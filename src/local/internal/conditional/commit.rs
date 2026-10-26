@@ -380,13 +380,17 @@ where
                 return Err((stage, error));
             }
             if let Some(error) = rollback.error {
-                for displaced_entry in displaced_entries {
+                let rollback_displaced_files_reported = !rollback.displaced.is_empty();
+                for mut displaced_entry in displaced_entries {
                     let represented_by_receipt = rollback
                         .installed
                         .iter()
                         .chain(rollback.displaced.iter())
                         .any(|receipt| receipt.namespace_path() == displaced_entry.namespace_path());
                     if !represented_by_receipt && backend.verify_entry(&displaced_entry).is_ok() {
+                        if !rollback_displaced_files_reported {
+                            displaced_entry.set_role(LocalRecoveryFileRole::Displaced);
+                        }
                         entries.push(displaced_entry);
                     }
                 }

@@ -269,6 +269,54 @@ mod conditional_state_tests {
         }
     }
 
+    #[cfg(feature = "test-support")]
+    #[test]
+    fn conditional_state_failed_rollback_keeps_original_displaced_role() {
+        use super::super::ConditionalHooks;
+        use crate::test_support::TestConditionalHooks;
+        use crate::test_support::TestConditionalPoint;
+
+        let backend = super::super::fake_backend::FakeBackend::new(b"A", b"B");
+        let (lease, target_path) = backend.target_observer();
+        let displaced_path = lease.path().join("old");
+        let displaced_for_hook = displaced_path.clone();
+        let hooks = ConditionalHooks::default()
+            .with_test(TestConditionalHooks::once(
+                TestConditionalPoint::BeforeVerifyDisplaced,
+                move || std::fs::write(displaced_for_hook, b"C"),
+            ))
+            .with_test(TestConditionalHooks::once(
+                TestConditionalPoint::BeforeRollbackExchange,
+                || {
+                    Err(std::io::Error::new(
+                        std::io::ErrorKind::PermissionDenied,
+                        "rollback blocked",
+                    ))
+                },
+            ));
+        let error = super::super::commit::commit_conditional::<Sha256, _>(
+            backend.with_hooks(hooks),
+            LocalWritePrecondition::Content(Sha256::digest(b"A")),
+            super::super::fake_backend::required_options(),
+            1,
+        )
+        .expect_err("a failed rollback keeps the original displaced receipt");
+
+        assert_eq!(error.stage(), crate::error::LocalConditionalWriteStage::Rollback);
+        assert_eq!(std::fs::read(target_path).expect("published candidate remains"), b"B");
+        assert!(error.recovery_files().iter().any(|file| {
+            file.role() == crate::recovery::LocalRecoveryFileRole::Displaced
+                && file.namespace_path() == displaced_path
+                && recovery_bytes(file) == b"C"
+        }));
+        assert!(
+            error
+                .recovery_files()
+                .iter()
+                .all(|file| file.role() != crate::recovery::LocalRecoveryFileRole::RollbackDisplaced)
+        );
+    }
+
     #[test]
     fn conditional_state_candidate_copy_backend_error_has_no_copy() {
         let backend = super::super::fake_backend::FakeBackend::new(b"A", b"B")

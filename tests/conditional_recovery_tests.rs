@@ -150,14 +150,14 @@ fn rollback_backend_precheck_observes_competitor_without_exchange() {
         failure
             .recovery_files()
             .iter()
-            .filter(|entry| { entry.role() == qubit_local_files::recovery::LocalRecoveryFileRole::RollbackDisplaced })
+            .filter(|entry| { entry.role() == qubit_local_files::recovery::LocalRecoveryFileRole::Displaced })
             .count(),
         1
     );
     let displaced = failure
         .recovery_files()
         .iter()
-        .find(|entry| entry.role() == qubit_local_files::recovery::LocalRecoveryFileRole::RollbackDisplaced)
+        .find(|entry| entry.role() == qubit_local_files::recovery::LocalRecoveryFileRole::Displaced)
         .unwrap();
     assert_eq!(conditional::read_recovery(displaced), b"C");
     assert_eq!(conditional::read_candidate(&failure), b"B");
