@@ -61,6 +61,7 @@ impl Drop for FuzzRoot {
 /// Shared state machine; other fuzz targets only use the scratch-root owner.
 #[allow(dead_code)]
 pub(crate) mod lifecycle {
+    use std::collections::BTreeMap;
     use std::fs;
     use std::path::Path;
     use std::path::PathBuf;
@@ -95,6 +96,8 @@ pub(crate) mod lifecycle {
     const MAX_DEPTH: usize = 16;
     const PAYLOAD: &[u8] = b"original fuzz resource";
     const REPLACEMENT: &[u8] = b"replacement must survive";
+    // Bound the model from the fixture's entry/depth limits and largest marker.
+    const MAX_SNAPSHOT_BYTES: usize = MAX_ENTRIES * (MAX_DEPTH * 16 + REPLACEMENT.len());
 
     /// The public resource retained between independently decoded operations.
     #[derive(Debug)]
@@ -110,6 +113,105 @@ pub(crate) mod lifecycle {
         stage: LocalPersistStage,
         source: LocalTempSourceState,
         target: Option<PathBuf>,
+    }
+
+    #[derive(Debug, PartialEq, Eq)]
+    enum SnapshotEntry {
+        Directory,
+        File(Vec<u8>),
+        Symlink(PathBuf),
+    }
+
+    /// A bounded, non-following snapshot of a published directory tree.
+    #[derive(Debug, PartialEq, Eq)]
+    struct DirectorySnapshot {
+        entries: BTreeMap<PathBuf, SnapshotEntry>,
+    }
+
+    impl DirectorySnapshot {
+        /// Captures the complete tree within the harness entry and byte budgets.
+        fn capture(root: &Path) -> Self {
+            fn visit(
+                path: &Path,
+                relative: &Path,
+                entries: &mut BTreeMap<PathBuf, SnapshotEntry>,
+                byte_count: &mut usize,
+            ) {
+                assert!(
+                    relative.components().count() <= MAX_DEPTH,
+                    "snapshot exceeded its depth budget"
+                );
+                assert!(
+                    entries.len() < MAX_ENTRIES,
+                    "snapshot exceeded its entry budget"
+                );
+                let metadata = fs::symlink_metadata(path).expect("snapshot entry metadata");
+                let snapshot_entry = if metadata.file_type().is_symlink() {
+                    let target = fs::read_link(path).expect("read snapshot link text");
+                    *byte_count = byte_count
+                        .checked_add(relative.as_os_str().len())
+                        .and_then(|size| size.checked_add(target.as_os_str().len()))
+                        .expect("snapshot byte budget arithmetic");
+                    assert!(
+                        *byte_count <= MAX_SNAPSHOT_BYTES,
+                        "snapshot exceeded its byte budget"
+                    );
+                    SnapshotEntry::Symlink(target)
+                } else if metadata.is_dir() {
+                    *byte_count = byte_count
+                        .checked_add(relative.as_os_str().len())
+                        .expect("snapshot byte budget arithmetic");
+                    assert!(
+                        *byte_count <= MAX_SNAPSHOT_BYTES,
+                        "snapshot exceeded its byte budget"
+                    );
+                    SnapshotEntry::Directory
+                } else if metadata.is_file() {
+                    let file_size =
+                        usize::try_from(metadata.len()).expect("snapshot file size fits usize");
+                    *byte_count = byte_count
+                        .checked_add(relative.as_os_str().len())
+                        .and_then(|size| size.checked_add(file_size))
+                        .expect("snapshot byte budget arithmetic");
+                    assert!(
+                        *byte_count <= MAX_SNAPSHOT_BYTES,
+                        "snapshot exceeded its byte budget"
+                    );
+                    SnapshotEntry::File(fs::read(path).expect("read snapshot file"))
+                } else {
+                    panic!("unsupported entry in fuzz-owned directory: {path:?}");
+                };
+                entries.insert(relative.to_path_buf(), snapshot_entry);
+
+                if metadata.is_dir() {
+                    for child in fs::read_dir(path).expect("read snapshot directory") {
+                        let child = child.expect("read snapshot directory entry");
+                        let child_path = child.path();
+                        let child_relative = relative.join(child.file_name());
+                        visit(&child_path, &child_relative, entries, byte_count);
+                    }
+                }
+            }
+
+            let mut entries = BTreeMap::new();
+            let mut byte_count = 0;
+            visit(root, Path::new(""), &mut entries, &mut byte_count);
+            Self { entries }
+        }
+
+        /// Asserts the exact relative paths, entry kinds, link text and bytes.
+        fn assert_matches(&self, root: &Path) {
+            assert_eq!(
+                self,
+                &Self::capture(root),
+                "published directory tree changed: {root:?}"
+            );
+        }
+    }
+
+    enum PublishedResource {
+        File(PathBuf, Vec<u8>),
+        Directory(PathBuf, DirectorySnapshot),
     }
 
     /// Converts named public error parts without discarding the retained guard.
@@ -231,16 +333,70 @@ pub(crate) mod lifecycle {
             .with_max_pending_path_bytes(128 * 1024)
     }
 
+    #[cfg(test)]
+    mod directory_snapshot_tests {
+        use std::fs;
+
+        use super::{DirectorySnapshot, FuzzRoot};
+
+        #[test]
+        fn snapshot_rejects_payload_loss_and_accepts_remaining_tree() {
+            let root = FuzzRoot::create("snapshot-test").expect("create fixture root");
+            let root_path = root.path();
+            fs::create_dir_all(root_path.join("nested")).expect("create fixture tree");
+            fs::write(root_path.join("payload"), b"payload").expect("write payload");
+            fs::write(root_path.join("nested/leaf"), b"leaf").expect("write nested leaf");
+
+            let complete = DirectorySnapshot::capture(root_path);
+            fs::remove_file(root_path.join("payload")).expect("remove only payload");
+            assert!(std::panic::catch_unwind(|| complete.assert_matches(root_path)).is_err());
+
+            let remaining = DirectorySnapshot::capture(root_path);
+            remaining.assert_matches(root_path);
+        }
+
+        #[cfg(unix)]
+        #[test]
+        fn snapshot_records_symlink_text_without_following_it() {
+            use std::os::unix::fs::symlink;
+
+            let root = FuzzRoot::create("symlink-snapshot-test").expect("create fixture root");
+            let outside_root =
+                FuzzRoot::create("symlink-snapshot-outside").expect("create outside root");
+            let root_path = root.path();
+            let outside = outside_root.path().join("target");
+            fs::write(&outside, b"outside").expect("write external target");
+            symlink(&outside, root_path.join("link")).expect("create fixture link");
+
+            let snapshot = DirectorySnapshot::capture(root_path);
+            fs::write(&outside, b"changed").expect("mutate link target");
+            snapshot.assert_matches(root_path);
+            fs::remove_file(root_path.join("link")).expect("remove original fixture link");
+            symlink("different-target", root_path.join("link")).expect("replace fixture link text");
+            assert!(std::panic::catch_unwind(|| snapshot.assert_matches(root_path)).is_err());
+        }
+    }
+
     /// Asserts saved replacement bytes and every published target survive later
     /// actions.
-    fn assert_preserved(replacements: &[PathBuf], published: &[(PathBuf, Option<Vec<u8>>)]) {
+    fn assert_preserved(replacements: &[PathBuf], published: &[PublishedResource]) {
         for marker in replacements {
             assert_eq!(fs::read(marker).expect("replacement remains readable"), REPLACEMENT);
         }
-        for (path, bytes) in published {
-            assert!(path.exists(), "cleanup or Drop removed published target: {path:?}");
-            if let Some(bytes) = bytes {
-                assert_eq!(&fs::read(path).expect("published bytes remain readable"), bytes);
+        for resource in published {
+            match resource {
+                PublishedResource::File(path, bytes) => {
+                    assert!(
+                        fs::symlink_metadata(path)
+                            .expect("published file remains")
+                            .is_file()
+                    );
+                    assert_eq!(
+                        &fs::read(path).expect("published bytes remain readable"),
+                        bytes
+                    );
+                }
+                PublishedResource::Directory(path, snapshot) => snapshot.assert_matches(path),
             }
         }
     }
@@ -272,7 +428,7 @@ pub(crate) mod lifecycle {
         let mut writable = true;
         let mut current: Option<Resource> = None;
         let mut replacements = Vec::new();
-        let mut published = Vec::new();
+        let mut published: Vec<PublishedResource> = Vec::new();
 
         for (index, operation) in data.chunks(2).take(MAX_OPERATIONS).enumerate() {
             let opcode = operation[0] % 14;
@@ -407,6 +563,15 @@ pub(crate) mod lifecycle {
                     }
                     let previous = expected_source;
                     let is_file = matches!(resource, Resource::File(_));
+                    let directory_snapshot = if !is_file
+                        && previous != LocalTempSourceState::Indeterminate
+                        && !source_replaced
+                        && source_path.is_dir()
+                    {
+                        Some(DirectorySnapshot::capture(&source_path))
+                    } else {
+                        None
+                    };
                     match resource.publish(parent, &target, opcode, selector, rooted) {
                         Ok(outcome) => {
                             assert_eq!(previous, LocalTempSourceState::Owned);
@@ -414,14 +579,17 @@ pub(crate) mod lifecycle {
                             assert!(!conflict && opcode != 10, "invalid publication succeeded");
                             let path = host_path(root.path(), outcome.path(), rooted);
                             assert!(path.exists(), "successful publication must exist");
-                            let bytes = if is_file {
+                            if is_file {
                                 let bytes = fs::read(&path).expect("published file");
                                 assert_eq!(bytes, expected_bytes, "published payload matches independent model");
-                                Some(bytes)
+                                published.push(PublishedResource::File(path, bytes));
                             } else {
-                                None
-                            };
-                            published.push((path, bytes));
+                                published.push(PublishedResource::Directory(
+                                    path,
+                                    directory_snapshot
+                                        .expect("owned directory has a publication snapshot"),
+                                ));
+                            }
                         }
                         Err(mut retained) => {
                             assert_eq!(retained.source, retained.resource.source_state());
@@ -463,13 +631,17 @@ pub(crate) mod lifecycle {
                             if retained.publication == LocalPersistFailureState::Published {
                                 let path =
                                     host_path(root.path(), retained.target.as_ref().expect("published target"), rooted);
-                                let bytes = if is_file {
+                                if is_file {
                                     let bytes = fs::read(&path).expect("published file");
                                     assert_eq!(bytes, expected_bytes, "published payload matches independent model");
-                                    Some(bytes)
+                                    published.push(PublishedResource::File(path, bytes));
                                 } else {
-                                    None
-                                };
+                                    published.push(PublishedResource::Directory(
+                                        path,
+                                        directory_snapshot
+                                            .expect("owned directory has a publication snapshot"),
+                                    ));
+                                }
                                 // A retained published guard may clean its sandbox, never its target.
                                 let cleanup = retained.resource.cleanup();
                                 expected_source = if cleanup.is_ok() {
@@ -478,7 +650,6 @@ pub(crate) mod lifecycle {
                                     LocalTempSourceState::CleanupRequired
                                 };
                                 assert_eq!(retained.resource.source_state(), expected_source);
-                                published.push((path, bytes));
                             } else if let Some(path) = &target_host
                                 && !conflict
                                 && retained.publication == LocalPersistFailureState::NotPublished
