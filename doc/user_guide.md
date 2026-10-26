@@ -184,6 +184,12 @@ Listing follows directory links when the effective policy allows it. Returned
 paths remain logical paths through the link (for example, `link/child`), and
 recursive traversal detects directory-identity cycles. Depth counts logical
 entries; crossing a link does not add another level.
+When descent is not allowed, listing returns the link entry from its own
+metadata without resolving its target; this includes dangling links in a
+non-recursive Host listing. Recursive follow attempts can report dangling or
+out-of-scope links. With `Continue`, a local child-open error is yielded and
+other safe siblings remain available; global budget or deadline exhaustion
+still terminates the walk.
 
 ## Scenario: write and inspect an export
 
@@ -327,6 +333,11 @@ leftovers on restart. For backend availability, Windows Host supports
 unsupported. Rooted uses opened directory handles. Android and FreeBSD Content
 are not claimed as supported.
 
+Conditional writers capture the operation's PWD context when created. Later
+commit, abort, and cleanup errors use that snapshot rather than querying a
+possibly changed process PWD; physical Host paths remain optional diagnostics
+and never replace Rooted namespace paths.
+
 ## Publish, Copy, and Recover
 
 `CreateNew` and `CreateOrReplace` use same-directory staging. `Append` changes
@@ -343,6 +354,10 @@ When `create_parent` and required durability are selected, the atomic writer
 creates missing ancestors and synchronizes each newly created directory after
 publication; a failure at that point is reported as `Published` with an
 incomplete publication error.
+For Windows Rooted writers, an identity conflict found at the final check
+before installation is `NotPublished`; staging remains available and the
+competing destination is preserved. Do not infer the same state after a native
+rename has already been attempted; inspect the typed commit failure.
 
 `LocalFileSystem::copy` selects file or directory behavior from source
 metadata. Use `with_entry_source()` or `with_tree_source()` when the source
@@ -464,7 +479,10 @@ failures retain the resource; publication and source eligibility together
 determine which subsequent operations are permitted. Prefixes and suffixes are
 checked before entry creation:
 native separators, NUL, and portable reserved-name violations do not leave an
-entry behind. Name-collision attempts are unbounded unless the caller sets
+entry behind. The complete prefix + generated name + suffix is checked before
+parent creation. Portable names reject control characters, Windows-forbidden
+punctuation, trailing spaces or dots, and reserved device names such as
+`CON.txt`. Name-collision attempts are unbounded unless the caller sets
 `max_attempts`.
 
 ## Temporary publication and recovery
@@ -476,6 +494,11 @@ rejects an existing destination. Successful publication returns
 `LocalPersistOutcome`: inspect its path, atomicity, durability, `cleanup_state()`,
 and `cleanup_error()`. A residual sandbox is reported in the successful outcome;
 it does not undo publication or authorize another attempt.
+Before synchronizing a temporary file, the library verifies that the open
+handle still identifies the owned temporary entry. Replacing the handle exposed
+by `as_file_mut()` with another file cannot produce a durable success for that
+other file. If the content handle was closed, the library reopens through the
+creating authority and checks the reopened identity before synchronization.
 
 On failure, inspect two independent facts:
 

@@ -241,6 +241,12 @@ atomicity.
 
 Copy modes distinguish one `Entry` (a regular file or final link), a directory `Tree`, and explicit `Auto` detection. See the [source-mode contract](doc/user_guide.md#copy-source-modes).
 
+Listing is lazy. A non-recursive walk reports a dangling link from the link
+entry itself without resolving its target. Recursive traversal reports
+directory-link failures; `Continue` yields a local child-open error and keeps
+safe sibling entries available, while exhausted global budgets terminate the
+walk.
+
 ## Platform Scope
 
 CI is configured to run behavioral tests on Linux, Windows, and macOS; consult

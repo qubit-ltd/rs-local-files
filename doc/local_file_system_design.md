@@ -654,7 +654,7 @@ whole file.
 
 ```text
 pub enum SizeLimit {
-    Maximum(usize),
+    Maximum(u64),
     VariesByPath,
     Unknown,
 }
@@ -742,6 +742,10 @@ selected metadata before staging sync, then validates identity, installs, and
 syncs parents. A metadata failure is pre-publication; a parent-sync failure
 can be `Published`. CreateNew has no old metadata to copy and retains atomic
 no-replace installation; Append performs direct writes under either policy.
+For Windows Rooted staged writers, a destination identity conflict detected at
+the final pre-install check is `NotPublished`; staging remains available for
+recovery and the competing destination is left intact. Errors after a native
+rename attempt follow the separately observed publication state.
 
 ### 14.6 Conditional write protocol
 
@@ -825,10 +829,15 @@ Iterator<Item = LocalResult<LocalDirectoryEntry>>
 ```
 They never pre-collect a directory tree, fix creation-time policy and authority,
 and offer explicit depth, entry, seen-name-byte, open-directory, and deadline
-budgets. `FailFast` stops at the first error; continuation returns each error and
-continues only safe branches. Directory identity detects recursive followed-link
-cycles while output retains logical link paths. Dropping a walker releases
-resources only.
+budgets. `FailFast` stops at the first error; `Continue` yields a local child-
+directory open error, discards that branch, and continues with safe siblings.
+Global entry/name budgets and deadlines remain terminal. When descent is not
+allowed, a final link is returned from its own metadata without resolving its
+target, including a Host dangling link in non-recursive mode. Recursive
+traversal attempts to follow eligible directory links and reports dangling or
+out-of-scope failures. Directory identity detects recursive followed-link cycles
+while output retains logical link paths. Dropping a walker releases resources
+only.
 
 ### 15.2 Budgets
 
@@ -1050,9 +1059,12 @@ Temporary parents accept namespace-absolute or relative paths; an omitted
 parent uses the filesystem PWD captured for creation. A relative parent keeps
 that PWD snapshot, while an absolute Host parent requires no extra PWD query.
 Resources retain their creating authority, link policy, and namespace-absolute
-path independently of later filesystem configuration or PWD changes. Name
-prefixes/suffixes reject separators, NUL, and portable reserved-name violations
-before creating entries. Collision retries have no hidden maximum; callers may
+path independently of later filesystem configuration or PWD changes. Prefixes
+and suffixes are composed and the complete generated component is validated
+before creating entries. Portable validation rejects separators, NUL, control
+characters, Windows-forbidden punctuation, trailing spaces or dots, and
+reserved device names such as `CON.txt`; invalid names fail before parent
+creation or entry I/O. Collision retries have no hidden maximum; callers may
 set `max_attempts`, and non-collision native errors return immediately.
 
 ### 18.3 Private sandbox
@@ -1071,7 +1083,11 @@ not establish an absolute synchronization boundary against concurrent writers.
 change source eligibility or relinquish cleanup responsibility. When still
 Owned, a closed file can be persisted, kept, or cleaned. `keep(self)` uses the
 same eligibility and publication protocol as persist but generates a sibling
-target outside the sandbox and returns `LocalPersistOutcome`.
+target outside the sandbox and returns `LocalPersistOutcome`. Before file
+synchronization, the open handle is checked against the retained source
+identity; replacing the handle through `as_file_mut()` cannot synchronize a
+different file. A closed file is reopened through its creating authority and
+its identity is checked again before synchronization.
 
 `cleanup(&mut self)` reports failure explicitly. Removing the source transitions
 to `CleanupRequired`; removing the remaining sandbox transitions to `Released`.
@@ -1246,6 +1262,11 @@ path: "../../../../etc/passwd"
 current_directory: "/work/project"
 reason: "path escapes the virtual root"
 ```
+
+Conditional-writer errors retain the creation-time PWD context when available.
+Commit, abort, and cleanup diagnostics use that snapshot instead of querying a
+later process PWD. A Rooted namespace path is not exposed as a physical Host
+path.
 
 ### 19.3 Error kinds
 

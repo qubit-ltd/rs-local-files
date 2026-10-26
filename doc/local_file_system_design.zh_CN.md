@@ -924,7 +924,7 @@ deadline 后继续。
 
 ```text
 pub enum SizeLimit {
-    Maximum(usize),
+    Maximum(u64),
     VariesByPath,
     Unknown,
 }
@@ -1023,6 +1023,9 @@ Append 直接修改目标，不能满足 `LocalAtomicityRequirement::Required`�
 - 在可安全继续处理时返回 writer 所有权。
 
 调用方可以基于 state 决定重试、清理、保留或人工检查，不能根据 error message 猜测。
+Windows Rooted staged writer 若在最终安装前的 identity 复核中发现目标已被替换，失败状态为
+`NotPublished`，staging 可供恢复，竞争目标保持原样。native rename 尝试之后的错误则依据实际
+观察到的 publication state 分类。
 
 ### 14.6 条件写入协议
 
@@ -1116,13 +1119,11 @@ Rooted 和 Host 的 tree copy 都按需推进 directory reader；受限复制允
 
 ### 15.3 错误策略
 
-`LocalWalkErrorPolicy::FailFast` 在第一个错误终止；continue 模式逐项返回错误并继续可安全的
-其他分支。任何模式都不能静默跳过未报告错误。
-
-递归跟随目录链接时通过 directory identity 检测循环。输出 `path()` 保留调用方看到的逻辑
-link 路径，而不是改写成物理 target path；深度按逻辑输出层级计算。
-
-Walker drop 只释放 handle 和内存，不执行 namespace 修改。
+`LocalWalkErrorPolicy::FailFast` 在第一个错误终止。`Continue` 会返回进入子目录时的局部
+错误，丢弃该分支并继续访问安全的同层条目；全局条目/名称预算和 deadline 耗尽仍会终止遍历。
+不允许向下遍历时，最终链接按自身 metadata 返回，不解析链接目标；例如 Host 非递归遍历会
+返回悬空链接条目。递归遍历会尝试跟随符合策略的目录链接，并报告悬空或越界错误。循环通过
+目录 identity 检测；输出路径仍保留逻辑链接路径。Drop 只释放资源，不修改 namespace。
 
 ## 16. Copy
 
@@ -1328,8 +1329,9 @@ source 或 destination 为 Rooted `/` 时返回 `InvalidPath`。
 parent 可以是命名空间绝对或相对路径；未指定时使用创建操作捕获的 filesystem PWD。
 相对 parent 保存创建时 PWD 快照，绝对 Host parent 不额外查询 PWD。资源保存创建 authority、
 链接策略和命名空间绝对路径，之后修改 filesystem 配置或 PWD 不会改变它们。
-prefix、suffix 在创建前拒绝分隔符、NUL 和便携保留名称；名称冲突次数默认不限，调用方
-可设置 `max_attempts`，非冲突原生错误立即返回。
+prefix、suffix 会先组合成完整名称再校验。分隔符、NUL、控制字符、Windows 禁用标点、末尾
+空格或句点，以及 `CON.txt` 这类设备保留名称都会被拒绝；校验先于父目录创建和条目 I/O。
+名称冲突次数默认不限，调用方可设置 `max_attempts`，非冲突原生错误立即返回。
 
 ### 18.3 私有 sandbox
 
@@ -1344,6 +1346,8 @@ prefix、suffix 在创建前拒绝分隔符、NUL 和便携保留名称；名称
 `LocalTempFile::close(&mut self)` 只关闭内容句柄，不改变源资格，也不解除清理责任。
 仍为 Owned 的已关闭文件可以 persist、keep 或 cleanup。`keep(self)` 使用与 persist 相同的
 资格与发布协议，只是目标由库生成，位于 sandbox 外的 sibling 路径，返回 `LocalPersistOutcome`。
+文件同步前会比较当前打开句柄与保留的源 identity；通过 `as_file_mut()` 换入其他文件句柄，
+不能让同步误作用于另一个文件。关闭后重新打开的句柄也会在同步前再次核对 identity。
 
 `cleanup(&mut self)` 显式报告失败。源实体删除后进入 `CleanupRequired`，剩余 sandbox
 删除后进入 `Released`。部分目录删除失败且源树仍归 guard 所有时保持 `Owned`，同时保留
@@ -1491,6 +1495,9 @@ path: "../../../../etc/passwd"
 current_directory: "/work/project"
 reason: "path escapes the virtual root"
 ```
+
+Conditional writer 错误在可用时保留创建时的 PWD context。commit、abort 和 cleanup 诊断使用
+该快照，不再查询之后变化的进程 PWD；Rooted namespace path 不会被当作物理 Host 路径公开。
 
 ### 19.3 Error kind
 

@@ -292,6 +292,10 @@ no-overwrite 安装时才可用。`Content(digest)` 必须搭配 `CreateOrReplac
 Host 的 Content 仅支持 `PreserveExisting` 元数据策略；Windows Rooted Content 不受支持。
 Rooted 操作使用已打开的目录句柄。这里不宣称 Android 或 FreeBSD 支持 Content。
 
+Conditional writer 创建时会保存本次操作的 PWD context。之后的 commit、abort 和 cleanup 错误
+使用该快照，不会重新查询可能已经变化的进程 PWD；Host 物理路径只是可选诊断，也不会替换
+Rooted namespace path。
+
 ## 发布、复制与恢复
 
 `CreateNew` 与 `CreateOrReplace` 使用目标目录内的暂存；`Append` 直接修改已有普通文件，
@@ -303,6 +307,9 @@ Rooted 操作使用已打开的目录句柄。这里不宣称 Android 或 FreeBS
 部分字节，调用方应按返回的字节数推进缓冲区。当同时启用 `create_parent` 与 Required 耐久性时，
 atomic writer 会创建缺失的祖先目录，并在发布后逐一同步新建目录；该阶段失败会以 `Published` 和
 不完整发布错误报告。
+Windows Rooted writer 若在安装前最后一次 identity 检查中发现目标已被替换，会返回
+`NotPublished`，保留 staging 并保持竞争目标不变。native rename 已经尝试后的错误应按类型化
+commit failure 中记录的发布状态处理，不能套用这个结论。
 
 `LocalFileSystem::copy` 根据源元数据选择文件或目录行为。需要固定源类型时使用
 `with_entry_source()` 或 `with_tree_source()`，并通过 `source_mode()` 读取模式。
@@ -384,6 +391,9 @@ namespace 路径作为公开 root；可选的 diagnostic path 仍可记录实际
 `max_depth` 为零时结果为空，并且不读取目录子项；深度、条目数和 seen-name 字节预算都为零时，
 同样不会读取子项。Host walker 在跳过已见名称期间及下一次目录读取前检查 deadline；这是协作式
 期限，不能中断已经阻塞的原生读取。
+不允许向下遍历时，最终链接按自身 metadata 返回，不会先解析目标；Host 非递归列表因此会
+保留悬空链接条目。递归跟随目录链接时，悬空或越界链接会产生错误。`Continue` 会返回局部子目录
+打开错误并继续安全的同层条目；全局预算或 deadline 耗尽仍会终止遍历。
 
 临时文件和目录按当前源资格承担清理责任。每个资源都创建在独立的私有 sandbox 中，
 sandbox 会和资源一起清理。需要观察清理失败时应显式调用 `cleanup()`；drop 只会静默地尽力清理。
@@ -391,8 +401,9 @@ sandbox 会和资源一起清理。需要观察清理失败时应显式调用 `c
 会报告 sandbox 残留。未显式指定 parent 时，在该次操作捕获的 filesystem PWD 下创建。
 `path()`、`keep` 和持久化结果对 Host 与 Rooted 都返回 namespace-absolute 路径，因此
 后续 PWD 即使变化，也能把它们再次传给同一个 filesystem。持久化失败会保留资源，后续允许
-的操作由发布状态和源资格共同决定。创建前会校验前缀和后缀：原生分隔符、NUL 与便携保留名称
-不会留下条目。除非调用方设置 `max_attempts`，名称冲突尝试次数没有上限。
+的操作由发布状态和源资格共同决定。创建前会组合前缀、随机名称和后缀并校验完整组件；原生
+分隔符、NUL、控制字符、Windows 禁用标点、末尾空格或句点，以及 `CON.txt` 这类设备保留名称
+都会被拒绝，且校验先于父目录创建。除非调用方设置 `max_attempts`，名称冲突尝试次数没有上限。
 
 ## 临时资源发布与失败恢复
 
@@ -400,6 +411,9 @@ sandbox 会和资源一起清理。需要观察清理失败时应显式调用 `c
 相对目标通过 `persist_at` 明确指定基准目录。`LocalPersistOptions::new()` 遇到已有目标会失败。
 成功时返回 `LocalPersistOutcome`，调用方应检查路径、原子性、耐久性、`cleanup_state()` 和
 `cleanup_error()`。sandbox 残留通过成功结果报告，不会撤销发布，也不表示可以再次发布。
+文件同步前会核对当前打开句柄是否仍指向 guard 持有的源实体。通过 `as_file_mut()` 换入其他
+文件句柄不会得到针对该文件的耐久成功；若内容句柄已关闭，库会经创建时的 authority 重新打开，
+并在同步前再次核对实体身份。
 
 失败时要分别检查目标发布结果与源资源资格：
 
