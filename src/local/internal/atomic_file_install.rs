@@ -259,6 +259,7 @@ pub(crate) fn install_new_atomic_file_at(
             "atomic-install-unlink-persistent",
             "atomic-install-unlink-persistent-sync",
             "atomic-install-unlink-recover-sync",
+            "atomic-install-unlink-recover-success",
             "atomic-install-unlink-indeterminate-sync",
         ]
         .into_iter()
@@ -433,6 +434,7 @@ fn unlink_staging_name(staging_parent: RawFd, staging: &CStr) -> Result<()> {
         || super::test_support::is_enabled("atomic-install-unlink-persistent")
         || super::test_support::is_enabled("atomic-install-unlink-persistent-sync")
         || super::test_support::is_enabled("atomic-install-unlink-recover-sync")
+        || super::test_support::is_enabled("atomic-install-unlink-recover-success")
         || super::test_support::is_enabled("atomic-install-unlink-indeterminate-sync");
     #[cfg(not(feature = "test-support"))]
     let forced_unlink_error = false;

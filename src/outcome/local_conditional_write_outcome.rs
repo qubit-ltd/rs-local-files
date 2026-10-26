@@ -52,9 +52,13 @@ use crate::recovery::LocalRecoveryFile;
 #[must_use]
 #[derive(Debug)]
 pub struct LocalConditionalWriteOutcome<D: Digest> {
+    /// Digest computed from the verified installed bytes.
     digest: Output<D>,
+    /// Publication method, byte count, and resulting durability status.
     write_outcome: LocalWriteOutcome,
+    /// Recovery files that remain after otherwise successful cleanup.
     retained_files: Vec<LocalRecoveryFile>,
+    /// Cleanup failures that did not invalidate publication.
     cleanup_errors: Vec<LocalFileError>,
 }
 

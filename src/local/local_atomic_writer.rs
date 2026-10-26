@@ -508,14 +508,14 @@ impl LocalAtomicWriter {
                     staging_state,
                 },
                 &mut self.staged_file,
+                self.durability,
                 StagedFile::cleanup,
                 |staged_file: &mut StagedFile| {
                     staged_file.close();
                     staged_file.disarm();
                 },
                 |_: &StagedFile| sync_atomic_parent_chain(&self.operation_path, &self.parent_dirs_to_sync),
-            )
-            .map(|()| false);
+            );
         }
         if self.durability == LocalDurabilityRequirement::NotRequired {
             self.staged_file.disarm();

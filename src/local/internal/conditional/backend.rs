@@ -32,6 +32,8 @@ pub(crate) struct NativeAttempt {
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 #[allow(dead_code)] // Includes checkpoints exercised only by the fake backend tests.
+/// Native-operation boundaries where the commit protocol or deterministic
+/// tests may observe or inject an outcome.
 pub(crate) enum ConditionalPoint {
     Write,
     Flush,
@@ -65,6 +67,11 @@ pub(crate) enum ConditionalPoint {
 }
 
 /// One deterministic action consumed by a backend checkpoint.
+///
+/// Checkpoints let the shared commit protocol validate state transitions at
+/// native-operation boundaries. Test hooks may inject a failure or competing
+/// namespace change at those boundaries; production backends otherwise treat
+/// them as no-ops.
 #[derive(Clone, Debug)]
 #[allow(dead_code)] // The fake backend constructs these actions in deterministic tests.
 pub(crate) enum ConditionalHookAction {

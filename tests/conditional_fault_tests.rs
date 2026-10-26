@@ -174,38 +174,73 @@ fn windows_sharing_failure_removes_empty_owned_recovery_container() {
 #[test]
 #[cfg(windows)]
 fn required_parent_sync_unavailability_fails_before_publication() {
-    let directory = tempdir().unwrap();
-    let path = directory.path().join("target");
-    let mut writer = conditional::host()
-        .open_conditional_writer::<Sha256>(
-            &path,
-            LocalWritePrecondition::Absent,
-            &LocalWriteOptions::new(LocalWriteMode::CreateOrReplace)
-                .with_durability(LocalDurabilityRequirement::Required),
-        )
-        .unwrap();
-    writer.write_fully(b"B").unwrap();
+    use qubit_local_files::LocalFileSystem;
+    use qubit_local_files::error::LocalFileErrorKind;
+    use qubit_local_files::error::LocalFileOperation;
 
-    let failure = writer.commit().unwrap_err();
+    for rooted in [false, true] {
+        for existing_target in [false, true] {
+            let directory = tempdir().expect("fixture directory");
+            let physical_path = if existing_target {
+                directory.path().join("target")
+            } else {
+                directory.path().join("missing-parent").join("target")
+            };
+            if existing_target {
+                std::fs::write(&physical_path, b"A").expect("old target");
+            }
+            let path = if rooted {
+                if existing_target {
+                    std::path::PathBuf::from("/target")
+                } else {
+                    std::path::PathBuf::from("/missing-parent/target")
+                }
+            } else {
+                physical_path.clone()
+            };
+            let filesystem = if rooted {
+                LocalFileSystem::rooted(directory.path()).expect("Rooted filesystem")
+            } else {
+                conditional::host()
+            };
+            let entries_before = std::fs::read_dir(directory.path())
+                .expect("fixture directory entries")
+                .map(|entry| entry.expect("fixture entry").file_name())
+                .collect::<std::collections::HashSet<_>>();
 
-    assert!(!path.exists());
-    assert_eq!(
-        failure.stage(),
-        qubit_local_files::error::LocalConditionalWriteStage::Sync
-    );
-    assert_eq!(
-        failure.publication(),
-        qubit_local_files::outcome::LocalConditionalPublicationState::NotPublished
-    );
-    assert!(
-        failure
-            .error()
-            .to_string()
-            .contains("Windows directory durability is not guaranteed"),
-        "unexpected Required durability error: {}",
-        failure.error()
-    );
-    assert_eq!(conditional::read_candidate(&failure), b"B");
+            let error = filesystem
+                .open_conditional_writer::<Sha256>(
+                    &path,
+                    LocalWritePrecondition::Absent,
+                    &LocalWriteOptions::new(LocalWriteMode::CreateOrReplace)
+                        .with_durability(LocalDurabilityRequirement::Required),
+                )
+                .err()
+                .expect("unsupported Required durability must fail during open");
+
+            assert_eq!(error.kind(), LocalFileErrorKind::RequirementNotMet);
+            assert_eq!(error.operation(), LocalFileOperation::OpenWriter);
+            assert_eq!(error.path(), Some(path.as_path()));
+            assert_eq!(
+                error.current_directory(),
+                rooted.then_some(std::path::Path::new(std::path::MAIN_SEPARATOR_STR)),
+                "static rejection should carry only a retained virtual PWD, never query process PWD"
+            );
+            assert_eq!(
+                std::fs::read_dir(directory.path())
+                    .expect("fixture directory entries after open")
+                    .map(|entry| entry.expect("fixture entry").file_name())
+                    .collect::<std::collections::HashSet<_>>(),
+                entries_before,
+                "opening a rejected writer must not create parent or candidate entries"
+            );
+            if existing_target {
+                assert_eq!(std::fs::read(&physical_path).expect("old target remains"), b"A");
+            } else {
+                assert!(!physical_path.parent().unwrap().exists());
+            }
+        }
+    }
 }
 
 #[test]

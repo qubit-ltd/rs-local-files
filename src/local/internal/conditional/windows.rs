@@ -5,10 +5,14 @@
 //
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
-//! Windows Host and Rooted conditional publication.
+//! Windows conditional publication, receipt classification, and backend
+//! orchestration.
 
 mod install;
 mod namespace;
+mod native_receipt_error;
+mod private_entry_guard;
+mod private_entry_setup_error;
 mod recovery;
 
 #[cfg(test)]
@@ -16,7 +20,6 @@ mod tests;
 
 use std::ffi::OsStr;
 use std::ffi::OsString;
-use std::fmt;
 use std::fs::File;
 use std::io;
 use std::io::Read;
@@ -28,6 +31,8 @@ use std::path::PathBuf;
 use namespace::FileIdentity;
 use namespace::Namespace;
 use namespace::file_identity;
+use native_receipt_error::NativeReceiptError;
+use private_entry_guard::PrivateEntryGuard;
 use qubit_io::Output;
 use recovery::classify_replace_failure;
 
@@ -83,35 +88,11 @@ fn combine_observation_error(
     }
 }
 
-#[derive(Debug)]
-struct NativeReceiptError {
-    native: io::Error,
-    observation: io::Error,
-}
-
-impl fmt::Display for NativeReceiptError {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            formatter,
-            "{}; receipt observation failed: {}",
-            self.native, self.observation
-        )
-    }
-}
-
-impl std::error::Error for NativeReceiptError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        Some(&self.native)
-    }
-}
-
-impl NativeReceiptError {
-    #[allow(dead_code)]
-    fn observation_source(&self) -> &(dyn std::error::Error + 'static) {
-        &self.observation
-    }
-}
-
+/// Classifies what the post-operation namespace observation proves.
+///
+/// An observation error makes the result indeterminate; otherwise an installed
+/// candidate proves publication, a remaining candidate without a backup proves
+/// no publication, and every unresolved shape remains indeterminate.
 fn receipt_publication(
     installed_is_candidate: Option<bool>,
     candidate_present: bool,
@@ -138,7 +119,7 @@ fn open_verified_candidate_entry(
         Ok(guard) => guard,
         Err((primary, mut guard)) => return Err(guard.finish_with(primary)),
     };
-    let candidate_identity = match file_identity(guard.file) {
+    let candidate_identity = match file_identity(guard.file_mut()) {
         Ok(identity) => identity,
         Err(primary) => return Err(guard.finish_with(primary)),
     };
@@ -146,7 +127,7 @@ fn open_verified_candidate_entry(
         namespace,
         LocalRecoveryFileRole::StagedCandidate,
         candidate_name,
-        guard.file,
+        guard.file_mut(),
         candidate_identity,
     ) {
         Ok(entry) => entry,
@@ -172,103 +153,6 @@ fn open_verified_private_entry(
         ));
     }
     namespace.entry_bound_to(role, name.to_os_string(), file)
-}
-
-#[derive(Debug)]
-struct PrivateEntryGuard<'a> {
-    namespace: &'a Namespace,
-    file: &'a mut File,
-    path: PathBuf,
-    identity: Option<FileIdentity>,
-    armed: bool,
-}
-
-impl<'a> PrivateEntryGuard<'a> {
-    fn new(namespace: &'a Namespace, name: &OsStr, file: &'a mut File) -> Result<Self, (io::Error, Self)> {
-        let mut guard = Self {
-            namespace,
-            file,
-            path: namespace.child_path(name),
-            identity: None,
-            armed: true,
-        };
-        match file_identity(guard.file) {
-            Ok(identity) => {
-                guard.identity = Some(identity);
-                Ok(guard)
-            }
-            Err(error) => Err((error, guard)),
-        }
-    }
-
-    fn disarm(&mut self) {
-        self.armed = false;
-    }
-
-    fn finish_with(&mut self, primary: io::Error) -> io::Error {
-        let cleanup = self.cleanup();
-        if cleanup.is_ok() {
-            self.disarm();
-        }
-        match cleanup {
-            Ok(()) => primary,
-            Err(cleanup) => {
-                let kind = primary.kind();
-                io::Error::new(
-                    kind,
-                    PrivateEntrySetupError {
-                        primary,
-                        cleanup,
-                        path: self.path.clone(),
-                    },
-                )
-            }
-        }
-    }
-
-    fn cleanup(&self) -> io::Result<()> {
-        let Some(identity) = self.identity else {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                "private entry identity unavailable",
-            ));
-        };
-        self.namespace.delete_created_private(self.file, Some(identity))
-    }
-}
-
-impl Drop for PrivateEntryGuard<'_> {
-    fn drop(&mut self) {
-        if !self.armed {
-            return;
-        }
-        let _ = self.cleanup();
-    }
-}
-
-#[derive(Debug)]
-struct PrivateEntrySetupError {
-    primary: io::Error,
-    cleanup: io::Error,
-    path: PathBuf,
-}
-
-impl fmt::Display for PrivateEntrySetupError {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            formatter,
-            "{}; private-entry cleanup failed at {}: {}",
-            self.primary,
-            self.path.display(),
-            self.cleanup
-        )
-    }
-}
-
-impl std::error::Error for PrivateEntrySetupError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        Some(&self.primary)
-    }
 }
 
 #[derive(Debug)]
@@ -651,15 +535,15 @@ impl ConditionalBackend for WindowsConditionalBackend {
                 if read == 0 {
                     break;
                 }
-                guard.file.write_all(&buffer[..read])?;
+                guard.file_mut().write_all(&buffer[..read])?;
             }
-            Write::flush(guard.file)?;
-            let identity = file_identity(guard.file)?;
+            Write::flush(guard.file_mut())?;
+            let identity = file_identity(guard.file_mut())?;
             let entry = open_verified_private_entry(
                 &self.namespace,
                 LocalRecoveryFileRole::StagedCandidate,
                 &name,
-                guard.file,
+                guard.file_mut(),
                 identity,
             )?;
             Ok((entry, identity))

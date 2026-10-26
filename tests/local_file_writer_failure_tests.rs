@@ -17,6 +17,7 @@ use qubit_local_files::error::LocalFileOperation;
 use qubit_local_files::options::LocalWriteMode;
 use qubit_local_files::options::LocalWriteOptions;
 use qubit_local_files::outcome::LocalWriteFailureState;
+#[cfg(all(feature = "test-support", unix))]
 use qubit_local_files::outcome::LocalWritePublicationMethod;
 use qubit_local_files::outcome::LocalWriterState;
 use qubit_local_files::policy::LocalDurabilityRequirement;
@@ -868,17 +869,17 @@ fn test_local_file_writer_exercises_atomic_install_fault_boundaries() {
             destination: REPLACEMENT,
             staging_remains: true,
             cleanup_error: true,
-            sync_error: true,
+            sync_error: false,
         },
         Expected {
             fault: "atomic-install-unlink-recover-sync",
             existing: false,
-            succeeds: false,
+            succeeds: true,
             state: LocalWriteFailureState::Published,
             destination: REPLACEMENT,
             staging_remains: false,
             cleanup_error: false,
-            sync_error: true,
+            sync_error: false,
         },
         Expected {
             fault: "atomic-install-unlink-indeterminate-sync",
@@ -888,7 +889,7 @@ fn test_local_file_writer_exercises_atomic_install_fault_boundaries() {
             destination: REPLACEMENT,
             staging_remains: true,
             cleanup_error: false,
-            sync_error: true,
+            sync_error: false,
         },
     ];
     for case in cases {
@@ -910,6 +911,7 @@ fn test_local_file_writer_exercises_atomic_install_fault_boundaries() {
                     | "atomic-install-unlink-persistent"
                     | "atomic-install-unlink-persistent-sync"
                     | "atomic-install-unlink-recover-sync"
+                    | "atomic-install-unlink-recover-success"
                     | "atomic-install-unlink-indeterminate-sync"
             )
         {
@@ -983,9 +985,129 @@ fn test_local_file_writer_exercises_atomic_install_fault_boundaries() {
                     expected_destination.unwrap(),
                     fs::read(&target).expect("target should exist").as_slice()
                 );
+                if fault == "atomic-install-unlink-recover-sync" {
+                    assert!(!outcome.durable(), "NotRequired must not sync the parent");
+                }
             }
         });
     }
+}
+
+/// Verifies recovered install unlink failures report successful parent sync
+/// for both Host and Rooted writers.
+#[cfg(all(feature = "test-support", unix))]
+#[test]
+fn test_local_file_writer_recovery_sync_success_is_durable() {
+    const TEST_NAME: &str = "test_local_file_writer_recovery_sync_success_is_durable";
+    run_host_writer_fault(TEST_NAME, "atomic-install-unlink-recover-success", || {
+        for rooted in [false, true] {
+            let directory = tempdir().expect("temporary directory should be created");
+            let filesystem = if rooted {
+                LocalFileSystem::rooted(directory.path())
+            } else {
+                LocalFileSystem::host()
+            }
+            .expect("filesystem should open");
+            let target = if rooted {
+                std::path::PathBuf::from("payload")
+            } else {
+                directory.path().join("payload")
+            };
+            for requirement in [
+                LocalDurabilityRequirement::Preferred,
+                LocalDurabilityRequirement::Required,
+            ] {
+                let options = LocalWriteOptions::new(LocalWriteMode::CreateNew).with_durability(requirement);
+                let mut writer = filesystem
+                    .open_writer_with_options(&target, &options)
+                    .expect("writer should open");
+                Output::write_fully(&mut writer, b"recovered").expect("writer should accept staged bytes");
+                let outcome = writer
+                    .commit()
+                    .expect("cleanup and required parent synchronization should recover");
+                assert!(outcome.durable());
+                assert_eq!(
+                    b"recovered",
+                    fs::read(directory.path().join("payload"))
+                        .expect("published destination should exist")
+                        .as_slice()
+                );
+                assert_eq!(
+                    1,
+                    fs::read_dir(directory.path())
+                        .expect("fixture directory should remain readable")
+                        .filter_map(Result::ok)
+                        .count(),
+                    "staging entry should have been removed"
+                );
+                fs::remove_file(directory.path().join("payload")).expect("next durability case needs a fresh target");
+            }
+        }
+    });
+}
+
+/// Verifies Required recovery reports its failed parent sync after publication
+/// while Preferred recovery degrades to a successful non-durable result.
+#[cfg(all(feature = "test-support", unix))]
+#[test]
+fn test_local_file_writer_recovery_sync_failure_obeys_durability() {
+    const TEST_NAME: &str = "test_local_file_writer_recovery_sync_failure_obeys_durability";
+    run_host_writer_fault(TEST_NAME, "atomic-install-unlink-recover-sync", || {
+        for rooted in [false, true] {
+            for requirement in [
+                LocalDurabilityRequirement::Preferred,
+                LocalDurabilityRequirement::Required,
+            ] {
+                let directory = tempdir().expect("temporary directory should be created");
+                let filesystem = if rooted {
+                    LocalFileSystem::rooted(directory.path())
+                } else {
+                    LocalFileSystem::host()
+                }
+                .expect("filesystem should open");
+                let target = if rooted {
+                    std::path::PathBuf::from("payload")
+                } else {
+                    directory.path().join("payload")
+                };
+                let options = LocalWriteOptions::new(LocalWriteMode::CreateNew).with_durability(requirement);
+                let mut writer = filesystem
+                    .open_writer_with_options(&target, &options)
+                    .expect("writer should open");
+                Output::write_fully(&mut writer, b"published").expect("writer should accept staged bytes");
+                let result = writer.commit();
+                match requirement {
+                    LocalDurabilityRequirement::Preferred => {
+                        let outcome = result.expect("Preferred sync failure should degrade");
+                        assert!(!outcome.durable());
+                    }
+                    LocalDurabilityRequirement::Required => {
+                        let error = result.expect_err("Required sync failure should be returned");
+                        assert_eq!(LocalWriteFailureState::Published, error.state());
+                        assert!(
+                            error.to_string().contains("SyncParent"),
+                            "sync stage should be reported: {error}"
+                        );
+                    }
+                    LocalDurabilityRequirement::NotRequired => unreachable!(),
+                }
+                assert_eq!(
+                    b"published",
+                    fs::read(directory.path().join("payload"))
+                        .expect("published destination should remain")
+                        .as_slice()
+                );
+                assert_eq!(
+                    1,
+                    fs::read_dir(directory.path())
+                        .expect("fixture directory should remain readable")
+                        .filter_map(Result::ok)
+                        .count(),
+                    "staging entry should have been removed"
+                );
+            }
+        }
+    });
 }
 
 /// Verifies a host staged replacement fault is surfaced as a not-published

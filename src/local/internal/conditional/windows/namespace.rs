@@ -6,6 +6,10 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 //! Windows conditional namespace permissions and entry identity checks.
+//!
+//! Retained handles and verified file identities grant access authority.
+//! Diagnostic paths describe namespace entries but never grant permission to
+//! reopen them; identity checks bind reopened entries to their original handle.
 
 #[cfg(test)]
 use std::cell::Cell;

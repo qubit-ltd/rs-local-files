@@ -18,7 +18,7 @@ use crate::recovery::LocalRecoveryFileRole;
 ///
 /// Implementations must use their retained namespace authority and validate
 /// the current entry identity. A diagnostic path is not an access capability.
-pub(crate) trait RecoveryAccess: Debug {
+pub(crate) trait RecoveryAccess: Debug + Send + Sync {
     fn open_reader(&self) -> LocalResult<LocalFileReader>;
 }
 

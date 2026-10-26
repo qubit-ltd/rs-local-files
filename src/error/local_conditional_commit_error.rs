@@ -24,13 +24,73 @@ use crate::recovery::LocalRecoveryFileRole;
 /// [`LocalRecoveryFile::open_reader`] while the error is alive, or consume the
 /// error with [`into_recovery_files`](Self::into_recovery_files) to transfer
 /// ownership. Dropping those handles does not delete their files.
+///
+/// The publication state, reason, and stage describe the observed attempt;
+/// `Indeterminate` must not be treated as safe to retry blindly.
+///
+/// # Examples
+///
+/// ```
+/// use qubit_io::Output;
+/// use qubit_local_files::LocalFileSystem;
+/// use qubit_local_files::error::LocalConditionalFailureReason;
+/// use qubit_local_files::options::{LocalWriteMode, LocalWriteOptions, LocalWritePrecondition};
+/// use qubit_local_files::outcome::LocalConditionalPublicationState;
+/// use qubit_local_files::error::LocalConditionalWriteStage;
+/// use sha2::Sha256;
+/// use tempfile::tempdir;
+///
+/// let directory = tempdir()?;
+/// let target = directory.path().canonicalize()?.join("model");
+/// std::fs::write(&target, b"existing")?;
+/// let mut filesystem = LocalFileSystem::host()?;
+/// filesystem.set_symlink_policy(qubit_local_files::policy::LocalSymlinkPolicy::Reject)?;
+/// let mut writer = filesystem.open_conditional_writer::<Sha256>(
+///     &target,
+///     LocalWritePrecondition::Absent,
+///     &LocalWriteOptions::new(LocalWriteMode::CreateOrReplace),
+/// )?;
+/// writer.write_fully(b"candidate bytes")?;
+/// let error = writer.commit().expect_err("the target already exists");
+/// assert_eq!(error.publication(), LocalConditionalPublicationState::NotPublished);
+/// assert_eq!(error.reason(), LocalConditionalFailureReason::TargetExists);
+/// assert_eq!(error.stage(), LocalConditionalWriteStage::Precheck);
+/// let candidate = error.candidate().expect("verified candidate is retained");
+/// let mut reader = candidate.open_reader()?;
+/// let mut bytes = Vec::new();
+/// qubit_io::Streams::copy_input_to_output(&mut reader, &mut bytes)?;
+/// assert_eq!(bytes, b"candidate bytes");
+/// drop(reader);
+/// let role = candidate.role();
+/// let retained_path = candidate.diagnostic_path().expect("host diagnostic path").to_path_buf();
+/// let recovery_files = error.into_recovery_files();
+/// let transferred = recovery_files.iter().find(|file| file.role() == role)
+///     .expect("candidate ownership transferred");
+/// let mut reader = transferred.open_reader()?;
+/// let mut bytes = Vec::new();
+/// qubit_io::Streams::copy_input_to_output(&mut reader, &mut bytes)?;
+/// assert_eq!(bytes, b"candidate bytes");
+/// drop(reader);
+/// drop(recovery_files);
+/// assert!(retained_path.exists(), "dropping recovery handles preserves files");
+/// # Ok::<(), Box<dyn std::error::Error>>(())
+/// ```
+///
+/// The temporary directory owns the example's files and is removed after all
+/// recovery handles have been dropped.
 #[must_use]
 #[derive(Debug)]
 pub struct LocalConditionalCommitError {
+    /// Structured operation error, including its native source.
     error: LocalFileError,
+    /// Stable classification of the conditional failure.
     reason: LocalConditionalFailureReason,
+    /// Commit stage where the attempt stopped.
     stage: LocalConditionalWriteStage,
+    /// Observed destination publication state; `Indeterminate` requires
+    /// inspection before deciding whether to retry.
     publication: LocalConditionalPublicationState,
+    /// Recovery files retained for caller inspection or transfer.
     recovery_files: Vec<LocalRecoveryFile>,
 }
 

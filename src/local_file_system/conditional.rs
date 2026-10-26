@@ -17,6 +17,7 @@ use super::LocalResult;
 use super::LocalWriteOptions;
 use super::Path;
 use crate::local::conditional::ConditionalWriterBackend;
+use crate::local_file_system_validation::validate_write_options;
 use crate::options::LocalWritePrecondition;
 use crate::writer::LocalConditionalWriter;
 
@@ -80,6 +81,12 @@ impl LocalFileSystem {
                     .with_path(path.to_path_buf()),
             );
         }
+        validate_write_options(options, self.core.capabilities, LocalFileOperation::OpenWriter).map_err(|error| {
+            super::with_current_directory(
+                error.with_path(path.to_path_buf()),
+                self.current_directory.virtual_path(),
+            )
+        })?;
         let resolver = self.resolver_for(path, LocalFileOperation::OpenWriter)?;
         let resolved = super::resolve_operation_path(&resolver, path, LocalFileOperation::OpenWriter)?;
         self.reject_root_operand(&resolved, LocalFileOperation::OpenWriter, resolver.current_directory())?;

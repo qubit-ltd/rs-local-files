@@ -921,6 +921,7 @@ impl LocalRootAtomicWriter {
                     staging_state,
                 },
                 &mut self.staged_file,
+                self.durability,
                 RootedStagedFile::cleanup,
                 |staged_file: &mut RootedStagedFile| {
                     staged_file.close();
@@ -929,8 +930,7 @@ impl LocalRootAtomicWriter {
                 |staged_file: &RootedStagedFile| {
                     sync_rooted_parent_chain(staged_file.parent(), &self.parent_dirs_to_sync)
                 },
-            )
-            .map(|()| false);
+            );
         }
         if self.durability == LocalDurabilityRequirement::NotRequired {
             self.staged_file.disarm();
