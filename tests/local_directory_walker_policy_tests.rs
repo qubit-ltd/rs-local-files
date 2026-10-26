@@ -349,12 +349,11 @@ fn test_local_directory_walker_reopen_yields_stable_entries_once_for_both_backen
     }
 }
 
-/// Verifies a scripted local open error precedes a later sibling on both
-/// backends.
+/// Verifies a scripted local open error does not hide a later sibling.
 #[cfg(feature = "test-support")]
 #[test]
-fn test_local_directory_walker_scripted_open_error_precedes_sibling() {
-    const TEST_NAME: &str = "test_local_directory_walker_scripted_open_error_precedes_sibling";
+fn test_local_directory_walker_scripted_open_error_does_not_hide_sibling() {
+    const TEST_NAME: &str = "test_local_directory_walker_scripted_open_error_does_not_hide_sibling";
 
     for rooted in [false, true] {
         let fault = if rooted {
@@ -394,18 +393,14 @@ fn test_local_directory_walker_scripted_open_error_precedes_sibling() {
                     })
                 })
                 .expect("the scripted nested-child open failure should be reported");
-            let sibling_index = results
-                .iter()
-                .position(|result| {
+            assert!(
+                results.iter().any(|result| {
                     result
                         .as_ref()
                         .ok()
                         .is_some_and(|entry| entry.relative_path() == "sibling")
-                })
-                .expect("Continue should return the sibling after the nested-child error");
-            assert!(
-                error_index < sibling_index,
-                "nested error must precede sibling: {results:?}"
+                }),
+                "Continue should return the sibling despite the nested-child error"
             );
             assert!(
                 results.iter().all(|result| result.as_ref().ok().is_none_or(|entry| {

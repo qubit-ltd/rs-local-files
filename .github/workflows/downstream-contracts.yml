@@ -19,6 +19,10 @@ on:
         description: Supporting rs-* repository branch or tag
         type: string
         default: main
+      budget_ref:
+        description: rs-budget revision required by the locked legacy consumer
+        type: string
+        default: 45bac87a11ea64fbb161023cc5c85051b51842d8
   workflow_call:
     inputs:
       local_files_ref:
@@ -33,6 +37,9 @@ on:
       support_ref:
         type: string
         default: main
+      budget_ref:
+        type: string
+        default: 45bac87a11ea64fbb161023cc5c85051b51842d8
 
 permissions:
   contents: read
@@ -72,10 +79,12 @@ jobs:
           FS_LOCAL_REF: ${{ inputs.fs_local_ref }}
           MIME_REF: ${{ inputs.mime_ref }}
           SUPPORT_REF: ${{ inputs.support_ref }}
+          BUDGET_REF: ${{ inputs.budget_ref }}
         run: >-
           python ci-root/rs-local-files/scripts/prepare_downstream_sources.py
           --root ci-root --candidate ci-root/rs-local-files
           --fs-local-ref "$FS_LOCAL_REF" --mime-ref "$MIME_REF" --support-ref "$SUPPORT_REF"
+          --additional-ref "rs-budget=$BUDGET_REF"
       - name: Check original consumer locks and run contracts
         run: >-
           python ci-root/rs-local-files/scripts/check_downstream_contracts.py

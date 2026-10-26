@@ -271,6 +271,29 @@ class SourceLayout(unittest.TestCase):
         )
         self.assertEqual(checkout_calls, [])
 
+    def test_yanked_budget_requirement_uses_matching_selected_source(self):
+        budget = self.manifest("rs-budget", '[package]\nname="qubit-budget"\nversion="0.9.1"\n')
+        self.assertTrue(budget.is_file())
+        value = self.manifest(
+            "rs-value",
+            '[dependencies]\nqubit-budget={version="0.9.1", features=["json"], optional=true}\n'
+            '[dev-dependencies]\nqubit-budget="^0.9.1"\n',
+        )
+
+        self.layout.use_yanked_budget_source(value, self.root)
+
+        data = self.layout.manifest_data(value)
+        self.assertEqual(data["dependencies"]["qubit-budget"], {
+            "path": "../rs-budget", "version": "0.9.1", "features": ["json"], "optional": True})
+        self.assertEqual(data["dev-dependencies"]["qubit-budget"], {
+            "path": "../rs-budget", "version": "^0.9.1"})
+
+    def test_yanked_budget_requirement_requires_matching_selected_source(self):
+        self.manifest("rs-budget", '[package]\nname="qubit-budget"\nversion="0.10.0"\n')
+        value = self.manifest("rs-value", '[dependencies]\nqubit-budget="0.9.1"\n')
+        with self.assertRaisesRegex(RuntimeError, "must provide qubit-budget 0.9.1"):
+            self.layout.use_yanked_budget_source(value, self.root)
+
     def test_workspace_inherited_unpublished_dependency_uses_sibling_path(self):
         self.manifest("rs-redact", '[package]\nname="qubit-redact"\nversion="0.10.0"\n')
         workspace = self.manifest(

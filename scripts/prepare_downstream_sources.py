@@ -125,6 +125,71 @@ def local_package_dependencies(manifest: Path, root: Path, registry_names=frozen
     }
 
 
+def update_dependency_declaration(source, table_name, alias, transform):
+    """Transform one dependency declaration without rewriting neighboring TOML."""
+    section = re.compile(
+        rf"(?ms)(?P<header>^[ \t]*\[[^\]\r\n]*\.{re.escape(table_name)}\][ \t]*\r?\n|"
+        rf"^[ \t]*\[{re.escape(table_name)}\][ \t]*\r?\n)"
+        rf"(?P<body>.*?)(?=^[ \t]*\[|\Z)"
+    )
+    declaration = re.compile(
+        rf"(?m)^(?P<prefix>[ \t]*{re.escape(alias)}[ \t]*=[ \t]*)"
+        rf"(?P<value>[^\r\n]+)$"
+    )
+
+    def update_section(match):
+        body, count = declaration.subn(transform, match.group("body"))
+        return match.group("header") + body if count else match.group(0)
+
+    updated, count = section.subn(update_section, source)
+    if count == 0:
+        raise RuntimeError(f"cannot locate {alias} declaration in [{table_name}]")
+    return updated
+
+
+def use_yanked_budget_source(manifest: Path, fixture: Path) -> None:
+    """Resolve legacy 0.9.1 constraints from their matching Git source."""
+    manifest = inside(fixture, manifest)
+    data = manifest_data(manifest)
+    scopes = [data, *data.get("target", {}).values(), data.get("workspace", {})]
+    selected = []
+    for scope in scopes:
+        for table_name in DEPENDENCY_TABLES:
+            for alias, dependency in scope.get(table_name, {}).items():
+                package_name = dependency.get("package", alias) if isinstance(dependency, dict) else alias
+                if package_name != "qubit-budget" or (isinstance(dependency, dict) and dependency.get("workspace")):
+                    continue
+                version = dependency.get("version") if isinstance(dependency, dict) else dependency
+                if version in ("0.9.1", "^0.9.1"):
+                    selected.append((table_name, alias))
+    if not selected:
+        return
+
+    budget = inside(fixture, fixture / "rs-budget")
+    budget_manifest = budget / "Cargo.toml"
+    if not budget_manifest.is_file() or manifest_data(budget_manifest).get("package", {}).get("version") != "0.9.1":
+        raise RuntimeError(f"selected rs-budget source must provide qubit-budget 0.9.1: {budget_manifest}")
+
+    contents = manifest.read_text(encoding="utf-8")
+    relative = Path(os.path.relpath(budget, manifest.parent)).as_posix()
+    for table_name, alias in selected:
+        def add_matching_path(match):
+            value = match.group("value").strip()
+            if value.startswith(("'", '"')):
+                fields = f"version = {value}"
+            elif value.startswith("{") and value.endswith("}"):
+                fields = value[1:-1].strip().rstrip(",")
+                if re.search(r"\bpath\s*=", fields):
+                    raise RuntimeError(f"unexpected existing qubit-budget path in {manifest}")
+            else:
+                raise RuntimeError(f"unsupported dependency syntax for qubit-budget in {manifest}")
+            return f'{match.group("prefix")}{{ path = "{relative}", {fields} }}'
+
+        contents = update_dependency_declaration(contents, table_name, alias, add_matching_path)
+    if contents != manifest.read_text(encoding="utf-8"):
+        manifest.write_text(contents, encoding="utf-8")
+
+
 def use_latest_local_dependencies(manifest: Path, root: Path, checkout, registry_names=frozenset()) -> None:
     """Use latest sibling sources for locked qubit packages absent from the registry."""
     lockfile = manifest_lockfile(manifest, root)
@@ -138,27 +203,6 @@ def use_latest_local_dependencies(manifest: Path, root: Path, checkout, registry
     data = manifest_data(manifest)
     scopes = [data, *data.get("target", {}).values(), data.get("workspace", {})]
     contents = manifest.read_text(encoding="utf-8")
-
-    def update_declaration(source, table_name, alias, transform):
-        """Update matching aliases only inside dependency table sections."""
-        section = re.compile(
-            rf"(?ms)(?P<header>^[ \t]*\[[^\]\r\n]*\.{re.escape(table_name)}\][ \t]*\r?\n|"
-            rf"^[ \t]*\[{re.escape(table_name)}\][ \t]*\r?\n)"
-            rf"(?P<body>.*?)(?=^[ \t]*\[|\Z)"
-        )
-        declaration = re.compile(
-            rf"(?m)^(?P<prefix>[ \t]*{re.escape(alias)}[ \t]*=[ \t]*)"
-            rf"(?P<value>[^\r\n]+)$"
-        )
-
-        def update_section(match):
-            body, count = declaration.subn(transform, match.group("body"))
-            return match.group("header") + body if count else match.group(0)
-
-        updated, count = section.subn(update_section, source)
-        if count == 0:
-            raise RuntimeError(f"cannot locate {alias} declaration in [{table_name}] in {manifest}")
-        return updated
 
     for scope in scopes:
         for table_name in DEPENDENCY_TABLES:
@@ -178,7 +222,7 @@ def use_latest_local_dependencies(manifest: Path, root: Path, checkout, registry
                             fields = fields.strip().strip(",").strip()
                             return f'{match.group("prefix")}{{{fields}}}'
 
-                        contents = update_declaration(contents, table_name, alias, remove_path)
+                        contents = update_dependency_declaration(contents, table_name, alias, remove_path)
                     continue
                 repository = package_name.replace("qubit-", "rs-", 1)
                 sibling = checkout(repository)
@@ -207,7 +251,7 @@ def use_latest_local_dependencies(manifest: Path, root: Path, checkout, registry
                         return f'{match.group("prefix")}{{ path = "{relative}"{suffix} }}'
                     raise RuntimeError(f"unsupported dependency syntax for {package_name} in {manifest}")
 
-                contents = update_declaration(contents, table_name, alias, add_path)
+                contents = update_dependency_declaration(contents, table_name, alias, add_path)
     if contents != manifest.read_text(encoding="utf-8"):
         manifest.write_text(contents, encoding="utf-8")
 
@@ -425,6 +469,7 @@ def prepare(root: Path, candidate: Path, refs: dict[str, str]) -> dict:
         return fixture / repository
 
     for manifest in sorted(fixture_manifests):
+        use_yanked_budget_source(manifest, fixture)
         use_latest_local_dependencies(manifest, fixture, fixture_checkout, registry_names)
     redirect_fixture_io_paths(fixture, fixture_manifests)
     config = write_candidate_config(fixture)
