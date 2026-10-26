@@ -15,7 +15,6 @@ use std::os::windows::ffi::OsStrExt;
 use std::os::windows::fs::OpenOptionsExt;
 use std::os::windows::io::AsRawHandle;
 use std::path::Path;
-use std::ptr::null;
 use std::ptr::null_mut;
 
 use qubit_io::Input;
@@ -81,7 +80,7 @@ fn set_distinct_reparse_names(link: &Path, actual: &Path, display: &Path) {
             null_mut(),
             0,
             &raw mut returned,
-            null(),
+            null_mut(),
         )
     };
     assert_ne!(
@@ -202,9 +201,9 @@ fn test_rooted_copy_uses_actual_reparse_target_instead_of_display_name() {
     let mut reader = filesystem
         .open_reader(Path::new("source"))
         .expect("Rooted reader should follow the actual target");
-    let mut source_bytes = [0_u8; 12];
+    let mut source_bytes = [0_u8; 13];
     Input::read_exactly(&mut reader, &mut source_bytes).expect("Rooted reader should read target bytes");
-    assert_eq!(b"actual target", source_bytes);
+    assert_eq!(b"actual target", source_bytes.as_slice());
 
     let _ = filesystem
         .copy(Path::new("source"), Path::new("destination"))
