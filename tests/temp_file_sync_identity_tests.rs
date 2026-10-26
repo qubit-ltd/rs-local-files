@@ -115,3 +115,70 @@ fn test_required_persist_accepts_cloned_and_reopened_source_handles() {
         assert!(outcome.durable());
     }
 }
+
+#[cfg(unix)]
+#[test]
+fn test_closed_persist_rejects_reopened_replacement_path_for_each_durability() {
+    for rooted in [false, true] {
+        for durability in [
+            LocalDurabilityRequirement::Required,
+            LocalDurabilityRequirement::Preferred,
+        ] {
+            let directory = tempdir().expect("private parent should be created");
+            let filesystem = if rooted {
+                LocalFileSystem::rooted(directory.path()).expect("root authority should open")
+            } else {
+                LocalFileSystem::host().expect("host authority should open")
+            };
+            let parent = if rooted {
+                std::path::Path::new("/")
+            } else {
+                directory.path()
+            };
+            let mut temporary = filesystem
+                .create_temp_file_with_options(&LocalTempFileOptions::new().with_parent(parent))
+                .expect("temporary source should be created");
+            let replacement = directory.path().join("replacement");
+            fs::write(&replacement, b"replacement entity")
+                .expect("replacement entity should be created while original exists");
+            let namespace_source = temporary.path().to_path_buf();
+            let source = if rooted {
+                directory.path().join(
+                    namespace_source
+                        .strip_prefix(std::path::Path::new("/"))
+                        .expect("rooted source should be virtual-absolute"),
+                )
+            } else {
+                namespace_source
+            };
+            temporary.close();
+            fs::remove_file(&source).expect("original path entity should be removed");
+            fs::rename(&replacement, &source)
+                .expect("replacement entity should occupy the source path");
+
+            let target = if rooted {
+                std::path::PathBuf::from("/published")
+            } else {
+                directory.path().join("published")
+            };
+            let host_target = directory.path().join("published");
+            let error = temporary
+                .persist_with(
+                    &target,
+                    LocalPersistOptions::new().with_durability(durability),
+                )
+                .expect_err("a reopened replacement entity must not be persisted");
+
+            assert_eq!(LocalPersistStage::InstallDestination, error.stage());
+            assert_eq!(LocalPersistFailureState::NotPublished, error.state());
+            assert_eq!(LocalTempSourceState::Indeterminate, error.source_state());
+            assert!(!host_target.exists(), "replacement must not be published");
+            assert_eq!(
+                b"replacement entity",
+                fs::read(&source)
+                    .expect("replacement must remain at the source path")
+                    .as_slice(),
+            );
+        }
+    }
+}
