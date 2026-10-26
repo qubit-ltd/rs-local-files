@@ -20,6 +20,7 @@ mod unix {
     use qubit_local_files::options::LocalTempDirectoryOptions;
     use qubit_local_files::options::LocalTempFileOptions;
     use qubit_local_files::outcome::LocalPersistFailureState;
+    use qubit_local_files::outcome::LocalPersistStage;
     use qubit_local_files::policy::LocalSymlinkPolicy;
     use tempfile::tempdir;
 
@@ -184,6 +185,7 @@ mod unix {
             .persist(Path::new("/"))
             .expect_err("the virtual root cannot be the final persistence target");
         assert_eq!(LocalPersistFailureState::NotPublished, persist.state());
+        assert_eq!(LocalPersistStage::ResolveTarget, persist.stage());
         persist
             .resource_mut()
             .cleanup()
