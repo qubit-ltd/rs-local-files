@@ -13,6 +13,10 @@ libfuzzer-sys = "^0.4"
 qubit-io = "^0.19"
 qubit-local-files = { path = ".." }
 
+[[test]]
+name = "lifecycle_model_tests"
+path = "fuzz_targets/lifecycle_model_tests.rs"
+
 [[bin]]
 name = "path_codec"
 path = "fuzz_targets/path_codec.rs"
