@@ -21,5 +21,5 @@ pub(crate) use temp_cleanup_fault::temp_cleanup_before_remove;
 pub(crate) use temp_cleanup_fault::temp_cleanup_deadline_expired;
 #[cfg(feature = "test-support")]
 pub(crate) use temp_cleanup_fault::temp_cleanup_metadata;
-#[cfg(all(unix, feature = "test-support"))]
+#[cfg(all(any(unix, windows), feature = "test-support"))]
 pub(crate) use temp_cleanup_fault::temp_cleanup_replace_observed_entry;

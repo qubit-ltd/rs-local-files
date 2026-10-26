@@ -8,17 +8,18 @@
 //! Thread-isolated temporary cleanup failure boundaries.
 // Covered through public temporary cleanup fault-injection tests.
 
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 use std::fs::File;
 use std::io;
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 use std::path::Path;
 
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 use qubit_io::Output;
 
 use crate::LocalRelativePath;
 use crate::local::create_rooted_directory;
+#[cfg(unix)]
 use crate::local::create_rooted_symlink;
 use crate::local::open_rooted_native_writer;
 use crate::local::remove_rooted_entry;
@@ -60,7 +61,7 @@ pub(crate) fn temp_cleanup_deadline_expired() -> bool {
 /// Replaces an entry after its type was observed, through the original root.
 /// This deterministic race affects only the scoped selector's owning thread.
 /// Native replacement setup errors propagate without concealing their cause.
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 pub(crate) fn temp_cleanup_replace_observed_entry(
     root: &File,
     diagnostic_root: &Path,
@@ -76,6 +77,7 @@ pub(crate) fn temp_cleanup_replace_observed_entry(
         return open_rooted_native_writer(root, diagnostic_root, path, &OpenOptions::default())?
             .write_fully(b"replacement");
     }
+    #[cfg(unix)]
     if directory && take_test_support("temp-observed-directory-becomes-symlink") {
         remove_rooted_entry(root, diagnostic_root, path)?;
         return create_rooted_symlink(root, diagnostic_root, Path::new("../../outside"), path);

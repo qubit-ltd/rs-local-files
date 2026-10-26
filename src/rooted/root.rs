@@ -438,7 +438,7 @@ impl Root {
                     "rooted remove_file does not remove directories",
                 ));
             }
-            #[cfg(all(unix, feature = "test-support"))]
+            #[cfg(all(any(unix, windows), feature = "test-support"))]
             crate::test_support::temp_cleanup_replace_observed_entry(&self.directory, &self.path, path, false)?;
             #[cfg(feature = "test-support")]
             if local::test_support_enabled("rooted-copy-remove-file-native") {

@@ -49,3 +49,23 @@ fn test_remove_empty_dir_does_not_delete_replacement_leaf() {
         );
     }
 }
+
+#[cfg(all(windows, feature = "test-support"))]
+#[test]
+fn test_remove_file_does_not_delete_replacement_directory_handle() {
+    let directory = tempdir().expect("root fixture should be created");
+    let root = Root::open(directory.path()).expect("root should open");
+    let path = LocalRelativePath::new(Path::new("entry")).expect("path should be valid");
+    fs::write(directory.path().join("entry"), b"original").expect("file should be written");
+    let fault = crate::local::install_test_fault("temp-observed-file-becomes-directory")
+        .expect("replacement fault should install");
+
+    let result = root.remove_file(&path);
+    drop(fault);
+
+    assert!(result.is_err(), "file removal must reject the replacement directory handle");
+    assert_eq!(
+        EntryKind::Directory,
+        root.symlink_metadata(&path).expect("replacement directory should remain").kind(),
+    );
+}

@@ -154,16 +154,23 @@ pub(crate) fn remove_rooted_entry_typed(
 ) -> Result<()> {
     let entry = open_entry_no_follow(root, path, DELETE | FILE_READ_ATTRIBUTES | SYNCHRONIZE, FILE_OPEN, 0)?;
     let kind = Metadata::from_open_file(&entry)?.kind();
-    let matches = if directory {
-        kind == EntryKind::Directory
-    } else {
-        kind != EntryKind::Directory
+    let mismatch = match (directory, kind) {
+        (true, EntryKind::Directory) | (false, EntryKind::File | EntryKind::Symlink) => None,
+        (true, _) => Some((
+            ErrorKind::NotADirectory,
+            "rooted empty-directory removal requires a real directory",
+        )),
+        (false, EntryKind::Directory) => Some((
+            ErrorKind::IsADirectory,
+            "rooted file removal does not remove directories",
+        )),
+        (false, EntryKind::Other) => Some((
+            ErrorKind::InvalidInput,
+            "rooted file removal rejects unsupported entry types",
+        )),
     };
-    if !matches {
-        return Err(std::io::Error::new(
-            if directory { ErrorKind::NotADirectory } else { ErrorKind::IsADirectory },
-            "rooted removal type does not match the requested operation",
-        ));
+    if let Some((kind, message)) = mismatch {
+        return Err(std::io::Error::new(kind, message));
     }
     delete_open_entry(&entry)
 }
