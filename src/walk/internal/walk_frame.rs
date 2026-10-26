@@ -23,8 +23,8 @@ pub(in crate::walk) struct WalkFrame {
     pub(in crate::walk) entries: Option<ReadDir>,
     /// Capacity permit retained for exactly as long as `entries` is open.
     pub(in crate::walk) directory_permit: Option<ManagedResourcePermit<LocalResourceKind, usize>>,
-    /// Names already yielded from this directory.
-    pub(in crate::walk) seen: HashSet<OsString>,
+    /// Names already yielded, when budgeting or reopening requires them.
+    pub(in crate::walk) seen: Option<HashSet<OsString>>,
     /// Root-relative path of this directory.
     pub(in crate::walk) relative: PathBuf,
     /// Native identity retained while this directory is on the DFS path.

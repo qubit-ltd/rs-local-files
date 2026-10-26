@@ -15,7 +15,6 @@ use qubit_local_files::LocalFileSystem;
 use qubit_local_files::error::LocalFileErrorKind;
 #[cfg(feature = "test-support")]
 use qubit_local_files::error::LocalResourceKind;
-#[cfg(feature = "test-support")]
 use qubit_local_files::options::LocalDirectoryReopenPolicy;
 use qubit_local_files::options::LocalListOptions;
 use qubit_local_files::options::LocalWalkErrorPolicy;
@@ -307,6 +306,49 @@ fn test_local_directory_walker_continue_skips_handle_limited_branch() {
     }
 }
 
+/// Verifies reopening a bounded directory reader does not duplicate entries.
+#[test]
+fn test_local_directory_walker_reopen_yields_stable_entries_once_for_both_backends() {
+    let directory = tempdir().expect("temporary directory should be created");
+    fs::create_dir(directory.path().join("nested")).expect("nested directory should be created");
+    fs::write(directory.path().join("sibling"), b"sibling").expect("sibling should be written");
+    fs::write(directory.path().join("nested/child"), b"child").expect("child should be written");
+
+    for rooted in [false, true] {
+        let filesystem = if rooted {
+            LocalFileSystem::rooted(directory.path()).expect("Rooted filesystem should open")
+        } else {
+            LocalFileSystem::host().expect("Host filesystem should open")
+        };
+        let root = if rooted { Path::new("/") } else { directory.path() };
+        let entries = filesystem
+            .list_with_options(
+                root,
+                &LocalListOptions::new()
+                    .with_recursive()
+                    .with_max_open_directories(1)
+                    .with_reopen_policy(LocalDirectoryReopenPolicy::Reopen),
+            )
+            .expect("bounded walker should open")
+            .collect::<Result<Vec<_>, _>>()
+            .expect("reopening traversal should succeed");
+        let mut paths = entries
+            .iter()
+            .map(|entry| entry.relative_path().to_path_buf())
+            .collect::<Vec<_>>();
+        paths.sort();
+        assert_eq!(
+            vec![
+                PathBuf::from("nested"),
+                PathBuf::from("nested/child"),
+                PathBuf::from("sibling")
+            ],
+            paths,
+            "stable directory entries should appear once per backend"
+        );
+    }
+}
+
 /// Verifies a scripted local open error precedes a later sibling on both
 /// backends.
 #[cfg(feature = "test-support")]
@@ -510,6 +552,8 @@ fn test_local_directory_walker_deadline_terminates_after_duplicate_progress() {
             .list_with_options(
                 directory.path(),
                 &LocalListOptions::new()
+                    .with_recursive()
+                    .with_max_open_directories(1)
                     .with_reopen_policy(LocalDirectoryReopenPolicy::Reopen)
                     .with_error_policy(error_policy),
             )
@@ -525,6 +569,36 @@ fn test_local_directory_walker_deadline_terminates_after_duplicate_progress() {
             "deadline should terminate even under Continue policy"
         );
     }
+}
+
+/// Verifies the uncached path checks deadline expiry before its next reader
+/// operation.
+#[cfg(feature = "test-support")]
+#[test]
+fn test_local_directory_walker_default_uncached_path_checks_deadline() {
+    let directory = tempdir().expect("temporary directory should be created");
+    fs::write(directory.path().join("entry"), b"payload").expect("entry fixture should be written");
+    let _fault = install_test_fault("walker-deadline-inner").expect("deadline progress fault should install");
+    let mut walker = LocalFileSystem::host()
+        .expect("Host filesystem should open")
+        .list_with_options(directory.path(), &LocalListOptions::new())
+        .expect("default uncached walker should open");
+
+    let entry = walker
+        .next()
+        .expect("first entry should be returned")
+        .expect("uncached traversal should accept the first entry");
+    assert_eq!(PathBuf::from("entry"), entry.relative_path());
+
+    let error = walker
+        .next()
+        .expect("deadline error should be returned before the next reader operation")
+        .expect_err("expired deadline must terminate the next step");
+    assert_eq!(std::io::ErrorKind::TimedOut, error.io_error_kind());
+    assert!(
+        walker.next().is_none(),
+        "deadline exhaustion should terminate the walker"
+    );
 }
 
 /// Verifies an exhausted global resource budget terminates Continue traversal.
@@ -546,6 +620,9 @@ fn test_local_directory_walker_resource_limit_terminates_continue_policy() {
                 .with_error_policy(LocalWalkErrorPolicy::Continue),
             LocalListOptions::new()
                 .with_max_seen_name_bytes(0)
+                .with_error_policy(LocalWalkErrorPolicy::Continue),
+            LocalListOptions::new()
+                .with_max_seen_name_bytes(1)
                 .with_error_policy(LocalWalkErrorPolicy::Continue),
         ] {
             let mut walker = filesystem

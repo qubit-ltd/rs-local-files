@@ -23,8 +23,8 @@ pub(in crate::walk) struct RootedWalkFrame {
     pub(in crate::walk) reader: Option<DirectoryReader>,
     /// Capacity permit retained for exactly as long as `reader` is open.
     pub(in crate::walk) directory_permit: Option<ManagedResourcePermit<LocalResourceKind, usize>>,
-    /// Names already yielded from this directory.
-    pub(in crate::walk) seen: HashSet<OsString>,
+    /// Names already yielded, when budgeting or reopening requires them.
+    pub(in crate::walk) seen: Option<HashSet<OsString>>,
     /// Authority-relative path of the listed directory.
     pub(in crate::walk) authority_parent: PathBuf,
     /// Requested-list-root-relative path of the listed directory.

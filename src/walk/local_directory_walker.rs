@@ -150,7 +150,7 @@ impl LocalDirectoryWalker {
                 vec![WalkFrame {
                     entries: Some(entries),
                     directory_permit,
-                    seen: HashSet::new(),
+                    seen: needs_seen_names(&options).then(HashSet::new),
                     relative: PathBuf::new(),
                     identity: Some(root_identity),
                     entry_depth: 1,
@@ -266,7 +266,7 @@ impl LocalDirectoryWalker {
                     vec![RootedWalkFrame {
                         reader: None,
                         directory_permit: None,
-                        seen: HashSet::new(),
+                        seen: needs_seen_names(&options).then(HashSet::new),
                         authority_parent,
                         output_parent,
                         entry_depth: 1,
@@ -427,7 +427,7 @@ impl LocalDirectoryWalker {
         self.stack.push(WalkFrame {
             entries: Some(entries),
             directory_permit,
-            seen: HashSet::new(),
+            seen: needs_seen_names(&self.options).then(HashSet::new),
             relative,
             identity: Some(identity),
             entry_depth: entry_depth + 1,
@@ -518,6 +518,17 @@ impl LocalDirectoryWalker {
         }
         Err(error)
     }
+}
+
+/// Returns whether traversal needs per-directory names for budget admission
+/// or duplicate suppression after reopening a directory reader.
+fn needs_seen_names(options: &LocalListOptions) -> bool {
+    let explicit_name_budget = options.max_seen_name_bytes().is_some();
+    let can_descend = options.recursive() && options.max_depth().is_none_or(|max_depth| max_depth > 1);
+    let can_reopen = can_descend
+        && options.max_open_directories().is_some()
+        && options.reopen_policy() == LocalDirectoryReopenPolicy::Reopen;
+    explicit_name_budget || can_reopen
 }
 
 impl LocalDirectoryWalker {
@@ -623,10 +634,12 @@ impl LocalDirectoryWalker {
                         #[cfg(not(feature = "test-support"))]
                         let force_duplicate_deadline = false;
                         if force_duplicate_deadline {
-                            frame.seen.insert(name.clone());
+                            if let Some(seen) = frame.seen.as_mut() {
+                                seen.insert(name.clone());
+                            }
                             self.deadline = Some(Instant::now());
                         }
-                        if frame.seen.insert(name) {
+                        if frame.seen.as_mut().is_none_or(|seen| seen.insert(name)) {
                             break Some(Ok(entry));
                         }
                         continue;
@@ -984,12 +997,13 @@ fn next_rooted_entry(
                         .scripted_sibling = Some(entry);
                     continue;
                 }
-                if !state
+                if let Some(seen) = state
                     .stack
                     .last_mut()
                     .expect("rooted walker stack is non-empty")
                     .seen
-                    .insert(entry.name().to_os_string())
+                    .as_mut()
+                    && !seen.insert(entry.name().to_os_string())
                 {
                     continue;
                 }
@@ -1089,7 +1103,7 @@ fn next_rooted_entry(
             state.stack.push(RootedWalkFrame {
                 reader: None,
                 directory_permit: None,
-                seen: std::collections::HashSet::new(),
+                seen: needs_seen_names(&options).then(HashSet::new),
                 authority_parent,
                 output_parent: output_path.clone(),
                 entry_depth: entry_depth + 1,
@@ -1149,4 +1163,98 @@ fn native_directory_identity(metadata: &fs::Metadata, path: &Path) -> LocalResul
 #[inline]
 fn walk_io_error(path: &Path, error: std::io::Error) -> LocalFileError {
     LocalFileError::from_io(LocalFileOperation::List, Some(path.to_path_buf()), None, error)
+}
+
+#[cfg(test)]
+mod seen_name_cache_tests {
+    use std::path::PathBuf;
+    use std::time::Instant;
+
+    use super::LocalDirectoryWalker;
+    use crate::LocalDirectoryReopenPolicy;
+    use crate::LocalListOptions;
+    use crate::LocalSymlinkPolicy;
+
+    #[test]
+    fn test_default_host_and_rooted_walkers_do_not_allocate_seen_name_sets() {
+        let directory = tempfile::tempdir().expect("walker fixture should be created");
+        let options = LocalListOptions::new();
+        let host = LocalDirectoryWalker::open_with_diagnostic(
+            directory.path().to_path_buf(),
+            directory.path().to_path_buf(),
+            options,
+            LocalSymlinkPolicy::Reject,
+            Instant::now(),
+        )
+        .expect("Host walker should open");
+        assert!(host.stack[0].seen.is_none());
+
+        let root = crate::rooted::Root::open(directory.path()).expect("Rooted authority should open");
+        let rooted = LocalDirectoryWalker::open_rooted(
+            std::sync::Arc::new(root),
+            None,
+            PathBuf::from("/"),
+            options,
+            LocalSymlinkPolicy::Reject,
+            Instant::now(),
+        )
+        .expect("Rooted walker should open");
+        assert!(
+            rooted.rooted.as_ref().expect("Rooted state should exist").stack[0]
+                .seen
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn test_host_and_rooted_walkers_allocate_seen_names_when_required() {
+        let directory = tempfile::tempdir().expect("walker fixture should be created");
+        let options = LocalListOptions::new().with_max_seen_name_bytes(0);
+        let host = LocalDirectoryWalker::open_with_diagnostic(
+            directory.path().to_path_buf(),
+            directory.path().to_path_buf(),
+            options,
+            LocalSymlinkPolicy::Reject,
+            Instant::now(),
+        )
+        .expect("Host walker should open");
+        assert!(host.stack[0].seen.is_some());
+
+        let root = crate::rooted::Root::open(directory.path()).expect("Rooted authority should open");
+        let rooted = LocalDirectoryWalker::open_rooted(
+            std::sync::Arc::new(root),
+            None,
+            PathBuf::from("/"),
+            options,
+            LocalSymlinkPolicy::Reject,
+            Instant::now(),
+        )
+        .expect("Rooted walker should open");
+        assert!(
+            rooted.rooted.as_ref().expect("Rooted state should exist").stack[0]
+                .seen
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn test_seen_name_sets_are_enabled_only_for_budget_or_reopen_requirements() {
+        assert!(super::needs_seen_names(
+            &LocalListOptions::new().with_max_seen_name_bytes(0)
+        ));
+        assert!(super::needs_seen_names(
+            &LocalListOptions::new()
+                .with_recursive()
+                .with_max_open_directories(1)
+                .with_reopen_policy(LocalDirectoryReopenPolicy::Reopen)
+        ));
+        assert!(!super::needs_seen_names(&LocalListOptions::new()));
+        assert!(!super::needs_seen_names(
+            &LocalListOptions::new()
+                .with_recursive()
+                .with_max_depth(1)
+                .with_max_open_directories(1)
+                .with_reopen_policy(LocalDirectoryReopenPolicy::Reopen)
+        ));
+    }
 }
