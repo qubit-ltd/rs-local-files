@@ -559,6 +559,39 @@ impl LocalRootAtomicWriter {
             let _ = self.staged_file.file().sync_all();
         }
         if let Some(opened_destination) = destination.as_ref() {
+            #[cfg(feature = "test-support")]
+            if crate::local::test_support_enabled("rooted-writer-identity-replace") {
+                use std::io::Write;
+
+                let competitor_path = crate::LocalRelativePath::new("rooted-writer-race-competitor")
+                    .expect("static competitor path should be valid");
+                let replace_destination = || -> io::Result<()> {
+                    let mut competitor = open_rooted_native_writer(
+                        &self.staged_file.root,
+                        Path::new(""),
+                        &competitor_path,
+                        &WriteOpenOptions::new(WriteMode::CreateNew),
+                    )?;
+                    competitor.write_all(b"competing destination")?;
+                    drop(competitor);
+                    rename_rooted_entry(
+                        &self.staged_file.root,
+                        Path::new(""),
+                        &competitor_path,
+                        &self.destination,
+                        true,
+                    )
+                };
+                replace_destination().map_err(|source| {
+                    LocalAtomicWriteError::new(
+                        LocalAtomicWriteStage::ReplaceDestination,
+                        self.path.clone(),
+                        Some(self.staged_file.diagnostic_path.clone()),
+                        LocalAtomicDestinationState::Unchanged,
+                        source,
+                    )
+                })?;
+            }
             let current_destination =
                 read_rooted_symlink_metadata(&self.staged_file.root, Path::new(""), &self.destination).map_err(
                     |source| {
@@ -594,7 +627,7 @@ impl LocalRootAtomicWriter {
                     LocalAtomicWriteStage::ReplaceDestination,
                     self.path.clone(),
                     Some(self.staged_file.diagnostic_path.clone()),
-                    LocalAtomicDestinationState::Indeterminate,
+                    LocalAtomicDestinationState::Unchanged,
                     io::Error::new(
                         io::ErrorKind::AlreadyExists,
                         "rooted atomic destination changed during commit",

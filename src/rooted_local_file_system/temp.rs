@@ -19,7 +19,7 @@ use super::LocalTempFile;
 use super::LocalTempFileOptions;
 use super::RootedLocalFileSystem;
 use super::io;
-use super::resolve_rooted_path;
+use super::resolve_rooted_path_allow_root;
 use super::rooted_io_error;
 use super::rooted_path;
 use super::rooted_temp_parent;
@@ -51,15 +51,13 @@ impl RootedLocalFileSystem {
         let parent = if requested_parent.as_os_str().is_empty() {
             requested_parent
         } else {
-            resolve_rooted_path(
+            resolve_rooted_path_allow_root(
                 &self.root,
                 &requested_parent,
                 symlink_policy,
                 true,
                 LocalFileOperation::CreateTempFile,
             )?
-            .as_path()
-            .to_path_buf()
         };
         if options.creates_parent() && !parent.as_os_str().is_empty() {
             let parent_path = rooted_path(&parent, LocalFileOperation::CreateTempFile)?;
@@ -183,15 +181,13 @@ impl RootedLocalFileSystem {
         let parent = if requested_parent.as_os_str().is_empty() {
             requested_parent
         } else {
-            resolve_rooted_path(
+            resolve_rooted_path_allow_root(
                 &self.root,
                 &requested_parent,
                 symlink_policy,
                 true,
                 LocalFileOperation::CreateTempDirectory,
             )?
-            .as_path()
-            .to_path_buf()
         };
         if options.creates_parent() && !parent.as_os_str().is_empty() {
             let parent_path = rooted_path(&parent, LocalFileOperation::CreateTempDirectory)?;

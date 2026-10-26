@@ -46,6 +46,55 @@ fn test_rooted_temp_resources_validate_attempt_and_affix_policies() {
     assert_eq!(LocalFileErrorKind::InvalidOptions, directory_affix.kind());
 }
 
+/// Verifies temporary resources and capability probes accept links to the
+/// rooted virtual directory while retaining rooted boundary policy.
+#[cfg(unix)]
+#[test]
+fn test_rooted_root_alias_parent_and_capability_probes() {
+    use std::os::unix::fs::symlink;
+
+    use qubit_local_files::policy::LocalSymlinkPolicy;
+
+    let directory = tempdir().expect("temporary root should be created");
+    symlink(".", directory.path().join("alias")).expect("root alias should be created");
+    symlink("/", directory.path().join("absolute-alias"))
+        .expect("absolute virtual-root alias should be created");
+    let rooted = LocalFileSystem::rooted(directory.path()).expect("root authority should open");
+
+    let file = rooted
+        .create_temp_file_with_options(&LocalTempFileOptions::new().with_parent(Path::new("alias")))
+        .expect("root alias should be a valid temporary parent");
+    assert!(file.path().starts_with(Path::new("/")));
+    drop(file);
+
+    let temp_dir = rooted
+        .create_temp_directory_with_options(
+            &LocalTempDirectoryOptions::new().with_parent(Path::new("absolute-alias")),
+        )
+        .expect("absolute virtual-root alias should be a valid temporary parent");
+    drop(temp_dir);
+
+    let root_limits = rooted.limits_at(Path::new("/")).expect("root limits should be readable");
+    let alias_limits = rooted.limits_at(Path::new("alias")).expect("alias limits should be readable");
+    assert_eq!(root_limits.max_component_length(), alias_limits.max_component_length());
+    assert_eq!(root_limits.max_path_length(), alias_limits.max_path_length());
+    assert_eq!(root_limits.length_unit(), alias_limits.length_unit());
+
+    let root_space = rooted.space_at(Path::new("/")).expect("root capacity should be readable");
+    let alias_space = rooted.space_at(Path::new("alias")).expect("alias capacity should be readable");
+    assert_eq!(root_space.capacity_bytes().is_some(), alias_space.capacity_bytes().is_some());
+    assert_eq!(root_space.free_bytes().is_some(), alias_space.free_bytes().is_some());
+    assert_eq!(root_space.available_bytes().is_some(), alias_space.available_bytes().is_some());
+
+    let mut rejecting = LocalFileSystem::rooted(directory.path()).expect("second root authority should open");
+    rejecting
+        .set_symlink_policy(LocalSymlinkPolicy::Reject)
+        .expect("reject policy should be selected");
+    assert!(rejecting
+        .create_temp_file_with_options(&LocalTempFileOptions::new().with_parent(Path::new("alias")))
+        .is_err());
+}
+
 /// Verifies rooted temporary parents must already be directories unless the
 /// caller explicitly requests recursive parent creation.
 #[test]

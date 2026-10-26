@@ -217,8 +217,13 @@ impl RootedLocalFileSystem {
                 Err(error) => Err(rooted_io_error(LocalFileOperation::Capabilities, path, error)),
             };
         }
-        let resolved = resolve_rooted_path(&self.root, path, symlink_policy, true, LocalFileOperation::Capabilities)?;
-        let mut candidate = resolved.as_path().to_path_buf();
+        let mut candidate = resolve_rooted_path_allow_root(
+            &self.root,
+            path,
+            symlink_policy,
+            true,
+            LocalFileOperation::Capabilities,
+        )?;
         loop {
             if candidate.as_os_str().is_empty() {
                 return match self.root.open_probe_root() {
