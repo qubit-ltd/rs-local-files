@@ -138,7 +138,7 @@ fn windows_sharing_failure_removes_empty_owned_recovery_container() {
         .share_mode(1)
         .open(&target)
         .expect("target should open with delete sharing denied");
-    let mut filesystem = conditional::host();
+    let filesystem = conditional::host();
     let mut writer = filesystem
         .open_conditional_writer::<Sha256>(
             &target,
@@ -223,8 +223,7 @@ fn required_parent_sync_unavailability_fails_before_publication() {
                     &LocalWriteOptions::new(LocalWriteMode::CreateOrReplace)
                         .with_durability(LocalDurabilityRequirement::Required),
                 )
-                .err()
-                .expect("unsupported Required durability must fail during open");
+                .expect_err("unsupported Required durability must fail during open");
 
             assert_eq!(error.kind(), LocalFileErrorKind::RequirementNotMet);
             assert_eq!(error.operation(), LocalFileOperation::OpenWriter);
