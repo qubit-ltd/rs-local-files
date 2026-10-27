@@ -18,9 +18,9 @@ use crate::options::LocalWriteOptions;
 #[test]
 fn lf3_authority_rejects_absolute_and_escape() {
     let fixture = tempfile::tempdir().expect("fixture should exist");
-    let fs = crate::LocalFileSystem::host().expect("host should open");
+    let fs = crate::LocalFileSystem::rooted(fixture.path()).expect("rooted filesystem should open");
     let handle = fs
-        .open_directory_with_options(fixture.path(), &LocalDirectoryOpenOptions::new())
+        .open_directory_with_options(std::path::Path::new("/"), &LocalDirectoryOpenOptions::new())
         .expect("directory should open");
     assert_eq!(
         handle
@@ -47,7 +47,7 @@ fn lf3_authority_rejects_absolute_and_escape() {
     std::fs::create_dir(fixture.path().join("allowed")).expect("allowed directory should exist");
     let restricted = fs
         .open_directory_with_options(
-            fixture.path(),
+            std::path::Path::new("/"),
             &LocalDirectoryOpenOptions::new()
                 .with_component_policy(LocalComponentPolicy::deny_names(vec!["denied".into()]).unwrap()),
         )
@@ -183,11 +183,11 @@ fn lf3_authority_windows_host_rejects_unavailable_path_binding() {
 #[test]
 fn lf3_authority_applies_component_policy_to_facades() {
     let fixture = tempfile::tempdir().expect("fixture should exist");
-    let fs = crate::LocalFileSystem::host().expect("host should open");
+    let fs = crate::LocalFileSystem::rooted(fixture.path()).expect("rooted filesystem should open");
     let policy = LocalComponentPolicy::deny_names(vec!["blocked".into()]).expect("policy should be valid");
     let handle = fs
         .open_directory_with_options(
-            fixture.path(),
+            std::path::Path::new("/"),
             &LocalDirectoryOpenOptions::new().with_component_policy(policy),
         )
         .expect("directory should open");
@@ -277,10 +277,10 @@ fn lf3_authority_binding_detects_final_name_replacement() {
     let fixture = tempfile::tempdir().expect("fixture should exist");
     let path = fixture.path().join("source");
     std::fs::write(&path, b"source").expect("source should exist");
-    let fs = crate::LocalFileSystem::host().expect("host should open");
+    let fs = crate::LocalFileSystem::rooted(fixture.path()).expect("rooted filesystem should open");
     let observed = fs
         .open_observed_reader(
-            &path,
+            std::path::Path::new("/source"),
             &LocalObservedReadOptions::new().with_path_binding(LocalPathBindingOptions::new()),
         )
         .expect("reader and binding should open");
@@ -349,10 +349,10 @@ fn lf3_authority_binding_reports_disappeared_final_name() {
     let fixture = tempfile::tempdir().expect("fixture should exist");
     let path = fixture.path().join("source");
     std::fs::write(&path, b"source").expect("source should exist");
-    let fs = crate::LocalFileSystem::host().expect("host should open");
+    let fs = crate::LocalFileSystem::rooted(fixture.path()).expect("rooted filesystem should open");
     let reader = fs
         .open_observed_reader(
-            &path,
+            std::path::Path::new("/source"),
             &LocalObservedReadOptions::new().with_path_binding(LocalPathBindingOptions::new()),
         )
         .expect("reader should open");
@@ -368,21 +368,24 @@ fn lf3_authority_binding_enforces_zero_budgets() {
     let fixture = tempfile::tempdir().expect("fixture should exist");
     let path = fixture.path().join("source");
     std::fs::write(&path, b"source").expect("source should exist");
-    let fs = crate::LocalFileSystem::host().expect("host should open");
+    let fs = crate::LocalFileSystem::rooted(fixture.path()).expect("rooted filesystem should open");
     for binding in [
         LocalPathBindingOptions::new().with_max_ancestors(0),
         LocalPathBindingOptions::new().with_max_path_bytes(0),
     ] {
         assert_eq!(
-            fs.open_observed_reader(&path, &LocalObservedReadOptions::new().with_path_binding(binding))
-                .unwrap_err()
-                .kind(),
+            fs.open_observed_reader(
+                std::path::Path::new("/source"),
+                &LocalObservedReadOptions::new().with_path_binding(binding),
+            )
+            .unwrap_err()
+            .kind(),
             LocalFileErrorKind::ResourceLimit,
         );
     }
     let error = fs
         .open_observed_reader(
-            &path,
+            std::path::Path::new("/source"),
             &LocalObservedReadOptions::new()
                 .with_path_binding(LocalPathBindingOptions::new().with_deadline(std::time::Duration::ZERO)),
         )
@@ -395,10 +398,10 @@ fn lf3_authority_binding_budgets_expanded_components_and_anchor_paths() {
     let fixture = tempfile::tempdir().expect("fixture should exist");
     let nested = fixture.path().join("first").join("second");
     std::fs::create_dir_all(&nested).expect("nested directories should exist");
-    let fs = crate::LocalFileSystem::host().expect("host should open");
+    let fs = crate::LocalFileSystem::rooted(fixture.path()).expect("rooted filesystem should open");
     for maximum in [1, 8] {
         let result = fs.open_directory_with_options(
-            &nested,
+            std::path::Path::new("/first/second"),
             &LocalDirectoryOpenOptions::new()
                 .with_path_binding(LocalPathBindingOptions::new().with_max_path_bytes(maximum)),
         );
@@ -445,10 +448,10 @@ fn lf3_authority_binding_detects_parent_replacement() {
     std::fs::create_dir(&parent).expect("parent should exist");
     let path = parent.join("source");
     std::fs::write(&path, b"source").expect("source should exist");
-    let fs = crate::LocalFileSystem::host().expect("host should open");
+    let fs = crate::LocalFileSystem::rooted(fixture.path()).expect("rooted filesystem should open");
     let observed = fs
         .open_observed_reader(
-            &path,
+            std::path::Path::new("/parent/source"),
             &LocalObservedReadOptions::new().with_path_binding(LocalPathBindingOptions::new()),
         )
         .expect("reader and binding should open");
@@ -467,10 +470,10 @@ fn lf3_authority_binding_detects_fixed_root_replacement() {
     let old = fixture.path().join("old");
     std::fs::create_dir(&directory).expect("directory should exist");
     std::fs::write(directory.join("source"), b"source").expect("source should exist");
-    let fs = crate::LocalFileSystem::host().expect("host should open");
+    let fs = crate::LocalFileSystem::rooted(fixture.path()).expect("rooted filesystem should open");
     let handle = fs
         .open_directory_with_options(
-            &directory,
+            std::path::Path::new("/d"),
             &LocalDirectoryOpenOptions::new().with_path_binding(LocalPathBindingOptions::new()),
         )
         .expect("bound directory should open");

@@ -276,6 +276,7 @@ fn lf3_sync_append_failure_preserves_rooted_existing_bytes() {
     );
 }
 
+#[cfg(unix)]
 #[test]
 fn lf3_sync_durability_required_reports_file_sync() {
     let fixture = tempfile::tempdir().expect("temporary directory should be created");
@@ -290,6 +291,22 @@ fn lf3_sync_durability_required_reports_file_sync() {
     let outcome = writer.commit().expect("writer should commit");
     assert!(outcome.file_synced());
     assert!(outcome.durable());
+}
+
+#[cfg(windows)]
+#[test]
+fn lf3_sync_durability_required_is_rejected_before_open() {
+    let fixture = tempfile::tempdir().expect("temporary directory should be created");
+    let fs = LocalFileSystem::host().expect("host filesystem should open");
+    let target = fixture.path().join("sync");
+    let options =
+        LocalWriteOptions::new(LocalWriteMode::CreateNew).with_durability(LocalDurabilityRequirement::Required);
+    let error = fs
+        .open_writer_with_options(&target, &options)
+        .expect_err("unsupported required durability should be rejected before opening");
+
+    assert_eq!(error.kind(), crate::error::LocalFileErrorKind::RequirementNotMet);
+    assert!(!target.exists(), "preflight rejection must not create the target");
 }
 
 #[cfg(unix)]

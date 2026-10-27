@@ -733,6 +733,7 @@ fn lf3_tree_partial_private_stage_retains_identity_and_cleanup_owner() {
         .expect("tree cleanup owner should be retained")
         .cleanup()
         .expect("identity-matching partial stage should clean up");
+    drop(cause);
     assert!(!fixture.path().join(name).exists());
 }
 

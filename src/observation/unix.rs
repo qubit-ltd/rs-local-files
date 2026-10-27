@@ -55,7 +55,11 @@ where
             #[allow(clippy::unnecessary_cast)]
             let inode = stat.st_ino as u64;
             let identity = Some(LocalFileIdentity::unix(device, inode));
-            if valid_nanos(nanos) && valid_nanos(changed_nanos) {
+            #[allow(clippy::useless_conversion)]
+            let nanos_valid = u64::try_from(nanos).is_ok_and(valid_nanos);
+            #[allow(clippy::useless_conversion)]
+            let changed_nanos_valid = u64::try_from(changed_nanos).is_ok_and(valid_nanos);
+            if nanos_valid && changed_nanos_valid {
                 (
                     identity,
                     Some(LocalNativeFileDetails::from_unix(LocalUnixFileDetails::from_parts(

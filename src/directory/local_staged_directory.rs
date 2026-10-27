@@ -1458,10 +1458,13 @@ impl LocalStagedDirectory {
                 )
             })?;
             let opened = root
-                .open_reader(&relative, &crate::read::OpenOptions::default())
+                .open_writer(
+                    &relative,
+                    &crate::write::OpenOptions::new(crate::write::Mode::OpenExistingAtStart),
+                )
                 .map_err(|source| {
                     LocalFileError::from_io(
-                        LocalFileOperation::Read,
+                        LocalFileOperation::Commit,
                         Some(self.directory().diagnostic_path().join(item.relative_path())),
                         None,
                         source,

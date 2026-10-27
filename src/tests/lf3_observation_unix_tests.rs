@@ -75,3 +75,20 @@ fn lf3_native_unix_rejects_out_of_range_nanoseconds_when_required() {
 
     assert_eq!(error.kind(), LocalFileErrorKind::RequirementNotMet);
 }
+
+#[cfg(target_os = "macos")]
+#[test]
+fn lf3_native_unix_rejects_negative_nanoseconds_when_required() {
+    let directory = tempfile::tempdir().expect("temporary directory should be created");
+    let path = directory.path().join("observed");
+    std::fs::write(&path, b"data").expect("fixture should be written");
+    let file = File::open(&path).expect("fixture should be opened");
+    let error = query_native_with(&file, Required, |file| {
+        let mut stat = rustix::fs::fstat(file).map_err(io::Error::from)?;
+        stat.st_mtime_nsec = -1;
+        Ok(stat)
+    })
+    .expect_err("negative native nanoseconds should fail a required observation");
+
+    assert_eq!(error.kind(), LocalFileErrorKind::RequirementNotMet);
+}
