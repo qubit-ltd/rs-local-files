@@ -17,6 +17,26 @@ use crate::options::LocalTempCleanupLimits;
 use crate::outcome::LocalTreeMutationState;
 
 /// An identity-bound tree resource retained after an operation failure.
+///
+/// The owner keeps the authority and observed identity needed for explicit
+/// cleanup. Dropping an armed owner makes a final best-effort cleanup attempt;
+/// call [`Self::retain_in_place`] to relinquish that cleanup responsibility.
+/// [`Self::diagnostic_path`] is a namespace coordinate for reporting and does
+/// not itself preserve authority or bind later path operations to this entry.
+///
+/// # Examples
+///
+/// This helper reports the diagnostic coordinate without consuming the owner;
+/// the caller can still retry cleanup afterwards.
+///
+/// ```
+/// use qubit_local_files::LocalTreeRetainedResource;
+/// use std::path::Path;
+///
+/// fn diagnostic_path(resource: &LocalTreeRetainedResource) -> &Path {
+///     resource.diagnostic_path()
+/// }
+/// ```
 #[derive(Debug)]
 pub struct LocalTreeRetainedResource {
     path: PathBuf,
@@ -51,6 +71,9 @@ impl LocalTreeRetainedResource {
         }
     }
     /// Returns the namespace path kept for diagnostics.
+    ///
+    /// This path is not an authority and does not guarantee that resolving it
+    /// later reaches the identity-bound resource.
     pub fn diagnostic_path(&self) -> &Path {
         &self.path
     }
@@ -59,6 +82,10 @@ impl LocalTreeRetainedResource {
         self.identity.as_ref()
     }
     /// Sets limits for explicit cleanup and the final Drop attempt.
+    ///
+    /// Dropping this armed owner runs only a best-effort attempt with these
+    /// limits; use [`Self::cleanup`] to observe failures and retain the owner
+    /// for retry.
     pub fn set_cleanup_limits(&mut self, limits: LocalTempCleanupLimits) {
         self.cleanup_limits = limits;
     }
@@ -266,6 +293,12 @@ impl LocalTreeRetainedResource {
             }),
         }
     }
+    /// Disarms automatic cleanup and returns the recorded namespace path and
+    /// identity.
+    ///
+    /// The returned location is diagnostic metadata, not a cleanup authority.
+    /// The consumed owner is disarmed, so this relinquishes its automatic
+    /// cleanup responsibility.
     pub fn retain_in_place(self) -> LocalTreeRecoveryLocation {
         let mut this = self;
         this.cleanup_armed = false;
@@ -289,6 +322,20 @@ impl Drop for LocalTreeRetainedResource {
 
 /// Cleanup failure that retains the identity-bound resource for recovery or
 /// retry.
+///
+/// The cause is borrowed by [`Self::cause`] and exposed through the standard
+/// error source chain. The optional retained owner is cleaned best-effort if
+/// this error is dropped; extract it to adjust limits and retry explicitly.
+///
+/// # Examples
+///
+/// ```
+/// use qubit_local_files::LocalTreeCleanupError;
+///
+/// fn parts(error: LocalTreeCleanupError) -> (qubit_local_files::LocalFileError, Vec<qubit_local_files::LocalTreeRetainedResource>) {
+///     error.into_parts()
+/// }
+/// ```
 #[derive(Debug)]
 pub struct LocalTreeCleanupError {
     cause: LocalFileError,
@@ -296,7 +343,7 @@ pub struct LocalTreeCleanupError {
     state: LocalTreeMutationState,
 }
 impl LocalTreeCleanupError {
-    /// Returns the primary cleanup failure.
+    /// Returns the primary cleanup failure without consuming retained owners.
     pub fn cause(&self) -> &LocalFileError {
         &self.cause
     }
@@ -305,14 +352,22 @@ impl LocalTreeCleanupError {
         self.state
     }
     /// Returns cleanup owners that remain available for retry.
+    ///
+    /// The slice borrows the owners; they remain governed by this error's Drop
+    /// behavior until ownership is transferred.
     pub fn retained_resources(&self) -> &[LocalTreeRetainedResource] {
         self.retained.as_slice()
     }
     /// Transfers all retained cleanup owners to the caller.
+    ///
+    /// The error's primary cause is discarded. Any transferred owner remains
+    /// armed and should be explicitly cleaned or deliberately retained.
     pub fn into_retained_resources(mut self) -> Vec<LocalTreeRetainedResource> {
         self.retained.take().into_iter().collect()
     }
     /// Transfers the cause and all retained cleanup owners.
+    ///
+    /// This tuple contains every transferable part of this error.
     pub fn into_parts(mut self) -> (LocalFileError, Vec<LocalTreeRetainedResource>) {
         let cause = std::mem::replace(
             &mut self.cause,
@@ -329,9 +384,28 @@ impl std::fmt::Display for LocalTreeCleanupError {
         write!(f, "tree cleanup failed: {}", self.cause)
     }
 }
-impl std::error::Error for LocalTreeCleanupError {}
+impl std::error::Error for LocalTreeCleanupError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(&self.cause)
+    }
+}
 
 /// Path and identity recorded after explicitly relinquishing cleanup ownership.
+///
+/// This value is a diagnostic record only. Its namespace path does not remain
+/// bound to the original entry and it carries no authority to access or clean
+/// that entry.
+///
+/// # Examples
+///
+/// ```
+/// use qubit_local_files::LocalTreeRecoveryLocation;
+/// use std::path::Path;
+///
+/// fn recorded_path(location: &LocalTreeRecoveryLocation) -> &Path {
+///     location.namespace_path()
+/// }
+/// ```
 #[derive(Clone, Debug)]
 pub struct LocalTreeRecoveryLocation {
     namespace_path: PathBuf,
@@ -356,6 +430,26 @@ impl LocalTreeRecoveryLocation {
 }
 
 /// Failure while creating a staged directory.
+///
+/// The error owns any stage and retained cleanup resources until they are
+/// transferred or the error is dropped. Dropping an unextracted stage or an
+/// armed retained owner can trigger its best-effort cleanup.
+/// Its cause is borrowed by [`Self::cause`] and exposed as the standard error
+/// source.
+///
+/// # Examples
+///
+/// ```
+/// use qubit_local_files::LocalTreeCreateError;
+///
+/// fn parts(error: LocalTreeCreateError) -> (
+///     qubit_local_files::LocalFileError,
+///     Option<qubit_local_files::LocalStagedDirectory>,
+///     Vec<qubit_local_files::LocalTreeRetainedResource>,
+/// ) {
+///     error.into_parts()
+/// }
+/// ```
 #[derive(Debug)]
 pub struct LocalTreeCreateError {
     cause: LocalFileError,
@@ -386,19 +480,30 @@ impl LocalTreeCreateError {
         self.state
     }
     /// Returns owners for any partially created stage resources.
+    ///
+    /// This only borrows them; they remain owned by this error.
     pub fn retained_resources(&self) -> &[LocalTreeRetainedResource] {
         &self.retained
     }
     /// Transfers all retained resources to the caller.
+    ///
+    /// The optional stage is left to be dropped and may run its best-effort
+    /// cleanup. Explicitly extract it with [`Self::into_parts`] when needed.
     pub fn into_retained_resources(mut self) -> Vec<LocalTreeRetainedResource> {
         std::mem::take(&mut self.retained)
     }
     /// Transfers the partially created stage, if its child authority was
     /// established.
+    ///
+    /// Any retained resources left in this error are dropped and may attempt
+    /// cleanup. `None` means no stage owner was established. Use
+    /// [`Self::into_parts`] to transfer all owned parts together.
     pub fn into_stage(self) -> Option<super::staged::LocalStagedDirectory> {
         self.stage
     }
     /// Transfers the cause, optional stage, and all retained cleanup owners.
+    ///
+    /// This is the lossless extraction path for every transferable part.
     pub fn into_parts(
         self,
     ) -> (
@@ -434,9 +539,33 @@ impl std::fmt::Display for LocalTreeCreateError {
         write!(f, "staged directory creation failed: {}", self.cause)
     }
 }
-impl std::error::Error for LocalTreeCreateError {}
+impl std::error::Error for LocalTreeCreateError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(&self.cause)
+    }
+}
 
 /// Failure while applying a staged tree access policy.
+///
+/// The cause is borrowed by [`Self::cause`] and exposed through the standard
+/// source chain. Any retained cleanup owners remain owned by this error until
+/// extracted; dropping an armed owner can trigger best-effort cleanup. Methods
+/// that transfer only owners also discard the cause and access state; use
+/// [`Self::into_parts`] when those values are needed.
+///
+/// # Examples
+///
+/// ```
+/// use qubit_local_files::LocalTreeAccessError;
+///
+/// fn parts(error: LocalTreeAccessError) -> (
+///     qubit_local_files::LocalFileError,
+///     qubit_local_files::outcome::LocalTreeAccessState,
+///     Vec<qubit_local_files::LocalTreeRetainedResource>,
+/// ) {
+///     error.into_parts()
+/// }
+/// ```
 #[derive(Debug)]
 pub struct LocalTreeAccessError {
     cause: LocalFileError,
@@ -478,9 +607,93 @@ impl std::fmt::Display for LocalTreeAccessError {
         write!(f, "tree access policy failed: {}", self.cause)
     }
 }
-impl std::error::Error for LocalTreeAccessError {}
+impl std::error::Error for LocalTreeAccessError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(&self.cause)
+    }
+}
 
 /// Failure while publishing a staged directory.
+///
+/// The error owns an unpublished stage and any retained cleanup resources.
+/// Inspect publication, mutation, and access state before consuming it, then
+/// use [`Self::into_parts`] to take every transferable owner. Dropping an
+/// unextracted stage or armed retained owner can trigger best-effort cleanup.
+/// The borrowed cause is also exposed as the standard error source.
+///
+/// # Examples
+///
+/// The conflict path below inspects the state first, extracts all owners, and
+/// explicitly cleans each one. Cleanup errors are returned with their owner
+/// and any unprocessed owners still available for retry.
+///
+/// ```
+/// use qubit_local_files::LocalFileSystem;
+/// use qubit_local_files::LocalTreePublishError;
+/// use qubit_local_files::directory::{LocalStagedDirectory, LocalTreeCleanupError, LocalTreeRetainedResource};
+/// use qubit_local_files::options::{LocalDirectoryOpenOptions, LocalTempDirectoryOptions, LocalTreePublishOptions};
+/// use qubit_local_files::outcome::LocalTreePublication;
+/// use std::error::Error;
+/// use std::ffi::OsStr;
+///
+/// #[derive(Debug)]
+/// struct RecoveryCleanupFailure {
+///     failure: LocalTreeCleanupError,
+///     remaining: Vec<LocalTreeRetainedResource>,
+/// }
+///
+/// impl std::fmt::Display for RecoveryCleanupFailure {
+///     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+///         write!(formatter, "cleanup failed with {} retained resources remaining: {}", self.remaining.len(), self.failure)
+///     }
+/// }
+///
+/// impl Error for RecoveryCleanupFailure {
+///     fn source(&self) -> Option<&(dyn Error + 'static)> {
+///         Some(&self.failure)
+///     }
+/// }
+///
+/// fn cleanup_all(
+///     stage: Option<LocalStagedDirectory>,
+///     retained: Vec<LocalTreeRetainedResource>,
+/// ) -> Result<(), RecoveryCleanupFailure> {
+///     if let Some(stage) = stage {
+///         if let Err(failure) = stage.cleanup() {
+///             return Err(RecoveryCleanupFailure { failure, remaining: retained });
+///         }
+///     }
+///     let mut remaining = retained.into_iter();
+///     while let Some(resource) = remaining.next() {
+///         if let Err(failure) = resource.cleanup() {
+///             return Err(RecoveryCleanupFailure {
+///                 failure,
+///                 remaining: remaining.collect(),
+///             });
+///         }
+///     }
+///     Ok(())
+/// }
+///
+/// fn recover(failure: LocalTreePublishError) -> Result<(), RecoveryCleanupFailure> {
+///     let _publication = failure.publication();
+///     let _mutation = failure.mutation_state();
+///     let _access = failure.access_state();
+///     let (_, stage, retained) = failure.into_parts();
+///     cleanup_all(stage, retained)
+/// }
+///
+/// let fixture = tempfile::tempdir()?;
+/// std::fs::create_dir(fixture.path().join("target"))?;
+/// let filesystem = LocalFileSystem::host()?;
+/// let parent = filesystem.open_directory_with_options(fixture.path(), &LocalDirectoryOpenOptions::new())?;
+/// let stage = parent.create_staged_directory(&LocalTempDirectoryOptions::new())?;
+/// let failure = stage.publish_new(&parent, OsStr::new("target"), &LocalTreePublishOptions::new())
+///     .expect_err("existing target should conflict");
+/// assert_eq!(LocalTreePublication::NotPublished, failure.publication());
+/// recover(failure)?;
+/// # Ok::<(), Box<dyn Error>>(())
+/// ```
 #[derive(Debug)]
 pub struct LocalTreePublishError {
     cause: LocalFileError,
@@ -513,12 +726,15 @@ impl LocalTreePublishError {
         }
         self
     }
+    /// Returns the publication failure without consuming any recovery owner.
     pub fn cause(&self) -> &LocalFileError {
         &self.cause
     }
     pub const fn mutation_state(&self) -> LocalTreeMutationState {
         self.mutation
     }
+    /// Borrows retained cleanup owners; they remain governed by this error's
+    /// Drop behavior until extracted.
     pub fn retained_resources(&self) -> &[LocalTreeRetainedResource] {
         &self.retained
     }
@@ -528,12 +744,21 @@ impl LocalTreePublishError {
     pub const fn access_state(&self) -> crate::outcome::LocalTreeAccessState {
         self.access_state
     }
+    /// Transfers the optional stage. If it is `None`, no stage owner remains.
+    /// Any unextracted retained owners are dropped and may attempt cleanup;
+    /// use [`Self::into_parts`] to take all owners.
     pub fn into_stage(self) -> Option<super::staged::LocalStagedDirectory> {
         self.stage
     }
+    /// Transfers retained cleanup owners. The optional stage is dropped and
+    /// may attempt best-effort cleanup; use [`Self::into_parts`] to transfer
+    /// the stage as well.
     pub fn into_retained_resources(mut self) -> Vec<LocalTreeRetainedResource> {
         std::mem::take(&mut self.retained)
     }
+    /// Transfers the cause, optional stage, and retained cleanup owners.
+    /// Inspect publication, mutation, and access state before calling this
+    /// method because those status values are not part of the returned tuple.
     pub fn into_parts(
         mut self,
     ) -> (
@@ -549,4 +774,8 @@ impl std::fmt::Display for LocalTreePublishError {
         write!(f, "tree publish failed: {}", self.cause)
     }
 }
-impl std::error::Error for LocalTreePublishError {}
+impl std::error::Error for LocalTreePublishError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(&self.cause)
+    }
+}

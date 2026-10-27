@@ -219,6 +219,43 @@ fn test_local_file_error_exposes_optional_context_without_source() {
     assert!(error.into_source().is_none());
 }
 
+fn require_standard_error<E: Error + 'static>() {}
+
+fn seal_failure_propagates_as_standard_error() -> Result<(), Box<dyn Error>> {
+    use qubit_local_files::options::{LocalSealOptions, LocalTempFileOptions};
+
+    let parent = tempfile::tempdir()?;
+    let mut temporary = qubit_local_files::LocalFileSystem::host()?
+        .create_temp_file_with_options(&LocalTempFileOptions::new().with_parent(parent.path()))?;
+    temporary.close();
+    let _sealed = temporary.seal_with_options(&LocalSealOptions::new())?;
+    Ok(())
+}
+
+#[test]
+fn test_recovery_error_seal_implements_standard_error() {
+    use qubit_local_files::options::{LocalSealOptions, LocalTempFileOptions};
+    use qubit_local_files::LocalTempSealError;
+
+    require_standard_error::<LocalTempSealError>();
+    let parent = tempfile::tempdir().expect("temporary parent should be created");
+    let mut temporary = qubit_local_files::LocalFileSystem::host()
+        .expect("Host filesystem should open")
+        .create_temp_file_with_options(&LocalTempFileOptions::new().with_parent(parent.path()))
+        .expect("temporary file should be created");
+    temporary.close();
+    let failure = temporary
+        .seal_with_options(&LocalSealOptions::new())
+        .expect_err("sealing a closed temporary file should fail");
+    let source = Error::source(&failure)
+        .and_then(|source| source.downcast_ref::<LocalFileError>())
+        .expect("standard source should be the structured cause");
+    assert!(std::ptr::eq(source, failure.cause()));
+    let mut resource = failure.into_resource();
+    resource.cleanup().expect("seal error should retain a cleanable resource");
+    assert!(seal_failure_propagates_as_standard_error().is_err());
+}
+
 /// Verifies PWD changes have their own stable operation classification.
 #[test]
 fn test_set_current_directory_operation_is_public() {

@@ -65,6 +65,60 @@ fn tree_publish_conflict_reports_prior_access_mutation() {
     assert!(fixture.path().join("target").is_dir());
 }
 
+#[test]
+fn test_recovery_error_tree_create_and_access_sources_retain_their_causes() {
+    use crate::directory::LocalTreeAccessError;
+    use crate::directory::LocalTreeCreateError;
+    use crate::error::LocalFileError;
+    use crate::error::LocalFileErrorKind;
+    use crate::error::LocalFileOperation;
+    use crate::outcome::LocalTreeAccessState;
+    use crate::outcome::LocalTreeMutationState;
+
+    let create_cause = LocalFileError::new(LocalFileErrorKind::NotFound, LocalFileOperation::CreateDirectory);
+    let create_error = LocalTreeCreateError::new(
+        create_cause,
+        None,
+        Vec::new(),
+        LocalTreeMutationState::NotStarted,
+    );
+    let create_source = std::error::Error::source(&create_error)
+        .and_then(|source| source.downcast_ref::<LocalFileError>())
+        .expect("create error should expose its structured cause");
+    assert!(std::ptr::eq(create_source, create_error.cause()));
+
+    let access_cause = LocalFileError::new(LocalFileErrorKind::PermissionDenied, LocalFileOperation::Commit);
+    let access_error = LocalTreeAccessError::new(access_cause, LocalTreeAccessState::Preserved);
+    let access_source = std::error::Error::source(&access_error)
+        .and_then(|source| source.downcast_ref::<LocalFileError>())
+        .expect("access error should expose its structured cause");
+    assert!(std::ptr::eq(access_source, access_error.cause()));
+}
+
+#[test]
+fn test_recovery_error_tree_cleanup_source_retains_its_cause_and_owner() {
+    use crate::options::LocalTempCleanupLimits;
+
+    let fixture = tempfile::tempdir().expect("fixture should be created");
+    let filesystem = crate::LocalFileSystem::host().expect("Host filesystem should open");
+    let parent = filesystem
+        .open_directory_with_options(fixture.path(), &LocalDirectoryOpenOptions::new())
+        .expect("parent directory should open");
+    let mut stage = parent
+        .create_staged_directory(&LocalTempDirectoryOptions::new())
+        .expect("stage should be created");
+    stage.set_cleanup_limits(LocalTempCleanupLimits::new().with_max_entries(0));
+    let error = stage.cleanup().expect_err("zero entry budget should prevent cleanup");
+    let source = std::error::Error::source(&error)
+        .and_then(|source| source.downcast_ref::<crate::LocalFileError>())
+        .expect("cleanup error should expose its structured cause");
+    assert!(std::ptr::eq(source, error.cause()));
+    for mut resource in error.into_retained_resources() {
+        resource.set_cleanup_limits(LocalTempCleanupLimits::new());
+        resource.cleanup().expect("retained owner should remain cleanable");
+    }
+}
+
 #[cfg(unix)]
 #[test]
 fn tree_access_policy_round_trips_without_releasing_stage() {
