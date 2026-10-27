@@ -5,8 +5,14 @@
 //
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
+use std::collections::HashMap;
 use std::path::Path;
 use std::path::PathBuf;
+
+#[cfg(test)]
+thread_local! {
+    static CLEANUP_INDEX_QUERIES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
 
 use crate::LocalFileError;
 use crate::directory::LocalDirectoryHandle;
@@ -46,11 +52,38 @@ pub struct LocalTreeRetainedResource {
     child: Option<LocalDirectoryHandle>,
     cleanup_armed: bool,
     cleanup_limits: LocalTempCleanupLimits,
-    owned_entries: Vec<(PathBuf, LocalFileIdentity)>,
+    owned_entries: HashMap<PathBuf, LocalFileIdentity>,
     mutation_state: LocalTreeMutationState,
 }
 
 impl LocalTreeRetainedResource {
+    #[cfg(test)]
+    pub(crate) fn reset_cleanup_index_queries() {
+        CLEANUP_INDEX_QUERIES.with(|queries| queries.set(0));
+    }
+
+    #[cfg(test)]
+    pub(crate) fn cleanup_index_queries() -> usize {
+        CLEANUP_INDEX_QUERIES.with(std::cell::Cell::get)
+    }
+
+    pub(crate) fn new_for_reopen(
+        path: PathBuf,
+        relative: PathBuf,
+        identity: Option<LocalFileIdentity>,
+        parent: LocalDirectoryHandle,
+        child: Option<LocalDirectoryHandle>,
+        cleanup_limits: LocalTempCleanupLimits,
+    ) -> Self {
+        let mut resource = Self::new(path, relative, identity, parent, child, cleanup_limits);
+        resource.cleanup_armed = false;
+        resource
+    }
+
+    pub(crate) fn arm_after_reopen_validation(&mut self) {
+        self.cleanup_armed = true;
+    }
+
     pub(crate) fn new(
         path: PathBuf,
         relative: PathBuf,
@@ -67,7 +100,7 @@ impl LocalTreeRetainedResource {
             child,
             cleanup_armed: true,
             cleanup_limits,
-            owned_entries: Vec::new(),
+            owned_entries: HashMap::new(),
             mutation_state: LocalTreeMutationState::NotStarted,
         }
     }
@@ -122,13 +155,23 @@ impl LocalTreeRetainedResource {
         Ok(expected.is_some() && expected == actual)
     }
     pub(crate) fn record_entry(&mut self, relative: &Path, identity: &LocalFileIdentity) -> crate::LocalResult<()> {
+        if let Some(recorded_identity) = self.owned_entries.get(relative) {
+            if recorded_identity == identity {
+                return Ok(());
+            }
+            return Err(crate::LocalFileError::new(
+                crate::LocalFileErrorKind::InvalidState,
+                crate::LocalFileOperation::CreateTempFile,
+            )
+            .with_path(self.path.join(relative)));
+        }
         self.owned_entries.try_reserve(1).map_err(|_| {
             crate::LocalFileError::new(
                 crate::LocalFileErrorKind::ResourceLimit,
                 crate::LocalFileOperation::CreateTempFile,
             )
         })?;
-        self.owned_entries.push((relative.to_path_buf(), identity.clone()));
+        self.owned_entries.insert(relative.to_path_buf(), identity.clone());
         Ok(())
     }
     fn cleanup_inner(&mut self) -> crate::LocalResult<()> {
@@ -231,9 +274,13 @@ impl LocalTreeRetainedResource {
                     )
                     .with_path(self.path.join(&relative)));
                 }
-                if self.owned_entries.iter().any(|(owned_path, owned_identity)| {
-                    owned_path == &relative && current.identity() != Some(owned_identity)
-                }) {
+                #[cfg(test)]
+                CLEANUP_INDEX_QUERIES.with(|queries| queries.set(queries.get().saturating_add(1)));
+                if self
+                    .owned_entries
+                    .get(relative.as_path())
+                    .is_some_and(|owned_identity| current.identity() != Some(owned_identity))
+                {
                     return Err(crate::LocalFileError::new(
                         crate::LocalFileErrorKind::InvalidState,
                         crate::LocalFileOperation::Cleanup,

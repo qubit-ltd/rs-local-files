@@ -13,6 +13,7 @@ use crate::LocalFileSystem;
 use crate::directory::LocalTreeEntry;
 use crate::options::LocalDirectoryOpenOptions;
 use crate::options::LocalListOptions;
+use crate::options::LocalTempCleanupLimits;
 use crate::options::LocalTempDirectoryOptions;
 use crate::options::LocalTreeValidationOptions;
 use crate::policy::LocalPrivacyRequirement;
@@ -432,6 +433,121 @@ fn lf3_tree_cleanup_refuses_replaced_owned_child() {
     assert_eq!(
         b"original".as_slice(),
         fs::read(fixture.path().join("moved-file")).expect("original must remain")
+    );
+}
+
+#[test]
+fn lf_revision_cleanup_index_scales_with_real_cleanup_entries() {
+    for count in [64, 128] {
+        let fixture = tempfile::tempdir().expect("fixture should exist");
+        let fs = LocalFileSystem::host().expect("host filesystem should open");
+        let parent = fs
+            .open_directory_with_options(fixture.path(), &LocalDirectoryOpenOptions::new())
+            .expect("parent should open");
+        let mut stage = parent
+            .create_staged_directory(&LocalTempDirectoryOptions::new())
+            .expect("stage should be created");
+        let stage_path = fixture.path().join(stage.relative_name());
+        for index in 0..count {
+            let relative = format!("entry-{index:03}");
+            let mut content = b"owned".as_slice();
+            stage
+                .write_file_new(Path::new(&relative), &mut content, 5)
+                .expect("file should be written");
+        }
+
+        crate::directory::LocalTreeRetainedResource::reset_cleanup_index_queries();
+        stage.cleanup().expect("all owned files should be removed");
+        assert_eq!(
+            crate::directory::LocalTreeRetainedResource::cleanup_index_queries(),
+            count,
+            "cleanup should perform one identity index lookup per deleted entry"
+        );
+        assert!(!stage_path.exists());
+    }
+}
+
+#[test]
+fn lf_revision_cleanup_index_refuses_replaced_owned_file() {
+    let fixture = tempfile::tempdir().expect("fixture should exist");
+    let fs = LocalFileSystem::host().expect("host filesystem should open");
+    let parent = fs
+        .open_directory_with_options(fixture.path(), &LocalDirectoryOpenOptions::new())
+        .expect("parent should open");
+    let mut stage = parent
+        .create_staged_directory(&LocalTempDirectoryOptions::new())
+        .expect("stage should be created");
+    let mut content = b"original".as_slice();
+    stage
+        .write_file_new(Path::new("entry"), &mut content, 8)
+        .expect("file should be written");
+    let stage_path = fixture.path().join(stage.relative_name());
+    fs::rename(stage_path.join("entry"), fixture.path().join("moved-entry")).expect("original entry should be moved");
+    fs::write(stage_path.join("entry"), b"replacement").expect("replacement should be created");
+
+    crate::directory::LocalTreeRetainedResource::reset_cleanup_index_queries();
+    let failure = stage.cleanup().expect_err("cleanup must refuse the replacement");
+    assert_eq!(failure.cause().kind(), crate::error::LocalFileErrorKind::InvalidState);
+    assert_eq!(
+        crate::directory::LocalTreeRetainedResource::cleanup_index_queries(),
+        1,
+        "the replaced entry still reaches exactly one identity index lookup"
+    );
+    assert_eq!(
+        b"replacement".as_slice(),
+        fs::read(stage_path.join("entry")).expect("replacement must remain")
+    );
+    assert_eq!(
+        b"original".as_slice(),
+        fs::read(fixture.path().join("moved-entry")).expect("original must remain")
+    );
+}
+
+#[test]
+fn lf_revision_cleanup_index_keeps_original_identity_on_duplicate_record() {
+    let fixture = tempfile::tempdir().expect("fixture should exist");
+    let fs = LocalFileSystem::host().expect("host filesystem should open");
+    let parent = fs
+        .open_directory_with_options(fixture.path(), &LocalDirectoryOpenOptions::new())
+        .expect("parent should open");
+    let mut stage = parent
+        .create_staged_directory(
+            &LocalTempDirectoryOptions::new().with_cleanup_limits(LocalTempCleanupLimits::new().with_max_entries(0)),
+        )
+        .expect("stage should be created");
+    let original = stage
+        .write_file_new(Path::new("alpha"), &mut b"alpha".as_slice(), 5)
+        .expect("alpha should be written")
+        .identity()
+        .expect("alpha identity should be observed")
+        .clone();
+    let replacement_identity = stage
+        .write_file_new(Path::new("beta"), &mut b"beta".as_slice(), 4)
+        .expect("beta should be written")
+        .identity()
+        .expect("beta identity should be observed")
+        .clone();
+    let stage_path = fixture.path().join(stage.relative_name());
+    let failure = stage.cleanup().expect_err("zero budget should retain the owner");
+    let mut owners = failure.into_retained_resources();
+    let mut owner = owners.pop().expect("one retained owner");
+
+    owner
+        .record_entry(Path::new("alpha"), &original)
+        .expect("recording the same path and identity should be idempotent");
+    let mismatch = owner
+        .record_entry(Path::new("alpha"), &replacement_identity)
+        .expect_err("a different identity must not replace the recorded one");
+    assert_eq!(mismatch.kind(), crate::error::LocalFileErrorKind::InvalidState);
+
+    fs::rename(stage_path.join("alpha"), fixture.path().join("moved-alpha")).expect("original alpha should be moved");
+    fs::rename(stage_path.join("beta"), stage_path.join("alpha")).expect("beta should replace alpha");
+    owner.set_cleanup_limits(LocalTempCleanupLimits::new());
+    let cleanup = owner.cleanup().expect_err("replacement identity must remain protected");
+    assert_eq!(cleanup.cause().kind(), crate::error::LocalFileErrorKind::InvalidState);
+    assert_eq!(
+        b"beta".as_slice(),
+        fs::read(stage_path.join("alpha")).expect("replacement should remain")
     );
 }
 
