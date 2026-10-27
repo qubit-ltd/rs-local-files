@@ -168,6 +168,7 @@ fn delete_with_extended_disposition(entry: &File, ignore_read_only: bool) -> Res
 /// Uses the legacy disposition only after the extended class is explicitly
 /// unavailable. Restores every basic attribute field if deletion fails.
 fn delete_with_attribute_fallback(entry: &File) -> Result<()> {
+    use windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_NORMAL;
     use windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_READONLY;
     use windows_sys::Win32::Storage::FileSystem::FILE_BASIC_INFO;
     use windows_sys::Win32::Storage::FileSystem::FileBasicInfo;
@@ -195,6 +196,9 @@ fn delete_with_attribute_fallback(entry: &File) -> Result<()> {
 
     let mut writable = original;
     writable.FileAttributes &= !FILE_ATTRIBUTE_READONLY;
+    if writable.FileAttributes == 0 {
+        writable.FileAttributes = FILE_ATTRIBUTE_NORMAL;
+    }
     // SAFETY: `entry` was opened with FILE_WRITE_ATTRIBUTES and `writable`
     // matches the FileBasicInfo information class.
     let result = unsafe {
