@@ -712,6 +712,7 @@ fn content_commit_failure_reports_host_target_path() {
 }
 
 #[test]
+#[cfg(not(windows))]
 fn rooted_content_commit_failure_reports_namespace_path_only() {
     let dir = tempdir().unwrap();
     let native_path = dir.path().join("model");
