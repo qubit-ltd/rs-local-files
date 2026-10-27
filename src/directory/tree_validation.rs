@@ -109,7 +109,9 @@ pub struct LocalTreeValidationOptions {
 
 impl LocalTreeValidationOptions {
     /// Creates validation options that check only the stage authority and
-    /// identity.
+    /// identity during publication. Passing these defaults to `verify_entries`
+    /// still performs a complete exact-set check, because that method receives
+    /// an explicit expected slice.
     pub const fn new() -> Self {
         Self {
             exact_entries: None,
@@ -121,6 +123,11 @@ impl LocalTreeValidationOptions {
         }
     }
     /// Requires the observed tree to contain exactly `entries`.
+    ///
+    /// Duplicate paths, including the same path with different kinds, make
+    /// verification invalid and return `InvalidOptions`. The paths are indexed
+    /// by borrowed references; their encoded bytes count toward the logical
+    /// path budget before indexing begins.
     pub fn with_exact_entries(mut self, entries: Vec<LocalTreeEntry>) -> Self {
         self.exact_entries = Some(entries);
         self
@@ -146,6 +153,12 @@ impl LocalTreeValidationOptions {
         self
     }
     /// Applies traversal resource limits to complete-tree validation.
+    ///
+    /// Finite depth is a complete-validation ceiling: empty trees and entries
+    /// at the boundary pass, while an observed entry below the boundary fails
+    /// with `ResourceLimit`. The seen-name byte limit counts expected encoded
+    /// paths first and then observed encoded paths; it is not a total heap
+    /// memory limit.
     pub const fn with_limits(mut self, limits: LocalListOptions) -> Self {
         self.limits = limits;
         self

@@ -10,9 +10,346 @@ use std::ffi::OsStr;
 use crate::options::LocalDirectoryOpenOptions;
 use crate::options::LocalTempDirectoryOptions;
 use crate::options::LocalTreePublishOptions;
+use crate::options::LocalListOptions;
+use crate::options::LocalTreeValidationOptions;
 use crate::outcome::LocalTreeAccessState;
 use crate::outcome::LocalTreePublication;
+use crate::outcome::LocalFileKind;
 use crate::policy::LocalTreeFinalAccess;
+use std::path::Path;
+
+#[test]
+fn lf_review_tree_exact_set_conflicts_leave_destination_and_owner_untouched() {
+    for (name, expected) in [
+        ("missing", Vec::new()),
+        (
+            "extra",
+            vec![
+                crate::directory::LocalTreeEntry::new(
+                    Path::new("other").to_path_buf(),
+                    LocalFileKind::File,
+                )
+                .expect("expected"),
+            ],
+        ),
+        (
+            "kind",
+            vec![
+                crate::directory::LocalTreeEntry::new(
+                    Path::new("file").to_path_buf(),
+                    LocalFileKind::Directory,
+                )
+                .expect("expected"),
+            ],
+        ),
+    ] {
+        let fixture = tempfile::tempdir().expect("fixture");
+        let fs = crate::LocalFileSystem::host().expect("Host");
+        let parent = fs
+            .open_directory_with_options(fixture.path(), &LocalDirectoryOpenOptions::new())
+            .expect("parent");
+        let mut stage = parent
+            .create_staged_directory(&LocalTempDirectoryOptions::new())
+            .expect("stage");
+        let mut bytes = b"x".as_slice();
+        stage
+            .write_file_new(Path::new("file"), &mut bytes, 1)
+            .expect("write");
+        let destination = fixture.path().join(name);
+        let error = stage
+            .publish_new(
+                &parent,
+                OsStr::new(name),
+                &LocalTreePublishOptions::new().with_validation(
+                    LocalTreeValidationOptions::new().with_exact_entries(expected),
+                ),
+            )
+            .expect_err("exact-set conflict must reject publication");
+        assert_eq!(
+            error.cause().kind(),
+            crate::error::LocalFileErrorKind::RequirementNotMet
+        );
+        assert_eq!(error.publication(), LocalTreePublication::NotPublished);
+        assert!(!destination.exists());
+        error
+            .into_stage()
+            .expect("owner returned")
+            .cleanup()
+            .expect("stage cleanup");
+    }
+}
+
+#[test]
+fn lf_review_tree_duplicate_expected_paths_preserve_publish_owner() {
+    let fixture = tempfile::tempdir().expect("fixture");
+    let fs = crate::LocalFileSystem::host().expect("Host");
+    let parent = fs
+        .open_directory_with_options(fixture.path(), &LocalDirectoryOpenOptions::new())
+        .expect("parent");
+    let stage = parent
+        .create_staged_directory(&LocalTempDirectoryOptions::new())
+        .expect("stage");
+    let entry =
+        crate::directory::LocalTreeEntry::new(Path::new("same").to_path_buf(), LocalFileKind::File)
+            .expect("expected");
+    let validation =
+        LocalTreeValidationOptions::new().with_exact_entries(vec![entry.clone(), entry]);
+    let error = stage
+        .publish_new(
+            &parent,
+            OsStr::new("destination"),
+            &LocalTreePublishOptions::new().with_validation(validation),
+        )
+        .expect_err("duplicate expected paths are invalid");
+    assert_eq!(
+        error.cause().kind(),
+        crate::error::LocalFileErrorKind::InvalidOptions
+    );
+    assert_eq!(error.publication(), LocalTreePublication::NotPublished);
+    assert!(!fixture.path().join("destination").exists());
+    error
+        .into_stage()
+        .expect("owner returned")
+        .cleanup()
+        .expect("stage cleanup");
+}
+
+#[cfg(unix)]
+#[test]
+fn lf_review_tree_special_allowed_with_only_limits() {
+    use std::os::unix::fs::FileTypeExt;
+    use std::os::unix::net::UnixListener;
+
+    let fixture = tempfile::tempdir().expect("fixture");
+    let fs = crate::LocalFileSystem::host().expect("Host");
+    let parent = fs
+        .open_directory_with_options(fixture.path(), &LocalDirectoryOpenOptions::new())
+        .expect("parent");
+    let stage = parent
+        .create_staged_directory(&LocalTempDirectoryOptions::new())
+        .expect("stage");
+    let source = fixture.path().join(stage.relative_name()).join("socket");
+    drop(UnixListener::bind(&source).expect("socket"));
+    let validation =
+        LocalTreeValidationOptions::new().with_limits(LocalListOptions::new().with_max_entries(4));
+    stage
+        .publish_new(
+            &parent,
+            OsStr::new("destination"),
+            &LocalTreePublishOptions::new().with_validation(validation),
+        )
+        .expect("special entry allowed by default");
+    assert!(
+        std::fs::symlink_metadata(fixture.path().join("destination/socket"))
+            .expect("published socket")
+            .file_type()
+            .is_socket()
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn lf_review_tree_special_rejected_when_requested() {
+    use std::os::unix::net::UnixListener;
+
+    let fixture = tempfile::tempdir().expect("fixture");
+    let fs = crate::LocalFileSystem::host().expect("Host");
+    let parent = fs
+        .open_directory_with_options(fixture.path(), &LocalDirectoryOpenOptions::new())
+        .expect("parent");
+    let stage = parent
+        .create_staged_directory(&LocalTempDirectoryOptions::new())
+        .expect("stage");
+    let source = fixture.path().join(stage.relative_name()).join("socket");
+    drop(UnixListener::bind(&source).expect("socket"));
+    let validation = LocalTreeValidationOptions::new().with_reject_special_files();
+    let error = stage
+        .publish_new(
+            &parent,
+            OsStr::new("destination"),
+            &LocalTreePublishOptions::new().with_validation(validation),
+        )
+        .expect_err("explicit special-file rule rejects socket");
+    assert_eq!(
+        error.cause().kind(),
+        crate::error::LocalFileErrorKind::RequirementNotMet
+    );
+    assert_eq!(error.publication(), LocalTreePublication::NotPublished);
+    assert!(!fixture.path().join("destination").exists());
+    error
+        .into_stage()
+        .expect("owner returned")
+        .cleanup()
+        .expect("stage cleanup");
+}
+
+#[cfg(unix)]
+#[test]
+fn lf_review_tree_hardlinks_reject_only_external_links() {
+    for external in [false, true] {
+        let fixture = tempfile::tempdir().expect("fixture");
+        let fs = crate::LocalFileSystem::host().expect("Host");
+        let parent = fs
+            .open_directory_with_options(fixture.path(), &LocalDirectoryOpenOptions::new())
+            .expect("parent");
+        let mut stage = parent
+            .create_staged_directory(&LocalTempDirectoryOptions::new())
+            .expect("stage");
+        let mut bytes = b"payload".as_slice();
+        stage
+            .write_file_new(Path::new("file"), &mut bytes, 7)
+            .expect("write");
+        let root = fixture.path().join(stage.relative_name());
+        if external {
+            std::fs::hard_link(root.join("file"), fixture.path().join("outside"))
+                .expect("outside hardlink");
+        } else {
+            std::fs::hard_link(root.join("file"), root.join("alias")).expect("tree hardlink");
+        }
+        let validation = LocalTreeValidationOptions::new().with_reject_external_hardlinks();
+        let result = stage.publish_new(
+            &parent,
+            OsStr::new("destination"),
+            &LocalTreePublishOptions::new().with_validation(validation),
+        );
+        if external {
+            let error = result.expect_err("outside link is rejected");
+            assert_eq!(
+                error.cause().kind(),
+                crate::error::LocalFileErrorKind::RequirementNotMet
+            );
+            assert_eq!(error.publication(), LocalTreePublication::NotPublished);
+            assert!(!fixture.path().join("destination").exists());
+            error
+                .into_stage()
+                .expect("owner returned")
+                .cleanup()
+                .expect("stage cleanup");
+        } else {
+            result.expect("in-tree links are allowed");
+            assert_eq!(
+                std::fs::read(fixture.path().join("destination/file")).expect("published file"),
+                b"payload"
+            );
+        }
+    }
+}
+
+#[test]
+fn lf_review_tree_path_budget_precedes_publish_retention() {
+    let fixture = tempfile::tempdir().expect("fixture");
+    let fs = crate::LocalFileSystem::host().expect("Host");
+    let parent = fs
+        .open_directory_with_options(fixture.path(), &LocalDirectoryOpenOptions::new())
+        .expect("parent");
+    let stage = parent
+        .create_staged_directory(&LocalTempDirectoryOptions::new())
+        .expect("stage");
+    let root = fixture.path().join(stage.relative_name());
+    let mut current = root.clone();
+    for _ in 0..18 {
+        current.push("abcdef");
+        std::fs::create_dir(&current).expect("nested directory");
+    }
+    std::fs::write(current.join("file"), b"x").expect("nested file");
+    let validation = LocalTreeValidationOptions::new()
+        .with_limits(LocalListOptions::new().with_max_seen_name_bytes(100));
+    let error = stage
+        .publish_new(
+            &parent,
+            OsStr::new("destination"),
+            &LocalTreePublishOptions::new().with_validation(validation),
+        )
+        .expect_err("cumulative logical path bytes exceed budget");
+    assert_eq!(
+        error.cause().kind(),
+        crate::error::LocalFileErrorKind::ResourceLimit
+    );
+    assert_eq!(error.publication(), LocalTreePublication::NotPublished);
+    assert!(!fixture.path().join("destination").exists());
+    error
+        .into_stage()
+        .expect("owner retained")
+        .cleanup()
+        .expect("stage cleanup");
+}
+
+#[test]
+fn lf_review_tree_publish_depth_limit_retains_stage() {
+    let fixture = tempfile::tempdir().expect("fixture");
+    let fs = crate::LocalFileSystem::host().expect("Host");
+    let parent = fs
+        .open_directory_with_options(fixture.path(), &LocalDirectoryOpenOptions::new())
+        .expect("parent");
+    let stage = parent
+        .create_staged_directory(&LocalTempDirectoryOptions::new())
+        .expect("stage");
+    let root = fixture.path().join(stage.relative_name());
+    std::fs::create_dir(root.join("one")).expect("first level");
+    std::fs::create_dir(root.join("one/two")).expect("second level");
+    std::fs::write(root.join("one/two/file"), b"x").expect("deep file");
+    crate::directory::reset_test_observation_count();
+    let error = stage
+        .publish_new(
+            &parent,
+            OsStr::new("destination"),
+            &LocalTreePublishOptions::new().with_validation(
+                LocalTreeValidationOptions::new()
+                    .with_limits(LocalListOptions::new().with_max_depth(1)),
+            ),
+        )
+        .expect_err("observed over-depth entry rejects publication");
+    assert_eq!(
+        error.cause().kind(),
+        crate::error::LocalFileErrorKind::ResourceLimit
+    );
+    assert_eq!(error.publication(), LocalTreePublication::NotPublished);
+    assert!(!fixture.path().join("destination").exists());
+    assert_eq!(
+        crate::directory::test_observation_count(),
+        2,
+        "verification stops at the first over-depth entry"
+    );
+    error
+        .into_stage()
+        .expect("owner retained")
+        .cleanup()
+        .expect("stage cleanup");
+}
+
+#[test]
+fn lf_review_tree_zero_deadline_and_entry_limit_retain_publish_owner() {
+    for limits in [
+        LocalListOptions::new().with_deadline(std::time::Duration::ZERO),
+        LocalListOptions::new().with_max_entries(0),
+    ] {
+        let fixture = tempfile::tempdir().expect("fixture");
+        let fs = crate::LocalFileSystem::host().expect("Host");
+        let parent = fs
+            .open_directory_with_options(fixture.path(), &LocalDirectoryOpenOptions::new())
+            .expect("parent");
+        let mut stage = parent
+            .create_staged_directory(&LocalTempDirectoryOptions::new())
+            .expect("stage");
+        let mut bytes = b"x".as_slice();
+        stage
+            .write_file_new(Path::new("file"), &mut bytes, 1)
+            .expect("write");
+        let error = stage
+            .publish_new(
+                &parent,
+                OsStr::new("destination"),
+                &LocalTreePublishOptions::new().with_validation(
+                    LocalTreeValidationOptions::new().with_limits(limits),
+                ),
+            )
+            .expect_err("zero validation budget rejects publication");
+        assert_eq!(error.cause().kind(), crate::error::LocalFileErrorKind::ResourceLimit);
+        assert_eq!(error.publication(), LocalTreePublication::NotPublished);
+        assert!(!fixture.path().join("destination").exists());
+        error.into_stage().expect("stage owner retained").cleanup().expect("stage cleanup");
+    }
+}
 
 #[test]
 fn lf3_tree_publish_conflict_retains_original() {

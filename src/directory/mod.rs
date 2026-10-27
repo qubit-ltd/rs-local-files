@@ -13,6 +13,7 @@ mod component_policy;
 mod conditional;
 #[path = "local_directory_handle.rs"]
 mod handle;
+mod internal;
 #[path = "local_staged_directory.rs"]
 mod staged;
 #[cfg(test)]
