@@ -224,6 +224,20 @@ impl ReaderPathBinding for CombinedPathBinding {
     }
 }
 
+impl qubit_io::Input for LocalObservedReader {
+    type Item = u8;
+
+    fn read_vectored(&mut self, buffers: &mut [&mut [u8]]) -> io::Result<usize> {
+        qubit_io::Input::read_vectored(&mut self.reader, buffers)
+    }
+
+    unsafe fn read_unchecked(&mut self, output: &mut [u8], index: usize, count: usize) -> io::Result<usize> {
+        // The Input caller guarantees this range; LocalFileReader applies the same
+        // contract.
+        unsafe { qubit_io::Input::read_unchecked(&mut self.reader, output, index, count) }
+    }
+}
+
 #[cfg(test)]
 mod binding_tests {
     use std::sync::Arc;
@@ -269,19 +283,5 @@ mod binding_tests {
         let second_deadline = *second.lock().expect("deadline mutex should be available");
         assert!(first_deadline.is_some());
         assert_eq!(first_deadline, second_deadline);
-    }
-}
-
-impl qubit_io::Input for LocalObservedReader {
-    type Item = u8;
-
-    fn read_vectored(&mut self, buffers: &mut [&mut [u8]]) -> io::Result<usize> {
-        qubit_io::Input::read_vectored(&mut self.reader, buffers)
-    }
-
-    unsafe fn read_unchecked(&mut self, output: &mut [u8], index: usize, count: usize) -> io::Result<usize> {
-        // The Input caller guarantees this range; LocalFileReader applies the same
-        // contract.
-        unsafe { qubit_io::Input::read_unchecked(&mut self.reader, output, index, count) }
     }
 }

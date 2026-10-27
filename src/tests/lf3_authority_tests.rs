@@ -475,11 +475,10 @@ fn lf3_authority_binding_detects_fixed_root_replacement() {
         )
         .expect("bound directory should open");
     assert!(
-        handle
+        !handle
             .ancestor_observations(&crate::LocalListOptions::new())
             .unwrap()
-            .len()
-            >= 1
+            .is_empty()
     );
     let reader = handle
         .open_observed_reader(std::path::Path::new("source"), &LocalObservedReadOptions::new())

@@ -17,9 +17,12 @@ use std::path::PathBuf;
 use qubit_io::ByteInput;
 
 #[cfg(test)]
+type StageCreatedHook = Box<dyn FnOnce(&Path)>;
+
+#[cfg(test)]
 thread_local! {
     static TREE_SYNC_FAILURE_AFTER: Cell<Option<usize>> = const { Cell::new(None) };
-    static STAGE_CREATED_HOOK: RefCell<Option<Box<dyn FnOnce(&Path)>>> = const { RefCell::new(None) };
+    static STAGE_CREATED_HOOK: RefCell<Option<StageCreatedHook>> = const { RefCell::new(None) };
 }
 
 #[cfg(test)]

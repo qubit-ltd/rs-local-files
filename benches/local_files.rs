@@ -183,10 +183,15 @@ fn bench_walk_handle_budget(c: &mut Criterion) {
 
 /// Counts a complete traversal and fails the benchmark on any entry error.
 fn count_entries(filesystem: &LocalFileSystem, path: &Path, options: &LocalListOptions) -> usize {
-    filesystem
+    let walker = filesystem
         .list_with_options(path, options)
-        .and_then(|mut walker| walker.try_fold(0_usize, |count, entry| entry.map(|_| count.saturating_add(1))))
-        .expect("benchmark traversal should complete without errors")
+        .expect("benchmark traversal should complete without errors");
+    let mut count = 0_usize;
+    for entry in walker {
+        let _ = entry.expect("benchmark traversal entry should be readable");
+        count = count.saturating_add(1);
+    }
+    count
 }
 
 /// Measures copying one immutable tree into a fresh destination per iteration.
@@ -538,12 +543,12 @@ fn write_scenario_payload(
     target: &Path,
     options: &LocalWriteOptions,
     payload: &[u8],
-) -> Result<LocalWriteOutcome, LocalFileError> {
+) -> Result<LocalWriteOutcome, Box<LocalFileError>> {
     let mut writer = filesystem.open_writer_with_options(black_box(target), options)?;
     Output::write_fully(&mut writer, black_box(payload)).expect("scenario payload should be written");
     writer.commit().map_err(|failure| {
         let (error, _state, _writer) = failure.into_parts();
-        error
+        Box::new(error)
     })
 }
 

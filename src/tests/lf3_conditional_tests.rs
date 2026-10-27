@@ -96,7 +96,7 @@ fn lf3_conditional_fixed_parent_content_conflict_keeps_original() {
     let mut writer = parent
         .open_conditional_writer::<Sha256>(
             Path::new("target"),
-            LocalWritePrecondition::Content(Sha256::digest(b"stale").into()),
+            LocalWritePrecondition::Content(Sha256::digest(b"stale")),
             &options,
         )
         .expect("open conditional writer");
@@ -278,7 +278,7 @@ fn lf3_conditional_installed_sync_failure_is_published() {
     let mut writer = fsys
         .open_conditional_writer::<Sha256>(
             &target,
-            LocalWritePrecondition::Content(Sha256::digest(b"previous").into()),
+            LocalWritePrecondition::Content(Sha256::digest(b"previous")),
             &options,
         )
         .expect("open conditional writer");
