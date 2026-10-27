@@ -131,11 +131,26 @@ provider registration, application authorization, or async I/O.
 | --- | --- |
 | `LocalFileSystem::host()` | A reusable service over the process-visible host namespace. |
 | `LocalFileSystem::rooted(root)` | The same operations beneath one opened directory authority. |
+| `LocalFileSnapshot` / `read_consistent_with_options` | Bounded bytes and before/after observations from one opened file; detects observed change but is not an atomic snapshot. |
+| `LocalDirectoryHandle` | Operations relative to a retained directory authority, without treating display paths as native authorization. |
 | `path::LocalFileSystemScope` | Whether an instance interprets paths as host paths or rooted descendants. |
 | `LocalFileWriter` | Explicit commit or abort after staged publication. |
 | `LocalDirectoryWalker` | Lazy directory enumeration with fixed creation-time policy. |
+| `LocalStagedDirectory` | Populate a staged tree, opt into validation rules, publish without replacing an existing target, or retain for recovery. |
 | `LocalTempFile` / `LocalTempDirectory` | Owned cleanup, `keep`, and persistence operations. |
+| `LocalSealedTempFile` | A private cleanup owner that retains a read-only handle; `native_path()` is optional and Host-only. |
 | `path::LocalFileNames` / `path::LocalPaths` | Native filename and lexical-path helpers without lossy UTF-8 conversion. |
+
+Request `LocalPrivacyRequirement::Required` at creation when a cache or
+temporary artifact must be private; tightening permissions after public
+creation does not meet that requirement. File sync and namespace durability
+are separate. Tree publication preserves legal links by default, applies only
+explicitly requested validation rules, and reports mutation separately from
+publication. A tree recovery location stores a namespace path and optional
+opaque identity, not an authority; reopen through the same parent and verify
+identity before acting. This differs from digest conditional-write recovery
+files, which remain caller-owned and are not automatically deleted. Windows
+Rooted content-conditional replacement remains unsupported.
 
 Readers and writers accept regular files only; directories and special files
 are rejected instead of being opened as byte streams.

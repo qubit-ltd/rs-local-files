@@ -121,11 +121,22 @@ let saved = writer.commit()?; // 检查 saved.digest()、cleanup_errors() 和 re
 | --- | --- |
 | `LocalFileSystem::host()` | 可复用的进程可见主机命名空间服务。 |
 | `LocalFileSystem::rooted(root)` | 以相同操作访问一个已打开目录权限下的后代。 |
+| `LocalFileSnapshot` / `read_consistent_with_options` | 从同一已打开文件读取有界字节并保留前后观察；可检测已观察变化，但不提供原子快照。 |
+| `LocalDirectoryHandle` | 相对于保留目录权限句柄执行操作，不把显示路径当作原生授权。 |
 | `path::LocalFileSystemScope` | 标识实例按主机路径还是 rooted 后代路径解释输入。 |
 | `LocalFileWriter` | 分阶段发布后的显式提交或中止。 |
 | `LocalDirectoryWalker` | 采用创建时固定策略的惰性目录枚举。 |
+| `LocalStagedDirectory` | 填充暂存树、选择性启用验证、以不覆盖已有目标的方式发布，或保留以供恢复。 |
 | `LocalTempFile` / `LocalTempDirectory` | 拥有清理责任，并支持 `keep` 与持久化。 |
+| `LocalSealedTempFile` | 保留只读句柄的私有清理 owner；`native_path()` 可选且仅适用于 Host。 |
 | `path::LocalFileNames` / `path::LocalPaths` | 不丢失 UTF-8 以外文件名信息的原生文件名和词法路径工具。 |
+
+缓存或临时产物要求私有时，应在创建时请求 `LocalPrivacyRequirement::Required`；先公开创建再
+收紧权限不满足要求。文件同步与命名空间耐久性相互独立。目录树默认保留合法链接，只应用显式
+选择的验证规则，并分别报告 mutation 与 publication。树恢复位置只保存命名空间路径和可选
+opaque identity，不含 authority；操作前应通过同一个 parent 重新打开并验证身份。这与 digest
+条件写入恢复文件不同，后者由调用方持有且不会自动删除。Windows Rooted Content 条件替换仍不受
+支持。
 
 Reader 和 writer 只接受普通文件；目录和特殊文件会被拒绝，不会被当作字节流打开。
 

@@ -28,6 +28,129 @@ Host namespace ── LocalFileSystem::host() ── operation-time process PWD
 opened root ───── LocalFileSystem::rooted(root) ── virtual / and instance PWD
 ```
 
+## Snapshots, fixed directories, and private temporary data
+
+An editor can read UTF-8 text with `read_text`, or request a bounded
+`LocalFileSnapshot` with `read_consistent_with_options`. The snapshot records
+observations from the same opened file handle before and after reading. A
+changed identity, size, or available native timestamps produce
+`ChangedDuringRead`; this detects observed changes but is not an atomic snapshot
+against an adversary that can write concurrently. Use the returned bytes as the
+document version you edited, then use conditional publication when the update
+must still match its original state.
+
+`LocalFileSystem::host()` interprets paths in the process-visible Host
+namespace. `LocalFileSystem::rooted(root)` and
+`open_directory_with_options` retain an opened directory authority; paths below
+that handle use namespace-relative names. Public `path()` values describe that
+namespace and are not native authorization tokens. In particular, a Rooted
+path is virtual: convert application wire formats at the application boundary,
+and do not pass it to a native API. A sealed temporary file's `native_path()`
+is available only for Host resources; it is a convenience path observation,
+not a permanent binding if another actor can rename entries.
+
+For a shared cache or generated artifact, request
+`LocalPrivacyRequirement::Required` when creating a temporary file or
+directory. The guarantee is checked during creation; creating a public object
+and tightening permissions later does not satisfy it. A temporary file can be
+sealed with `LocalSealOptions`; the returned `LocalSealedTempFile` retains a
+read-only handle for observation and cleanup, but exposes neither a byte-stream
+reader nor a mutable native handle. Reopen its namespace path through the same
+filesystem authority when bytes must be read. File
+sync and namespace durability are separate requirements: syncing the file does
+not by itself promise that a later rename is durable.
+
+For a directory backup, create a `LocalStagedDirectory`, populate it through
+its fixed directory handle, and opt into validation rules only when needed.
+Tree validation can reject links, special entries, or external hard links and
+can enforce an explicit resource budget. These checks are independent: the
+default behavior preserves legal links rather than following them. Publishing
+consumes the stage and uses no-replace semantics. Inspect mutation and
+publication separately on errors. A retained tree recovery location contains
+only a namespace path and optional opaque identity, not an authority; reopen it
+through the same parent and verify identity before acting on it. Explicit
+`retain_in_place` transfers responsibility without renaming or publishing.
+`apply_access_policy` is a separate `&mut` operation: `Preserve` makes no native
+change, while the two current-user policies update only identity-checked files
+and directories. If an item fails after earlier entries changed, inspect the
+error's `access_state()`; `Mixed` reports partial conversion and the stage
+remains with the caller. The library does not claim to roll back a whole tree.
+
+This staged backup example captures the generated name and identity before
+publishing. If the destination already exists, the returned stage is explicitly
+retained and reopened beneath the same parent; cleanup only proceeds after the
+identity check succeeds:
+
+```rust,no_run
+use std::ffi::OsStr;
+use std::path::Path;
+
+use qubit_local_files::LocalFileSystem;
+use qubit_local_files::directory::LocalDirectoryHandle;
+use qubit_local_files::options::{
+    LocalDirectoryOpenOptions, LocalTempDirectoryOptions, LocalTreePublishOptions,
+    LocalTreeValidationOptions,
+};
+
+fn create_backup(parent: &LocalDirectoryHandle) -> Result<(), Box<dyn std::error::Error>> {
+    let mut stage = parent.create_staged_directory(&LocalTempDirectoryOptions::new())?;
+    let mut manifest = &b"backup version 1\n"[..];
+    stage.write_file_new(Path::new("manifest.txt"), &mut manifest, 1024)?;
+    let name = stage.relative_name().to_os_string();
+    let identity = stage.identity().cloned().ok_or("stage identity unavailable")?;
+
+    match stage.publish_new(parent, OsStr::new("backup-current"), &LocalTreePublishOptions::new()) {
+        Ok(outcome) => {
+            assert_eq!(outcome.publication(), qubit_local_files::outcome::LocalTreePublication::Published);
+        }
+        Err(error) => {
+            let publication = error.publication();
+            let (cause, stage, retained) = error.into_parts();
+            if publication != qubit_local_files::outcome::LocalTreePublication::NotPublished {
+                if let Some(stage) = stage {
+                    drop(stage.retain_in_place());
+                }
+                for resource in retained {
+                    drop(resource.retain_in_place());
+                }
+                return Err(cause.into());
+            }
+            if let Some(stage) = stage {
+                let location = stage.retain_in_place();
+                assert_eq!(location.identity(), Some(&identity));
+                let reopened = parent.open_staged_directory(
+                    Path::new(&name), &identity, &LocalTreeValidationOptions::new(),
+                )?;
+                reopened.cleanup()?;
+            }
+            for resource in retained {
+                resource.cleanup()?;
+            }
+            return Err(cause.into());
+        }
+    }
+    Ok(())
+}
+
+let filesystem = LocalFileSystem::host()?;
+let parent = filesystem.open_directory_with_options(
+    Path::new("backup-root"), &LocalDirectoryOpenOptions::new(),
+)?;
+create_backup(&parent)?;
+# Ok::<(), Box<dyn std::error::Error>>(())
+```
+
+The example's cleanup branch is a policy choice for a one-shot backup job. An
+application that needs operator recovery should persist the namespace location
+and identity, keep the owner context long enough to call `open_staged_directory`,
+and avoid dropping a recovery owner before handoff is complete.
+
+Tree recovery owners attempt identity-checked cleanup on Drop, while digest
+conditional-write `LocalRecoveryFile` values are retained for caller-directed
+recovery and are not automatically deleted. These are different ownership
+contracts. Windows Rooted content-conditional replacement remains unsupported;
+the crate does not claim otherwise.
+
 ## Byte stream protocols and standard I/O
 
 `LocalFileReader` uses `ByteInput` and retains `std::io::Seek`.

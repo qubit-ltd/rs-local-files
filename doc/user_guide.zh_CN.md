@@ -24,6 +24,108 @@ Host 命名空间 ── LocalFileSystem::host() ── 操作时读取进程 PW
 已打开根目录 ─── LocalFileSystem::rooted(root) ── 虚拟 / 与实例 PWD
 ```
 
+## 快照、固定目录与私有临时数据
+
+编辑器可以用 `read_text` 读取 UTF-8 文本，或用
+`read_consistent_with_options` 获取有字节上限的 `LocalFileSnapshot`。快照在同一个已打开
+文件句柄上读取前后观察；身份、大小或可用的原生时间戳变化会返回
+`ChangedDuringRead`。这能检测已观察到的变化，但无法对抗可并发写入的攻击者，也不提供原子
+快照。编辑时应以返回的字节作为文档版本；若发布更新时必须确认原版本仍有效，再使用条件发布。
+
+`LocalFileSystem::host()` 在进程可见的 Host 命名空间解释路径。
+`LocalFileSystem::rooted(root)` 和 `open_directory_with_options` 保留已打开目录权限句柄，
+其子路径使用该句柄下的命名空间相对名称。公开的 `path()` 是命名空间坐标，不是原生授权令牌。
+尤其 Rooted 路径是虚拟路径：应用应在 wire 格式边界自行转换，不能把它交给原生 API。
+sealed 临时文件的 `native_path()` 仅对 Host 资源可用；它只是路径观察，如果其他参与者能重命名
+条目，就不代表永久绑定。
+
+共享缓存或生成产物需要创建时保证权限时，应在创建临时文件或目录时请求
+`LocalPrivacyRequirement::Required`。该保证在创建过程中检查；先创建公开对象再收紧权限不满足
+要求。临时文件可使用 `LocalSealOptions` seal；返回的 `LocalSealedTempFile` 保留只读句柄用于观察
+和清理，但不公开字节流 reader 或可变原生句柄。需要读取字节时，应通过同一 filesystem authority
+重新打开它的命名空间路径。文件同步与命名空间耐久性是两项独立要求：同步文件本身不
+保证后续 rename 已耐久。
+
+创建目录备份时，可创建 `LocalStagedDirectory`，通过其固定目录句柄填充，并只在需要时显式
+启用验证规则。目录树验证可以拒绝链接、特殊条目或树外硬链接，也可以设置明确的资源预算；
+这些规则彼此独立。默认会保留合法链接而不会跟随链接。发布会消费 stage 并使用 no-replace
+语义。错误时分别检查 mutation 与 publication 状态。保留的树恢复位置只包含命名空间路径和可选
+opaque identity，不含权限句柄；重新操作前须通过同一个 parent 重新打开并验证身份。
+显式 `retain_in_place` 只转移责任，不重命名也不发布。
+`apply_access_policy` 是独立的 `&mut` 操作：`Preserve` 不执行原生修改；另外两种当前用户策略
+只修改经过 identity 复核的文件和目录。如果前面的条目已修改、后续某项失败，应检查错误中的
+`access_state()`；`Mixed` 表示权限只转换了一部分，stage 仍由调用方持有。库不会声称整棵树可回滚。
+
+下面的目录备份示例会在发布前保存随机名称和 identity。若目标已存在，错误会把 stage 交还给
+调用方；示例先显式保留，再通过同一个 parent 按身份重新打开，确认后才清理：
+
+```rust,no_run
+use std::ffi::OsStr;
+use std::path::Path;
+
+use qubit_local_files::LocalFileSystem;
+use qubit_local_files::directory::LocalDirectoryHandle;
+use qubit_local_files::options::{
+    LocalDirectoryOpenOptions, LocalTempDirectoryOptions, LocalTreePublishOptions,
+    LocalTreeValidationOptions,
+};
+
+fn create_backup(parent: &LocalDirectoryHandle) -> Result<(), Box<dyn std::error::Error>> {
+    let mut stage = parent.create_staged_directory(&LocalTempDirectoryOptions::new())?;
+    let mut manifest = &b"backup version 1\n"[..];
+    stage.write_file_new(Path::new("manifest.txt"), &mut manifest, 1024)?;
+    let name = stage.relative_name().to_os_string();
+    let identity = stage.identity().cloned().ok_or("identity 不可用")?;
+
+    match stage.publish_new(parent, OsStr::new("backup-current"), &LocalTreePublishOptions::new()) {
+        Ok(outcome) => {
+            assert_eq!(outcome.publication(), qubit_local_files::outcome::LocalTreePublication::Published);
+        }
+        Err(error) => {
+            let publication = error.publication();
+            let (cause, stage, retained) = error.into_parts();
+            if publication != qubit_local_files::outcome::LocalTreePublication::NotPublished {
+                if let Some(stage) = stage {
+                    drop(stage.retain_in_place());
+                }
+                for resource in retained {
+                    drop(resource.retain_in_place());
+                }
+                return Err(cause.into());
+            }
+            if let Some(stage) = stage {
+                let location = stage.retain_in_place();
+                assert_eq!(location.identity(), Some(&identity));
+                let reopened = parent.open_staged_directory(
+                    Path::new(&name), &identity, &LocalTreeValidationOptions::new(),
+                )?;
+                reopened.cleanup()?;
+            }
+            for resource in retained {
+                resource.cleanup()?;
+            }
+            return Err(cause.into());
+        }
+    }
+    Ok(())
+}
+
+let filesystem = LocalFileSystem::host()?;
+let parent = filesystem.open_directory_with_options(
+    Path::new("backup-root"), &LocalDirectoryOpenOptions::new(),
+)?;
+create_backup(&parent)?;
+# Ok::<(), Box<dyn std::error::Error>>(())
+```
+
+示例为一次性备份任务选择了“失败后校验身份并清理”的处理方式。如果应用需要留待运维人员恢复，
+应持久化命名空间位置与 identity，保留足够的 owner 上下文以便调用
+`open_staged_directory`，并确保交接完成前不会丢弃恢复 owner。
+
+树恢复 owner 会在 Drop 时尽力进行身份校验清理；digest 条件写入的 `LocalRecoveryFile` 则由调用方
+自行恢复，不会自动删除。这两者的所有权合同不同。Windows Rooted 的 Content 条件替换仍不受
+支持；crate 不宣称该能力已实现。
+
 ## 字节流协议与标准 I/O
 
 `LocalFileReader` 使用 `ByteInput`，并保留 `std::io::Seek`。
