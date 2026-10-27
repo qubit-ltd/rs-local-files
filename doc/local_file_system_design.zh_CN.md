@@ -320,7 +320,12 @@ setter 在应用初始化阶段尽早验证结构、scope 和已知 capability �
 
 ### 6.3 操作双入口
 
-每个有 Options 的 `LocalFileSystem` 操作提供两个入口：
+普通入口使用对应的实例默认值。直接读取覆盖入口
+`open_reader_with_options` 和 `read_prefix_with_options` 使用传入的完整
+`LocalReadOptions`。对于 `open_observed_reader`、`read_all_with_options` 和
+`read_text_with_options`，存在嵌套 `LocalReadOptions` 时完整替代 `defaults.read`，缺少时继承它。
+Snapshot builder 自行构造 `LocalReadOptions::new()`，不继承 `defaults.read`。其它操作对应的
+`*_with_options` 入口使用传入的完整 Options：
 
 ```text
 impl LocalFileSystem {
@@ -424,14 +429,24 @@ Options 继续按引用传入，允许调用方复用。无 Options 的 metadata
 
 ### 7.1 完整替代规则
 
-普通方法只使用实例默认 Options；`*_with_options()` 只使用显式 Options：
+普通方法使用对应的实例默认 Options。`open_reader_with_options` 和
+`read_prefix_with_options` 使用传入的完整 `LocalReadOptions`。对于
+`open_observed_reader`、`read_all_with_options` 和 `read_text_with_options`，存在嵌套
+`LocalReadOptions` 时完整替代 `defaults.read`，缺少时继承它。Snapshot builder 自行创建
+`LocalReadOptions::new()`，不继承 `defaults.read`。其它操作的 `*_with_options()` 使用显式 Options：
 
 ```text
-effective_options = explicit_options.unwrap_or(instance_default_options)
+direct_operation_options = explicit_options.unwrap_or(instance_default_options)
 ```
 
-不得逐字段隐式合并，不得在显式 Options 外再套实例 hard cap，也不得偷偷选择两者中更小
-的资源限制。
+不同 Options 值之间不得逐字段隐式合并，不得在显式 Options 外再套实例 hard cap，也不得偷偷选择
+两者中更小的资源限制。组合读取未提供嵌套读取配置时继承 `defaults.read`；通过
+`LocalReadAllOptions::new().with_read_options(LocalReadOptions::new())` 显式设置嵌套值，会完整替代
+它并清除 `open_retry_timeout` 等字段，同时保留 `LocalReadAllOptions` 的其它字段。
+
+链接策略优先级为：外层显式策略、选中的嵌套 `LocalReadOptions.symlink_policy`、filesystem
+实例策略。Rooted 在 I/O 前拒绝 `FollowAcrossScope`。目录子 handle 的拒绝组件名称取自身与父
+handle 拒绝集合的并集；子 handle 不能解除父级限制，包括以 `open_directory(".")` 打开时。
 
 如果调用方需要“默认值基础上的单次修改”，必须显式复制：
 
@@ -1358,6 +1373,7 @@ prefix、suffix 会先组合成完整名称再校验。分隔符、NUL、控制�
 资格与发布协议，只是目标由库生成，位于 sandbox 外的 sibling 路径，返回 `LocalPersistOutcome`。
 文件同步前会比较当前打开句柄与保留的源 identity；通过 `as_file_mut()` 换入其他文件句柄，
 不能让同步误作用于另一个文件。关闭后重新打开的句柄也会在同步前再次核对 identity。
+Windows 私有句柄的原生同步 I/O 契约尚未在 Windows runner 上验证，此行为仍待原生平台验证。
 
 `cleanup(&mut self)` 显式报告失败。源实体删除后进入 `CleanupRequired`，剩余 sandbox
 删除后进入 `Released`。部分目录删除失败且源树仍归 guard 所有时保持 `Owned`，同时保留
@@ -1896,7 +1912,8 @@ backend 负责原生 I/O、发布操作、经 `CopyBudget` 扣减实际字节，
 - Host/Rooted 使用相同方法集合；
 - getter 返回实际实例默认 Options；
 - setter 成功后普通方法使用新默认值；
-- `*_with_options()` 完整替代而非合并；
+- 直接操作的 `*_with_options()` 使用传入的完整值；组合读取分别测试嵌套选项存在和
+  缺省两种情况，并验证缺省时的继承行为；
 - 构造和 setter 失败保持对象原状态；
 - compile examples 覆盖所有主入口。
 

@@ -146,8 +146,11 @@ Reader 和 writer 只接受普通文件；目录和特殊文件会被拒绝，�
 
 `LocalFileSystem` 是有状态的实例 API。Rooted 实例拥有自己的虚拟当前目录；Host
 实例只在操作需要绑定相对路径时读取进程当前目录。每个实例还拥有符号链接策略和九种
-操作的默认 Options。普通方法使用实例默认值；每个 `*_with_options` 方法都以传入的完整
-Options 替代实例默认值。clone 会复制全部可变状态，Rooted clone 只共享不可变的已打开
+操作的默认 Options。普通方法使用实例默认值；`open_reader_with_options` 和
+`read_prefix_with_options` 使用传入的完整 `LocalReadOptions`。对于
+`open_observed_reader`、`read_all_with_options` 和 `read_text_with_options`，存在可选的嵌套
+`LocalReadOptions` 时会完整替代 `defaults.read`，缺少时则继承它；snapshot builder 使用自己的
+默认读取选项。clone 会复制全部可变状态，Rooted clone 只共享不可变的已打开
 authority。本 crate 不承诺共享可变配置时的线程安全；调用方可以每线程持有一个 clone，
 也可以自行添加同步包装。Host 实例的 `set_current_directory` 修改进程全局当前目录；
 Rooted 实例的同名方法只修改该实例。

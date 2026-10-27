@@ -234,10 +234,28 @@ read, write, list, copy, create-directory, delete, rename, temporary-file, and
 temporary-directory operations. Configure those values once with the
 `set_default_*_options` methods and then use ordinary operation methods.
 
-Every `*_with_options` method instead uses the supplied Options as a complete
-one-call replacement; it does not merge them with the instance defaults. To
-modify one field from an instance default, clone or copy that default
-explicitly, modify it, and pass the resulting value.
+`open_reader_with_options` and `read_prefix_with_options` use their supplied
+`LocalReadOptions` as a complete replacement for `defaults.read`. The combined
+`open_observed_reader`, `read_all_with_options`, and `read_text_with_options`
+operations accept optional nested read options: a present value completely
+replaces `defaults.read`, while an absent value inherits it. Snapshot builders
+create their own `LocalReadOptions::new()` and do not inherit `defaults.read`.
+Other operation-specific `*_with_options` methods use their supplied options
+as a complete replacement. These rules do not merge fields between option
+values. To change one field while retaining others, clone the relevant default,
+change the clone, and pass it explicitly.
+
+For link handling, an explicit outer-operation policy takes precedence over
+the selected nested read option's `symlink_policy`, which takes precedence over
+the filesystem instance policy. Rooted rejects `FollowAcrossScope` before I/O.
+Directory child handles combine denied component names with the parent's set;
+a child cannot remove a parent's restriction, including when opened as `.`.
+
+For example, if `defaults.read` sets `open_retry_timeout`, omitting nested read
+options from `read_all_with_options` inherits that timeout. Passing
+`LocalReadAllOptions::new().with_read_options(LocalReadOptions::new())` clears
+it because the nested value replaces the whole read-options value; other
+`LocalReadAllOptions` fields remain in effect.
 
 ```rust,no_run
 use qubit_local_files::LocalFileSystem;
@@ -645,6 +663,8 @@ handle still identifies the owned temporary entry. Replacing the handle exposed
 by `as_file_mut()` with another file cannot produce a durable success for that
 other file. If the content handle was closed, the library reopens through the
 creating authority and checks the reopened identity before synchronization.
+The Windows native private-handle synchronous-I/O contract has not yet been
+verified on a Windows runner; this behavior remains pending native validation.
 
 On failure, inspect two independent facts:
 
@@ -854,7 +874,8 @@ For each resource limit, `None` means unbounded and two finite values select
 the minimum. Zero stays zero; operation validation still rejects invalid zero
 handle limits. Deadlines remain durations measured from operation start.
 Behavior, including recursion, overwrite and parent creation, stays with the
-receiver. `*_with_options` still uses the supplied complete options value.
+receiver. For these list/copy/delete operations, `*_with_options` still uses
+the supplied complete options value.
 
 ```rust
 use qubit_local_files::options::LocalCopyOptions;
@@ -1013,9 +1034,11 @@ for `PublicationIncomplete` and `Some(LocalFileEffectState::Indeterminate)` for
 value does not mean `Unchanged`. The dedicated copy, rename, writer, and persist
 failure types remain the authority for their precise recovery states.
 
-Instance default Options are convenience configuration, not mandatory ceilings:
-explicit `*_with_options` replaces them completely. For a provider policy that
-requests cannot loosen, configure `qubit-fs-local::LocalResourcePolicy` instead.
+Instance default Options are convenience configuration, not mandatory ceilings.
+Direct per-operation `*_with_options` values replace the corresponding default;
+combined reads follow the nested-option inheritance described in “Configure
+Once, Override Deliberately.” For a provider policy that requests cannot loosen,
+configure `qubit-fs-local::LocalResourcePolicy` instead.
 
 Deletion has a strict operation/type contract: `delete_file` returns
 `IsDirectory` for an entity directory, while `delete_directory` returns

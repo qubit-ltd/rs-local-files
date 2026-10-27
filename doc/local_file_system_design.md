@@ -305,17 +305,33 @@ facts may differ from the instance defaults.
 
 ### 7.1 Complete replacement
 
-Every configurable operation has an ordinary entry point and a
-`*_with_options` entry point. The former uses its instance default; the latter
-uses its supplied complete value:
+Ordinary entry points use their operation defaults. Direct reader overrides
+`open_reader_with_options` and `read_prefix_with_options` use the supplied
+complete `LocalReadOptions`. For `open_observed_reader`, `read_all_with_options`,
+and `read_text_with_options`, a present nested `LocalReadOptions` completely
+replaces `defaults.read`, while an absent nested value inherits it. Snapshot
+builders construct their own `LocalReadOptions::new()` and do not inherit
+`defaults.read`. Other operation-specific `*_with_options` entry points use
+their supplied complete value:
 
 ```text
-effective_options = explicit_options.unwrap_or(instance_default_options)
+direct_operation_options = explicit_options.unwrap_or(instance_default_options)
 ```
 
-No fields are implicitly merged, no instance hard cap is applied over explicit
-options, and the smaller of two limits is never silently selected. To alter one
-default for one call, callers clone that default and alter the clone explicitly.
+No fields are implicitly merged between option values, no instance hard cap is
+applied over explicit options, and the smaller of two limits is never silently
+selected. To alter one default for one call, callers clone that default and
+alter the clone explicitly. For combined reads, omitting nested read options
+inherits `defaults.read`; setting the nested value with
+`LocalReadAllOptions::new().with_read_options(LocalReadOptions::new())` clears
+fields such as `open_retry_timeout` while retaining other `LocalReadAllOptions`
+fields.
+
+Link-policy precedence is outer explicit policy, then the selected nested
+`LocalReadOptions.symlink_policy`, then the filesystem instance policy. Rooted
+rejects `FollowAcrossScope` before I/O. A directory child handle's denied
+component names are the union of its own and its parent's denied names, so a
+child cannot remove a parent restriction, including for `open_directory(".")`.
 
 ```text
 let options = filesystem
@@ -1106,7 +1122,9 @@ target outside the sandbox and returns `LocalPersistOutcome`. Before file
 synchronization, the open handle is checked against the retained source
 identity; replacing the handle through `as_file_mut()` cannot synchronize a
 different file. A closed file is reopened through its creating authority and
-its identity is checked again before synchronization.
+its identity is checked again before synchronization. The Windows native
+private-handle synchronous-I/O contract remains unverified on a Windows runner;
+this behavior is pending native validation.
 
 `cleanup(&mut self)` reports failure explicitly. Removing the source transitions
 to `CleanupRequired`; removing the remaining sandbox transitions to `Released`.

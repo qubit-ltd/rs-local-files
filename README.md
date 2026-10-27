@@ -165,8 +165,12 @@ entry, while a reader reports metadata from its opened content handle.
 current directory; Host instances read the process current directory only when
 an operation needs to bind a relative path. Each instance also owns its
 symbolic-link policy and nine operation-default Options values.
-Ordinary methods use those defaults; every `*_with_options` method uses the
-supplied complete Options value instead. Cloning snapshots all mutable state,
+Ordinary methods use those defaults. `open_reader_with_options` and
+`read_prefix_with_options` use the supplied complete `LocalReadOptions` value.
+For `open_observed_reader`, `read_all_with_options`, and `read_text_with_options`,
+an optional nested `LocalReadOptions` replaces `defaults.read` when present and
+inherits it when absent; snapshot builders keep their own default read options.
+Cloning snapshots all mutable state,
 while Rooted clones share only the immutable opened authority. The crate makes
 no thread-safety promise for shared mutable configuration; callers may keep one
 clone per thread or add their own synchronization. Calling

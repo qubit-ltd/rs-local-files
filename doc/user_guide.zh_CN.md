@@ -199,9 +199,22 @@ assert!(rooted.diagnostic_root().is_some());
 create-directory、delete、rename、temporary-file 和 temporary-directory 九种默认
 Options。调用方可以通过 `set_default_*_options` 一次配置，然后使用普通操作方法。
 
-每个 `*_with_options` 方法则把传入的 Options 当作该次调用的完整配置，不会与实例
-默认值合并。需要在默认值基础上只修改一个字段时，应显式 clone 或 copy 对应默认值，
-修改后再传入。
+`open_reader_with_options` 和 `read_prefix_with_options` 使用传入的
+`LocalReadOptions` 完整替代 `defaults.read`。组合操作 `open_observed_reader`、
+`read_all_with_options` 和 `read_text_with_options` 接受可选的嵌套读取选项：存在时完整替代
+`defaults.read`，缺少时继承它。Snapshot builder 自行创建 `LocalReadOptions::new()`，不继承
+`defaults.read`。其它操作各自的 `*_with_options` 方法仍以传入 Options 完整替代相应实例默认值。
+这些规则都不在不同 Options 值之间逐字段合并。若要保留默认值中的其它字段，应先显式复制相关默认值、
+修改副本，再传入。
+
+链接策略按以下顺序确定：外层操作显式指定的策略优先，其次是所选嵌套读取选项的
+`symlink_policy`，最后才是 filesystem 实例策略。Rooted 会在 I/O 前拒绝
+`FollowAcrossScope`。目录子 handle 的拒绝组件名称与父 handle 的集合取并集；子 handle
+不能解除父级限制，包括通过 `.` 打开时。
+
+例如，若 `defaults.read` 设置了 `open_retry_timeout`，`read_all_with_options` 未提供嵌套读取选项时
+会继承该 timeout。调用 `LocalReadAllOptions::new().with_read_options(LocalReadOptions::new())` 则会
+完整替代读取默认值并清除该 timeout；`LocalReadAllOptions` 的其它字段仍然生效。
 
 ```rust,no_run
 use qubit_local_files::LocalFileSystem;
@@ -527,7 +540,8 @@ sandbox 会和资源一起清理。需要观察清理失败时应显式调用 `c
 `cleanup_error()`。sandbox 残留通过成功结果报告，不会撤销发布，也不表示可以再次发布。
 文件同步前会核对当前打开句柄是否仍指向 guard 持有的源实体。通过 `as_file_mut()` 换入其他
 文件句柄不会得到针对该文件的耐久成功；若内容句柄已关闭，库会经创建时的 authority 重新打开，
-并在同步前再次核对实体身份。
+并在同步前再次核对实体身份。Windows 私有句柄的原生同步 I/O 契约尚未在 Windows runner 上验证，
+此行为仍待原生平台验证。
 
 失败时要分别检查目标发布结果与源资源资格：
 
@@ -703,7 +717,7 @@ assert_eq!(options.metadata_policy(), LocalWriteMetadataPolicy::UseStaging);
 list/copy/delete options 提供 `tighten_resource_limits(self, ceilings: &Self)`。
 每项限制中，`None` 表示无上限；两侧都有值时取较小者。0 仍是 0，操作入口仍会拒绝
 非法的零句柄上限。deadline 仍从操作开始计时。递归、覆盖、创建父目录等行为全部来自
-接收者；`*_with_options` 完整使用传入 options 的契约不变。
+接收者；对于这些 list/copy/delete 操作，`*_with_options` 仍完整使用传入 options。
 
 ```rust
 use qubit_local_files::options::LocalCopyOptions;
@@ -841,8 +855,9 @@ Windows Rooted 的符号链接读取、类型判断和创建均相对于已打�
 这不表示 `Unchanged`。copy、rename、writer 和 persist 的专用 failure 类型仍是精确恢复
 状态的权威来源。
 
-实例默认 Options 是便利配置，不是强制上限；显式 `*_with_options` 会完整替换它们。
-需要请求无法放宽的 provider 上限时，应配置 `qubit-fs-local::LocalResourcePolicy`。
+实例默认 Options 是便利配置，不是强制上限。直接操作的 `*_with_options` 值会替换对应默认值；
+组合读取遵循“配置一次，显式覆盖”一节说明的嵌套选项继承规则。需要请求无法放宽的 provider 上限时，
+应配置 `qubit-fs-local::LocalResourcePolicy`。
 
 删除操作有明确的类型契约：`delete_file` 遇到实体目录返回 `IsDirectory`，
 `delete_directory` 遇到普通文件或最终符号链接返回 `NotDirectory`。`missing_ok` 只对请求的
