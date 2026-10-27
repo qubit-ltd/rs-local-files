@@ -11,6 +11,7 @@ mod file_system;
 mod lf3_contract_tests;
 #[cfg(unix)]
 mod lf3_observation_unix_tests;
+mod lf3_observation_tests;
 #[cfg(windows)]
 mod lf3_observation_windows_tests;
 #[cfg(unix)]
