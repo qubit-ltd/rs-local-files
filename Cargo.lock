@@ -593,7 +593,7 @@ dependencies = [
  "getrandom",
  "libc",
  "proptest",
- "qubit-budget 0.10.0",
+ "qubit-budget",
  "qubit-io",
  "qubit-redact",
  "rustix",
@@ -606,7 +606,7 @@ dependencies = [
 name = "qubit-redact"
 version = "0.10.0"
 dependencies = [
- "qubit-budget 0.10.0",
+ "qubit-budget",
 ]
 
 [[package]]
