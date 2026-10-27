@@ -35,9 +35,11 @@ impl LocalFileSystem {
     /// handle.
     ///
     /// Backend support differs by platform. Linux and macOS support Host and
-    /// Rooted `Content`; Windows Host supports `Content` with
-    /// `PreserveExisting` metadata only, while Windows Rooted does not support
-    /// `Content`. `Absent` is available only where the backend has a native
+    /// Rooted `Content`; on Windows, Host supports `Content` with
+    /// `PreserveExisting` metadata only, and Rooted does not support `Content`.
+    /// These unsupported Windows combinations return `Unsupported` while
+    /// opening the writer, before resolving the path or creating staging
+    /// resources. `Absent` is available only where the backend has a native
     /// no-overwrite install. Android and FreeBSD support is not claimed.
     ///
     /// The returned writer owns staged B until
@@ -97,6 +99,25 @@ impl LocalFileSystem {
                 self.current_directory.virtual_path(),
             )
         })?;
+        #[cfg(windows)]
+        if matches!(&precondition, LocalWritePrecondition::Content(_))
+            && (self.scope() == crate::path::LocalFileSystemScope::Rooted
+                || options.metadata_policy()
+                    != crate::options::LocalWriteMetadataPolicy::PreserveExisting)
+        {
+            let error = LocalFileError::new(
+                LocalFileErrorKind::Unsupported,
+                LocalFileOperation::OpenWriter,
+            )
+                .with_path(path.to_path_buf())
+                .with_reason("this Windows conditional Content configuration is unsupported");
+            return Err(match self.current_directory.virtual_path() {
+                Some(current_directory) => {
+                    error.with_current_directory(current_directory.to_path_buf())
+                }
+                None => error,
+            });
+        }
         let resolver = self.resolver_for(path, LocalFileOperation::OpenWriter)?;
         let resolved = super::resolve_operation_path(&resolver, path, LocalFileOperation::OpenWriter)?;
         self.reject_root_operand(&resolved, LocalFileOperation::OpenWriter, resolver.current_directory())?;

@@ -18,9 +18,11 @@ use digest::consts::U32;
 use qubit_io::Output;
 use qubit_local_files::LocalFileSystem;
 use qubit_local_files::error::LocalFileErrorKind;
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 use qubit_local_files::error::LocalFileOperation;
 use qubit_local_files::options::LocalWriteMode;
+#[cfg(windows)]
+use qubit_local_files::options::LocalWriteMetadataPolicy;
 use qubit_local_files::options::LocalWriteOptions;
 use qubit_local_files::options::LocalWritePrecondition;
 use sha2::Digest;
@@ -252,36 +254,147 @@ fn content_precondition_replaces_rooted_file_and_returns_digest() {
 
 #[test]
 #[cfg(windows)]
-fn rooted_content_precondition_is_unsupported_and_retains_candidate() {
+fn windows_open_rejects_rooted_content_without_artifacts() {
     let dir = tempdir().unwrap();
-    let native_path = dir.path().join("rooted-model");
-    std::fs::write(&native_path, b"old").unwrap();
     let mut fs = LocalFileSystem::rooted(dir.path()).unwrap();
     fs.set_symlink_policy(qubit_local_files::policy::LocalSymlinkPolicy::Reject)
         .unwrap();
-    let mut writer = fs
-        .open_conditional_writer::<Sha256>(
-            std::path::Path::new("/rooted-model"),
-            LocalWritePrecondition::Content(Sha256::digest(b"old")),
-            &LocalWriteOptions::new(LocalWriteMode::CreateOrReplace),
-        )
+    for (parent, create_parent) in [("missing-parent", false), ("created-parent", true)] {
+        let target = std::path::PathBuf::from(format!("/{parent}/target"));
+        let options = LocalWriteOptions::new(LocalWriteMode::CreateOrReplace);
+        let options = if create_parent {
+            options.with_create_parent()
+        } else {
+            options
+        };
+
+        let error = fs
+            .open_conditional_writer::<Sha256>(
+                &target,
+                LocalWritePrecondition::Content(Sha256::digest(b"old")),
+                &options,
+            )
+            .expect_err("Rooted Content must be rejected while opening");
+
+        assert_eq!(LocalFileErrorKind::Unsupported, error.kind());
+        assert_eq!(LocalFileOperation::OpenWriter, error.operation());
+        assert_eq!(Some(target.as_path()), error.path());
+        assert_eq!(
+            Some("this Windows conditional Content configuration is unsupported"),
+            error.reason()
+        );
+        assert!(
+            !dir.path().join(parent).exists(),
+            "the parent must not be created"
+        );
+        assert_eq!(
+            0,
+            std::fs::read_dir(dir.path()).unwrap().count(),
+            "no destination or staging artifact may be created",
+        );
+    }
+}
+
+#[test]
+#[cfg(windows)]
+fn windows_open_rejects_host_content_use_staging_without_artifacts() {
+    let dir = tempdir().unwrap();
+    let mut fs = LocalFileSystem::host().unwrap();
+    fs.set_symlink_policy(qubit_local_files::policy::LocalSymlinkPolicy::Reject)
         .unwrap();
+    for (parent, create_parent) in [("missing-parent", false), ("created-parent", true)] {
+        let missing_parent = dir.path().join(parent);
+        let target = missing_parent.join("target");
+        let options = LocalWriteOptions::new(LocalWriteMode::CreateOrReplace)
+            .with_metadata_policy(LocalWriteMetadataPolicy::UseStaging);
+        let options = if create_parent {
+            options.with_create_parent()
+        } else {
+            options
+        };
+
+        let error = fs
+            .open_conditional_writer::<Sha256>(
+                &target,
+                LocalWritePrecondition::Content(Sha256::digest(b"old")),
+                &options,
+            )
+            .expect_err("Host Content with UseStaging must be rejected while opening");
+
+        assert_eq!(LocalFileErrorKind::Unsupported, error.kind());
+        assert_eq!(LocalFileOperation::OpenWriter, error.operation());
+        assert_eq!(Some(target.as_path()), error.path());
+        assert_eq!(
+            Some("this Windows conditional Content configuration is unsupported"),
+            error.reason()
+        );
+        assert!(
+            !missing_parent.exists(),
+            "the parent must not be created"
+        );
+        assert_eq!(
+            0,
+            std::fs::read_dir(dir.path()).unwrap().count(),
+            "no destination or staging artifact may be created",
+        );
+    }
+}
+
+#[test]
+#[cfg(windows)]
+fn windows_open_accepts_absent_condition() {
+    let dir = tempdir().unwrap();
+    let mut fs = LocalFileSystem::host().unwrap();
+    fs.set_symlink_policy(qubit_local_files::policy::LocalSymlinkPolicy::Reject)
+        .unwrap();
+    let target = dir.path().join("absent");
+    let writer = fs
+        .open_conditional_writer::<Sha256>(
+            &target,
+            LocalWritePrecondition::Absent,
+            &LocalWriteOptions::new(LocalWriteMode::CreateNew),
+        )
+        .expect("Host Absent must remain supported");
+    drop(writer);
+    assert!(!target.exists());
+
+    let mut rooted = LocalFileSystem::rooted(dir.path()).unwrap();
+    rooted
+        .set_symlink_policy(qubit_local_files::policy::LocalSymlinkPolicy::Reject)
+        .unwrap();
+    let rooted_target = std::path::Path::new("/rooted-absent");
+    let writer = rooted
+        .open_conditional_writer::<Sha256>(
+            rooted_target,
+            LocalWritePrecondition::Absent,
+            &LocalWriteOptions::new(LocalWriteMode::CreateNew),
+        )
+        .expect("Rooted Absent must remain supported");
+    drop(writer);
+    assert!(!dir.path().join("rooted-absent").exists());
+}
+
+#[test]
+#[cfg(windows)]
+fn windows_open_accepts_host_preserve_existing_content() {
+    let dir = tempdir().unwrap();
+    let mut fs = LocalFileSystem::host().unwrap();
+    fs.set_symlink_policy(qubit_local_files::policy::LocalSymlinkPolicy::Reject)
+        .unwrap();
+    let target = dir.path().join("content");
+    std::fs::write(&target, b"old").unwrap();
+    let writer = fs
+        .open_conditional_writer::<Sha256>(
+            &target,
+            LocalWritePrecondition::Content(Sha256::digest(b"old")),
+            &LocalWriteOptions::new(LocalWriteMode::CreateOrReplace)
+                .with_metadata_policy(LocalWriteMetadataPolicy::PreserveExisting),
+        )
+        .expect("Host Content with PreserveExisting must remain supported");
     writer.write_fully(b"new").unwrap();
-
-    let failure = writer.commit().expect_err("Windows Rooted Content is unsupported");
-
-    assert_eq!(std::fs::read(native_path).unwrap(), b"old");
-    assert_eq!(
-        failure.publication(),
-        qubit_local_files::outcome::LocalConditionalPublicationState::NotPublished
-    );
-    assert!(
-        failure
-            .error()
-            .to_string()
-            .contains("Windows Rooted conditional Content is unsupported")
-    );
-    assert!(failure.candidate().is_some());
+    let saved = writer.commit().unwrap();
+    assert_eq!(b"new", std::fs::read(target).unwrap().as_slice());
+    assert_eq!(saved.digest(), &Sha256::digest(b"new"));
 }
 
 #[test]
