@@ -30,6 +30,7 @@ use crate::outcome::LocalConditionalPublicationState;
 use crate::outcome::LocalConditionalWriteOutcome;
 use crate::outcome::LocalWritePublicationMethod;
 use crate::policy::LocalDurabilityRequirement;
+use crate::policy::LocalFileSyncRequirement;
 use crate::recovery::LocalRecoveryFileRole;
 
 #[allow(clippy::result_large_err)]
@@ -81,6 +82,7 @@ where
     let absent_precondition = matches!(&precondition, LocalWritePrecondition::Absent);
     let mut publication_method = LocalWritePublicationMethod::AtomicRename;
     let mut durable = options.durability() != LocalDurabilityRequirement::NotRequired;
+    let mut file_synced = false;
     let result = (|| {
         qubit_io::Output::flush(&mut backend).map_err(|error| (stage, error))?;
         stage = LocalConditionalWriteStage::VerifyCandidate;
@@ -108,20 +110,44 @@ where
             .map_err(|error| (stage, error))?;
 
         stage = LocalConditionalWriteStage::Sync;
-        if options.durability() != LocalDurabilityRequirement::NotRequired {
+        let sync_requirement = match (options.durability(), options.file_sync()) {
+            (LocalDurabilityRequirement::Required, _) | (_, LocalFileSyncRequirement::Required) => {
+                LocalFileSyncRequirement::Required
+            }
+            (LocalDurabilityRequirement::Preferred, _) | (_, LocalFileSyncRequirement::Preferred) => {
+                LocalFileSyncRequirement::Preferred
+            }
+            _ => LocalFileSyncRequirement::NotRequired,
+        };
+        if sync_requirement != LocalFileSyncRequirement::NotRequired {
+            // The native protocol installs the original candidate and retains
+            // the independently copied entry for recovery. Sync both before
+            // publication; installed-entry identity is verified after the
+            // native operation before this result can report file_synced.
             let sync = backend
                 .checkpoint(ConditionalPoint::BeforeRequiredFileSync)
                 .and_then(|()| {
                     backend
                         .sync_candidate()
                         .and_then(|()| backend.sync_entry(&entries[0]))
-                        .and_then(|()| backend.sync_namespace())
                 });
             if let Err(error) = sync {
-                if options.durability() == LocalDurabilityRequirement::Required {
+                if sync_requirement == LocalFileSyncRequirement::Required {
                     return Err((stage, error));
                 }
-                durable = false;
+                if options.durability() == LocalDurabilityRequirement::Preferred {
+                    durable = false;
+                }
+            } else {
+                file_synced = true;
+            }
+            if options.durability() != LocalDurabilityRequirement::NotRequired {
+                if let Err(error) = backend.sync_namespace() {
+                    if options.durability() == LocalDurabilityRequirement::Required {
+                        return Err((stage, error));
+                    }
+                    durable = false;
+                }
             }
         }
 
@@ -146,13 +172,18 @@ where
                 }
                 if options.metadata_policy() == crate::options::LocalWriteMetadataPolicy::PreserveExisting {
                     backend.preserve_metadata(&target).map_err(|error| (stage, error))?;
-                    if options.durability() != LocalDurabilityRequirement::NotRequired
+                    if sync_requirement != LocalFileSyncRequirement::NotRequired
                         && let Err(error) = backend.sync_candidate()
                     {
-                        if options.durability() == LocalDurabilityRequirement::Required {
+                        if sync_requirement == LocalFileSyncRequirement::Required {
                             return Err((stage, error));
                         }
-                        durable = false;
+                        file_synced = false;
+                        if options.durability() == LocalDurabilityRequirement::Preferred {
+                            durable = false;
+                        }
+                    } else if sync_requirement != LocalFileSyncRequirement::NotRequired {
+                        file_synced = true;
                     }
                 }
                 // The observed target is only a precheck/metadata source. The
@@ -435,12 +466,19 @@ where
                     io::Error::new(io::ErrorKind::InvalidData, "rollback verification failed"),
                 ));
             }
-            if options.durability() == LocalDurabilityRequirement::Required {
+            if options.durability() == LocalDurabilityRequirement::Required
+                || options.file_sync() == LocalFileSyncRequirement::Required
+            {
                 stage = LocalConditionalWriteStage::Sync;
-                let sync_result = backend
-                    .checkpoint(ConditionalPoint::SyncRollback)
-                    .and_then(|()| backend.sync_entry(&restored))
-                    .and_then(|()| backend.sync_namespace());
+                let sync_result = backend.checkpoint(ConditionalPoint::SyncRollback).and_then(|()| {
+                    backend.sync_entry(&restored).and_then(|()| {
+                        if options.durability() == LocalDurabilityRequirement::Required {
+                            backend.sync_namespace()
+                        } else {
+                            Ok(())
+                        }
+                    })
+                });
                 if let Err(error) = sync_result {
                     entries.push(restored);
                     return Err((stage, error));
@@ -466,9 +504,7 @@ where
         if options.durability() == LocalDurabilityRequirement::Required {
             stage = LocalConditionalWriteStage::Sync;
             let sync = backend
-                .checkpoint(ConditionalPoint::BeforeRequiredFileSync)
-                .and_then(|()| backend.sync_entry(&installed))
-                .and_then(|()| backend.checkpoint(ConditionalPoint::BeforeRequiredParentSync))
+                .checkpoint(ConditionalPoint::BeforeRequiredParentSync)
                 .and_then(|()| backend.sync_namespace());
             if let Err(error) = sync {
                 entries.push(installed);
@@ -476,11 +512,7 @@ where
             }
         } else if options.durability() == LocalDurabilityRequirement::Preferred {
             stage = LocalConditionalWriteStage::Sync;
-            if backend
-                .sync_entry(&installed)
-                .and_then(|()| backend.sync_namespace())
-                .is_err()
-            {
+            if backend.sync_namespace().is_err() {
                 durable = false;
             }
         }
@@ -556,7 +588,8 @@ where
         durable,
         bytes_written,
         None,
-    );
+    )
+    .with_file_synced(file_synced);
     let _ = installed;
     Ok(LocalConditionalWriteOutcome::new(
         candidate_digest,

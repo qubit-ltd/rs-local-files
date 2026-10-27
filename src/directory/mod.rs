@@ -2,6 +2,7 @@
 
 pub(crate) mod binding;
 mod component_policy;
+mod conditional;
 mod handle;
 
 pub use component_policy::LocalComponentPolicy;

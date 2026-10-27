@@ -1,0 +1,221 @@
+use std::fs;
+
+use crate::LocalFileSystem;
+use crate::LocalWriteMode;
+use crate::LocalWriteOptions;
+use crate::capability::LocalCapabilitySupport;
+use crate::capability::LocalConditionalKind;
+use crate::options::LocalDirectoryOpenOptions;
+use crate::options::LocalWritePrecondition;
+use crate::policy::LocalFileSyncRequirement;
+use crate::policy::LocalSymlinkPolicy;
+use qubit_io::Output;
+use sha2::Digest;
+use sha2::Sha256;
+
+#[test]
+fn lf3_conditional_absent_fixed_parent() {
+    let fixture = tempfile::tempdir().expect("fixture directory");
+    let original_parent = fixture.path().join("parent");
+    fs::create_dir(&original_parent).expect("create parent");
+    let mut fsys = LocalFileSystem::host().expect("host filesystem");
+    fsys.set_symlink_policy(LocalSymlinkPolicy::Reject)
+        .expect("set link policy");
+    let parent = fsys
+        .open_directory_with_options(&original_parent, &LocalDirectoryOpenOptions::new())
+        .expect("open fixed parent");
+    let renamed_parent = fixture.path().join("renamed-parent");
+    fs::rename(&original_parent, &renamed_parent).expect("rename parent");
+    let options = LocalWriteOptions::new(LocalWriteMode::CreateNew)
+        .with_file_sync(LocalFileSyncRequirement::Required);
+    assert_eq!(
+        parent.conditional_support(LocalConditionalKind::Absent, &options),
+        LocalCapabilitySupport::CanAttempt
+    );
+    let mut writer = parent
+        .open_conditional_writer::<Sha256>(
+            Path::new("new"),
+            LocalWritePrecondition::Absent,
+            &options,
+        )
+        .expect("open conditional writer");
+    writer.write_fully(b"verified").expect("write candidate");
+    let outcome = writer.commit().expect("publish candidate");
+    assert!(outcome.write_outcome().file_synced());
+    assert_eq!(
+        fs::read(renamed_parent.join("new")).expect("read installed object"),
+        b"verified"
+    );
+}
+
+#[test]
+fn lf3_conditional_fixed_parent_absent_conflict_keeps_target() {
+    let fixture = tempfile::tempdir().expect("fixture directory");
+    let mut fsys = LocalFileSystem::host().expect("host filesystem");
+    fsys.set_symlink_policy(LocalSymlinkPolicy::Reject)
+        .expect("set link policy");
+    let parent = fsys
+        .open_directory_with_options(fixture.path(), &LocalDirectoryOpenOptions::new())
+        .expect("open fixed parent");
+    let options = LocalWriteOptions::new(LocalWriteMode::CreateNew);
+    let mut writer = parent
+        .open_conditional_writer::<Sha256>(
+            Path::new("target"),
+            LocalWritePrecondition::Absent,
+            &options,
+        )
+        .expect("open conditional writer");
+    writer.write_fully(b"candidate").expect("write candidate");
+    fs::write(fixture.path().join("target"), b"competitor").expect("install competitor");
+    let error = writer.commit().expect_err("late target must conflict");
+    assert_eq!(
+        error.publication(),
+        crate::outcome::LocalConditionalPublicationState::NotPublished
+    );
+    assert_eq!(
+        fs::read(fixture.path().join("target")).expect("read competitor"),
+        b"competitor"
+    );
+    assert!(error.candidate().is_some(), "candidate remains recoverable");
+}
+
+#[test]
+#[cfg(unix)]
+fn lf3_conditional_fixed_parent_content_conflict_keeps_original() {
+    let fixture = tempfile::tempdir().expect("fixture directory");
+    fs::write(fixture.path().join("target"), b"current").expect("write target");
+    let mut fsys = LocalFileSystem::host().expect("host filesystem");
+    fsys.set_symlink_policy(LocalSymlinkPolicy::Reject)
+        .expect("set link policy");
+    let parent = fsys
+        .open_directory_with_options(fixture.path(), &LocalDirectoryOpenOptions::new())
+        .expect("open fixed parent");
+    let options = LocalWriteOptions::new(LocalWriteMode::CreateOrReplace);
+    let mut writer = parent
+        .open_conditional_writer::<Sha256>(
+            Path::new("target"),
+            LocalWritePrecondition::Content(Sha256::digest(b"stale").into()),
+            &options,
+        )
+        .expect("open conditional writer");
+    writer.write_fully(b"candidate").expect("write candidate");
+    let error = writer.commit().expect_err("stale digest must conflict");
+    assert_eq!(
+        error.publication(),
+        crate::outcome::LocalConditionalPublicationState::NotPublished
+    );
+    assert_eq!(
+        error.reason(),
+        crate::error::LocalConditionalFailureReason::PreconditionMismatch
+    );
+    assert_eq!(
+        fs::read(fixture.path().join("target")).expect("read original"),
+        b"current"
+    );
+}
+
+#[cfg(feature = "test-support")]
+#[test]
+fn lf3_conditional_required_file_sync_failure_prevents_publication() {
+    use crate::test_support::{TestConditionalHooks, TestConditionalPoint};
+
+    let fixture = tempfile::tempdir().expect("fixture directory");
+    let target = fixture.path().join("target");
+    let mut fsys = LocalFileSystem::host().expect("host filesystem");
+    fsys.set_symlink_policy(LocalSymlinkPolicy::Reject)
+        .expect("set link policy");
+    let fsys = fsys.with_conditional_test_hooks(TestConditionalHooks::once(
+        TestConditionalPoint::BeforeRequiredFileSync,
+        || Err(std::io::Error::other("injected sync failure")),
+    ));
+    let options = LocalWriteOptions::new(LocalWriteMode::CreateNew)
+        .with_file_sync(LocalFileSyncRequirement::Required);
+    let mut writer = fsys
+        .open_conditional_writer::<Sha256>(&target, LocalWritePrecondition::Absent, &options)
+        .expect("open conditional writer");
+    writer.write_fully(b"candidate").expect("write candidate");
+    let error = writer
+        .commit()
+        .expect_err("required sync failure must abort before publish");
+    assert_eq!(
+        error.publication(),
+        crate::outcome::LocalConditionalPublicationState::NotPublished
+    );
+    assert!(!target.exists(), "target must remain absent");
+    assert!(
+        error.candidate().is_some(),
+        "recovery candidate is retained"
+    );
+    assert!(
+        std::error::Error::source(error.error()).is_some(),
+        "native error source survives"
+    );
+}
+
+#[cfg(feature = "test-support")]
+#[test]
+fn lf3_conditional_preferred_file_sync_failure_reports_false_and_publishes() {
+    use crate::test_support::{TestConditionalHooks, TestConditionalPoint};
+
+    let fixture = tempfile::tempdir().expect("fixture directory");
+    let target = fixture.path().join("target");
+    let mut fsys = LocalFileSystem::host().expect("host filesystem");
+    fsys.set_symlink_policy(LocalSymlinkPolicy::Reject)
+        .expect("set link policy");
+    let fsys = fsys.with_conditional_test_hooks(TestConditionalHooks::once(
+        TestConditionalPoint::BeforeRequiredFileSync,
+        || Err(std::io::Error::other("injected preferred sync failure")),
+    ));
+    let options = LocalWriteOptions::new(LocalWriteMode::CreateNew)
+        .with_file_sync(LocalFileSyncRequirement::Preferred);
+    let mut writer = fsys
+        .open_conditional_writer::<Sha256>(&target, LocalWritePrecondition::Absent, &options)
+        .expect("open conditional writer");
+    writer.write_fully(b"candidate").expect("write candidate");
+    let outcome = writer.commit().expect("preferred sync may continue");
+    assert!(!outcome.write_outcome().file_synced());
+    assert_eq!(
+        fs::read(target).expect("read installed target"),
+        b"candidate"
+    );
+}
+
+#[cfg(windows)]
+#[test]
+fn lf3_conditional_windows_rooted_content_preflight_is_unchanged() {
+    let fixture = tempfile::tempdir().expect("fixture directory");
+    fs::write(fixture.path().join("target"), b"before").expect("write target");
+    let mut fsys = LocalFileSystem::host().expect("host filesystem");
+    fsys.set_symlink_policy(LocalSymlinkPolicy::Reject)
+        .expect("set link policy");
+    let parent = fsys
+        .open_directory_with_options(fixture.path(), &LocalDirectoryOpenOptions::new())
+        .expect("open fixed parent");
+    let options = LocalWriteOptions::new(LocalWriteMode::CreateOrReplace);
+    let before = fs::read_dir(fixture.path())
+        .expect("enumerate before")
+        .map(|entry| entry.expect("entry").file_name())
+        .collect::<std::collections::BTreeSet<_>>();
+    assert_eq!(
+        parent.conditional_support(LocalConditionalKind::Content, &options),
+        LocalCapabilitySupport::Unsupported
+    );
+    let error = parent
+        .open_conditional_writer::<Sha256>(
+            Path::new("target"),
+            LocalWritePrecondition::Content(Sha256::digest(b"before").into()),
+            &options,
+        )
+        .expect_err("rooted Content is unsupported");
+    assert_eq!(
+        error.kind(),
+        crate::error::LocalFileErrorKind::RequirementNotMet
+    );
+    let after = fs::read_dir(fixture.path())
+        .expect("enumerate after")
+        .map(|entry| entry.expect("entry").file_name())
+        .collect::<std::collections::BTreeSet<_>>();
+    assert_eq!(before, after);
+}
+
+use std::path::Path;

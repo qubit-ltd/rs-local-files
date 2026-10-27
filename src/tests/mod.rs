@@ -20,6 +20,8 @@ mod lf3_observation_windows_tests;
 mod lf3_privacy_unix_tests;
 #[cfg(windows)]
 mod lf3_privacy_windows_tests;
+#[cfg(feature = "digest")]
+mod lf3_conditional_tests;
 mod lf3_sync_tests;
 mod lf3_temp_tests;
 mod local;

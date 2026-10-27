@@ -428,8 +428,12 @@ impl LocalDirectoryHandle {
         })
     }
 
-    fn checked(&self, relative: &Path, follow_final: bool) -> LocalResult<PathBuf> {
+    pub(super) fn checked(&self, relative: &Path, follow_final: bool) -> LocalResult<PathBuf> {
         self.validate(relative, follow_final)
+    }
+
+    pub(super) fn filesystem(&self) -> &LocalFileSystem {
+        &self.filesystem
     }
 
     /// Reads final-entry metadata beneath this authority.
