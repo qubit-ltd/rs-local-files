@@ -8,6 +8,14 @@
 #[cfg(windows)]
 use std::fs::OpenOptions;
 #[cfg(windows)]
+use std::io::Read;
+#[cfg(windows)]
+use std::io::Seek;
+#[cfg(windows)]
+use std::io::SeekFrom;
+#[cfg(windows)]
+use std::io::Write;
+#[cfg(windows)]
 use std::os::windows::fs::OpenOptionsExt;
 
 #[cfg(windows)]
@@ -37,6 +45,49 @@ fn lf3_privacy_windows_creates_protected_file_and_directory() {
 
     let directory = privacy_windows::create_private_directory_at(&parent, std::ffi::OsStr::new("private-dir")).unwrap();
     privacy_windows::verify_current_user_access(&directory, true, false).unwrap();
+}
+
+#[cfg(windows)]
+#[test]
+fn lf3_privacy_windows_private_file_io_and_standard_read_reopen() {
+    use crate::temp::internal::privacy_windows;
+
+    let fixture = tempfile::tempdir().unwrap();
+    let parent = open_directory(fixture.path());
+    let name = std::ffi::OsStr::new("private-io");
+    let mut file = privacy_windows::create_private_file_at(&parent, name).unwrap();
+    file.write_all(b"first").unwrap();
+    file.seek(SeekFrom::Start(2)).unwrap();
+    file.write_all(b"X").unwrap();
+    file.seek(SeekFrom::End(0)).unwrap();
+    file.write_all(b"-tail").unwrap();
+
+    privacy_windows::verify_current_user_access(&file, false, false).unwrap();
+    privacy_windows::apply_current_user_access(&file, false, true).unwrap();
+
+    let reopened = OpenOptions::new()
+        .read(true)
+        .open(fixture.path().join(name))
+        .expect("standard read-only open must be granted to the current user");
+    privacy_windows::verify_current_user_access(&reopened, false, true).unwrap();
+    let mut contents = Vec::new();
+    reopened.take(u64::MAX).read_to_end(&mut contents).unwrap();
+    assert_eq!(contents, b"fiXst-tail");
+}
+
+#[cfg(windows)]
+#[test]
+fn lf3_privacy_windows_private_directory_reopens_by_handle() {
+    use crate::temp::internal::privacy_windows;
+
+    let fixture = tempfile::tempdir().unwrap();
+    let parent = open_directory(fixture.path());
+    let name = std::ffi::OsStr::new("private-dir");
+    let directory = privacy_windows::create_private_directory_at(&parent, name).unwrap();
+    privacy_windows::verify_current_user_access(&directory, true, false).unwrap();
+
+    let reopened = privacy_windows::open_existing_entry_at(&parent, name, true).unwrap();
+    privacy_windows::verify_current_user_access(&reopened, true, false).unwrap();
 }
 
 #[cfg(windows)]

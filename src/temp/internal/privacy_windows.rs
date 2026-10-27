@@ -62,6 +62,7 @@ use windows_sys::Win32::Storage::FileSystem::FILE_DELETE_CHILD;
 use windows_sys::Win32::Storage::FileSystem::FILE_LIST_DIRECTORY;
 use windows_sys::Win32::Storage::FileSystem::FILE_READ_ATTRIBUTES;
 use windows_sys::Win32::Storage::FileSystem::FILE_READ_DATA;
+use windows_sys::Win32::Storage::FileSystem::FILE_READ_EA;
 use windows_sys::Win32::Storage::FileSystem::FILE_TRAVERSE;
 use windows_sys::Win32::Storage::FileSystem::FILE_WRITE_ATTRIBUTES;
 use windows_sys::Win32::Storage::FileSystem::FILE_WRITE_DATA;
@@ -80,6 +81,7 @@ const FILE_INITIAL_ACCESS: u32 = FILE_READ_DATA
     | FILE_WRITE_DATA
     | FILE_APPEND_DATA
     | FILE_READ_ATTRIBUTES
+    | FILE_READ_EA
     | FILE_WRITE_ATTRIBUTES
     | READ_CONTROL
     | WRITE_DAC
@@ -91,6 +93,7 @@ const DIRECTORY_ACCESS: u32 = FILE_LIST_DIRECTORY
     | FILE_ADD_SUBDIRECTORY
     | FILE_DELETE_CHILD
     | FILE_READ_ATTRIBUTES
+    | FILE_READ_EA
     | FILE_WRITE_ATTRIBUTES
     | READ_CONTROL
     | WRITE_DAC

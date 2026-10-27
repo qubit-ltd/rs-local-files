@@ -71,6 +71,7 @@ jobs:
             Windows)
               run_tests --locked --lib lf_review_stage_cleanup_
               run_tests --locked --lib lf_review_tree_
+              run_tests --locked --all-features --lib lf3_privacy_windows_
               run_tests --locked --lib lf3_temp_windows_required_private_creation_and_seal
               run_tests --locked --features digest,test-support \
                 --test conditional_recovery_tests windows_cleanup_
