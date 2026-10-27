@@ -214,8 +214,9 @@ fn assert_rooted_cleanup_failure(error: &qubit_local_files::LocalFileError, root
         primary.kind(),
         std::io::ErrorKind::PermissionDenied | std::io::ErrorKind::AlreadyExists | std::io::ErrorKind::Other
     ));
+    let namespace_sandbox_prefix = format!("{}sandbox-", std::path::MAIN_SEPARATOR);
     assert!(
-        diagnostic.contains("/sandbox-"),
+        diagnostic.contains(&namespace_sandbox_prefix),
         "sandbox must use rooted namespace coordinates: {diagnostic}"
     );
     assert!(
