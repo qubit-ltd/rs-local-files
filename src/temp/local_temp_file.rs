@@ -432,7 +432,29 @@ impl LocalTempFile {
             #[cfg(unix)]
             crate::temp::internal::privacy_unix::apply_current_user_access(file, false, true)?;
             #[cfg(windows)]
-            crate::temp::internal::privacy_windows::apply_current_user_access(file, false, true)?;
+            {
+                let access_file = match &self.core.backend {
+                    LocalTempResourceBackend::Host(_) => {
+                        crate::temp::internal::privacy_windows::open_existing_host_file(self.path())?
+                    }
+                    LocalTempResourceBackend::Rooted(rooted) => {
+                        let relative = crate::LocalRelativePath::new(&rooted.relative_path)
+                            .map_err(|error| Error::new(ErrorKind::InvalidInput, error))?;
+                        rooted.root.open_existing_file_for_security(relative.as_path())?
+                    }
+                };
+                let access_identity = crate::observation::query::query_observation(
+                    &access_file,
+                    crate::observation::LocalObservationRequirement::Required,
+                )
+                .map_err(crate::LocalFileError::into_io_error)?
+                .identity()
+                .cloned();
+                if access_identity.as_ref() != self.file_identity.as_ref() {
+                    return Err(Error::new(ErrorKind::InvalidInput, "temporary file identity changed"));
+                }
+                crate::temp::internal::privacy_windows::apply_current_user_access(&access_file, false, true)?;
+            }
             self.access_state = LocalTempAccessState::ReadOnly;
             if options.file_sync() == LocalFileSyncRequirement::Required {
                 #[cfg(feature = "test-support")]

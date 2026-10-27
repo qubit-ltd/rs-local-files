@@ -68,6 +68,14 @@ impl Root {
         }
     }
 
+    /// Opens an existing descendant without following its final reparse point,
+    /// with the rights needed to update its Windows security descriptor.
+    #[cfg(windows)]
+    pub(crate) fn open_existing_file_for_security(&self, path: &Path) -> Result<File> {
+        let relative = crate::local::LocalRelativePath::new(path)?;
+        crate::temp::internal::privacy_windows::open_existing_relative(&self.directory, relative.as_path(), false)
+    }
+
     /// Opens and anchors a local filesystem root.
     ///
     /// # Errors

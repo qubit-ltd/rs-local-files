@@ -14,6 +14,7 @@ use std::fs::File;
 use std::io;
 use std::mem::size_of;
 use std::os::windows::ffi::OsStrExt;
+use std::os::windows::fs::OpenOptionsExt;
 use std::os::windows::io::AsRawHandle;
 use std::os::windows::io::FromRawHandle;
 use std::ptr;
@@ -59,6 +60,7 @@ use windows_sys::Win32::Storage::FileSystem::FILE_ADD_FILE;
 use windows_sys::Win32::Storage::FileSystem::FILE_ADD_SUBDIRECTORY;
 use windows_sys::Win32::Storage::FileSystem::FILE_APPEND_DATA;
 use windows_sys::Win32::Storage::FileSystem::FILE_DELETE_CHILD;
+use windows_sys::Win32::Storage::FileSystem::FILE_FLAG_BACKUP_SEMANTICS;
 use windows_sys::Win32::Storage::FileSystem::FILE_LIST_DIRECTORY;
 use windows_sys::Win32::Storage::FileSystem::FILE_READ_ATTRIBUTES;
 use windows_sys::Win32::Storage::FileSystem::FILE_READ_DATA;
@@ -451,6 +453,23 @@ pub(crate) fn open_existing_entry_at(parent: &File, name: &OsStr, directory: boo
         ));
     }
     Ok(file)
+}
+
+/// Opens a Host file through its retained parent with DACL and attribute
+/// rights.
+pub(crate) fn open_existing_host_file(path: &std::path::Path) -> io::Result<File> {
+    let parent_path = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "file path has no parent"))?;
+    let name = path
+        .file_name()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "file path has no entry name"))?;
+    let parent = std::fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(FILE_FLAG_BACKUP_SEMANTICS)
+        .open(parent_path)?;
+    open_existing_entry_at(&parent, name, false)
 }
 
 /// Opens an existing relative path one component at a time with no-follow
