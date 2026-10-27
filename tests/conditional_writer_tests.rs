@@ -377,7 +377,7 @@ fn windows_open_accepts_host_preserve_existing_content() {
         .unwrap();
     let target = dir.path().join("content");
     std::fs::write(&target, b"old").unwrap();
-    let writer = fs
+    let mut writer = fs
         .open_conditional_writer::<Sha256>(
             &target,
             LocalWritePrecondition::Content(Sha256::digest(b"old")),
