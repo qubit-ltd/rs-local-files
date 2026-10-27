@@ -17,6 +17,9 @@ mod local_create_directory_outcome;
 mod local_delete_outcome;
 mod local_persist_cleanup_state;
 mod local_temp_source_state;
+mod local_tree_access_state;
+mod local_tree_mutation_state;
+mod local_tree_publication;
 pub use local_temp_source_state::LocalTempSourceState;
 #[cfg(feature = "digest")]
 mod local_conditional_publication_state;
@@ -52,6 +55,9 @@ pub use local_rename_failure::LocalRenameFailure;
 pub use local_rename_failure::LocalRenameResult;
 pub use local_rename_failure_state::LocalRenameFailureState;
 pub use local_rename_outcome::LocalRenameOutcome;
+pub use local_tree_access_state::LocalTreeAccessState;
+pub use local_tree_mutation_state::LocalTreeMutationState;
+pub use local_tree_publication::LocalTreePublication;
 pub use local_write_publication_method::LocalWritePublicationMethod;
 
 pub use crate::local::LocalPersistFailureState;

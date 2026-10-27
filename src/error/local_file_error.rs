@@ -115,6 +115,25 @@ impl LocalFileError {
         }
     }
 
+    /// Creates an invalid-encoding error while retaining the UTF-8 failure.
+    #[inline]
+    pub(crate) fn from_utf8(
+        operation: LocalFileOperation,
+        path: Option<PathBuf>,
+        source: std::string::FromUtf8Error,
+    ) -> Self {
+        Self {
+            kind: LocalFileErrorKind::InvalidEncoding,
+            operation,
+            current_directory: None,
+            path,
+            target: None,
+            reason: None,
+            source: Some(LocalFileErrorSource::InvalidEncoding(source)),
+            cleanup_error: None,
+        }
+    }
+
     /// Converts a canonical path codec failure and preserves path context.
     ///
     /// # Parameters
@@ -288,6 +307,9 @@ impl LocalFileError {
             return Some(self.kind);
         }
         match self.source.as_ref() {
+            Some(LocalFileErrorSource::InvalidEncoding(_)) => {
+                Some(LocalFileErrorKind::InvalidEncoding)
+            }
             Some(LocalFileErrorSource::Io(source)) => Some(classify_io_error(source)),
             Some(LocalFileErrorSource::ResourceLimit(_)) => Some(LocalFileErrorKind::ResourceLimit),
             Some(LocalFileErrorSource::PathCodec(_)) => Some(LocalFileErrorKind::InvalidPath),
@@ -304,7 +326,9 @@ impl LocalFileError {
     #[inline]
     pub fn effect_state(&self) -> Option<LocalFileEffectState> {
         match self.kind {
-            LocalFileErrorKind::PublicationIncomplete => Some(LocalFileEffectState::PartiallyApplied),
+            LocalFileErrorKind::PublicationIncomplete => {
+                Some(LocalFileEffectState::PartiallyApplied)
+            }
             LocalFileErrorKind::Indeterminate => Some(LocalFileEffectState::Indeterminate),
             _ => None,
         }
@@ -345,8 +369,8 @@ impl LocalFileError {
     ///
     /// # Returns
     ///
-    /// `Some` contains an I/O, path codec, or resource-limit source; `None`
-    /// means this error was constructed without an originating source.
+    /// `Some` contains an I/O, UTF-8, path codec, or resource-limit source;
+    /// `None` means this error was constructed without an originating source.
     #[must_use]
     #[inline]
     pub const fn typed_source(&self) -> Option<&LocalFileErrorSource> {
@@ -385,8 +409,8 @@ impl LocalFileError {
     ///
     /// # Returns
     ///
-    /// `Some` contains an I/O, path codec, or resource-limit source; `None`
-    /// means this error was constructed without an originating source.
+    /// `Some` contains an I/O, UTF-8, path codec, or resource-limit source;
+    /// `None` means this error was constructed without an originating source.
     #[must_use]
     #[inline]
     pub fn into_source(self) -> Option<LocalFileErrorSource> {
@@ -436,20 +460,24 @@ impl LocalFileError {
 fn standard_io_error_kind(error: &LocalFileError) -> io::ErrorKind {
     match error.source.as_ref() {
         Some(LocalFileErrorSource::Io(source)) => source.kind(),
+        Some(LocalFileErrorSource::InvalidEncoding(_)) => io::ErrorKind::InvalidData,
         Some(LocalFileErrorSource::PathCodec(_)) => io::ErrorKind::InvalidInput,
         Some(LocalFileErrorSource::ResourceLimit(_)) => io::ErrorKind::Other,
         None => match error.kind {
             LocalFileErrorKind::AlreadyExists => io::ErrorKind::AlreadyExists,
-            LocalFileErrorKind::InvalidPath | LocalFileErrorKind::InvalidOptions | LocalFileErrorKind::InvalidState => {
-                io::ErrorKind::InvalidInput
-            }
+            LocalFileErrorKind::InvalidPath
+            | LocalFileErrorKind::InvalidOptions
+            | LocalFileErrorKind::InvalidState => io::ErrorKind::InvalidInput,
             LocalFileErrorKind::NotDirectory => io::ErrorKind::NotADirectory,
             LocalFileErrorKind::IsDirectory => io::ErrorKind::IsADirectory,
             LocalFileErrorKind::NotFound => io::ErrorKind::NotFound,
             LocalFileErrorKind::PermissionDenied => io::ErrorKind::PermissionDenied,
             LocalFileErrorKind::ResourceLimit => io::ErrorKind::Other,
             LocalFileErrorKind::DataCorruption => io::ErrorKind::InvalidData,
-            LocalFileErrorKind::RequirementNotMet | LocalFileErrorKind::Unsupported => io::ErrorKind::Unsupported,
+            LocalFileErrorKind::InvalidEncoding => io::ErrorKind::InvalidData,
+            LocalFileErrorKind::RequirementNotMet | LocalFileErrorKind::Unsupported => {
+                io::ErrorKind::Unsupported
+            }
             _ => io::ErrorKind::Other,
         },
     }
@@ -458,7 +486,11 @@ fn standard_io_error_kind(error: &LocalFileError) -> io::ErrorKind {
 impl fmt::Display for LocalFileError {
     /// Formats the structured operation and available native path context.
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(formatter, "{:?} failed with {:?}", self.operation, self.kind)?;
+        write!(
+            formatter,
+            "{:?} failed with {:?}",
+            self.operation, self.kind
+        )?;
         if let Some(reason) = self.reason {
             write!(formatter, ": {reason}")?;
         }
@@ -533,7 +565,11 @@ mod tests {
         )
         .with_kind(LocalFileErrorKind::InvalidOptions)
         .with_operation(LocalFileOperation::OpenWriter);
-        error.replace_paths(Some("source".into()), Some("target".into()), Some("/workspace".into()));
+        error.replace_paths(
+            Some("source".into()),
+            Some("target".into()),
+            Some("/workspace".into()),
+        );
 
         assert_eq!(LocalFileErrorKind::InvalidOptions, error.kind());
         assert_eq!(LocalFileOperation::OpenWriter, error.operation());

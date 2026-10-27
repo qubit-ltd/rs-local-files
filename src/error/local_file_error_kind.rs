@@ -46,6 +46,10 @@ pub enum LocalFileErrorKind {
     ResourceLimit,
     /// Native metadata or stored data failed structural validation.
     DataCorruption,
+    /// File contents are not valid UTF-8.
+    InvalidEncoding,
+    /// File observations changed during a consistent-read operation.
+    ChangedDuringRead,
     /// Publication did not complete.
     PublicationIncomplete,
     /// The final namespace state cannot be determined safely.

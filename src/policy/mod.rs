@@ -12,9 +12,11 @@ mod local_durability_requirement;
 mod local_file_sync_requirement;
 mod local_privacy_requirement;
 mod local_symlink_policy;
+mod local_tree_final_access;
 
 pub use local_atomicity_requirement::LocalAtomicityRequirement;
 pub use local_durability_requirement::LocalDurabilityRequirement;
 pub use local_file_sync_requirement::LocalFileSyncRequirement;
 pub use local_privacy_requirement::LocalPrivacyRequirement;
 pub use local_symlink_policy::LocalSymlinkPolicy;
+pub use local_tree_final_access::LocalTreeFinalAccess;

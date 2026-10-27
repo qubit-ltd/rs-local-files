@@ -30,6 +30,11 @@ use super::LocalResourceLimitError;
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum LocalFileErrorSource {
+    /// File contents failed UTF-8 decoding.
+    InvalidEncoding(
+        /// Retained UTF-8 decoding failure.
+        std::string::FromUtf8Error,
+    ),
     /// Operating-system I/O failure.
     Io(
         /// Retained operating-system error.
@@ -51,6 +56,7 @@ impl fmt::Display for LocalFileErrorSource {
     /// Formats the retained typed failure source.
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::InvalidEncoding(error) => error.fmt(formatter),
             Self::Io(error) => error.fmt(formatter),
             Self::PathCodec(error) => error.fmt(formatter),
             Self::ResourceLimit(error) => error.fmt(formatter),
@@ -63,6 +69,7 @@ impl Error for LocalFileErrorSource {
     #[inline]
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
+            Self::InvalidEncoding(error) => Some(error),
             Self::Io(error) => Some(error),
             Self::PathCodec(error) => Some(error),
             Self::ResourceLimit(error) => Some(error),
