@@ -79,6 +79,18 @@ use crate::writer::internal::LocalCommitSyncObserver;
 #[cfg(any(unix, windows))]
 use crate::LocalRelativePath;
 use crate::options::LocalWriteMetadataPolicy;
+
+#[cfg(unix)]
+fn sync_rooted_parent_chain_observed(
+    parent: &File,
+    parent_dirs_to_sync: &[File],
+    observer: Option<&LocalCommitSyncObserver>,
+) -> io::Result<()> {
+    if let Some(observer) = observer {
+        observer.record_parent_sync();
+    }
+    sync_rooted_parent_chain(parent, parent_dirs_to_sync)
+}
 #[cfg(windows)]
 use crate::write::Mode as WriteMode;
 #[cfg(windows)]
@@ -959,7 +971,11 @@ impl LocalRootAtomicWriter {
                     staged_file.disarm();
                 },
                 |staged_file: &RootedStagedFile| {
-                    sync_rooted_parent_chain(staged_file.parent(), &self.parent_dirs_to_sync)
+                    sync_rooted_parent_chain_observed(
+                        staged_file.parent(),
+                        &self.parent_dirs_to_sync,
+                        observer,
+                    )
                 },
             );
         }
@@ -967,12 +983,9 @@ impl LocalRootAtomicWriter {
             self.staged_file.disarm();
             return Ok(false);
         }
-        if let Some(observer) = observer {
-            observer.record_parent_sync();
-        }
         let temporary_path = self.staged_file.diagnostic_path().to_path_buf();
         self.staged_file.disarm();
-        match sync_rooted_parent_chain(self.staged_file.parent(), &self.parent_dirs_to_sync) {
+        match sync_rooted_parent_chain_observed(self.staged_file.parent(), &self.parent_dirs_to_sync, observer) {
             Ok(()) => Ok(true),
             Err(_) if self.durability == LocalDurabilityRequirement::Preferred => Ok(false),
             Err(error) => map_atomic_error(

@@ -528,19 +528,22 @@ impl LocalAtomicWriter {
                     staged_file.close();
                     staged_file.disarm();
                 },
-                |_: &StagedFile| sync_atomic_parent_chain(&self.operation_path, &self.parent_dirs_to_sync),
+                |_: &StagedFile| {
+                    sync_atomic_parent_chain_observed(
+                        &self.operation_path,
+                        &self.parent_dirs_to_sync,
+                        observer,
+                    )
+                },
             );
         }
         if self.durability == LocalDurabilityRequirement::NotRequired {
             self.staged_file.disarm();
             return Ok(false);
         }
-        if let Some(observer) = observer {
-            observer.record_parent_sync();
-        }
         let temporary_path = self.staged_file.path().to_path_buf();
         self.staged_file.disarm();
-        match sync_atomic_parent_chain(&self.operation_path, &self.parent_dirs_to_sync) {
+        match sync_atomic_parent_chain_observed(&self.operation_path, &self.parent_dirs_to_sync, observer) {
             Ok(()) => Ok(true),
             Err(_) if self.durability == LocalDurabilityRequirement::Preferred => Ok(false),
             Err(error) => with_atomic_context(
@@ -615,6 +618,17 @@ fn sync_atomic_parent_chain(path: &Path, parent_dirs_to_sync: &[PathBuf]) -> io:
         sync_parent_dir(directory)?;
     }
     Ok(())
+}
+
+fn sync_atomic_parent_chain_observed(
+    path: &Path,
+    parent_dirs_to_sync: &[PathBuf],
+    observer: Option<&LocalCommitSyncObserver>,
+) -> io::Result<()> {
+    if let Some(observer) = observer {
+        observer.record_parent_sync();
+    }
+    sync_atomic_parent_chain(path, parent_dirs_to_sync)
 }
 
 /// Returns destination existence and metadata-preservation requirements.

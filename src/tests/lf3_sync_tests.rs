@@ -349,15 +349,19 @@ fn lf3_sync_rooted_durability_required_reports_file_sync() {
 #[cfg(all(unix, feature = "test-support"))]
 #[test]
 fn lf3_sync_preferred_parent_failure_preserves_file_sync_result() {
+    use std::sync::Arc;
+
     let fixture = tempfile::tempdir().expect("temporary directory should be created");
     let fs = LocalFileSystem::host().expect("host filesystem should open");
     let target = fixture.path().join("parent/sync");
     let options = LocalWriteOptions::new(LocalWriteMode::CreateNew)
         .with_create_parent()
         .with_durability(LocalDurabilityRequirement::Preferred);
+    let observer = Arc::new(LocalCommitSyncObserver::default());
     let mut writer = fs
         .open_writer_with_options(&target, &options)
-        .expect("writer should open");
+        .expect("writer should open")
+        .with_sync_observer(Arc::clone(&observer));
     writer
         .write_fully(b"data")
         .expect("bytes should be written");
@@ -368,19 +372,25 @@ fn lf3_sync_preferred_parent_failure_preserves_file_sync_result() {
         .expect("preferred parent sync failure may publish");
     assert!(outcome.file_synced());
     assert!(!outcome.durable());
+    assert_eq!(1, observer.file_sync_calls());
+    assert_eq!(1, observer.parent_sync_calls());
 }
 
 #[cfg(all(unix, feature = "test-support"))]
 #[test]
 fn lf3_sync_preferred_rooted_parent_failure_preserves_file_sync_result() {
+    use std::sync::Arc;
+
     let fixture = tempfile::tempdir().expect("temporary directory should be created");
     let fs = LocalFileSystem::rooted(fixture.path()).expect("rooted filesystem should open");
     let target = std::path::Path::new("sync");
     let options = LocalWriteOptions::new(LocalWriteMode::CreateNew)
         .with_durability(LocalDurabilityRequirement::Preferred);
+    let observer = Arc::new(LocalCommitSyncObserver::default());
     let mut writer = fs
         .open_writer_with_options(target, &options)
-        .expect("writer should open");
+        .expect("writer should open")
+        .with_sync_observer(Arc::clone(&observer));
     writer
         .write_fully(b"data")
         .expect("bytes should be written");
@@ -391,4 +401,62 @@ fn lf3_sync_preferred_rooted_parent_failure_preserves_file_sync_result() {
         .expect("preferred parent sync failure may publish");
     assert!(outcome.file_synced());
     assert!(!outcome.durable());
+    assert_eq!(1, observer.file_sync_calls());
+    assert_eq!(1, observer.parent_sync_calls());
+}
+
+#[cfg(all(any(target_os = "linux", target_os = "android"), feature = "test-support"))]
+#[test]
+fn lf3_sync_host_recovery_parent_sync_is_counted() {
+    use std::sync::Arc;
+
+    let fixture = tempfile::tempdir().expect("temporary directory should be created");
+    let fs = LocalFileSystem::host().expect("host filesystem should open");
+    let target = fixture.path().join("sync");
+    let options = LocalWriteOptions::new(LocalWriteMode::CreateNew)
+        .with_file_sync(LocalFileSyncRequirement::Required)
+        .with_durability(LocalDurabilityRequirement::Preferred);
+    let observer = Arc::new(LocalCommitSyncObserver::default());
+    let mut writer = fs
+        .open_writer_with_options(&target, &options)
+        .expect("writer should open")
+        .with_sync_observer(Arc::clone(&observer));
+    writer.write_fully(b"data").expect("bytes should be written");
+    let _fault = crate::test_support::install_test_fault("atomic-install-unlink-recover-sync")
+        .expect("fallback recovery sync fault should install");
+    let outcome = writer.commit().expect("preferred recovery sync may fail and publish");
+
+    assert!(outcome.file_synced());
+    assert!(!outcome.durable());
+    assert_eq!(1, observer.file_sync_calls());
+    assert_eq!(1, observer.parent_sync_calls());
+    assert_eq!(b"data".to_vec(), std::fs::read(target).expect("published file should remain"));
+}
+
+#[cfg(all(unix, any(target_os = "linux", target_os = "android"), feature = "test-support"))]
+#[test]
+fn lf3_sync_rooted_recovery_parent_sync_is_counted() {
+    use std::sync::Arc;
+
+    let fixture = tempfile::tempdir().expect("temporary directory should be created");
+    let fs = LocalFileSystem::rooted(fixture.path()).expect("rooted filesystem should open");
+    let target = std::path::Path::new("sync");
+    let options = LocalWriteOptions::new(LocalWriteMode::CreateNew)
+        .with_file_sync(LocalFileSyncRequirement::Required)
+        .with_durability(LocalDurabilityRequirement::Preferred);
+    let observer = Arc::new(LocalCommitSyncObserver::default());
+    let mut writer = fs
+        .open_writer_with_options(target, &options)
+        .expect("writer should open")
+        .with_sync_observer(Arc::clone(&observer));
+    writer.write_fully(b"data").expect("bytes should be written");
+    let _fault = crate::test_support::install_test_fault("atomic-install-unlink-recover-sync")
+        .expect("fallback recovery sync fault should install");
+    let outcome = writer.commit().expect("preferred recovery sync may fail and publish");
+
+    assert!(outcome.file_synced());
+    assert!(!outcome.durable());
+    assert_eq!(1, observer.file_sync_calls());
+    assert_eq!(1, observer.parent_sync_calls());
+    assert_eq!(b"data".to_vec(), std::fs::read(fixture.path().join(target)).expect("published file should remain"));
 }
