@@ -14,13 +14,20 @@ use std::io::SeekFrom;
 use qubit_io::Input;
 use qubit_io::Streams;
 use qubit_local_files::LocalFileSystem;
+#[cfg(unix)]
 use qubit_local_files::error::LocalFileErrorKind;
+#[cfg(unix)]
 use qubit_local_files::options::LocalDirectoryOpenOptions;
+#[cfg(unix)]
 use qubit_local_files::options::LocalObservedReadOptions;
+#[cfg(unix)]
 use qubit_local_files::options::LocalPathBindingOptions;
+#[cfg(unix)]
 use qubit_local_files::options::LocalReadAllOptions;
 use qubit_local_files::options::LocalReadOptions;
+#[cfg(unix)]
 use qubit_local_files::options::LocalSnapshotOptions;
+#[cfg(unix)]
 use qubit_local_files::policy::LocalSymlinkPolicy;
 use tempfile::tempdir;
 
