@@ -9,6 +9,7 @@
 mod error;
 mod file_system;
 mod lf3_contract_tests;
+mod lf3_authority_tests;
 mod lf3_read_tests;
 #[cfg(unix)]
 mod lf3_observation_unix_tests;

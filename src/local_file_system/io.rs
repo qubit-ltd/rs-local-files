@@ -121,6 +121,8 @@ impl LocalFileSystem {
             observed = observed.with_binding(Box::new(DirectoryPathBinding::new(parent_anchors, binding_options.deadline())));
         }
         Ok(observed)
+    }
+
     /// Reads metadata for the final target while honoring this filesystem's link policy.
     ///
     /// Returns file or directory metadata. Link rejection, missing targets,
