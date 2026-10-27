@@ -138,8 +138,6 @@ where
                 if options.durability() == LocalDurabilityRequirement::Preferred {
                     durable = false;
                 }
-            } else {
-                file_synced = true;
             }
             if options.durability() != LocalDurabilityRequirement::NotRequired {
                 if let Err(error) = backend.sync_namespace() {
@@ -178,12 +176,9 @@ where
                         if sync_requirement == LocalFileSyncRequirement::Required {
                             return Err((stage, error));
                         }
-                        file_synced = false;
                         if options.durability() == LocalDurabilityRequirement::Preferred {
                             durable = false;
                         }
-                    } else if sync_requirement != LocalFileSyncRequirement::NotRequired {
-                        file_synced = true;
                     }
                 }
                 // The observed target is only a precheck/metadata source. The
@@ -500,6 +495,25 @@ where
                 stage,
                 io::Error::new(io::ErrorKind::InvalidData, "installed candidate verification failed"),
             ));
+        }
+        if sync_requirement != LocalFileSyncRequirement::NotRequired {
+            stage = LocalConditionalWriteStage::Sync;
+            let sync_result = backend
+                .checkpoint(ConditionalPoint::SyncInstalled)
+                .and_then(|()| backend.sync_entry(&installed));
+            match sync_result {
+                Ok(()) => file_synced = true,
+                Err(error) if sync_requirement == LocalFileSyncRequirement::Required => {
+                    entries.push(installed);
+                    return Err((stage, error));
+                }
+                Err(_) => {
+                    file_synced = false;
+                    if options.durability() == LocalDurabilityRequirement::Preferred {
+                        durable = false;
+                    }
+                }
+            }
         }
         if options.durability() == LocalDurabilityRequirement::Required {
             stage = LocalConditionalWriteStage::Sync;

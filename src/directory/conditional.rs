@@ -27,7 +27,9 @@ impl LocalDirectoryHandle {
             return LocalCapabilitySupport::Unsupported;
         }
         #[cfg(windows)]
-        if kind == LocalConditionalKind::Content {
+        if kind == LocalConditionalKind::Content
+            || options.durability() == crate::policy::LocalDurabilityRequirement::Required
+        {
             return LocalCapabilitySupport::Unsupported;
         }
         #[cfg(unix)]

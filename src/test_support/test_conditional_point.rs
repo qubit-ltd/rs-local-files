@@ -37,6 +37,8 @@ pub enum TestConditionalPoint {
     AfterRollback,
     /// Before the required file synchronization step.
     BeforeRequiredFileSync,
+    /// Before synchronizing the verified installed destination entry.
+    BeforeInstalledFileSync,
     /// Before the required parent-directory synchronization step.
     BeforeRequiredParentSync,
     /// After publication and required synchronization establish save

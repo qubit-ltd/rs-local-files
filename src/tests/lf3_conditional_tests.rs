@@ -7,11 +7,14 @@ use crate::capability::LocalCapabilitySupport;
 use crate::capability::LocalConditionalKind;
 use crate::options::LocalDirectoryOpenOptions;
 use crate::options::LocalWritePrecondition;
+#[cfg(windows)]
+use crate::policy::LocalDurabilityRequirement;
 use crate::policy::LocalFileSyncRequirement;
 use crate::policy::LocalSymlinkPolicy;
 use qubit_io::Output;
 use sha2::Digest;
 use sha2::Sha256;
+use std::path::Path;
 
 #[test]
 fn lf3_conditional_absent_fixed_parent() {
@@ -163,7 +166,7 @@ fn lf3_conditional_preferred_file_sync_failure_reports_false_and_publishes() {
     fsys.set_symlink_policy(LocalSymlinkPolicy::Reject)
         .expect("set link policy");
     let fsys = fsys.with_conditional_test_hooks(TestConditionalHooks::once(
-        TestConditionalPoint::BeforeRequiredFileSync,
+        TestConditionalPoint::BeforeInstalledFileSync,
         || Err(std::io::Error::other("injected preferred sync failure")),
     ));
     let options = LocalWriteOptions::new(LocalWriteMode::CreateNew)
@@ -216,6 +219,137 @@ fn lf3_conditional_windows_rooted_content_preflight_is_unchanged() {
         .map(|entry| entry.expect("entry").file_name())
         .collect::<std::collections::BTreeSet<_>>();
     assert_eq!(before, after);
+
+    let rooted = LocalFileSystem::rooted(fixture.path()).expect("open rooted filesystem");
+    let mut rooted = rooted;
+    rooted
+        .set_symlink_policy(LocalSymlinkPolicy::Reject)
+        .expect("set rooted link policy");
+    let error = rooted
+        .open_conditional_writer::<Sha256>(
+            Path::new("direct-new"),
+            LocalWritePrecondition::Absent,
+            &options,
+        )
+        .expect_err("Rooted Required durability is unsupported before staging");
+    assert_eq!(
+        error.kind(),
+        crate::error::LocalFileErrorKind::RequirementNotMet
+    );
+    let final_entries = fs::read_dir(fixture.path())
+        .expect("enumerate after direct Rooted open")
+        .map(|entry| entry.expect("entry").file_name())
+        .collect::<std::collections::BTreeSet<_>>();
+    assert_eq!(before, final_entries);
 }
 
-use std::path::Path;
+#[cfg(windows)]
+#[test]
+fn lf3_conditional_windows_rooted_required_durability_preflight_is_unchanged() {
+    let fixture = tempfile::tempdir().expect("fixture directory");
+    let mut fsys = LocalFileSystem::host().expect("host filesystem");
+    fsys.set_symlink_policy(LocalSymlinkPolicy::Reject)
+        .expect("set link policy");
+    let parent = fsys
+        .open_directory_with_options(fixture.path(), &LocalDirectoryOpenOptions::new())
+        .expect("open fixed parent");
+    let options = LocalWriteOptions::new(LocalWriteMode::CreateNew)
+        .with_durability(LocalDurabilityRequirement::Required);
+    let before = fs::read_dir(fixture.path())
+        .expect("enumerate before")
+        .map(|entry| entry.expect("entry").file_name())
+        .collect::<std::collections::BTreeSet<_>>();
+    assert_eq!(
+        parent.conditional_support(LocalConditionalKind::Absent, &options),
+        LocalCapabilitySupport::Unsupported
+    );
+    let error = parent
+        .open_conditional_writer::<Sha256>(
+            Path::new("new"),
+            LocalWritePrecondition::Absent,
+            &options,
+        )
+        .expect_err("Rooted Required durability is unsupported");
+    assert_eq!(
+        error.kind(),
+        crate::error::LocalFileErrorKind::RequirementNotMet
+    );
+    let after = fs::read_dir(fixture.path())
+        .expect("enumerate after")
+        .map(|entry| entry.expect("entry").file_name())
+        .collect::<std::collections::BTreeSet<_>>();
+    assert_eq!(before, after);
+}
+
+#[cfg(feature = "test-support")]
+#[test]
+fn lf3_conditional_installed_sync_failure_is_published() {
+    use crate::test_support::{TestConditionalHooks, TestConditionalPoint};
+
+    let fixture = tempfile::tempdir().expect("fixture directory");
+    let target = fixture.path().join("target");
+    fs::write(&target, b"previous").expect("write previous content");
+    let mut fsys = LocalFileSystem::host().expect("host filesystem");
+    fsys.set_symlink_policy(LocalSymlinkPolicy::Reject)
+        .expect("set link policy");
+    let fsys = fsys.with_conditional_test_hooks(TestConditionalHooks::once(
+        TestConditionalPoint::BeforeInstalledFileSync,
+        || Err(std::io::Error::other("injected installed sync failure")),
+    ));
+    let options = LocalWriteOptions::new(LocalWriteMode::CreateOrReplace)
+        .with_file_sync(LocalFileSyncRequirement::Required);
+    let mut writer = fsys
+        .open_conditional_writer::<Sha256>(
+            &target,
+            LocalWritePrecondition::Content(Sha256::digest(b"previous").into()),
+            &options,
+        )
+        .expect("open conditional writer");
+    writer.write_fully(b"replacement").expect("write candidate");
+    let error = writer
+        .commit()
+        .expect_err("final installed sync is required");
+    assert_eq!(
+        error.publication(),
+        crate::outcome::LocalConditionalPublicationState::Published
+    );
+    assert_eq!(
+        fs::read(&target).expect("read installed target"),
+        b"replacement"
+    );
+    assert!(
+        std::error::Error::source(error.error()).is_some(),
+        "native sync error is preserved"
+    );
+    assert!(!error.recovery_files().is_empty());
+}
+
+#[cfg(windows)]
+#[test]
+fn lf3_conditional_windows_host_content_syncs_installed_object() {
+    use sha2::Digest;
+
+    let fixture = tempfile::tempdir().expect("fixture directory");
+    let target = fixture.path().join("target");
+    fs::write(&target, b"previous").expect("write previous content");
+    let mut fsys = LocalFileSystem::host().expect("host filesystem");
+    fsys.set_symlink_policy(LocalSymlinkPolicy::Reject)
+        .expect("set link policy");
+    let options = LocalWriteOptions::new(LocalWriteMode::CreateOrReplace)
+        .with_file_sync(LocalFileSyncRequirement::Required)
+        .with_metadata_policy(crate::options::LocalWriteMetadataPolicy::PreserveExisting);
+    let mut writer = fsys
+        .open_conditional_writer::<Sha256>(
+            &target,
+            LocalWritePrecondition::Content(Sha256::digest(b"previous").into()),
+            &options,
+        )
+        .expect("open conditional writer");
+    writer.write_fully(b"replacement").expect("write candidate");
+    let outcome = writer.commit().expect("publish replacement");
+    assert!(outcome.write_outcome().file_synced());
+    assert_eq!(
+        fs::read(&target).expect("read installed target"),
+        b"replacement"
+    );
+}

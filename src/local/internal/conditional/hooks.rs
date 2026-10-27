@@ -52,6 +52,7 @@ impl ConditionalHooks {
             PublicPoint::BeforeRollbackExchange => ConditionalPoint::RollbackExchange,
             PublicPoint::AfterRollback => ConditionalPoint::AfterRollbackSyscall,
             PublicPoint::BeforeRequiredFileSync => ConditionalPoint::BeforeRequiredFileSync,
+            PublicPoint::BeforeInstalledFileSync => ConditionalPoint::SyncInstalled,
             PublicPoint::BeforeRequiredParentSync => ConditionalPoint::BeforeRequiredParentSync,
             PublicPoint::AfterSaveComplete => ConditionalPoint::SaveComplete,
             PublicPoint::BeforeCleanupOld => ConditionalPoint::CleanupOld,
