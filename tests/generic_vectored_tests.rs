@@ -79,7 +79,10 @@ fn vectored_writer_entries_share_the_byte_count() {
         .write_vectored(&[IoSlice::new(b"c"), IoSlice::new(b"d")])
         .unwrap();
     assert_eq!(writer.commit().unwrap().bytes_written(), first + second);
-    assert_eq!(std::fs::read(path).unwrap(), b"abcd");
+    let mut expected = Vec::new();
+    expected.extend_from_slice(&b"ab"[..first]);
+    expected.extend_from_slice(&b"cd"[..second]);
+    assert_eq!(std::fs::read(path).unwrap(), expected);
 }
 
 #[test]
