@@ -389,8 +389,11 @@ impl LocalFileSystem {
             resolver.current_directory(),
             options.symlink_policy().unwrap_or(self.symlink_policy),
         )?;
-        let mut observed =
-            LocalObservedReader::from_reader(reader, LocalObservationRequirement::Required)?;
+        let mut observed = LocalObservedReader::from_reader(
+            reader,
+            LocalObservationRequirement::Required,
+        )
+        .map_err(|error| error.with_path(resolved.namespace_absolute().to_path_buf()))?;
         let before = observed.observation().clone();
         if before.metadata().len() > options.max_bytes() {
             return Err(LocalFileError::new(
@@ -399,10 +402,14 @@ impl LocalFileSystem {
             )
             .with_path(resolved.namespace_absolute().to_path_buf()));
         }
-        let bytes = observed.read_to_end_limited(options.max_bytes())?;
+        let bytes = observed
+            .read_to_end_limited(options.max_bytes())
+            .map_err(|error| error.with_path(resolved.namespace_absolute().to_path_buf()))?;
         #[cfg(test)]
         crate::observation::snapshot::run_read_hook();
-        let after = observed.observe_now()?;
+        let after = observed
+            .observe_now()
+            .map_err(|error| error.with_path(resolved.namespace_absolute().to_path_buf()))?;
         if !crate::observation::snapshot::observations_match(&before, &after, bytes.len() as u64) {
             return Err(LocalFileError::new(
                 LocalFileErrorKind::ChangedDuringRead,
