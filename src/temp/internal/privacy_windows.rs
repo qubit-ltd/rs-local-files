@@ -66,6 +66,7 @@ use windows_sys::Win32::System::Threading::GetCurrentProcess;
 use windows_sys::Win32::System::Threading::OpenProcessToken;
 
 use crate::temp::types::NativePrivateCreateError;
+use crate::temp::types::NativePrivateEntry;
 
 const ACL_BUFFER_SIZE: usize = 1024;
 const FILE_INITIAL_ACCESS: u32 = FILE_READ_DATA
@@ -302,10 +303,7 @@ pub(crate) fn create_private_file_at(
     parent: &File,
     name: &OsStr,
 ) -> Result<File, NativePrivateCreateError> {
-    create_at(parent, name, false).map_err(|source| NativePrivateCreateError {
-        source,
-        retained: None,
-    })
+    create_private_entry_at(parent, name, false)
 }
 
 /// Creates a directory relative to a retained parent handle with a protected current-user DACL.
@@ -313,10 +311,37 @@ pub(crate) fn create_private_directory_at(
     parent: &File,
     name: &OsStr,
 ) -> Result<File, NativePrivateCreateError> {
-    create_at(parent, name, true).map_err(|source| NativePrivateCreateError {
+    create_private_entry_at(parent, name, true)
+}
+
+fn create_private_entry_at(
+    parent: &File,
+    name: &OsStr,
+    directory: bool,
+) -> Result<File, NativePrivateCreateError> {
+    let retained_parent = parent
+        .try_clone()
+        .map_err(|source| NativePrivateCreateError {
+            source,
+            retained: None,
+        })?;
+    let retained_name = name.to_os_string();
+    let file = create_at(parent, name, directory).map_err(|source| NativePrivateCreateError {
         source,
         retained: None,
-    })
+    })?;
+    if let Err(source) = verify_current_user_access(&file, directory, false) {
+        return Err(NativePrivateCreateError {
+            source,
+            retained: Some(NativePrivateEntry {
+                parent: retained_parent,
+                name: retained_name,
+                file: Some(file),
+                identity: None,
+            }),
+        });
+    }
+    Ok(file)
 }
 
 /// Applies the current user's access policy to an already-open entry.
