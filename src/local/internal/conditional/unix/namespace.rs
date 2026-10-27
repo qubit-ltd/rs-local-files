@@ -144,11 +144,6 @@ impl Namespace {
         open_regular_at(&self.parent, name)
     }
 
-    pub(super) fn sync_entry(&self, entry: &ConditionalEntry) -> io::Result<()> {
-        let name = super::recovery::name(entry)?;
-        self.open_name(&name)?.sync_all()
-    }
-
     pub(super) fn sync_all(&self) -> io::Result<()> {
         self.parent.sync_all()?;
         for directory in self.sync_dirs.iter().rev() {

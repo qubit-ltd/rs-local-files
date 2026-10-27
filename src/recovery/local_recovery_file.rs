@@ -150,6 +150,10 @@ mod conditional_types_tests {
                 LocalFileError::from_io(LocalFileOperation::OpenReader, Some(self.path.clone()), None, error)
             })
         }
+
+        fn sync_file(&self) -> std::io::Result<()> {
+            File::open(&self.path)?.sync_all()
+        }
     }
 
     #[test]

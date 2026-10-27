@@ -588,7 +588,7 @@ impl ConditionalBackend for WindowsConditionalBackend {
     }
 
     fn sync_entry(&self, entry: &ConditionalEntry) -> io::Result<()> {
-        self.namespace.sync_entry(entry)
+        entry.sync_file()
     }
 
     fn sync_namespace(&self) -> io::Result<()> {

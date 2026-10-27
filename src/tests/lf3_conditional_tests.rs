@@ -324,6 +324,54 @@ fn lf3_conditional_installed_sync_failure_is_published() {
     assert!(!error.recovery_files().is_empty());
 }
 
+#[cfg(feature = "test-support")]
+#[test]
+fn lf3_conditional_replaced_installed_entry_is_not_reported_synced() {
+    use crate::test_support::{TestConditionalHooks, TestConditionalPoint};
+
+    let fixture = tempfile::tempdir().expect("fixture directory");
+    let target = fixture.path().join("target");
+    let replaced = fixture.path().join("replaced");
+    let mut fsys = LocalFileSystem::host().expect("host filesystem");
+    fsys.set_symlink_policy(LocalSymlinkPolicy::Reject)
+        .expect("set link policy");
+    let hook_target = target.clone();
+    let hook_replaced = replaced.clone();
+    let fsys = fsys.with_conditional_test_hooks(TestConditionalHooks::once(
+        TestConditionalPoint::BeforeInstalledFileSync,
+        move || {
+            fs::rename(&hook_target, &hook_replaced)?;
+            fs::write(&hook_target, b"replacement by competitor")?;
+            Ok(())
+        },
+    ));
+    let options = LocalWriteOptions::new(LocalWriteMode::CreateNew)
+        .with_file_sync(LocalFileSyncRequirement::Required);
+    let mut writer = fsys
+        .open_conditional_writer::<Sha256>(&target, LocalWritePrecondition::Absent, &options)
+        .expect("open conditional writer");
+    writer.write_fully(b"candidate").expect("write candidate");
+    let error = writer
+        .commit()
+        .expect_err("replacement must fail final installed sync");
+    assert_eq!(
+        error.publication(),
+        crate::outcome::LocalConditionalPublicationState::Published
+    );
+    assert_eq!(
+        fs::read(&target).expect("read competing replacement"),
+        b"replacement by competitor"
+    );
+    assert_eq!(
+        fs::read(&replaced).expect("read original installed object"),
+        b"candidate"
+    );
+    assert!(
+        std::error::Error::source(error.error()).is_some(),
+        "identity mismatch remains the error source"
+    );
+}
+
 #[cfg(windows)]
 #[test]
 fn lf3_conditional_windows_host_content_syncs_installed_object() {

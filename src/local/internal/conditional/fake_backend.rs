@@ -66,6 +66,10 @@ impl super::RecoveryAccess for Access {
             )
         })
     }
+
+    fn sync_file(&self) -> io::Result<()> {
+        fs::File::open(&self.path)?.sync_all()
+    }
 }
 
 pub(super) struct FakeBackend {

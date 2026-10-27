@@ -334,27 +334,6 @@ impl Namespace {
         Ok(())
     }
 
-    pub(super) fn sync_entry(&self, entry: &ConditionalEntry) -> io::Result<()> {
-        let name = entry
-            .namespace_path()
-            .file_name()
-            .ok_or_else(|| io::Error::new(ErrorKind::InvalidInput, "entry has no leaf"))?;
-        let file = match &self.scope {
-            Scope::Host { .. } => open_host_file(
-                entry.namespace_path(),
-                GENERIC_READ | windows_sys::Win32::Foundation::GENERIC_WRITE | FILE_READ_ATTRIBUTES | SYNCHRONIZE,
-            )?,
-            Scope::Rooted { .. } => open_conditional_entry_at(
-                &self.parent,
-                name,
-                GENERIC_READ | windows_sys::Win32::Foundation::GENERIC_WRITE | FILE_READ_ATTRIBUTES | SYNCHRONIZE,
-                FILE_OPEN,
-                FILE_NON_DIRECTORY_FILE,
-            )?,
-        };
-        file.sync_all()
-    }
-
     pub(super) fn child_path(&self, name: &OsStr) -> PathBuf {
         match &self.scope {
             Scope::Host { parent_path } => parent_path.join(name),
@@ -620,6 +599,24 @@ impl RecoveryAccess for EntryAccess {
                 error,
             )
         })
+    }
+
+    fn sync_file(&self) -> io::Result<()> {
+        let file = open_conditional_entry_at(
+            &self.parent,
+            &self.name,
+            GENERIC_READ | GENERIC_WRITE | FILE_READ_ATTRIBUTES | SYNCHRONIZE,
+            FILE_OPEN,
+            FILE_NON_DIRECTORY_FILE,
+        )?;
+        verify_regular_no_reparse(&file)?;
+        if file_identity(&file)? != self.identity {
+            return Err(io::Error::new(
+                ErrorKind::InvalidData,
+                "conditional entry identity changed before file synchronization",
+            ));
+        }
+        file.sync_all()
     }
 }
 

@@ -86,6 +86,32 @@ impl RecoveryAccess for EntryAccess {
             )
         })
     }
+
+    fn sync_file(&self) -> io::Result<()> {
+        // SAFETY: the retained parent and single-component name remain live
+        // for openat; O_NOFOLLOW prevents syncing a substituted symlink.
+        let descriptor = unsafe {
+            libc::openat(
+                self.parent.as_raw_fd(),
+                self.name.as_ptr(),
+                libc::O_RDONLY | libc::O_CLOEXEC | libc::O_NOFOLLOW | libc::O_NONBLOCK,
+                0,
+            )
+        };
+        if descriptor == -1 {
+            return Err(io::Error::last_os_error());
+        }
+        // SAFETY: openat returned a new descriptor uniquely owned here.
+        let file = unsafe { File::from_raw_fd(descriptor) };
+        let metadata = file.metadata()?;
+        if !metadata.is_file() || metadata.dev() != self.device || metadata.ino() != self.inode {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "conditional entry identity changed before file synchronization",
+            ));
+        }
+        file.sync_all()
+    }
 }
 
 pub(super) fn name(entry: &super::super::ConditionalEntry) -> io::Result<CString> {

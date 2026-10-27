@@ -7,6 +7,7 @@
 // =============================================================================
 
 use std::fmt::Debug;
+use std::io;
 use std::path::PathBuf;
 
 use crate::LocalFileReader;
@@ -20,6 +21,7 @@ use crate::recovery::LocalRecoveryFileRole;
 /// the current entry identity. A diagnostic path is not an access capability.
 pub(crate) trait RecoveryAccess: Debug + Send + Sync {
     fn open_reader(&self) -> LocalResult<LocalFileReader>;
+    fn sync_file(&self) -> io::Result<()>;
 }
 
 /// An observed namespace entry and the permission required to read it again.
@@ -76,6 +78,12 @@ impl ConditionalEntry {
     #[allow(dead_code)]
     pub(crate) fn open_reader(&self) -> LocalResult<LocalFileReader> {
         self.access.open_reader()
+    }
+
+    /// Opens the entry through its retained authority, verifies the observed
+    /// identity on that handle, and synchronizes the same handle.
+    pub(crate) fn sync_file(&self) -> io::Result<()> {
+        self.access.sync_file()
     }
 
     /// Transfers the retained permission into a non-deleting recovery value.
