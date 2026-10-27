@@ -22,7 +22,7 @@ use qubit_local_files::outcome::LocalCopyStats;
 use qubit_local_files::policy::LocalAtomicityRequirement;
 #[cfg(unix)]
 use qubit_local_files::policy::LocalDurabilityRequirement;
-#[cfg(feature = "test-support")]
+#[cfg(all(unix, feature = "test-support"))]
 use qubit_local_files::test_support::install_test_fault;
 use tempfile::tempdir;
 
