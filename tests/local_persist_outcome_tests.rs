@@ -13,6 +13,7 @@ use std::fs;
 use std::os::unix::fs::symlink;
 #[cfg(all(feature = "test-support", unix))]
 use std::path::Path;
+#[cfg(unix)]
 use std::path::absolute;
 
 use qubit_io::Output;
