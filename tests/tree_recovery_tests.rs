@@ -44,7 +44,9 @@ fn test_recovery_error_publish_source_retains_same_cause_and_owners() {
         stage.cleanup().expect("recovered stage should be explicitly cleanable");
     }
     for resource in retained {
-        resource.cleanup().expect("retained resource should be explicitly cleanable");
+        resource
+            .cleanup()
+            .expect("retained resource should be explicitly cleanable");
     }
     assert_eq!(
         b"original",

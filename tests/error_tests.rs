@@ -222,7 +222,8 @@ fn test_local_file_error_exposes_optional_context_without_source() {
 fn require_standard_error<E: Error + 'static>() {}
 
 fn seal_failure_propagates_as_standard_error() -> Result<(), Box<dyn Error>> {
-    use qubit_local_files::options::{LocalSealOptions, LocalTempFileOptions};
+    use qubit_local_files::options::LocalSealOptions;
+    use qubit_local_files::options::LocalTempFileOptions;
 
     let parent = tempfile::tempdir()?;
     let mut temporary = qubit_local_files::LocalFileSystem::host()?
@@ -234,8 +235,9 @@ fn seal_failure_propagates_as_standard_error() -> Result<(), Box<dyn Error>> {
 
 #[test]
 fn test_recovery_error_seal_implements_standard_error() {
-    use qubit_local_files::options::{LocalSealOptions, LocalTempFileOptions};
     use qubit_local_files::LocalTempSealError;
+    use qubit_local_files::options::LocalSealOptions;
+    use qubit_local_files::options::LocalTempFileOptions;
 
     require_standard_error::<LocalTempSealError>();
     let parent = tempfile::tempdir().expect("temporary parent should be created");
@@ -252,7 +254,9 @@ fn test_recovery_error_seal_implements_standard_error() {
         .expect("standard source should be the structured cause");
     assert!(std::ptr::eq(source, failure.cause()));
     let mut resource = failure.into_resource();
-    resource.cleanup().expect("seal error should retain a cleanable resource");
+    resource
+        .cleanup()
+        .expect("seal error should retain a cleanable resource");
     assert!(seal_failure_propagates_as_standard_error().is_err());
 }
 

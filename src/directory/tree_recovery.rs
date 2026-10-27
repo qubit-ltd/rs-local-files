@@ -30,7 +30,7 @@ use crate::outcome::LocalTreeMutationState;
 /// the caller can still retry cleanup afterwards.
 ///
 /// ```
-/// use qubit_local_files::LocalTreeRetainedResource;
+/// use qubit_local_files::directory::LocalTreeRetainedResource;
 /// use std::path::Path;
 ///
 /// fn diagnostic_path(resource: &LocalTreeRetainedResource) -> &Path {
@@ -280,6 +280,10 @@ impl LocalTreeRetainedResource {
             Err(cause) => Err(cause),
         }
     }
+    /// Removes the retained tree and disarms this owner when cleanup succeeds.
+    ///
+    /// On failure, returns an error that still owns this resource so cleanup
+    /// can be retried or the owner can be transferred elsewhere.
     pub fn cleanup(mut self) -> Result<(), LocalTreeCleanupError> {
         match self.cleanup_inner() {
             Ok(()) => {
@@ -330,9 +334,12 @@ impl Drop for LocalTreeRetainedResource {
 /// # Examples
 ///
 /// ```
-/// use qubit_local_files::LocalTreeCleanupError;
+/// use qubit_local_files::directory::LocalTreeCleanupError;
 ///
-/// fn parts(error: LocalTreeCleanupError) -> (qubit_local_files::LocalFileError, Vec<qubit_local_files::LocalTreeRetainedResource>) {
+/// fn parts(error: LocalTreeCleanupError) -> (
+///     qubit_local_files::LocalFileError,
+///     Vec<qubit_local_files::directory::LocalTreeRetainedResource>,
+/// ) {
 ///     error.into_parts()
 /// }
 /// ```
@@ -399,7 +406,7 @@ impl std::error::Error for LocalTreeCleanupError {
 /// # Examples
 ///
 /// ```
-/// use qubit_local_files::LocalTreeRecoveryLocation;
+/// use qubit_local_files::directory::LocalTreeRecoveryLocation;
 /// use std::path::Path;
 ///
 /// fn recorded_path(location: &LocalTreeRecoveryLocation) -> &Path {
@@ -440,12 +447,13 @@ impl LocalTreeRecoveryLocation {
 /// # Examples
 ///
 /// ```
-/// use qubit_local_files::LocalTreeCreateError;
+/// use qubit_local_files::directory::LocalTreeCreateError;
+/// use qubit_local_files::directory::LocalStagedDirectory;
 ///
 /// fn parts(error: LocalTreeCreateError) -> (
 ///     qubit_local_files::LocalFileError,
-///     Option<qubit_local_files::LocalStagedDirectory>,
-///     Vec<qubit_local_files::LocalTreeRetainedResource>,
+///     Option<LocalStagedDirectory>,
+///     Vec<qubit_local_files::directory::LocalTreeRetainedResource>,
 /// ) {
 ///     error.into_parts()
 /// }
@@ -561,7 +569,7 @@ impl std::error::Error for LocalTreeCreateError {
 /// fn parts(error: LocalTreeAccessError) -> (
 ///     qubit_local_files::LocalFileError,
 ///     qubit_local_files::outcome::LocalTreeAccessState,
-///     Vec<qubit_local_files::LocalTreeRetainedResource>,
+///     Vec<qubit_local_files::directory::LocalTreeRetainedResource>,
 /// ) {
 ///     error.into_parts()
 /// }
@@ -580,18 +588,24 @@ impl LocalTreeAccessError {
             retained: Vec::new(),
         }
     }
+    /// Returns the access-policy failure cause.
     pub fn cause(&self) -> &LocalFileError {
         &self.cause
     }
+    /// Returns the access state observed when the operation failed.
     pub const fn access_state(&self) -> crate::outcome::LocalTreeAccessState {
         self.access_state
     }
+    /// Borrows cleanup owners that remain held by this error.
     pub fn retained_resources(&self) -> &[LocalTreeRetainedResource] {
         &self.retained
     }
+    /// Transfers retained cleanup owners and discards the cause and access
+    /// state.
     pub fn into_retained_resources(mut self) -> Vec<LocalTreeRetainedResource> {
         std::mem::take(&mut self.retained)
     }
+    /// Transfers the cause, access state, and retained cleanup owners.
     pub fn into_parts(
         mut self,
     ) -> (
@@ -730,6 +744,7 @@ impl LocalTreePublishError {
     pub fn cause(&self) -> &LocalFileError {
         &self.cause
     }
+    /// Returns whether publication may have mutated the destination namespace.
     pub const fn mutation_state(&self) -> LocalTreeMutationState {
         self.mutation
     }
@@ -738,9 +753,11 @@ impl LocalTreePublishError {
     pub fn retained_resources(&self) -> &[LocalTreeRetainedResource] {
         &self.retained
     }
+    /// Returns the publication outcome recorded before the failure.
     pub const fn publication(&self) -> crate::outcome::LocalTreePublication {
         self.publication
     }
+    /// Returns the access state observed when publication failed.
     pub const fn access_state(&self) -> crate::outcome::LocalTreeAccessState {
         self.access_state
     }

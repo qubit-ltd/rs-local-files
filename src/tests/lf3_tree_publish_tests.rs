@@ -76,12 +76,7 @@ fn test_recovery_error_tree_create_and_access_sources_retain_their_causes() {
     use crate::outcome::LocalTreeMutationState;
 
     let create_cause = LocalFileError::new(LocalFileErrorKind::NotFound, LocalFileOperation::CreateDirectory);
-    let create_error = LocalTreeCreateError::new(
-        create_cause,
-        None,
-        Vec::new(),
-        LocalTreeMutationState::NotStarted,
-    );
+    let create_error = LocalTreeCreateError::new(create_cause, None, Vec::new(), LocalTreeMutationState::NotStarted);
     let create_source = std::error::Error::source(&create_error)
         .and_then(|source| source.downcast_ref::<LocalFileError>())
         .expect("create error should expose its structured cause");
