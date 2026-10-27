@@ -550,13 +550,14 @@ fn windows_sealed_cleanup_fallback_restores_attributes_and_retries() {
     let error = {
         let _fault = install_test_fault("rooted-owned-delete-fallback-delete-once")
             .expect("fallback delete fault should install");
-        sealed
-            .cleanup()
-            .expect_err("the injected fallback delete should fail")
+        sealed.cleanup().expect_err("the injected fallback delete should fail")
     };
 
     assert_eq!(LocalFileErrorKind::Io, error.kind());
-    assert!(native_path.exists(), "the owned entry should remain after failed deletion");
+    assert!(
+        native_path.exists(),
+        "the owned entry should remain after failed deletion"
+    );
     assert!(
         fs::metadata(&native_path)
             .expect("entry metadata should remain available")
@@ -619,21 +620,26 @@ fn windows_sealed_cleanup_fallback_reports_restore_failure_and_retries() {
         .expect("Rooted temporary file should seal");
 
     let error = {
-        let _fault = install_test_fault("rooted-owned-delete-restore-fail")
-            .expect("fallback restore fault should install");
+        let _fault =
+            install_test_fault("rooted-owned-delete-restore-fail").expect("fallback restore fault should install");
         sealed
             .cleanup()
             .expect_err("the injected fallback delete and restore should fail")
     };
 
     let message = error.to_string();
-    assert!(message.contains("deletion failed"), "primary delete cause should be retained: {message}");
+    assert!(
+        message.contains("deletion failed"),
+        "primary delete cause should be retained: {message}"
+    );
     assert!(
         message.contains("restoring original file attributes failed"),
         "restore cause should be retained: {message}"
     );
     assert!(native_path.exists(), "the entry should remain available for retry");
-    sealed.cleanup().expect("cleanup should retry after the injected failure");
+    sealed
+        .cleanup()
+        .expect("cleanup should retry after the injected failure");
     assert!(!native_path.exists(), "retry should remove the owned entry");
 }
 

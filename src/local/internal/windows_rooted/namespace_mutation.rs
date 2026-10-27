@@ -242,7 +242,10 @@ fn delete_with_attribute_fallback(entry: &File) -> Result<()> {
 }
 
 /// Restores the complete captured `FILE_BASIC_INFO` payload.
-fn restore_file_basic_info(entry: &File, original: &windows_sys::Win32::Storage::FileSystem::FILE_BASIC_INFO) -> Result<()> {
+fn restore_file_basic_info(
+    entry: &File,
+    original: &windows_sys::Win32::Storage::FileSystem::FILE_BASIC_INFO,
+) -> Result<()> {
     use windows_sys::Win32::Storage::FileSystem::FileBasicInfo;
     use windows_sys::Win32::Storage::FileSystem::SetFileInformationByHandle;
 
