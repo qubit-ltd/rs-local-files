@@ -23,6 +23,7 @@ use crate::LocalSymlinkPolicy;
 use crate::LocalWriteOptions;
 use crate::directory::binding::BindingAnchor;
 use crate::directory::binding::DirectoryPathBinding;
+use crate::directory::binding::PathBindingBudget;
 use crate::local::LocalNamespace;
 use crate::observation::LocalFileObservation;
 use crate::observation::LocalObservedReader;
@@ -63,6 +64,12 @@ impl LocalDirectoryHandle {
             }
         }
         let binding_enabled = options.path_binding().is_some();
+        #[cfg(windows)]
+        if binding_enabled && matches!(&filesystem.core.namespace, LocalNamespace::Host) {
+            return Err(LocalFileError::new(LocalFileErrorKind::Unsupported, LocalFileOperation::OpenRoot)
+                .with_reason("Windows Host path binding requires drive-root ancestor traversal"));
+        }
+        let mut path_budget = options.path_binding().map(|limits| PathBindingBudget::new(limits.max_path_bytes()));
         let (rooted, binding_observations, binding_anchors, authority_path) =
             match &filesystem.core.namespace {
                 LocalNamespace::Host => {
@@ -91,7 +98,7 @@ impl LocalDirectoryHandle {
                             policy
                         };
                         let deadline = path_binding_deadline(started_at, options.path_binding());
-                        validate_parent_steps(&host_root, relative, policy, path, deadline)?;
+                        validate_parent_steps(&host_root, relative, policy, path, deadline, options.component_policy(), path_budget.as_mut())?;
                         let resolved =
                             crate::rooted_local_file_system::resolve_rooted_path_allow_root_with_component_policy_and_budget(
                                 &host_root,
@@ -101,7 +108,7 @@ impl LocalDirectoryHandle {
                                 LocalFileOperation::OpenRoot,
                                 options.component_policy(),
                                 deadline,
-                                options.path_binding().and_then(|limits| limits.max_path_bytes()),
+                                path_budget.as_mut(),
                             )?;
                         for component in resolved.components() {
                             if let Component::Normal(name) = component {
@@ -115,6 +122,7 @@ impl LocalDirectoryHandle {
                             &diagnostic,
                             binding_enabled,
                             options.path_binding(),
+                            path_budget.as_mut(),
                             started_at,
                         )?;
                         (root, observations, anchors, diagnostic)
@@ -140,6 +148,7 @@ impl LocalDirectoryHandle {
                             &diagnostic,
                             binding_enabled,
                             options.path_binding(),
+                            None,
                             started_at,
                         )?;
                         (root, observations, anchors, diagnostic)
@@ -155,7 +164,7 @@ impl LocalDirectoryHandle {
                         .strip_prefix(Path::new(std::path::MAIN_SEPARATOR_STR))
                         .unwrap_or(&virtual_path);
                     let deadline = path_binding_deadline(started_at, options.path_binding());
-                    validate_parent_steps(rooted.root_authority(), authority_path, policy, path, deadline)?;
+                    validate_parent_steps(rooted.root_authority(), authority_path, policy, path, deadline, options.component_policy(), path_budget.as_mut())?;
                     let resolved = crate::rooted_local_file_system::resolve_rooted_path_allow_root_with_component_policy_and_budget(
                         rooted.root_authority(),
                         authority_path,
@@ -164,7 +173,7 @@ impl LocalDirectoryHandle {
                         LocalFileOperation::OpenRoot,
                         options.component_policy(),
                         deadline,
-                        options.path_binding().and_then(|limits| limits.max_path_bytes()),
+                        path_budget.as_mut(),
                     )?;
                     for component in resolved.components() {
                         if let Component::Normal(name) = component {
@@ -178,6 +187,7 @@ impl LocalDirectoryHandle {
                         &diagnostic,
                         binding_enabled,
                         options.path_binding(),
+                        path_budget.as_mut(),
                         started_at,
                     )?;
                     (root, observations, anchors, diagnostic)
@@ -298,11 +308,12 @@ impl LocalDirectoryHandle {
             .unwrap_or(self.filesystem.symlink_policy());
         let started_at = Instant::now();
         let deadline = options.path_binding().and_then(|limits| limits.deadline()).and_then(|limit| started_at.checked_add(limit));
+        let mut path_budget = options.path_binding().map(|limits| PathBindingBudget::new(limits.max_path_bytes()));
         let relative = crate::rooted_local_file_system::resolve_rooted_path_allow_root_with_component_policy_and_budget(
             self.root_authority()?, raw_relative, policy, true, LocalFileOperation::OpenRoot,
             options.component_policy(),
             deadline,
-            options.path_binding().and_then(|limits| limits.max_path_bytes()),
+            path_budget.as_mut(),
         )?;
         let diagnostic = self.diagnostic_path.join(&relative);
         for component in relative.components() {
@@ -322,6 +333,7 @@ impl LocalDirectoryHandle {
             &diagnostic,
             options.path_binding().is_some(),
             options.path_binding(),
+            path_budget.as_mut(),
             started_at,
         )?;
         let filesystem = LocalFileSystem::from_root_authority(
@@ -625,6 +637,7 @@ pub(crate) fn retain_directory_chain(
     diagnostic_path: &Path,
     retain_binding: bool,
     limits: Option<&LocalPathBindingOptions>,
+    mut path_budget: Option<&mut PathBindingBudget>,
     started_at: std::time::Instant,
 ) -> LocalResult<(
     Root,
@@ -632,27 +645,10 @@ pub(crate) fn retain_directory_chain(
     Option<Vec<BindingAnchor>>,
 )> {
     let depth = relative.components().count();
-    let mut path_bytes = 0_usize;
-    for component in relative.components() {
-        if let Component::Normal(name) = component {
-            path_bytes = path_bytes
-                .checked_add(name.len())
-                .and_then(|bytes| bytes.checked_add(1))
-                .ok_or_else(|| {
-                    LocalFileError::new(
-                        LocalFileErrorKind::ResourceLimit,
-                        LocalFileOperation::OpenRoot,
-                    )
-                })?;
-        }
-    }
     if limits.is_some_and(|limits| {
         limits
             .max_ancestors()
             .is_some_and(|maximum| depth > maximum)
-            || limits
-                .max_path_bytes()
-                .is_some_and(|maximum| path_bytes > maximum)
             || limits
                 .deadline()
                 .is_some_and(|maximum| started_at.elapsed() >= maximum)
@@ -665,12 +661,11 @@ pub(crate) fn retain_directory_chain(
     }
     let mut observations = Vec::new();
     let mut anchors = Vec::new();
-    let mut retained_path_bytes = if retain_binding { root.path().as_os_str().len() } else { 0 };
-    if limits.and_then(|limits| limits.max_path_bytes()).is_some_and(|maximum| retained_path_bytes > maximum) {
-        return Err(LocalFileError::new(LocalFileErrorKind::ResourceLimit, LocalFileOperation::OpenRoot)
-            .with_path(diagnostic_path.to_path_buf()));
-    }
     if retain_binding {
+        check_binding_deadline(limits, started_at, diagnostic_path)?;
+        if let Some(budget) = path_budget.as_deref_mut() {
+            budget.debit(root.path().as_os_str().len(), LocalFileOperation::OpenRoot, diagnostic_path)?;
+        }
         observations
             .try_reserve_exact(depth.saturating_add(1))
             .map_err(|_| {
@@ -699,6 +694,7 @@ pub(crate) fn retain_directory_chain(
             &root_file,
             crate::observation::LocalObservationRequirement::Optional,
         )?;
+        check_binding_deadline(limits, started_at, diagnostic_path)?;
         let identity = observation.identity().cloned().ok_or_else(|| {
             LocalFileError::new(
                 LocalFileErrorKind::Unsupported,
@@ -718,21 +714,7 @@ pub(crate) fn retain_directory_chain(
     })?;
     let mut prefix = PathBuf::new();
     for component in relative.components() {
-        if limits.is_some_and(|limits| {
-            limits
-                .deadline()
-                .is_some_and(|maximum| started_at.elapsed() >= maximum)
-        }) {
-            return Err(LocalFileError::from_io(
-                LocalFileOperation::OpenRoot,
-                Some(diagnostic_path.to_path_buf()),
-                None,
-                std::io::Error::new(
-                    std::io::ErrorKind::TimedOut,
-                    "path binding deadline exceeded",
-                ),
-            ));
-        }
+        check_binding_deadline(limits, started_at, diagnostic_path)?;
         let Component::Normal(name) = component else {
             continue;
         };
@@ -744,6 +726,7 @@ pub(crate) fn retain_directory_chain(
                 source,
             )
         })?;
+        check_binding_deadline(limits, started_at, diagnostic_path)?;
         if metadata.kind() != crate::rooted::EntryKind::Directory {
             return Err(LocalFileError::new(
                 LocalFileErrorKind::NotDirectory,
@@ -759,17 +742,13 @@ pub(crate) fn retain_directory_chain(
                 source,
             )
         })?;
+        check_binding_deadline(limits, started_at, diagnostic_path)?;
         prefix.push(name);
         if retain_binding {
             let authority_path = root.path().join(&prefix);
-            let next_path_bytes = retained_path_bytes.checked_add(authority_path.as_os_str().len()).ok_or_else(|| {
-                LocalFileError::new(LocalFileErrorKind::ResourceLimit, LocalFileOperation::OpenRoot)
-            })?;
-            if limits.and_then(|limits| limits.max_path_bytes()).is_some_and(|maximum| next_path_bytes > maximum) {
-                return Err(LocalFileError::new(LocalFileErrorKind::ResourceLimit, LocalFileOperation::OpenRoot)
-                    .with_path(diagnostic_path.to_path_buf()));
+            if let Some(budget) = path_budget.as_deref_mut() {
+                budget.debit(authority_path.as_os_str().len(), LocalFileOperation::OpenRoot, diagnostic_path)?;
             }
-            retained_path_bytes = next_path_bytes;
             let file = cursor.try_clone_current().map_err(|source| {
                 LocalFileError::from_io(
                     LocalFileOperation::Metadata,
@@ -782,6 +761,7 @@ pub(crate) fn retain_directory_chain(
                 &file,
                 crate::observation::LocalObservationRequirement::Optional,
             )?;
+            check_binding_deadline(limits, started_at, diagnostic_path)?;
             let identity = observation.identity().cloned().ok_or_else(|| {
                 LocalFileError::new(
                     LocalFileErrorKind::Unsupported,
@@ -797,6 +777,7 @@ pub(crate) fn retain_directory_chain(
             observations.push(observation);
         }
     }
+    check_binding_deadline(limits, started_at, diagnostic_path)?;
     let root = Root::from_directory_authority(cursor.into_file(), diagnostic_path.to_path_buf());
     Ok((
         root,
@@ -811,6 +792,8 @@ fn validate_parent_steps(
     policy: LocalSymlinkPolicy,
     original: &Path,
     deadline: Option<Instant>,
+    component_policy: &LocalComponentPolicy,
+    mut path_budget: Option<&mut PathBindingBudget>,
 ) -> LocalResult<()> {
     let mut prefix = PathBuf::new();
     for component in path.components() {
@@ -818,13 +801,15 @@ fn validate_parent_steps(
             Component::Normal(name) => prefix.push(name),
             Component::ParentDir => {
                 if !prefix.as_os_str().is_empty() {
-                    crate::rooted_local_file_system::resolve_rooted_path_allow_root_with_deadline(
+                    crate::rooted_local_file_system::resolve_rooted_path_allow_root_with_component_policy_and_budget(
                         root,
                         &prefix,
                         policy,
                         true,
                         LocalFileOperation::OpenRoot,
+                        component_policy,
                         deadline,
+                        path_budget.as_deref_mut(),
                     )
                     .map_err(|error| error.with_path(original.to_path_buf()))?;
                 }
@@ -851,6 +836,22 @@ fn validate_parent_steps(
 
 fn path_binding_deadline(started_at: Instant, limits: Option<&LocalPathBindingOptions>) -> Option<Instant> {
     limits.and_then(|limits| limits.deadline()).and_then(|duration| started_at.checked_add(duration))
+}
+
+fn check_binding_deadline(
+    limits: Option<&LocalPathBindingOptions>,
+    started_at: Instant,
+    path: &Path,
+) -> LocalResult<()> {
+    if limits.is_some_and(|limits| limits.deadline().is_some_and(|deadline| started_at.elapsed() >= deadline)) {
+        return Err(LocalFileError::from_io(
+            LocalFileOperation::OpenRoot,
+            Some(path.to_path_buf()),
+            None,
+            std::io::Error::new(std::io::ErrorKind::TimedOut, "path binding deadline exceeded"),
+        ));
+    }
+    Ok(())
 }
 
 fn binding_anchor(

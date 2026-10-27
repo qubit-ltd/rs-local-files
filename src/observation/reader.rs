@@ -115,7 +115,16 @@ fn read_error(error: io::Error) -> LocalFileError {
 }
 
 pub(crate) trait ReaderPathBinding: std::fmt::Debug + Send + Sync {
-    fn verify(&self) -> LocalResult<LocalSourceVerification>;
+    fn verification_deadline(&self) -> Option<std::time::Duration>;
+
+    fn verify_until(&self, deadline: Option<std::time::Instant>) -> LocalResult<LocalSourceVerification>;
+
+    fn verify(&self) -> LocalResult<LocalSourceVerification> {
+        let deadline = self
+            .verification_deadline()
+            .and_then(|limit| std::time::Instant::now().checked_add(limit));
+        self.verify_until(deadline)
+    }
 }
 
 /// A byte reader whose initial and refreshed observations share its open handle.
@@ -193,16 +202,68 @@ struct CombinedPathBinding {
 }
 
 impl ReaderPathBinding for CombinedPathBinding {
-    fn verify(&self) -> LocalResult<LocalSourceVerification> {
+    fn verification_deadline(&self) -> Option<std::time::Duration> {
+        self.bindings.iter().filter_map(|binding| binding.verification_deadline()).min()
+    }
+
+    fn verify_until(&self, deadline: Option<std::time::Instant>) -> LocalResult<LocalSourceVerification> {
         let mut missing = false;
         for binding in &self.bindings {
-            match binding.verify()? {
+            match binding.verify_until(deadline)? {
                 LocalSourceVerification::Changed => return Ok(LocalSourceVerification::Changed),
                 LocalSourceVerification::Missing => missing = true,
                 LocalSourceVerification::Unchanged => {}
             }
         }
         Ok(if missing { LocalSourceVerification::Missing } else { LocalSourceVerification::Unchanged })
+    }
+}
+
+#[cfg(test)]
+mod binding_tests {
+    use std::sync::Arc;
+    use std::sync::Mutex;
+    use std::time::Duration;
+    use std::time::Instant;
+
+    use super::CombinedPathBinding;
+    use super::ReaderPathBinding;
+    use crate::LocalResult;
+    use crate::observation::LocalSourceVerification;
+
+    #[derive(Debug)]
+    struct DeadlineRecorder {
+        seen: Arc<Mutex<Option<Instant>>>,
+    }
+
+    impl ReaderPathBinding for DeadlineRecorder {
+        fn verification_deadline(&self) -> Option<Duration> {
+            Some(Duration::from_secs(1))
+        }
+
+        fn verify_until(&self, deadline: Option<Instant>) -> LocalResult<LocalSourceVerification> {
+            *self.seen.lock().expect("deadline mutex should be available") = deadline;
+            Ok(LocalSourceVerification::Unchanged)
+        }
+    }
+
+    #[test]
+    fn combined_bindings_share_one_verification_deadline() {
+        let first = Arc::new(Mutex::new(None));
+        let second = Arc::new(Mutex::new(None));
+        let binding = CombinedPathBinding {
+            bindings: vec![
+                Box::new(DeadlineRecorder { seen: first.clone() }),
+                Box::new(DeadlineRecorder { seen: second.clone() }),
+            ],
+        };
+
+        binding.verify().expect("combined binding should verify");
+
+        let first_deadline = *first.lock().expect("deadline mutex should be available");
+        let second_deadline = *second.lock().expect("deadline mutex should be available");
+        assert!(first_deadline.is_some());
+        assert_eq!(first_deadline, second_deadline);
     }
 }
 

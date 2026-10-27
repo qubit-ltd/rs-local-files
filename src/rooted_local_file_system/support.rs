@@ -155,13 +155,13 @@ pub(crate) fn resolve_rooted_path_allow_root_with_component_policy_and_budget(
     operation: LocalFileOperation,
     component_policy: &crate::directory::LocalComponentPolicy,
     deadline: Option<Instant>,
-    max_path_bytes: Option<usize>,
+    budget: Option<&mut crate::directory::binding::PathBindingBudget>,
 ) -> LocalResult<PathBuf> {
     check_resolution_deadline(deadline, path, operation)?;
     if symlink_policy == LocalSymlinkPolicy::FollowAcrossScope {
         return Err(LocalFileError::new(LocalFileErrorKind::InvalidOptions, operation).with_path(path.to_path_buf()));
     }
-    resolve_rooted_symlinks(root, path, symlink_policy, follow_final, operation, path, deadline, Some(component_policy), max_path_bytes)
+    resolve_rooted_symlinks(root, path, symlink_policy, follow_final, operation, path, deadline, Some(component_policy), budget)
 }
 
 fn check_resolution_deadline(
@@ -251,7 +251,7 @@ fn resolve_rooted_symlinks(
     original: &Path,
     deadline: Option<Instant>,
     component_policy: Option<&crate::directory::LocalComponentPolicy>,
-    max_path_bytes: Option<usize>,
+    mut budget: Option<&mut crate::directory::binding::PathBindingBudget>,
 ) -> LocalResult<PathBuf> {
     use std::collections::HashSet;
     #[cfg(test)]
@@ -280,11 +280,14 @@ fn resolve_rooted_symlinks(
                 active_symlinks.remove(&identity);
             }
             ResolutionStep::Normal(component) => {
-                expanded_path_bytes = expanded_path_bytes.checked_add(component.len()).and_then(|bytes| bytes.checked_add(1)).ok_or_else(|| {
+                let component_bytes = component.len().checked_add(1).ok_or_else(|| {
                     LocalFileError::new(LocalFileErrorKind::ResourceLimit, operation).with_path(original.to_path_buf())
                 })?;
-                if max_path_bytes.is_some_and(|maximum| expanded_path_bytes > maximum) {
-                    return Err(LocalFileError::new(LocalFileErrorKind::ResourceLimit, operation).with_path(original.to_path_buf()));
+                expanded_path_bytes = expanded_path_bytes.checked_add(component_bytes).ok_or_else(|| {
+                    LocalFileError::new(LocalFileErrorKind::ResourceLimit, operation).with_path(original.to_path_buf())
+                })?;
+                if let Some(budget) = budget.as_deref_mut() {
+                    budget.debit(component_bytes, operation, original)?;
                 }
                 if let Some(component_policy) = component_policy {
                     component_policy

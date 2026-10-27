@@ -40,30 +40,141 @@ use crate::observation::{LocalObservedReader, LocalObservationRequirement};
 
 impl LocalFileSystem {
     /// Opens a reader with same-handle observations and optional name binding.
+    /// Windows Host scope rejects path binding because drive-root ancestor
+    /// traversal is not available for that namespace.
     pub fn open_observed_reader(&self, path: &Path, options: &LocalObservedReadOptions) -> LocalResult<LocalObservedReader> {
         let resolver_started = std::time::Instant::now();
+        let binding_options = options.path_binding().copied();
+        #[cfg(windows)]
+        if binding_options.is_some() && matches!(&self.core.namespace, LocalNamespace::Host) {
+            return Err(LocalFileError::new(LocalFileErrorKind::Unsupported, LocalFileOperation::OpenReader)
+                .with_reason("Windows Host path binding requires drive-root ancestor traversal"));
+        }
+        let binding_deadline = binding_options
+            .and_then(|limits| limits.deadline())
+            .and_then(|limit| resolver_started.checked_add(limit));
+        self.open_observed_reader_with_binding_limits(
+            path,
+            options,
+            binding_options,
+            binding_deadline,
+            resolver_started,
+            true,
+        )
+    }
+
+    pub(crate) fn open_observed_reader_with_binding_deadline(
+        &self,
+        path: &Path,
+        options: &LocalObservedReadOptions,
+        limits: crate::options::LocalPathBindingOptions,
+        deadline: Option<std::time::Instant>,
+    ) -> LocalResult<LocalObservedReader> {
+        self.open_observed_reader_with_binding_limits(
+            path,
+            options,
+            Some(limits),
+            deadline,
+            std::time::Instant::now(),
+            false,
+        )
+    }
+
+    fn open_observed_reader_with_binding_limits(
+        &self,
+        path: &Path,
+        options: &LocalObservedReadOptions,
+        binding_options: Option<crate::options::LocalPathBindingOptions>,
+        binding_deadline: Option<std::time::Instant>,
+        resolver_started: std::time::Instant,
+        attach_binding: bool,
+    ) -> LocalResult<LocalObservedReader> {
+        let mut path_budget = binding_options.map(|limits| crate::directory::binding::PathBindingBudget::new(limits.max_path_bytes()));
+        check_binding_deadline(binding_deadline, path)?;
         let read_options = options.read_options().unwrap_or(&self.defaults.read);
         let resolver = self.resolver_for(path, LocalFileOperation::OpenReader)?;
         let resolved = resolve_operation_path(&resolver, path, LocalFileOperation::OpenReader)?;
+        check_binding_deadline(binding_deadline, path)?;
+        if binding_options.is_some() {
+            let absolute_bytes = resolved.namespace_absolute().as_os_str().len();
+            let raw_component_bytes = path
+                .components()
+                .filter_map(|component| match component {
+                    std::path::Component::Normal(name) => Some(name.len().saturating_add(1)),
+                    _ => None,
+                })
+                .fold(0_usize, usize::saturating_add);
+            if let Some(budget) = path_budget.as_mut() {
+                budget.debit(absolute_bytes, LocalFileOperation::OpenReader, resolved.namespace_absolute())?;
+                budget.debit(raw_component_bytes, LocalFileOperation::OpenReader, resolved.namespace_absolute())?;
+            }
+            let namespace_absolute = if path.is_absolute() {
+                path.to_path_buf()
+            } else {
+                resolver.current_directory().unwrap_or_else(|| Path::new("/")).join(path)
+            };
+            let authority_path = namespace_absolute
+                .strip_prefix(Path::new(std::path::MAIN_SEPARATOR_STR))
+                .unwrap_or(&namespace_absolute);
+            let (root, symlink_policy) = match &self.core.namespace {
+                LocalNamespace::Host => (
+                    Root::open(Path::new("/")).map_err(|source| LocalFileError::from_io(
+                        LocalFileOperation::OpenRoot,
+                        Some(namespace_absolute.clone()),
+                        None,
+                        source,
+                    ))?,
+                    if self.symlink_policy == crate::LocalSymlinkPolicy::FollowAcrossScope {
+                        crate::LocalSymlinkPolicy::FollowWithinScope
+                    } else {
+                        self.symlink_policy
+                    },
+                ),
+                LocalNamespace::Rooted(rooted) => {
+                    let authority = rooted.root_authority();
+                    let file = authority.try_clone_authority().map_err(|source| {
+                        LocalFileError::from_io(
+                            LocalFileOperation::OpenRoot,
+                            Some(namespace_absolute.clone()),
+                            None,
+                            source,
+                        )
+                    })?;
+                    (
+                        Root::from_directory_authority(file, authority.path().to_path_buf()),
+                        self.symlink_policy,
+                    )
+                }
+            };
+            let allow_all = crate::directory::LocalComponentPolicy::allow_all();
+            crate::rooted_local_file_system::resolve_rooted_path_allow_root_with_component_policy_and_budget(
+                &root,
+                authority_path,
+                symlink_policy,
+                true,
+                LocalFileOperation::OpenReader,
+                &allow_all,
+                binding_deadline,
+                path_budget.as_mut(),
+            )?;
+            check_binding_deadline(binding_deadline, resolved.namespace_absolute())?;
+        }
         let reader = self.open_resolved_reader(&resolved, read_options, LocalFileOperation::OpenReader, resolver.current_directory())?;
+        check_binding_deadline(binding_deadline, path)?;
         let mut observed = LocalObservedReader::from_reader(reader, options.native_observation())?;
-        if let Some(binding_options) = options.path_binding() {
-            let binding_deadline = binding_options.deadline().and_then(|limit| resolver_started.checked_add(limit));
-            let path_bytes = resolved.namespace_absolute().as_os_str().len();
-            let raw_component_bytes = path.components().filter_map(|component| match component {
-                std::path::Component::Normal(name) => Some(name.len().saturating_add(1)),
-                _ => None,
-            }).fold(0_usize, usize::saturating_add);
+        if attach_binding {
+            let Some(binding_options) = binding_options else {
+                check_binding_deadline(binding_deadline, path)?;
+                return Ok(observed);
+            };
             let ancestors = resolved.namespace_absolute().components().count().saturating_sub(1);
-            if binding_options.max_path_bytes().is_some_and(|limit| path_bytes > limit)
-                || binding_options.max_path_bytes().is_some_and(|limit| raw_component_bytes > limit)
-                || binding_options.max_ancestors().is_some_and(|limit| ancestors > limit)
+            if binding_options.max_ancestors().is_some_and(|limit| ancestors > limit)
                 || binding_options.max_ancestors() == Some(0)
-                || binding_options.deadline().is_some_and(|limit| resolver_started.elapsed() >= limit)
             {
                 return Err(LocalFileError::new(LocalFileErrorKind::ResourceLimit, LocalFileOperation::OpenReader)
                     .with_path(resolved.namespace_absolute().to_path_buf()));
             }
+            check_binding_deadline(binding_deadline, resolved.namespace_absolute())?;
             let identity = observed.observation().identity().cloned().ok_or_else(|| {
                 LocalFileError::new(LocalFileErrorKind::Unsupported, LocalFileOperation::Metadata)
             })?;
@@ -84,11 +195,13 @@ impl LocalFileSystem {
                     let allow_all = crate::directory::LocalComponentPolicy::allow_all();
                     let relative_parent = crate::rooted_local_file_system::resolve_rooted_path_allow_root_with_component_policy_and_budget(
                         &host_root, relative_parent, policy, true, LocalFileOperation::OpenRoot, &allow_all,
-                        binding_deadline, binding_options.max_path_bytes(),
+                        binding_deadline, path_budget.as_mut(),
                     )?;
+                    check_binding_deadline(binding_deadline, &relative_parent)?;
                     let diagnostic_parent = Path::new("/").join(&relative_parent);
                     let (root, _, anchors) = crate::directory::retain_directory_chain(
-                        &host_root, &relative_parent, &diagnostic_parent, true, Some(binding_options), resolver_started,
+                        &host_root, &relative_parent, &diagnostic_parent, true, Some(&binding_options),
+                        path_budget.as_mut(), resolver_started,
                     )?;
                     (root, anchors.unwrap_or_default())
                 }
@@ -96,11 +209,13 @@ impl LocalFileSystem {
                     let allow_all = crate::directory::LocalComponentPolicy::allow_all();
                     let resolved_parent = crate::rooted_local_file_system::resolve_rooted_path_allow_root_with_component_policy_and_budget(
                         rooted.root_authority(), parent_path, self.symlink_policy, true, LocalFileOperation::OpenRoot,
-                        &allow_all, binding_deadline, binding_options.max_path_bytes(),
+                        &allow_all, binding_deadline, path_budget.as_mut(),
                     )?;
+                    check_binding_deadline(binding_deadline, &resolved_parent)?;
                     let diagnostic_parent = rooted.diagnostic_path().join(&resolved_parent);
                     let (root, _, anchors) = crate::directory::retain_directory_chain(
-                        rooted.root_authority(), &resolved_parent, &diagnostic_parent, true, Some(binding_options), resolver_started,
+                        rooted.root_authority(), &resolved_parent, &diagnostic_parent, true, Some(&binding_options),
+                        path_budget.as_mut(), resolver_started,
                     )?;
                     (root, anchors.unwrap_or_default())
                 }
@@ -109,17 +224,11 @@ impl LocalFileSystem {
                 crate::LocalSymlinkPolicy::FollowWithinScope
             } else { self.symlink_policy };
             let parent_fs = LocalFileSystem::from_root_authority(parent_root, binding_policy)?;
-            if binding_options.deadline().is_some_and(|limit| resolver_started.elapsed() >= limit) {
-                return Err(LocalFileError::from_io(
-                    LocalFileOperation::OpenReader,
-                    Some(resolved.namespace_absolute().to_path_buf()),
-                    None,
-                    std::io::Error::new(std::io::ErrorKind::TimedOut, "path binding deadline exceeded"),
-                ));
-            }
-            observed = observed.with_binding(Box::new(PathBinding::new(parent_fs, name, identity, binding_options.deadline())));
+            check_binding_deadline(binding_deadline, resolved.namespace_absolute())?;
+            observed = observed.with_binding(Box::new(PathBinding::new(parent_fs, name, identity, binding_options)));
             observed = observed.with_binding(Box::new(DirectoryPathBinding::new(parent_anchors, binding_options.deadline())));
         }
+        check_binding_deadline(binding_deadline, path)?;
         Ok(observed)
     }
 
@@ -538,4 +647,16 @@ impl LocalFileSystem {
             )
         })
     }
+}
+
+fn check_binding_deadline(deadline: Option<std::time::Instant>, path: &Path) -> LocalResult<()> {
+    if deadline.is_some_and(|deadline| std::time::Instant::now() >= deadline) {
+        return Err(LocalFileError::from_io(
+            LocalFileOperation::OpenReader,
+            Some(path.to_path_buf()),
+            None,
+            std::io::Error::new(std::io::ErrorKind::TimedOut, "path binding deadline exceeded"),
+        ));
+    }
+    Ok(())
 }

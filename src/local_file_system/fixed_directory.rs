@@ -41,6 +41,8 @@ impl LocalFileSystem {
     /// because expanded names behind reparse points cannot be inspected safely
     /// during the initial opening path. Operations through an allow-all handle
     /// retain their rooted authority.
+    /// Windows Host scope also rejects path binding until the path can be
+    /// anchored from its drive root and all ancestors retained.
     ///
     /// # Errors
     /// Returns path, policy, type, native I/O, or resource-limit errors.

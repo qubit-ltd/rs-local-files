@@ -10,12 +10,45 @@ use crate::LocalResult;
 use crate::observation::LocalSourceVerification;
 use crate::observation::reader::ReaderPathBinding;
 
+/// Shared byte budget for path resolution and retained ancestor anchors.
+#[derive(Debug)]
+pub(crate) struct PathBindingBudget {
+    limit: Option<usize>,
+    used: usize,
+}
+
+impl PathBindingBudget {
+    pub(crate) const fn new(limit: Option<usize>) -> Self {
+        Self { limit, used: 0 }
+    }
+
+    pub(crate) fn debit(
+        &mut self,
+        bytes: usize,
+        operation: crate::LocalFileOperation,
+        path: &Path,
+    ) -> LocalResult<()> {
+        self.used = self.used.checked_add(bytes).ok_or_else(|| {
+            crate::LocalFileError::new(crate::LocalFileErrorKind::ResourceLimit, operation)
+                .with_path(path.to_path_buf())
+        })?;
+        if self.limit.is_some_and(|limit| self.used > limit) {
+            return Err(crate::LocalFileError::new(
+                crate::LocalFileErrorKind::ResourceLimit,
+                operation,
+            )
+            .with_path(path.to_path_buf()));
+        }
+        Ok(())
+    }
+}
+
 #[derive(Debug)]
 pub(crate) struct PathBinding {
     filesystem: LocalFileSystem,
     name: OsString,
     identity: crate::observation::LocalFileIdentity,
-    deadline: Option<Duration>,
+    options: crate::options::LocalPathBindingOptions,
 }
 
 impl PathBinding {
@@ -23,39 +56,42 @@ impl PathBinding {
         filesystem: LocalFileSystem,
         name: OsString,
         identity: crate::observation::LocalFileIdentity,
-        deadline: Option<Duration>,
+        options: crate::options::LocalPathBindingOptions,
     ) -> Self {
         Self {
             filesystem,
             name,
             identity,
-            deadline,
+            options,
         }
     }
 }
 
 impl ReaderPathBinding for PathBinding {
-    fn verify(&self) -> LocalResult<LocalSourceVerification> {
-        let started_at = Instant::now();
-        match self.filesystem.open_observed_reader(
+    fn verification_deadline(&self) -> Option<Duration> {
+        self.options.deadline()
+    }
+
+    fn verify_until(&self, deadline: Option<Instant>) -> LocalResult<LocalSourceVerification> {
+        let result = self.filesystem.open_observed_reader_with_binding_deadline(
             Path::new(&self.name),
             &crate::options::LocalObservedReadOptions::new(),
-        ) {
+            self.options,
+            deadline,
+        );
+        if deadline.is_some_and(|deadline| Instant::now() >= deadline) {
+            return Err(crate::LocalFileError::from_io(
+                crate::LocalFileOperation::Metadata,
+                None,
+                None,
+                std::io::Error::new(
+                    std::io::ErrorKind::TimedOut,
+                    "path binding deadline exceeded",
+                ),
+            ));
+        }
+        match result {
             Ok(reader) => {
-                if self
-                    .deadline
-                    .is_some_and(|limit| started_at.elapsed() >= limit)
-                {
-                    return Err(crate::LocalFileError::from_io(
-                        crate::LocalFileOperation::Metadata,
-                        None,
-                        None,
-                        std::io::Error::new(
-                            std::io::ErrorKind::TimedOut,
-                            "path binding deadline exceeded",
-                        ),
-                    ));
-                }
                 Ok(if reader.observation().identity() == Some(&self.identity) {
                     LocalSourceVerification::Unchanged
                 } else {
@@ -90,13 +126,13 @@ impl DirectoryPathBinding {
 }
 
 impl ReaderPathBinding for DirectoryPathBinding {
-    fn verify(&self) -> LocalResult<LocalSourceVerification> {
-        let started_at = Instant::now();
+    fn verification_deadline(&self) -> Option<Duration> {
+        self.deadline
+    }
+
+    fn verify_until(&self, deadline: Option<Instant>) -> LocalResult<LocalSourceVerification> {
         for anchor in &self.anchors {
-            if self
-                .deadline
-                .is_some_and(|limit| started_at.elapsed() >= limit)
-            {
+            if deadline.is_some_and(|deadline| Instant::now() >= deadline) {
                 return Err(crate::LocalFileError::from_io(
                     crate::LocalFileOperation::Metadata,
                     Some(anchor.path.clone()),
@@ -119,10 +155,13 @@ impl ReaderPathBinding for DirectoryPathBinding {
                 &retained,
                 crate::observation::LocalObservationRequirement::Optional,
             )?;
+            check_verification_deadline(deadline, &anchor.path)?;
             if retained_observation.identity() != Some(&anchor.identity) {
                 return Ok(LocalSourceVerification::Changed);
             }
-            let root = match crate::rooted::Root::open(&anchor.path) {
+            let root_result = crate::rooted::Root::open(&anchor.path);
+            check_verification_deadline(deadline, &anchor.path)?;
+            let root = match root_result {
                 Ok(root) => root,
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
                     return Ok(LocalSourceVerification::Missing);
@@ -136,6 +175,7 @@ impl ReaderPathBinding for DirectoryPathBinding {
                     ));
                 }
             };
+            check_verification_deadline(deadline, &anchor.path)?;
             let file = root.try_clone_authority().map_err(|error| {
                 crate::LocalFileError::from_io(
                     crate::LocalFileOperation::Metadata,
@@ -148,24 +188,51 @@ impl ReaderPathBinding for DirectoryPathBinding {
                 &file,
                 crate::observation::LocalObservationRequirement::Optional,
             )?;
+            check_verification_deadline(deadline, &anchor.path)?;
             if observation.identity() != Some(&anchor.identity) {
                 return Ok(LocalSourceVerification::Changed);
             }
         }
-        if self
-            .deadline
-            .is_some_and(|limit| started_at.elapsed() >= limit)
-        {
-            return Err(crate::LocalFileError::from_io(
-                crate::LocalFileOperation::Metadata,
-                None,
-                None,
-                std::io::Error::new(
-                    std::io::ErrorKind::TimedOut,
-                    "path binding deadline exceeded",
-                ),
-            ));
-        }
+        check_verification_deadline(deadline, Path::new(""))?;
         Ok(LocalSourceVerification::Unchanged)
+    }
+}
+
+fn check_verification_deadline(deadline: Option<Instant>, path: &Path) -> LocalResult<()> {
+    if deadline.is_some_and(|deadline| Instant::now() >= deadline) {
+        return Err(crate::LocalFileError::from_io(
+            crate::LocalFileOperation::Metadata,
+            Some(path.to_path_buf()),
+            None,
+            std::io::Error::new(std::io::ErrorKind::TimedOut, "path binding deadline exceeded"),
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::PathBinding;
+    use crate::LocalFileSystem;
+    use crate::observation::reader::ReaderPathBinding;
+    use crate::options::LocalObservedReadOptions;
+    use crate::options::LocalPathBindingOptions;
+
+    #[test]
+    fn path_binding_reopen_obeys_verification_deadline() {
+        let directory = tempfile::tempdir().expect("fixture should exist");
+        std::fs::write(directory.path().join("source"), b"source").expect("source should exist");
+        let filesystem = LocalFileSystem::rooted(directory.path()).expect("root should open");
+        let reader = filesystem
+            .open_observed_reader(std::path::Path::new("source"), &LocalObservedReadOptions::new())
+            .expect("reader should open");
+        let binding = PathBinding::new(
+            filesystem,
+            "source".into(),
+            reader.observation().identity().cloned().expect("identity should be available"),
+            LocalPathBindingOptions::new().with_deadline(std::time::Duration::ZERO),
+        );
+        let error = binding.verify().unwrap_err();
+        assert_eq!(error.io_error().unwrap().kind(), std::io::ErrorKind::TimedOut);
     }
 }
