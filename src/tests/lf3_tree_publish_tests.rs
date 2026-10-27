@@ -1,3 +1,10 @@
+// =============================================================================
+//    Copyright (c) 2025 - 2026 Haixing Hu.
+//
+//    SPDX-License-Identifier: Apache-2.0
+//
+//    Licensed under the Apache License, Version 2.0.
+// =============================================================================
 use std::ffi::OsStr;
 
 use crate::options::LocalDirectoryOpenOptions;
@@ -221,8 +228,8 @@ fn required_file_sync_is_completed_before_publish() {
 #[cfg(windows)]
 #[test]
 fn windows_access_failure_after_child_mutation_reports_mixed_and_keeps_stage() {
+    use crate::temp::internal::privacy_windows;
     use crate::temp::internal::privacy_windows::FailurePoint;
-    use crate::temp::internal::privacy_windows::{self};
 
     let fixture = tempfile::tempdir().expect("fixture should be created");
     let fs = crate::LocalFileSystem::host().expect("host filesystem should open");

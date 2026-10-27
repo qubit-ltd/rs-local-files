@@ -14,3 +14,28 @@ reason = "Coverage instrumentation keeps inline behavior measurable without sour
 rule = "coverage-cfg"
 path = "src/local_file_reader.rs"
 reason = "Coverage instrumentation keeps inline behavior measurable without source exemptions."
+
+[[exceptions]]
+rule = "multiple-public-types"
+path = "src/directory/tree_validation.rs"
+reason = "Tree entry, observation, and validation option types form one cohesive tree validation model."
+
+[[exceptions]]
+rule = "multiple-public-types"
+path = "src/directory/tree_recovery.rs"
+reason = "Tree cleanup, access, creation, and publication errors share retained-resource recovery state and helpers."
+
+[[exceptions]]
+rule = "multiple-public-types"
+path = "src/temp/local_temp_file.rs"
+reason = "Unsealed and sealed temporary file handles share the same private ownership and cleanup implementation."
+
+[[exceptions]]
+rule = "multiple-public-types"
+path = "src/options/local_snapshot_options.rs"
+reason = "The snapshot options builder is the dedicated construction API for LocalSnapshotOptions."
+
+[[exceptions]]
+rule = "multiple-public-types"
+path = "src/observation/types.rs"
+reason = "Observation identity, metadata, platform details, and verification values form one cohesive observation model."
