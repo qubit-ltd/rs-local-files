@@ -472,6 +472,14 @@ impl Root {
         }
     }
 
+    /// Removes an owned regular file through its captured rooted identity.
+    /// Windows uses the retained parent authority and ignores the read-only
+    /// attribute only for this cleanup-owned entry.
+    #[cfg(windows)]
+    pub(crate) fn remove_owned_read_only_file(&self, path: &path::Path, expected: &Metadata) -> Result<()> {
+        local::remove_rooted_owned_read_only_file(&self.directory, path, expected)
+    }
+
     /// Removes one empty descendant directory.
     ///
     /// # Errors

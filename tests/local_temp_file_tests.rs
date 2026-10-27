@@ -526,6 +526,117 @@ fn windows_sealed_cleanup_rejects_replacement() {
     assert!(original.exists(), "the displaced owned file should remain");
 }
 
+/// Verifies the compatibility deletion fallback restores attributes after a
+/// failed delete and leaves the owned file available for retry.
+#[cfg(all(windows, feature = "test-support"))]
+#[test]
+fn windows_sealed_cleanup_fallback_restores_attributes_and_retries() {
+    let root = tempdir().expect("Rooted fixture should be created");
+    let filesystem = LocalFileSystem::rooted(root.path()).expect("Rooted filesystem should open");
+    let mut temporary = filesystem
+        .create_temp_file_with_options(
+            &LocalTempFileOptions::new()
+                .with_parent(Path::new("/"))
+                .with_privacy(LocalPrivacyRequirement::PlatformDefault),
+        )
+        .expect("PlatformDefault Rooted temporary file should be created");
+    let virtual_path = temporary.path().to_path_buf();
+    let native_path = rooted_host_path(root.path(), &virtual_path);
+    Output::write_fully(&mut temporary, b"sealed payload").expect("Rooted temporary file should accept bytes");
+    let mut sealed = temporary
+        .seal_with_options(&LocalSealOptions::new())
+        .expect("Rooted temporary file should seal");
+
+    let error = {
+        let _fault = install_test_fault("rooted-owned-delete-fallback-delete-once")
+            .expect("fallback delete fault should install");
+        sealed
+            .cleanup()
+            .expect_err("the injected fallback delete should fail")
+    };
+
+    assert_eq!(LocalFileErrorKind::Io, error.kind());
+    assert!(native_path.exists(), "the owned entry should remain after failed deletion");
+    assert!(
+        fs::metadata(&native_path)
+            .expect("entry metadata should remain available")
+            .permissions()
+            .readonly(),
+        "the original read-only attribute should be restored"
+    );
+    sealed.cleanup().expect("owned cleanup should be retryable");
+    assert!(!native_path.exists(), "retry should remove the owned entry");
+}
+
+/// Verifies the compatibility deletion fallback removes an owned read-only
+/// Rooted entry when extended disposition is unavailable.
+#[cfg(all(windows, feature = "test-support"))]
+#[test]
+fn windows_sealed_cleanup_fallback_removes_read_only_entry() {
+    let root = tempdir().expect("Rooted fixture should be created");
+    let filesystem = LocalFileSystem::rooted(root.path()).expect("Rooted filesystem should open");
+    let mut temporary = filesystem
+        .create_temp_file_with_options(
+            &LocalTempFileOptions::new()
+                .with_parent(Path::new("/"))
+                .with_privacy(LocalPrivacyRequirement::PlatformDefault),
+        )
+        .expect("PlatformDefault Rooted temporary file should be created");
+    let virtual_path = temporary.path().to_path_buf();
+    let native_path = rooted_host_path(root.path(), &virtual_path);
+    Output::write_fully(&mut temporary, b"sealed payload").expect("Rooted temporary file should accept bytes");
+    let mut sealed = temporary
+        .seal_with_options(&LocalSealOptions::new())
+        .expect("Rooted temporary file should seal");
+
+    let _fault = install_test_fault("rooted-owned-delete-fallback-success")
+        .expect("unsupported disposition fault should install");
+    sealed
+        .cleanup()
+        .expect("read-only fallback should remove the owned file");
+    assert!(!native_path.exists(), "fallback should remove the owned entry");
+}
+
+/// Verifies failure to restore attributes reports both the delete and restore
+/// causes while preserving cleanup ownership for a later retry.
+#[cfg(all(windows, feature = "test-support"))]
+#[test]
+fn windows_sealed_cleanup_fallback_reports_restore_failure_and_retries() {
+    let root = tempdir().expect("Rooted fixture should be created");
+    let filesystem = LocalFileSystem::rooted(root.path()).expect("Rooted filesystem should open");
+    let mut temporary = filesystem
+        .create_temp_file_with_options(
+            &LocalTempFileOptions::new()
+                .with_parent(Path::new("/"))
+                .with_privacy(LocalPrivacyRequirement::PlatformDefault),
+        )
+        .expect("PlatformDefault Rooted temporary file should be created");
+    let virtual_path = temporary.path().to_path_buf();
+    let native_path = rooted_host_path(root.path(), &virtual_path);
+    Output::write_fully(&mut temporary, b"sealed payload").expect("Rooted temporary file should accept bytes");
+    let mut sealed = temporary
+        .seal_with_options(&LocalSealOptions::new())
+        .expect("Rooted temporary file should seal");
+
+    let error = {
+        let _fault = install_test_fault("rooted-owned-delete-restore-fail")
+            .expect("fallback restore fault should install");
+        sealed
+            .cleanup()
+            .expect_err("the injected fallback delete and restore should fail")
+    };
+
+    let message = error.to_string();
+    assert!(message.contains("deletion failed"), "primary delete cause should be retained: {message}");
+    assert!(
+        message.contains("restoring original file attributes failed"),
+        "restore cause should be retained: {message}"
+    );
+    assert!(native_path.exists(), "the entry should remain available for retry");
+    sealed.cleanup().expect("cleanup should retry after the injected failure");
+    assert!(!native_path.exists(), "retry should remove the owned entry");
+}
+
 /// Verifies Unix Rooted persistence implements the same durable publication
 /// contract as Host persistence.
 #[cfg(unix)]

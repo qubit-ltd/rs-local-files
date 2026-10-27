@@ -25,6 +25,7 @@ use windows_sys::Win32::Storage::FileSystem::SYNCHRONIZE;
 use super::handle::open_entry;
 use super::handle::open_entry_no_follow;
 use super::namespace_mutation::delete_open_entry;
+use super::namespace_mutation::delete_owned_read_only_entry;
 use super::native::nt_open_at;
 use super::native::verify_real_directory;
 use crate::local::LocalRelativePath;
@@ -173,6 +174,26 @@ pub(crate) fn remove_rooted_entry_typed(
         return Err(std::io::Error::new(kind, message));
     }
     delete_open_entry(&entry)
+}
+
+/// Removes one owned rooted file only when its opened entry retains the
+/// creation-time identity.
+pub(crate) fn remove_rooted_owned_read_only_file(
+    root: &File,
+    path: &LocalRelativePath,
+    expected: &Metadata,
+) -> Result<()> {
+    let entry = open_entry_no_follow(
+        root,
+        path,
+        DELETE | FILE_READ_ATTRIBUTES | windows_sys::Win32::Storage::FileSystem::FILE_WRITE_ATTRIBUTES | SYNCHRONIZE,
+        FILE_OPEN,
+        0,
+    )?;
+    if Metadata::from_open_file(&entry)?.kind() != EntryKind::File {
+        return Err(ErrorKind::InvalidInput.into());
+    }
+    delete_owned_read_only_entry(&entry, expected)
 }
 
 /// Opens and deletes one rooted entry without following a reparse point.

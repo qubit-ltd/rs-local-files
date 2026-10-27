@@ -959,6 +959,9 @@ impl LocalTempFile {
             LocalTempResourceBackend::Rooted(rooted) => {
                 let path = LocalRelativePath::new(&rooted.relative_path)
                     .expect("rooted temporary path was validated at creation");
+                #[cfg(windows)]
+                rooted.root.remove_owned_read_only_file(&path, &rooted.identity)?;
+                #[cfg(not(windows))]
                 rooted.root.remove_file(&path)?;
                 Ok(())
             }

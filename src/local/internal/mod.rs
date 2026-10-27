@@ -247,6 +247,8 @@ pub(crate) use windows_rooted::remove_rooted_entry;
 #[cfg(windows)]
 pub(crate) use windows_rooted::remove_rooted_entry_typed;
 #[cfg(windows)]
+pub(crate) use windows_rooted::remove_rooted_owned_read_only_file;
+#[cfg(windows)]
 pub(crate) use windows_rooted::rename_rooted_entry;
 #[cfg(windows)]
 pub(crate) use windows_rooted::rooted_link_targets_directory;

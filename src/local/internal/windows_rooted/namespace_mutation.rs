@@ -105,6 +105,182 @@ pub(super) fn delete_open_entry(entry: &File) -> Result<()> {
     }
 }
 
+/// Deletes an owned entry while preserving its captured identity and the
+/// original file attributes when compatibility fallback deletion fails.
+pub(super) fn delete_owned_read_only_entry(entry: &File, expected: &crate::rooted::Metadata) -> Result<()> {
+    let actual = crate::rooted::Metadata::from_open_file(entry)?;
+    if !expected.is_same_file(&actual) {
+        return Err(Error::new(
+            ErrorKind::InvalidInput,
+            "owned rooted temporary entry identity changed",
+        ));
+    }
+
+    match delete_read_only_with_extended_disposition(entry) {
+        Ok(()) => Ok(()),
+        Err(error) if extended_disposition_is_unsupported(&error) => delete_with_attribute_fallback(entry),
+        Err(error) => Err(error),
+    }
+}
+
+/// Requests deletion while asking Windows to ignore the read-only attribute.
+fn delete_read_only_with_extended_disposition(entry: &File) -> Result<()> {
+    use windows_sys::Win32::Storage::FileSystem::FILE_DISPOSITION_FLAG_DELETE;
+    use windows_sys::Win32::Storage::FileSystem::FILE_DISPOSITION_FLAG_IGNORE_READONLY_ATTRIBUTE;
+    use windows_sys::Win32::Storage::FileSystem::FILE_DISPOSITION_INFO_EX;
+    use windows_sys::Win32::Storage::FileSystem::FileDispositionInfoEx;
+    use windows_sys::Win32::Storage::FileSystem::SetFileInformationByHandle;
+
+    #[cfg(feature = "test-support")]
+    if crate::local::test_support_enabled("rooted-owned-delete-fallback-delete-once")
+        || crate::local::test_support_enabled("rooted-owned-delete-fallback-success")
+        || crate::local::test_support_enabled("rooted-owned-delete-restore-fail")
+    {
+        return Err(Error::from_raw_os_error(
+            windows_sys::Win32::Foundation::ERROR_NOT_SUPPORTED as i32,
+        ));
+    }
+
+    let disposition = FILE_DISPOSITION_INFO_EX {
+        Flags: FILE_DISPOSITION_FLAG_DELETE | FILE_DISPOSITION_FLAG_IGNORE_READONLY_ATTRIBUTE,
+    };
+    // SAFETY: `entry` is a live handle opened with DELETE access and the
+    // payload matches the FileDispositionInfoEx information class.
+    let result = unsafe {
+        SetFileInformationByHandle(
+            entry.as_raw_handle(),
+            FileDispositionInfoEx,
+            (&raw const disposition).cast(),
+            size_of::<FILE_DISPOSITION_INFO_EX>() as u32,
+        )
+    };
+    if result == 0 {
+        Err(Error::last_os_error())
+    } else {
+        Ok(())
+    }
+}
+
+/// Uses the legacy disposition only after the extended class is explicitly
+/// unavailable. Restores every basic attribute field if deletion fails.
+fn delete_with_attribute_fallback(entry: &File) -> Result<()> {
+    use windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_READONLY;
+    use windows_sys::Win32::Storage::FileSystem::FILE_BASIC_INFO;
+    use windows_sys::Win32::Storage::FileSystem::FileBasicInfo;
+    use windows_sys::Win32::Storage::FileSystem::GetFileInformationByHandleEx;
+    use windows_sys::Win32::Storage::FileSystem::SetFileInformationByHandle;
+
+    let mut original = FILE_BASIC_INFO::default();
+    // SAFETY: `entry` is live and `original` is writable storage for
+    // FileBasicInfo.
+    let result = unsafe {
+        GetFileInformationByHandleEx(
+            entry.as_raw_handle(),
+            FileBasicInfo,
+            (&raw mut original).cast(),
+            size_of::<FILE_BASIC_INFO>() as u32,
+        )
+    };
+    if result == 0 {
+        return Err(Error::last_os_error());
+    }
+
+    if original.FileAttributes & FILE_ATTRIBUTE_READONLY == 0 {
+        return delete_open_entry(entry);
+    }
+
+    let mut writable = original;
+    writable.FileAttributes &= !FILE_ATTRIBUTE_READONLY;
+    // SAFETY: `entry` was opened with FILE_WRITE_ATTRIBUTES and `writable`
+    // matches the FileBasicInfo information class.
+    let result = unsafe {
+        SetFileInformationByHandle(
+            entry.as_raw_handle(),
+            FileBasicInfo,
+            (&raw const writable).cast(),
+            size_of::<FILE_BASIC_INFO>() as u32,
+        )
+    };
+    if result == 0 {
+        return Err(Error::last_os_error());
+    }
+
+    #[cfg(feature = "test-support")]
+    let delete_result = if crate::local::take_test_support("rooted-owned-delete-fallback-delete-once")
+        || crate::local::test_support_enabled("rooted-owned-delete-restore-fail")
+    {
+        Err(crate::local::test_fault_error())
+    } else {
+        delete_open_entry(entry)
+    };
+    #[cfg(not(feature = "test-support"))]
+    let delete_result = delete_open_entry(entry);
+
+    match delete_result {
+        Ok(()) => Ok(()),
+        Err(delete_error) => {
+            #[cfg(feature = "test-support")]
+            let restore_result = if crate::local::test_support_enabled("rooted-owned-delete-restore-fail") {
+                Err(crate::local::test_fault_error())
+            } else {
+                restore_file_basic_info(entry, &original)
+            };
+            #[cfg(not(feature = "test-support"))]
+            let restore_result = restore_file_basic_info(entry, &original);
+
+            match restore_result {
+                Ok(()) => Err(delete_error),
+                Err(restore_error) => Err(Error::new(
+                    delete_error.kind(),
+                    format!(
+                        "deletion failed: {delete_error}; restoring original file attributes failed: {restore_error}"
+                    ),
+                )),
+            }
+        }
+    }
+}
+
+/// Restores the complete captured `FILE_BASIC_INFO` payload.
+fn restore_file_basic_info(entry: &File, original: &windows_sys::Win32::Storage::FileSystem::FILE_BASIC_INFO) -> Result<()> {
+    use windows_sys::Win32::Storage::FileSystem::FileBasicInfo;
+    use windows_sys::Win32::Storage::FileSystem::SetFileInformationByHandle;
+
+    // SAFETY: `entry` is live and `original` matches the FileBasicInfo class.
+    let result = unsafe {
+        SetFileInformationByHandle(
+            entry.as_raw_handle(),
+            FileBasicInfo,
+            (&raw const *original).cast(),
+            size_of::<windows_sys::Win32::Storage::FileSystem::FILE_BASIC_INFO>() as u32,
+        )
+    };
+    if result == 0 {
+        Err(Error::last_os_error())
+    } else {
+        Ok(())
+    }
+}
+
+/// Returns whether the extended disposition failure means the class is
+/// unsupported, rather than an access, sharing, or namespace failure.
+fn extended_disposition_is_unsupported(error: &Error) -> bool {
+    use windows_sys::Win32::Foundation::ERROR_CALL_NOT_IMPLEMENTED;
+    use windows_sys::Win32::Foundation::ERROR_INVALID_FUNCTION;
+    use windows_sys::Win32::Foundation::ERROR_INVALID_LEVEL;
+    use windows_sys::Win32::Foundation::ERROR_INVALID_PARAMETER;
+    use windows_sys::Win32::Foundation::ERROR_NOT_SUPPORTED;
+
+    matches!(
+        error.raw_os_error().map(|code| code as u32),
+        Some(ERROR_CALL_NOT_IMPLEMENTED)
+            | Some(ERROR_INVALID_FUNCTION)
+            | Some(ERROR_INVALID_LEVEL)
+            | Some(ERROR_INVALID_PARAMETER)
+            | Some(ERROR_NOT_SUPPORTED)
+    )
+}
+
 /// Renames an opened entry relative to the same root handle.
 /// Opens the source without following its final link and retains the target
 /// parent during installation. `overwrite` permits replacement, with a legacy
