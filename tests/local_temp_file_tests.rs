@@ -11,6 +11,8 @@ use std::env;
 use std::fs;
 use std::io::ErrorKind;
 use std::io::IoSlice;
+#[cfg(windows)]
+use std::io::Read;
 use std::io::Seek;
 use std::io::SeekFrom;
 use std::path::Path;
@@ -25,6 +27,8 @@ use qubit_local_files::error::LocalFileErrorKind;
 use qubit_local_files::error::LocalFileOperation;
 use qubit_local_files::error::LocalPersistErrorParts;
 use qubit_local_files::options::LocalPersistOptions;
+#[cfg(windows)]
+use qubit_local_files::options::LocalSealOptions;
 use qubit_local_files::options::LocalTempFileOptions;
 #[cfg(feature = "test-support")]
 use qubit_local_files::outcome::LocalPersistCleanupState;
@@ -34,6 +38,8 @@ use qubit_local_files::outcome::LocalPersistMethod;
 use qubit_local_files::outcome::LocalPersistStage;
 use qubit_local_files::outcome::LocalTempSourceState;
 use qubit_local_files::policy::LocalDurabilityRequirement;
+#[cfg(windows)]
+use qubit_local_files::policy::LocalPrivacyRequirement;
 #[cfg(feature = "test-support")]
 use qubit_local_files::test_support::install_test_fault;
 use tempfile::tempdir;
@@ -284,6 +290,103 @@ fn test_local_temp_file_persist_reports_required_host_durability() {
         b"durable payload".as_slice(),
         fs::read(target).expect("published target should be readable"),
     );
+}
+
+/// Verifies Required-private Host temporary files support synchronous I/O and
+/// retain their identity through sealing.
+#[cfg(windows)]
+#[test]
+fn test_required_private_windows_host_io_contract() {
+    let parent = tempdir().expect("temporary parent should be created");
+    let mut temporary = LocalFileSystem::host()
+        .expect("Host filesystem should open")
+        .create_temp_file_with_options(
+            &LocalTempFileOptions::new()
+                .with_parent(parent.path())
+                .with_privacy(LocalPrivacyRequirement::Required),
+        )
+        .expect("Required-private Host temporary file should be created");
+    let path = temporary.path().to_path_buf();
+
+    Output::write_fully(&mut temporary, b"abc").expect("first segment should be written");
+    Output::write_fully(&mut temporary, b"def").expect("second segment should be written");
+    temporary
+        .seek(SeekFrom::Start(2))
+        .expect("temporary file should seek to the overwrite position");
+    Output::write_fully(&mut temporary, b"XY").expect("overwrite segment should be written");
+    Output::flush(&mut temporary).expect("temporary file should flush");
+
+    let file = temporary
+        .as_file_mut()
+        .expect("retained file handle should be available");
+    file.seek(SeekFrom::Start(0)).expect("retained handle should seek");
+    let mut contents = [0; 6];
+    file.read_exact(&mut contents).expect("retained handle should read");
+    assert_eq!(&contents, b"abXYef");
+
+    let sealed = temporary
+        .seal_with_options(&LocalSealOptions::new())
+        .expect("Host temporary file should seal");
+    assert!(
+        sealed
+            .observation()
+            .expect("sealed file identity should be observable")
+            .identity()
+            .is_some(),
+        "sealed Host file should retain a native identity"
+    );
+    let mut sealed = sealed;
+    sealed.cleanup().expect("sealed Host file should clean up");
+    assert!(!path.exists());
+}
+
+/// Verifies Required-private Rooted temporary files support synchronous I/O
+/// and retain their identity through sealing.
+#[cfg(windows)]
+#[test]
+fn test_required_private_windows_rooted_io_contract() {
+    let root = tempdir().expect("Rooted fixture should be created");
+    let filesystem = LocalFileSystem::rooted(root.path()).expect("Rooted filesystem should open");
+    let mut temporary = filesystem
+        .create_temp_file_with_options(
+            &LocalTempFileOptions::new()
+                .with_parent(Path::new("/"))
+                .with_privacy(LocalPrivacyRequirement::Required),
+        )
+        .expect("Required-private Rooted temporary file should be created");
+    let virtual_path = temporary.path().to_path_buf();
+    let native_path = rooted_host_path(root.path(), &virtual_path);
+
+    Output::write_fully(&mut temporary, b"abc").expect("first segment should be written");
+    Output::write_fully(&mut temporary, b"def").expect("second segment should be written");
+    temporary
+        .seek(SeekFrom::Start(2))
+        .expect("temporary file should seek to the overwrite position");
+    Output::write_fully(&mut temporary, b"XY").expect("overwrite segment should be written");
+    Output::flush(&mut temporary).expect("temporary file should flush");
+
+    let file = temporary
+        .as_file_mut()
+        .expect("retained file handle should be available");
+    file.seek(SeekFrom::Start(0)).expect("retained handle should seek");
+    let mut contents = [0; 6];
+    file.read_exact(&mut contents).expect("retained handle should read");
+    assert_eq!(&contents, b"abXYef");
+
+    let sealed = temporary
+        .seal_with_options(&LocalSealOptions::new())
+        .expect("Rooted temporary file should seal");
+    assert!(
+        sealed
+            .observation()
+            .expect("sealed file identity should be observable")
+            .identity()
+            .is_some(),
+        "sealed Rooted file should retain a native identity"
+    );
+    let mut sealed = sealed;
+    sealed.cleanup().expect("sealed Rooted file should clean up");
+    assert!(!native_path.exists());
 }
 
 /// Verifies Unix Rooted persistence implements the same durable publication
