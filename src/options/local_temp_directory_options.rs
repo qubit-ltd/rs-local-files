@@ -11,6 +11,7 @@ use std::path::Path;
 use std::path::PathBuf;
 
 use super::LocalTempCleanupLimits;
+use crate::policy::LocalPrivacyRequirement;
 
 /// Options for creating a temporary directory whose cleanup limits are
 /// retained.
@@ -38,6 +39,8 @@ pub struct LocalTempDirectoryOptions {
     create_parent: bool,
     /// Limits retained for explicit cleanup and the final Drop attempt.
     cleanup_limits: LocalTempCleanupLimits,
+    /// Requested privacy for the newly created directory.
+    privacy: LocalPrivacyRequirement,
 }
 
 impl LocalTempDirectoryOptions {
@@ -51,6 +54,7 @@ impl LocalTempDirectoryOptions {
             max_attempts: None,
             create_parent: false,
             cleanup_limits: LocalTempCleanupLimits::new(),
+            privacy: LocalPrivacyRequirement::PlatformDefault,
         }
     }
 
@@ -58,6 +62,19 @@ impl LocalTempDirectoryOptions {
     #[must_use = "inspect the limits retained for explicit and automatic cleanup"]
     pub const fn cleanup_limits(&self) -> LocalTempCleanupLimits {
         self.cleanup_limits
+    }
+
+    /// Returns the requested creation privacy.
+    #[inline]
+    pub const fn privacy(&self) -> LocalPrivacyRequirement {
+        self.privacy
+    }
+
+    /// Sets the requested creation privacy.
+    #[inline]
+    pub const fn with_privacy(mut self, requirement: LocalPrivacyRequirement) -> Self {
+        self.privacy = requirement;
+        self
     }
 
     /// Returns the configured parent, or `None` for the owning filesystem's

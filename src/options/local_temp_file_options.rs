@@ -10,6 +10,8 @@
 use std::path::Path;
 use std::path::PathBuf;
 
+use crate::policy::LocalPrivacyRequirement;
+
 /// Options for creating a cleanup-owned temporary file.
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[must_use = "temporary file options have no effect unless they are used"]
@@ -24,6 +26,8 @@ pub struct LocalTempFileOptions {
     max_attempts: Option<usize>,
     /// Whether a missing parent directory is created before allocation.
     create_parent: bool,
+    /// Requested privacy for the newly created file.
+    privacy: LocalPrivacyRequirement,
 }
 
 impl LocalTempFileOptions {
@@ -36,6 +40,7 @@ impl LocalTempFileOptions {
             suffix: None,
             max_attempts: None,
             create_parent: false,
+            privacy: LocalPrivacyRequirement::PlatformDefault,
         }
     }
 
@@ -69,6 +74,19 @@ impl LocalTempFileOptions {
     #[inline]
     pub const fn creates_parent(&self) -> bool {
         self.create_parent
+    }
+
+    /// Returns the requested creation privacy.
+    #[inline]
+    pub const fn privacy(&self) -> LocalPrivacyRequirement {
+        self.privacy
+    }
+
+    /// Sets the requested creation privacy.
+    #[inline]
+    pub const fn with_privacy(mut self, requirement: LocalPrivacyRequirement) -> Self {
+        self.privacy = requirement;
+        self
     }
 
     /// Enables recursive creation of a missing parent directory.

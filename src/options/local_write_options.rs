@@ -13,6 +13,7 @@ use super::LocalWriteMetadataPolicy;
 use super::LocalWriteMode;
 use crate::policy::LocalAtomicityRequirement;
 use crate::policy::LocalDurabilityRequirement;
+use crate::policy::LocalFileSyncRequirement;
 
 /// Options fixed for a local file writer session.
 ///
@@ -42,6 +43,8 @@ pub struct LocalWriteOptions {
     atomicity: LocalAtomicityRequirement,
     /// Required durability.
     durability: LocalDurabilityRequirement,
+    /// Explicit synchronization requirement for the file itself.
+    file_sync: LocalFileSyncRequirement,
     /// Optional maximum time spent retrying Unix lease conflicts.
     open_retry_timeout: Option<Duration>,
 }
@@ -59,6 +62,7 @@ impl LocalWriteOptions {
             create_parent: false,
             atomicity: LocalAtomicityRequirement::Preferred,
             durability: LocalDurabilityRequirement::NotRequired,
+            file_sync: LocalFileSyncRequirement::NotRequired,
             open_retry_timeout: None,
         }
     }
@@ -104,6 +108,12 @@ impl LocalWriteOptions {
         self.durability
     }
 
+    /// Returns the requested synchronization of the file itself.
+    #[inline]
+    pub const fn file_sync(&self) -> LocalFileSyncRequirement {
+        self.file_sync
+    }
+
     /// Returns the configured Unix open retry timeout.
     #[inline]
     pub const fn open_retry_timeout(&self) -> Option<Duration> {
@@ -128,6 +138,13 @@ impl LocalWriteOptions {
     #[inline]
     pub const fn with_durability(mut self, durability: LocalDurabilityRequirement) -> Self {
         self.durability = durability;
+        self
+    }
+
+    /// Sets the requested synchronization of the file itself.
+    #[inline]
+    pub const fn with_file_sync(mut self, requirement: LocalFileSyncRequirement) -> Self {
+        self.file_sync = requirement;
         self
     }
 

@@ -8,6 +8,7 @@
 
 mod error;
 mod file_system;
+mod lf3_contract_tests;
 mod local;
 mod local_file_metadata_tests;
 mod outcome;
