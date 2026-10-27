@@ -25,6 +25,7 @@ use windows_sys::Wdk::Storage::FileSystem::FILE_NON_DIRECTORY_FILE;
 use windows_sys::Wdk::Storage::FileSystem::FILE_OPEN;
 use windows_sys::Wdk::Storage::FileSystem::FILE_OPEN_REPARSE_POINT;
 use windows_sys::Wdk::Storage::FileSystem::NtCreateFile;
+use windows_sys::Wdk::Storage::FileSystem::RtlNtStatusToDosErrorNoTeb;
 use windows_sys::Win32::Foundation::CloseHandle;
 use windows_sys::Win32::Foundation::GetLastError;
 use windows_sys::Win32::Foundation::HANDLE;
@@ -280,6 +281,14 @@ fn last_os_error() -> io::Error {
     io::Error::from_raw_os_error(unsafe { GetLastError() } as i32)
 }
 
+/// Converts an NTSTATUS failure into its corresponding standard I/O error.
+fn nt_status_error(status: i32) -> io::Error {
+    // SAFETY: RtlNtStatusToDosErrorNoTeb accepts any NTSTATUS value and does
+    // not retain pointers.
+    let error_code = unsafe { RtlNtStatusToDosErrorNoTeb(status) };
+    io::Error::from_raw_os_error(error_code as i32)
+}
+
 fn create_at(parent: &File, name: &OsStr, directory: bool) -> io::Result<File> {
     let mut name: Vec<u16> = name.encode_wide().collect();
     if name.is_empty()
@@ -339,7 +348,7 @@ fn create_at(parent: &File, name: &OsStr, directory: bool) -> io::Result<File> {
         )
     };
     if status < 0 {
-        return Err(io::Error::from_raw_os_error(status));
+        return Err(nt_status_error(status));
     }
     let handle = NativeHandle(handle);
     // Transfer the successfully created native handle into File ownership.
@@ -415,7 +424,7 @@ pub(crate) fn open_existing_entry_at(parent: &File, name: &OsStr, directory: boo
         )
     };
     if status < 0 {
-        return Err(io::Error::from_raw_os_error(status));
+        return Err(nt_status_error(status));
     }
     let handle = NativeHandle(handle);
     let file = unsafe { File::from_raw_handle(handle.0.cast()) };
