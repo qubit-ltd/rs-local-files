@@ -32,10 +32,11 @@ use crate::local_file_system_validation::validate_write_options;
 use crate::directory::binding::PathBinding;
 use crate::directory::binding::DirectoryPathBinding;
 use crate::options::LocalObservedReadOptions;
-use crate::observation::LocalObservedReader;
 use crate::rooted::Root;
 use crate::path::LocalNamespacePath;
 use crate::test_support::TestFaultPoint;
+use crate::options::{LocalReadAllOptions, LocalSnapshotOptions};
+use crate::observation::{LocalObservedReader, LocalObservationRequirement};
 
 impl LocalFileSystem {
     /// Opens a reader with same-handle observations and optional name binding.
@@ -120,6 +121,185 @@ impl LocalFileSystem {
             observed = observed.with_binding(Box::new(DirectoryPathBinding::new(parent_anchors, binding_options.deadline())));
         }
         Ok(observed)
+    /// Reads metadata for the final target while honoring this filesystem's link policy.
+    ///
+    /// Returns file or directory metadata. Link rejection, missing targets,
+    /// resolution errors, and native metadata failures are returned as
+    /// `LocalFileError` with metadata-operation context.
+    pub fn target_metadata(&self, path: &Path) -> LocalResult<LocalFileMetadata> {
+        let resolver = self.resolver_for(path, LocalFileOperation::Metadata)?;
+        let resolved = resolve_operation_path(&resolver, path, LocalFileOperation::Metadata)?;
+        match &self.core.namespace {
+            LocalNamespace::Host => {
+                let entry = HostLocalFileSystem::metadata_with_policy(
+                    resolved.authority_relative(),
+                    self.symlink_policy,
+                )?;
+                if entry.kind() == LocalFileKind::Symlink && !self.symlink_policy.follows() {
+                    return Err(LocalFileError::new(
+                        LocalFileErrorKind::Unsupported,
+                        LocalFileOperation::Metadata,
+                    )
+                    .with_reason("target metadata requires following a symbolic link")
+                    .with_path(resolved.namespace_absolute().to_path_buf()));
+                }
+                if entry.kind() == LocalFileKind::Symlink && self.symlink_policy.follows() {
+                    std::fs::metadata(resolved.authority_relative())
+                        .map(|metadata| LocalFileMetadata::from_native(&metadata))
+                        .map_err(|error| {
+                            LocalFileError::from_io(
+                                LocalFileOperation::Metadata,
+                                Some(resolved.namespace_absolute().to_path_buf()),
+                                None,
+                                error,
+                            )
+                        })
+                } else {
+                    Ok(entry)
+                }
+            }
+            LocalNamespace::Rooted(rooted) => {
+                rooted.target_metadata(resolved.authority_relative(), self.symlink_policy)
+            }
+        }
+    }
+
+    /// Resolves an existing operand to its namespace coordinate.
+    ///
+    /// Host results are native canonical paths; Rooted results are virtual
+    /// absolute paths and do not grant authority for a later operation.
+    /// Returns path-policy, missing-target, or native resolution errors.
+    pub fn canonicalize(&self, path: &Path) -> LocalResult<std::path::PathBuf> {
+        let resolver = self.resolver_for(path, LocalFileOperation::Metadata)?;
+        let resolved = resolve_operation_path(&resolver, path, LocalFileOperation::Metadata)?;
+        match &self.core.namespace {
+            LocalNamespace::Host => {
+                let entry = HostLocalFileSystem::metadata_with_policy(
+                    resolved.authority_relative(),
+                    self.symlink_policy,
+                )?;
+                if entry.kind() == LocalFileKind::Symlink && !self.symlink_policy.follows() {
+                    return Err(LocalFileError::new(
+                        LocalFileErrorKind::Unsupported,
+                        LocalFileOperation::Metadata,
+                    )
+                    .with_reason("canonicalization requires following a symbolic link")
+                    .with_path(resolved.namespace_absolute().to_path_buf()));
+                }
+                std::fs::canonicalize(resolved.authority_relative()).map_err(|source| {
+                    LocalFileError::from_io(
+                        LocalFileOperation::Metadata,
+                        Some(resolved.namespace_absolute().to_path_buf()),
+                        None,
+                        source,
+                    )
+                })
+            }
+            LocalNamespace::Rooted(rooted) => {
+                rooted.canonicalize_virtual(resolved.authority_relative(), self.symlink_policy)
+            }
+        }
+    }
+
+    /// Reads a regular file completely using the filesystem's reader defaults.
+    pub fn read_all(&self, path: &Path) -> LocalResult<Vec<u8>> {
+        self.read_all_with_options(path, &LocalReadAllOptions::new())
+    }
+
+    /// Reads a regular file completely with an optional byte limit.
+    ///
+    /// Returns `ResourceLimit` when the observed length or bytes read exceed
+    /// the configured maximum. Other open/read failures retain structured
+    /// operation context; partial bytes are discarded.
+    pub fn read_all_with_options(
+        &self,
+        path: &Path,
+        options: &LocalReadAllOptions,
+    ) -> LocalResult<Vec<u8>> {
+        let resolver = self.resolver_for(path, LocalFileOperation::Read)?;
+        let resolved = resolve_operation_path(&resolver, path, LocalFileOperation::Read)?;
+        let mut reader = self.open_resolved_reader_with_policy(
+            &resolved,
+            options.read_options().unwrap_or(&self.defaults.read),
+            LocalFileOperation::Read,
+            resolver.current_directory(),
+            options.symlink_policy().unwrap_or(self.symlink_policy),
+        )?;
+        let maximum = options.max_bytes();
+        if maximum.is_some_and(|limit| reader.metadata().len() > limit) {
+            return Err(LocalFileError::new(
+                LocalFileErrorKind::ResourceLimit,
+                LocalFileOperation::Read,
+            )
+            .with_path(resolved.namespace_absolute().to_path_buf()));
+        }
+        #[cfg(test)]
+        crate::observation::snapshot::run_read_hook();
+        crate::observation::reader::collect_limited(&mut reader, maximum)
+            .map_err(|error| error.with_path(resolved.namespace_absolute().to_path_buf()))
+    }
+
+    /// Reads a complete UTF-8 text file using the filesystem's reader defaults.
+    pub fn read_text(&self, path: &Path) -> LocalResult<String> {
+        self.read_text_with_options(path, &LocalReadAllOptions::new())
+    }
+
+    /// Reads a complete UTF-8 text file with an optional byte limit.
+    ///
+    /// Returns `InvalidEncoding` with the original UTF-8 conversion error
+    /// when the complete file is not valid UTF-8.
+    pub fn read_text_with_options(
+        &self,
+        path: &Path,
+        options: &LocalReadAllOptions,
+    ) -> LocalResult<String> {
+        let bytes = self.read_all_with_options(path, options)?;
+        String::from_utf8(bytes).map_err(|error| {
+            LocalFileError::from_utf8(LocalFileOperation::Read, Some(path.to_path_buf()), error)
+        })
+    }
+
+    /// Reads bytes while checking same-handle observations before and after.
+    ///
+    /// This detects observed identity, size, or native timestamp changes; it
+    /// does not provide an atomic snapshot against adversarial concurrent I/O.
+    /// Returns `ChangedDuringRead` when the observations do not match.
+    pub fn read_consistent_with_options(
+        &self,
+        path: &Path,
+        options: &LocalSnapshotOptions,
+    ) -> LocalResult<crate::LocalFileSnapshot> {
+        let resolver = self.resolver_for(path, LocalFileOperation::Read)?;
+        let resolved = resolve_operation_path(&resolver, path, LocalFileOperation::Read)?;
+        let reader = self.open_resolved_reader_with_policy(
+            &resolved,
+            options.read_options(),
+            LocalFileOperation::Read,
+            resolver.current_directory(),
+            options.symlink_policy().unwrap_or(self.symlink_policy),
+        )?;
+        let mut observed =
+            LocalObservedReader::from_reader(reader, LocalObservationRequirement::Required)?;
+        let before = observed.observation().clone();
+        if before.metadata().len() > options.max_bytes() {
+            return Err(LocalFileError::new(
+                LocalFileErrorKind::ResourceLimit,
+                LocalFileOperation::Read,
+            )
+            .with_path(resolved.namespace_absolute().to_path_buf()));
+        }
+        let bytes = observed.read_to_end_limited(options.max_bytes())?;
+        #[cfg(test)]
+        crate::observation::snapshot::run_read_hook();
+        let after = observed.observe_now()?;
+        if !crate::observation::snapshot::observations_match(&before, &after, bytes.len() as u64) {
+            return Err(LocalFileError::new(
+                LocalFileErrorKind::ChangedDuringRead,
+                LocalFileOperation::Read,
+            )
+            .with_path(resolved.namespace_absolute().to_path_buf()));
+        }
+        Ok(crate::LocalFileSnapshot::new(bytes, before, after))
     }
 
     /// Reads final-entry metadata without following the final symlink.
@@ -194,18 +374,43 @@ impl LocalFileSystem {
         operation: LocalFileOperation,
         current_directory: Option<&Path>,
     ) -> LocalResult<LocalFileReader> {
+        self.open_resolved_reader_with_policy(
+            resolved,
+            options,
+            operation,
+            current_directory,
+            self.symlink_policy,
+        )
+    }
+
+    fn open_resolved_reader_with_policy(
+        &self,
+        resolved: &LocalNamespacePath,
+        options: &LocalReadOptions,
+        operation: LocalFileOperation,
+        current_directory: Option<&Path>,
+        symlink_policy: crate::LocalSymlinkPolicy,
+    ) -> LocalResult<LocalFileReader> {
         reject_directory_qualified_file(resolved, operation, current_directory)?;
         match &self.core.namespace {
             LocalNamespace::Host => HostLocalFileSystem::open_reader_with_policy(
                 resolved.authority_relative(),
                 options,
-                self.symlink_policy,
+                symlink_policy,
             ),
             LocalNamespace::Rooted(rooted) => {
-                rooted.open_reader(resolved.authority_relative(), options, self.symlink_policy)
+                rooted.open_reader(resolved.authority_relative(), options, symlink_policy)
             }
         }
-        .map_err(|error| operation_error(error, operation, resolved.namespace_absolute(), None, current_directory))
+        .map_err(|error| {
+            operation_error(
+                error,
+                operation,
+                resolved.namespace_absolute(),
+                None,
+                current_directory,
+            )
+        })
     }
 
     /// Reads at most `max_bytes` using the default reader options.

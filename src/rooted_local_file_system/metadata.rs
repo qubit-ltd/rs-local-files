@@ -19,6 +19,52 @@ use crate::LocalResult;
 use crate::LocalSymlinkPolicy;
 
 impl RootedLocalFileSystem {
+    pub(crate) fn canonicalize_virtual(
+        &self,
+        path: &Path,
+        symlink_policy: LocalSymlinkPolicy,
+    ) -> LocalResult<std::path::PathBuf> {
+        if path.as_os_str().is_empty() {
+            let _ = self
+                .root
+                .metadata()
+                .map_err(|error| rooted_io_error(LocalFileOperation::Metadata, path, error))?;
+            return Ok(Path::new(std::path::MAIN_SEPARATOR_STR).to_path_buf());
+        }
+        let relative = super::resolve_rooted_path_allow_root(
+            &self.root,
+            path,
+            symlink_policy,
+            true,
+            LocalFileOperation::Metadata,
+        )?;
+        let mut absolute = Path::new(std::path::MAIN_SEPARATOR_STR).to_path_buf();
+        absolute.push(relative);
+        Ok(absolute)
+    }
+
+    /// Reads metadata for the final target after applying the selected link policy.
+    pub(crate) fn target_metadata(
+        &self,
+        path: &Path,
+        symlink_policy: LocalSymlinkPolicy,
+    ) -> LocalResult<LocalFileMetadata> {
+        if path.as_os_str().is_empty() {
+            return self.metadata(path, symlink_policy);
+        }
+        let relative = resolve_rooted_path(
+            &self.root,
+            path,
+            symlink_policy,
+            true,
+            LocalFileOperation::Metadata,
+        )?;
+        self.root
+            .symlink_metadata(&relative)
+            .map(rooted_metadata)
+            .map_err(|error| rooted_io_error(LocalFileOperation::Metadata, path, error))
+    }
+
     /// Reads metadata through the opened root authority.
     /// An empty `path` inspects the retained root. Otherwise applies
     /// `symlink_policy` to intermediate components and inspects the final entry

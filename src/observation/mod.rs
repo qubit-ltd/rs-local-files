@@ -1,6 +1,7 @@
 //! Same-handle file observations and source verification values.
 
 mod types;
+pub(crate) mod snapshot;
 pub(crate) mod query;
 pub(crate) mod reader;
 #[cfg(unix)]
@@ -13,3 +14,4 @@ pub use types::{
     LocalSourceVerification, LocalUnixFileDetails, LocalWindowsFileDetails,
 };
 pub use reader::LocalObservedReader;
+pub use snapshot::LocalFileSnapshot;
