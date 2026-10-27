@@ -24,6 +24,7 @@ use windows_sys::Wdk::Storage::FileSystem::FILE_DIRECTORY_FILE;
 use windows_sys::Wdk::Storage::FileSystem::FILE_NON_DIRECTORY_FILE;
 use windows_sys::Wdk::Storage::FileSystem::FILE_OPEN;
 use windows_sys::Wdk::Storage::FileSystem::FILE_OPEN_REPARSE_POINT;
+use windows_sys::Wdk::Storage::FileSystem::FILE_SYNCHRONOUS_IO_NONALERT;
 use windows_sys::Wdk::Storage::FileSystem::NtCreateFile;
 use windows_sys::Wdk::Storage::FileSystem::RtlNtStatusToDosErrorNoTeb;
 use windows_sys::Win32::Foundation::CloseHandle;
@@ -65,6 +66,7 @@ use windows_sys::Win32::Storage::FileSystem::FILE_TRAVERSE;
 use windows_sys::Win32::Storage::FileSystem::FILE_WRITE_ATTRIBUTES;
 use windows_sys::Win32::Storage::FileSystem::FILE_WRITE_DATA;
 use windows_sys::Win32::Storage::FileSystem::READ_CONTROL;
+use windows_sys::Win32::Storage::FileSystem::SYNCHRONIZE;
 use windows_sys::Win32::Storage::FileSystem::WRITE_DAC;
 use windows_sys::Win32::System::IO::IO_STATUS_BLOCK;
 use windows_sys::Win32::System::Threading::GetCurrentProcess;
@@ -81,7 +83,8 @@ const FILE_INITIAL_ACCESS: u32 = FILE_READ_DATA
     | FILE_WRITE_ATTRIBUTES
     | READ_CONTROL
     | WRITE_DAC
-    | DELETE;
+    | DELETE
+    | SYNCHRONIZE;
 const DIRECTORY_ACCESS: u32 = FILE_LIST_DIRECTORY
     | FILE_TRAVERSE
     | FILE_ADD_FILE
@@ -91,7 +94,8 @@ const DIRECTORY_ACCESS: u32 = FILE_LIST_DIRECTORY
     | FILE_WRITE_ATTRIBUTES
     | READ_CONTROL
     | WRITE_DAC
-    | DELETE;
+    | DELETE
+    | SYNCHRONIZE;
 
 #[cfg(test)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -338,11 +342,12 @@ fn create_at(parent: &File, name: &OsStr, directory: bool) -> io::Result<File> {
             0,
             0x7, // FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE
             FILE_CREATE,
-            if directory {
-                FILE_DIRECTORY_FILE
-            } else {
-                FILE_NON_DIRECTORY_FILE
-            },
+            FILE_SYNCHRONOUS_IO_NONALERT
+                | if directory {
+                    FILE_DIRECTORY_FILE
+                } else {
+                    FILE_NON_DIRECTORY_FILE
+                },
             ptr::null(),
             0,
         )
@@ -394,6 +399,7 @@ pub(crate) fn open_existing_entry_at(parent: &File, name: &OsStr, directory: boo
     };
     let access = READ_CONTROL
         | WRITE_DAC
+        | SYNCHRONIZE
         | FILE_READ_ATTRIBUTES
         | FILE_WRITE_ATTRIBUTES
         | if directory {
@@ -413,7 +419,8 @@ pub(crate) fn open_existing_entry_at(parent: &File, name: &OsStr, directory: boo
             0,
             0x7,
             FILE_OPEN,
-            FILE_OPEN_REPARSE_POINT
+            FILE_SYNCHRONOUS_IO_NONALERT
+                | FILE_OPEN_REPARSE_POINT
                 | if directory {
                     FILE_DIRECTORY_FILE
                 } else {
