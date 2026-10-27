@@ -78,7 +78,7 @@ jobs:
               run_tests --locked --features digest,test-support \
                 --test conditional_writer_tests windows_open_
               run_tests --locked --test local_temp_file_tests test_required_private_windows_
-              run_tests --locked --test local_temp_file_tests windows_sealed_cleanup_
+              run_tests --locked --features test-support --test local_temp_file_tests windows_sealed_cleanup_
               ;;
             *) echo "Unsupported runner OS: $RUNNER_OS" >&2; exit 1 ;;
           esac
