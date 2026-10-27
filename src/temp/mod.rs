@@ -15,4 +15,7 @@ pub(crate) mod types;
 pub(crate) mod internal;
 
 pub use local_temp_directory::LocalTempDirectory;
-pub use local_temp_file::LocalTempFile;
+pub use local_temp_file::{
+    LocalSealedTempFile, LocalTempFile,
+};
+pub use types::LocalTempRecovery;

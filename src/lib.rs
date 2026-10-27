@@ -159,6 +159,10 @@ pub(crate) use policy::LocalSymlinkPolicy;
 pub use temp::LocalTempDirectory;
 pub use temp::LocalTempFile;
 pub use temp::LocalTempRecovery;
+pub use temp::LocalSealedTempFile;
+pub use error::LocalTempSealError;
+pub use options::LocalSealOptions;
+pub use outcome::LocalTempAccessState;
 #[cfg(feature = "test-support")]
 #[doc(hidden)]
 pub(crate) use test_support::TestFaultPlan;

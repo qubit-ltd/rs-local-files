@@ -17,10 +17,12 @@ mod local_create_directory_outcome;
 mod local_delete_outcome;
 mod local_persist_cleanup_state;
 mod local_temp_source_state;
+mod local_temp_access_state;
 mod local_tree_access_state;
 mod local_tree_mutation_state;
 mod local_tree_publication;
 pub use local_temp_source_state::LocalTempSourceState;
+pub use local_temp_access_state::LocalTempAccessState;
 #[cfg(feature = "digest")]
 mod local_conditional_publication_state;
 #[cfg(feature = "digest")]

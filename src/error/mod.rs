@@ -22,6 +22,7 @@ mod local_path_codec_error;
 mod local_resource_kind;
 mod local_resource_limit_error;
 mod local_result;
+mod local_temp_seal_error;
 
 #[cfg(feature = "digest")]
 pub use local_conditional_commit_error::LocalConditionalCommitError;
@@ -38,6 +39,7 @@ pub use local_path_codec_error::LocalPathCodecError;
 pub use local_resource_kind::LocalResourceKind;
 pub use local_resource_limit_error::LocalResourceLimitError;
 pub use local_result::LocalResult;
+pub use local_temp_seal_error::LocalTempSealError;
 
 pub use crate::local::LocalPersistError;
 pub use crate::local::LocalPersistErrorParts;

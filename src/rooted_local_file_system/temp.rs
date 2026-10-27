@@ -31,6 +31,10 @@ use crate::local::test_support_enabled;
 use crate::local::try_random_file_name;
 use crate::write::Mode;
 use crate::write::OpenOptions;
+use crate::policy::LocalPrivacyRequirement;
+use crate::temp::types::NativePrivateCreateError;
+use std::ffi::OsStr;
+use std::fs::File;
 
 impl RootedLocalFileSystem {
     /// Creates a cleanup-owned temporary file below this opened root.
@@ -80,6 +84,9 @@ impl RootedLocalFileSystem {
         if let Err(error) = validate_temp_affixes(options.prefix(), options.suffix()) {
             return Err(rooted_io_error(LocalFileOperation::CreateTempFile, &parent, error)
                 .with_kind(LocalFileErrorKind::InvalidOptions));
+        }
+        if options.privacy() == LocalPrivacyRequirement::Required {
+            return self.create_private_rooted_temp_file(&parent, options, symlink_policy);
         }
         let mut attempts = 0_usize;
         loop {
@@ -211,6 +218,9 @@ impl RootedLocalFileSystem {
             return Err(rooted_io_error(LocalFileOperation::CreateTempDirectory, &parent, error)
                 .with_kind(LocalFileErrorKind::InvalidOptions));
         }
+        if options.privacy() == LocalPrivacyRequirement::Required {
+            return self.create_private_rooted_temp_directory(&parent, options, symlink_policy);
+        }
         let mut attempts = 0_usize;
         loop {
             attempts = attempts.saturating_add(1);
@@ -300,10 +310,97 @@ impl RootedLocalFileSystem {
             ),
         ))
     }
+
+    fn create_private_rooted_temp_file(
+        &self,
+        parent: &std::path::Path,
+        options: &LocalTempFileOptions,
+        symlink_policy: LocalSymlinkPolicy,
+    ) -> LocalResult<LocalTempFile> {
+        let parent_handle = if parent.as_os_str().is_empty() {
+            self.root.open_probe_root()
+        } else {
+            self.root
+                .open_probe_file(&rooted_path(parent, LocalFileOperation::CreateTempFile)?)
+        }
+        .map_err(|error| rooted_io_error(LocalFileOperation::CreateTempFile, parent, error))?;
+        for _ in 0..options.max_attempts().unwrap_or(128) {
+            let sandbox_name = try_random_file_name("sandbox-", None, None)
+                .map_err(|error| rooted_io_error(LocalFileOperation::CreateTempFile, parent, error))?;
+            let sandbox = parent.join(&sandbox_name);
+            let _sandbox_relative = rooted_path(&sandbox, LocalFileOperation::CreateTempFile)?;
+            let sandbox_handle = rooted_private_directory(&parent_handle, OsStr::new(&sandbox_name))
+                .map_err(|error| private_rooted_error(&sandbox, error))?;
+            let name = try_random_file_name("qubit-local-files-", options.prefix(), options.suffix())
+                .map_err(|error| rooted_io_error(LocalFileOperation::CreateTempFile, &sandbox, error))?;
+            let file = match rooted_private_file(&sandbox_handle, OsStr::new(&name)) {
+                Ok(file) => file,
+                Err(error) => return Err(private_rooted_error(&sandbox.join(&name), error)),
+            };
+            let target = sandbox.join(name);
+            return LocalTempFile::rooted(Arc::clone(&self.root), target, sandbox.clone(), file, symlink_policy)
+                .map_err(|error| rooted_io_error(LocalFileOperation::CreateTempFile, &sandbox, error));
+        }
+        Err(rooted_io_error(LocalFileOperation::CreateTempFile, parent, io::Error::new(io::ErrorKind::AlreadyExists, "private temp name attempts exhausted")))
+    }
+
+    fn create_private_rooted_temp_directory(
+        &self,
+        parent: &std::path::Path,
+        options: &LocalTempDirectoryOptions,
+        symlink_policy: LocalSymlinkPolicy,
+    ) -> LocalResult<LocalTempDirectory> {
+        let parent_handle = if parent.as_os_str().is_empty() {
+            self.root.open_probe_root()
+        } else {
+            self.root
+                .open_probe_file(&rooted_path(parent, LocalFileOperation::CreateTempDirectory)?)
+        }
+        .map_err(|error| rooted_io_error(LocalFileOperation::CreateTempDirectory, parent, error))?;
+        for _ in 0..options.max_attempts().unwrap_or(128) {
+            let sandbox_name = try_random_file_name("sandbox-", None, None)
+                .map_err(|error| rooted_io_error(LocalFileOperation::CreateTempDirectory, parent, error))?;
+            let sandbox = parent.join(&sandbox_name);
+            let _sandbox_relative = rooted_path(&sandbox, LocalFileOperation::CreateTempDirectory)?;
+            let sandbox_handle = rooted_private_directory(&parent_handle, OsStr::new(&sandbox_name))
+                .map_err(|error| private_rooted_error(&sandbox, error))?;
+            let name = try_random_file_name("qubit-local-files-", options.prefix(), options.suffix())
+                .map_err(|error| rooted_io_error(LocalFileOperation::CreateTempDirectory, &sandbox, error))?;
+            match rooted_private_directory(&sandbox_handle, OsStr::new(&name)) {
+                Ok(_) => {
+                    let target = sandbox.join(name);
+                    return LocalTempDirectory::rooted(Arc::clone(&self.root), target, sandbox.clone(), symlink_policy, options.cleanup_limits())
+                        .map_err(|error| rooted_io_error(LocalFileOperation::CreateTempDirectory, &sandbox, error));
+                }
+                Err(error) => return Err(private_rooted_error(&sandbox.join(name), error)),
+            }
+        }
+        Err(rooted_io_error(LocalFileOperation::CreateTempDirectory, parent, io::Error::new(io::ErrorKind::AlreadyExists, "private temp name attempts exhausted")))
+    }
 }
 
 /// Reports whether an explicitly configured collision budget is exhausted.
 #[must_use]
 fn attempt_budget_exhausted(attempts: usize, max_attempts: Option<usize>) -> bool {
     max_attempts.is_some_and(|max_attempts| attempts >= max_attempts)
+}
+
+fn rooted_private_file(parent: &File, name: &OsStr) -> Result<File, NativePrivateCreateError> {
+    #[cfg(unix)] { crate::temp::internal::privacy_unix::create_private_file_at(parent, name) }
+    #[cfg(windows)] { crate::temp::internal::privacy_windows::create_private_file_at(parent, name) }
+    #[cfg(not(any(unix, windows)))] { let _ = (parent, name); unreachable!() }
+}
+
+fn rooted_private_directory(parent: &File, name: &OsStr) -> Result<File, NativePrivateCreateError> {
+    #[cfg(unix)] { crate::temp::internal::privacy_unix::create_private_directory_at(parent, name) }
+    #[cfg(windows)] { crate::temp::internal::privacy_windows::create_private_directory_at(parent, name) }
+    #[cfg(not(any(unix, windows)))] { let _ = (parent, name); unreachable!() }
+}
+
+fn private_rooted_error(path: &std::path::Path, error: NativePrivateCreateError) -> crate::LocalFileError {
+    let mut result = rooted_io_error(LocalFileOperation::CreateTempFile, path, error.source);
+    if let Some(entry) = error.retained {
+        result = result.with_temp_recovery(crate::LocalTempRecovery::from_native(path.to_path_buf(), entry));
+    }
+    result
 }

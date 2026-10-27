@@ -21,6 +21,7 @@ mod lf3_privacy_unix_tests;
 #[cfg(windows)]
 mod lf3_privacy_windows_tests;
 mod lf3_sync_tests;
+mod lf3_temp_tests;
 mod local;
 mod local_file_metadata_tests;
 mod outcome;

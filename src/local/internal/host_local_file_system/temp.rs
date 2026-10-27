@@ -10,6 +10,9 @@
 
 use std::error::Error;
 use std::fmt;
+use std::fs::File;
+use std::ffi::OsStr;
+use std::path::PathBuf;
 use std::time::Instant;
 
 use super::HostLocalFileSystem;
@@ -24,6 +27,7 @@ use super::LocalTempDirectory;
 use super::LocalTempDirectoryOptions;
 use super::LocalTempFile;
 use super::LocalTempFileOptions;
+use crate::policy::LocalPrivacyRequirement;
 use super::LocalWriteMode;
 use super::LocalWriteOptions;
 use super::Path;
@@ -64,6 +68,9 @@ impl HostLocalFileSystem {
             LocalFileError::from_io(LocalFileOperation::CreateTempFile, Some(parent.clone()), None, error)
                 .with_kind(LocalFileErrorKind::InvalidOptions)
         })?;
+        if options.privacy() == LocalPrivacyRequirement::Required {
+            return create_private_host_temp_file(&parent, options, symlink_policy);
+        }
         let sandbox =
             crate::local::create_temp_dir_in_dir_with_affixes(&parent, Some("sandbox-"), None, options.max_attempts())
                 .map_err(|error| {
@@ -127,6 +134,9 @@ impl HostLocalFileSystem {
             )
             .with_kind(LocalFileErrorKind::InvalidOptions)
         })?;
+        if options.privacy() == LocalPrivacyRequirement::Required {
+            return create_private_host_temp_directory(&parent, options, symlink_policy);
+        }
         let sandbox =
             crate::local::create_temp_dir_in_dir_with_affixes(&parent, Some("sandbox-"), None, options.max_attempts())
                 .map_err(|error| {
@@ -186,6 +196,131 @@ fn cleanup_failed_temp_sandbox(sandbox: &Path, primary: io::Error) -> io::Error 
             },
         ),
     }
+}
+
+fn create_private_host_temp_file(
+    parent: &Path,
+    options: &LocalTempFileOptions,
+    symlink_policy: LocalSymlinkPolicy,
+) -> LocalResult<LocalTempFile> {
+    #[cfg(not(any(unix, windows)))]
+    {
+        let _ = (parent, options, symlink_policy);
+        return Err(LocalFileError::new(LocalFileErrorKind::RequirementNotMet, LocalFileOperation::CreateTempFile));
+    }
+    #[cfg(any(unix, windows))]
+    {
+        let parent_handle = File::open(parent).map_err(|error| {
+            LocalFileError::from_io(LocalFileOperation::CreateTempFile, Some(parent.to_path_buf()), None, error)
+        })?;
+        let maximum = options.max_attempts().unwrap_or(128);
+        for _ in 0..maximum {
+            let sandbox_name = crate::local::try_random_file_name("sandbox-", None, None).map_err(|error| {
+                LocalFileError::from_io(LocalFileOperation::CreateTempFile, Some(parent.to_path_buf()), None, error)
+            })?;
+            let sandbox_os = std::ffi::OsStr::new(&sandbox_name);
+            let sandbox_handle = match private_create_directory_at(&parent_handle, sandbox_os) {
+                Ok(handle) => handle,
+                Err(error) if error.retained.is_none() && error.source.kind() == io::ErrorKind::AlreadyExists => continue,
+                Err(error) => return Err(private_create_error(parent.join(&sandbox_name), error)),
+            };
+            let sandbox = parent.join(&sandbox_name);
+            let file_name = crate::local::try_random_file_name("qubit-local-files-", options.prefix(), options.suffix())
+                .map_err(|error| LocalFileError::from_io(LocalFileOperation::CreateTempFile, Some(sandbox.clone()), None, error))?;
+            let file = match private_create_file_at(&sandbox_handle, OsStr::new(&file_name)) {
+                Ok(file) => file,
+                Err(error) if error.retained.is_none() && error.source.kind() == io::ErrorKind::AlreadyExists => {
+                    let _ = fs::remove_dir(&sandbox);
+                    continue;
+                }
+                Err(error) => return Err(private_create_error(sandbox.join(&file_name), error)),
+            };
+            let target = sandbox.join(file_name);
+            return LocalTempFile::host(target, sandbox, file, symlink_policy).map_err(|error| {
+                LocalFileError::from_io(LocalFileOperation::CreateTempFile, Some(parent.to_path_buf()), None, error)
+            });
+        }
+        Err(LocalFileError::from_io(
+            LocalFileOperation::CreateTempFile,
+            Some(parent.to_path_buf()),
+            None,
+            io::Error::new(io::ErrorKind::AlreadyExists, "private temp name attempts exhausted"),
+        ))
+    }
+}
+
+fn create_private_host_temp_directory(
+    parent: &Path,
+    options: &LocalTempDirectoryOptions,
+    symlink_policy: LocalSymlinkPolicy,
+) -> LocalResult<LocalTempDirectory> {
+    #[cfg(not(any(unix, windows)))]
+    {
+        let _ = (parent, options, symlink_policy);
+        return Err(LocalFileError::new(LocalFileErrorKind::RequirementNotMet, LocalFileOperation::CreateTempDirectory));
+    }
+    #[cfg(any(unix, windows))]
+    {
+        let parent_handle = File::open(parent).map_err(|error| {
+            LocalFileError::from_io(LocalFileOperation::CreateTempDirectory, Some(parent.to_path_buf()), None, error)
+        })?;
+        let maximum = options.max_attempts().unwrap_or(128);
+        for _ in 0..maximum {
+            let sandbox_name = crate::local::try_random_file_name("sandbox-", None, None).map_err(|error| {
+                LocalFileError::from_io(LocalFileOperation::CreateTempDirectory, Some(parent.to_path_buf()), None, error)
+            })?;
+            let sandbox = parent.join(&sandbox_name);
+            let sandbox_handle = match private_create_directory_at(&parent_handle, OsStr::new(&sandbox_name)) {
+                Ok(handle) => handle,
+                Err(error) if error.retained.is_none() && error.source.kind() == io::ErrorKind::AlreadyExists => continue,
+                Err(error) => return Err(private_create_error(sandbox, error)),
+            };
+            let name = crate::local::try_random_file_name("qubit-local-files-", options.prefix(), options.suffix())
+                .map_err(|error| LocalFileError::from_io(LocalFileOperation::CreateTempDirectory, Some(sandbox.clone()), None, error))?;
+            match private_create_directory_at(&sandbox_handle, OsStr::new(&name)) {
+                Ok(_) => {
+                    let target = sandbox.join(&name);
+                    return LocalTempDirectory::host(target, sandbox, symlink_policy, options.cleanup_limits())
+                        .map_err(|error| LocalFileError::from_io(LocalFileOperation::CreateTempDirectory, Some(parent.to_path_buf()), None, error));
+                }
+                Err(error) if error.retained.is_none() && error.source.kind() == io::ErrorKind::AlreadyExists => {
+                    let _ = fs::remove_dir(&sandbox);
+                }
+                Err(error) => return Err(private_create_error(sandbox.join(name), error)),
+            }
+        }
+        Err(LocalFileError::from_io(
+            LocalFileOperation::CreateTempDirectory,
+            Some(parent.to_path_buf()),
+            None,
+            io::Error::new(io::ErrorKind::AlreadyExists, "private temp name attempts exhausted"),
+        ))
+    }
+}
+
+#[cfg(any(unix, windows))]
+fn private_create_file_at(parent: &File, name: &OsStr) -> Result<File, crate::temp::types::NativePrivateCreateError> {
+    #[cfg(unix)]
+    { crate::temp::internal::privacy_unix::create_private_file_at(parent, name) }
+    #[cfg(windows)]
+    { crate::temp::internal::privacy_windows::create_private_file_at(parent, name) }
+}
+
+#[cfg(any(unix, windows))]
+fn private_create_directory_at(parent: &File, name: &OsStr) -> Result<File, crate::temp::types::NativePrivateCreateError> {
+    #[cfg(unix)]
+    { crate::temp::internal::privacy_unix::create_private_directory_at(parent, name) }
+    #[cfg(windows)]
+    { crate::temp::internal::privacy_windows::create_private_directory_at(parent, name) }
+}
+
+#[cfg(any(unix, windows))]
+fn private_create_error(path: PathBuf, error: crate::temp::types::NativePrivateCreateError) -> LocalFileError {
+    let mut result = LocalFileError::from_io(LocalFileOperation::CreateTempFile, Some(path.clone()), None, error.source);
+    if let Some(entry) = error.retained {
+        result = result.with_temp_recovery(crate::LocalTempRecovery::from_native(path, entry));
+    }
+    result
 }
 
 /// Retains the owner-construction error while describing failed sandbox
