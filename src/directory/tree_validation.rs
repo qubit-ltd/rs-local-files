@@ -18,10 +18,12 @@ pub struct LocalTreeEntry {
 }
 
 impl LocalTreeEntry {
-    /// Creates an expected entry from a safe relative path and an ordinary tree kind.
+    /// Creates an expected entry from a safe relative path and an ordinary tree
+    /// kind.
     ///
-    /// Returns `InvalidPath` for empty, absolute, dotted, parent, or prefixed paths and
-    /// `InvalidOptions` for kinds other than file, directory, and symbolic link.
+    /// Returns `InvalidPath` for empty, absolute, dotted, parent, or prefixed
+    /// paths and `InvalidOptions` for kinds other than file, directory, and
+    /// symbolic link.
     pub fn new(relative_path: PathBuf, kind: LocalFileKind) -> LocalResult<Self> {
         let relative_path = crate::LocalRelativePath::new(&relative_path)
             .map_err(|source| {
@@ -44,10 +46,7 @@ impl LocalTreeEntry {
                 LocalFileOperation::ValidateName,
             ));
         }
-        Ok(Self {
-            relative_path,
-            kind,
-        })
+        Ok(Self { relative_path, kind })
     }
 
     /// Returns this entry's path relative to the staged directory.
@@ -57,7 +56,6 @@ impl LocalTreeEntry {
     }
 
     /// Returns the expected native entry kind.
-    #[must_use]
     pub const fn kind(&self) -> LocalFileKind {
         self.kind
     }
@@ -103,7 +101,8 @@ pub struct LocalTreeValidationOptions {
 }
 
 impl LocalTreeValidationOptions {
-    /// Creates validation options that check only the stage authority and identity.
+    /// Creates validation options that check only the stage authority and
+    /// identity.
     pub const fn new() -> Self {
         Self {
             exact_entries: None,

@@ -1,7 +1,10 @@
 use crate::directory::LocalTreeValidationOptions;
-use crate::policy::{LocalDurabilityRequirement, LocalFileSyncRequirement, LocalTreeFinalAccess};
+use crate::policy::LocalDurabilityRequirement;
+use crate::policy::LocalFileSyncRequirement;
+use crate::policy::LocalTreeFinalAccess;
 
-/// Optional verification, access, file synchronization, and durability requested before tree publication.
+/// Optional verification, access, file synchronization, and durability
+/// requested before tree publication.
 #[derive(Clone, Debug)]
 #[must_use]
 pub struct LocalTreePublishOptions {
@@ -11,7 +14,8 @@ pub struct LocalTreePublishOptions {
     access: LocalTreeFinalAccess,
 }
 impl LocalTreePublishOptions {
-    /// Creates no-replace options that preserve access and request no synchronization.
+    /// Creates no-replace options that preserve access and request no
+    /// synchronization.
     pub const fn new() -> Self {
         Self {
             validation: None,
@@ -30,7 +34,8 @@ impl LocalTreePublishOptions {
         self.durability = requirement;
         self
     }
-    /// Sets the requested synchronization policy for regular files in the stage.
+    /// Sets the requested synchronization policy for regular files in the
+    /// stage.
     pub const fn with_file_sync(mut self, requirement: LocalFileSyncRequirement) -> Self {
         self.file_sync = requirement;
         self

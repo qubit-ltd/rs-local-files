@@ -3,7 +3,8 @@
 use std::fs::File;
 
 use crate::LocalResult;
-use crate::observation::{LocalFileObservation, LocalObservationRequirement};
+use crate::observation::LocalFileObservation;
+use crate::observation::LocalObservationRequirement;
 
 pub(crate) fn query_observation(
     file: &File,
@@ -20,7 +21,9 @@ pub(crate) fn query_observation(
     #[cfg(not(any(unix, windows)))]
     {
         use crate::LocalFileMetadata;
-        use crate::error::{LocalFileError, LocalFileErrorKind, LocalFileOperation};
+        use crate::error::LocalFileError;
+        use crate::error::LocalFileErrorKind;
+        use crate::error::LocalFileOperation;
 
         if requirement == LocalObservationRequirement::Required {
             Err(LocalFileError::new(
@@ -28,9 +31,9 @@ pub(crate) fn query_observation(
                 LocalFileOperation::Metadata,
             ))
         } else {
-            let metadata = file.metadata().map_err(|error| {
-                LocalFileError::from_io(LocalFileOperation::Metadata, None, None, error)
-            })?;
+            let metadata = file
+                .metadata()
+                .map_err(|error| LocalFileError::from_io(LocalFileOperation::Metadata, None, None, error))?;
             Ok(LocalFileObservation::from_parts(
                 LocalFileMetadata::from_native(&metadata),
                 None,

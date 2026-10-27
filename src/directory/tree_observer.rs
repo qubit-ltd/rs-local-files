@@ -1,9 +1,8 @@
+use super::LocalDirectoryHandle;
+use super::tree_validation::LocalTreeEntryObservation;
 use crate::LocalDirectoryWalker;
 use crate::LocalFileOperation;
 use crate::LocalResult;
-
-use super::LocalDirectoryHandle;
-use super::tree_validation::LocalTreeEntryObservation;
 
 #[cfg(test)]
 thread_local! {

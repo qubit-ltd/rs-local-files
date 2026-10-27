@@ -12,10 +12,9 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use super::internal::LocalFileWriterBackend;
 use super::internal::LocalCommitSyncObserver;
+use super::internal::LocalFileWriterBackend;
 use crate::LocalDurabilityRequirement;
-use crate::policy::LocalFileSyncRequirement;
 use crate::LocalFileCommitError;
 use crate::LocalFileError;
 use crate::LocalFileErrorKind;
@@ -28,6 +27,7 @@ use crate::LocalWritePublicationMethod;
 use crate::LocalWriterState;
 use crate::local::LocalAtomicDestinationState;
 use crate::local::LocalAtomicWriteError;
+use crate::policy::LocalFileSyncRequirement;
 
 /// Stateful native byte output and destination publication session.
 ///
@@ -185,8 +185,12 @@ impl LocalFileWriter {
                     ));
                 }
                 let sync_requirement = match (self.options.durability(), self.options.file_sync()) {
-                    (LocalDurabilityRequirement::Required, _) | (_, LocalFileSyncRequirement::Required) => LocalFileSyncRequirement::Required,
-                    (LocalDurabilityRequirement::Preferred, _) | (_, LocalFileSyncRequirement::Preferred) => LocalFileSyncRequirement::Preferred,
+                    (LocalDurabilityRequirement::Required, _) | (_, LocalFileSyncRequirement::Required) => {
+                        LocalFileSyncRequirement::Required
+                    }
+                    (LocalDurabilityRequirement::Preferred, _) | (_, LocalFileSyncRequirement::Preferred) => {
+                        LocalFileSyncRequirement::Preferred
+                    }
                     _ => LocalFileSyncRequirement::NotRequired,
                 };
                 let (durable, file_synced) = match sync_requirement {
@@ -196,7 +200,10 @@ impl LocalFileWriter {
                             observer.record_file_sync();
                         }
                         let synced = sync_append_file(&file).is_ok();
-                        (self.options.durability() == LocalDurabilityRequirement::Preferred && synced, synced)
+                        (
+                            self.options.durability() == LocalDurabilityRequirement::Preferred && synced,
+                            synced,
+                        )
                     }
                     LocalFileSyncRequirement::Required => {
                         if let Some(observer) = &self.sync_observer {
@@ -220,7 +227,10 @@ impl LocalFileWriter {
                                 None,
                             ));
                         }
-                        (self.options.durability() != LocalDurabilityRequirement::NotRequired, true)
+                        (
+                            self.options.durability() != LocalDurabilityRequirement::NotRequired,
+                            true,
+                        )
                     }
                 };
                 self.state = LocalWriterState::Committed;
@@ -231,7 +241,8 @@ impl LocalFileWriter {
                     durable,
                     self.bytes_written,
                     self.failure_state,
-                ).with_file_synced(file_synced))
+                )
+                .with_file_synced(file_synced))
             }
         }
     }
@@ -346,7 +357,8 @@ impl LocalFileWriter {
                     sync_outcome.durable,
                     self.bytes_written,
                     self.failure_state,
-                ).with_file_synced(sync_outcome.file_synced))
+                )
+                .with_file_synced(sync_outcome.file_synced))
             }
             Err(commit_error) => {
                 let (error, retained) = commit_error.into_parts();

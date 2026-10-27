@@ -8,14 +8,11 @@ fn lf3_privacy_windows_creates_protected_file_and_directory() {
 
     let fixture = tempfile::tempdir().unwrap();
     let parent = File::open(fixture.path()).unwrap();
-    let file =
-        privacy_windows::create_private_file_at(&parent, std::ffi::OsStr::new("private")).unwrap();
+    let file = privacy_windows::create_private_file_at(&parent, std::ffi::OsStr::new("private")).unwrap();
     privacy_windows::verify_current_user_access(&file, false, false).unwrap();
     assert_ne!(file.as_raw_handle(), parent.as_raw_handle());
 
-    let directory =
-        privacy_windows::create_private_directory_at(&parent, std::ffi::OsStr::new("private-dir"))
-            .unwrap();
+    let directory = privacy_windows::create_private_directory_at(&parent, std::ffi::OsStr::new("private-dir")).unwrap();
     privacy_windows::verify_current_user_access(&directory, true, false).unwrap();
 }
 
@@ -28,8 +25,7 @@ fn lf3_privacy_windows_read_only_removes_data_write_access() {
 
     let fixture = tempfile::tempdir().unwrap();
     let parent = File::open(fixture.path()).unwrap();
-    let file =
-        privacy_windows::create_private_file_at(&parent, std::ffi::OsStr::new("readonly")).unwrap();
+    let file = privacy_windows::create_private_file_at(&parent, std::ffi::OsStr::new("readonly")).unwrap();
     privacy_windows::apply_current_user_access(&file, false, true).unwrap();
     privacy_windows::verify_current_user_access(&file, false, true).unwrap();
 }
@@ -45,9 +41,7 @@ fn lf3_privacy_windows_refuses_existing_name_without_touching_it() {
     let path = fixture.path().join("existing");
     std::fs::write(&path, b"preserve").unwrap();
     let parent = File::open(fixture.path()).unwrap();
-    assert!(
-        privacy_windows::create_private_file_at(&parent, std::ffi::OsStr::new("existing")).is_err()
-    );
+    assert!(privacy_windows::create_private_file_at(&parent, std::ffi::OsStr::new("existing")).is_err());
     assert_eq!(std::fs::read(path).unwrap(), b"preserve");
 }
 
@@ -61,8 +55,7 @@ fn lf3_privacy_windows_retains_partial_after_readback_failure() {
     let fixture = tempfile::tempdir().unwrap();
     let parent = File::open(fixture.path()).unwrap();
     privacy_windows::fail_once_at(privacy_windows::FailurePoint::AclReadback);
-    let error = privacy_windows::create_private_file_at(&parent, std::ffi::OsStr::new("partial"))
-        .unwrap_err();
+    let error = privacy_windows::create_private_file_at(&parent, std::ffi::OsStr::new("partial")).unwrap_err();
     let retained = error.retained.expect("created entry must remain owned");
     assert_eq!(retained.name, std::ffi::OsStr::new("partial"));
     assert!(retained.file.is_some());
@@ -85,9 +78,7 @@ fn lf3_privacy_windows_injected_precreate_failures_do_not_create_entries() {
         let fixture = tempfile::tempdir().unwrap();
         let parent = File::open(fixture.path()).unwrap();
         privacy_windows::fail_once_at(point);
-        assert!(
-            privacy_windows::create_private_file_at(&parent, std::ffi::OsStr::new(name)).is_err()
-        );
+        assert!(privacy_windows::create_private_file_at(&parent, std::ffi::OsStr::new(name)).is_err());
         assert!(!fixture.path().join(name).exists());
     }
 }
@@ -101,8 +92,7 @@ fn lf3_privacy_windows_injected_acl_and_readonly_failures_are_reported() {
 
     let fixture = tempfile::tempdir().unwrap();
     let parent = File::open(fixture.path()).unwrap();
-    let file =
-        privacy_windows::create_private_file_at(&parent, std::ffi::OsStr::new("policy")).unwrap();
+    let file = privacy_windows::create_private_file_at(&parent, std::ffi::OsStr::new("policy")).unwrap();
 
     privacy_windows::fail_once_at(privacy_windows::FailurePoint::AclApply);
     assert!(privacy_windows::apply_current_user_access(&file, false, false).is_err());
@@ -124,10 +114,7 @@ fn lf3_privacy_windows_nth_child_create_failure_keeps_prior_children() {
     for name in ["child-1", "child-2"] {
         privacy_windows::create_private_directory_at(&parent, std::ffi::OsStr::new(name)).unwrap();
     }
-    assert!(
-        privacy_windows::create_private_directory_at(&parent, std::ffi::OsStr::new("child-3"))
-            .is_err()
-    );
+    assert!(privacy_windows::create_private_directory_at(&parent, std::ffi::OsStr::new("child-3")).is_err());
     assert!(fixture.path().join("child-1").is_dir());
     assert!(fixture.path().join("child-2").is_dir());
     assert!(!fixture.path().join("child-3").exists());

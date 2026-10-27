@@ -1,18 +1,21 @@
 use std::path::Path;
-
-use super::LocalFileSystem;
-use super::LocalCurrentDirectory;
-use super::LocalFileSystemCore;
-use super::LocalNamespace;
-use super::LocalFileSystemDefaults;
 use std::path::PathBuf;
 use std::sync::Arc;
+
+use super::LocalCurrentDirectory;
+use super::LocalFileSystem;
+use super::LocalFileSystemCore;
+use super::LocalFileSystemDefaults;
+use super::LocalNamespace;
+use crate::LocalResult;
 use crate::directory::LocalDirectoryHandle;
 use crate::options::LocalDirectoryOpenOptions;
-use crate::LocalResult;
 
 impl LocalFileSystem {
-    pub(crate) fn from_root_authority(root: crate::rooted::Root, symlink_policy: crate::LocalSymlinkPolicy) -> LocalResult<Self> {
+    pub(crate) fn from_root_authority(
+        root: crate::rooted::Root,
+        symlink_policy: crate::LocalSymlinkPolicy,
+    ) -> LocalResult<Self> {
         let rooted = crate::rooted_local_file_system::RootedLocalFileSystem::from_root(root)?;
         let capabilities = rooted.capabilities();
         let limits = rooted.limits();

@@ -1,6 +1,7 @@
 //! Same-handle snapshot value and comparison.
 
-use super::{LocalFileObservation, LocalNativeFileDetails};
+use super::LocalFileObservation;
+use super::LocalNativeFileDetails;
 
 #[cfg(test)]
 thread_local! {
@@ -43,16 +44,8 @@ pub struct LocalFileSnapshot {
 }
 
 impl LocalFileSnapshot {
-    pub(crate) const fn new(
-        bytes: Vec<u8>,
-        before: LocalFileObservation,
-        after: LocalFileObservation,
-    ) -> Self {
-        Self {
-            bytes,
-            before,
-            after,
-        }
+    pub(crate) const fn new(bytes: Vec<u8>, before: LocalFileObservation, after: LocalFileObservation) -> Self {
+        Self { bytes, before, after }
     }
 
     /// Returns the collected bytes.
@@ -73,11 +66,7 @@ impl LocalFileSnapshot {
     }
 }
 
-pub(crate) fn observations_match(
-    before: &LocalFileObservation,
-    after: &LocalFileObservation,
-    count: u64,
-) -> bool {
+pub(crate) fn observations_match(before: &LocalFileObservation, after: &LocalFileObservation, count: u64) -> bool {
     if before.identity() != after.identity()
         || before.metadata().len() != after.metadata().len()
         || before.metadata().len() != count

@@ -85,14 +85,11 @@ impl LocalFileSystem {
         if matches!(&self.core.namespace, crate::local::LocalNamespace::Rooted(_))
             && options.durability() == crate::policy::LocalDurabilityRequirement::Required
         {
-            return Err(LocalFileError::new(
-                LocalFileErrorKind::RequirementNotMet,
-                LocalFileOperation::OpenWriter,
-            )
-            .with_reason(
-                "Windows Rooted conditional writes do not support required namespace durability",
-            )
-            .with_path(path.to_path_buf()));
+            return Err(
+                LocalFileError::new(LocalFileErrorKind::RequirementNotMet, LocalFileOperation::OpenWriter)
+                    .with_reason("Windows Rooted conditional writes do not support required namespace durability")
+                    .with_path(path.to_path_buf()),
+            );
         }
         validate_write_options(options, self.core.capabilities, LocalFileOperation::OpenWriter).map_err(|error| {
             super::with_current_directory(

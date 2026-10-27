@@ -297,11 +297,8 @@ impl LocalFileError {
     }
 
     /// Consumes this error and transfers its retained recovery resource.
-    #[must_use]
     #[inline]
-    pub fn into_temp_recovery_parts(
-        mut self,
-    ) -> (LocalFileError, Option<crate::LocalTempRecovery>) {
+    pub fn into_temp_recovery_parts(mut self) -> (LocalFileError, Option<crate::LocalTempRecovery>) {
         let recovery = self.temp_recovery.take().map(|recovery| *recovery);
         (self, recovery)
     }
@@ -339,9 +336,7 @@ impl LocalFileError {
             return Some(self.kind);
         }
         match self.source.as_ref() {
-            Some(LocalFileErrorSource::InvalidEncoding(_)) => {
-                Some(LocalFileErrorKind::InvalidEncoding)
-            }
+            Some(LocalFileErrorSource::InvalidEncoding(_)) => Some(LocalFileErrorKind::InvalidEncoding),
             Some(LocalFileErrorSource::Recovery(error)) => error.cause_kind(),
             Some(LocalFileErrorSource::Io(source)) => Some(classify_io_error(source)),
             Some(LocalFileErrorSource::ResourceLimit(_)) => Some(LocalFileErrorKind::ResourceLimit),
@@ -359,9 +354,7 @@ impl LocalFileError {
     #[inline]
     pub fn effect_state(&self) -> Option<LocalFileEffectState> {
         match self.kind {
-            LocalFileErrorKind::PublicationIncomplete => {
-                Some(LocalFileEffectState::PartiallyApplied)
-            }
+            LocalFileErrorKind::PublicationIncomplete => Some(LocalFileEffectState::PartiallyApplied),
             LocalFileErrorKind::Indeterminate => Some(LocalFileEffectState::Indeterminate),
             _ => None,
         }
@@ -505,9 +498,9 @@ fn standard_io_error_kind(error: &LocalFileError) -> io::ErrorKind {
         Some(LocalFileErrorSource::ResourceLimit(_)) => io::ErrorKind::Other,
         None => match error.kind {
             LocalFileErrorKind::AlreadyExists => io::ErrorKind::AlreadyExists,
-            LocalFileErrorKind::InvalidPath
-            | LocalFileErrorKind::InvalidOptions
-            | LocalFileErrorKind::InvalidState => io::ErrorKind::InvalidInput,
+            LocalFileErrorKind::InvalidPath | LocalFileErrorKind::InvalidOptions | LocalFileErrorKind::InvalidState => {
+                io::ErrorKind::InvalidInput
+            }
             LocalFileErrorKind::NotDirectory => io::ErrorKind::NotADirectory,
             LocalFileErrorKind::IsDirectory => io::ErrorKind::IsADirectory,
             LocalFileErrorKind::NotFound => io::ErrorKind::NotFound,
@@ -515,9 +508,7 @@ fn standard_io_error_kind(error: &LocalFileError) -> io::ErrorKind {
             LocalFileErrorKind::ResourceLimit => io::ErrorKind::Other,
             LocalFileErrorKind::DataCorruption => io::ErrorKind::InvalidData,
             LocalFileErrorKind::InvalidEncoding => io::ErrorKind::InvalidData,
-            LocalFileErrorKind::RequirementNotMet | LocalFileErrorKind::Unsupported => {
-                io::ErrorKind::Unsupported
-            }
+            LocalFileErrorKind::RequirementNotMet | LocalFileErrorKind::Unsupported => io::ErrorKind::Unsupported,
             _ => io::ErrorKind::Other,
         },
     }
@@ -526,11 +517,7 @@ fn standard_io_error_kind(error: &LocalFileError) -> io::ErrorKind {
 impl fmt::Display for LocalFileError {
     /// Formats the structured operation and available native path context.
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            formatter,
-            "{:?} failed with {:?}",
-            self.operation, self.kind
-        )?;
+        write!(formatter, "{:?} failed with {:?}", self.operation, self.kind)?;
         if let Some(reason) = self.reason {
             write!(formatter, ": {reason}")?;
         }
@@ -605,11 +592,7 @@ mod tests {
         )
         .with_kind(LocalFileErrorKind::InvalidOptions)
         .with_operation(LocalFileOperation::OpenWriter);
-        error.replace_paths(
-            Some("source".into()),
-            Some("target".into()),
-            Some("/workspace".into()),
-        );
+        error.replace_paths(Some("source".into()), Some("target".into()), Some("/workspace".into()));
 
         assert_eq!(LocalFileErrorKind::InvalidOptions, error.kind());
         assert_eq!(LocalFileOperation::OpenWriter, error.operation());

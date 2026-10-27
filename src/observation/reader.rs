@@ -2,11 +2,14 @@
 
 use std::io;
 
-use crate::error::{LocalFileError, LocalFileErrorKind, LocalFileOperation};
-use crate::observation::{
-    LocalFileObservation, LocalObservationRequirement, LocalSourceVerification,
-};
-use crate::{LocalFileReader, LocalResult};
+use crate::LocalFileReader;
+use crate::LocalResult;
+use crate::error::LocalFileError;
+use crate::error::LocalFileErrorKind;
+use crate::error::LocalFileOperation;
+use crate::observation::LocalFileObservation;
+use crate::observation::LocalObservationRequirement;
+use crate::observation::LocalSourceVerification;
 
 const BLOCK_SIZE: usize = 8 * 1024;
 
@@ -24,11 +27,7 @@ pub(crate) fn collect_limited<S: qubit_io::ByteInput + ?Sized>(
     })
 }
 
-fn collect_limited_with_reserver<S, F>(
-    input: &mut S,
-    maximum: Option<u64>,
-    mut reserve: F,
-) -> LocalResult<Vec<u8>>
+fn collect_limited_with_reserver<S, F>(input: &mut S, maximum: Option<u64>, mut reserve: F) -> LocalResult<Vec<u8>>
 where
     S: qubit_io::ByteInput + ?Sized,
     F: FnMut(&mut Vec<u8>, usize) -> io::Result<()>,
@@ -54,10 +53,7 @@ where
                 Err(error) => return Err(read_error(error)),
             }
         }
-        let new_len = output
-            .len()
-            .checked_add(request)
-            .ok_or_else(resource_limit)?;
+        let new_len = output.len().checked_add(request).ok_or_else(resource_limit)?;
         let additional = new_len.saturating_sub(output.len());
         reserve(&mut output, additional).map_err(|_| resource_limit())?;
         let start = output.len();
@@ -127,7 +123,8 @@ pub(crate) trait ReaderPathBinding: std::fmt::Debug + Send + Sync {
     }
 }
 
-/// A byte reader whose initial and refreshed observations share its open handle.
+/// A byte reader whose initial and refreshed observations share its open
+/// handle.
 #[derive(Debug)]
 pub struct LocalObservedReader {
     reader: LocalFileReader,
@@ -137,10 +134,7 @@ pub struct LocalObservedReader {
 }
 
 impl LocalObservedReader {
-    pub(crate) fn from_reader(
-        reader: LocalFileReader,
-        requirement: LocalObservationRequirement,
-    ) -> LocalResult<Self> {
+    pub(crate) fn from_reader(reader: LocalFileReader, requirement: LocalObservationRequirement) -> LocalResult<Self> {
         let observation = super::query::query_observation(reader.as_file(), requirement)?;
         Ok(Self {
             reader,
@@ -152,7 +146,9 @@ impl LocalObservedReader {
 
     pub(crate) fn with_binding(mut self, binding: Box<dyn ReaderPathBinding>) -> Self {
         self.binding = Some(match self.binding.take() {
-            Some(existing) => Box::new(CombinedPathBinding { bindings: vec![existing, binding] }),
+            Some(existing) => Box::new(CombinedPathBinding {
+                bindings: vec![existing, binding],
+            }),
             None => binding,
         });
         self
@@ -178,12 +174,7 @@ impl LocalObservedReader {
     pub fn verify_path_binding(&self) -> LocalResult<LocalSourceVerification> {
         self.binding
             .as_ref()
-            .ok_or_else(|| {
-                LocalFileError::new(
-                    LocalFileErrorKind::InvalidState,
-                    LocalFileOperation::Metadata,
-                )
-            })?
+            .ok_or_else(|| LocalFileError::new(LocalFileErrorKind::InvalidState, LocalFileOperation::Metadata))?
             .verify()
     }
 
@@ -203,7 +194,10 @@ struct CombinedPathBinding {
 
 impl ReaderPathBinding for CombinedPathBinding {
     fn verification_deadline(&self) -> Option<std::time::Duration> {
-        self.bindings.iter().filter_map(|binding| binding.verification_deadline()).min()
+        self.bindings
+            .iter()
+            .filter_map(|binding| binding.verification_deadline())
+            .min()
     }
 
     fn verify_until(&self, deadline: Option<std::time::Instant>) -> LocalResult<LocalSourceVerification> {
@@ -215,7 +209,11 @@ impl ReaderPathBinding for CombinedPathBinding {
                 LocalSourceVerification::Unchanged => {}
             }
         }
-        Ok(if missing { LocalSourceVerification::Missing } else { LocalSourceVerification::Unchanged })
+        Ok(if missing {
+            LocalSourceVerification::Missing
+        } else {
+            LocalSourceVerification::Unchanged
+        })
     }
 }
 
@@ -274,13 +272,9 @@ impl qubit_io::Input for LocalObservedReader {
         qubit_io::Input::read_vectored(&mut self.reader, buffers)
     }
 
-    unsafe fn read_unchecked(
-        &mut self,
-        output: &mut [u8],
-        index: usize,
-        count: usize,
-    ) -> io::Result<usize> {
-        // The Input caller guarantees this range; LocalFileReader applies the same contract.
+    unsafe fn read_unchecked(&mut self, output: &mut [u8], index: usize, count: usize) -> io::Result<usize> {
+        // The Input caller guarantees this range; LocalFileReader applies the same
+        // contract.
         unsafe { qubit_io::Input::read_unchecked(&mut self.reader, output, index, count) }
     }
 }

@@ -5,9 +5,10 @@
 //
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
-// Windows `std::io::Error` makes the stable public `LocalFileError` large;
-// boxing it solely for this lint would change the public error representation.
-#![cfg_attr(windows, allow(clippy::result_large_err))]
+// `LocalFileError` intentionally retains structured paths, source errors,
+// cleanup errors, and recoverable temporary ownership. Boxing the public
+// result solely for this lint would change its stable error representation.
+#![allow(clippy::result_large_err)]
 
 //! # Qubit Local Files
 //!
@@ -50,6 +51,7 @@ use qubit_local_files::LocalConditionalWriter;
 )]
 pub mod capability;
 // Compiles the exact README, user-guide, and design Rust examples as doctests.
+pub mod directory;
 #[cfg(doctest)]
 mod documentation_tests;
 pub mod error;
@@ -60,11 +62,10 @@ mod local_file_metadata;
 mod local_file_permissions;
 mod local_file_reader;
 mod local_file_system;
-pub mod directory;
 mod local_file_system_scope;
 mod local_file_system_validation;
-pub mod options;
 pub mod observation;
+pub mod options;
 pub use observation::LocalFileSnapshot;
 pub mod outcome;
 pub mod path;
@@ -91,6 +92,8 @@ pub(crate) use capability::LocalFileSystemLimits;
 pub(crate) use capability::LocalFileSystemSpace;
 pub(crate) use capability::LocalPathLengthUnit;
 pub(crate) use capability::SizeLimit;
+pub use directory::LocalTreeAccessError;
+pub use directory::LocalTreePublishError;
 pub use error::LocalFileError;
 pub(crate) use error::LocalFileErrorKind;
 pub(crate) use error::LocalFileOperation;
@@ -98,6 +101,7 @@ pub(crate) use error::LocalPathCodecError;
 pub(crate) use error::LocalResourceKind;
 pub(crate) use error::LocalResourceLimitError;
 pub use error::LocalResult;
+pub use error::LocalTempSealError;
 pub(crate) use local::LocalAtomicCommitError;
 pub(crate) use local::LocalAtomicDestinationState;
 pub(crate) use local::LocalAtomicWriteError;
@@ -129,8 +133,10 @@ pub(crate) use options::LocalListOptions;
 pub(crate) use options::LocalMetadataPreservePolicy;
 pub(crate) use options::LocalReadOptions;
 pub(crate) use options::LocalRenameOptions;
+pub use options::LocalSealOptions;
 pub(crate) use options::LocalTempDirectoryOptions;
 pub(crate) use options::LocalTempFileOptions;
+pub use options::LocalTreePublishOptions;
 pub(crate) use options::LocalWalkErrorPolicy;
 pub(crate) use options::LocalWriteMode;
 pub(crate) use options::LocalWriteOptions;
@@ -149,6 +155,12 @@ pub(crate) use outcome::LocalRenameFailure;
 pub(crate) use outcome::LocalRenameFailureState;
 pub(crate) use outcome::LocalRenameOutcome;
 pub(crate) use outcome::LocalRenameResult;
+pub use outcome::LocalTempAccessState;
+pub use outcome::LocalTreeAccessOutcome;
+pub use outcome::LocalTreeAccessState;
+pub use outcome::LocalTreeMutationState;
+pub use outcome::LocalTreePublication;
+pub use outcome::LocalTreePublishOutcome;
 pub(crate) use outcome::LocalWritePublicationMethod;
 pub(crate) use path::LocalFileNames;
 pub(crate) use path::LocalNamespacePath;
@@ -156,19 +168,10 @@ pub(crate) use path::LocalPathCodec;
 pub(crate) use policy::LocalAtomicityRequirement;
 pub(crate) use policy::LocalDurabilityRequirement;
 pub(crate) use policy::LocalSymlinkPolicy;
-pub use directory::{LocalTreeAccessError, LocalTreePublishError};
-pub use options::LocalTreePublishOptions;
-pub use outcome::{
-    LocalTreeAccessOutcome, LocalTreeAccessState, LocalTreeMutationState, LocalTreePublication,
-    LocalTreePublishOutcome,
-};
+pub use temp::LocalSealedTempFile;
 pub use temp::LocalTempDirectory;
 pub use temp::LocalTempFile;
 pub use temp::LocalTempRecovery;
-pub use temp::LocalSealedTempFile;
-pub use error::LocalTempSealError;
-pub use options::LocalSealOptions;
-pub use outcome::LocalTempAccessState;
 #[cfg(feature = "test-support")]
 #[doc(hidden)]
 pub(crate) use test_support::TestFaultPlan;

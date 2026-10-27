@@ -43,7 +43,8 @@ impl RootedLocalFileSystem {
         Ok(absolute)
     }
 
-    /// Reads metadata for the final target after applying the selected link policy.
+    /// Reads metadata for the final target after applying the selected link
+    /// policy.
     pub(crate) fn target_metadata(
         &self,
         path: &Path,
@@ -52,13 +53,7 @@ impl RootedLocalFileSystem {
         if path.as_os_str().is_empty() {
             return self.metadata(path, symlink_policy);
         }
-        let relative = resolve_rooted_path(
-            &self.root,
-            path,
-            symlink_policy,
-            true,
-            LocalFileOperation::Metadata,
-        )?;
+        let relative = resolve_rooted_path(&self.root, path, symlink_policy, true, LocalFileOperation::Metadata)?;
         self.root
             .symlink_metadata(&relative)
             .map(rooted_metadata)

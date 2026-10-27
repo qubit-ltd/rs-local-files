@@ -126,11 +126,7 @@ where
             // native operation before this result can report file_synced.
             let sync = backend
                 .checkpoint(ConditionalPoint::BeforeRequiredFileSync)
-                .and_then(|()| {
-                    backend
-                        .sync_candidate()
-                        .and_then(|()| backend.sync_entry(&entries[0]))
-                });
+                .and_then(|()| backend.sync_candidate().and_then(|()| backend.sync_entry(&entries[0])));
             if let Err(error) = sync {
                 if sync_requirement == LocalFileSyncRequirement::Required {
                     return Err((stage, error));
@@ -139,13 +135,13 @@ where
                     durable = false;
                 }
             }
-            if options.durability() != LocalDurabilityRequirement::NotRequired {
-                if let Err(error) = backend.sync_namespace() {
-                    if options.durability() == LocalDurabilityRequirement::Required {
-                        return Err((stage, error));
-                    }
-                    durable = false;
+            if options.durability() != LocalDurabilityRequirement::NotRequired
+                && let Err(error) = backend.sync_namespace()
+            {
+                if options.durability() == LocalDurabilityRequirement::Required {
+                    return Err((stage, error));
                 }
+                durable = false;
             }
         }
 

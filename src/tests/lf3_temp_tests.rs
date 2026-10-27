@@ -4,9 +4,9 @@ use std::fs::OpenOptions;
 use crate::LocalFileSystem;
 use crate::LocalSealOptions;
 use crate::LocalTempAccessState;
-use crate::options::LocalTempFileOptions;
-use crate::options::LocalTempDirectoryOptions;
 use crate::options::LocalTempCleanupLimits;
+use crate::options::LocalTempDirectoryOptions;
+use crate::options::LocalTempFileOptions;
 use crate::policy::LocalPrivacyRequirement;
 
 #[test]
@@ -16,16 +16,8 @@ fn lf3_temp_seal_returns_read_only_owner() {
     let temporary = filesystem
         .create_temp_file_with_options(&LocalTempFileOptions::new().with_parent(fixture.path()))
         .expect("temporary file");
-    let sealed = temporary
-        .seal_with_options(&LocalSealOptions::new())
-        .expect("seal");
-    assert!(
-        sealed
-            .observation()
-            .expect("observation")
-            .identity()
-            .is_some()
-    );
+    let sealed = temporary.seal_with_options(&LocalSealOptions::new()).expect("seal");
+    assert!(sealed.observation().expect("observation").identity().is_some());
     assert!(OpenOptions::new().write(true).open(sealed.path()).is_err());
     let mut sealed = sealed;
     sealed.cleanup().expect("cleanup");
@@ -52,10 +44,7 @@ fn lf3_temp_replaced_handle_cannot_seal() {
     assert_eq!(error.access_state(), LocalTempAccessState::Writable);
     let mut recovered = error.into_resource();
     recovered.cleanup().expect("cleanup original temp");
-    assert_eq!(
-        fs::read(replacement_path).expect("read replacement"),
-        b"keep"
-    );
+    assert_eq!(fs::read(replacement_path).expect("read replacement"), b"keep");
 }
 
 #[test]
@@ -107,9 +96,10 @@ fn lf3_temp_cleanup_limit_retains_owner_for_retry() {
 
 #[test]
 fn lf3_temp_recovery_survives_error_source_and_io_conversion() {
-    use crate::error::{
-        LocalFileError, LocalFileErrorKind, LocalFileErrorSource, LocalFileOperation,
-    };
+    use crate::error::LocalFileError;
+    use crate::error::LocalFileErrorKind;
+    use crate::error::LocalFileErrorSource;
+    use crate::error::LocalFileOperation;
     use crate::temp::LocalTempRecovery;
     let fixture = tempfile::tempdir().expect("fixture");
     let filesystem = LocalFileSystem::host().expect("host filesystem");
@@ -117,11 +107,8 @@ fn lf3_temp_recovery_survives_error_source_and_io_conversion() {
         .create_temp_file_with_options(&LocalTempFileOptions::new().with_parent(fixture.path()))
         .expect("temporary file");
     let recovery = LocalTempRecovery::from_file(resource);
-    let error = LocalFileError::new(
-        LocalFileErrorKind::RequirementNotMet,
-        LocalFileOperation::Commit,
-    )
-    .with_temp_recovery(recovery);
+    let error = LocalFileError::new(LocalFileErrorKind::RequirementNotMet, LocalFileOperation::Commit)
+        .with_temp_recovery(recovery);
     match error.into_source().expect("recovery source") {
         LocalFileErrorSource::Recovery(error) => assert!(error.temp_recovery().is_some()),
         other => panic!("unexpected source: {other:?}"),
@@ -130,16 +117,17 @@ fn lf3_temp_recovery_survives_error_source_and_io_conversion() {
     let resource = filesystem
         .create_temp_file_with_options(&LocalTempFileOptions::new().with_parent(fixture.path()))
         .expect("second temporary file");
-    let error = LocalFileError::new(
-        LocalFileErrorKind::RequirementNotMet,
-        LocalFileOperation::Commit,
-    )
-    .with_temp_recovery(LocalTempRecovery::from_file(resource));
+    let error = LocalFileError::new(LocalFileErrorKind::RequirementNotMet, LocalFileOperation::Commit)
+        .with_temp_recovery(LocalTempRecovery::from_file(resource));
     let io_error = error.into_io_error();
     let source = io_error.into_inner().expect("structured source");
     let structured = *source.downcast::<LocalFileError>().expect("local error source");
     let (_, mut recovery) = structured.into_temp_recovery_parts();
-    recovery.as_mut().expect("recovery owner").cleanup().expect("recovery cleanup");
+    recovery
+        .as_mut()
+        .expect("recovery owner")
+        .cleanup()
+        .expect("recovery cleanup");
 }
 
 #[cfg(unix)]
@@ -156,7 +144,10 @@ fn lf3_temp_required_privacy_is_applied_at_creation() {
                 .with_privacy(LocalPrivacyRequirement::Required),
         )
         .expect("private file");
-    assert_eq!(fs::metadata(file.path()).expect("file metadata").permissions().mode() & 0o777, 0o600);
+    assert_eq!(
+        fs::metadata(file.path()).expect("file metadata").permissions().mode() & 0o777,
+        0o600
+    );
     let mut file = file;
     file.cleanup().expect("file cleanup");
 
@@ -167,10 +158,16 @@ fn lf3_temp_required_privacy_is_applied_at_creation() {
                 .with_privacy(LocalPrivacyRequirement::Required),
         )
         .expect("private directory");
-    assert_eq!(fs::metadata(directory.path()).expect("directory metadata").permissions().mode() & 0o777, 0o700);
+    assert_eq!(
+        fs::metadata(directory.path())
+            .expect("directory metadata")
+            .permissions()
+            .mode()
+            & 0o777,
+        0o700
+    );
     let mut directory = directory;
     directory.cleanup().expect("directory cleanup");
-
 }
 
 #[cfg(unix)]
@@ -181,12 +178,17 @@ fn lf3_temp_required_privacy_is_applied_under_rooted_authority() {
     let fixture = tempfile::tempdir().expect("fixture");
     let filesystem = LocalFileSystem::rooted(fixture.path()).expect("rooted filesystem");
     let file = filesystem
-        .create_temp_file_with_options(
-            &LocalTempFileOptions::new().with_privacy(LocalPrivacyRequirement::Required),
-        )
+        .create_temp_file_with_options(&LocalTempFileOptions::new().with_privacy(LocalPrivacyRequirement::Required))
         .expect("private rooted file");
     let file_path = file.path().strip_prefix("/").unwrap_or(file.path());
-    assert_eq!(fs::metadata(fixture.path().join(file_path)).expect("file metadata").permissions().mode() & 0o777, 0o600);
+    assert_eq!(
+        fs::metadata(fixture.path().join(file_path))
+            .expect("file metadata")
+            .permissions()
+            .mode()
+            & 0o777,
+        0o600
+    );
     let mut file = file;
     file.cleanup().expect("file cleanup");
 
@@ -196,7 +198,14 @@ fn lf3_temp_required_privacy_is_applied_under_rooted_authority() {
         )
         .expect("private rooted directory");
     let directory_path = directory.path().strip_prefix("/").unwrap_or(directory.path());
-    assert_eq!(fs::metadata(fixture.path().join(directory_path)).expect("directory metadata").permissions().mode() & 0o777, 0o700);
+    assert_eq!(
+        fs::metadata(fixture.path().join(directory_path))
+            .expect("directory metadata")
+            .permissions()
+            .mode()
+            & 0o777,
+        0o700
+    );
     let mut directory = directory;
     directory.cleanup().expect("directory cleanup");
 }
@@ -204,8 +213,9 @@ fn lf3_temp_required_privacy_is_applied_under_rooted_authority() {
 #[cfg(all(feature = "test-support", any(unix, windows)))]
 #[test]
 fn lf3_temp_private_guard_handle_reservations_precede_child_mutation() {
-    use crate::LocalFileError;
     use std::path::Path;
+
+    use crate::LocalFileError;
 
     fn create(
         filesystem: &LocalFileSystem,
@@ -251,7 +261,11 @@ fn lf3_temp_private_guard_handle_reservations_precede_child_mutation() {
                 drop(guard);
                 if retains_recovery {
                     let (_, mut recovery) = error.into_temp_recovery_parts();
-                    recovery.as_mut().expect("sandbox recovery owner").cleanup().expect("cleanup recovery");
+                    recovery
+                        .as_mut()
+                        .expect("sandbox recovery owner")
+                        .cleanup()
+                        .expect("cleanup recovery");
                 } else {
                     let (_, recovery) = error.into_temp_recovery_parts();
                     assert!(recovery.is_none(), "parent clone failed before mutation");
@@ -269,7 +283,9 @@ fn lf3_temp_sealed_native_path_follows_authority_kind() {
     let host_temp = host
         .create_temp_file_with_options(&LocalTempFileOptions::new().with_parent(fixture.path()))
         .expect("host temp");
-    let host_sealed = host_temp.seal_with_options(&LocalSealOptions::new()).expect("host seal");
+    let host_sealed = host_temp
+        .seal_with_options(&LocalSealOptions::new())
+        .expect("host seal");
     assert_eq!(host_sealed.native_path(), Some(host_sealed.path()));
     let mut host_sealed = host_sealed;
     host_sealed.cleanup().expect("host cleanup");
@@ -289,16 +305,29 @@ fn lf3_temp_sealed_native_path_follows_authority_kind() {
 #[cfg(feature = "test-support")]
 #[test]
 fn lf3_temp_seal_faults_retain_owner_and_access_state() {
-    use qubit_io::Output;
     use std::io::Seek;
     use std::io::SeekFrom;
+
+    use qubit_io::Output;
     let fixture = tempfile::tempdir().expect("fixture");
     let filesystem = LocalFileSystem::host().expect("host filesystem");
     for (fault, expected_state) in [
-        ("temp-seal-file-sync-before", crate::outcome::LocalTempAccessState::Writable),
-        ("temp-seal-access-change", crate::outcome::LocalTempAccessState::Indeterminate),
-        ("temp-seal-file-sync-after-access", crate::outcome::LocalTempAccessState::ReadOnly),
-        ("temp-seal-readonly-reopen", crate::outcome::LocalTempAccessState::ReadOnly),
+        (
+            "temp-seal-file-sync-before",
+            crate::outcome::LocalTempAccessState::Writable,
+        ),
+        (
+            "temp-seal-access-change",
+            crate::outcome::LocalTempAccessState::Indeterminate,
+        ),
+        (
+            "temp-seal-file-sync-after-access",
+            crate::outcome::LocalTempAccessState::ReadOnly,
+        ),
+        (
+            "temp-seal-readonly-reopen",
+            crate::outcome::LocalTempAccessState::ReadOnly,
+        ),
     ] {
         let temporary = filesystem
             .create_temp_file_with_options(&LocalTempFileOptions::new().with_parent(fixture.path()))
@@ -365,9 +394,7 @@ fn lf3_temp_private_creation_retries_collisions_and_cleans_own_sandbox() {
     let rooted = LocalFileSystem::rooted(fixture.path()).expect("rooted filesystem");
     let fault = crate::local::install_test_fault("temp-private-file-collision").expect("fault controller");
     let rooted_file = rooted
-        .create_temp_file_with_options(
-            &LocalTempFileOptions::new().with_privacy(LocalPrivacyRequirement::Required),
-        )
+        .create_temp_file_with_options(&LocalTempFileOptions::new().with_privacy(LocalPrivacyRequirement::Required))
         .expect("rooted file collision retry succeeds");
     drop(fault);
     let mut rooted_file = rooted_file;
@@ -398,10 +425,12 @@ fn lf3_temp_private_creation_retries_collisions_and_cleans_own_sandbox() {
 #[cfg(unix)]
 #[test]
 fn lf3_temp_recovery_unknown_or_replaced_entries_are_not_removed() {
-    use crate::observation::{LocalObservationRequirement, query};
-    use crate::temp::types::NativePrivateEntry;
     use std::ffi::OsString;
     use std::fs::File;
+
+    use crate::observation::LocalObservationRequirement;
+    use crate::observation::query;
+    use crate::temp::types::NativePrivateEntry;
 
     let fixture = tempfile::tempdir().expect("fixture");
     let parent = File::open(fixture.path()).expect("parent handle");
@@ -429,7 +458,10 @@ fn lf3_temp_recovery_unknown_or_replaced_entries_are_not_removed() {
 
     let unknown_path = fixture.path().join("unknown");
     fs::write(&unknown_path, b"unknown").expect("unknown entry");
-    let unknown_file = OpenOptions::new().read(true).open(&unknown_path).expect("unknown handle");
+    let unknown_file = OpenOptions::new()
+        .read(true)
+        .open(&unknown_path)
+        .expect("unknown handle");
     let mut unknown = crate::temp::LocalTempRecovery::from_native(
         unknown_path.clone(),
         NativePrivateEntry {

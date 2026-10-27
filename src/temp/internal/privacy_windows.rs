@@ -169,7 +169,8 @@ impl CurrentUser {
     fn acquire() -> io::Result<Self> {
         check_failure!(Token);
         let mut token = ptr::null_mut();
-        // GetCurrentProcess is a pseudo-handle; OpenProcessToken returns an owned handle.
+        // GetCurrentProcess is a pseudo-handle; OpenProcessToken returns an owned
+        // handle.
         if unsafe { OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token) } == 0 {
             return Err(last_os_error());
         }
@@ -224,24 +225,13 @@ impl SecurityDescriptor {
 
         let mut acl = vec![0_usize; ACL_BUFFER_SIZE.div_ceil(size_of::<usize>())];
         let acl_ptr = acl.as_mut_ptr().cast::<ACL>();
-        if unsafe {
-            InitializeAcl(
-                acl_ptr,
-                (acl.len() * size_of::<usize>()) as u32,
-                ACL_REVISION,
-            )
-        } == 0
-        {
+        if unsafe { InitializeAcl(acl_ptr, (acl.len() * size_of::<usize>()) as u32, ACL_REVISION) } == 0 {
             return Err(last_os_error());
         }
         let access = if directory {
             if read_only {
                 DIRECTORY_ACCESS
-                    & !(FILE_ADD_FILE
-                        | FILE_ADD_SUBDIRECTORY
-                        | FILE_DELETE_CHILD
-                        | FILE_WRITE_ATTRIBUTES
-                        | DELETE)
+                    & !(FILE_ADD_FILE | FILE_ADD_SUBDIRECTORY | FILE_DELETE_CHILD | FILE_WRITE_ATTRIBUTES | DELETE)
             } else {
                 DIRECTORY_ACCESS
             }
@@ -255,32 +245,22 @@ impl SecurityDescriptor {
         }
 
         let mut descriptor = unsafe { std::mem::zeroed::<SECURITY_DESCRIPTOR>() };
-        if unsafe {
-            InitializeSecurityDescriptor((&mut descriptor as *mut SECURITY_DESCRIPTOR).cast(), 1)
-        } == 0
+        if unsafe { InitializeSecurityDescriptor((&mut descriptor as *mut SECURITY_DESCRIPTOR).cast(), 1) } == 0 {
+            return Err(last_os_error());
+        }
+        if unsafe { SetSecurityDescriptorDacl((&mut descriptor as *mut SECURITY_DESCRIPTOR).cast(), 1, acl_ptr, 0) }
+            == 0
         {
             return Err(last_os_error());
         }
-        if unsafe {
-            SetSecurityDescriptorDacl(
-                (&mut descriptor as *mut SECURITY_DESCRIPTOR).cast(),
-                1,
-                acl_ptr,
-                0,
-            )
-        } == 0
-        {
-            return Err(last_os_error());
-        }
-        // NtCreateFile with this descriptor creates an explicit DACL without inheriting ACEs.
+        // NtCreateFile with this descriptor creates an explicit DACL without inheriting
+        // ACEs.
         descriptor.Control |= SE_DACL_PROTECTED;
         Ok(Self { descriptor, acl })
     }
 
     fn as_ptr(&self) -> PSECURITY_DESCRIPTOR {
-        (&self.descriptor as *const SECURITY_DESCRIPTOR)
-            .cast_mut()
-            .cast()
+        (&self.descriptor as *const SECURITY_DESCRIPTOR).cast_mut().cast()
     }
 }
 
@@ -310,10 +290,7 @@ fn create_at(parent: &File, name: &OsStr, directory: bool) -> io::Result<File> {
         || name.as_slice() == [b'.' as u16]
         || name.as_slice() == [b'.' as u16, b'.' as u16]
     {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "invalid entry name",
-        ));
+        return Err(io::Error::new(io::ErrorKind::InvalidInput, "invalid entry name"));
     }
     let byte_length = name
         .len()
@@ -371,12 +348,9 @@ fn create_at(parent: &File, name: &OsStr, directory: bool) -> io::Result<File> {
     Ok(file)
 }
 
-/// Opens one existing child by native directory handle with rights to update its DACL.
-pub(crate) fn open_existing_entry_at(
-    parent: &File,
-    name: &OsStr,
-    directory: bool,
-) -> io::Result<File> {
+/// Opens one existing child by native directory handle with rights to update
+/// its DACL.
+pub(crate) fn open_existing_entry_at(parent: &File, name: &OsStr, directory: bool) -> io::Result<File> {
     let mut name: Vec<u16> = name.encode_wide().collect();
     if name.is_empty()
         || name.contains(&0)
@@ -448,9 +422,7 @@ pub(crate) fn open_existing_entry_at(
     std::mem::forget(handle);
     let metadata = file.metadata()?;
     use std::os::windows::fs::MetadataExt;
-    if metadata.file_attributes()
-        & windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_REPARSE_POINT
-        != 0
+    if metadata.file_attributes() & windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_REPARSE_POINT != 0
         || (directory && !metadata.is_dir())
         || (!directory && !metadata.is_file())
     {
@@ -462,12 +434,9 @@ pub(crate) fn open_existing_entry_at(
     Ok(file)
 }
 
-/// Opens an existing relative path one component at a time with no-follow semantics.
-pub(crate) fn open_existing_relative(
-    parent: &File,
-    relative: &std::path::Path,
-    directory: bool,
-) -> io::Result<File> {
+/// Opens an existing relative path one component at a time with no-follow
+/// semantics.
+pub(crate) fn open_existing_relative(parent: &File, relative: &std::path::Path, directory: bool) -> io::Result<File> {
     let mut current = parent.try_clone()?;
     let mut components = relative.components().peekable();
     while let Some(component) = components.next() {
@@ -483,38 +452,25 @@ pub(crate) fn open_existing_relative(
     Ok(current)
 }
 
-/// Creates a file relative to a retained parent handle with a protected current-user DACL.
-pub(crate) fn create_private_file_at(
-    parent: &File,
-    name: &OsStr,
-) -> Result<File, NativePrivateCreateError> {
+/// Creates a file relative to a retained parent handle with a protected
+/// current-user DACL.
+pub(crate) fn create_private_file_at(parent: &File, name: &OsStr) -> Result<File, NativePrivateCreateError> {
     create_private_entry_at(parent, name, false)
 }
 
-/// Creates a directory relative to a retained parent handle with a protected current-user DACL.
-pub(crate) fn create_private_directory_at(
-    parent: &File,
-    name: &OsStr,
-) -> Result<File, NativePrivateCreateError> {
+/// Creates a directory relative to a retained parent handle with a protected
+/// current-user DACL.
+pub(crate) fn create_private_directory_at(parent: &File, name: &OsStr) -> Result<File, NativePrivateCreateError> {
     create_private_entry_at(parent, name, true)
 }
 
-fn create_private_entry_at(
-    parent: &File,
-    name: &OsStr,
-    directory: bool,
-) -> Result<File, NativePrivateCreateError> {
+fn create_private_entry_at(parent: &File, name: &OsStr, directory: bool) -> Result<File, NativePrivateCreateError> {
     let retained_parent = parent
         .try_clone()
-        .map_err(|source| NativePrivateCreateError {
-            source,
-            retained: None,
-        })?;
+        .map_err(|source| NativePrivateCreateError { source, retained: None })?;
     let retained_name = name.to_os_string();
-    let file = create_at(parent, name, directory).map_err(|source| NativePrivateCreateError {
-        source,
-        retained: None,
-    })?;
+    let file =
+        create_at(parent, name, directory).map_err(|source| NativePrivateCreateError { source, retained: None })?;
     if let Err(source) = verify_current_user_access(&file, directory, false) {
         let identity = crate::observation::query::query_observation(
             &file,
@@ -537,11 +493,7 @@ fn create_private_entry_at(
 }
 
 /// Applies the current user's access policy to an already-open entry.
-pub(crate) fn apply_current_user_access(
-    file: &File,
-    directory: bool,
-    read_only: bool,
-) -> io::Result<()> {
+pub(crate) fn apply_current_user_access(file: &File, directory: bool, read_only: bool) -> io::Result<()> {
     let descriptor = SecurityDescriptor::for_current_user(directory, read_only)?;
     check_failure!(AccessApplyBefore);
     let status = unsafe {
@@ -562,29 +514,24 @@ pub(crate) fn apply_current_user_access(
     if read_only && !directory {
         check_failure!(ReadOnly);
         // Attribute changes are performed through the retained handle, not a path.
-        let mut information = unsafe {
-            std::mem::zeroed::<windows_sys::Win32::Storage::FileSystem::FILE_BASIC_INFO>()
-        };
+        let mut information = unsafe { std::mem::zeroed::<windows_sys::Win32::Storage::FileSystem::FILE_BASIC_INFO>() };
         if unsafe {
             windows_sys::Win32::Storage::FileSystem::GetFileInformationByHandleEx(
                 file.as_raw_handle().cast(),
                 windows_sys::Win32::Storage::FileSystem::FileBasicInfo,
-                (&mut information as *mut windows_sys::Win32::Storage::FileSystem::FILE_BASIC_INFO)
-                    .cast(),
+                (&mut information as *mut windows_sys::Win32::Storage::FileSystem::FILE_BASIC_INFO).cast(),
                 size_of::<windows_sys::Win32::Storage::FileSystem::FILE_BASIC_INFO>() as u32,
             )
         } == 0
         {
             return Err(last_os_error());
         }
-        information.FileAttributes =
-            windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_READONLY;
+        information.FileAttributes = windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_READONLY;
         if unsafe {
             windows_sys::Win32::Storage::FileSystem::SetFileInformationByHandle(
                 file.as_raw_handle().cast(),
                 windows_sys::Win32::Storage::FileSystem::FileBasicInfo,
-                (&information as *const windows_sys::Win32::Storage::FileSystem::FILE_BASIC_INFO)
-                    .cast(),
+                (&information as *const windows_sys::Win32::Storage::FileSystem::FILE_BASIC_INFO).cast(),
                 size_of::<windows_sys::Win32::Storage::FileSystem::FILE_BASIC_INFO>() as u32,
             )
         } == 0
@@ -595,12 +542,9 @@ pub(crate) fn apply_current_user_access(
     verify_current_user_access(file, directory, read_only)
 }
 
-/// Verifies owner, protected DACL, current-user ACE and required read-only attribute.
-pub(crate) fn verify_current_user_access(
-    file: &File,
-    directory: bool,
-    read_only: bool,
-) -> io::Result<()> {
+/// Verifies owner, protected DACL, current-user ACE and required read-only
+/// attribute.
+pub(crate) fn verify_current_user_access(file: &File, directory: bool, read_only: bool) -> io::Result<()> {
     check_failure!(AclReadback);
     let current_user = CurrentUser::acquire()?;
     let current_sid = current_user.sid()?;
@@ -628,8 +572,7 @@ pub(crate) fn verify_current_user_access(
     }
     // GetSecurityInfo allocates this descriptor with LocalAlloc.
     let _descriptor = LocalSecurityDescriptor(descriptor_ptr);
-    if owner.is_null() || unsafe { windows_sys::Win32::Security::EqualSid(owner, current_sid) } == 0
-    {
+    if owner.is_null() || unsafe { windows_sys::Win32::Security::EqualSid(owner, current_sid) } == 0 {
         return Err(io::Error::new(
             io::ErrorKind::PermissionDenied,
             "owner SID is not current user",
@@ -638,26 +581,13 @@ pub(crate) fn verify_current_user_access(
     if unsafe { GetSecurityDescriptorControl(descriptor_ptr, &mut control, &mut revision) } == 0
         || control & SE_DACL_PROTECTED == 0
     {
-        return Err(io::Error::new(
-            io::ErrorKind::PermissionDenied,
-            "DACL is not protected",
-        ));
+        return Err(io::Error::new(io::ErrorKind::PermissionDenied, "DACL is not protected"));
     }
-    if unsafe {
-        GetSecurityDescriptorDacl(
-            descriptor_ptr,
-            &mut dacl_present,
-            &mut dacl,
-            &mut dacl_defaulted,
-        )
-    } == 0
+    if unsafe { GetSecurityDescriptorDacl(descriptor_ptr, &mut dacl_present, &mut dacl, &mut dacl_defaulted) } == 0
         || dacl_present == 0
         || dacl.is_null()
     {
-        return Err(io::Error::new(
-            io::ErrorKind::PermissionDenied,
-            "missing DACL",
-        ));
+        return Err(io::Error::new(io::ErrorKind::PermissionDenied, "missing DACL"));
     }
     let ace_count = unsafe { (*dacl).AceCount };
     if ace_count != 1 {
@@ -682,11 +612,7 @@ pub(crate) fn verify_current_user_access(
     let expected_access = if directory {
         if read_only {
             DIRECTORY_ACCESS
-                & !(FILE_ADD_FILE
-                    | FILE_ADD_SUBDIRECTORY
-                    | FILE_DELETE_CHILD
-                    | FILE_WRITE_ATTRIBUTES
-                    | DELETE)
+                & !(FILE_ADD_FILE | FILE_ADD_SUBDIRECTORY | FILE_DELETE_CHILD | FILE_WRITE_ATTRIBUTES | DELETE)
         } else {
             DIRECTORY_ACCESS
         }
@@ -695,9 +621,7 @@ pub(crate) fn verify_current_user_access(
     } else {
         FILE_INITIAL_ACCESS
     };
-    if unsafe { windows_sys::Win32::Security::EqualSid(ace_sid, current_sid) } == 0
-        || allowed.Mask != expected_access
-    {
+    if unsafe { windows_sys::Win32::Security::EqualSid(ace_sid, current_sid) } == 0 || allowed.Mask != expected_access {
         return Err(io::Error::new(
             io::ErrorKind::PermissionDenied,
             "DACL does not match current-user policy",
@@ -706,10 +630,7 @@ pub(crate) fn verify_current_user_access(
     if read_only && !directory {
         let metadata = file.metadata()?;
         if metadata.permissions().readonly() == false {
-            return Err(io::Error::new(
-                io::ErrorKind::PermissionDenied,
-                "file is not read-only",
-            ));
+            return Err(io::Error::new(io::ErrorKind::PermissionDenied, "file is not read-only"));
         }
     }
     Ok(())

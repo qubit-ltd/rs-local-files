@@ -41,10 +41,10 @@ use crate::LocalPersistStage;
 use crate::LocalRelativePath;
 use crate::LocalResult;
 use crate::LocalSymlinkPolicy;
-use crate::outcome::LocalTempSourceState;
-use crate::outcome::LocalTempAccessState;
-use crate::options::LocalSealOptions;
 use crate::error::LocalTempSealError;
+use crate::options::LocalSealOptions;
+use crate::outcome::LocalTempAccessState;
+use crate::outcome::LocalTempSourceState;
 use crate::path::LocalFileSystemScope;
 use crate::path::LocalPathResolver;
 use crate::policy::LocalFileSyncRequirement;
@@ -118,10 +118,7 @@ impl LocalTempFile {
         Ok(Self {
             core: LocalTempResourceCore::new(
                 path,
-                LocalTempResourceBackend::Host(super::internal::HostTempResourceBackend {
-                    sandbox_path,
-                    identity,
-                }),
+                LocalTempResourceBackend::Host(super::internal::HostTempResourceBackend { sandbox_path, identity }),
                 symlink_policy,
             ),
             file: Some(file),
@@ -403,15 +400,16 @@ impl LocalTempFile {
                 crate::observation::LocalObservationRequirement::Required,
             )
             .map_err(crate::LocalFileError::into_io_error)?
-            .identity() == self.file_identity.as_ref();
+            .identity()
+                == self.file_identity.as_ref();
             if self.file_identity.is_none() {
-                return Err(Error::new(ErrorKind::Unsupported, "temporary file identity is unavailable"));
+                return Err(Error::new(
+                    ErrorKind::Unsupported,
+                    "temporary file identity is unavailable",
+                ));
             }
             if !expected {
-                return Err(Error::new(
-                    ErrorKind::InvalidInput,
-                    "temporary file identity changed",
-                ));
+                return Err(Error::new(ErrorKind::InvalidInput, "temporary file identity changed"));
             }
             if options.file_sync() != LocalFileSyncRequirement::NotRequired {
                 #[cfg(feature = "test-support")]
@@ -462,7 +460,8 @@ impl LocalTempFile {
                 crate::observation::LocalObservationRequirement::Required,
             )
             .map_err(crate::LocalFileError::into_io_error)?
-            .identity() == self.file_identity.as_ref();
+            .identity()
+                == self.file_identity.as_ref();
             if !reopened_matches {
                 self.access_state = LocalTempAccessState::Indeterminate;
                 return Err(Error::new(
@@ -475,13 +474,9 @@ impl LocalTempFile {
         })();
         if let Err(error) = result {
             let state = self.access_state;
-            let cause = LocalFileError::from_io(
-                LocalFileOperation::Commit,
-                Some(self.path().to_path_buf()),
-                None,
-                error,
-            )
-            .with_temp_recovery(super::LocalTempRecovery::from_file(self));
+            let cause =
+                LocalFileError::from_io(LocalFileOperation::Commit, Some(self.path().to_path_buf()), None, error)
+                    .with_temp_recovery(super::LocalTempRecovery::from_file(self));
             return Err(LocalTempSealError::new(cause, state));
         }
         Ok(LocalSealedTempFile { resource: self })
@@ -527,8 +522,7 @@ impl LocalTempFile {
     /// namespace input; consuming failure drops this guard and attempts
     /// cleanup.
     pub(crate) fn bind_namespace(mut self, resolver: LocalPathResolver) -> LocalResult<Self> {
-        self.core
-            .bind_namespace(resolver, LocalFileOperation::CreateTempFile)?;
+        self.core.bind_namespace(resolver, LocalFileOperation::CreateTempFile)?;
         Ok(self)
     }
 
@@ -600,14 +594,9 @@ impl LocalTempFile {
             }
         };
         let namespace_target = resolved_target.namespace_absolute().to_path_buf();
-        if scope == LocalFileSystemScope::Rooted
-            && resolved_target.authority_relative().as_os_str().is_empty()
-        {
+        if scope == LocalFileSystemScope::Rooted && resolved_target.authority_relative().as_os_str().is_empty() {
             return Err(self.persist_error(
-                Error::new(
-                    ErrorKind::InvalidInput,
-                    "cannot replace the Rooted virtual root",
-                ),
+                Error::new(ErrorKind::InvalidInput, "cannot replace the Rooted virtual root"),
                 requested_target,
                 Some(namespace_target),
                 LocalPersistStage::ResolveTarget,
@@ -644,8 +633,7 @@ impl LocalTempFile {
             ));
         }
 
-        let file_durable =
-            match self.synchronize_source_before_reopen(options.durability(), before_reopen) {
+        let file_durable = match self.synchronize_source_before_reopen(options.durability(), before_reopen) {
             Ok(durable) => durable,
             Err(error) => {
                 return Err(self.persist_error(
@@ -660,11 +648,7 @@ impl LocalTempFile {
         self.close();
         let authority_target = resolved_target.authority_relative().to_path_buf();
         if matches!(&self.core.backend, LocalTempResourceBackend::Host(_)) {
-            let target = match crate::local::resolve_host_path(
-                &authority_target,
-                self.core.symlink_policy,
-                false,
-            ) {
+            let target = match crate::local::resolve_host_path(&authority_target, self.core.symlink_policy, false) {
                 Ok(target) => target,
                 Err(error) => {
                     return Err(self.persist_error(
@@ -753,8 +737,8 @@ impl LocalTempFile {
         let LocalTempResourceBackend::Rooted(rooted) = &self.core.backend else {
             unreachable!()
         };
-        let source = LocalRelativePath::new(&rooted.relative_path)
-            .expect("rooted temporary path was validated at creation");
+        let source =
+            LocalRelativePath::new(&rooted.relative_path).expect("rooted temporary path was validated at creation");
         let resolved = match crate::rooted_local_file_system::resolve_rooted_path(
             &rooted.root,
             &target,
@@ -774,9 +758,7 @@ impl LocalTempFile {
             }
         };
         let destination = resolved;
-        if let Err(error) =
-            prepare_rooted_parent(&rooted.root, &destination, options.creates_parent())
-        {
+        if let Err(error) = prepare_rooted_parent(&rooted.root, &destination, options.creates_parent()) {
             return Err(self.persist_error(
                 error,
                 requested_target,
@@ -801,12 +783,8 @@ impl LocalTempFile {
             ));
         }
         self.core.state = LocalTempResourceState::SandboxPending;
-        let parent_durable = match synchronize_rooted_publication(
-            &rooted.root,
-            &source,
-            &destination,
-            options.durability(),
-        ) {
+        let parent_durable =
+            match synchronize_rooted_publication(&rooted.root, &source, &destination, options.durability()) {
                 Ok(durable) => durable,
                 Err(error) => {
                     return Err(self.persist_error(
@@ -868,11 +846,11 @@ impl LocalTempFile {
             return Err(crate::local::test_fault_error());
         }
         let durability_supported = match &self.core.backend {
-            LocalTempResourceBackend::Host(_) => crate::LocalFileSystemCapabilities::detect_host()
-                .supports_durable_temp_file_persist(),
+            LocalTempResourceBackend::Host(_) => {
+                crate::LocalFileSystemCapabilities::detect_host().supports_durable_temp_file_persist()
+            }
             LocalTempResourceBackend::Rooted(_) => {
-                crate::LocalFileSystemCapabilities::detect_rooted()
-                    .supports_durable_temp_file_persist()
+                crate::LocalFileSystemCapabilities::detect_rooted().supports_durable_temp_file_persist()
             }
         };
         if !durability_supported {
@@ -881,9 +859,7 @@ impl LocalTempFile {
                     ErrorKind::Unsupported,
                     "required temporary-file persistence durability is unavailable on this platform",
                 )),
-                LocalDurabilityRequirement::Preferred | LocalDurabilityRequirement::NotRequired => {
-                    Ok(false)
-                }
+                LocalDurabilityRequirement::Preferred | LocalDurabilityRequirement::NotRequired => Ok(false),
             };
         }
         let mut before_reopen = Some(before_reopen);
@@ -993,8 +969,8 @@ impl LocalTempFile {
     ) -> LocalPersistError<Self> {
         let requirement_not_met =
             stage == LocalPersistStage::SynchronizeSource && error.kind() == ErrorKind::Unsupported;
-        let error =
-            self.core
+        let error = self
+            .core
             .persist_error(error, requested_target, resolved_target, stage, publication);
         let error = if requirement_not_met {
             error.with_kind(LocalFileErrorKind::RequirementNotMet)
@@ -1085,8 +1061,7 @@ fn synchronize_destination(
     synchronize: impl FnOnce() -> Result<()>,
 ) -> Result<bool> {
     #[cfg(feature = "test-support")]
-    if durability != LocalDurabilityRequirement::NotRequired
-        && crate::local::take_test_support("temp-file-parent-sync")
+    if durability != LocalDurabilityRequirement::NotRequired && crate::local::take_test_support("temp-file-parent-sync")
     {
         return Err(crate::local::test_fault_error());
     }
@@ -1121,12 +1096,7 @@ impl Output for LocalTempFile {
     /// `index..index + count` must be a valid range inside `input`, and the
     /// addition must not overflow.
     #[inline]
-    unsafe fn write_unchecked(
-        &mut self,
-        input: &[u8],
-        index: usize,
-        count: usize,
-    ) -> Result<usize> {
+    unsafe fn write_unchecked(&mut self, input: &[u8], index: usize, count: usize) -> Result<usize> {
         Output::write(self.as_file_mut()?, &input[index..index + count])
     }
 
@@ -1178,6 +1148,21 @@ fn reopen_read_only(path: &Path, _original: &File) -> Result<File> {
 }
 
 /// A cleanup-owned temporary file with no public write handle.
+///
+/// The sealed owner does not implement [`qubit_io::ByteOutput`]:
+///
+/// ```compile_fail
+/// fn requires_output<T: qubit_io::ByteOutput>() {}
+/// requires_output::<qubit_local_files::LocalSealedTempFile>();
+/// ```
+///
+/// It also exposes no mutable native file handle:
+///
+/// ```compile_fail
+/// fn request_mutable_file(file: &mut qubit_local_files::LocalSealedTempFile) {
+///     let _ = file.as_file_mut();
+/// }
+/// ```
 #[must_use = "use explicit cleanup to observe errors; drop only attempts cleanup"]
 #[derive(Debug)]
 pub struct LocalSealedTempFile {
@@ -1191,11 +1176,7 @@ impl LocalSealedTempFile {
     }
     /// Returns a native path for host resources.
     pub fn native_path(&self) -> Option<&Path> {
-        matches!(
-            self.resource.core.backend,
-            LocalTempResourceBackend::Host(_)
-        )
-        .then(|| self.path())
+        matches!(self.resource.core.backend, LocalTempResourceBackend::Host(_)).then(|| self.path())
     }
     /// Observes the retained read-only handle.
     pub fn observation(&self) -> LocalResult<crate::observation::LocalFileObservation> {
@@ -1207,10 +1188,7 @@ impl LocalSealedTempFile {
                 closed_file_error(),
             )
         })?;
-        crate::observation::query::query_observation(
-            file,
-            crate::observation::LocalObservationRequirement::Required,
-        )
+        crate::observation::query::query_observation(file, crate::observation::LocalObservationRequirement::Required)
     }
     /// Removes the sealed file and its sandbox.
     pub fn cleanup(&mut self) -> LocalResult<()> {
@@ -1254,11 +1232,7 @@ mod sync_identity_tests {
                 } else {
                     LocalFileSystem::host().expect("host authority should open")
                 };
-                let parent = if rooted {
-                    Path::new("/")
-                } else {
-                    directory.path()
-                };
+                let parent = if rooted { Path::new("/") } else { directory.path() };
                 let mut temporary = filesystem
                     .create_temp_file_with_options(&LocalTempFileOptions::new().with_parent(parent))
                     .expect("temporary source should be created");
@@ -1290,8 +1264,7 @@ mod sync_identity_tests {
                         None,
                         LocalPersistOptions::new().with_durability(durability),
                         || {
-                            fs::remove_file(&source)
-                                .expect("prechecked source should be removable");
+                            fs::remove_file(&source).expect("prechecked source should be removable");
                             fs::rename(&replacement, &source)
                                 .expect("replacement should take the prechecked source path");
                             seam_reached = true;

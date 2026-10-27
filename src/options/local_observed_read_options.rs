@@ -1,4 +1,5 @@
-use super::{LocalPathBindingOptions, LocalReadOptions};
+use super::LocalPathBindingOptions;
+use super::LocalReadOptions;
 use crate::observation::LocalObservationRequirement;
 
 /// Options for opening a reader with same-handle metadata observations.
@@ -11,7 +12,8 @@ pub struct LocalObservedReadOptions {
 }
 
 impl LocalObservedReadOptions {
-    /// Creates options with optional native details and no retained path binding.
+    /// Creates options with optional native details and no retained path
+    /// binding.
     pub const fn new() -> Self {
         Self {
             read_options: None,
@@ -27,10 +29,7 @@ impl LocalObservedReadOptions {
     }
 
     /// Sets whether native identity and timestamp details are required.
-    pub const fn with_native_observation(
-        mut self,
-        requirement: LocalObservationRequirement,
-    ) -> Self {
+    pub const fn with_native_observation(mut self, requirement: LocalObservationRequirement) -> Self {
         self.native_observation = requirement;
         self
     }

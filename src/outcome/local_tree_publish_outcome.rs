@@ -1,6 +1,7 @@
 use crate::directory::LocalTreeRetainedResource;
 use crate::error::LocalFileError;
-use crate::outcome::{LocalTreeAccessState, LocalTreePublication};
+use crate::outcome::LocalTreeAccessState;
+use crate::outcome::LocalTreePublication;
 
 /// Reports publication and synchronization facts for a staged tree.
 #[derive(Debug)]

@@ -44,10 +44,10 @@ use crate::LocalAtomicWriteError;
 use crate::LocalAtomicWriteOptions;
 use crate::LocalAtomicWriteStage;
 use crate::LocalDurabilityRequirement;
-use crate::policy::LocalFileSyncRequirement;
-use crate::writer::internal::LocalCommitSyncOutcome;
-use crate::writer::internal::LocalCommitSyncObserver;
 use crate::options::LocalWriteMetadataPolicy;
+use crate::policy::LocalFileSyncRequirement;
+use crate::writer::internal::LocalCommitSyncObserver;
+use crate::writer::internal::LocalCommitSyncOutcome;
 
 /// Default suffix used by atomic-write temporary files.
 const ATOMIC_WRITE_TEMP_SUFFIX: &str = ".tmp";
@@ -239,7 +239,11 @@ impl LocalAtomicWriter {
         self,
         observer: Option<&LocalCommitSyncObserver>,
     ) -> Result<LocalCommitSyncOutcome, LocalAtomicCommitError<Self>> {
-        commit_recoverably(self, |writer| writer.commit_attempt(observer), |writer| writer.staged_file.is_open())
+        commit_recoverably(
+            self,
+            |writer| writer.commit_attempt(observer),
+            |writer| writer.staged_file.is_open(),
+        )
     }
 
     /// Aborts the staged replacement and removes its temporary file.
@@ -270,7 +274,10 @@ impl LocalAtomicWriter {
     ///
     /// Returns the structured commit failure. Errors raised before installation
     /// leave the staging handle open for the public recoverable commit API.
-    fn commit_attempt(&mut self, observer: Option<&LocalCommitSyncObserver>) -> Result<LocalCommitSyncOutcome, LocalAtomicWriteError> {
+    fn commit_attempt(
+        &mut self,
+        observer: Option<&LocalCommitSyncObserver>,
+    ) -> Result<LocalCommitSyncOutcome, LocalAtomicWriteError> {
         #[cfg(unix)]
         let destination = self.open_destination_for_commit()?;
         #[cfg(unix)]
@@ -423,16 +430,25 @@ impl LocalAtomicWriter {
     ///
     /// Returns a structured staging synchronization error while retaining
     /// staging when the native synchronization fails.
-    fn sync_temporary_file(&mut self, observer: Option<&LocalCommitSyncObserver>) -> Result<bool, LocalAtomicWriteError> {
-        synchronize_staging_file(self.staged_file.file(), self.durability, self.file_sync, observer, |result| {
-            with_atomic_context(
-                result,
-                LocalAtomicWriteStage::SyncTemporaryFile,
-                &self.path,
-                Some(self.staged_file.path().to_path_buf()),
-                LocalAtomicDestinationState::Unchanged,
-            )
-        })
+    fn sync_temporary_file(
+        &mut self,
+        observer: Option<&LocalCommitSyncObserver>,
+    ) -> Result<bool, LocalAtomicWriteError> {
+        synchronize_staging_file(
+            self.staged_file.file(),
+            self.durability,
+            self.file_sync,
+            observer,
+            |result| {
+                with_atomic_context(
+                    result,
+                    LocalAtomicWriteStage::SyncTemporaryFile,
+                    &self.path,
+                    Some(self.staged_file.path().to_path_buf()),
+                    LocalAtomicDestinationState::Unchanged,
+                )
+            },
+        )
     }
 
     /// Verifies that the observed destination still names the final entry.
@@ -504,7 +520,10 @@ impl LocalAtomicWriter {
     ///
     /// Returns the structured installation or recovery error, or a parent
     /// synchronization error after the destination has been replaced.
-    fn install_and_sync_parent(&mut self, observer: Option<&LocalCommitSyncObserver>) -> Result<bool, LocalAtomicWriteError> {
+    fn install_and_sync_parent(
+        &mut self,
+        observer: Option<&LocalCommitSyncObserver>,
+    ) -> Result<bool, LocalAtomicWriteError> {
         self.staged_file.close();
         let install_result = install_atomic_file(
             self.staged_file.path(),
@@ -529,11 +548,7 @@ impl LocalAtomicWriter {
                     staged_file.disarm();
                 },
                 |_: &StagedFile| {
-                    sync_atomic_parent_chain_observed(
-                        &self.operation_path,
-                        &self.parent_dirs_to_sync,
-                        observer,
-                    )
+                    sync_atomic_parent_chain_observed(&self.operation_path, &self.parent_dirs_to_sync, observer)
                 },
             );
         }

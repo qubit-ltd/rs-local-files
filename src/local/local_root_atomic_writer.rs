@@ -73,12 +73,12 @@ use crate::LocalAtomicWriteError;
 use crate::LocalAtomicWriteOptions;
 use crate::LocalAtomicWriteStage;
 use crate::LocalDurabilityRequirement;
-use crate::policy::LocalFileSyncRequirement;
-use crate::writer::internal::LocalCommitSyncOutcome;
-use crate::writer::internal::LocalCommitSyncObserver;
 #[cfg(any(unix, windows))]
 use crate::LocalRelativePath;
 use crate::options::LocalWriteMetadataPolicy;
+use crate::policy::LocalFileSyncRequirement;
+use crate::writer::internal::LocalCommitSyncObserver;
+use crate::writer::internal::LocalCommitSyncOutcome;
 
 #[cfg(unix)]
 fn sync_rooted_parent_chain_observed(
@@ -435,7 +435,11 @@ impl LocalRootAtomicWriter {
     ) -> Result<LocalCommitSyncOutcome, LocalAtomicCommitError<Self>> {
         #[cfg(unix)]
         {
-            commit_recoverably(self, |writer| writer.commit_attempt(observer), |writer| writer.staged_file.is_open())
+            commit_recoverably(
+                self,
+                |writer| writer.commit_attempt(observer),
+                |writer| writer.staged_file.is_open(),
+            )
         }
         #[cfg(windows)]
         {
@@ -445,7 +449,11 @@ impl LocalRootAtomicWriter {
                     Some(self),
                 ));
             }
-            commit_recoverably(self, |writer| writer.commit_attempt_windows(observer), |writer| writer.staged_file.armed)
+            commit_recoverably(
+                self,
+                |writer| writer.commit_attempt_windows(observer),
+                |writer| writer.staged_file.armed,
+            )
         }
         #[cfg(not(any(unix, windows)))]
         {
@@ -506,7 +514,10 @@ impl LocalRootAtomicWriter {
     /// Native metadata/permission/rename failures retain structured stage and
     /// destination state; staging remains armed until successful installation.
     #[cfg(windows)]
-    fn commit_attempt_windows(&mut self, observer: Option<&LocalCommitSyncObserver>) -> Result<LocalCommitSyncOutcome, LocalAtomicWriteError> {
+    fn commit_attempt_windows(
+        &mut self,
+        observer: Option<&LocalCommitSyncObserver>,
+    ) -> Result<LocalCommitSyncOutcome, LocalAtomicWriteError> {
         let destination = if self.destination_is_regular {
             Some(
                 read_rooted_symlink_metadata(&self.staged_file.root, Path::new(""), &self.destination).map_err(
@@ -599,7 +610,9 @@ impl LocalRootAtomicWriter {
                 observer.record_file_sync();
             }
             sync_rooted_staging_file(self.staged_file.file()).is_ok()
-        } else { false };
+        } else {
+            false
+        };
         if let Some(opened_destination) = destination.as_ref() {
             #[cfg(feature = "test-support")]
             if crate::local::test_support_enabled("rooted-writer-identity-replace") {
@@ -704,7 +717,10 @@ impl LocalRootAtomicWriter {
                 io::Error::other("injected error after rooted destination rename"),
             ));
         }
-        Ok(LocalCommitSyncOutcome { durable: false, file_synced })
+        Ok(LocalCommitSyncOutcome {
+            durable: false,
+            file_synced,
+        })
     }
 
     /// Runs one rooted commit attempt without consuming recoverable staging.
@@ -714,7 +730,10 @@ impl LocalRootAtomicWriter {
     /// Returns the structured commit failure. Errors raised before installation
     /// leave the staging handle open for the public recoverable commit API.
     #[cfg(unix)]
-    fn commit_attempt(&mut self, observer: Option<&LocalCommitSyncObserver>) -> Result<LocalCommitSyncOutcome, LocalAtomicWriteError> {
+    fn commit_attempt(
+        &mut self,
+        observer: Option<&LocalCommitSyncObserver>,
+    ) -> Result<LocalCommitSyncOutcome, LocalAtomicWriteError> {
         let destination = self.open_destination_for_commit()?;
         self.apply_destination_metadata(destination.as_ref())?;
         self.apply_copy_permissions()?;
@@ -865,16 +884,25 @@ impl LocalRootAtomicWriter {
     /// Returns a structured staging synchronization error while retaining
     /// staging when the native synchronization fails.
     #[cfg(unix)]
-    fn sync_temporary_file(&mut self, observer: Option<&LocalCommitSyncObserver>) -> Result<bool, LocalAtomicWriteError> {
-        synchronize_staging_file(self.staged_file.file(), self.durability, self.file_sync, observer, |result| {
-            map_atomic_error(
-                result,
-                LocalAtomicWriteStage::SyncTemporaryFile,
-                &self.path,
-                Some(self.staged_file.diagnostic_path().to_path_buf()),
-                LocalAtomicDestinationState::Unchanged,
-            )
-        })
+    fn sync_temporary_file(
+        &mut self,
+        observer: Option<&LocalCommitSyncObserver>,
+    ) -> Result<bool, LocalAtomicWriteError> {
+        synchronize_staging_file(
+            self.staged_file.file(),
+            self.durability,
+            self.file_sync,
+            observer,
+            |result| {
+                map_atomic_error(
+                    result,
+                    LocalAtomicWriteStage::SyncTemporaryFile,
+                    &self.path,
+                    Some(self.staged_file.diagnostic_path().to_path_buf()),
+                    LocalAtomicDestinationState::Unchanged,
+                )
+            },
+        )
     }
 
     /// Verifies that the rooted destination still has the observed identity.
@@ -951,7 +979,10 @@ impl LocalRootAtomicWriter {
     /// Returns the structured installation or recovery error, or a parent
     /// synchronization error after the destination has been replaced.
     #[cfg(unix)]
-    fn install_and_sync_parent(&mut self, observer: Option<&LocalCommitSyncObserver>) -> Result<bool, LocalAtomicWriteError> {
+    fn install_and_sync_parent(
+        &mut self,
+        observer: Option<&LocalCommitSyncObserver>,
+    ) -> Result<bool, LocalAtomicWriteError> {
         let install_result =
             install_rooted_atomic_file(&mut self.staged_file, &self.final_name, self.destination_existed);
         if let Err((source, destination_state, staging_state)) = install_result {
@@ -971,11 +1002,7 @@ impl LocalRootAtomicWriter {
                     staged_file.disarm();
                 },
                 |staged_file: &RootedStagedFile| {
-                    sync_rooted_parent_chain_observed(
-                        staged_file.parent(),
-                        &self.parent_dirs_to_sync,
-                        observer,
-                    )
+                    sync_rooted_parent_chain_observed(staged_file.parent(), &self.parent_dirs_to_sync, observer)
                 },
             );
         }

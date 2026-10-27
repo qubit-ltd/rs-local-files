@@ -7,11 +7,11 @@
 // =============================================================================
 //! Private writer backend state.
 
-mod local_file_writer_backend;
 mod local_commit_sync_outcome;
+mod local_file_writer_backend;
 mod local_staged_commit_error;
 
-pub(crate) use local_commit_sync_outcome::LocalCommitSyncOutcome;
 pub(crate) use local_commit_sync_outcome::LocalCommitSyncObserver;
+pub(crate) use local_commit_sync_outcome::LocalCommitSyncOutcome;
 pub(crate) use local_file_writer_backend::LocalFileWriterBackend;
 pub(crate) use local_staged_commit_error::LocalStagedCommitError;

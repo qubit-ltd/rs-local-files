@@ -1,12 +1,13 @@
-use std::ffi::{CString, OsStr};
-use std::fs::File;
-use std::io;
-use std::os::fd::{AsRawFd, FromRawFd};
-use std::os::unix::ffi::OsStrExt;
-use std::os::unix::fs::MetadataExt;
-
 #[cfg(test)]
 use std::cell::Cell;
+use std::ffi::CString;
+use std::ffi::OsStr;
+use std::fs::File;
+use std::io;
+use std::os::fd::AsRawFd;
+use std::os::fd::FromRawFd;
+use std::os::unix::ffi::OsStrExt;
+use std::os::unix::fs::MetadataExt;
 
 #[cfg(test)]
 thread_local! {
@@ -39,12 +40,10 @@ fn fail_access_if_scheduled() -> io::Result<()> {
 }
 
 use crate::observation::LocalFileIdentity;
-use crate::temp::types::{NativePrivateCreateError, NativePrivateEntry};
+use crate::temp::types::NativePrivateCreateError;
+use crate::temp::types::NativePrivateEntry;
 
-pub(crate) fn create_private_file_at(
-    parent: &File,
-    name: &OsStr,
-) -> Result<File, NativePrivateCreateError> {
+pub(crate) fn create_private_file_at(parent: &File, name: &OsStr) -> Result<File, NativePrivateCreateError> {
     create_private_file_at_impl(parent, name, File::try_clone)
 }
 
@@ -131,10 +130,7 @@ where
     Ok(file)
 }
 
-pub(crate) fn create_private_directory_at(
-    parent: &File,
-    name: &OsStr,
-) -> Result<File, NativePrivateCreateError> {
+pub(crate) fn create_private_directory_at(parent: &File, name: &OsStr) -> Result<File, NativePrivateCreateError> {
     create_private_directory_at_impl(parent, name, File::try_clone, || {})
 }
 
@@ -273,11 +269,7 @@ where
     Ok(directory)
 }
 
-pub(crate) fn apply_current_user_access(
-    file: &File,
-    directory: bool,
-    read_only: bool,
-) -> io::Result<()> {
+pub(crate) fn apply_current_user_access(file: &File, directory: bool, read_only: bool) -> io::Result<()> {
     verify_owner_and_type(file, directory)?;
     let mode = match (directory, read_only) {
         (false, false) => 0o600,
@@ -293,11 +285,7 @@ pub(crate) fn apply_current_user_access(
     verify_current_user_access(file, directory, read_only)
 }
 
-pub(crate) fn verify_current_user_access(
-    file: &File,
-    directory: bool,
-    read_only: bool,
-) -> io::Result<()> {
+pub(crate) fn verify_current_user_access(file: &File, directory: bool, read_only: bool) -> io::Result<()> {
     verify_owner_and_type(file, directory)?;
     let metadata = file.metadata()?;
     let expected = match (directory, read_only) {
@@ -339,8 +327,7 @@ fn component_name(name: &OsStr) -> io::Result<CString> {
             "name must be one native path component",
         ));
     }
-    CString::new(bytes)
-        .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "name contains a nul byte"))
+    CString::new(bytes).map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "name contains a nul byte"))
 }
 
 fn identity_for_file(file: &File) -> io::Result<LocalFileIdentity> {
@@ -364,10 +351,11 @@ fn identity_for_name(parent: &File, name: &OsStr) -> io::Result<LocalFileIdentit
     }
     // SAFETY: fstatat initialized status on success.
     let status = unsafe { status.assume_init() };
-    Ok(LocalFileIdentity::unix(
-        status.st_dev as u64,
-        status.st_ino as u64,
-    ))
+    #[allow(clippy::unnecessary_cast)]
+    let device = status.st_dev as u64;
+    #[allow(clippy::unnecessary_cast)]
+    let inode = status.st_ino as u64;
+    Ok(LocalFileIdentity::unix(device, inode))
 }
 
 fn create_error(
@@ -391,8 +379,5 @@ fn create_error(
 }
 
 fn pre_create_error(source: io::Error) -> NativePrivateCreateError {
-    NativePrivateCreateError {
-        source,
-        retained: None,
-    }
+    NativePrivateCreateError { source, retained: None }
 }

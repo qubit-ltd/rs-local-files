@@ -26,8 +26,10 @@ impl LocalComponentPolicy {
             let one_normal_component = matches!(components.next(), Some(Component::Normal(value)) if value == name)
                 && components.next().is_none();
             if name.is_empty() || name == "." || name == ".." || !one_normal_component {
-                return Err(LocalFileError::new(LocalFileErrorKind::InvalidOptions, LocalFileOperation::BindPath)
-                    .with_reason("denied component names must be non-empty single native names other than . or .."));
+                return Err(
+                    LocalFileError::new(LocalFileErrorKind::InvalidOptions, LocalFileOperation::BindPath)
+                        .with_reason("denied component names must be non-empty single native names other than . or .."),
+                );
             }
         }
         Ok(Self { denied: names })
@@ -44,11 +46,10 @@ impl LocalComponentPolicy {
 
     pub(crate) fn validate_component(&self, component: &std::ffi::OsStr) -> LocalResult<()> {
         if self.denies(component) {
-            return Err(LocalFileError::new(
-                LocalFileErrorKind::InvalidPath,
-                LocalFileOperation::BindPath,
-            )
-            .with_reason("path component is rejected by the configured component policy"));
+            return Err(
+                LocalFileError::new(LocalFileErrorKind::InvalidPath, LocalFileOperation::BindPath)
+                    .with_reason("path component is rejected by the configured component policy"),
+            );
         }
         Ok(())
     }

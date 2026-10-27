@@ -29,9 +29,13 @@ pub(crate) struct RootedResolutionCursor {
 }
 
 impl RootedResolutionCursor {
-    pub(crate) fn into_file(self) -> File { self.current }
+    pub(crate) fn into_file(self) -> File {
+        self.current
+    }
 
-    pub(crate) fn try_clone_current(&self) -> Result<File> { self.current.try_clone() }
+    pub(crate) fn try_clone_current(&self) -> Result<File> {
+        self.current.try_clone()
+    }
 
     /// Creates a cursor from an already-opened rooted directory authority.
     #[inline]
@@ -60,7 +64,8 @@ impl RootedResolutionCursor {
         }
     }
 
-    /// Observes the final entry without following a link, and reports its native hardlink count.
+    /// Observes the final entry without following a link, and reports its
+    /// native hardlink count.
     pub(crate) fn observe_entry_with_link_count(
         &self,
         name: &OsStr,
@@ -71,8 +76,11 @@ impl RootedResolutionCursor {
                 crate::LocalFileError::from_io(crate::LocalFileOperation::Metadata, None, None, source)
             })?;
             let metadata = Metadata::from_stat(&status);
-            let identity = metadata.native_identity().map(|(device, inode)| crate::observation::LocalFileIdentity::unix(device, inode));
-            let observation = crate::observation::LocalFileObservation::from_parts(local_file_metadata(metadata), identity, None);
+            let identity = metadata
+                .native_identity()
+                .map(|(device, inode)| crate::observation::LocalFileIdentity::unix(device, inode));
+            let observation =
+                crate::observation::LocalFileObservation::from_parts(local_file_metadata(metadata), identity, None);
             Ok((observation, Some(status.st_nlink as u64)))
         }
         #[cfg(windows)]
@@ -81,20 +89,41 @@ impl RootedResolutionCursor {
             let file = crate::local::read_rooted_component_metadata(&self.current, name).map_err(|source| {
                 crate::LocalFileError::from_io(crate::LocalFileOperation::Metadata, None, None, source)
             })?;
-            let observation = crate::observation::query::query_observation(&file, crate::observation::LocalObservationRequirement::Optional)?;
-            use windows_sys::Win32::Storage::FileSystem::{FILE_STANDARD_INFO, FileStandardInfo, GetFileInformationByHandleEx};
+            let observation = crate::observation::query::query_observation(
+                &file,
+                crate::observation::LocalObservationRequirement::Optional,
+            )?;
+            use windows_sys::Win32::Storage::FileSystem::FILE_STANDARD_INFO;
+            use windows_sys::Win32::Storage::FileSystem::FileStandardInfo;
+            use windows_sys::Win32::Storage::FileSystem::GetFileInformationByHandleEx;
             let mut standard = FILE_STANDARD_INFO::default();
-            // SAFETY: `file` owns a live reparse-point handle and `standard` is a correctly sized writable result buffer.
-            let result = unsafe { GetFileInformationByHandleEx(file.as_raw_handle(), FileStandardInfo, (&raw mut standard).cast(), std::mem::size_of::<FILE_STANDARD_INFO>() as u32) };
+            // SAFETY: `file` owns a live reparse-point handle and `standard` is a correctly
+            // sized writable result buffer.
+            let result = unsafe {
+                GetFileInformationByHandleEx(
+                    file.as_raw_handle(),
+                    FileStandardInfo,
+                    (&raw mut standard).cast(),
+                    std::mem::size_of::<FILE_STANDARD_INFO>() as u32,
+                )
+            };
             if result == 0 {
-                return Err(crate::LocalFileError::from_io(crate::LocalFileOperation::Metadata, None, None, std::io::Error::last_os_error()));
+                return Err(crate::LocalFileError::from_io(
+                    crate::LocalFileOperation::Metadata,
+                    None,
+                    None,
+                    std::io::Error::last_os_error(),
+                ));
             }
             Ok((observation, Some(u64::from(standard.NumberOfLinks))))
         }
         #[cfg(not(any(unix, windows)))]
         {
             let _ = name;
-            Err(crate::LocalFileError::new(crate::LocalFileErrorKind::Unsupported, crate::LocalFileOperation::Metadata))
+            Err(crate::LocalFileError::new(
+                crate::LocalFileErrorKind::Unsupported,
+                crate::LocalFileOperation::Metadata,
+            ))
         }
     }
 

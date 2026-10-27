@@ -30,10 +30,7 @@ pub(crate) type NativeQuery = unsafe extern "system" fn(
     u32,
 ) -> i32;
 
-pub(crate) fn query_native(
-    file: &File,
-    requirement: LocalObservationRequirement,
-) -> LocalResult<LocalFileObservation> {
+pub(crate) fn query_native(file: &File, requirement: LocalObservationRequirement) -> LocalResult<LocalFileObservation> {
     query_native_with(file, requirement, GetFileInformationByHandleEx)
 }
 
@@ -42,9 +39,9 @@ pub(crate) fn query_native_with(
     requirement: LocalObservationRequirement,
     query: NativeQuery,
 ) -> LocalResult<LocalFileObservation> {
-    let metadata = file.metadata().map_err(|error| {
-        LocalFileError::from_io(LocalFileOperation::Metadata, None, None, error)
-    })?;
+    let metadata = file
+        .metadata()
+        .map_err(|error| LocalFileError::from_io(LocalFileOperation::Metadata, None, None, error))?;
     let normalized = LocalFileMetadata::from_native(&metadata);
     let handle = file.as_raw_handle();
 
@@ -62,12 +59,8 @@ pub(crate) fn query_native_with(
         Ok((id, standard, basic)) => {
             let file_id = id.FileId.Identifier;
             let identity = LocalFileIdentity::windows(id.VolumeSerialNumber, file_id);
-            let details = LocalWindowsFileDetails::new(
-                id.VolumeSerialNumber,
-                file_id,
-                basic.LastWriteTime,
-                basic.ChangeTime,
-            );
+            let details =
+                LocalWindowsFileDetails::new(id.VolumeSerialNumber, file_id, basic.LastWriteTime, basic.ChangeTime);
             let _standard_length = standard.EndOfFile;
             Ok(LocalFileObservation::from_parts(
                 normalized,
@@ -78,10 +71,8 @@ pub(crate) fn query_native_with(
         Err(_error) if requirement == LocalObservationRequirement::Optional => {
             Ok(LocalFileObservation::from_parts(normalized, None, None))
         }
-        Err(error) => Err(
-            LocalFileError::from_io(LocalFileOperation::Metadata, None, None, error)
-                .with_kind(LocalFileErrorKind::RequirementNotMet),
-        ),
+        Err(error) => Err(LocalFileError::from_io(LocalFileOperation::Metadata, None, None, error)
+            .with_kind(LocalFileErrorKind::RequirementNotMet)),
     }
 }
 
@@ -93,14 +84,7 @@ fn query_info<T: Default>(
 ) -> io::Result<()> {
     // SAFETY: `handle` is borrowed from a live `File`, and `output` points to
     // a writable, correctly sized value for the requested information class.
-    let succeeded = unsafe {
-        query(
-            handle,
-            class,
-            ptr::from_mut(output).cast(),
-            size_of::<T>() as u32,
-        )
-    };
+    let succeeded = unsafe { query(handle, class, ptr::from_mut(output).cast(), size_of::<T>() as u32) };
     if succeeded == 0 {
         Err(io::Error::last_os_error())
     } else {

@@ -81,8 +81,12 @@ pub(crate) fn synchronize_staging_file(
     map_required_error: impl FnOnce(io::Result<()>) -> Result<(), LocalAtomicWriteError>,
 ) -> Result<bool, LocalAtomicWriteError> {
     let requirement = match (durability, file_sync) {
-        (LocalDurabilityRequirement::Required, _) | (_, LocalFileSyncRequirement::Required) => LocalFileSyncRequirement::Required,
-        (LocalDurabilityRequirement::Preferred, _) | (_, LocalFileSyncRequirement::Preferred) => LocalFileSyncRequirement::Preferred,
+        (LocalDurabilityRequirement::Required, _) | (_, LocalFileSyncRequirement::Required) => {
+            LocalFileSyncRequirement::Required
+        }
+        (LocalDurabilityRequirement::Preferred, _) | (_, LocalFileSyncRequirement::Preferred) => {
+            LocalFileSyncRequirement::Preferred
+        }
         _ => LocalFileSyncRequirement::NotRequired,
     };
     match requirement {

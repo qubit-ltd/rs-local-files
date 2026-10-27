@@ -7,8 +7,9 @@
 // =============================================================================
 // Covered by host and rooted reader integration tests.
 
-use crate::policy::LocalSymlinkPolicy;
 use std::time::Duration;
+
+use crate::policy::LocalSymlinkPolicy;
 
 /// Options for opening a native local file reader.
 ///
@@ -54,7 +55,8 @@ impl LocalReadOptions {
         self.symlink_policy
     }
 
-    /// Sets the symbolic-link policy override for readers opened with these options.
+    /// Sets the symbolic-link policy override for readers opened with these
+    /// options.
     #[inline]
     pub const fn with_symlink_policy(mut self, policy: LocalSymlinkPolicy) -> Self {
         self.symlink_policy = Some(policy);

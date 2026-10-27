@@ -15,15 +15,20 @@ impl LocalTempSealError {
     }
 
     /// Returns the sealing failure.
-    pub fn cause(&self) -> &LocalFileError { &self.cause }
+    pub fn cause(&self) -> &LocalFileError {
+        &self.cause
+    }
 
     /// Returns the resource owner for recovery or cleanup.
     pub fn into_resource(self) -> LocalTempFile {
         let (_, recovery) = self.cause.into_temp_recovery_parts();
-        recovery.and_then(crate::temp::types::LocalTempRecovery::into_file)
+        recovery
+            .and_then(crate::temp::types::LocalTempRecovery::into_file)
             .expect("seal failure retains its temporary file")
     }
 
     /// Returns the access state established when sealing failed.
-    pub const fn access_state(&self) -> LocalTempAccessState { self.access_state }
+    pub const fn access_state(&self) -> LocalTempAccessState {
+        self.access_state
+    }
 }

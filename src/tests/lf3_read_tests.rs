@@ -3,8 +3,10 @@ use std::path::Path;
 use crate::LocalFileSystem;
 use crate::LocalSymlinkPolicy;
 use crate::error::LocalFileErrorKind;
-use crate::observation::{LocalObservationRequirement, LocalObservedReader};
-use crate::options::{LocalReadAllOptions, LocalSnapshotOptions};
+use crate::observation::LocalObservationRequirement;
+use crate::observation::LocalObservedReader;
+use crate::options::LocalReadAllOptions;
+use crate::options::LocalSnapshotOptions;
 
 #[test]
 fn lf3_read_complete_limit_utf8() {
@@ -25,9 +27,7 @@ fn lf3_read_complete_limit_utf8() {
     );
     std::fs::write(&path, [255_u8]).expect("write invalid UTF-8");
     assert_eq!(
-        fs.read_text(Path::new(path.as_os_str()))
-            .unwrap_err()
-            .kind(),
+        fs.read_text(Path::new(path.as_os_str())).unwrap_err().kind(),
         LocalFileErrorKind::InvalidEncoding
     );
     assert!(
@@ -86,28 +86,26 @@ fn lf3_read_rooted_paths_stay_virtual() {
     std::fs::write(fixture.path().join("payload"), b"rooted").expect("write fixture");
     let fs = LocalFileSystem::rooted(fixture.path()).expect("rooted filesystem");
     assert_eq!(fs.canonicalize(Path::new("/")).unwrap(), Path::new("/"));
-    assert_eq!(
-        fs.canonicalize(Path::new("/payload")).unwrap(),
-        Path::new("/payload")
-    );
+    assert_eq!(fs.canonicalize(Path::new("/payload")).unwrap(), Path::new("/payload"));
     assert_eq!(fs.target_metadata(Path::new("/payload")).unwrap().len(), 6);
 }
 
 #[test]
 fn lf3_read_snapshot_detects_same_handle_mutation() {
-    use std::io::{Seek, SeekFrom, Write};
+    use std::io::Seek;
+    use std::io::SeekFrom;
+    use std::io::Write;
 
     let mut file = tempfile::tempfile().expect("temporary file");
     file.write_all(b"before").expect("write initial bytes");
-    let reader = crate::LocalFileReader::from_file(file.try_clone().expect("clone file handle"))
-        .expect("construct reader");
+    let reader =
+        crate::LocalFileReader::from_file(file.try_clone().expect("clone file handle")).expect("construct reader");
     let observed = LocalObservedReader::from_reader(reader, LocalObservationRequirement::Required)
         .expect("capture initial observation");
     let before = observed.observation().clone();
     file.set_len(0).expect("truncate file");
     file.seek(SeekFrom::Start(0)).expect("rewind file");
-    file.write_all(b"changed content")
-        .expect("write changed bytes");
+    file.write_all(b"changed content").expect("write changed bytes");
     let after = observed.observe_now().expect("refresh same handle");
     assert!(!crate::observation::snapshot::observations_match(
         &before,
@@ -168,10 +166,7 @@ fn lf3_read_non_regular_fifo_is_rejected_without_content_read() {
     let status = unsafe { libc::mkfifo(encoded.as_ptr(), 0o600) };
     assert_eq!(status, 0, "create FIFO");
     let fs = LocalFileSystem::host().expect("host filesystem");
-    assert_eq!(
-        fs.read_all(&fifo).unwrap_err().kind(),
-        LocalFileErrorKind::TypeConflict
-    );
+    assert_eq!(fs.read_all(&fifo).unwrap_err().kind(), LocalFileErrorKind::TypeConflict);
 }
 
 #[test]
@@ -186,15 +181,10 @@ fn lf3_read_path_queries_follow_host_target_policy() {
     symlink(&target, &link).expect("create symlink");
     let fs = LocalFileSystem::host().expect("host filesystem");
     assert_eq!(fs.target_metadata(&link).unwrap().len(), 7);
-    assert_eq!(
-        fs.canonicalize(&link).unwrap(),
-        std::fs::canonicalize(&target).unwrap()
-    );
+    assert_eq!(fs.canonicalize(&link).unwrap(), std::fs::canonicalize(&target).unwrap());
     let options = LocalReadAllOptions::new().with_symlink_policy(LocalSymlinkPolicy::Reject);
     assert!(fs.read_all_with_options(&link, &options).is_err());
     let mut restricted = LocalFileSystem::host().unwrap();
-    restricted
-        .set_symlink_policy(LocalSymlinkPolicy::Reject)
-        .unwrap();
+    restricted.set_symlink_policy(LocalSymlinkPolicy::Reject).unwrap();
     assert!(restricted.canonicalize(&link).is_err());
 }

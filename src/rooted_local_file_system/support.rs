@@ -144,9 +144,20 @@ pub(crate) fn resolve_rooted_path_allow_root_with_deadline(
     if let Some(resolved) = try_resolve_without_symlinks(root, &relative, follow_final, deadline, path, operation)? {
         return Ok(resolved);
     }
-    resolve_rooted_symlinks(root, relative.as_path(), symlink_policy, follow_final, operation, path, deadline, None, None)
+    resolve_rooted_symlinks(
+        root,
+        relative.as_path(),
+        symlink_policy,
+        follow_final,
+        operation,
+        path,
+        deadline,
+        None,
+        None,
+    )
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn resolve_rooted_path_allow_root_with_component_policy_and_budget(
     root: &crate::rooted::Root,
     path: &Path,
@@ -161,7 +172,17 @@ pub(crate) fn resolve_rooted_path_allow_root_with_component_policy_and_budget(
     if symlink_policy == LocalSymlinkPolicy::FollowAcrossScope {
         return Err(LocalFileError::new(LocalFileErrorKind::InvalidOptions, operation).with_path(path.to_path_buf()));
     }
-    resolve_rooted_symlinks(root, path, symlink_policy, follow_final, operation, path, deadline, Some(component_policy), budget)
+    resolve_rooted_symlinks(
+        root,
+        path,
+        symlink_policy,
+        follow_final,
+        operation,
+        path,
+        deadline,
+        Some(component_policy),
+        budget,
+    )
 }
 
 fn check_resolution_deadline(
@@ -242,6 +263,7 @@ fn try_resolve_without_symlinks(
 /// components remain lexical; rejected policy, virtual-root escape, invalid
 /// target syntax, and native inspection/read-link failures carry `original`
 /// and `operation` context.
+#[allow(clippy::too_many_arguments)]
 fn resolve_rooted_symlinks(
     root: &crate::rooted::Root,
     path: &Path,

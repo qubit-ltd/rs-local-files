@@ -9,8 +9,8 @@
 
 use std::fs::File;
 
-use super::LocalCommitSyncOutcome;
 use super::LocalCommitSyncObserver;
+use super::LocalCommitSyncOutcome;
 use super::LocalStagedCommitError;
 use crate::local::LocalAtomicWriteError;
 use crate::local::LocalAtomicWriter;

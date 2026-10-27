@@ -38,7 +38,6 @@ pub use local_create_directory_options::LocalCreateDirectoryOptions;
 pub use local_delete_options::LocalDeleteOptions;
 pub use local_directory_reopen_policy::LocalDirectoryReopenPolicy;
 mod local_directory_open_options;
-pub use crate::directory::LocalTreeValidationOptions;
 pub use local_directory_open_options::LocalDirectoryOpenOptions;
 pub use local_list_options::LocalListOptions;
 pub use local_metadata_preserve_policy::LocalMetadataPreservePolicy;
@@ -48,7 +47,8 @@ pub use local_read_all_options::LocalReadAllOptions;
 pub use local_read_options::LocalReadOptions;
 pub use local_rename_options::LocalRenameOptions;
 pub use local_seal_options::LocalSealOptions;
-pub use local_snapshot_options::{LocalSnapshotOptions, LocalSnapshotOptionsBuilder};
+pub use local_snapshot_options::LocalSnapshotOptions;
+pub use local_snapshot_options::LocalSnapshotOptionsBuilder;
 pub use local_temp_cleanup_limits::LocalTempCleanupLimits;
 pub use local_temp_directory_options::LocalTempDirectoryOptions;
 pub use local_temp_file_options::LocalTempFileOptions;
@@ -59,6 +59,7 @@ pub use local_write_options::LocalWriteOptions;
 #[cfg(feature = "digest")]
 pub use local_write_precondition::LocalWritePrecondition;
 
+pub use crate::directory::LocalTreeValidationOptions;
 pub use crate::local::LocalCopyConflictPolicy;
 pub use crate::local::LocalCopyTypeConflictPolicy;
 pub use crate::local::LocalPersistOptions;

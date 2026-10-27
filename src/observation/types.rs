@@ -22,10 +22,7 @@ enum LocalNativeIdentity {
     #[cfg(unix)]
     Unix { device: u64, inode: u64 },
     #[cfg(windows)]
-    Windows {
-        volume_serial: u64,
-        file_id: [u8; 16],
-    },
+    Windows { volume_serial: u64, file_id: [u8; 16] },
 }
 
 impl LocalFileIdentity {
@@ -39,10 +36,7 @@ impl LocalFileIdentity {
     #[cfg(windows)]
     pub(crate) const fn windows(volume_serial: u64, file_id: [u8; 16]) -> Self {
         Self {
-            native: LocalNativeIdentity::Windows {
-                volume_serial,
-                file_id,
-            },
+            native: LocalNativeIdentity::Windows { volume_serial, file_id },
         }
     }
 }
@@ -150,12 +144,7 @@ pub struct LocalWindowsFileDetails {
 
 impl LocalWindowsFileDetails {
     #[cfg(windows)]
-    pub(crate) const fn new(
-        volume_serial: u64,
-        file_id: [u8; 16],
-        last_write_time: i64,
-        change_time: i64,
-    ) -> Self {
+    pub(crate) const fn new(volume_serial: u64, file_id: [u8; 16], last_write_time: i64, change_time: i64) -> Self {
         Self {
             volume_serial,
             file_id,

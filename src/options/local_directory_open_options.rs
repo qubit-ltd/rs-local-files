@@ -1,5 +1,5 @@
-use crate::directory::LocalComponentPolicy;
 use crate::LocalSymlinkPolicy;
+use crate::directory::LocalComponentPolicy;
 use crate::options::LocalPathBindingOptions;
 
 /// Options captured by a fixed directory handle.

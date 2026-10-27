@@ -21,9 +21,7 @@ impl LocalDirectoryHandle {
         if options.mode() == crate::LocalWriteMode::Append {
             return LocalCapabilitySupport::Unsupported;
         }
-        if kind == LocalConditionalKind::Content
-            && options.mode() == crate::LocalWriteMode::CreateNew
-        {
+        if kind == LocalConditionalKind::Content && options.mode() == crate::LocalWriteMode::CreateNew {
             return LocalCapabilitySupport::Unsupported;
         }
         #[cfg(windows)]
@@ -50,26 +48,19 @@ impl LocalDirectoryHandle {
         precondition: crate::options::LocalWritePrecondition<digest::Output<D>>,
         options: &LocalWriteOptions,
     ) -> LocalResult<crate::writer::LocalConditionalWriter<D>> {
-        let kind = if matches!(
-            &precondition,
-            crate::options::LocalWritePrecondition::Absent
-        ) {
+        let kind = if matches!(&precondition, crate::options::LocalWritePrecondition::Absent) {
             LocalConditionalKind::Absent
         } else {
             LocalConditionalKind::Content
         };
         if self.conditional_support(kind, options) == LocalCapabilitySupport::Unsupported {
-            return Err(LocalFileError::new(
-                LocalFileErrorKind::RequirementNotMet,
-                LocalFileOperation::OpenWriter,
-            )
-            .with_path(relative.to_path_buf())
-            .with_reason("the fixed-directory conditional protocol is unsupported"));
+            return Err(
+                LocalFileError::new(LocalFileErrorKind::RequirementNotMet, LocalFileOperation::OpenWriter)
+                    .with_path(relative.to_path_buf())
+                    .with_reason("the fixed-directory conditional protocol is unsupported"),
+            );
         }
-        self.filesystem().open_conditional_writer(
-            &self.checked(relative, true)?,
-            precondition,
-            options,
-        )
+        self.filesystem()
+            .open_conditional_writer(&self.checked(relative, true)?, precondition, options)
     }
 }

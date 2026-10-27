@@ -2,13 +2,14 @@
 use std::fs;
 use std::path::Path;
 
+use crate::LocalFileKind;
+use crate::LocalFileSystem;
 use crate::directory::LocalTreeEntry;
-use crate::options::{
-    LocalDirectoryOpenOptions, LocalListOptions, LocalTempDirectoryOptions,
-    LocalTreeValidationOptions,
-};
+use crate::options::LocalDirectoryOpenOptions;
+use crate::options::LocalListOptions;
+use crate::options::LocalTempDirectoryOptions;
+use crate::options::LocalTreeValidationOptions;
 use crate::policy::LocalPrivacyRequirement;
-use crate::{LocalFileKind, LocalFileSystem};
 
 #[test]
 fn lf3_tree_observer_streams_created_entry() {
@@ -49,29 +50,35 @@ fn lf3_tree_observer_defers_entry_reads_until_next() {
         .create_staged_directory(&LocalTempDirectoryOptions::new())
         .expect("stage should be created");
     let mut first_bytes = b"first".as_slice();
-    stage.write_file_new(Path::new("first"), &mut first_bytes, 5).expect("first file should be written");
+    stage
+        .write_file_new(Path::new("first"), &mut first_bytes, 5)
+        .expect("first file should be written");
     let mut second_bytes = b"second".as_slice();
-    stage.write_file_new(Path::new("second"), &mut second_bytes, 6).expect("second file should be written");
+    stage
+        .write_file_new(Path::new("second"), &mut second_bytes, 6)
+        .expect("second file should be written");
     crate::directory::reset_test_observation_count();
     let mut observer = stage
         .observe_tree_with_options(&LocalListOptions::new())
         .expect("observer should open");
     assert_eq!(0, crate::directory::test_observation_count());
-    observer.next().expect("first entry should be yielded").expect("entry should observe");
+    observer
+        .next()
+        .expect("first entry should be yielded")
+        .expect("entry should observe");
     assert_eq!(1, crate::directory::test_observation_count());
-    observer.next().expect("second entry should be yielded").expect("entry should observe");
+    observer
+        .next()
+        .expect("second entry should be yielded")
+        .expect("entry should observe");
     assert_eq!(2, crate::directory::test_observation_count());
     assert!(observer.next().is_none());
 }
 
 #[test]
 fn lf3_tree_entry_rejects_escaping_paths_and_special_kinds() {
-    assert!(
-        LocalTreeEntry::new(Path::new("../escape").to_path_buf(), LocalFileKind::File).is_err()
-    );
-    assert!(
-        LocalTreeEntry::new(Path::new("/absolute").to_path_buf(), LocalFileKind::File).is_err()
-    );
+    assert!(LocalTreeEntry::new(Path::new("../escape").to_path_buf(), LocalFileKind::File).is_err());
+    assert!(LocalTreeEntry::new(Path::new("/absolute").to_path_buf(), LocalFileKind::File).is_err());
     assert!(LocalTreeEntry::new(Path::new("file").to_path_buf(), LocalFileKind::Fifo).is_err());
     assert!(LocalTreeEntry::new(Path::new("dir/file").to_path_buf(), LocalFileKind::File).is_ok());
 }
@@ -90,18 +97,12 @@ fn lf3_tree_validation_checks_exact_entries_and_rejects_symlink_opt_in() {
     stage
         .write_file_new(Path::new("file"), &mut bytes, 1)
         .expect("file should be written");
-    let expected = [
-        LocalTreeEntry::new(Path::new("file").to_path_buf(), LocalFileKind::File)
-            .expect("entry should validate"),
-    ];
+    let expected =
+        [LocalTreeEntry::new(Path::new("file").to_path_buf(), LocalFileKind::File).expect("entry should validate")];
     stage
         .verify_entries(&expected, &LocalTreeValidationOptions::new())
         .expect("exact entries should match");
-    assert!(
-        stage
-            .verify_entries(&[], &LocalTreeValidationOptions::new())
-            .is_err()
-    );
+    assert!(stage.verify_entries(&[], &LocalTreeValidationOptions::new()).is_err());
     let _ = fs::remove_file(fixture.path().join(stage.relative_name()).join("file"));
 }
 
@@ -116,11 +117,7 @@ fn lf3_tree_write_new_enforces_no_replace_and_stream_limit() {
         .create_staged_directory(&LocalTempDirectoryOptions::new())
         .expect("stage should be created");
     let mut too_many = b"long".as_slice();
-    assert!(
-        stage
-            .write_file_new(Path::new("limited"), &mut too_many, 3)
-            .is_err()
-    );
+    assert!(stage.write_file_new(Path::new("limited"), &mut too_many, 3).is_err());
     assert!(
         stage
             .directory()
@@ -133,11 +130,7 @@ fn lf3_tree_write_new_enforces_no_replace_and_stream_limit() {
         .write_file_new(Path::new("file"), &mut first, 3)
         .expect("first create should succeed");
     let mut second = b"two".as_slice();
-    assert!(
-        stage
-            .write_file_new(Path::new("file"), &mut second, 3)
-            .is_err()
-    );
+    assert!(stage.write_file_new(Path::new("file"), &mut second, 3).is_err());
     let mut observer = stage
         .observe_tree_with_options(&LocalListOptions::new())
         .expect("observer should open");
@@ -164,20 +157,11 @@ fn lf3_tree_cleanup_refuses_replaced_stage_name() {
         .expect("stage should be created");
     let name = stage.relative_name().to_os_string();
     let stage_path = fixture.path().join(&name);
-    fs::rename(&stage_path, fixture.path().join("moved"))
-        .expect("original stage should be moved for replacement test");
+    fs::rename(&stage_path, fixture.path().join("moved")).expect("original stage should be moved for replacement test");
     fs::create_dir(&stage_path).expect("replacement should be created");
-    let failure = stage
-        .cleanup()
-        .expect_err("cleanup must reject a replacement");
-    assert_eq!(
-        failure.cause().kind(),
-        crate::error::LocalFileErrorKind::InvalidState
-    );
-    assert!(
-        stage_path.is_dir(),
-        "replacement entry must remain untouched"
-    );
+    let failure = stage.cleanup().expect_err("cleanup must reject a replacement");
+    assert_eq!(failure.cause().kind(), crate::error::LocalFileErrorKind::InvalidState);
+    assert!(stage_path.is_dir(), "replacement entry must remain untouched");
     assert!(
         fixture.path().join("moved").is_dir(),
         "renamed original must remain available"
@@ -199,16 +183,10 @@ fn lf3_tree_cleanup_refuses_replaced_owned_child() {
         .write_file_new(Path::new("file"), &mut bytes, 8)
         .expect("file should be written");
     let stage_path = fixture.path().join(stage.relative_name());
-    fs::rename(stage_path.join("file"), fixture.path().join("moved-file"))
-        .expect("original child should be moved");
+    fs::rename(stage_path.join("file"), fixture.path().join("moved-file")).expect("original child should be moved");
     fs::write(stage_path.join("file"), b"replacement").expect("replacement should be created");
-    let failure = stage
-        .cleanup()
-        .expect_err("cleanup must reject a replaced owned child");
-    assert_eq!(
-        failure.cause().kind(),
-        crate::error::LocalFileErrorKind::InvalidState
-    );
+    let failure = stage.cleanup().expect_err("cleanup must reject a replaced owned child");
+    assert_eq!(failure.cause().kind(), crate::error::LocalFileErrorKind::InvalidState);
     assert_eq!(
         b"replacement".as_slice(),
         fs::read(stage_path.join("file")).expect("replacement must remain")
@@ -230,12 +208,10 @@ fn lf3_tree_staged_directory_can_require_private_creation() {
         .open_directory_with_options(fixture.path(), &LocalDirectoryOpenOptions::new())
         .expect("parent should open");
     let mut stage = parent
-        .create_staged_directory(
-            &LocalTempDirectoryOptions::new().with_privacy(LocalPrivacyRequirement::Required),
-        )
+        .create_staged_directory(&LocalTempDirectoryOptions::new().with_privacy(LocalPrivacyRequirement::Required))
         .expect("private stage should be created");
-    let metadata = fs::symlink_metadata(fixture.path().join(stage.relative_name()))
-        .expect("stage metadata should be readable");
+    let metadata =
+        fs::symlink_metadata(fixture.path().join(stage.relative_name())).expect("stage metadata should be readable");
     assert_eq!(0o700, metadata.permissions().mode() & 0o777);
     let mut bytes = b"private".as_slice();
     stage
@@ -244,10 +220,8 @@ fn lf3_tree_staged_directory_can_require_private_creation() {
     let metadata = fs::symlink_metadata(fixture.path().join(stage.relative_name()).join("secret"))
         .expect("private file metadata should be readable");
     assert_eq!(0o600, metadata.permissions().mode() & 0o777);
-    let expected = [
-        LocalTreeEntry::new(Path::new("secret").to_path_buf(), LocalFileKind::File)
-            .expect("entry should validate"),
-    ];
+    let expected =
+        [LocalTreeEntry::new(Path::new("secret").to_path_buf(), LocalFileKind::File).expect("entry should validate")];
     stage
         .verify_entries(
             &expected,
@@ -277,10 +251,8 @@ fn lf3_tree_hardlink_validation_counts_links_inside_the_checked_tree() {
     let stage_path = fixture.path().join(stage.relative_name());
     hard_link(stage_path.join("a"), stage_path.join("b")).expect("in-tree link should be created");
     let expected = [
-        LocalTreeEntry::new(Path::new("a").to_path_buf(), LocalFileKind::File)
-            .expect("entry should validate"),
-        LocalTreeEntry::new(Path::new("b").to_path_buf(), LocalFileKind::File)
-            .expect("entry should validate"),
+        LocalTreeEntry::new(Path::new("a").to_path_buf(), LocalFileKind::File).expect("entry should validate"),
+        LocalTreeEntry::new(Path::new("b").to_path_buf(), LocalFileKind::File).expect("entry should validate"),
     ];
     stage
         .verify_entries(
@@ -288,8 +260,7 @@ fn lf3_tree_hardlink_validation_counts_links_inside_the_checked_tree() {
             &LocalTreeValidationOptions::new().with_reject_external_hardlinks(),
         )
         .expect("in-tree links should count toward the checked scope");
-    hard_link(stage_path.join("a"), fixture.path().join("outside"))
-        .expect("external link should be created");
+    hard_link(stage_path.join("a"), fixture.path().join("outside")).expect("external link should be created");
     assert!(
         stage
             .verify_entries(
@@ -314,12 +285,9 @@ fn lf3_tree_validation_rejects_a_truncated_walk() {
     stage
         .write_file_new(Path::new("file"), &mut bytes, 1)
         .expect("file should be written");
-    let expected = [
-        LocalTreeEntry::new(Path::new("file").to_path_buf(), LocalFileKind::File)
-            .expect("entry should validate"),
-    ];
-    let options =
-        LocalTreeValidationOptions::new().with_limits(LocalListOptions::new().with_max_entries(0));
+    let expected =
+        [LocalTreeEntry::new(Path::new("file").to_path_buf(), LocalFileKind::File).expect("entry should validate")];
+    let options = LocalTreeValidationOptions::new().with_limits(LocalListOptions::new().with_max_entries(0));
     assert!(stage.verify_entries(&expected, &options).is_err());
 }
 
@@ -339,12 +307,9 @@ fn lf3_tree_validation_enforces_name_entry_and_deadline_budgets() {
     stage
         .write_file_new(Path::new("file"), &mut bytes, 1)
         .expect("file should be written");
-    let expected = [
-        LocalTreeEntry::new(Path::new("file").to_path_buf(), LocalFileKind::File)
-            .expect("entry should validate"),
-    ];
-    let name_limit = LocalTreeValidationOptions::new()
-        .with_limits(LocalListOptions::new().with_max_seen_name_bytes(0));
+    let expected =
+        [LocalTreeEntry::new(Path::new("file").to_path_buf(), LocalFileKind::File).expect("entry should validate")];
+    let name_limit = LocalTreeValidationOptions::new().with_limits(LocalListOptions::new().with_max_seen_name_bytes(0));
     assert_eq!(
         crate::error::LocalFileErrorKind::ResourceLimit,
         stage
@@ -352,11 +317,9 @@ fn lf3_tree_validation_enforces_name_entry_and_deadline_budgets() {
             .expect_err("exact entry indexing must charge path bytes")
             .kind()
     );
-    let entry_limit =
-        LocalTreeValidationOptions::new().with_limits(LocalListOptions::new().with_max_entries(0));
+    let entry_limit = LocalTreeValidationOptions::new().with_limits(LocalListOptions::new().with_max_entries(0));
     assert!(stage.verify_entries(&expected, &entry_limit).is_err());
-    let deadline = LocalTreeValidationOptions::new()
-        .with_limits(LocalListOptions::new().with_deadline(Duration::ZERO));
+    let deadline = LocalTreeValidationOptions::new().with_limits(LocalListOptions::new().with_deadline(Duration::ZERO));
     assert!(stage.verify_entries(&expected, &deadline).is_err());
     let inconsistent = LocalTreeValidationOptions::new().with_exact_entries(Vec::new());
     assert_eq!(
@@ -380,10 +343,7 @@ fn lf3_tree_observer_respects_open_directory_limit() {
         .expect("stage should be created");
     let _first = stage
         .directory()
-        .create_directory_with_options(
-            Path::new("one"),
-            &crate::options::LocalCreateDirectoryOptions::new(),
-        )
+        .create_directory_with_options(Path::new("one"), &crate::options::LocalCreateDirectoryOptions::new())
         .expect("first directory should be created");
     let _nested = stage
         .directory()
@@ -420,10 +380,7 @@ fn lf3_tree_create_error_retains_structured_failure() {
     let error = parent
         .create_staged_directory(&LocalTempDirectoryOptions::new().with_max_attempts(0))
         .expect_err("zero attempts must be rejected");
-    assert_eq!(
-        crate::error::LocalFileErrorKind::InvalidOptions,
-        error.cause().kind()
-    );
+    assert_eq!(crate::error::LocalFileErrorKind::InvalidOptions, error.cause().kind());
     assert_eq!(
         crate::outcome::LocalTreeMutationState::NotStarted,
         error.mutation_state()
@@ -439,8 +396,8 @@ fn lf3_tree_private_stage_retries_name_collisions_without_deleting_conflicts() {
     let parent = fs
         .open_directory_with_options(fixture.path(), &LocalDirectoryOpenOptions::new())
         .expect("parent should open");
-    let fault = crate::local::install_test_fault("temp-private-directory-collision")
-        .expect("collision fault should install");
+    let fault =
+        crate::local::install_test_fault("temp-private-directory-collision").expect("collision fault should install");
     let stage = parent
         .create_staged_directory(
             &LocalTempDirectoryOptions::new()
@@ -455,7 +412,8 @@ fn lf3_tree_private_stage_retries_name_collisions_without_deleting_conflicts() {
 #[cfg(unix)]
 #[test]
 fn lf3_tree_private_stage_does_not_claim_or_cleanup_replaced_name() {
-    use std::sync::{Arc, Mutex};
+    use std::sync::Arc;
+    use std::sync::Mutex;
 
     let fixture = tempfile::tempdir().expect("fixture should exist");
     let fs = LocalFileSystem::host().expect("host filesystem should open");
@@ -471,11 +429,8 @@ fn lf3_tree_private_stage_does_not_claim_or_cleanup_replaced_name() {
         let created = fixture_path.join(name);
         std::fs::rename(&created, &moved_original_for_hook).expect("move original private stage");
         std::fs::create_dir(&created).expect("install replacement directory");
-        std::fs::write(created.join("sentinel"), b"replacement")
-            .expect("write replacement sentinel");
-        *replacement_path_for_hook
-            .lock()
-            .expect("replacement path lock") = Some(created);
+        std::fs::write(created.join("sentinel"), b"replacement").expect("write replacement sentinel");
+        *replacement_path_for_hook.lock().expect("replacement path lock") = Some(created);
     });
 
     let error = parent
@@ -519,10 +474,7 @@ fn lf3_tree_partial_private_stage_retains_identity_and_cleanup_owner() {
         )
         .expect_err("injected post-open failure should retain the partial stage");
     drop(fault);
-    assert_eq!(
-        crate::outcome::LocalTreeMutationState::Started,
-        error.mutation_state()
-    );
+    assert_eq!(crate::outcome::LocalTreeMutationState::Started, error.mutation_state());
     let name = error
         .stage_name()
         .expect("partial stage name should be available")
@@ -572,11 +524,7 @@ fn lf3_tree_recovery_location_survives_drop_and_reopens_by_identity() {
         .cloned()
         .expect("identity should be available");
     let reopened = parent
-        .open_staged_directory(
-            Path::new(&name),
-            &identity,
-            &LocalTreeValidationOptions::new(),
-        )
+        .open_staged_directory(Path::new(&name), &identity, &LocalTreeValidationOptions::new())
         .expect("stage should reopen only by observed identity");
     reopened.cleanup().expect("reopened stage should clean up");
     assert!(!path.exists());
@@ -595,20 +543,13 @@ fn lf3_tree_cleanup_limit_failure_retains_retryable_owner() {
         .create_staged_directory(&LocalTempDirectoryOptions::new())
         .expect("stage should be created");
     let name = stage.relative_name().to_os_string();
-    stage.set_cleanup_limits(
-        crate::options::LocalTempCleanupLimits::new().with_deadline(Duration::ZERO),
-    );
+    stage.set_cleanup_limits(crate::options::LocalTempCleanupLimits::new().with_deadline(Duration::ZERO));
     let error = stage
         .cleanup()
         .expect_err("zero cleanup deadline must retain the stage");
-    assert_eq!(
-        crate::error::LocalFileErrorKind::ResourceLimit,
-        error.cause().kind()
-    );
+    assert_eq!(crate::error::LocalFileErrorKind::ResourceLimit, error.cause().kind());
     let mut resources = error.into_retained_resources();
-    let mut resource = resources
-        .pop()
-        .expect("cleanup failure must retain an owner");
+    let mut resource = resources.pop().expect("cleanup failure must retain an owner");
     resource.set_cleanup_limits(crate::options::LocalTempCleanupLimits::new());
     resource
         .cleanup()
@@ -640,10 +581,7 @@ fn lf3_tree_observer_observes_symlink_entry_without_following_it() {
         let entry = entry.expect("each entry should be observed");
         if entry.relative_path() == Path::new("link") {
             saw_link = true;
-            assert_eq!(
-                entry.observation().metadata().kind(),
-                LocalFileKind::Symlink
-            );
+            assert_eq!(entry.observation().metadata().kind(), LocalFileKind::Symlink);
             assert!(entry.observation().identity().is_some());
         }
     }
@@ -656,10 +594,7 @@ fn lf3_tree_observer_observes_symlink_entry_without_following_it() {
     ];
     assert!(
         stage
-            .verify_entries(
-                &expected,
-                &LocalTreeValidationOptions::new().with_reject_symlinks()
-            )
+            .verify_entries(&expected, &LocalTreeValidationOptions::new().with_reject_symlinks())
             .is_err()
     );
 }
@@ -676,9 +611,9 @@ fn lf3_tree_special_file_rejection_is_independent() {
         .create_staged_directory(&LocalTempDirectoryOptions::new())
         .expect("stage should be created");
     let fifo = fixture.path().join(stage.relative_name()).join("pipe");
-    let path = std::ffi::CString::new(fifo.as_os_str().as_encoded_bytes())
-        .expect("fixture path has no NUL");
-    // SAFETY: `path` is NUL terminated and points to a writable child path in the fixture.
+    let path = std::ffi::CString::new(fifo.as_os_str().as_encoded_bytes()).expect("fixture path has no NUL");
+    // SAFETY: `path` is NUL terminated and points to a writable child path in the
+    // fixture.
     assert_eq!(0, unsafe { libc::mkfifo(path.as_ptr(), 0o600) });
     let mut observer = stage
         .observe_tree_with_options(&LocalListOptions::new())
@@ -687,18 +622,12 @@ fn lf3_tree_special_file_rejection_is_independent() {
         .next()
         .expect("FIFO should be yielded")
         .expect("FIFO should be observed");
-    assert_eq!(
-        LocalFileKind::Fifo,
-        observed.observation().metadata().kind()
-    );
+    assert_eq!(LocalFileKind::Fifo, observed.observation().metadata().kind());
     assert!(observer.next().is_none());
     assert_eq!(
         crate::error::LocalFileErrorKind::RequirementNotMet,
         stage
-            .verify_entries(
-                &[],
-                &LocalTreeValidationOptions::new().with_reject_special_files()
-            )
+            .verify_entries(&[], &LocalTreeValidationOptions::new().with_reject_special_files())
             .expect_err("special-file rule should reject FIFO")
             .kind()
     );

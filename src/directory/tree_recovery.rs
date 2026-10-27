@@ -1,10 +1,12 @@
-use std::path::{Path, PathBuf};
+use std::path::Path;
+use std::path::PathBuf;
 
 use crate::LocalFileError;
 use crate::directory::LocalDirectoryHandle;
 use crate::observation::LocalFileIdentity;
+use crate::options::LocalDeleteOptions;
+use crate::options::LocalListOptions;
 use crate::options::LocalTempCleanupLimits;
-use crate::options::{LocalDeleteOptions, LocalListOptions};
 use crate::outcome::LocalTreeMutationState;
 
 /// An identity-bound tree resource retained after an operation failure.
@@ -55,31 +57,24 @@ impl LocalTreeRetainedResource {
     }
     #[cfg(windows)]
     pub(crate) fn open_child_for_access(&self) -> crate::LocalResult<std::fs::File> {
-        let parent = self
-            .parent
-            .root_authority()?
-            .try_clone_authority()
-            .map_err(|source| {
-                crate::LocalFileError::from_io(
-                    crate::LocalFileOperation::OpenRoot,
-                    Some(self.path.clone()),
-                    None,
-                    source,
-                )
-            })?;
-        crate::temp::internal::privacy_windows::open_existing_relative(
-            &parent,
-            &self.relative,
-            true,
-        )
-        .map_err(|source| {
+        let parent = self.parent.root_authority()?.try_clone_authority().map_err(|source| {
             crate::LocalFileError::from_io(
                 crate::LocalFileOperation::OpenRoot,
                 Some(self.path.clone()),
                 None,
                 source,
             )
-        })
+        })?;
+        crate::temp::internal::privacy_windows::open_existing_relative(&parent, &self.relative, true).map_err(
+            |source| {
+                crate::LocalFileError::from_io(
+                    crate::LocalFileOperation::OpenRoot,
+                    Some(self.path.clone()),
+                    None,
+                    source,
+                )
+            },
+        )
     }
 
     pub(crate) fn disarm_after_publish(&mut self) {
@@ -91,19 +86,14 @@ impl LocalTreeRetainedResource {
         let actual = parent.observe()?.identity().cloned();
         Ok(expected.is_some() && expected == actual)
     }
-    pub(crate) fn record_entry(
-        &mut self,
-        relative: &Path,
-        identity: &LocalFileIdentity,
-    ) -> crate::LocalResult<()> {
+    pub(crate) fn record_entry(&mut self, relative: &Path, identity: &LocalFileIdentity) -> crate::LocalResult<()> {
         self.owned_entries.try_reserve(1).map_err(|_| {
             crate::LocalFileError::new(
                 crate::LocalFileErrorKind::ResourceLimit,
                 crate::LocalFileOperation::CreateTempFile,
             )
         })?;
-        self.owned_entries
-            .push((relative.to_path_buf(), identity.clone()));
+        self.owned_entries.push((relative.to_path_buf(), identity.clone()));
         Ok(())
     }
     fn cleanup_inner(&mut self) -> crate::LocalResult<()> {
@@ -111,9 +101,7 @@ impl LocalTreeRetainedResource {
             return Ok(());
         }
         let started_at = std::time::Instant::now();
-        if self.cleanup_limits.max_entries() == Some(0)
-            || cleanup_deadline_exceeded(self.cleanup_limits, started_at)
-        {
+        if self.cleanup_limits.max_entries() == Some(0) || cleanup_deadline_exceeded(self.cleanup_limits, started_at) {
             return Err(crate::LocalFileError::new(
                 crate::LocalFileErrorKind::ResourceLimit,
                 crate::LocalFileOperation::Cleanup,
@@ -208,13 +196,9 @@ impl LocalTreeRetainedResource {
                     )
                     .with_path(self.path.join(&relative)));
                 }
-                if self
-                    .owned_entries
-                    .iter()
-                    .any(|(owned_path, owned_identity)| {
-                        owned_path == &relative && current.identity() != Some(owned_identity)
-                    })
-                {
+                if self.owned_entries.iter().any(|(owned_path, owned_identity)| {
+                    owned_path == &relative && current.identity() != Some(owned_identity)
+                }) {
                     return Err(crate::LocalFileError::new(
                         crate::LocalFileErrorKind::InvalidState,
                         crate::LocalFileOperation::Cleanup,
@@ -248,10 +232,7 @@ impl LocalTreeRetainedResource {
                     Err(error) => {
                         self.child = self
                             .parent
-                            .open_directory(
-                                &self.relative,
-                                &crate::options::LocalDirectoryOpenOptions::new(),
-                            )
+                            .open_directory(&self.relative, &crate::options::LocalDirectoryOpenOptions::new())
                             .ok();
                         Err(error)
                     }
@@ -285,10 +266,7 @@ impl LocalTreeRetainedResource {
     }
 }
 
-fn cleanup_deadline_exceeded(
-    limits: LocalTempCleanupLimits,
-    started_at: std::time::Instant,
-) -> bool {
+fn cleanup_deadline_exceeded(limits: LocalTempCleanupLimits, started_at: std::time::Instant) -> bool {
     limits
         .deadline()
         .is_some_and(|deadline| started_at.elapsed() >= deadline)
@@ -302,7 +280,8 @@ impl Drop for LocalTreeRetainedResource {
     }
 }
 
-/// Cleanup failure that retains the identity-bound resource for recovery or retry.
+/// Cleanup failure that retains the identity-bound resource for recovery or
+/// retry.
 #[derive(Debug)]
 pub struct LocalTreeCleanupError {
     cause: LocalFileError,
@@ -358,7 +337,8 @@ impl LocalTreeRecoveryLocation {
             identity,
         }
     }
-    /// Returns the namespace path recorded when cleanup ownership was relinquished.
+    /// Returns the namespace path recorded when cleanup ownership was
+    /// relinquished.
     pub fn namespace_path(&self) -> &Path {
         &self.namespace_path
     }
@@ -406,7 +386,8 @@ impl LocalTreeCreateError {
     pub fn into_retained_resources(mut self) -> Vec<LocalTreeRetainedResource> {
         std::mem::take(&mut self.retained)
     }
-    /// Transfers the partially created stage, if its child authority was established.
+    /// Transfers the partially created stage, if its child authority was
+    /// established.
     pub fn into_stage(self) -> Option<super::staged::LocalStagedDirectory> {
         self.stage
     }
@@ -437,16 +418,8 @@ impl LocalTreeCreateError {
         self.stage
             .as_ref()
             .and_then(super::staged::LocalStagedDirectory::identity)
-            .or_else(|| {
-                self.retained
-                    .first()
-                    .and_then(LocalTreeRetainedResource::identity)
-            })
-            .or_else(|| {
-                self.cause
-                    .temp_recovery()
-                    .and_then(crate::LocalTempRecovery::identity)
-            })
+            .or_else(|| self.retained.first().and_then(LocalTreeRetainedResource::identity))
+            .or_else(|| self.cause.temp_recovery().and_then(crate::LocalTempRecovery::identity))
     }
 }
 impl std::fmt::Display for LocalTreeCreateError {
@@ -464,10 +437,7 @@ pub struct LocalTreeAccessError {
     retained: Vec<LocalTreeRetainedResource>,
 }
 impl LocalTreeAccessError {
-    pub(crate) fn new(
-        cause: LocalFileError,
-        access_state: crate::outcome::LocalTreeAccessState,
-    ) -> Self {
+    pub(crate) fn new(cause: LocalFileError, access_state: crate::outcome::LocalTreeAccessState) -> Self {
         Self {
             cause,
             access_state,
@@ -493,11 +463,7 @@ impl LocalTreeAccessError {
         crate::outcome::LocalTreeAccessState,
         Vec<LocalTreeRetainedResource>,
     ) {
-        (
-            self.cause,
-            self.access_state,
-            std::mem::take(&mut self.retained),
-        )
+        (self.cause, self.access_state, std::mem::take(&mut self.retained))
     }
 }
 impl std::fmt::Display for LocalTreeAccessError {
@@ -568,11 +534,7 @@ impl LocalTreePublishError {
         Option<super::staged::LocalStagedDirectory>,
         Vec<LocalTreeRetainedResource>,
     ) {
-        (
-            self.cause,
-            self.stage.take(),
-            std::mem::take(&mut self.retained),
-        )
+        (self.cause, self.stage.take(), std::mem::take(&mut self.retained))
     }
 }
 impl std::fmt::Display for LocalTreePublishError {

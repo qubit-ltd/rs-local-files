@@ -1,17 +1,17 @@
 use std::ffi::OsStr;
 
-use crate::options::{
-    LocalDirectoryOpenOptions, LocalTempDirectoryOptions, LocalTreePublishOptions,
-};
-use crate::outcome::{LocalTreeAccessState, LocalTreePublication};
+use crate::options::LocalDirectoryOpenOptions;
+use crate::options::LocalTempDirectoryOptions;
+use crate::options::LocalTreePublishOptions;
+use crate::outcome::LocalTreeAccessState;
+use crate::outcome::LocalTreePublication;
 use crate::policy::LocalTreeFinalAccess;
 
 #[test]
 fn lf3_tree_publish_conflict_retains_original() {
     let fixture = tempfile::tempdir().expect("fixture should be created");
     std::fs::create_dir(fixture.path().join("target")).expect("target should be created");
-    std::fs::write(fixture.path().join("target/old"), b"original")
-        .expect("target contents should be written");
+    std::fs::write(fixture.path().join("target/old"), b"original").expect("target contents should be written");
     let fs = crate::LocalFileSystem::host().expect("host filesystem should open");
     let parent = fs
         .open_directory_with_options(fixture.path(), &LocalDirectoryOpenOptions::new())
@@ -20,11 +20,7 @@ fn lf3_tree_publish_conflict_retains_original() {
         .create_staged_directory(&LocalTempDirectoryOptions::new())
         .expect("stage should be created");
     let error = stage
-        .publish_new(
-            &parent,
-            OsStr::new("target"),
-            &LocalTreePublishOptions::new(),
-        )
+        .publish_new(&parent, OsStr::new("target"), &LocalTreePublishOptions::new())
         .expect_err("existing target must not be replaced");
     assert_eq!(error.publication(), LocalTreePublication::NotPublished);
     assert!(error.into_stage().is_some());
@@ -54,10 +50,7 @@ fn tree_publish_conflict_reports_prior_access_mutation() {
         )
         .expect_err("no-replace collision should fail");
     assert_eq!(error.publication(), LocalTreePublication::NotPublished);
-    assert_eq!(
-        error.mutation_state(),
-        crate::outcome::LocalTreeMutationState::Started
-    );
+    assert_eq!(error.mutation_state(), crate::outcome::LocalTreeMutationState::Started);
     assert_eq!(error.access_state(), LocalTreeAccessState::CurrentUserOnly);
     let stage = error.into_stage().expect("unpublished stage remains owned");
     assert_eq!(stage.relative_name(), name.as_os_str());
@@ -160,27 +153,16 @@ fn retained_stage_can_be_reopened_by_identity_and_explicitly_cleaned() {
         .create_staged_directory(&LocalTempDirectoryOptions::new())
         .expect("stage should be created");
     let relative = std::path::PathBuf::from(stage.relative_name());
-    let identity = stage
-        .identity()
-        .cloned()
-        .expect("stage identity should be known");
+    let identity = stage.identity().cloned().expect("stage identity should be known");
     let location = stage.retain_in_place();
     assert_eq!(location.identity(), Some(&identity));
     drop(location);
-    let observed = parent
-        .observe_entry(&relative)
-        .expect("retained stage should remain");
+    let observed = parent.observe_entry(&relative).expect("retained stage should remain");
     assert_eq!(observed.identity(), Some(&identity));
     let reopened = parent
-        .open_staged_directory(
-            &relative,
-            &identity,
-            &crate::options::LocalTreeValidationOptions::new(),
-        )
+        .open_staged_directory(&relative, &identity, &crate::options::LocalTreeValidationOptions::new())
         .expect("stage should reopen after identity validation");
-    reopened
-        .cleanup()
-        .expect("matching stage should be explicitly cleaned");
+    reopened.cleanup().expect("matching stage should be explicitly cleaned");
     assert!(
         parent
             .entry_metadata(&relative)
@@ -204,13 +186,10 @@ fn successful_publish_keeps_stage_contents_at_target() {
         .write_file_new(std::path::Path::new("file"), &mut input, 16)
         .expect("file should be staged");
     let outcome = stage
-        .publish_new(
-            &parent,
-            OsStr::new("published"),
-            &LocalTreePublishOptions::new(),
-        )
+        .publish_new(&parent, OsStr::new("published"), &LocalTreePublishOptions::new())
         .expect("stage should publish");
     assert_eq!(outcome.publication(), LocalTreePublication::Published);
+    drop(outcome);
     assert_eq!(
         std::fs::read(fixture.path().join("published/file")).expect("published file should remain"),
         b"payload"
@@ -231,8 +210,7 @@ fn required_file_sync_is_completed_before_publish() {
     stage
         .write_file_new(std::path::Path::new("file"), &mut input, 16)
         .expect("file should be staged");
-    let options = LocalTreePublishOptions::new()
-        .with_file_sync(crate::policy::LocalFileSyncRequirement::Required);
+    let options = LocalTreePublishOptions::new().with_file_sync(crate::policy::LocalFileSyncRequirement::Required);
     let outcome = stage
         .publish_new(&parent, OsStr::new("published"), &options)
         .expect("required file sync should succeed");
@@ -243,7 +221,8 @@ fn required_file_sync_is_completed_before_publish() {
 #[cfg(windows)]
 #[test]
 fn windows_access_failure_after_child_mutation_reports_mixed_and_keeps_stage() {
-    use crate::temp::internal::privacy_windows::{self, FailurePoint};
+    use crate::temp::internal::privacy_windows::FailurePoint;
+    use crate::temp::internal::privacy_windows::{self};
 
     let fixture = tempfile::tempdir().expect("fixture should be created");
     let fs = crate::LocalFileSystem::host().expect("host filesystem should open");
@@ -263,10 +242,7 @@ fn windows_access_failure_after_child_mutation_reports_mixed_and_keeps_stage() {
         .expect_err("injected root ACL failure should be reported");
     assert_eq!(error.access_state(), LocalTreeAccessState::Mixed);
     assert!(error.retained_resources().is_empty());
-    assert!(
-        stage.observation().is_ok(),
-        "the caller must retain the stage owner"
-    );
+    assert!(stage.observation().is_ok(), "the caller must retain the stage owner");
     drop(error);
     assert_eq!(
         stage
@@ -298,10 +274,7 @@ fn unix_access_failure_after_child_mutation_reports_mixed_and_keeps_stage() {
         .expect_err("injected root permission failure should be reported");
     assert_eq!(error.access_state(), LocalTreeAccessState::Mixed);
     assert!(error.retained_resources().is_empty());
-    assert!(
-        stage.observation().is_ok(),
-        "the caller must retain the stage owner"
-    );
+    assert!(stage.observation().is_ok(), "the caller must retain the stage owner");
     drop(error);
     assert_eq!(
         stage
@@ -331,8 +304,7 @@ fn required_sync_failure_keeps_unpublished_stage_for_cleanup() {
         .publish_new(
             &parent,
             OsStr::new("published"),
-            &LocalTreePublishOptions::new()
-                .with_file_sync(crate::policy::LocalFileSyncRequirement::Required),
+            &LocalTreePublishOptions::new().with_file_sync(crate::policy::LocalFileSyncRequirement::Required),
         )
         .expect_err("injected required sync failure must prevent publication");
     assert_eq!(error.publication(), LocalTreePublication::NotPublished);

@@ -1,13 +1,13 @@
-use std::ffi::OsStr;
-use std::fs::File;
-use std::path::{Path, PathBuf};
-
-use qubit_io::ByteInput;
-
 #[cfg(test)]
 use std::cell::Cell;
 #[cfg(test)]
 use std::cell::RefCell;
+use std::ffi::OsStr;
+use std::fs::File;
+use std::path::Path;
+use std::path::PathBuf;
+
+use qubit_io::ByteInput;
 
 #[cfg(test)]
 thread_local! {
@@ -31,14 +31,9 @@ impl Drop for StageCreatedHookGuard {
 }
 
 #[cfg(test)]
-pub(crate) fn install_stage_created_hook(
-    hook: impl FnOnce(&Path) + 'static,
-) -> StageCreatedHookGuard {
+pub(crate) fn install_stage_created_hook(hook: impl FnOnce(&Path) + 'static) -> StageCreatedHookGuard {
     STAGE_CREATED_HOOK.with(|slot| {
-        assert!(
-            slot.borrow().is_none(),
-            "stage creation hook already installed"
-        );
+        assert!(slot.borrow().is_none(), "stage creation hook already installed");
         *slot.borrow_mut() = Some(Box::new(hook));
     });
     StageCreatedHookGuard
@@ -72,23 +67,29 @@ fn fail_tree_sync_if_scheduled() -> std::io::Result<()> {
     }
 }
 
+use super::tree_observer::LocalTreeObserver;
+use super::tree_recovery::LocalTreeCleanupError;
+use super::tree_recovery::LocalTreeCreateError;
+use super::tree_recovery::LocalTreeRecoveryLocation;
+use super::tree_recovery::LocalTreeRetainedResource;
+use super::tree_validation::LocalTreeEntry;
+use super::tree_validation::LocalTreeValidationOptions;
+use crate::LocalFileError;
+use crate::LocalFileErrorKind;
+use crate::LocalFileOperation;
 use crate::directory::LocalDirectoryHandle;
 use crate::error::LocalResult;
-use crate::observation::{LocalFileIdentity, LocalFileObservation};
-use crate::options::{
-    LocalCreateDirectoryOptions, LocalDirectoryOpenOptions, LocalListOptions,
-    LocalTempCleanupLimits, LocalTempDirectoryOptions, LocalWriteMode, LocalWriteOptions,
-};
+use crate::observation::LocalFileIdentity;
+use crate::observation::LocalFileObservation;
+use crate::options::LocalCreateDirectoryOptions;
+use crate::options::LocalDirectoryOpenOptions;
+use crate::options::LocalListOptions;
+use crate::options::LocalTempCleanupLimits;
+use crate::options::LocalTempDirectoryOptions;
+use crate::options::LocalWriteMode;
+use crate::options::LocalWriteOptions;
 use crate::outcome::LocalTreeMutationState;
 use crate::policy::LocalFileSyncRequirement;
-use crate::{LocalFileError, LocalFileErrorKind, LocalFileOperation};
-
-use super::tree_observer::LocalTreeObserver;
-use super::tree_recovery::{
-    LocalTreeCleanupError, LocalTreeCreateError, LocalTreeRecoveryLocation,
-    LocalTreeRetainedResource,
-};
-use super::tree_validation::{LocalTreeEntry, LocalTreeValidationOptions};
 
 /// A temporary directory retained under a fixed parent authority.
 #[derive(Debug)]
@@ -139,10 +140,12 @@ impl LocalStagedDirectory {
         self.directory().observe()
     }
 
-    /// Creates a new file beneath the stage and streams at most `maximum` bytes.
+    /// Creates a new file beneath the stage and streams at most `maximum`
+    /// bytes.
     ///
-    /// The destination is never replaced. Input bytes consumed before an I/O or limit
-    /// error cannot be restored; a successful result carries the created file's observation.
+    /// The destination is never replaced. Input bytes consumed before an I/O or
+    /// limit error cannot be restored; a successful result carries the
+    /// created file's observation.
     pub fn write_file_new<S: ByteInput + ?Sized>(
         &mut self,
         relative: &Path,
@@ -179,15 +182,14 @@ impl LocalStagedDirectory {
                 }
                 let mut offset = 0;
                 while offset < count {
-                    let written = qubit_io::Output::write(&mut writer, &block[offset..count])
-                        .map_err(|source| {
-                            LocalFileError::from_io(
-                                LocalFileOperation::Commit,
-                                Some(writer.path().to_path_buf()),
-                                None,
-                                source,
-                            )
-                        })?;
+                    let written = qubit_io::Output::write(&mut writer, &block[offset..count]).map_err(|source| {
+                        LocalFileError::from_io(
+                            LocalFileOperation::Commit,
+                            Some(writer.path().to_path_buf()),
+                            None,
+                            source,
+                        )
+                    })?;
                     if written == 0 {
                         return Err(LocalFileError::new(
                             LocalFileErrorKind::DataCorruption,
@@ -204,12 +206,9 @@ impl LocalStagedDirectory {
             }
             self.directory().observe_entry(relative)?
         };
-        let identity = observation.identity().ok_or_else(|| {
-            LocalFileError::new(
-                LocalFileErrorKind::Unsupported,
-                LocalFileOperation::Metadata,
-            )
-        })?;
+        let identity = observation
+            .identity()
+            .ok_or_else(|| LocalFileError::new(LocalFileErrorKind::Unsupported, LocalFileOperation::Metadata))?;
         self.owner
             .as_mut()
             .expect("stage cleanup owner is present")
@@ -223,12 +222,9 @@ impl LocalStagedDirectory {
         input: &mut S,
         maximum: u64,
     ) -> LocalResult<LocalFileObservation> {
-        let name = relative.file_name().ok_or_else(|| {
-            LocalFileError::new(
-                LocalFileErrorKind::InvalidPath,
-                LocalFileOperation::ValidateName,
-            )
-        })?;
+        let name = relative
+            .file_name()
+            .ok_or_else(|| LocalFileError::new(LocalFileErrorKind::InvalidPath, LocalFileOperation::ValidateName))?;
         let parent_relative = relative
             .parent()
             .filter(|path| !path.as_os_str().is_empty())
@@ -239,28 +235,20 @@ impl LocalStagedDirectory {
             self.directory()
                 .open_directory(parent_relative, &LocalDirectoryOpenOptions::new())?
         };
-        let parent_file = containing
-            .root_authority()?
-            .try_clone_authority()
-            .map_err(|source| {
-                LocalFileError::from_io(
-                    LocalFileOperation::OpenWriter,
-                    Some(containing.diagnostic_path().to_path_buf()),
-                    None,
-                    source,
-                )
-            })?;
+        let parent_file = containing.root_authority()?.try_clone_authority().map_err(|source| {
+            LocalFileError::from_io(
+                LocalFileOperation::OpenWriter,
+                Some(containing.diagnostic_path().to_path_buf()),
+                None,
+                source,
+            )
+        })?;
         let file = create_private_file(&parent_file, name).map_err(|error| {
             let path = containing.diagnostic_path().join(name);
             let recovery = error
                 .retained
                 .map(|entry| crate::LocalTempRecovery::from_native(path.clone(), entry));
-            let mut cause = LocalFileError::from_io(
-                LocalFileOperation::OpenWriter,
-                Some(path),
-                None,
-                error.source,
-            );
+            let mut cause = LocalFileError::from_io(LocalFileOperation::OpenWriter, Some(path), None, error.source);
             if let Some(recovery) = recovery {
                 cause = cause.with_temp_recovery(recovery);
             }
@@ -285,11 +273,8 @@ impl LocalStagedDirectory {
         };
         let Some(identity) = identity else {
             return Err(cleanup_partial_private_file(
-                LocalFileError::new(
-                    LocalFileErrorKind::RequirementNotMet,
-                    LocalFileOperation::Metadata,
-                )
-                .with_path(path.clone()),
+                LocalFileError::new(LocalFileErrorKind::RequirementNotMet, LocalFileOperation::Metadata)
+                    .with_path(path.clone()),
                 &parent_file,
                 name,
                 file,
@@ -304,12 +289,7 @@ impl LocalStagedDirectory {
             let count = match qubit_io::Input::read(input, &mut block) {
                 Ok(count) => count,
                 Err(source) => {
-                    let cause = LocalFileError::from_io(
-                        LocalFileOperation::Read,
-                        Some(path.clone()),
-                        None,
-                        source,
-                    );
+                    let cause = LocalFileError::from_io(LocalFileOperation::Read, Some(path.clone()), None, source);
                     return Err(cleanup_partial_private_file(
                         cause,
                         &parent_file,
@@ -347,12 +327,7 @@ impl LocalStagedDirectory {
                 ));
             }
             if let Err(source) = std::io::Write::write_all(&mut file, &block[..count]) {
-                let cause = LocalFileError::from_io(
-                    LocalFileOperation::Commit,
-                    Some(path.clone()),
-                    None,
-                    source,
-                );
+                let cause = LocalFileError::from_io(LocalFileOperation::Commit, Some(path.clone()), None, source);
                 return Err(cleanup_partial_private_file(
                     cause,
                     &parent_file,
@@ -363,37 +338,24 @@ impl LocalStagedDirectory {
                 ));
             }
         }
-        crate::observation::query::query_observation(
-            &file,
-            crate::observation::LocalObservationRequirement::Required,
-        )
+        crate::observation::query::query_observation(&file, crate::observation::LocalObservationRequirement::Required)
     }
 
     /// Creates a lazy, recursive observer using the supplied resource ceilings.
-    pub fn observe_tree_with_options(
-        &self,
-        options: &LocalListOptions,
-    ) -> LocalResult<LocalTreeObserver> {
-        let recursive = options.clone().with_recursive();
-        let walker = self
-            .directory()
-            .list_with_options(Path::new("."), &recursive)?;
+    pub fn observe_tree_with_options(&self, options: &LocalListOptions) -> LocalResult<LocalTreeObserver> {
+        let recursive = (*options).with_recursive();
+        let walker = self.directory().list_with_options(Path::new("."), &recursive)?;
         Ok(LocalTreeObserver::new(self.directory().clone(), walker))
     }
 
-    /// Validates the complete tree against an expected entry set and optional constraints.
+    /// Validates the complete tree against an expected entry set and optional
+    /// constraints.
     ///
-    /// Returns `ResourceLimit` if traversal or exact-set indexing exceeds its budgets,
-    /// and `RequirementNotMet` when an enabled entry rule or expected set is violated.
-    pub fn verify_entries(
-        &self,
-        expected: &[LocalTreeEntry],
-        options: &LocalTreeValidationOptions,
-    ) -> LocalResult<()> {
-        if options
-            .exact_entries()
-            .is_some_and(|configured| configured != expected)
-        {
+    /// Returns `ResourceLimit` if traversal or exact-set indexing exceeds its
+    /// budgets, and `RequirementNotMet` when an enabled entry rule or
+    /// expected set is violated.
+    pub fn verify_entries(&self, expected: &[LocalTreeEntry], options: &LocalTreeValidationOptions) -> LocalResult<()> {
+        if options.exact_entries().is_some_and(|configured| configured != expected) {
             return Err(LocalFileError::new(
                 LocalFileErrorKind::InvalidOptions,
                 LocalFileOperation::ValidateName,
@@ -414,15 +376,16 @@ impl LocalStagedDirectory {
                             source,
                         )
                     })?;
-                crate::temp::internal::privacy_unix::verify_current_user_access(&file, true, false)
-                    .map_err(|source| {
+                crate::temp::internal::privacy_unix::verify_current_user_access(&file, true, false).map_err(
+                    |source| {
                         LocalFileError::from_io(
                             LocalFileOperation::Metadata,
                             Some(self.directory().diagnostic_path().to_path_buf()),
                             None,
                             source,
                         )
-                    })?;
+                    },
+                )?;
             }
             #[cfg(windows)]
             {
@@ -441,17 +404,16 @@ impl LocalStagedDirectory {
                         LocalFileOperation::Metadata,
                     ));
                 }
-                crate::temp::internal::privacy_windows::verify_current_user_access(
-                    &root, true, false,
-                )
-                .map_err(|source| {
-                    LocalFileError::from_io(
-                        LocalFileOperation::Metadata,
-                        Some(self.directory().diagnostic_path().to_path_buf()),
-                        None,
-                        source,
-                    )
-                })?;
+                crate::temp::internal::privacy_windows::verify_current_user_access(&root, true, false).map_err(
+                    |source| {
+                        LocalFileError::from_io(
+                            LocalFileOperation::Metadata,
+                            Some(self.directory().diagnostic_path().to_path_buf()),
+                            None,
+                            source,
+                        )
+                    },
+                )?;
             }
         }
         if options.limits().max_depth().is_some() {
@@ -477,8 +439,7 @@ impl LocalStagedDirectory {
             return Err(resource_limit());
         }
         let mut seen = Vec::new();
-        seen.try_reserve_exact(expected.len())
-            .map_err(|_| resource_limit())?;
+        seen.try_reserve_exact(expected.len()).map_err(|_| resource_limit())?;
         seen.resize(expected.len(), false);
         let mut name_bytes = expected_name_bytes;
         let mut count = 0_usize;
@@ -490,9 +451,7 @@ impl LocalStagedDirectory {
                 || (options.rejects_special_files()
                     && !matches!(
                         kind,
-                        crate::LocalFileKind::File
-                            | crate::LocalFileKind::Directory
-                            | crate::LocalFileKind::Symlink
+                        crate::LocalFileKind::File | crate::LocalFileKind::Directory | crate::LocalFileKind::Symlink
                     ))
             {
                 return Err(LocalFileError::new(
@@ -504,20 +463,14 @@ impl LocalStagedDirectory {
                 #[cfg(unix)]
                 {
                     let kind = item.observation().metadata().kind();
-                    if !matches!(
-                        kind,
-                        crate::LocalFileKind::File | crate::LocalFileKind::Directory
-                    ) {
+                    if !matches!(kind, crate::LocalFileKind::File | crate::LocalFileKind::Directory) {
                         return Err(LocalFileError::new(
                             LocalFileErrorKind::RequirementNotMet,
                             LocalFileOperation::Metadata,
                         ));
                     }
                     let identity = item.observation().identity().ok_or_else(|| {
-                        LocalFileError::new(
-                            LocalFileErrorKind::Unsupported,
-                            LocalFileOperation::Metadata,
-                        )
+                        LocalFileError::new(LocalFileErrorKind::Unsupported, LocalFileOperation::Metadata)
                     })?;
                     let file = open_unix_tree_entry(self, item.relative_path(), kind)?;
                     let current = crate::observation::query::query_observation(
@@ -538,11 +491,7 @@ impl LocalStagedDirectory {
                     .map_err(|source| {
                         LocalFileError::from_io(
                             LocalFileOperation::Metadata,
-                            Some(
-                                self.directory()
-                                    .diagnostic_path()
-                                    .join(item.relative_path()),
-                            ),
+                            Some(self.directory().diagnostic_path().join(item.relative_path())),
                             None,
                             source,
                         )
@@ -551,20 +500,14 @@ impl LocalStagedDirectory {
                 #[cfg(windows)]
                 {
                     let kind = item.observation().metadata().kind();
-                    if !matches!(
-                        kind,
-                        crate::LocalFileKind::File | crate::LocalFileKind::Directory
-                    ) {
+                    if !matches!(kind, crate::LocalFileKind::File | crate::LocalFileKind::Directory) {
                         return Err(LocalFileError::new(
                             LocalFileErrorKind::RequirementNotMet,
                             LocalFileOperation::Metadata,
                         ));
                     }
                     let identity = item.observation().identity().ok_or_else(|| {
-                        LocalFileError::new(
-                            LocalFileErrorKind::Unsupported,
-                            LocalFileOperation::Metadata,
-                        )
+                        LocalFileError::new(LocalFileErrorKind::Unsupported, LocalFileOperation::Metadata)
                     })?;
                     let file = open_windows_tree_entry(self, item.relative_path(), kind)?;
                     let current = crate::observation::query::query_observation(
@@ -585,11 +528,7 @@ impl LocalStagedDirectory {
                     .map_err(|source| {
                         LocalFileError::from_io(
                             LocalFileOperation::Metadata,
-                            Some(
-                                self.directory()
-                                    .diagnostic_path()
-                                    .join(item.relative_path()),
-                            ),
+                            Some(self.directory().diagnostic_path().join(item.relative_path())),
                             None,
                             source,
                         )
@@ -607,9 +546,10 @@ impl LocalStagedDirectory {
             {
                 return Err(resource_limit());
             }
-            let Some(index) = expected.iter().position(|entry| {
-                entry.relative_path() == item.relative_path() && entry.kind() == kind
-            }) else {
+            let Some(index) = expected
+                .iter()
+                .position(|entry| entry.relative_path() == item.relative_path() && entry.kind() == kind)
+            else {
                 return Err(LocalFileError::new(
                     LocalFileErrorKind::RequirementNotMet,
                     LocalFileOperation::Metadata,
@@ -623,9 +563,7 @@ impl LocalStagedDirectory {
             }
             seen[index] = true;
             if options.rejects_external_hardlinks() && kind == crate::LocalFileKind::File {
-                let (current, native_count) = self
-                    .directory()
-                    .observe_entry_with_link_count(item.relative_path())?;
+                let (current, native_count) = self.directory().observe_entry_with_link_count(item.relative_path())?;
                 if current.identity() != item.observation().identity() {
                     return Err(LocalFileError::new(
                         LocalFileErrorKind::ChangedDuringRead,
@@ -633,20 +571,12 @@ impl LocalStagedDirectory {
                     ));
                 }
                 let native_count = native_count.ok_or_else(|| {
-                    LocalFileError::new(
-                        LocalFileErrorKind::Unsupported,
-                        LocalFileOperation::Metadata,
-                    )
+                    LocalFileError::new(LocalFileErrorKind::Unsupported, LocalFileOperation::Metadata)
                 })?;
                 let identity = current.identity().cloned().ok_or_else(|| {
-                    LocalFileError::new(
-                        LocalFileErrorKind::Unsupported,
-                        LocalFileOperation::Metadata,
-                    )
+                    LocalFileError::new(LocalFileErrorKind::Unsupported, LocalFileOperation::Metadata)
                 })?;
-                if let Some((_, _, occurrences)) = link_counts
-                    .iter_mut()
-                    .find(|(observed, _, _)| *observed == identity)
+                if let Some((_, _, occurrences)) = link_counts.iter_mut().find(|(observed, _, _)| *observed == identity)
                 {
                     *occurrences = occurrences.checked_add(1).ok_or_else(resource_limit)?;
                 } else {
@@ -655,9 +585,10 @@ impl LocalStagedDirectory {
                 }
             }
         }
-        if link_counts.iter().any(|(_, native_count, occurrences)| {
-            u64::try_from(*occurrences).is_ok_and(|count| native_count > &count)
-        }) {
+        if link_counts
+            .iter()
+            .any(|(_, native_count, occurrences)| u64::try_from(*occurrences).is_ok_and(|count| native_count > &count))
+        {
             return Err(LocalFileError::new(
                 LocalFileErrorKind::RequirementNotMet,
                 LocalFileOperation::Metadata,
@@ -672,7 +603,8 @@ impl LocalStagedDirectory {
         Ok(())
     }
 
-    /// Removes the stage after identity checks and returns cleanup failures with an owner.
+    /// Removes the stage after identity checks and returns cleanup failures
+    /// with an owner.
     pub fn cleanup(mut self) -> Result<(), LocalTreeCleanupError> {
         drop(self.directory.take());
         self.owner
@@ -681,7 +613,8 @@ impl LocalStagedDirectory {
             .cleanup()
     }
 
-    /// Explicitly gives up automatic cleanup and returns a path/identity recovery record.
+    /// Explicitly gives up automatic cleanup and returns a path/identity
+    /// recovery record.
     pub fn retain_in_place(mut self) -> LocalTreeRecoveryLocation {
         drop(self.directory.take());
         self.owner
@@ -701,7 +634,8 @@ impl Drop for LocalStagedDirectory {
 }
 
 impl LocalDirectoryHandle {
-    /// Reopens a stage beneath this authority only if its identity still matches `expected`.
+    /// Reopens a stage beneath this authority only if its identity still
+    /// matches `expected`.
     pub fn open_staged_directory(
         &self,
         relative: &Path,
@@ -711,26 +645,22 @@ impl LocalDirectoryHandle {
         let directory = self.open_directory(relative, &LocalDirectoryOpenOptions::new())?;
         let observation = directory.observe()?;
         if observation.identity() != Some(expected) {
-            return Err(LocalFileError::new(
-                LocalFileErrorKind::RequirementNotMet,
-                LocalFileOperation::Metadata,
-            )
-            .with_path(self.diagnostic_path().join(relative)));
+            return Err(
+                LocalFileError::new(LocalFileErrorKind::RequirementNotMet, LocalFileOperation::Metadata)
+                    .with_path(self.diagnostic_path().join(relative)),
+            );
         }
         let private = options.privacy() == crate::policy::LocalPrivacyRequirement::Required;
         if private {
             #[cfg(unix)]
-            let file = directory
-                .root_authority()?
-                .try_clone_authority()
-                .map_err(|source| {
-                    LocalFileError::from_io(
-                        LocalFileOperation::Metadata,
-                        Some(directory.diagnostic_path().to_path_buf()),
-                        None,
-                        source,
-                    )
-                })?;
+            let file = directory.root_authority()?.try_clone_authority().map_err(|source| {
+                LocalFileError::from_io(
+                    LocalFileOperation::Metadata,
+                    Some(directory.diagnostic_path().to_path_buf()),
+                    None,
+                    source,
+                )
+            })?;
             #[cfg(unix)]
             {
                 use std::os::unix::fs::MetadataExt;
@@ -751,9 +681,16 @@ impl LocalDirectoryHandle {
             }
             #[cfg(windows)]
             {
-                let parent_file =
-                    self.root_authority()?
-                        .try_clone_authority()
+                let parent_file = self.root_authority()?.try_clone_authority().map_err(|source| {
+                    LocalFileError::from_io(
+                        LocalFileOperation::Metadata,
+                        Some(directory.diagnostic_path().to_path_buf()),
+                        None,
+                        source,
+                    )
+                })?;
+                let access_file =
+                    crate::temp::internal::privacy_windows::open_existing_relative(&parent_file, relative, true)
                         .map_err(|source| {
                             LocalFileError::from_io(
                                 LocalFileOperation::Metadata,
@@ -762,19 +699,6 @@ impl LocalDirectoryHandle {
                                 source,
                             )
                         })?;
-                let access_file = crate::temp::internal::privacy_windows::open_existing_relative(
-                    &parent_file,
-                    relative,
-                    true,
-                )
-                .map_err(|source| {
-                    LocalFileError::from_io(
-                        LocalFileOperation::Metadata,
-                        Some(directory.diagnostic_path().to_path_buf()),
-                        None,
-                        source,
-                    )
-                })?;
                 let access_observation = crate::observation::query::query_observation(
                     &access_file,
                     crate::observation::LocalObservationRequirement::Required,
@@ -785,19 +709,16 @@ impl LocalDirectoryHandle {
                         LocalFileOperation::Metadata,
                     ));
                 }
-                crate::temp::internal::privacy_windows::verify_current_user_access(
-                    &access_file,
-                    true,
-                    false,
-                )
-                .map_err(|source| {
-                    LocalFileError::from_io(
-                        LocalFileOperation::Metadata,
-                        Some(directory.diagnostic_path().to_path_buf()),
-                        None,
-                        source,
-                    )
-                })?;
+                crate::temp::internal::privacy_windows::verify_current_user_access(&access_file, true, false).map_err(
+                    |source| {
+                        LocalFileError::from_io(
+                            LocalFileOperation::Metadata,
+                            Some(directory.diagnostic_path().to_path_buf()),
+                            None,
+                            source,
+                        )
+                    },
+                )?;
             }
         }
         let identity = observation.identity().cloned();
@@ -809,29 +730,26 @@ impl LocalDirectoryHandle {
             self.clone(),
             Some(directory.clone()),
         );
-        let stage =
-            LocalStagedDirectory::new(owner, directory, relative.to_path_buf(), identity, private);
+        let stage = LocalStagedDirectory::new(owner, directory, relative.to_path_buf(), identity, private);
         if let Some(entries) = options.exact_entries() {
             stage.verify_entries(entries, options)?;
         }
         Ok(stage)
     }
 
-    /// Creates a uniquely named stage directly beneath this fixed directory authority.
+    /// Creates a uniquely named stage directly beneath this fixed directory
+    /// authority.
     pub fn create_staged_directory(
         &self,
         options: &LocalTempDirectoryOptions,
     ) -> Result<LocalStagedDirectory, LocalTreeCreateError> {
-        let parent = self.root_authority().map_err(|cause| {
-            LocalTreeCreateError::new(cause, None, Vec::new(), LocalTreeMutationState::NotStarted)
-        })?;
+        let parent = self
+            .root_authority()
+            .map_err(|cause| LocalTreeCreateError::new(cause, None, Vec::new(), LocalTreeMutationState::NotStarted))?;
         let maximum_attempts = options.max_attempts().unwrap_or(64);
         if maximum_attempts == 0 {
             return Err(LocalTreeCreateError::new(
-                LocalFileError::new(
-                    LocalFileErrorKind::InvalidOptions,
-                    LocalFileOperation::GenerateName,
-                ),
+                LocalFileError::new(LocalFileErrorKind::InvalidOptions, LocalFileOperation::GenerateName),
                 None,
                 Vec::new(),
                 LocalTreeMutationState::NotStarted,
@@ -841,12 +759,7 @@ impl LocalDirectoryHandle {
         let mut relative = None;
         for _ in 0..maximum_attempts {
             let name = stage_name().map_err(|cause| {
-                LocalTreeCreateError::new(
-                    cause,
-                    None,
-                    Vec::new(),
-                    LocalTreeMutationState::NotStarted,
-                )
+                LocalTreeCreateError::new(cause, None, Vec::new(), LocalTreeMutationState::NotStarted)
             })?;
             if options.privacy() == crate::policy::LocalPrivacyRequirement::Required {
                 match create_private_directory(parent, &name) {
@@ -856,8 +769,7 @@ impl LocalDirectoryHandle {
                         break;
                     }
                     Err(error)
-                        if error.source.kind() == std::io::ErrorKind::AlreadyExists
-                            && error.retained.is_none() =>
+                        if error.source.kind() == std::io::ErrorKind::AlreadyExists && error.retained.is_none() =>
                     {
                         continue;
                     }
@@ -868,10 +780,7 @@ impl LocalDirectoryHandle {
                         } else {
                             LocalTreeMutationState::NotStarted
                         };
-                        let identity = error
-                            .retained
-                            .as_ref()
-                            .and_then(|entry| entry.identity.clone());
+                        let identity = error.retained.as_ref().and_then(|entry| entry.identity.clone());
                         let retained = identity
                             .clone()
                             .map(|identity| {
@@ -885,9 +794,9 @@ impl LocalDirectoryHandle {
                             })
                             .into_iter()
                             .collect();
-                        let recovery = error.retained.map(|entry| {
-                            crate::LocalTempRecovery::from_native(path.clone(), entry)
-                        });
+                        let recovery = error
+                            .retained
+                            .map(|entry| crate::LocalTempRecovery::from_native(path.clone(), entry));
                         let mut cause = LocalFileError::from_io(
                             LocalFileOperation::CreateTempDirectory,
                             Some(path),
@@ -897,12 +806,7 @@ impl LocalDirectoryHandle {
                         if let Some(recovery) = recovery {
                             cause = cause.with_temp_recovery(recovery);
                         }
-                        return Err(LocalTreeCreateError::new(
-                            cause,
-                            None,
-                            retained,
-                            mutation_state,
-                        ));
+                        return Err(LocalTreeCreateError::new(cause, None, retained, mutation_state));
                     }
                 }
             } else {
@@ -918,9 +822,7 @@ impl LocalDirectoryHandle {
                     Err(error) if error.kind() == LocalFileErrorKind::AlreadyExists => continue,
                     Err(error) => {
                         let state = match error.effect_state() {
-                            Some(crate::error::LocalFileEffectState::Unchanged) => {
-                                LocalTreeMutationState::NotStarted
-                            }
+                            Some(crate::error::LocalFileEffectState::Unchanged) => LocalTreeMutationState::NotStarted,
                             Some(
                                 crate::error::LocalFileEffectState::PartiallyApplied
                                 | crate::error::LocalFileEffectState::Applied,
@@ -953,13 +855,8 @@ impl LocalDirectoryHandle {
             ) {
                 Ok(observation) => observation,
                 Err(cause) => {
-                    let owner = LocalTreeRetainedResource::new(
-                        path.clone(),
-                        relative.clone(),
-                        None,
-                        self.clone(),
-                        None,
-                    );
+                    let owner =
+                        LocalTreeRetainedResource::new(path.clone(), relative.clone(), None, self.clone(), None);
                     return Err(LocalTreeCreateError::new(
                         cause,
                         None,
@@ -971,19 +868,11 @@ impl LocalDirectoryHandle {
             match observation.identity().cloned() {
                 Some(identity) => Some(identity),
                 None => {
-                    let owner = LocalTreeRetainedResource::new(
-                        path.clone(),
-                        relative.clone(),
-                        None,
-                        self.clone(),
-                        None,
-                    );
+                    let owner =
+                        LocalTreeRetainedResource::new(path.clone(), relative.clone(), None, self.clone(), None);
                     return Err(LocalTreeCreateError::new(
-                        LocalFileError::new(
-                            LocalFileErrorKind::Unsupported,
-                            LocalFileOperation::Metadata,
-                        )
-                        .with_path(path.clone()),
+                        LocalFileError::new(LocalFileErrorKind::Unsupported, LocalFileOperation::Metadata)
+                            .with_path(path.clone()),
                         None,
                         vec![owner],
                         LocalTreeMutationState::Started,
@@ -1003,13 +892,7 @@ impl LocalDirectoryHandle {
                         .ok()
                         .and_then(|observation| observation.identity().cloned())
                 });
-                let resource = LocalTreeRetainedResource::new(
-                    path,
-                    relative,
-                    identity,
-                    self.clone(),
-                    None,
-                );
+                let resource = LocalTreeRetainedResource::new(path, relative, identity, self.clone(), None);
                 return Err(LocalTreeCreateError::new(
                     cause,
                     None,
@@ -1031,13 +914,7 @@ impl LocalDirectoryHandle {
                 } else {
                     Some(directory.clone())
                 };
-                let resource = LocalTreeRetainedResource::new(
-                    path,
-                    relative,
-                    identity,
-                    self.clone(),
-                    child,
-                );
+                let resource = LocalTreeRetainedResource::new(path, relative, identity, self.clone(), child);
                 return Err(LocalTreeCreateError::new(
                     cause,
                     None,
@@ -1058,11 +935,8 @@ impl LocalDirectoryHandle {
                 None,
             );
             return Err(LocalTreeCreateError::new(
-                LocalFileError::new(
-                    LocalFileErrorKind::ChangedDuringRead,
-                    LocalFileOperation::Metadata,
-                )
-                .with_path(path),
+                LocalFileError::new(LocalFileErrorKind::ChangedDuringRead, LocalFileOperation::Metadata)
+                    .with_path(path),
                 None,
                 vec![owner],
                 LocalTreeMutationState::Indeterminate,
@@ -1149,17 +1023,16 @@ fn open_windows_tree_entry(
         .peekable();
     while let Some(name) = components.next() {
         let directory = components.peek().is_some() || kind == crate::LocalFileKind::Directory;
-        current = crate::temp::internal::privacy_windows::open_existing_entry_at(
-            &current, name, directory,
-        )
-        .map_err(|source| {
-            LocalFileError::from_io(
-                LocalFileOperation::OpenRoot,
-                Some(stage.directory().diagnostic_path().join(relative)),
-                None,
-                source,
-            )
-        })?;
+        current = crate::temp::internal::privacy_windows::open_existing_entry_at(&current, name, directory).map_err(
+            |source| {
+                LocalFileError::from_io(
+                    LocalFileOperation::OpenRoot,
+                    Some(stage.directory().diagnostic_path().join(relative)),
+                    None,
+                    source,
+                )
+            },
+        )?;
     }
     Ok(current)
 }
@@ -1190,12 +1063,9 @@ fn create_private_directory(
     parent: &crate::rooted::Root,
     name: &OsStr,
 ) -> Result<File, crate::temp::types::NativePrivateCreateError> {
-    let parent_file = parent.try_clone_authority().map_err(|source| {
-        crate::temp::types::NativePrivateCreateError {
-            source,
-            retained: None,
-        }
-    })?;
+    let parent_file = parent
+        .try_clone_authority()
+        .map_err(|source| crate::temp::types::NativePrivateCreateError { source, retained: None })?;
     let result = {
         #[cfg(unix)]
         {
@@ -1209,10 +1079,7 @@ fn create_private_directory(
         {
             let _ = name;
             Err(crate::temp::types::NativePrivateCreateError {
-                source: std::io::Error::new(
-                    std::io::ErrorKind::Unsupported,
-                    "private directories are unsupported",
-                ),
+                source: std::io::Error::new(std::io::ErrorKind::Unsupported, "private directories are unsupported"),
                 retained: None,
             })
         }
@@ -1225,17 +1092,16 @@ fn create_private_directory(
         )
         .ok()
         .and_then(|observation| observation.identity().cloned());
-        let retained =
-            parent_file
-                .try_clone()
-                .ok()
-                .map(|parent| crate::temp::types::NativePrivateEntry {
-                    parent,
-                    name: name.to_os_string(),
-                    file: Some(result),
-                    identity,
-                    directory: true,
-                });
+        let retained = parent_file
+            .try_clone()
+            .ok()
+            .map(|parent| crate::temp::types::NativePrivateEntry {
+                parent,
+                name: name.to_os_string(),
+                file: Some(result),
+                identity,
+                directory: true,
+            });
         return Err(crate::temp::types::NativePrivateCreateError {
             source: std::io::Error::new(
                 std::io::ErrorKind::PermissionDenied,
@@ -1247,10 +1113,7 @@ fn create_private_directory(
     Ok(result)
 }
 
-fn create_private_file(
-    parent: &File,
-    name: &OsStr,
-) -> Result<File, crate::temp::types::NativePrivateCreateError> {
+fn create_private_file(parent: &File, name: &OsStr) -> Result<File, crate::temp::types::NativePrivateCreateError> {
     #[cfg(unix)]
     {
         crate::temp::internal::privacy_unix::create_private_file_at(parent, name)
@@ -1263,10 +1126,7 @@ fn create_private_file(
     {
         let _ = (parent, name);
         Err(crate::temp::types::NativePrivateCreateError {
-            source: std::io::Error::new(
-                std::io::ErrorKind::Unsupported,
-                "private files are unsupported",
-            ),
+            source: std::io::Error::new(std::io::ErrorKind::Unsupported, "private files are unsupported"),
             retained: None,
         })
     }
@@ -1302,8 +1162,7 @@ impl LocalStagedDirectory {
     pub fn apply_access_policy(
         &mut self,
         policy: crate::policy::LocalTreeFinalAccess,
-    ) -> Result<crate::outcome::LocalTreeAccessOutcome, super::tree_recovery::LocalTreeAccessError>
-    {
+    ) -> Result<crate::outcome::LocalTreeAccessOutcome, super::tree_recovery::LocalTreeAccessError> {
         self.apply_access_policy_with_options(policy, &LocalListOptions::new())
     }
 
@@ -1312,13 +1171,10 @@ impl LocalStagedDirectory {
         &mut self,
         policy: crate::policy::LocalTreeFinalAccess,
         limits: &LocalListOptions,
-    ) -> Result<crate::outcome::LocalTreeAccessOutcome, super::tree_recovery::LocalTreeAccessError>
-    {
+    ) -> Result<crate::outcome::LocalTreeAccessOutcome, super::tree_recovery::LocalTreeAccessError> {
         use crate::outcome::LocalTreeAccessState as State;
         if policy == crate::policy::LocalTreeFinalAccess::Preserve {
-            return Ok(crate::outcome::LocalTreeAccessOutcome::new(
-                State::Preserved,
-            ));
+            return Ok(crate::outcome::LocalTreeAccessOutcome::new(State::Preserved));
         }
         #[cfg(windows)]
         {
@@ -1328,10 +1184,7 @@ impl LocalStagedDirectory {
         {
             let _ = limits;
             return Err(super::tree_recovery::LocalTreeAccessError::new(
-                LocalFileError::new(
-                    LocalFileErrorKind::RequirementNotMet,
-                    LocalFileOperation::Metadata,
-                ),
+                LocalFileError::new(LocalFileErrorKind::RequirementNotMet, LocalFileOperation::Metadata),
                 State::Indeterminate,
             ));
         }
@@ -1345,10 +1198,7 @@ impl LocalStagedDirectory {
                     bytes = bytes
                         .checked_add(item.relative_path().as_os_str().as_encoded_bytes().len())
                         .ok_or_else(resource_limit)?;
-                    if limits
-                        .max_seen_name_bytes()
-                        .is_some_and(|maximum| bytes > maximum)
-                    {
+                    if limits.max_seen_name_bytes().is_some_and(|maximum| bytes > maximum) {
                         return Err(resource_limit());
                     }
                     if limits
@@ -1362,10 +1212,7 @@ impl LocalStagedDirectory {
                         item.relative_path().to_path_buf(),
                         item.observation().metadata().kind(),
                         item.observation().identity().cloned().ok_or_else(|| {
-                            LocalFileError::new(
-                                LocalFileErrorKind::Unsupported,
-                                LocalFileOperation::Metadata,
-                            )
+                            LocalFileError::new(LocalFileErrorKind::Unsupported, LocalFileOperation::Metadata)
                         })?,
                     ));
                 }
@@ -1379,11 +1226,7 @@ impl LocalStagedDirectory {
             }
             entries.sort_by_key(|(path, kind, _)| {
                 (
-                    if *kind == crate::LocalFileKind::Directory {
-                        1
-                    } else {
-                        0
-                    },
+                    if *kind == crate::LocalFileKind::Directory { 1 } else { 0 },
                     std::cmp::Reverse(path.components().count()),
                 )
             });
@@ -1404,11 +1247,8 @@ impl LocalStagedDirectory {
                 };
                 if current.identity() != Some(identity) {
                     return Err(super::tree_recovery::LocalTreeAccessError::new(
-                        LocalFileError::new(
-                            LocalFileErrorKind::ChangedDuringRead,
-                            LocalFileOperation::Metadata,
-                        )
-                        .with_path(self.directory().diagnostic_path().join(relative)),
+                        LocalFileError::new(LocalFileErrorKind::ChangedDuringRead, LocalFileOperation::Metadata)
+                            .with_path(self.directory().diagnostic_path().join(relative)),
                         if applied == 0 {
                             State::Indeterminate
                         } else {
@@ -1417,10 +1257,7 @@ impl LocalStagedDirectory {
                     ));
                 }
                 if *kind == crate::LocalFileKind::Symlink
-                    || !matches!(
-                        *kind,
-                        crate::LocalFileKind::File | crate::LocalFileKind::Directory
-                    )
+                    || !matches!(*kind, crate::LocalFileKind::File | crate::LocalFileKind::Directory)
                 {
                     continue;
                 }
@@ -1455,11 +1292,8 @@ impl LocalStagedDirectory {
                 };
                 if opened_observation.identity() != Some(identity) {
                     return Err(super::tree_recovery::LocalTreeAccessError::new(
-                        LocalFileError::new(
-                            LocalFileErrorKind::ChangedDuringRead,
-                            LocalFileOperation::Metadata,
-                        )
-                        .with_path(self.directory().diagnostic_path().join(relative)),
+                        LocalFileError::new(LocalFileErrorKind::ChangedDuringRead, LocalFileOperation::Metadata)
+                            .with_path(self.directory().diagnostic_path().join(relative)),
                         if applied == 0 {
                             State::Indeterminate
                         } else {
@@ -1508,11 +1342,8 @@ impl LocalStagedDirectory {
                     || verified.metadata().permissions().unix_mode() != Some(expected_mode)
                 {
                     return Err(super::tree_recovery::LocalTreeAccessError::new(
-                        LocalFileError::new(
-                            LocalFileErrorKind::ChangedDuringRead,
-                            LocalFileOperation::Metadata,
-                        )
-                        .with_path(self.directory().diagnostic_path().join(relative)),
+                        LocalFileError::new(LocalFileErrorKind::ChangedDuringRead, LocalFileOperation::Metadata)
+                            .with_path(self.directory().diagnostic_path().join(relative)),
                         State::Indeterminate,
                     ));
                 }
@@ -1533,10 +1364,7 @@ impl LocalStagedDirectory {
             };
             if root_observation.identity() != self.identity.as_ref() {
                 return Err(super::tree_recovery::LocalTreeAccessError::new(
-                    LocalFileError::new(
-                        LocalFileErrorKind::ChangedDuringRead,
-                        LocalFileOperation::Metadata,
-                    ),
+                    LocalFileError::new(LocalFileErrorKind::ChangedDuringRead, LocalFileOperation::Metadata),
                     if applied == 0 {
                         State::Indeterminate
                     } else {
@@ -1567,9 +1395,9 @@ impl LocalStagedDirectory {
                 }
             };
             let read_only = policy == crate::policy::LocalTreeFinalAccess::ReadOnlyCurrentUser;
-            if let Err(source) = crate::temp::internal::privacy_unix::apply_current_user_access(
-                &root_file, true, read_only,
-            ) {
+            if let Err(source) =
+                crate::temp::internal::privacy_unix::apply_current_user_access(&root_file, true, read_only)
+            {
                 let cause = LocalFileError::from_io(
                     LocalFileOperation::Metadata,
                     Some(self.directory().diagnostic_path().to_path_buf()),
@@ -1589,26 +1417,19 @@ impl LocalStagedDirectory {
                 &root_file,
                 crate::observation::LocalObservationRequirement::Required,
             )
-            .map_err(|cause| {
-                super::tree_recovery::LocalTreeAccessError::new(cause, State::Indeterminate)
-            })?;
+            .map_err(|cause| super::tree_recovery::LocalTreeAccessError::new(cause, State::Indeterminate))?;
             let expected_root_mode = if read_only { 0o500 } else { 0o700 };
             if verified_root.identity() != self.identity.as_ref()
                 || verified_root.metadata().permissions().unix_mode() != Some(expected_root_mode)
             {
                 return Err(super::tree_recovery::LocalTreeAccessError::new(
-                    LocalFileError::new(
-                        LocalFileErrorKind::ChangedDuringRead,
-                        LocalFileOperation::Metadata,
-                    ),
+                    LocalFileError::new(LocalFileErrorKind::ChangedDuringRead, LocalFileOperation::Metadata),
                     State::Indeterminate,
                 ));
             }
             let state = match policy {
                 crate::policy::LocalTreeFinalAccess::CurrentUserOnly => State::CurrentUserOnly,
-                crate::policy::LocalTreeFinalAccess::ReadOnlyCurrentUser => {
-                    State::ReadOnlyCurrentUser
-                }
+                crate::policy::LocalTreeFinalAccess::ReadOnlyCurrentUser => State::ReadOnlyCurrentUser,
                 crate::policy::LocalTreeFinalAccess::Preserve => State::Preserved,
             };
             Ok(crate::outcome::LocalTreeAccessOutcome::new(state))
@@ -1620,8 +1441,7 @@ impl LocalStagedDirectory {
         &mut self,
         policy: crate::policy::LocalTreeFinalAccess,
         limits: &LocalListOptions,
-    ) -> Result<crate::outcome::LocalTreeAccessOutcome, super::tree_recovery::LocalTreeAccessError>
-    {
+    ) -> Result<crate::outcome::LocalTreeAccessOutcome, super::tree_recovery::LocalTreeAccessError> {
         use crate::outcome::LocalTreeAccessState as State;
         let mut entries = Vec::new();
         let mut bytes = 0_usize;
@@ -1631,9 +1451,7 @@ impl LocalStagedDirectory {
                 bytes = bytes
                     .checked_add(item.relative_path().as_os_str().as_encoded_bytes().len())
                     .ok_or_else(resource_limit)?;
-                if limits
-                    .max_seen_name_bytes()
-                    .is_some_and(|maximum| bytes > maximum)
+                if limits.max_seen_name_bytes().is_some_and(|maximum| bytes > maximum)
                     || limits
                         .max_depth()
                         .is_some_and(|maximum| item.relative_path().components().count() >= maximum)
@@ -1645,10 +1463,7 @@ impl LocalStagedDirectory {
                     item.relative_path().to_path_buf(),
                     item.observation().metadata().kind(),
                     item.observation().identity().cloned().ok_or_else(|| {
-                        LocalFileError::new(
-                            LocalFileErrorKind::Unsupported,
-                            LocalFileOperation::Metadata,
-                        )
+                        LocalFileError::new(LocalFileErrorKind::Unsupported, LocalFileOperation::Metadata)
                     })?,
                 ));
             }
@@ -1662,20 +1477,13 @@ impl LocalStagedDirectory {
         }
         entries.sort_by_key(|(path, kind, _)| {
             (
-                if *kind == crate::LocalFileKind::Directory {
-                    1
-                } else {
-                    0
-                },
+                if *kind == crate::LocalFileKind::Directory { 1 } else { 0 },
                 std::cmp::Reverse(path.components().count()),
             )
         });
         let mut applied = 0_usize;
         for (relative, kind, identity) in &entries {
-            if !matches!(
-                *kind,
-                crate::LocalFileKind::File | crate::LocalFileKind::Directory
-            ) {
+            if !matches!(*kind, crate::LocalFileKind::File | crate::LocalFileKind::Directory) {
                 continue;
             }
             let file = match open_windows_tree_entry(self, relative, *kind) {
@@ -1707,11 +1515,8 @@ impl LocalStagedDirectory {
             })?;
             if observation.identity() != Some(identity) {
                 return Err(super::tree_recovery::LocalTreeAccessError::new(
-                    LocalFileError::new(
-                        LocalFileErrorKind::ChangedDuringRead,
-                        LocalFileOperation::Metadata,
-                    )
-                    .with_path(self.directory().diagnostic_path().join(relative)),
+                    LocalFileError::new(LocalFileErrorKind::ChangedDuringRead, LocalFileOperation::Metadata)
+                        .with_path(self.directory().diagnostic_path().join(relative)),
                     if applied == 0 {
                         State::Indeterminate
                     } else {
@@ -1721,11 +1526,9 @@ impl LocalStagedDirectory {
             }
             let is_directory = *kind == crate::LocalFileKind::Directory;
             let read_only = policy == crate::policy::LocalTreeFinalAccess::ReadOnlyCurrentUser;
-            if let Err(source) = crate::temp::internal::privacy_windows::apply_current_user_access(
-                &file,
-                is_directory,
-                read_only,
-            ) {
+            if let Err(source) =
+                crate::temp::internal::privacy_windows::apply_current_user_access(&file, is_directory, read_only)
+            {
                 let cause = LocalFileError::from_io(
                     LocalFileOperation::Metadata,
                     Some(self.directory().diagnostic_path().join(relative)),
@@ -1743,12 +1546,7 @@ impl LocalStagedDirectory {
             }
             applied += 1;
         }
-        let root_file = match self
-            .owner
-            .as_ref()
-            .expect("stage owner exists")
-            .open_child_for_access()
-        {
+        let root_file = match self.owner.as_ref().expect("stage owner exists").open_child_for_access() {
             Ok(file) => file,
             Err(cause) => {
                 return Err(super::tree_recovery::LocalTreeAccessError::new(
@@ -1777,10 +1575,7 @@ impl LocalStagedDirectory {
         })?;
         if root_observation.identity() != self.identity.as_ref() {
             return Err(super::tree_recovery::LocalTreeAccessError::new(
-                LocalFileError::new(
-                    LocalFileErrorKind::ChangedDuringRead,
-                    LocalFileOperation::Metadata,
-                ),
+                LocalFileError::new(LocalFileErrorKind::ChangedDuringRead, LocalFileOperation::Metadata),
                 if applied == 0 {
                     State::Indeterminate
                 } else {
@@ -1816,11 +1611,7 @@ impl LocalStagedDirectory {
         Ok(crate::outcome::LocalTreeAccessOutcome::new(state))
     }
 
-    fn sync_tree_files(
-        &self,
-        limits: &LocalListOptions,
-        requirement: LocalFileSyncRequirement,
-    ) -> LocalResult<bool> {
+    fn sync_tree_files(&self, limits: &LocalListOptions, requirement: LocalFileSyncRequirement) -> LocalResult<bool> {
         if requirement == LocalFileSyncRequirement::NotRequired {
             return Ok(false);
         }
@@ -1837,31 +1628,24 @@ impl LocalStagedDirectory {
             if item.observation().metadata().kind() != crate::LocalFileKind::File {
                 continue;
             }
-            let expected = item.observation().identity().cloned().ok_or_else(|| {
-                LocalFileError::new(
-                    LocalFileErrorKind::Unsupported,
-                    LocalFileOperation::Metadata,
+            let expected =
+                item.observation().identity().cloned().ok_or_else(|| {
+                    LocalFileError::new(LocalFileErrorKind::Unsupported, LocalFileOperation::Metadata)
+                })?;
+            let relative = crate::LocalRelativePath::new(item.relative_path()).map_err(|source| {
+                LocalFileError::from_io(
+                    LocalFileOperation::ValidateName,
+                    Some(item.relative_path().to_path_buf()),
+                    None,
+                    source,
                 )
             })?;
-            let relative =
-                crate::LocalRelativePath::new(item.relative_path()).map_err(|source| {
-                    LocalFileError::from_io(
-                        LocalFileOperation::ValidateName,
-                        Some(item.relative_path().to_path_buf()),
-                        None,
-                        source,
-                    )
-                })?;
             let opened = root
                 .open_reader(&relative, &crate::read::OpenOptions::default())
                 .map_err(|source| {
                     LocalFileError::from_io(
                         LocalFileOperation::Read,
-                        Some(
-                            self.directory()
-                                .diagnostic_path()
-                                .join(item.relative_path()),
-                        ),
+                        Some(self.directory().diagnostic_path().join(item.relative_path())),
                         None,
                         source,
                     )
@@ -1871,26 +1655,17 @@ impl LocalStagedDirectory {
                 crate::observation::LocalObservationRequirement::Required,
             )?;
             if observation.identity() != Some(&expected) {
-                return Err(LocalFileError::new(
-                    LocalFileErrorKind::ChangedDuringRead,
-                    LocalFileOperation::Metadata,
-                )
-                .with_path(
-                    self.directory()
-                        .diagnostic_path()
-                        .join(item.relative_path()),
-                ));
+                return Err(
+                    LocalFileError::new(LocalFileErrorKind::ChangedDuringRead, LocalFileOperation::Metadata)
+                        .with_path(self.directory().diagnostic_path().join(item.relative_path())),
+                );
             }
             #[cfg(test)]
             if let Err(source) = fail_tree_sync_if_scheduled() {
                 if requirement == LocalFileSyncRequirement::Required {
                     return Err(LocalFileError::from_io(
                         LocalFileOperation::Commit,
-                        Some(
-                            self.directory()
-                                .diagnostic_path()
-                                .join(item.relative_path()),
-                        ),
+                        Some(self.directory().diagnostic_path().join(item.relative_path())),
                         None,
                         source,
                     ));
@@ -1902,11 +1677,7 @@ impl LocalStagedDirectory {
                 if requirement == LocalFileSyncRequirement::Required {
                     return Err(LocalFileError::from_io(
                         LocalFileOperation::Commit,
-                        Some(
-                            self.directory()
-                                .diagnostic_path()
-                                .join(item.relative_path()),
-                        ),
+                        Some(self.directory().diagnostic_path().join(item.relative_path())),
                         None,
                         source,
                     ));
@@ -1917,33 +1688,24 @@ impl LocalStagedDirectory {
         Ok(synced)
     }
 
-    /// Publishes this stage under a single native name without replacing an entry.
+    /// Publishes this stage under a single native name without replacing an
+    /// entry.
     pub fn publish_new(
         mut self,
         parent: &LocalDirectoryHandle,
         name: &OsStr,
         options: &crate::options::LocalTreePublishOptions,
-    ) -> Result<crate::outcome::LocalTreePublishOutcome, super::tree_recovery::LocalTreePublishError>
-    {
-        use crate::outcome::{
-            LocalTreeAccessState as Access, LocalTreeMutationState as Mutation,
-            LocalTreePublication as Publication,
-        };
-        let invalid_name = || {
-            LocalFileError::new(
-                LocalFileErrorKind::InvalidPath,
-                LocalFileOperation::ValidateName,
-            )
-        };
+    ) -> Result<crate::outcome::LocalTreePublishOutcome, super::tree_recovery::LocalTreePublishError> {
+        use crate::outcome::LocalTreeAccessState as Access;
+        use crate::outcome::LocalTreeMutationState as Mutation;
+        use crate::outcome::LocalTreePublication as Publication;
+        let invalid_name = || LocalFileError::new(LocalFileErrorKind::InvalidPath, LocalFileOperation::ValidateName);
         let name_path = Path::new(name);
         if name.is_empty()
             || name == OsStr::new(".")
             || name == OsStr::new("..")
             || name_path.components().count() != 1
-            || !matches!(
-                name_path.components().next(),
-                Some(std::path::Component::Normal(_))
-            )
+            || !matches!(name_path.components().next(), Some(std::path::Component::Normal(_)))
         {
             return Err(super::tree_recovery::LocalTreePublishError::new(
                 invalid_name(),
@@ -1995,10 +1757,7 @@ impl LocalStagedDirectory {
         };
         if observed.identity() != self.identity.as_ref() || self.identity.is_none() {
             return Err(super::tree_recovery::LocalTreePublishError::new(
-                LocalFileError::new(
-                    LocalFileErrorKind::ChangedDuringRead,
-                    LocalFileOperation::Metadata,
-                ),
+                LocalFileError::new(LocalFileErrorKind::ChangedDuringRead, LocalFileOperation::Metadata),
                 Some(self),
                 Mutation::NotStarted,
                 Publication::NotPublished,
@@ -2021,9 +1780,11 @@ impl LocalStagedDirectory {
                 let observed = (|| -> LocalResult<()> {
                     for item in self.observe_tree_with_options(validation.limits())? {
                         let item = item?;
-                        if validation.limits().max_depth().is_some_and(|maximum| {
-                            item.relative_path().components().count() >= maximum
-                        }) {
+                        if validation
+                            .limits()
+                            .max_depth()
+                            .is_some_and(|maximum| item.relative_path().components().count() >= maximum)
+                        {
                             return Err(resource_limit());
                         }
                         entries.try_reserve(1).map_err(|_| resource_limit())?;
@@ -2070,9 +1831,7 @@ impl LocalStagedDirectory {
                         Some(self),
                         match access_state {
                             Access::Preserved => Mutation::NotStarted,
-                            Access::CurrentUserOnly
-                            | Access::ReadOnlyCurrentUser
-                            | Access::Mixed => Mutation::Started,
+                            Access::CurrentUserOnly | Access::ReadOnlyCurrentUser | Access::Mixed => Mutation::Started,
                             Access::Indeterminate => Mutation::Indeterminate,
                         },
                         Publication::NotPublished,
@@ -2103,8 +1862,7 @@ impl LocalStagedDirectory {
                 ));
             }
         };
-        let rename_options =
-            crate::options::LocalRenameOptions::new().with_durability(options.durability());
+        let rename_options = crate::options::LocalRenameOptions::new().with_durability(options.durability());
         match parent
             .filesystem()
             .rename_with_options(&source, &target, &rename_options)

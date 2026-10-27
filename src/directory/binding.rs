@@ -22,22 +22,16 @@ impl PathBindingBudget {
         Self { limit, used: 0 }
     }
 
-    pub(crate) fn debit(
-        &mut self,
-        bytes: usize,
-        operation: crate::LocalFileOperation,
-        path: &Path,
-    ) -> LocalResult<()> {
+    pub(crate) fn debit(&mut self, bytes: usize, operation: crate::LocalFileOperation, path: &Path) -> LocalResult<()> {
         self.used = self.used.checked_add(bytes).ok_or_else(|| {
             crate::LocalFileError::new(crate::LocalFileErrorKind::ResourceLimit, operation)
                 .with_path(path.to_path_buf())
         })?;
         if self.limit.is_some_and(|limit| self.used > limit) {
-            return Err(crate::LocalFileError::new(
-                crate::LocalFileErrorKind::ResourceLimit,
-                operation,
-            )
-            .with_path(path.to_path_buf()));
+            return Err(
+                crate::LocalFileError::new(crate::LocalFileErrorKind::ResourceLimit, operation)
+                    .with_path(path.to_path_buf()),
+            );
         }
         Ok(())
     }
@@ -84,20 +78,15 @@ impl ReaderPathBinding for PathBinding {
                 crate::LocalFileOperation::Metadata,
                 None,
                 None,
-                std::io::Error::new(
-                    std::io::ErrorKind::TimedOut,
-                    "path binding deadline exceeded",
-                ),
+                std::io::Error::new(std::io::ErrorKind::TimedOut, "path binding deadline exceeded"),
             ));
         }
         match result {
-            Ok(reader) => {
-                Ok(if reader.observation().identity() == Some(&self.identity) {
-                    LocalSourceVerification::Unchanged
-                } else {
-                    LocalSourceVerification::Changed
-                })
-            }
+            Ok(reader) => Ok(if reader.observation().identity() == Some(&self.identity) {
+                LocalSourceVerification::Unchanged
+            } else {
+                LocalSourceVerification::Changed
+            }),
             Err(error) if error.kind() == crate::error::LocalFileErrorKind::NotFound => {
                 Ok(LocalSourceVerification::Missing)
             }
@@ -137,10 +126,7 @@ impl ReaderPathBinding for DirectoryPathBinding {
                     crate::LocalFileOperation::Metadata,
                     Some(anchor.path.clone()),
                     None,
-                    std::io::Error::new(
-                        std::io::ErrorKind::TimedOut,
-                        "path binding deadline exceeded",
-                    ),
+                    std::io::Error::new(std::io::ErrorKind::TimedOut, "path binding deadline exceeded"),
                 ));
             }
             let retained = anchor.authority.try_clone_authority().map_err(|error| {
@@ -229,7 +215,11 @@ mod tests {
         let binding = PathBinding::new(
             filesystem,
             "source".into(),
-            reader.observation().identity().cloned().expect("identity should be available"),
+            reader
+                .observation()
+                .identity()
+                .cloned()
+                .expect("identity should be available"),
             LocalPathBindingOptions::new().with_deadline(std::time::Duration::ZERO),
         );
         let error = binding.verify().unwrap_err();
