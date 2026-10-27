@@ -7,6 +7,8 @@
 // =============================================================================
 //! Windows private temporary-resource creation and access control.
 
+#[cfg(test)]
+use std::cell::Cell;
 use std::ffi::OsStr;
 use std::fs::File;
 use std::io;
@@ -88,6 +90,60 @@ const DIRECTORY_ACCESS: u32 = FILE_LIST_DIRECTORY
     | WRITE_DAC
     | DELETE;
 
+#[cfg(test)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum FailurePoint {
+    Token,
+    Sid,
+    Descriptor,
+    Create,
+    AclApply,
+    AclReadback,
+    ReadOnly,
+}
+
+#[cfg(test)]
+thread_local! {
+    static FAILURE_POINT: Cell<Option<(FailurePoint, usize)>> = const { Cell::new(None) };
+}
+
+#[cfg(test)]
+pub(crate) fn fail_once_at(point: FailurePoint) {
+    fail_after(point, 0);
+}
+
+#[cfg(test)]
+pub(crate) fn fail_after(point: FailurePoint, successful_steps: usize) {
+    FAILURE_POINT.with(|slot| slot.set(Some((point, successful_steps))));
+}
+
+#[cfg(test)]
+fn fail_if(point: FailurePoint) -> io::Result<()> {
+    let should_fail = FAILURE_POINT.with(|slot| match slot.get() {
+        Some((scheduled, 0)) if scheduled == point => {
+            slot.set(None);
+            true
+        }
+        Some((scheduled, remaining)) if scheduled == point => {
+            slot.set(Some((scheduled, remaining - 1)));
+            false
+        }
+        _ => false,
+    });
+    if should_fail {
+        Err(io::Error::other(format!("injected {point:?} failure")))
+    } else {
+        Ok(())
+    }
+}
+
+macro_rules! check_failure {
+    ($point:ident) => {{
+        #[cfg(test)]
+        fail_if(FailurePoint::$point)?;
+    }};
+}
+
 #[derive(Debug)]
 struct Token(HANDLE);
 
@@ -108,6 +164,7 @@ struct CurrentUser {
 
 impl CurrentUser {
     fn acquire() -> io::Result<Self> {
+        check_failure!(Token);
         let mut token = ptr::null_mut();
         // GetCurrentProcess is a pseudo-handle; OpenProcessToken returns an owned handle.
         if unsafe { OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token) } == 0 {
@@ -140,9 +197,14 @@ impl CurrentUser {
         Ok(Self { token, information })
     }
 
-    fn sid(&self) -> PSID {
+    fn sid(&self) -> io::Result<PSID> {
+        check_failure!(Sid);
         // GetTokenInformation returns TOKEN_USER at the start of this owned buffer.
-        unsafe { (*(self.information.as_ptr().cast::<TOKEN_USER>())).User.Sid }
+        let sid = unsafe { (*(self.information.as_ptr().cast::<TOKEN_USER>())).User.Sid };
+        if sid.is_null() || unsafe { GetLengthSid(sid) } == 0 {
+            return Err(last_os_error());
+        }
+        Ok(sid)
     }
 }
 
@@ -153,11 +215,9 @@ struct SecurityDescriptor {
 
 impl SecurityDescriptor {
     fn for_current_user(directory: bool, read_only: bool) -> io::Result<Self> {
+        check_failure!(Descriptor);
         let current_user = CurrentUser::acquire()?;
-        let sid_length = unsafe { GetLengthSid(current_user.sid()) } as usize;
-        if sid_length == 0 {
-            return Err(last_os_error());
-        }
+        let current_sid = current_user.sid()?;
 
         let mut acl = vec![0_usize; ACL_BUFFER_SIZE.div_ceil(size_of::<usize>())];
         let acl_ptr = acl.as_mut_ptr().cast::<ACL>();
@@ -178,7 +238,7 @@ impl SecurityDescriptor {
         } else {
             FILE_INITIAL_ACCESS
         };
-        if unsafe { AddAccessAllowedAce(acl_ptr, ACL_REVISION, access, current_user.sid()) } == 0 {
+        if unsafe { AddAccessAllowedAce(acl_ptr, ACL_REVISION, access, current_sid) } == 0 {
             return Err(last_os_error());
         }
 
@@ -263,6 +323,7 @@ fn create_at(parent: &File, name: &OsStr, directory: bool) -> io::Result<File> {
     };
     let descriptor = SecurityDescriptor::for_current_user(directory, false)?;
     attributes.SecurityDescriptor = descriptor.as_ptr().cast();
+    check_failure!(Create);
     let mut handle = ptr::null_mut();
     let mut io_status = unsafe { std::mem::zeroed::<IO_STATUS_BLOCK>() };
     let status = unsafe {
@@ -365,7 +426,9 @@ pub(crate) fn apply_current_user_access(
     if status != 0 {
         return Err(io::Error::from_raw_os_error(status as i32));
     }
+    check_failure!(AclApply);
     if read_only && !directory {
+        check_failure!(ReadOnly);
         // Attribute changes are performed through the retained handle, not a path.
         let mut information = unsafe {
             std::mem::zeroed::<windows_sys::Win32::Storage::FileSystem::FILE_BASIC_INFO>()
@@ -406,7 +469,9 @@ pub(crate) fn verify_current_user_access(
     directory: bool,
     read_only: bool,
 ) -> io::Result<()> {
+    check_failure!(AclReadback);
     let current_user = CurrentUser::acquire()?;
+    let current_sid = current_user.sid()?;
     let mut owner: PSID = ptr::null_mut();
     let mut dacl: *mut ACL = ptr::null_mut();
     let mut descriptor_ptr: PSECURITY_DESCRIPTOR = ptr::null_mut();
@@ -431,8 +496,7 @@ pub(crate) fn verify_current_user_access(
     }
     // GetSecurityInfo allocates this descriptor with LocalAlloc.
     let _descriptor = LocalSecurityDescriptor(descriptor_ptr);
-    if owner.is_null()
-        || unsafe { windows_sys::Win32::Security::EqualSid(owner, current_user.sid()) } == 0
+    if owner.is_null() || unsafe { windows_sys::Win32::Security::EqualSid(owner, current_sid) } == 0
     {
         return Err(io::Error::new(
             io::ErrorKind::PermissionDenied,
@@ -490,7 +554,7 @@ pub(crate) fn verify_current_user_access(
     } else {
         FILE_INITIAL_ACCESS
     };
-    if unsafe { windows_sys::Win32::Security::EqualSid(ace_sid, current_user.sid()) } == 0
+    if unsafe { windows_sys::Win32::Security::EqualSid(ace_sid, current_sid) } == 0
         || allowed.Mask != expected_access
     {
         return Err(io::Error::new(
