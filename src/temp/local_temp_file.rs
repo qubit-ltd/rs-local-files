@@ -93,7 +93,7 @@ pub struct LocalTempFile {
     /// Open file handle until closed or source authority is invalidated.
     file: Option<File>,
     access_state: LocalTempAccessState,
-    file_identity: crate::observation::LocalFileIdentity,
+    file_identity: Option<crate::observation::LocalFileIdentity>,
 }
 
 impl LocalTempFile {
@@ -111,12 +111,10 @@ impl LocalTempFile {
         let identity = TempEntryIdentity::from_file(&file)?;
         let file_identity = crate::observation::query::query_observation(
             &file,
-            crate::observation::LocalObservationRequirement::Required,
+            crate::observation::LocalObservationRequirement::Optional,
         )
-        .map_err(crate::LocalFileError::into_io_error)?
-        .identity()
-        .cloned()
-        .ok_or_else(|| Error::new(ErrorKind::Unsupported, "temporary file identity is unavailable"))?;
+        .ok()
+        .and_then(|observation| observation.identity().cloned());
         Ok(Self {
             core: LocalTempResourceCore::new(
                 path,
@@ -147,12 +145,10 @@ impl LocalTempFile {
         let identity = crate::rooted::Metadata::from_open_file(&file)?;
         let file_identity = crate::observation::query::query_observation(
             &file,
-            crate::observation::LocalObservationRequirement::Required,
+            crate::observation::LocalObservationRequirement::Optional,
         )
-        .map_err(crate::LocalFileError::into_io_error)?
-        .identity()
-        .cloned()
-        .ok_or_else(|| Error::new(ErrorKind::Unsupported, "temporary file identity is unavailable"))?;
+        .ok()
+        .and_then(|observation| observation.identity().cloned());
         Ok(Self {
             core: LocalTempResourceCore::new(
                 path.clone(),
@@ -398,7 +394,10 @@ impl LocalTempFile {
                 crate::observation::LocalObservationRequirement::Required,
             )
             .map_err(crate::LocalFileError::into_io_error)?
-            .identity() == Some(&self.file_identity);
+            .identity() == self.file_identity.as_ref();
+            if self.file_identity.is_none() {
+                return Err(Error::new(ErrorKind::Unsupported, "temporary file identity is unavailable"));
+            }
             if !expected {
                 return Err(Error::new(
                     ErrorKind::InvalidInput,
@@ -406,6 +405,10 @@ impl LocalTempFile {
                 ));
             }
             if options.file_sync() != LocalFileSyncRequirement::NotRequired {
+                #[cfg(feature = "test-support")]
+                if crate::local::take_test_support("temp-seal-file-sync-before") {
+                    return Err(crate::local::test_fault_error());
+                }
                 match file.sync_all() {
                     Ok(()) => {}
                     Err(error) if options.file_sync() == LocalFileSyncRequirement::Required => {
@@ -415,13 +418,25 @@ impl LocalTempFile {
                 }
             }
             self.access_state = LocalTempAccessState::Indeterminate;
+            #[cfg(feature = "test-support")]
+            if crate::local::take_test_support("temp-seal-access-change") {
+                return Err(crate::local::test_fault_error());
+            }
             #[cfg(unix)]
             crate::temp::internal::privacy_unix::apply_current_user_access(file, false, true)?;
             #[cfg(windows)]
             crate::temp::internal::privacy_windows::apply_current_user_access(file, false, true)?;
             self.access_state = LocalTempAccessState::ReadOnly;
             if options.file_sync() == LocalFileSyncRequirement::Required {
+                #[cfg(feature = "test-support")]
+                if crate::local::take_test_support("temp-seal-file-sync-after-access") {
+                    return Err(crate::local::test_fault_error());
+                }
                 file.sync_all()?;
+            }
+            #[cfg(feature = "test-support")]
+            if crate::local::take_test_support("temp-seal-readonly-reopen") {
+                return Err(crate::local::test_fault_error());
             }
             let readonly = match &self.core.backend {
                 LocalTempResourceBackend::Host(_) => reopen_read_only(self.path(), file)?,
@@ -438,7 +453,7 @@ impl LocalTempFile {
                 crate::observation::LocalObservationRequirement::Required,
             )
             .map_err(crate::LocalFileError::into_io_error)?
-            .identity() == Some(&self.file_identity);
+            .identity() == self.file_identity.as_ref();
             if !reopened_matches {
                 self.access_state = LocalTempAccessState::Indeterminate;
                 return Err(Error::new(
@@ -1126,13 +1141,13 @@ fn closed_file_error() -> Error {
     Error::new(ErrorKind::BrokenPipe, "temporary file handle is closed")
 }
 
-fn reopen_read_only(path: &Path, original: &File) -> Result<File> {
+fn reopen_read_only(path: &Path, _original: &File) -> Result<File> {
     let reopened = std::fs::OpenOptions::new().read(true).open(path)?;
     #[cfg(unix)]
     use std::os::unix::fs::MetadataExt;
     #[cfg(unix)]
     {
-        let before = original.metadata()?;
+        let before = _original.metadata()?;
         let after = reopened.metadata()?;
         if before.dev() != after.dev() || before.ino() != after.ino() {
             return Err(Error::new(

@@ -210,7 +210,15 @@ fn create_private_host_temp_file(
     }
     #[cfg(any(unix, windows))]
     {
-        let parent_handle = File::open(parent).map_err(|error| {
+        if options.max_attempts() == Some(0) {
+            return Err(LocalFileError::from_io(
+                LocalFileOperation::CreateTempFile,
+                Some(parent.to_path_buf()),
+                None,
+                io::Error::new(io::ErrorKind::InvalidInput, "temporary entry retry count must be positive"),
+            ).with_kind(LocalFileErrorKind::InvalidOptions));
+        }
+        let parent_handle = open_host_directory_handle(parent).map_err(|error| {
             LocalFileError::from_io(LocalFileOperation::CreateTempFile, Some(parent.to_path_buf()), None, error)
         })?;
         let maximum = options.max_attempts().unwrap_or(128);
@@ -222,7 +230,7 @@ fn create_private_host_temp_file(
             let sandbox_handle = match private_create_directory_at(&parent_handle, sandbox_os) {
                 Ok(handle) => handle,
                 Err(error) if error.retained.is_none() && error.source.kind() == io::ErrorKind::AlreadyExists => continue,
-                Err(error) => return Err(private_create_error(parent.join(&sandbox_name), error)),
+                Err(error) => return Err(private_create_error(LocalFileOperation::CreateTempFile, parent.join(&sandbox_name), error)),
             };
             let sandbox = parent.join(&sandbox_name);
             let file_name = crate::local::try_random_file_name("qubit-local-files-", options.prefix(), options.suffix())
@@ -233,7 +241,7 @@ fn create_private_host_temp_file(
                     let _ = fs::remove_dir(&sandbox);
                     continue;
                 }
-                Err(error) => return Err(private_create_error(sandbox.join(&file_name), error)),
+                Err(error) => return Err(private_create_error(LocalFileOperation::CreateTempFile, sandbox.join(&file_name), error)),
             };
             let target = sandbox.join(file_name);
             return LocalTempFile::host(target, sandbox, file, symlink_policy).map_err(|error| {
@@ -261,7 +269,15 @@ fn create_private_host_temp_directory(
     }
     #[cfg(any(unix, windows))]
     {
-        let parent_handle = File::open(parent).map_err(|error| {
+        if options.max_attempts() == Some(0) {
+            return Err(LocalFileError::from_io(
+                LocalFileOperation::CreateTempDirectory,
+                Some(parent.to_path_buf()),
+                None,
+                io::Error::new(io::ErrorKind::InvalidInput, "temporary entry retry count must be positive"),
+            ).with_kind(LocalFileErrorKind::InvalidOptions));
+        }
+        let parent_handle = open_host_directory_handle(parent).map_err(|error| {
             LocalFileError::from_io(LocalFileOperation::CreateTempDirectory, Some(parent.to_path_buf()), None, error)
         })?;
         let maximum = options.max_attempts().unwrap_or(128);
@@ -273,7 +289,7 @@ fn create_private_host_temp_directory(
             let sandbox_handle = match private_create_directory_at(&parent_handle, OsStr::new(&sandbox_name)) {
                 Ok(handle) => handle,
                 Err(error) if error.retained.is_none() && error.source.kind() == io::ErrorKind::AlreadyExists => continue,
-                Err(error) => return Err(private_create_error(sandbox, error)),
+                Err(error) => return Err(private_create_error(LocalFileOperation::CreateTempDirectory, sandbox, error)),
             };
             let name = crate::local::try_random_file_name("qubit-local-files-", options.prefix(), options.suffix())
                 .map_err(|error| LocalFileError::from_io(LocalFileOperation::CreateTempDirectory, Some(sandbox.clone()), None, error))?;
@@ -286,7 +302,7 @@ fn create_private_host_temp_directory(
                 Err(error) if error.retained.is_none() && error.source.kind() == io::ErrorKind::AlreadyExists => {
                     let _ = fs::remove_dir(&sandbox);
                 }
-                Err(error) => return Err(private_create_error(sandbox.join(name), error)),
+                Err(error) => return Err(private_create_error(LocalFileOperation::CreateTempDirectory, sandbox.join(name), error)),
             }
         }
         Err(LocalFileError::from_io(
@@ -296,6 +312,19 @@ fn create_private_host_temp_directory(
             io::Error::new(io::ErrorKind::AlreadyExists, "private temp name attempts exhausted"),
         ))
     }
+}
+
+fn open_host_directory_handle(path: &Path) -> io::Result<File> {
+    #[cfg(unix)]
+    { File::open(path) }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        use windows_sys::Win32::Storage::FileSystem::FILE_FLAG_BACKUP_SEMANTICS;
+        std::fs::OpenOptions::new().read(true).custom_flags(FILE_FLAG_BACKUP_SEMANTICS).open(path)
+    }
+    #[cfg(not(any(unix, windows)))]
+    { let _ = path; Err(io::Error::new(io::ErrorKind::Unsupported, "native private temp creation is unsupported")) }
 }
 
 #[cfg(any(unix, windows))]
@@ -315,8 +344,12 @@ fn private_create_directory_at(parent: &File, name: &OsStr) -> Result<File, crat
 }
 
 #[cfg(any(unix, windows))]
-fn private_create_error(path: PathBuf, error: crate::temp::types::NativePrivateCreateError) -> LocalFileError {
-    let mut result = LocalFileError::from_io(LocalFileOperation::CreateTempFile, Some(path.clone()), None, error.source);
+fn private_create_error(
+    operation: LocalFileOperation,
+    path: PathBuf,
+    error: crate::temp::types::NativePrivateCreateError,
+) -> LocalFileError {
+    let mut result = LocalFileError::from_io(operation, Some(path.clone()), None, error.source);
     if let Some(entry) = error.retained {
         result = result.with_temp_recovery(crate::LocalTempRecovery::from_native(path, entry));
     }

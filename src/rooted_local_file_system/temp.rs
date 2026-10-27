@@ -329,13 +329,20 @@ impl RootedLocalFileSystem {
                 .map_err(|error| rooted_io_error(LocalFileOperation::CreateTempFile, parent, error))?;
             let sandbox = parent.join(&sandbox_name);
             let _sandbox_relative = rooted_path(&sandbox, LocalFileOperation::CreateTempFile)?;
-            let sandbox_handle = rooted_private_directory(&parent_handle, OsStr::new(&sandbox_name))
-                .map_err(|error| private_rooted_error(&sandbox, error))?;
+            let sandbox_handle = match rooted_private_directory(&parent_handle, OsStr::new(&sandbox_name)) {
+                Ok(handle) => handle,
+                Err(error) if error.retained.is_none() && error.source.kind() == io::ErrorKind::AlreadyExists => continue,
+                Err(error) => return Err(private_rooted_error(LocalFileOperation::CreateTempFile, &sandbox, error)),
+            };
             let name = try_random_file_name("qubit-local-files-", options.prefix(), options.suffix())
                 .map_err(|error| rooted_io_error(LocalFileOperation::CreateTempFile, &sandbox, error))?;
             let file = match rooted_private_file(&sandbox_handle, OsStr::new(&name)) {
                 Ok(file) => file,
-                Err(error) => return Err(private_rooted_error(&sandbox.join(&name), error)),
+                Err(error) if error.retained.is_none() && error.source.kind() == io::ErrorKind::AlreadyExists => {
+                    let _ = self.root.remove_tree(&rooted_path(&sandbox, LocalFileOperation::CreateTempFile)?);
+                    continue;
+                }
+                Err(error) => return Err(private_rooted_error(LocalFileOperation::CreateTempFile, &sandbox.join(&name), error)),
             };
             let target = sandbox.join(name);
             return LocalTempFile::rooted(Arc::clone(&self.root), target, sandbox.clone(), file, symlink_policy)
@@ -362,8 +369,11 @@ impl RootedLocalFileSystem {
                 .map_err(|error| rooted_io_error(LocalFileOperation::CreateTempDirectory, parent, error))?;
             let sandbox = parent.join(&sandbox_name);
             let _sandbox_relative = rooted_path(&sandbox, LocalFileOperation::CreateTempDirectory)?;
-            let sandbox_handle = rooted_private_directory(&parent_handle, OsStr::new(&sandbox_name))
-                .map_err(|error| private_rooted_error(&sandbox, error))?;
+            let sandbox_handle = match rooted_private_directory(&parent_handle, OsStr::new(&sandbox_name)) {
+                Ok(handle) => handle,
+                Err(error) if error.retained.is_none() && error.source.kind() == io::ErrorKind::AlreadyExists => continue,
+                Err(error) => return Err(private_rooted_error(LocalFileOperation::CreateTempDirectory, &sandbox, error)),
+            };
             let name = try_random_file_name("qubit-local-files-", options.prefix(), options.suffix())
                 .map_err(|error| rooted_io_error(LocalFileOperation::CreateTempDirectory, &sandbox, error))?;
             match rooted_private_directory(&sandbox_handle, OsStr::new(&name)) {
@@ -372,7 +382,10 @@ impl RootedLocalFileSystem {
                     return LocalTempDirectory::rooted(Arc::clone(&self.root), target, sandbox.clone(), symlink_policy, options.cleanup_limits())
                         .map_err(|error| rooted_io_error(LocalFileOperation::CreateTempDirectory, &sandbox, error));
                 }
-                Err(error) => return Err(private_rooted_error(&sandbox.join(name), error)),
+                Err(error) if error.retained.is_none() && error.source.kind() == io::ErrorKind::AlreadyExists => {
+                    let _ = self.root.remove_tree(&rooted_path(&sandbox, LocalFileOperation::CreateTempDirectory)?);
+                }
+                Err(error) => return Err(private_rooted_error(LocalFileOperation::CreateTempDirectory, &sandbox.join(name), error)),
             }
         }
         Err(rooted_io_error(LocalFileOperation::CreateTempDirectory, parent, io::Error::new(io::ErrorKind::AlreadyExists, "private temp name attempts exhausted")))
@@ -388,17 +401,27 @@ fn attempt_budget_exhausted(attempts: usize, max_attempts: Option<usize>) -> boo
 fn rooted_private_file(parent: &File, name: &OsStr) -> Result<File, NativePrivateCreateError> {
     #[cfg(unix)] { crate::temp::internal::privacy_unix::create_private_file_at(parent, name) }
     #[cfg(windows)] { crate::temp::internal::privacy_windows::create_private_file_at(parent, name) }
-    #[cfg(not(any(unix, windows)))] { let _ = (parent, name); unreachable!() }
+    #[cfg(not(any(unix, windows)))] {
+        let _ = (parent, name);
+        Err(NativePrivateCreateError { source: io::Error::new(io::ErrorKind::Unsupported, "private temp files unsupported"), retained: None })
+    }
 }
 
 fn rooted_private_directory(parent: &File, name: &OsStr) -> Result<File, NativePrivateCreateError> {
     #[cfg(unix)] { crate::temp::internal::privacy_unix::create_private_directory_at(parent, name) }
     #[cfg(windows)] { crate::temp::internal::privacy_windows::create_private_directory_at(parent, name) }
-    #[cfg(not(any(unix, windows)))] { let _ = (parent, name); unreachable!() }
+    #[cfg(not(any(unix, windows)))] {
+        let _ = (parent, name);
+        Err(NativePrivateCreateError { source: io::Error::new(io::ErrorKind::Unsupported, "private temp directories unsupported"), retained: None })
+    }
 }
 
-fn private_rooted_error(path: &std::path::Path, error: NativePrivateCreateError) -> crate::LocalFileError {
-    let mut result = rooted_io_error(LocalFileOperation::CreateTempFile, path, error.source);
+fn private_rooted_error(
+    operation: LocalFileOperation,
+    path: &std::path::Path,
+    error: NativePrivateCreateError,
+) -> crate::LocalFileError {
+    let mut result = rooted_io_error(operation, path, error.source);
     if let Some(entry) = error.retained {
         result = result.with_temp_recovery(crate::LocalTempRecovery::from_native(path.to_path_buf(), entry));
     }
