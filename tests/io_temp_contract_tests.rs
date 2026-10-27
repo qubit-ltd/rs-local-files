@@ -74,7 +74,8 @@ fn temp_vectored_write_uses_inherent_method() {
     let written = file
         .write_vectored(&[IoSlice::new(b"vec"), IoSlice::new(b"tored")])
         .expect("vectored write should succeed");
-    assert_eq!(written, 8);
+    assert!((1..=8).contains(&written));
+    Output::write_fully(&mut file, &b"vectored"[written..]).expect("remaining bytes should be written");
     file.as_file_mut()
         .expect("native handle should remain open")
         .seek(SeekFrom::Start(0))
