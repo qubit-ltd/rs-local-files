@@ -201,6 +201,67 @@ fn lf3_temp_required_privacy_is_applied_under_rooted_authority() {
     directory.cleanup().expect("directory cleanup");
 }
 
+#[cfg(all(feature = "test-support", any(unix, windows)))]
+#[test]
+fn lf3_temp_private_guard_handle_reservations_precede_child_mutation() {
+    use crate::LocalFileError;
+    use std::path::Path;
+
+    fn create(
+        filesystem: &LocalFileSystem,
+        rooted: bool,
+        directory: bool,
+        parent: &Path,
+    ) -> Result<(), LocalFileError> {
+        if directory {
+            let options = if rooted {
+                LocalTempDirectoryOptions::new().with_privacy(LocalPrivacyRequirement::Required)
+            } else {
+                LocalTempDirectoryOptions::new()
+                    .with_parent(parent)
+                    .with_privacy(LocalPrivacyRequirement::Required)
+            };
+            filesystem.create_temp_directory_with_options(&options).map(drop)
+        } else {
+            let options = if rooted {
+                LocalTempFileOptions::new().with_privacy(LocalPrivacyRequirement::Required)
+            } else {
+                LocalTempFileOptions::new()
+                    .with_parent(parent)
+                    .with_privacy(LocalPrivacyRequirement::Required)
+            };
+            filesystem.create_temp_file_with_options(&options).map(drop)
+        }
+    }
+
+    for rooted in [false, true] {
+        for directory in [false, true] {
+            for (fault, retains_recovery) in [
+                ("temp-private-parent-clone", false),
+                ("temp-private-sandbox-clone", true),
+            ] {
+                let fixture = tempfile::tempdir().expect("fixture");
+                let filesystem = if rooted {
+                    LocalFileSystem::rooted(fixture.path()).expect("rooted filesystem")
+                } else {
+                    LocalFileSystem::host().expect("host filesystem")
+                };
+                let guard = crate::local::install_test_fault(fault).expect("fault controller");
+                let error = create(&filesystem, rooted, directory, fixture.path()).expect_err("clone failure");
+                drop(guard);
+                if retains_recovery {
+                    let (_, mut recovery) = error.into_temp_recovery_parts();
+                    recovery.as_mut().expect("sandbox recovery owner").cleanup().expect("cleanup recovery");
+                } else {
+                    let (_, recovery) = error.into_temp_recovery_parts();
+                    assert!(recovery.is_none(), "parent clone failed before mutation");
+                }
+                assert_eq!(fs::read_dir(fixture.path()).expect("fixture entries").count(), 0);
+            }
+        }
+    }
+}
+
 #[test]
 fn lf3_temp_sealed_native_path_follows_authority_kind() {
     let fixture = tempfile::tempdir().expect("fixture");
