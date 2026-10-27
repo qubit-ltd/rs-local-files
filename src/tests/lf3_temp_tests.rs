@@ -6,6 +6,7 @@ use crate::LocalSealOptions;
 use crate::LocalTempAccessState;
 use crate::options::LocalTempFileOptions;
 use crate::options::LocalTempDirectoryOptions;
+use crate::options::LocalTempCleanupLimits;
 use crate::policy::LocalPrivacyRequirement;
 
 #[test]
@@ -87,6 +88,24 @@ fn lf3_temp_cleanup_replacement_is_preserved() {
 }
 
 #[test]
+fn lf3_temp_cleanup_limit_retains_owner_for_retry() {
+    let fixture = tempfile::tempdir().expect("fixture");
+    let filesystem = LocalFileSystem::host().expect("host filesystem");
+    let mut temporary = filesystem
+        .create_temp_directory_with_options(
+            &LocalTempDirectoryOptions::new()
+                .with_parent(fixture.path())
+                .with_cleanup_limits(LocalTempCleanupLimits::new().with_max_entries(1)),
+        )
+        .expect("temporary directory");
+    fs::write(temporary.path().join("child"), b"data").expect("child entry");
+    assert!(temporary.cleanup().is_err());
+    assert!(temporary.path().exists());
+    temporary.set_cleanup_limits(LocalTempCleanupLimits::new());
+    temporary.cleanup().expect("retry cleanup");
+}
+
+#[test]
 fn lf3_temp_recovery_survives_error_source_and_io_conversion() {
     use crate::error::{
         LocalFileError, LocalFileErrorKind, LocalFileErrorSource, LocalFileOperation,
@@ -151,6 +170,7 @@ fn lf3_temp_required_privacy_is_applied_at_creation() {
     assert_eq!(fs::metadata(directory.path()).expect("directory metadata").permissions().mode() & 0o777, 0o700);
     let mut directory = directory;
     directory.cleanup().expect("directory cleanup");
+
 }
 
 #[cfg(unix)]
@@ -208,6 +228,9 @@ fn lf3_temp_sealed_native_path_follows_authority_kind() {
 #[cfg(feature = "test-support")]
 #[test]
 fn lf3_temp_seal_faults_retain_owner_and_access_state() {
+    use qubit_io::Output;
+    use std::io::Seek;
+    use std::io::SeekFrom;
     let fixture = tempfile::tempdir().expect("fixture");
     let filesystem = LocalFileSystem::host().expect("host filesystem");
     for (fault, expected_state) in [
@@ -226,8 +249,89 @@ fn lf3_temp_seal_faults_retain_owner_and_access_state() {
         assert_eq!(error.access_state(), expected_state);
         let mut resource = error.into_resource();
         drop(guard);
+        if expected_state != crate::outcome::LocalTempAccessState::Writable {
+            assert!(resource.as_file_mut().is_err());
+            assert!(resource.write_fully(b"blocked").is_err());
+            assert!(Seek::seek(&mut resource, SeekFrom::Start(0)).is_err());
+            let error = resource.keep().expect_err("sealed temp cannot be published");
+            resource = error.into_parts().resource;
+        }
         resource.cleanup().expect("retained resource cleanup");
     }
+}
+
+#[cfg(feature = "test-support")]
+#[test]
+fn lf3_temp_created_file_identity_failure_returns_recovery_owner() {
+    let fixture = tempfile::tempdir().expect("fixture");
+    let filesystem = LocalFileSystem::host().expect("host filesystem");
+    let guard = crate::local::install_test_fault("temp-identity-file").expect("fault controller");
+    let error = filesystem
+        .create_temp_file_with_options(
+            &LocalTempFileOptions::new()
+                .with_parent(fixture.path())
+                .with_privacy(LocalPrivacyRequirement::Required),
+        )
+        .expect_err("injected identity failure");
+    drop(guard);
+    let (error, mut recovery) = error.into_temp_recovery_parts();
+    assert!(error.temp_recovery().is_none());
+    let mut recovery = recovery.take().expect("partial native owner");
+    let path = recovery.path().to_path_buf();
+    let sandbox = path.parent().expect("private sandbox").to_path_buf();
+    recovery.cleanup().expect("cleanup partial entry");
+    assert!(!path.exists());
+    assert!(!sandbox.exists());
+}
+
+#[cfg(feature = "test-support")]
+#[test]
+fn lf3_temp_private_creation_retries_collisions_and_cleans_own_sandbox() {
+    let fixture = tempfile::tempdir().expect("fixture");
+    let filesystem = LocalFileSystem::host().expect("host filesystem");
+    let fault = crate::local::install_test_fault("temp-private-file-collision").expect("fault controller");
+    let file = filesystem
+        .create_temp_file_with_options(
+            &LocalTempFileOptions::new()
+                .with_parent(fixture.path())
+                .with_privacy(LocalPrivacyRequirement::Required),
+        )
+        .expect("collision retry succeeds");
+    drop(fault);
+    let mut file = file;
+    file.cleanup().expect("file cleanup");
+
+    let rooted = LocalFileSystem::rooted(fixture.path()).expect("rooted filesystem");
+    let fault = crate::local::install_test_fault("temp-private-file-collision").expect("fault controller");
+    let rooted_file = rooted
+        .create_temp_file_with_options(
+            &LocalTempFileOptions::new().with_privacy(LocalPrivacyRequirement::Required),
+        )
+        .expect("rooted file collision retry succeeds");
+    drop(fault);
+    let mut rooted_file = rooted_file;
+    rooted_file.cleanup().expect("rooted file cleanup");
+
+    let fault = crate::local::install_test_fault("temp-private-directory-target-collision").expect("fault controller");
+    let directory = rooted
+        .create_temp_directory_with_options(
+            &LocalTempDirectoryOptions::new().with_privacy(LocalPrivacyRequirement::Required),
+        )
+        .expect("directory collision retry succeeds");
+    drop(fault);
+    let mut directory = directory;
+    directory.cleanup().expect("directory cleanup");
+
+    let fault = crate::local::install_test_fault("temp-private-file-collision").expect("fault controller");
+    let error = filesystem.create_temp_file_with_options(
+        &LocalTempFileOptions::new()
+            .with_parent(fixture.path())
+            .with_max_attempts(1)
+            .with_privacy(LocalPrivacyRequirement::Required),
+    );
+    drop(fault);
+    assert!(error.is_err());
+    assert_eq!(fs::read_dir(fixture.path()).expect("fixture entries").count(), 0);
 }
 
 #[cfg(unix)]
@@ -254,6 +358,7 @@ fn lf3_temp_recovery_unknown_or_replaced_entries_are_not_removed() {
             name: OsString::from("entry"),
             file: Some(original),
             identity,
+            directory: false,
         },
     );
     fs::remove_file(&path).expect("remove original name");
@@ -271,10 +376,31 @@ fn lf3_temp_recovery_unknown_or_replaced_entries_are_not_removed() {
             name: OsString::from("unknown"),
             file: Some(unknown_file),
             identity: None,
+            directory: false,
         },
     );
     assert!(unknown.cleanup().is_err());
     assert_eq!(fs::read(unknown_path).expect("unknown entry remains"), b"unknown");
+
+    let directory_path = fixture.path().join("native-directory");
+    fs::create_dir(&directory_path).expect("native directory");
+    let directory_handle = File::open(&directory_path).expect("directory handle");
+    let directory_identity = query::query_observation(&directory_handle, LocalObservationRequirement::Required)
+        .expect("directory identity")
+        .identity()
+        .cloned();
+    let mut directory_recovery = crate::temp::LocalTempRecovery::from_native(
+        directory_path.clone(),
+        NativePrivateEntry {
+            parent: File::open(fixture.path()).expect("parent handle"),
+            name: OsString::from("native-directory"),
+            file: Some(directory_handle),
+            identity: directory_identity,
+            directory: true,
+        },
+    );
+    directory_recovery.cleanup().expect("remove retained directory");
+    assert!(!directory_path.exists());
 }
 
 #[cfg(windows)]
@@ -302,4 +428,28 @@ fn lf3_temp_windows_required_private_creation_and_seal() {
         .expect("protected rooted temp directory");
     let mut directory = directory;
     directory.cleanup().expect("rooted cleanup");
+}
+
+#[cfg(windows)]
+#[test]
+fn lf3_temp_windows_partial_acl_failure_retains_cleanup_owner() {
+    use crate::temp::internal::privacy_windows;
+
+    let fixture = tempfile::tempdir().expect("fixture");
+    let filesystem = LocalFileSystem::host().expect("host filesystem");
+    privacy_windows::fail_once_at(privacy_windows::FailurePoint::AclReadback);
+    let error = filesystem
+        .create_temp_file_with_options(
+            &LocalTempFileOptions::new()
+                .with_parent(fixture.path())
+                .with_privacy(LocalPrivacyRequirement::Required),
+        )
+        .expect_err("injected ACL readback failure");
+    assert!(error.temp_recovery().and_then(|recovery| recovery.identity()).is_some());
+    let (error, mut recovery) = error.into_temp_recovery_parts();
+    assert!(error.temp_recovery().is_none());
+    let recovery = recovery.as_mut().expect("partial resource owner");
+    let path = recovery.path().to_path_buf();
+    recovery.cleanup().expect("cleanup ACL partial");
+    assert!(!path.exists());
 }

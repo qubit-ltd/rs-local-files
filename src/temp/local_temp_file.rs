@@ -275,6 +275,15 @@ impl LocalTempFile {
     #[inline]
     pub fn keep(self) -> std::result::Result<LocalPersistOutcome, LocalPersistError<Self>> {
         let requested_target = self.core.path.clone();
+        if self.access_state != LocalTempAccessState::Writable {
+            return Err(self.persist_error(
+                Error::new(ErrorKind::PermissionDenied, "sealed temporary file cannot be persisted"),
+                requested_target,
+                None,
+                LocalPersistStage::InstallDestination,
+                LocalPersistFailureState::NotPublished,
+            ));
+        }
         if let Err(error) = self.core.ensure_publishable() {
             return Err(self.persist_error(
                 error,
@@ -559,6 +568,15 @@ impl LocalTempFile {
         F: FnOnce(),
     {
         let requested_target = target.to_path_buf();
+        if self.access_state != LocalTempAccessState::Writable {
+            return Err(self.persist_error(
+                Error::new(ErrorKind::PermissionDenied, "sealed temporary file cannot be persisted"),
+                requested_target,
+                None,
+                LocalPersistStage::InstallDestination,
+                LocalPersistFailureState::NotPublished,
+            ));
+        }
         if let Err(error) = self.core.ensure_publishable() {
             return Err(self.persist_error(
                 error,

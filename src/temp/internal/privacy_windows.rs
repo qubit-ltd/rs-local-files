@@ -392,13 +392,20 @@ fn create_private_entry_at(
         retained: None,
     })?;
     if let Err(source) = verify_current_user_access(&file, directory, false) {
+        let identity = crate::observation::query::query_observation(
+            &file,
+            crate::observation::LocalObservationRequirement::Optional,
+        )
+        .ok()
+        .and_then(|observation| observation.identity().cloned());
         return Err(NativePrivateCreateError {
             source,
             retained: Some(NativePrivateEntry {
                 parent: retained_parent,
                 name: retained_name,
                 file: Some(file),
-                identity: None,
+                identity,
+                directory,
             }),
         });
     }

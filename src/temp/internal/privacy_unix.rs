@@ -58,6 +58,7 @@ where
         Err(source) => {
             let identity = identity_for_file(&file).ok();
             return Err(create_error(
+                false,
                 source,
                 retained_parent,
                 OsStr::from_bytes(name.as_bytes()),
@@ -70,6 +71,7 @@ where
     let mode = metadata.mode() & 0o777;
     if !metadata.file_type().is_file() || metadata.uid() != unsafe { libc::geteuid() } {
         return Err(create_error(
+            false,
             io::Error::new(
                 io::ErrorKind::PermissionDenied,
                 "created entry is not an owned regular file",
@@ -82,6 +84,7 @@ where
     }
     if mode & 0o077 != 0 || mode & 0o600 != 0o600 {
         return Err(create_error(
+            false,
             io::Error::new(
                 io::ErrorKind::PermissionDenied,
                 "umask prevented required private file mode 0600",
@@ -155,6 +158,7 @@ where
     if descriptor < 0 {
         let source = io::Error::last_os_error();
         return Err(create_error(
+            true,
             source,
             retained_parent,
             OsStr::from_bytes(name.as_bytes()),
@@ -170,6 +174,7 @@ where
         Err(source) => {
             let identity = identity_for_file(&directory).ok();
             return Err(create_error(
+                true,
                 source,
                 retained_parent,
                 OsStr::from_bytes(name.as_bytes()),
@@ -183,6 +188,7 @@ where
         Ok(identity) => identity,
         Err(source) => {
             return Err(create_error(
+                true,
                 source,
                 retained_parent,
                 OsStr::from_bytes(name.as_bytes()),
@@ -193,6 +199,7 @@ where
     };
     if identity.as_ref() != Some(&name_identity) {
         return Err(create_error(
+            true,
             io::Error::new(
                 io::ErrorKind::PermissionDenied,
                 "directory entry changed after handle acquisition",
@@ -206,6 +213,7 @@ where
     let mode = metadata.mode() & 0o777;
     if !metadata.is_dir() || metadata.uid() != unsafe { libc::geteuid() } {
         return Err(create_error(
+            true,
             io::Error::new(
                 io::ErrorKind::PermissionDenied,
                 "created entry is not an owned directory",
@@ -218,6 +226,7 @@ where
     }
     if mode & 0o077 != 0 || mode & 0o700 != 0o700 {
         return Err(create_error(
+            true,
             io::Error::new(
                 io::ErrorKind::PermissionDenied,
                 "umask prevented required private directory mode 0700",
@@ -327,6 +336,7 @@ fn identity_for_name(parent: &File, name: &OsStr) -> io::Result<LocalFileIdentit
 }
 
 fn create_error(
+    directory: bool,
     source: io::Error,
     parent: File,
     name: &OsStr,
@@ -340,6 +350,7 @@ fn create_error(
             name: name.to_os_string(),
             file,
             identity,
+            directory,
         }),
     }
 }

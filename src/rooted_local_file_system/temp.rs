@@ -33,6 +33,7 @@ use crate::write::Mode;
 use crate::write::OpenOptions;
 use crate::policy::LocalPrivacyRequirement;
 use crate::temp::types::NativePrivateCreateError;
+use crate::temp::types::NativePrivateEntry;
 use std::ffi::OsStr;
 use std::fs::File;
 
@@ -332,21 +333,42 @@ impl RootedLocalFileSystem {
             let sandbox_handle = match rooted_private_directory(&parent_handle, OsStr::new(&sandbox_name)) {
                 Ok(handle) => handle,
                 Err(error) if error.retained.is_none() && error.source.kind() == io::ErrorKind::AlreadyExists => continue,
-                Err(error) => return Err(private_rooted_error(LocalFileOperation::CreateTempFile, &sandbox, error)),
+                Err(error) => return Err(private_rooted_error(LocalFileOperation::CreateTempFile, &sandbox, error, None)),
             };
             let name = try_random_file_name("qubit-local-files-", options.prefix(), options.suffix())
-                .map_err(|error| rooted_io_error(LocalFileOperation::CreateTempFile, &sandbox, error))?;
+                .map_err(|error| rooted_sandbox_error(
+                    LocalFileOperation::CreateTempFile,
+                    &sandbox,
+                    error,
+                    rooted_directory_guard(&parent_handle, &sandbox_name, &sandbox_handle),
+                ))?;
             let file = match rooted_private_file(&sandbox_handle, OsStr::new(&name)) {
                 Ok(file) => file,
                 Err(error) if error.retained.is_none() && error.source.kind() == io::ErrorKind::AlreadyExists => {
-                    let _ = self.root.remove_tree(&rooted_path(&sandbox, LocalFileOperation::CreateTempFile)?);
+                    cleanup_rooted_sandbox(&sandbox, &parent_handle, &sandbox_name, &sandbox_handle)?;
                     continue;
                 }
-                Err(error) => return Err(private_rooted_error(LocalFileOperation::CreateTempFile, &sandbox.join(&name), error)),
+                Err(error) => {
+                    let extra = rooted_directory_guard(&parent_handle, &sandbox_name, &sandbox_handle);
+                    return Err(private_rooted_error(LocalFileOperation::CreateTempFile, &sandbox.join(&name), error, extra));
+                }
             };
-            let target = sandbox.join(name);
-            return LocalTempFile::rooted(Arc::clone(&self.root), target, sandbox.clone(), file, symlink_policy)
-                .map_err(|error| rooted_io_error(LocalFileOperation::CreateTempFile, &sandbox, error));
+            let target = sandbox.join(&name);
+            let sandbox_guard = rooted_directory_guard(&parent_handle, &sandbox_name, &sandbox_handle);
+            let owner_file = match file.try_clone() {
+                Ok(file) => file,
+                Err(error) => {
+                    let recovery = rooted_temp_recovery(target.clone(), sandbox_handle, name.clone(), file, false, sandbox_guard);
+                    return Err(rooted_io_error(LocalFileOperation::CreateTempFile, &target, error).with_temp_recovery(recovery));
+                }
+            };
+            return match LocalTempFile::rooted(Arc::clone(&self.root), target.clone(), sandbox.clone(), owner_file, symlink_policy) {
+                Ok(resource) => Ok(resource),
+                Err(error) => {
+                    Err(rooted_io_error(LocalFileOperation::CreateTempFile, &target, error)
+                        .with_temp_recovery(rooted_temp_recovery(target, sandbox_handle, name, file, false, sandbox_guard)))
+                }
+            };
         }
         Err(rooted_io_error(LocalFileOperation::CreateTempFile, parent, io::Error::new(io::ErrorKind::AlreadyExists, "private temp name attempts exhausted")))
     }
@@ -372,20 +394,42 @@ impl RootedLocalFileSystem {
             let sandbox_handle = match rooted_private_directory(&parent_handle, OsStr::new(&sandbox_name)) {
                 Ok(handle) => handle,
                 Err(error) if error.retained.is_none() && error.source.kind() == io::ErrorKind::AlreadyExists => continue,
-                Err(error) => return Err(private_rooted_error(LocalFileOperation::CreateTempDirectory, &sandbox, error)),
+                Err(error) => return Err(private_rooted_error(LocalFileOperation::CreateTempDirectory, &sandbox, error, None)),
             };
             let name = try_random_file_name("qubit-local-files-", options.prefix(), options.suffix())
-                .map_err(|error| rooted_io_error(LocalFileOperation::CreateTempDirectory, &sandbox, error))?;
-            match rooted_private_directory(&sandbox_handle, OsStr::new(&name)) {
-                Ok(_) => {
-                    let target = sandbox.join(name);
-                    return LocalTempDirectory::rooted(Arc::clone(&self.root), target, sandbox.clone(), symlink_policy, options.cleanup_limits())
-                        .map_err(|error| rooted_io_error(LocalFileOperation::CreateTempDirectory, &sandbox, error));
+                .map_err(|error| rooted_sandbox_error(
+                    LocalFileOperation::CreateTempDirectory,
+                    &sandbox,
+                    error,
+                    rooted_directory_guard(&parent_handle, &sandbox_name, &sandbox_handle),
+                ))?;
+            #[cfg(feature = "test-support")]
+            let target_created = if crate::local::take_test_support("temp-private-directory-target-collision") {
+                Err(NativePrivateCreateError { source: io::Error::from(io::ErrorKind::AlreadyExists), retained: None })
+            } else {
+                rooted_private_directory(&sandbox_handle, OsStr::new(&name))
+            };
+            #[cfg(not(feature = "test-support"))]
+            let target_created = rooted_private_directory(&sandbox_handle, OsStr::new(&name));
+            match target_created {
+                Ok(target_handle) => {
+                    let target = sandbox.join(&name);
+                    return match LocalTempDirectory::rooted(Arc::clone(&self.root), target.clone(), sandbox.clone(), symlink_policy, options.cleanup_limits()) {
+                        Ok(resource) => Ok(resource),
+                        Err(error) => {
+                            let sandbox_guard = rooted_directory_guard(&parent_handle, &sandbox_name, &sandbox_handle);
+                            Err(rooted_io_error(LocalFileOperation::CreateTempDirectory, &target, error)
+                                .with_temp_recovery(rooted_temp_recovery(target, sandbox_handle, name, target_handle, true, sandbox_guard)))
+                        }
+                    };
                 }
                 Err(error) if error.retained.is_none() && error.source.kind() == io::ErrorKind::AlreadyExists => {
-                    let _ = self.root.remove_tree(&rooted_path(&sandbox, LocalFileOperation::CreateTempDirectory)?);
+                    cleanup_rooted_sandbox(&sandbox, &parent_handle, &sandbox_name, &sandbox_handle)?;
                 }
-                Err(error) => return Err(private_rooted_error(LocalFileOperation::CreateTempDirectory, &sandbox.join(name), error)),
+                Err(error) => {
+                    let extra = rooted_directory_guard(&parent_handle, &sandbox_name, &sandbox_handle);
+                    return Err(private_rooted_error(LocalFileOperation::CreateTempDirectory, &sandbox.join(name), error, extra));
+                }
             }
         }
         Err(rooted_io_error(LocalFileOperation::CreateTempDirectory, parent, io::Error::new(io::ErrorKind::AlreadyExists, "private temp name attempts exhausted")))
@@ -399,6 +443,10 @@ fn attempt_budget_exhausted(attempts: usize, max_attempts: Option<usize>) -> boo
 }
 
 fn rooted_private_file(parent: &File, name: &OsStr) -> Result<File, NativePrivateCreateError> {
+    #[cfg(feature = "test-support")]
+    if crate::local::take_test_support("temp-private-file-collision") {
+        return Err(NativePrivateCreateError { source: io::Error::from(io::ErrorKind::AlreadyExists), retained: None });
+    }
     #[cfg(unix)] { crate::temp::internal::privacy_unix::create_private_file_at(parent, name) }
     #[cfg(windows)] { crate::temp::internal::privacy_windows::create_private_file_at(parent, name) }
     #[cfg(not(any(unix, windows)))] {
@@ -408,6 +456,10 @@ fn rooted_private_file(parent: &File, name: &OsStr) -> Result<File, NativePrivat
 }
 
 fn rooted_private_directory(parent: &File, name: &OsStr) -> Result<File, NativePrivateCreateError> {
+    #[cfg(feature = "test-support")]
+    if crate::local::take_test_support("temp-private-directory-collision") {
+        return Err(NativePrivateCreateError { source: io::Error::from(io::ErrorKind::AlreadyExists), retained: None });
+    }
     #[cfg(unix)] { crate::temp::internal::privacy_unix::create_private_directory_at(parent, name) }
     #[cfg(windows)] { crate::temp::internal::privacy_windows::create_private_directory_at(parent, name) }
     #[cfg(not(any(unix, windows)))] {
@@ -420,10 +472,82 @@ fn private_rooted_error(
     operation: LocalFileOperation,
     path: &std::path::Path,
     error: NativePrivateCreateError,
+    extra: Option<NativePrivateEntry>,
 ) -> crate::LocalFileError {
     let mut result = rooted_io_error(operation, path, error.source);
-    if let Some(entry) = error.retained {
-        result = result.with_temp_recovery(crate::LocalTempRecovery::from_native(path.to_path_buf(), entry));
+    let mut entries = error.retained.into_iter().collect::<Vec<_>>();
+    if let Some(extra) = extra { entries.push(extra); }
+    if !entries.is_empty() {
+        result = result.with_temp_recovery(crate::LocalTempRecovery::from_native_entries(path.to_path_buf(), entries));
     }
     result
+}
+
+fn rooted_sandbox_error(
+    operation: LocalFileOperation,
+    path: &std::path::Path,
+    source: io::Error,
+    entry: Option<NativePrivateEntry>,
+) -> crate::LocalFileError {
+    let error = rooted_io_error(operation, path, source);
+    match entry {
+        Some(entry) => error.with_temp_recovery(crate::LocalTempRecovery::from_native(path.to_path_buf(), entry)),
+        None => error,
+    }
+}
+
+fn cleanup_rooted_sandbox(
+    path: &std::path::Path,
+    parent: &File,
+    name: &str,
+    directory: &File,
+) -> LocalResult<()> {
+    let entry = rooted_directory_guard(parent, name, directory).ok_or_else(|| {
+        crate::LocalFileError::new(crate::LocalFileErrorKind::RequirementNotMet, LocalFileOperation::Cleanup)
+    })?;
+    let mut owner = crate::LocalTempRecovery::from_native(path.to_path_buf(), entry);
+    match owner.cleanup() {
+        Ok(()) => Ok(()),
+        Err(error) => Err(error.with_temp_recovery(owner)),
+    }
+}
+
+fn rooted_temp_recovery(
+    path: std::path::PathBuf,
+    parent: File,
+    name: String,
+    file: File,
+    directory: bool,
+    sandbox: Option<NativePrivateEntry>,
+) -> crate::LocalTempRecovery {
+    let identity = crate::observation::query::query_observation(
+        &file,
+        crate::observation::LocalObservationRequirement::Optional,
+    )
+    .ok()
+    .and_then(|observation| observation.identity().cloned());
+    let primary = NativePrivateEntry {
+            parent,
+            name: name.into(),
+            file: Some(file),
+            identity,
+            directory,
+        };
+    let mut entries = vec![primary];
+    if let Some(sandbox) = sandbox { entries.push(sandbox); }
+    crate::LocalTempRecovery::from_native_entries(path, entries)
+}
+
+fn rooted_directory_guard(parent: &File, name: &str, directory: &File) -> Option<NativePrivateEntry> {
+    let identity = crate::observation::query::query_observation(
+        directory,
+        crate::observation::LocalObservationRequirement::Optional,
+    ).ok().and_then(|observation| observation.identity().cloned());
+    Some(NativePrivateEntry {
+        parent: parent.try_clone().ok()?,
+        name: name.into(),
+        file: Some(directory.try_clone().ok()?),
+        identity,
+        directory: true,
+    })
 }
