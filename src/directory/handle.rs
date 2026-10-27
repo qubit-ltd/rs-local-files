@@ -440,10 +440,6 @@ impl LocalDirectoryHandle {
         self.validate(relative, follow_final)
     }
 
-    pub(super) fn filesystem(&self) -> &LocalFileSystem {
-        &self.filesystem
-    }
-
     /// Reads final-entry metadata beneath this authority.
     ///
     /// Returns `None` only when the entry is safely absent.
