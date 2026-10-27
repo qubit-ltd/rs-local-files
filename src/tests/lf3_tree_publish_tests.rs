@@ -107,14 +107,15 @@ fn lf_review_tree_special_allowed_with_only_limits() {
     use std::os::unix::net::UnixListener;
 
     let fixture = tempfile::tempdir().expect("fixture");
+    let root = std::fs::canonicalize(fixture.path()).expect("canonicalize fixture");
     let fs = crate::LocalFileSystem::host().expect("Host");
     let parent = fs
-        .open_directory_with_options(fixture.path(), &LocalDirectoryOpenOptions::new())
+        .open_directory_with_options(&root, &LocalDirectoryOpenOptions::new())
         .expect("parent");
     let stage = parent
         .create_staged_directory(&LocalTempDirectoryOptions::new())
         .expect("stage");
-    let source = fixture.path().join(stage.relative_name()).join("socket");
+    let source = root.join(stage.relative_name()).join("socket");
     drop(UnixListener::bind(&source).expect("socket"));
     let validation = LocalTreeValidationOptions::new().with_limits(LocalListOptions::new().with_max_entries(4));
     stage
@@ -125,7 +126,7 @@ fn lf_review_tree_special_allowed_with_only_limits() {
         )
         .expect("special entry allowed by default");
     assert!(
-        std::fs::symlink_metadata(fixture.path().join("destination/socket"))
+        std::fs::symlink_metadata(root.join("destination/socket"))
             .expect("published socket")
             .file_type()
             .is_socket()
@@ -138,14 +139,15 @@ fn lf_review_tree_special_rejected_when_requested() {
     use std::os::unix::net::UnixListener;
 
     let fixture = tempfile::tempdir().expect("fixture");
+    let root = std::fs::canonicalize(fixture.path()).expect("canonicalize fixture");
     let fs = crate::LocalFileSystem::host().expect("Host");
     let parent = fs
-        .open_directory_with_options(fixture.path(), &LocalDirectoryOpenOptions::new())
+        .open_directory_with_options(&root, &LocalDirectoryOpenOptions::new())
         .expect("parent");
     let stage = parent
         .create_staged_directory(&LocalTempDirectoryOptions::new())
         .expect("stage");
-    let source = fixture.path().join(stage.relative_name()).join("socket");
+    let source = root.join(stage.relative_name()).join("socket");
     drop(UnixListener::bind(&source).expect("socket"));
     let validation = LocalTreeValidationOptions::new().with_reject_special_files();
     let error = stage
@@ -160,7 +162,7 @@ fn lf_review_tree_special_rejected_when_requested() {
         crate::error::LocalFileErrorKind::RequirementNotMet
     );
     assert_eq!(error.publication(), LocalTreePublication::NotPublished);
-    assert!(!fixture.path().join("destination").exists());
+    assert!(!root.join("destination").exists());
     error
         .into_stage()
         .expect("owner returned")

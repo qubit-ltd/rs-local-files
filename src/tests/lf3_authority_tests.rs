@@ -15,6 +15,12 @@ use crate::options::LocalPathBindingOptions;
 use crate::options::LocalWriteMode;
 use crate::options::LocalWriteOptions;
 
+fn fixture_on_canonical_current_directory() -> tempfile::TempDir {
+    let current = std::env::current_dir().expect("current directory should be available");
+    let current = std::fs::canonicalize(current).expect("current directory should be canonical");
+    tempfile::tempdir_in(current).expect("fixture should exist")
+}
+
 #[test]
 fn lf3_authority_rejects_absolute_and_escape() {
     let fixture = tempfile::tempdir().expect("fixture should exist");
@@ -64,7 +70,7 @@ fn lf3_authority_rejects_absolute_and_escape() {
 #[cfg(unix)]
 #[test]
 fn lf3_authority_checks_expanded_symlink_components() {
-    let fixture = tempfile::tempdir().expect("fixture should exist");
+    let fixture = fixture_on_canonical_current_directory();
     let denied = fixture.path().join("private");
     std::fs::create_dir(&denied).expect("denied directory should exist");
     std::fs::write(denied.join("value"), b"value").expect("target file should exist");
@@ -89,7 +95,7 @@ fn lf3_authority_checks_expanded_symlink_components() {
 #[cfg(unix)]
 #[test]
 fn lf3_authority_checks_symlink_components_before_parent_collapse() {
-    let fixture = tempfile::tempdir().expect("fixture should exist");
+    let fixture = fixture_on_canonical_current_directory();
     std::fs::create_dir(fixture.path().join("private")).expect("denied directory should exist");
     std::fs::create_dir(fixture.path().join("public")).expect("target directory should exist");
     std::fs::write(fixture.path().join("public/value"), b"value").expect("target should exist");
@@ -114,7 +120,7 @@ fn lf3_authority_checks_symlink_components_before_parent_collapse() {
 #[cfg(unix)]
 #[test]
 fn lf3_authority_initial_host_open_checks_link_target_policy() {
-    let fixture = tempfile::tempdir().expect("fixture should exist");
+    let fixture = fixture_on_canonical_current_directory();
     let denied = fixture.path().join("private");
     std::fs::create_dir(&denied).expect("target directory should exist");
     let alias = fixture.path().join("alias");
@@ -440,6 +446,7 @@ fn lf3_observed_reader_binding_shares_budget_across_parent_resolution_and_anchor
     assert_eq!(result.unwrap_err().kind(), LocalFileErrorKind::ResourceLimit);
 }
 
+#[cfg(unix)]
 #[test]
 fn lf3_authority_binding_detects_parent_replacement() {
     let fixture = tempfile::tempdir().expect("fixture should exist");
@@ -463,6 +470,7 @@ fn lf3_authority_binding_detects_parent_replacement() {
     );
 }
 
+#[cfg(unix)]
 #[test]
 fn lf3_authority_binding_detects_fixed_root_replacement() {
     let fixture = tempfile::tempdir().expect("fixture should exist");

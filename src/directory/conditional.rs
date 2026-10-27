@@ -5,11 +5,16 @@
 //
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
+#[cfg(feature = "digest")]
 use std::path::Path;
 
+#[cfg(feature = "digest")]
 use crate::LocalFileError;
+#[cfg(feature = "digest")]
 use crate::LocalFileErrorKind;
+#[cfg(feature = "digest")]
 use crate::LocalFileOperation;
+#[cfg(feature = "digest")]
 use crate::LocalResult;
 use crate::LocalWriteOptions;
 use crate::capability::LocalCapabilitySupport;

@@ -6,7 +6,7 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use qubit_io::Output;
 use sha2::Digest;
@@ -24,10 +24,15 @@ use crate::policy::LocalDurabilityRequirement;
 use crate::policy::LocalFileSyncRequirement;
 use crate::policy::LocalSymlinkPolicy;
 
+fn fixture_root(fixture: &tempfile::TempDir) -> PathBuf {
+    fs::canonicalize(fixture.path()).expect("canonicalize fixture directory")
+}
+
 #[test]
 fn lf3_conditional_absent_fixed_parent() {
     let fixture = tempfile::tempdir().expect("fixture directory");
-    let original_parent = fixture.path().join("parent");
+    let root = fixture_root(&fixture);
+    let original_parent = root.join("parent");
     fs::create_dir(&original_parent).expect("create parent");
     let mut fsys = LocalFileSystem::host().expect("host filesystem");
     fsys.set_symlink_policy(LocalSymlinkPolicy::Reject)
@@ -35,7 +40,7 @@ fn lf3_conditional_absent_fixed_parent() {
     let parent = fsys
         .open_directory_with_options(&original_parent, &LocalDirectoryOpenOptions::new())
         .expect("open fixed parent");
-    let renamed_parent = fixture.path().join("renamed-parent");
+    let renamed_parent = root.join("renamed-parent");
     fs::rename(&original_parent, &renamed_parent).expect("rename parent");
     let options = LocalWriteOptions::new(LocalWriteMode::CreateNew).with_file_sync(LocalFileSyncRequirement::Required);
     assert_eq!(
@@ -57,27 +62,25 @@ fn lf3_conditional_absent_fixed_parent() {
 #[test]
 fn lf3_conditional_fixed_parent_absent_conflict_keeps_target() {
     let fixture = tempfile::tempdir().expect("fixture directory");
+    let root = fixture_root(&fixture);
     let mut fsys = LocalFileSystem::host().expect("host filesystem");
     fsys.set_symlink_policy(LocalSymlinkPolicy::Reject)
         .expect("set link policy");
     let parent = fsys
-        .open_directory_with_options(fixture.path(), &LocalDirectoryOpenOptions::new())
+        .open_directory_with_options(&root, &LocalDirectoryOpenOptions::new())
         .expect("open fixed parent");
     let options = LocalWriteOptions::new(LocalWriteMode::CreateNew);
     let mut writer = parent
         .open_conditional_writer::<Sha256>(Path::new("target"), LocalWritePrecondition::Absent, &options)
         .expect("open conditional writer");
     writer.write_fully(b"candidate").expect("write candidate");
-    fs::write(fixture.path().join("target"), b"competitor").expect("install competitor");
+    fs::write(root.join("target"), b"competitor").expect("install competitor");
     let error = writer.commit().expect_err("late target must conflict");
     assert_eq!(
         error.publication(),
         crate::outcome::LocalConditionalPublicationState::NotPublished
     );
-    assert_eq!(
-        fs::read(fixture.path().join("target")).expect("read competitor"),
-        b"competitor"
-    );
+    assert_eq!(fs::read(root.join("target")).expect("read competitor"), b"competitor");
     assert!(error.candidate().is_some(), "candidate remains recoverable");
 }
 
@@ -85,12 +88,13 @@ fn lf3_conditional_fixed_parent_absent_conflict_keeps_target() {
 #[cfg(unix)]
 fn lf3_conditional_fixed_parent_content_conflict_keeps_original() {
     let fixture = tempfile::tempdir().expect("fixture directory");
-    fs::write(fixture.path().join("target"), b"current").expect("write target");
+    let root = fixture_root(&fixture);
+    fs::write(root.join("target"), b"current").expect("write target");
     let mut fsys = LocalFileSystem::host().expect("host filesystem");
     fsys.set_symlink_policy(LocalSymlinkPolicy::Reject)
         .expect("set link policy");
     let parent = fsys
-        .open_directory_with_options(fixture.path(), &LocalDirectoryOpenOptions::new())
+        .open_directory_with_options(&root, &LocalDirectoryOpenOptions::new())
         .expect("open fixed parent");
     let options = LocalWriteOptions::new(LocalWriteMode::CreateOrReplace);
     let mut writer = parent
@@ -110,10 +114,7 @@ fn lf3_conditional_fixed_parent_content_conflict_keeps_original() {
         error.reason(),
         crate::error::LocalConditionalFailureReason::PreconditionMismatch
     );
-    assert_eq!(
-        fs::read(fixture.path().join("target")).expect("read original"),
-        b"current"
-    );
+    assert_eq!(fs::read(root.join("target")).expect("read original"), b"current");
 }
 
 #[cfg(feature = "test-support")]
@@ -123,7 +124,7 @@ fn lf3_conditional_required_file_sync_failure_prevents_publication() {
     use crate::test_support::TestConditionalPoint;
 
     let fixture = tempfile::tempdir().expect("fixture directory");
-    let target = fixture.path().join("target");
+    let target = fixture_root(&fixture).join("target");
     let mut fsys = LocalFileSystem::host().expect("host filesystem");
     fsys.set_symlink_policy(LocalSymlinkPolicy::Reject)
         .expect("set link policy");
@@ -158,7 +159,7 @@ fn lf3_conditional_preferred_file_sync_failure_reports_false_and_publishes() {
     use crate::test_support::TestConditionalPoint;
 
     let fixture = tempfile::tempdir().expect("fixture directory");
-    let target = fixture.path().join("target");
+    let target = fixture_root(&fixture).join("target");
     let mut fsys = LocalFileSystem::host().expect("host filesystem");
     fsys.set_symlink_policy(LocalSymlinkPolicy::Reject)
         .expect("set link policy");
@@ -180,15 +181,16 @@ fn lf3_conditional_preferred_file_sync_failure_reports_false_and_publishes() {
 #[test]
 fn lf3_conditional_windows_content_preflight_and_rooted_absent_are_unchanged() {
     let fixture = tempfile::tempdir().expect("fixture directory");
-    fs::write(fixture.path().join("target"), b"before").expect("write target");
+    let root = fixture_root(&fixture);
+    fs::write(root.join("target"), b"before").expect("write target");
     let mut fsys = LocalFileSystem::host().expect("host filesystem");
     fsys.set_symlink_policy(LocalSymlinkPolicy::Reject)
         .expect("set link policy");
     let parent = fsys
-        .open_directory_with_options(fixture.path(), &LocalDirectoryOpenOptions::new())
+        .open_directory_with_options(&root, &LocalDirectoryOpenOptions::new())
         .expect("open fixed parent");
     let options = LocalWriteOptions::new(LocalWriteMode::CreateOrReplace);
-    let before = fs::read_dir(fixture.path())
+    let before = fs::read_dir(&root)
         .expect("enumerate before")
         .map(|entry| entry.expect("entry").file_name())
         .collect::<std::collections::BTreeSet<_>>();
@@ -204,13 +206,13 @@ fn lf3_conditional_windows_content_preflight_and_rooted_absent_are_unchanged() {
         )
         .expect_err("rooted Content is unsupported");
     assert_eq!(error.kind(), crate::error::LocalFileErrorKind::RequirementNotMet);
-    let after = fs::read_dir(fixture.path())
+    let after = fs::read_dir(&root)
         .expect("enumerate after")
         .map(|entry| entry.expect("entry").file_name())
         .collect::<std::collections::BTreeSet<_>>();
     assert_eq!(before, after);
 
-    let rooted = LocalFileSystem::rooted(fixture.path()).expect("open rooted filesystem");
+    let rooted = LocalFileSystem::rooted(&root).expect("open rooted filesystem");
     let mut rooted = rooted;
     rooted
         .set_symlink_policy(LocalSymlinkPolicy::Reject)
@@ -219,7 +221,7 @@ fn lf3_conditional_windows_content_preflight_and_rooted_absent_are_unchanged() {
         .open_conditional_writer::<Sha256>(Path::new("direct-new"), LocalWritePrecondition::Absent, &options)
         .expect("Rooted Absent remains supported");
     drop(writer);
-    let final_entries = fs::read_dir(fixture.path())
+    let final_entries = fs::read_dir(&root)
         .expect("enumerate after direct Rooted open")
         .map(|entry| entry.expect("entry").file_name())
         .collect::<std::collections::BTreeSet<_>>();
@@ -230,15 +232,16 @@ fn lf3_conditional_windows_content_preflight_and_rooted_absent_are_unchanged() {
 #[test]
 fn lf3_conditional_windows_rooted_required_durability_preflight_is_unchanged() {
     let fixture = tempfile::tempdir().expect("fixture directory");
+    let root = fixture_root(&fixture);
     let mut fsys = LocalFileSystem::host().expect("host filesystem");
     fsys.set_symlink_policy(LocalSymlinkPolicy::Reject)
         .expect("set link policy");
     let parent = fsys
-        .open_directory_with_options(fixture.path(), &LocalDirectoryOpenOptions::new())
+        .open_directory_with_options(&root, &LocalDirectoryOpenOptions::new())
         .expect("open fixed parent");
     let options =
         LocalWriteOptions::new(LocalWriteMode::CreateNew).with_durability(LocalDurabilityRequirement::Required);
-    let before = fs::read_dir(fixture.path())
+    let before = fs::read_dir(&root)
         .expect("enumerate before")
         .map(|entry| entry.expect("entry").file_name())
         .collect::<std::collections::BTreeSet<_>>();
@@ -250,7 +253,7 @@ fn lf3_conditional_windows_rooted_required_durability_preflight_is_unchanged() {
         .open_conditional_writer::<Sha256>(Path::new("new"), LocalWritePrecondition::Absent, &options)
         .expect_err("Rooted Required durability is unsupported");
     assert_eq!(error.kind(), crate::error::LocalFileErrorKind::RequirementNotMet);
-    let after = fs::read_dir(fixture.path())
+    let after = fs::read_dir(&root)
         .expect("enumerate after")
         .map(|entry| entry.expect("entry").file_name())
         .collect::<std::collections::BTreeSet<_>>();
@@ -264,7 +267,7 @@ fn lf3_conditional_installed_sync_failure_is_published() {
     use crate::test_support::TestConditionalPoint;
 
     let fixture = tempfile::tempdir().expect("fixture directory");
-    let target = fixture.path().join("target");
+    let target = fixture_root(&fixture).join("target");
     fs::write(&target, b"previous").expect("write previous content");
     let mut fsys = LocalFileSystem::host().expect("host filesystem");
     fsys.set_symlink_policy(LocalSymlinkPolicy::Reject)
@@ -303,8 +306,9 @@ fn lf3_conditional_replaced_installed_entry_is_not_reported_synced() {
     use crate::test_support::TestConditionalPoint;
 
     let fixture = tempfile::tempdir().expect("fixture directory");
-    let target = fixture.path().join("target");
-    let replaced = fixture.path().join("replaced");
+    let root = fixture_root(&fixture);
+    let target = root.join("target");
+    let replaced = root.join("replaced");
     let mut fsys = LocalFileSystem::host().expect("host filesystem");
     fsys.set_symlink_policy(LocalSymlinkPolicy::Reject)
         .expect("set link policy");
@@ -348,7 +352,7 @@ fn lf3_conditional_windows_host_content_syncs_installed_object() {
     use sha2::Digest;
 
     let fixture = tempfile::tempdir().expect("fixture directory");
-    let target = fixture.path().join("target");
+    let target = fixture_root(&fixture).join("target");
     fs::write(&target, b"previous").expect("write previous content");
     let mut fsys = LocalFileSystem::host().expect("host filesystem");
     fsys.set_symlink_policy(LocalSymlinkPolicy::Reject)
