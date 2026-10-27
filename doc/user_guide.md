@@ -76,6 +76,22 @@ and directories. If an item fails after earlier entries changed, inspect the
 error's `access_state()`; `Mixed` reports partial conversion and the stage
 remains with the caller. The library does not claim to roll back a whole tree.
 
+`verify_entries()` compares the observed entries with the expected set exactly;
+include each link entry, but do not add descendants reachable through an alias.
+Duplicate expected paths return `InvalidOptions`. A finite depth limit checks
+the complete tree and returns an error if any entry exceeds that depth; it does
+not silently truncate validation. Expected-path bytes are charged before
+indexing, and verification shares the configured entry, depth, path-byte,
+open-directory, and deadline budgets. Special entries are accepted by default
+and rejected only when that rule is enabled. Observations detect changes at
+visited entries but are not an atomic snapshot. Publishing without validation
+options performs no recursive scan.
+
+Migration note: when enabling exact validation, expected sets should contain
+only actual entries (including a link itself), never alias descendants. Keep
+ordinary regular-file readers and temporary-resource calls unchanged; no new
+tree-validation option is required for those paths.
+
 This staged backup example captures the generated name and identity before
 publishing. If the destination already exists, the returned stage is explicitly
 retained and reopened beneath the same parent; cleanup only proceeds after the
@@ -480,7 +496,10 @@ parent directory. Rollback is attempted at most once. Process abort or machine
 crash can interrupt publication or cleanup; the library does not scan for
 leftovers on restart. For backend availability, Windows Host supports
 `PreserveExisting` metadata only for Content; Windows Rooted Content is
-unsupported. Rooted uses opened directory handles. Android and FreeBSD Content
+unsupported. Windows Rooted Content and Host Content with `UseStaging` return
+`Unsupported` while opening the writer, before path resolution or staging/parent
+side effects. Valid Host Content with `PreserveExisting` and `Absent` remain
+supported. Rooted uses opened directory handles. Android and FreeBSD Content
 are not claimed as supported.
 On Windows, opening a conditional writer with `Required` durability returns
 `RequirementNotMet` before path resolution or backend resource creation.
@@ -681,6 +700,10 @@ the source and only its private sandbox remains the guard's responsibility.
 Only sandbox cleanup is allowed. `Released` has no cleanup obligation and
 `cleanup()` succeeds idempotently. `Indeterminate` forbids persist, keep,
 cleanup, and Drop deletion because source authority cannot be proven.
+
+If cleanup removes a temporary file but cannot remove its now-empty sandbox,
+the cleanup error identifies the sandbox path; the deleted file is not listed
+as a retained resource.
 
 | Failure situation | Publication | Source | Recovery |
 | --- | --- | --- | --- |
@@ -1112,7 +1135,11 @@ rely on the same path and error contracts in either case.
 
 CI is configured for Linux, Windows, and macOS behavioral tests; actual CI
 results establish validation for a particular change. FreeBSD and Android are
-compile-checked only. `capabilities()` reports the selected authority's build
+compile-checked only. T3/T4 Windows cleanup and conditional-open behavior, and
+LF-09 private-resource and LF-10 sealed-cleanup behavior, remain unverified
+without native Windows runner results: Linux filters execute zero tests for
+these cases, and Windows GNU `cargo check --lib` is compile evidence only.
+`capabilities()` reports the selected authority's build
 capability snapshot; a Rooted instance caches it when opening the authority.
 `scope()` lets integration code distinguish the two namespaces, and
 `diagnostic_root()` exposes the non-authoritative Rooted anchor separately.
@@ -1141,7 +1168,9 @@ configuration in caller code.
 
 Registry dependencies are resolved with versions and checksums in `Cargo.lock`.
 This crate's CI validates this crate's own package and does not run downstream
-consumer tests. Run performance measurements separately from correctness tests:
+consumer tests. Adapter compatibility belongs to the adapter repository or a
+separate integration job. Run performance measurements separately from
+correctness tests:
 
 ```bash
 # Compile the Criterion benchmark

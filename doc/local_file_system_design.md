@@ -834,6 +834,11 @@ Backend scope currently established by the implementation:
 | Windows Rooted | Native no-replace install | Unsupported | Rooted `Absent` is handle-relative. |
 | Android and FreeBSD | Not claimed | Not claimed | Do not infer support from other Unix targets. |
 
+Windows Rooted `Content` and Host `Content` with `UseStaging` return
+`Unsupported` while opening the writer, before path resolution, parent access,
+or candidate/staging creation. Host `Content` with `PreserveExisting` and valid
+`Absent` remain supported.
+
 On Linux, the extended-attribute value reader handles a size change between
 the length query and value read, including a zero-capacity buffer whose
 attribute grew before the read. If the native read reports a larger required
@@ -1257,6 +1262,11 @@ or Drop attempt. It is checked before sandbox release and is never restarted
 for that release. Sandbox release is accounted separately from source-tree
 entries and never changes the source publication state.
 
+`LocalStagedDirectory` carries the cleanup limits supplied at creation into its
+owner. `set_cleanup_limits()` replaces them explicitly; otherwise explicit
+cleanup and the final Drop attempt use the creation budget. Drop does not retry
+with unbounded limits.
+
 ## 19. Structured Errors
 
 ### 19.1 Basic error domain
@@ -1447,12 +1457,28 @@ back. It does not strip a Rooted leading slash, invent another root-relative
 coordinate system, retain duplicate defaults, or reimplement codecs, containment,
 link traversal, temporary ownership, or publication algorithms. Provider identity,
 URI, registry, user metadata, and remote capability policy stay above this crate.
-Non-exhaustive native variants require conservative fallback. Compatibility CI
-must compile and test the adapter against this crate to detect variant drift.
+Non-exhaustive native variants require conservative fallback. The adapter
+repository or a separate integration job is responsible for compiling and
+testing the adapter against this crate to detect variant drift; this crate's CI
+validates this crate only.
 
 The adapter must map `CopyMode::File` to `LocalCopySourceMode::Entry`,
 `Tree` to `Tree`, and `Auto` to `Auto`. A resolved `Auto` request must overwrite
 an entry/tree mode in native defaults while preserving independent budgets.
+
+`LocalStagedDirectory::publish_new()` performs only its identity checks and
+publication checks by default; it does not recursively scan the staged tree.
+When `LocalTreePublishOptions` includes validation, the shared verifier checks
+the complete tree before mutation. `verify_entries()` compares the observed
+entry set with the supplied expected set exactly. Expected paths must be unique
+or verification returns `InvalidOptions`; path bytes are charged before the
+borrowed-reference index is built, and traversal/indexing share the selected
+entry, depth, byte, open-directory, and deadline limits. A finite depth limit
+fails if any entry lies beyond it rather than silently truncating validation.
+Links are observed as entries and their targets are not followed or expanded
+into alias children. Special entries are allowed unless explicitly rejected.
+Tree observations detect identity changes at checked entries, but are not an
+atomic snapshot against concurrent mutation.
 
 ### Temporary failure adaptation
 
@@ -1679,6 +1705,11 @@ Verification follows contracts rather than line count:
   machine paths;
 - CI is configured for Linux, Windows, and macOS behavioral tests; FreeBSD and Android are
   compile-checked;
+- Windows-specific T3/T4 recovery and conditional-open cases, plus LF-09
+  private-resource and LF-10 sealed-cleanup behavior, remain unverified unless
+  native Windows runner results are available. Linux filters execute zero tests
+  for these cases; a Windows GNU `cargo check --lib` is compile evidence only,
+  not behavioral evidence;
 - the project-level coverage configuration grants no whole-file exemption;
   state-machine branches are covered through public behavior, crate-private
   contracts, or narrow deterministic fault injection.

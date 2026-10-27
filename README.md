@@ -137,6 +137,7 @@ provider registration, application authorization, or async I/O.
 | `LocalFileWriter` | Explicit commit or abort after staged publication. |
 | `LocalDirectoryWalker` | Lazy directory enumeration with fixed creation-time policy. |
 | `LocalStagedDirectory` | Populate a staged tree, opt into validation rules, publish without replacing an existing target, or retain for recovery. |
+| `directory::LocalTreeEntry` / `options::LocalTreeValidationOptions` | Validate an exact staged-tree entry set with optional link, special-file, hard-link, and traversal-budget rules. |
 | `LocalTempFile` / `LocalTempDirectory` | Owned cleanup, `keep`, and persistence operations. |
 | `LocalSealedTempFile` | A private cleanup owner that retains a read-only handle; `native_path()` is optional and Host-only. |
 | `path::LocalFileNames` / `path::LocalPaths` | Native filename and lexical-path helpers without lossy UTF-8 conversion. |
@@ -150,7 +151,14 @@ publication. A tree recovery location stores a namespace path and optional
 opaque identity, not an authority; reopen through the same parent and verify
 identity before acting. This differs from digest conditional-write recovery
 files, which remain caller-owned and are not automatically deleted. Windows
-Rooted content-conditional replacement remains unsupported.
+Rooted `Content` and Host `Content` with `UseStaging` return `Unsupported` while
+opening the writer, before path resolution or staging/parent side effects; Host
+`Content` with `PreserveExisting` and valid `Absent` remain supported. Exact
+tree validation requires unique expected paths, completes within its configured
+budgets instead of truncating at finite depth, and observes links as entries
+without following or expanding aliases. Special entries are allowed unless
+explicitly rejected. Publishing without validation options does not recursively
+scan the stage.
 
 Readers and writers accept regular files only; directories and special files
 are rejected instead of being opened as byte streams.
@@ -215,7 +223,10 @@ resource's live `source_state()`. See the [recovery workflow](doc/user_guide.md#
 Temporary directories accept `LocalTempCleanupLimits` for depth, entries,
 pending-path bytes, and elapsed time. Limits stay on the directory and apply to
 explicit `cleanup()` and Drop, with a fresh budget per call and no unbounded
-Drop fallback. `descendant` accepts only nonempty relative paths of normal
+Drop fallback. Staged-directory owners likewise retain creation limits unless
+the caller replaces them. If file deletion succeeds but empty-sandbox removal
+fails, the error identifies the sandbox path and does not report the deleted
+file as retained. `descendant` accepts only nonempty relative paths of normal
 names: `a/b` succeeds, while `a/../b`, `a/./b`, and empty input fail.
 
 ## Choose the right authority
@@ -270,7 +281,13 @@ walk.
 
 CI is configured to run behavioral tests on Linux, Windows, and macOS; consult
 the matching CI results for validation of a particular change. FreeBSD and Android
-configuration paths are compile-checked only; this crate makes no runtime
+configuration paths are compile-checked only. T3/T4 Windows cleanup and
+conditional-open behavior, and LF-09 private-resource and LF-10 sealed-cleanup
+behavior, remain unverified without native Windows runner results. Linux filters
+execute zero tests for these Windows-only cases; Windows GNU `cargo check --lib`
+is compile evidence only. This crate's CI validates this
+crate only; adapter compatibility belongs to the adapter repository or a
+separate integration job. This crate makes no runtime
 guarantee for those targets. `capabilities()` reports whether this build
 implements each complete operation protocol; it does not probe a particular
 runtime filesystem or claim that the underlying hardware has persisted data.

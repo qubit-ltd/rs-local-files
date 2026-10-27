@@ -127,6 +127,7 @@ let saved = writer.commit()?; // 检查 saved.digest()、cleanup_errors() 和 re
 | `LocalFileWriter` | 分阶段发布后的显式提交或中止。 |
 | `LocalDirectoryWalker` | 采用创建时固定策略的惰性目录枚举。 |
 | `LocalStagedDirectory` | 填充暂存树、选择性启用验证、以不覆盖已有目标的方式发布，或保留以供恢复。 |
+| `directory::LocalTreeEntry` / `options::LocalTreeValidationOptions` | 按精确条目集合验证暂存树，并按需启用链接、特殊文件、硬链接和遍历预算规则。 |
 | `LocalTempFile` / `LocalTempDirectory` | 拥有清理责任，并支持 `keep` 与持久化。 |
 | `LocalSealedTempFile` | 保留只读句柄的私有清理 owner；`native_path()` 可选且仅适用于 Host。 |
 | `path::LocalFileNames` / `path::LocalPaths` | 不丢失 UTF-8 以外文件名信息的原生文件名和词法路径工具。 |
@@ -135,8 +136,11 @@ let saved = writer.commit()?; // 检查 saved.digest()、cleanup_errors() 和 re
 收紧权限不满足要求。文件同步与命名空间耐久性相互独立。目录树默认保留合法链接，只应用显式
 选择的验证规则，并分别报告 mutation 与 publication。树恢复位置只保存命名空间路径和可选
 opaque identity，不含 authority；操作前应通过同一个 parent 重新打开并验证身份。这与 digest
-条件写入恢复文件不同，后者由调用方持有且不会自动删除。Windows Rooted Content 条件替换仍不受
-支持。
+条件写入恢复文件不同，后者由调用方持有且不会自动删除。Windows Rooted `Content`，以及 Host
+`Content` 配合 `UseStaging`，会在打开 writer 时返回 `Unsupported`，早于路径解析或创建 staging/parent
+副作用；Host `Content` 配合 `PreserveExisting` 和有效的 `Absent` 仍可用。精确树验证要求 expected
+路径不重复；达到有限深度上限时会报错，不会静默截断。验证按条目观测链接，不跟随目标或展开 alias
+子项。特殊条目默认允许，只有显式启用拒绝规则才会失败；未配置验证的发布不会递归扫描 stage。
 
 Reader 和 writer 只接受普通文件；目录和特殊文件会被拒绝，不会被当作字节流打开。
 
@@ -179,6 +183,8 @@ Rooted 实例的同名方法只修改该实例。
 
 临时目录可通过 `LocalTempCleanupLimits` 设置清理深度、条目数、待处理路径字节数和期限。
 限制保存在目录对象中，显式 `cleanup()` 与 Drop 均使用它；每次调用独立计费，Drop 不会退回无界清理。
+暂存目录 owner 也会沿用创建时的清理限制，除非调用方显式替换。若文件已删除但空 sandbox 清理失败，
+错误会指向 sandbox 路径，不会把已删除文件列为保留资源。
 `descendant` 仅接受非空、由正常名称组成的相对路径；`a/b` 合法，`a/../b`、`a/./b` 和空路径均被拒绝。
 
 ## 选择合适的权限范围
@@ -219,7 +225,10 @@ Windows 上，Rooted 的链接读取、链接类型判断和链接创建都相�
 ## 平台范围
 
 CI 配置了 Linux、Windows 和 macOS 运行时测试；本次修改是否通过，以对应 CI 结果为准。
-FreeBSD 和 Android 仅编译检查配置路径；
+T3/T4 的 Windows 清理和条件写入行为，以及 LF-09 私有资源和 LF-10 sealed 清理，尚无原生 Windows runner
+证据时必须视为待验证：Linux 对应筛选为 0 tests，Windows GNU `cargo check --lib` 只能证明可编译，不能证明运行行为。
+本 crate CI 只验证当前 crate；
+adapter 兼容性由 adapter 仓库或独立集成 job 负责。FreeBSD 和 Android 仅编译检查配置路径；
 本 crate 不承诺这些目标上的运行时保证。`capabilities()` 只报告当前 build 是否实现了
 对应的完整操作协议，不会探测具体的运行时文件系统，也不声称证明底层硬件已经持久化数据；无法满足要求的原子性或耐久性时，
 会在命名空间变更前拒绝操作。

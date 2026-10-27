@@ -56,6 +56,14 @@ opaque identity，不含权限句柄；重新操作前须通过同一个 parent 
 只修改经过 identity 复核的文件和目录。如果前面的条目已修改、后续某项失败，应检查错误中的
 `access_state()`；`Mixed` 表示权限只转换了一部分，stage 仍由调用方持有。库不会声称整棵树可回滚。
 
+`verify_entries()` 会把观测到的条目与 expected 集合精确比较；expected 集合应包含链接条目本身，
+不要把通过 alias 可见的后代也加入集合。重复 expected path 返回 `InvalidOptions`。设置有限深度时，
+验证仍覆盖整棵树；发现超出深度的条目会报错，不会静默截断。expected path 字节在建立索引前计入预算，
+验证与遍历共同受条目数、深度、路径字节、打开目录数和 deadline 限制。特殊条目默认允许，只有显式
+启用拒绝规则才会失败。观测能发现已访问条目的变化，但不构成原子快照。发布未附带验证选项时不会递归扫描。
+迁移时，精确 expected 集合只列实际条目（链接本身也算一个条目），不要列出通过链接 alias 才能到达的后代。
+正确使用普通文件 reader 和临时资源的代码无需调整，也不需要新增树验证选项。
+
 下面的目录备份示例会在发布前保存随机名称和 identity。若目标已存在，错误会把 stage 交还给
 调用方；示例先显式保留，再通过同一个 parent 按身份重新打开，确认后才清理：
 
@@ -123,8 +131,9 @@ create_backup(&parent)?;
 `open_staged_directory`，并确保交接完成前不会丢弃恢复 owner。
 
 树恢复 owner 会在 Drop 时尽力进行身份校验清理；digest 条件写入的 `LocalRecoveryFile` 则由调用方
-自行恢复，不会自动删除。这两者的所有权合同不同。Windows Rooted 的 Content 条件替换仍不受
-支持；crate 不宣称该能力已实现。
+自行恢复，不会自动删除。这两者的所有权合同不同。Windows Rooted `Content` 以及 Host `Content`
+配合 `UseStaging` 会在打开 writer 时返回 `Unsupported`，早于路径解析、父目录操作或 staging 创建。
+Host `Content` 配合 `PreserveExisting` 和有效 `Absent` 组合仍可用。
 
 ## 字节流协议与标准 I/O
 
@@ -410,6 +419,7 @@ no-overwrite 安装时才可用。`Content(digest)` 必须搭配 `CreateOrReplac
 摘要。staging 与恢复文件名可能在父目录中可见。回滚至多尝试一次。进程被 abort 或
 机器崩溃可能中断发布或清理；库不会在重启时扫描遗留文件。平台范围方面，Windows
 Host 的 Content 仅支持 `PreserveExisting` 元数据策略；Windows Rooted Content 不受支持。
+Rooted Content 与 Host Content + `UseStaging` 都在打开 writer 时拒绝，不会解析路径或创建 staging。
 Rooted 操作使用已打开的目录句柄。这里不宣称 Android 或 FreeBSD 支持 Content。
 Windows 上，使用 `Required` 耐久性打开条件 writer 会在路径解析或创建后端资源前返回
 `RequirementNotMet`。恢复文件和条件提交错误满足 `Send + Sync`；条件写入 outcome 也会在
@@ -666,6 +676,8 @@ sandbox 释放最多额外执行一次原生删除，不计入源树条目和路
 也只是剩余内容。源实体已删除而 sandbox 删除失败时进入 `CleanupRequired`，重试只处理
 sandbox。并发新增子项可能导致 `DirectoryNotEmpty`，操作会返回错误，不会无限重扫。
 
+若普通文件已删除、但其私有 sandbox 清理失败，错误路径指向 sandbox；已删除文件不会作为保留资源返回。
+
 `child` 接受单个正常名称；`descendant` 只接受非空、全部由正常名称组成的相对路径，拒绝根、
 原生 prefix/盘符、字面 `.`、`..` 和 NUL。即使归一化后仍在目录内，`a/../b` 与字面
 `a/./b` 也会失败。这些方法只构造路径，不执行 I/O，不赋予 Rooted 权限，也不证明磁盘上
@@ -919,7 +931,10 @@ Rooted metadata 等操作对不含链接的普通路径使用私有的一次顺�
 ## 限制与最佳实践
 
 CI 配置了 Linux、Windows 和 macOS 运行时测试；具体修改的验证状态以实际 CI 结果为准。
-FreeBSD 与 Android 仅做编译检查。
+FreeBSD 与 Android 仅做编译检查。T3/T4 的 Windows 清理与条件写入行为，以及 LF-09 私有资源和
+LF-10 sealed 清理，尚无原生 Windows runner 证据时必须视为待验证：Linux 对应筛选为 0 tests，Windows
+GNU `cargo check --lib` 只能证明可编译，不能证明运行行为。
+本 crate CI 仅验证本 crate；下游 adapter 的兼容性和集成由 adapter 仓库或独立集成负责。
 `capabilities()` 返回所选 authority 的 build capability 快照；Rooted 实例在打开
 authority 时缓存该快照。`scope()` 供集成层区分两种命名空间；Rooted 实例的诊断锚点通过
 `diagnostic_root()` 单独读取。Host 命名空间的 `limits()` 返回 `SizeLimit::VariesByPath`；使用

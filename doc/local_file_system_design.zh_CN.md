@@ -1098,6 +1098,10 @@ Windows 上，使用 `Required` 耐久性打开条件 writer 会在路径解析�
 | Windows Rooted | 原生 no-replace 安装 | 不支持 | Rooted `Absent` 使用相对已打开句柄的安装。 |
 | Android 和 FreeBSD | 未声明支持 | 未声明支持 | 不应从其他 Unix 目标推断支持。 |
 
+Windows Rooted `Content`，以及 Host `Content` 配合 `UseStaging`，在打开 writer 阶段返回
+`Unsupported`，早于路径解析、父目录操作或 candidate/staging 创建。Host `Content` 配合
+`PreserveExisting` 和有效的 `Absent` 组合保持可用。
+
 Linux 的扩展属性读取会处理长度查询与值读取之间发生的大小变化，包括查询到零长度后、读取前
 属性变为非空的情况。若原生读取报告所需空间大于当前缓冲区，读取器会在固定的 8 次尝试预算内重试；
 预算耗尽时返回 `ERANGE`。Linux 回归测试通过有序测试检查点覆盖零转非零增长。本证据不代表已验证 Android 运行时行为。
@@ -1466,6 +1470,10 @@ Indeterminate，后续可写句柄访问不得绕过该状态。Rooted 资源始
 sandbox 释放最多额外执行一次原生删除，不计入源树条目/路径预算。deadline 从 cleanup
 入口开始，贯穿树删除；移除 sandbox 前检查同一个 deadline，不重启计时。
 
+`LocalStagedDirectory` 会把创建时的 cleanup limits 交给 owner。除非调用方显式调用
+`set_cleanup_limits()` 替换限制，否则显式 cleanup 和最后一次 Drop 尝试都使用创建预算；Drop
+不会退回无界清理。
+
 临时清理复用递归删除的无排序后序调度器，子链接只删自身，不跟随目标。不保证删除顺序
 或常量内存。部分删除失败保留精确副作用，原源树仍归 guard 所有时为 Owned；若再发布，
 发布的是剩余内容。源实体删除后 sandbox 失败为 CleanupRequired，重试只清理 sandbox。
@@ -1750,6 +1758,8 @@ qubit_fs::spi::Request
 - codec 和 Windows/Unix native component 逻辑只存在于 `qubit-local-files`。
 
 Provider identity、registry、URI、user metadata 和远程 capability 仍属于 `qubit-fs` 层。
+Non-exhaustive native variants 由 adapter 保守处理；adapter 仓库或独立集成 job 负责编译和测试
+adapter 与本 crate 的兼容性。本 crate CI 只验证当前 crate。
 
 适配器必须将 `CopyMode::File` 映射为 `LocalCopySourceMode::Entry`，`Tree` 映射为
 `Tree`，`Auto` 映射为 `Auto`。已经解析的 `Auto` 请求必须覆盖 native defaults 中的
@@ -1905,6 +1915,17 @@ backend 负责原生 I/O、发布操作、经 `CopyBudget` 扣减实际字节，
 `finish_frame` 在后代完成后保存目录元数据；失败会释放当前 frame 和全部祖先 frame。
 释放资源只关闭读取器并归还 permit，不回滚已经发布的目标数据。
 
+### Staged tree validation
+
+`LocalStagedDirectory::publish_new()` 默认只做 identity 与发布检查，不递归扫描 stage。
+只有 `LocalTreePublishOptions` 显式携带 validation 时，发布前才完整验证目录树。
+`verify_entries()` 将观测到的条目集合与 expected 集合精确比较；expected path 必须唯一，重复路径
+（即使 kind 不同）返回 `InvalidOptions`。验证按单遍遍历索引 expected set，不为遍历额外构造拥有型
+副本；索引前先计入 expected path 的原生编码字节。遍历与索引共同受条目数、深度、路径字节、打开目录数
+和 deadline 限制。有限深度下发现超深条目会失败，不会静默截断。链接只按链接条目观测，不跟随目标，
+也不展开通过 alias 可见的子项；特殊条目默认允许，只有显式拒绝规则才会失败。观测可检测已检查条目
+的 identity 变化，但不是抵御并发修改的原子快照。
+
 ## 26. 验证策略
 
 ### 26.1 API contract tests
@@ -1975,7 +1996,10 @@ namespace-absolute、不含 `.`/`..`，再次规范化保持不变。Host 绑定
 
 ### 26.6 跨平台验证
 
-- Linux、Windows、macOS runtime tests；
+- Linux、Windows、macOS runtime tests；某项代码被 `cfg` 排除或筛选后显示 0 tests，不构成该平台证据；
+- T3/T4 的 Windows 清理与条件写入用例，以及 LF-09 私有资源和 LF-10 sealed cleanup，尚无原生
+  Windows runner 证据时必须标为待验证；Linux 对应测试为 0 tests，Windows GNU `cargo check --lib`
+  仅证明可编译，不证明运行行为；
 - Android、FreeBSD 等只有 compile-check 时文档不得宣称 runtime guarantee；
 - `cargo test --all-features`；
 - `cargo clippy --all-targets --all-features -- -D warnings`；
