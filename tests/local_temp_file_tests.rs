@@ -389,6 +389,148 @@ fn test_required_private_windows_rooted_io_contract() {
     assert!(!native_path.exists());
 }
 
+/// Verifies PlatformDefault Rooted sealed cleanup removes the file and sandbox.
+#[cfg(windows)]
+#[test]
+fn windows_sealed_cleanup_platform_default_rooted() {
+    let root = tempdir().expect("Rooted fixture should be created");
+    let filesystem = LocalFileSystem::rooted(root.path()).expect("Rooted filesystem should open");
+    let mut temporary = filesystem
+        .create_temp_file_with_options(
+            &LocalTempFileOptions::new()
+                .with_parent(Path::new("/"))
+                .with_privacy(LocalPrivacyRequirement::PlatformDefault),
+        )
+        .expect("PlatformDefault Rooted temporary file should be created");
+    let virtual_path = temporary.path().to_path_buf();
+    let native_path = rooted_host_path(root.path(), &virtual_path);
+    Output::write_fully(&mut temporary, b"sealed payload")
+        .expect("Rooted temporary file should accept bytes");
+
+    let mut sealed = temporary
+        .seal_with_options(&LocalSealOptions::new())
+        .expect("PlatformDefault Rooted temporary file should seal");
+    let sandbox = native_path
+        .parent()
+        .expect("Rooted temporary file should have a sandbox");
+    sealed
+        .cleanup()
+        .expect("PlatformDefault Rooted sealed file should clean up");
+
+    assert!(!native_path.exists(), "sealed file should be removed");
+    assert!(!sandbox.exists(), "sealed file sandbox should be removed");
+}
+
+/// Verifies Required-private Rooted sealing and cleanup complete end to end.
+#[cfg(windows)]
+#[test]
+fn windows_sealed_cleanup_required_private_rooted() {
+    let root = tempdir().expect("Rooted fixture should be created");
+    let filesystem = LocalFileSystem::rooted(root.path()).expect("Rooted filesystem should open");
+    let mut temporary = filesystem
+        .create_temp_file_with_options(
+            &LocalTempFileOptions::new()
+                .with_parent(Path::new("/"))
+                .with_privacy(LocalPrivacyRequirement::Required),
+        )
+        .expect("Required-private Rooted temporary file should be created");
+    let virtual_path = temporary.path().to_path_buf();
+    let native_path = rooted_host_path(root.path(), &virtual_path);
+    Output::write_fully(&mut temporary, b"sealed payload")
+        .expect("Rooted temporary file should accept bytes");
+
+    let mut sealed = temporary
+        .seal_with_options(&LocalSealOptions::new())
+        .expect("Required-private Rooted temporary file should seal");
+    let sandbox = native_path
+        .parent()
+        .expect("Rooted temporary file should have a sandbox");
+    sealed
+        .cleanup()
+        .expect("Required-private Rooted sealed file should clean up");
+
+    assert!(!native_path.exists(), "sealed file should be removed");
+    assert!(!sandbox.exists(), "sealed file sandbox should be removed");
+}
+
+/// Verifies dropping a sealed Rooted owner removes its owned read-only entry.
+#[cfg(windows)]
+#[test]
+fn windows_sealed_cleanup_drop_removes_owned_entry() {
+    let root = tempdir().expect("Rooted fixture should be created");
+    let filesystem = LocalFileSystem::rooted(root.path()).expect("Rooted filesystem should open");
+    let mut temporary = filesystem
+        .create_temp_file_with_options(
+            &LocalTempFileOptions::new()
+                .with_parent(Path::new("/"))
+                .with_privacy(LocalPrivacyRequirement::PlatformDefault),
+        )
+        .expect("PlatformDefault Rooted temporary file should be created");
+    let virtual_path = temporary.path().to_path_buf();
+    let native_path = rooted_host_path(root.path(), &virtual_path);
+    Output::write_fully(&mut temporary, b"sealed payload")
+        .expect("Rooted temporary file should accept bytes");
+    let sealed = temporary
+        .seal_with_options(&LocalSealOptions::new())
+        .expect("Rooted temporary file should seal");
+    assert!(
+        fs::metadata(&native_path)
+            .expect("sealed file metadata should be available")
+            .permissions()
+            .readonly(),
+        "sealed file should expose the native read-only bit"
+    );
+
+    drop(sealed);
+
+    assert!(!native_path.exists(), "drop should remove the owned entry");
+    assert!(
+        !native_path
+            .parent()
+            .expect("Rooted temporary file should have a sandbox")
+            .exists(),
+        "drop should remove the empty sandbox"
+    );
+}
+
+/// Verifies sealed Rooted cleanup preserves a replacement entry.
+#[cfg(windows)]
+#[test]
+fn windows_sealed_cleanup_rejects_replacement() {
+    let root = tempdir().expect("Rooted fixture should be created");
+    let filesystem = LocalFileSystem::rooted(root.path()).expect("Rooted filesystem should open");
+    let mut temporary = filesystem
+        .create_temp_file_with_options(
+            &LocalTempFileOptions::new()
+                .with_parent(Path::new("/"))
+                .with_privacy(LocalPrivacyRequirement::PlatformDefault),
+        )
+        .expect("PlatformDefault Rooted temporary file should be created");
+    let virtual_path = temporary.path().to_path_buf();
+    let native_path = rooted_host_path(root.path(), &virtual_path);
+    Output::write_fully(&mut temporary, b"owned payload")
+        .expect("Rooted temporary file should accept bytes");
+    let mut sealed = temporary
+        .seal_with_options(&LocalSealOptions::new())
+        .expect("Rooted temporary file should seal");
+    let original = root.path().join("original-sealed-file");
+    fs::rename(&native_path, &original).expect("owned file should be moved aside");
+    fs::write(&native_path, b"replacement")
+        .expect("replacement file should occupy the original name");
+
+    let error = sealed
+        .cleanup()
+        .expect_err("sealed cleanup must reject a replacement entry");
+    assert_eq!(LocalFileErrorKind::InvalidPath, error.kind());
+    assert_eq!(
+        b"replacement",
+        fs::read(&native_path)
+            .expect("replacement entry should remain")
+            .as_slice(),
+    );
+    assert!(original.exists(), "the displaced owned file should remain");
+}
+
 /// Verifies Unix Rooted persistence implements the same durable publication
 /// contract as Host persistence.
 #[cfg(unix)]
