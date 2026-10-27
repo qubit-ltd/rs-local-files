@@ -29,10 +29,99 @@ use super::with_current_directory;
 #[cfg(feature = "test-support")]
 use crate::local::take_test_support;
 use crate::local_file_system_validation::validate_write_options;
+use crate::directory::binding::PathBinding;
+use crate::directory::binding::DirectoryPathBinding;
+use crate::options::LocalObservedReadOptions;
+use crate::observation::LocalObservedReader;
+use crate::rooted::Root;
 use crate::path::LocalNamespacePath;
 use crate::test_support::TestFaultPoint;
 
 impl LocalFileSystem {
+    /// Opens a reader with same-handle observations and optional name binding.
+    pub fn open_observed_reader(&self, path: &Path, options: &LocalObservedReadOptions) -> LocalResult<LocalObservedReader> {
+        let resolver_started = std::time::Instant::now();
+        let read_options = options.read_options().unwrap_or(&self.defaults.read);
+        let resolver = self.resolver_for(path, LocalFileOperation::OpenReader)?;
+        let resolved = resolve_operation_path(&resolver, path, LocalFileOperation::OpenReader)?;
+        let reader = self.open_resolved_reader(&resolved, read_options, LocalFileOperation::OpenReader, resolver.current_directory())?;
+        let mut observed = LocalObservedReader::from_reader(reader, options.native_observation())?;
+        if let Some(binding_options) = options.path_binding() {
+            let binding_deadline = binding_options.deadline().and_then(|limit| resolver_started.checked_add(limit));
+            let path_bytes = resolved.namespace_absolute().as_os_str().len();
+            let raw_component_bytes = path.components().filter_map(|component| match component {
+                std::path::Component::Normal(name) => Some(name.len().saturating_add(1)),
+                _ => None,
+            }).fold(0_usize, usize::saturating_add);
+            let ancestors = resolved.namespace_absolute().components().count().saturating_sub(1);
+            if binding_options.max_path_bytes().is_some_and(|limit| path_bytes > limit)
+                || binding_options.max_path_bytes().is_some_and(|limit| raw_component_bytes > limit)
+                || binding_options.max_ancestors().is_some_and(|limit| ancestors > limit)
+                || binding_options.max_ancestors() == Some(0)
+                || binding_options.deadline().is_some_and(|limit| resolver_started.elapsed() >= limit)
+            {
+                return Err(LocalFileError::new(LocalFileErrorKind::ResourceLimit, LocalFileOperation::OpenReader)
+                    .with_path(resolved.namespace_absolute().to_path_buf()));
+            }
+            let identity = observed.observation().identity().cloned().ok_or_else(|| {
+                LocalFileError::new(LocalFileErrorKind::Unsupported, LocalFileOperation::Metadata)
+            })?;
+            let name = resolved.authority_relative().file_name().ok_or_else(|| {
+                LocalFileError::new(LocalFileErrorKind::InvalidPath, LocalFileOperation::OpenReader)
+                    .with_path(resolved.namespace_absolute().to_path_buf())
+            })?.to_os_string();
+            let parent_path = resolved.authority_relative().parent().unwrap_or_else(|| Path::new(""));
+            let (parent_root, parent_anchors) = match &self.core.namespace {
+                LocalNamespace::Host => {
+                    let host_root = Root::open(Path::new("/")).map_err(|source| LocalFileError::from_io(
+                        LocalFileOperation::OpenRoot, Some(parent_path.to_path_buf()), None, source,
+                    ))?;
+                    let relative_parent = parent_path.strip_prefix("/").unwrap_or(parent_path);
+                    let policy = if self.symlink_policy == crate::LocalSymlinkPolicy::FollowAcrossScope {
+                        crate::LocalSymlinkPolicy::FollowWithinScope
+                    } else { self.symlink_policy };
+                    let allow_all = crate::directory::LocalComponentPolicy::allow_all();
+                    let relative_parent = crate::rooted_local_file_system::resolve_rooted_path_allow_root_with_component_policy_and_budget(
+                        &host_root, relative_parent, policy, true, LocalFileOperation::OpenRoot, &allow_all,
+                        binding_deadline, binding_options.max_path_bytes(),
+                    )?;
+                    let diagnostic_parent = Path::new("/").join(&relative_parent);
+                    let (root, _, anchors) = crate::directory::retain_directory_chain(
+                        &host_root, &relative_parent, &diagnostic_parent, true, Some(binding_options), resolver_started,
+                    )?;
+                    (root, anchors.unwrap_or_default())
+                }
+                LocalNamespace::Rooted(rooted) => {
+                    let allow_all = crate::directory::LocalComponentPolicy::allow_all();
+                    let resolved_parent = crate::rooted_local_file_system::resolve_rooted_path_allow_root_with_component_policy_and_budget(
+                        rooted.root_authority(), parent_path, self.symlink_policy, true, LocalFileOperation::OpenRoot,
+                        &allow_all, binding_deadline, binding_options.max_path_bytes(),
+                    )?;
+                    let diagnostic_parent = rooted.diagnostic_path().join(&resolved_parent);
+                    let (root, _, anchors) = crate::directory::retain_directory_chain(
+                        rooted.root_authority(), &resolved_parent, &diagnostic_parent, true, Some(binding_options), resolver_started,
+                    )?;
+                    (root, anchors.unwrap_or_default())
+                }
+            };
+            let binding_policy = if self.symlink_policy == crate::LocalSymlinkPolicy::FollowAcrossScope {
+                crate::LocalSymlinkPolicy::FollowWithinScope
+            } else { self.symlink_policy };
+            let parent_fs = LocalFileSystem::from_root_authority(parent_root, binding_policy)?;
+            if binding_options.deadline().is_some_and(|limit| resolver_started.elapsed() >= limit) {
+                return Err(LocalFileError::from_io(
+                    LocalFileOperation::OpenReader,
+                    Some(resolved.namespace_absolute().to_path_buf()),
+                    None,
+                    std::io::Error::new(std::io::ErrorKind::TimedOut, "path binding deadline exceeded"),
+                ));
+            }
+            observed = observed.with_binding(Box::new(PathBinding::new(parent_fs, name, identity, binding_options.deadline())));
+            observed = observed.with_binding(Box::new(DirectoryPathBinding::new(parent_anchors, binding_options.deadline())));
+        }
+        Ok(observed)
+    }
+
     /// Reads final-entry metadata without following the final symlink.
     ///
     /// Returns resolution, policy, or native metadata errors. A

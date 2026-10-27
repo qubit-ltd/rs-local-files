@@ -14,6 +14,8 @@ mod copy;
 mod delete;
 // Implements rooted directory operations.
 mod directory;
+#[path = "rooted_local_file_system/fixed_directory.rs"]
+mod fixed_directory;
 // Implements rooted metadata, reader, and writer operations.
 #[path = "rooted_local_file_system/io.rs"]
 mod io_operations;
@@ -47,6 +49,7 @@ pub(crate) use path_support::temp_candidate;
 pub(crate) use path_support::validate_rooted_temp_parent;
 pub(crate) use support::resolve_rooted_path;
 pub(crate) use support::resolve_rooted_path_allow_root;
+pub(crate) use support::resolve_rooted_path_allow_root_with_component_policy_and_budget;
 pub(crate) use support::resolve_rooted_path_allow_root_with_deadline;
 pub(super) use support::sync_rooted_copy_parent_chain;
 pub(super) use support::validate_rooted_list_start;

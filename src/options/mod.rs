@@ -37,6 +37,8 @@ pub use local_copy_source_mode::LocalCopySourceMode;
 pub use local_create_directory_options::LocalCreateDirectoryOptions;
 pub use local_delete_options::LocalDeleteOptions;
 pub use local_directory_reopen_policy::LocalDirectoryReopenPolicy;
+mod local_directory_open_options;
+pub use local_directory_open_options::LocalDirectoryOpenOptions;
 pub use local_list_options::LocalListOptions;
 pub use local_metadata_preserve_policy::LocalMetadataPreservePolicy;
 pub use local_observed_read_options::LocalObservedReadOptions;

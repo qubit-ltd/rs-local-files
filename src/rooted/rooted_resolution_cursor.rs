@@ -29,6 +29,10 @@ pub(crate) struct RootedResolutionCursor {
 }
 
 impl RootedResolutionCursor {
+    pub(crate) fn into_file(self) -> File { self.current }
+
+    pub(crate) fn try_clone_current(&self) -> Result<File> { self.current.try_clone() }
+
     /// Creates a cursor from an already-opened rooted directory authority.
     #[inline]
     pub(crate) fn new(current: File) -> Result<Self> {

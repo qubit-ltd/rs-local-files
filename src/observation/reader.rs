@@ -142,7 +142,10 @@ impl LocalObservedReader {
     }
 
     pub(crate) fn with_binding(mut self, binding: Box<dyn ReaderPathBinding>) -> Self {
-        self.binding = Some(binding);
+        self.binding = Some(match self.binding.take() {
+            Some(existing) => Box::new(CombinedPathBinding { bindings: vec![existing, binding] }),
+            None => binding,
+        });
         self
     }
 
@@ -181,6 +184,25 @@ impl LocalObservedReader {
     /// EOF from growth. Read and allocation errors do not return partial data.
     pub fn read_to_end_limited(&mut self, maximum: u64) -> LocalResult<Vec<u8>> {
         collect_limited(self, Some(maximum))
+    }
+}
+
+#[derive(Debug)]
+struct CombinedPathBinding {
+    bindings: Vec<Box<dyn ReaderPathBinding>>,
+}
+
+impl ReaderPathBinding for CombinedPathBinding {
+    fn verify(&self) -> LocalResult<LocalSourceVerification> {
+        let mut missing = false;
+        for binding in &self.bindings {
+            match binding.verify()? {
+                LocalSourceVerification::Changed => return Ok(LocalSourceVerification::Changed),
+                LocalSourceVerification::Missing => missing = true,
+                LocalSourceVerification::Unchanged => {}
+            }
+        }
+        Ok(if missing { LocalSourceVerification::Missing } else { LocalSourceVerification::Unchanged })
     }
 }
 

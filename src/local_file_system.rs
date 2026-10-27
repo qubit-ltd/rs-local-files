@@ -19,6 +19,7 @@ mod copy;
 mod directory;
 // Implements metadata, reader, and writer operations.
 mod io;
+mod fixed_directory;
 // Implements temporary-file and temporary-directory operations.
 mod temp;
 

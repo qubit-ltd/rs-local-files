@@ -60,6 +60,11 @@ pub struct Root {
     directory: File,
 }
 impl Root {
+    /// Builds a root from an already-open directory authority.
+    pub(crate) fn from_directory_authority(directory: File, diagnostic_path: PathBuf) -> Self {
+        Self { path: diagnostic_path, directory }
+    }
+
     /// Opens and anchors a local filesystem root.
     ///
     /// # Errors

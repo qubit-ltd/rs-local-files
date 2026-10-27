@@ -144,7 +144,24 @@ pub(crate) fn resolve_rooted_path_allow_root_with_deadline(
     if let Some(resolved) = try_resolve_without_symlinks(root, &relative, follow_final, deadline, path, operation)? {
         return Ok(resolved);
     }
-    resolve_rooted_symlinks(root, relative, symlink_policy, follow_final, operation, path, deadline)
+    resolve_rooted_symlinks(root, relative.as_path(), symlink_policy, follow_final, operation, path, deadline, None, None)
+}
+
+pub(crate) fn resolve_rooted_path_allow_root_with_component_policy_and_budget(
+    root: &crate::rooted::Root,
+    path: &Path,
+    symlink_policy: LocalSymlinkPolicy,
+    follow_final: bool,
+    operation: LocalFileOperation,
+    component_policy: &crate::directory::LocalComponentPolicy,
+    deadline: Option<Instant>,
+    max_path_bytes: Option<usize>,
+) -> LocalResult<PathBuf> {
+    check_resolution_deadline(deadline, path, operation)?;
+    if symlink_policy == LocalSymlinkPolicy::FollowAcrossScope {
+        return Err(LocalFileError::new(LocalFileErrorKind::InvalidOptions, operation).with_path(path.to_path_buf()));
+    }
+    resolve_rooted_symlinks(root, path, symlink_policy, follow_final, operation, path, deadline, Some(component_policy), max_path_bytes)
 }
 
 fn check_resolution_deadline(
@@ -227,12 +244,14 @@ fn try_resolve_without_symlinks(
 /// and `operation` context.
 fn resolve_rooted_symlinks(
     root: &crate::rooted::Root,
-    path: crate::local::LocalRelativePath,
+    path: &Path,
     symlink_policy: LocalSymlinkPolicy,
     follow_final: bool,
     operation: LocalFileOperation,
     original: &Path,
     deadline: Option<Instant>,
+    component_policy: Option<&crate::directory::LocalComponentPolicy>,
+    max_path_bytes: Option<usize>,
 ) -> LocalResult<PathBuf> {
     use std::collections::HashSet;
     #[cfg(test)]
@@ -242,9 +261,10 @@ fn resolve_rooted_symlinks(
             .with_reason("FollowAcrossScope is incompatible with a Rooted filesystem")
             .with_path(original.to_path_buf()));
     }
-    let mut pending = steps_from_path(path.as_path(), original, operation)?;
+    let mut pending = steps_from_path(path, original, operation)?;
     let mut resolved = Vec::<std::ffi::OsString>::new();
     let mut active_symlinks = HashSet::<SymlinkIdentity>::new();
+    let mut expanded_path_bytes = 0_usize;
     while let Some(step) = pending.pop_front() {
         check_resolution_deadline(deadline, original, operation)?;
         match step {
@@ -260,6 +280,17 @@ fn resolve_rooted_symlinks(
                 active_symlinks.remove(&identity);
             }
             ResolutionStep::Normal(component) => {
+                expanded_path_bytes = expanded_path_bytes.checked_add(component.len()).and_then(|bytes| bytes.checked_add(1)).ok_or_else(|| {
+                    LocalFileError::new(LocalFileErrorKind::ResourceLimit, operation).with_path(original.to_path_buf())
+                })?;
+                if max_path_bytes.is_some_and(|maximum| expanded_path_bytes > maximum) {
+                    return Err(LocalFileError::new(LocalFileErrorKind::ResourceLimit, operation).with_path(original.to_path_buf()));
+                }
+                if let Some(component_policy) = component_policy {
+                    component_policy
+                        .validate_component(&component)
+                        .map_err(|error| error.with_operation(operation).with_path(original.to_path_buf()))?;
+                }
                 let candidate =
                     relative_from_components(resolved.iter().chain(std::iter::once(&component)), original, operation)?;
                 let is_final = pending.iter().all(is_end_symlink_step);

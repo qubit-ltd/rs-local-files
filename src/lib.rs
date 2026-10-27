@@ -60,6 +60,7 @@ mod local_file_metadata;
 mod local_file_permissions;
 mod local_file_reader;
 mod local_file_system;
+pub mod directory;
 mod local_file_system_scope;
 mod local_file_system_validation;
 pub mod options;
