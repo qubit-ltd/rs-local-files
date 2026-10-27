@@ -116,15 +116,15 @@ pub(super) fn delete_owned_read_only_entry(entry: &File, expected: &crate::roote
         ));
     }
 
-    match delete_read_only_with_extended_disposition(entry) {
+    match delete_with_extended_disposition(entry, true) {
         Ok(()) => Ok(()),
         Err(error) if extended_disposition_is_unsupported(&error) => delete_with_attribute_fallback(entry),
         Err(error) => Err(error),
     }
 }
 
-/// Requests deletion while asking Windows to ignore the read-only attribute.
-fn delete_read_only_with_extended_disposition(entry: &File) -> Result<()> {
+/// Requests extended deletion, optionally asking Windows to ignore read-only.
+fn delete_with_extended_disposition(entry: &File, ignore_read_only: bool) -> Result<()> {
     use windows_sys::Win32::Storage::FileSystem::FILE_DISPOSITION_FLAG_DELETE;
     use windows_sys::Win32::Storage::FileSystem::FILE_DISPOSITION_FLAG_IGNORE_READONLY_ATTRIBUTE;
     use windows_sys::Win32::Storage::FileSystem::FILE_DISPOSITION_INFO_EX;
@@ -132,18 +132,22 @@ fn delete_read_only_with_extended_disposition(entry: &File) -> Result<()> {
     use windows_sys::Win32::Storage::FileSystem::SetFileInformationByHandle;
 
     #[cfg(feature = "test-support")]
-    if crate::local::test_support_enabled("rooted-owned-delete-fallback-delete-once")
-        || crate::local::test_support_enabled("rooted-owned-delete-fallback-success")
-        || crate::local::test_support_enabled("rooted-owned-delete-restore-fail")
+    if ignore_read_only
+        && (crate::local::take_test_support("rooted-owned-delete-fallback-delete-once")
+            || crate::local::take_test_support("rooted-owned-delete-fallback-success")
+            || crate::local::take_test_support("rooted-owned-delete-restore-fail"))
     {
         return Err(Error::from_raw_os_error(
             windows_sys::Win32::Foundation::ERROR_NOT_SUPPORTED as i32,
         ));
     }
 
-    let disposition = FILE_DISPOSITION_INFO_EX {
-        Flags: FILE_DISPOSITION_FLAG_DELETE | FILE_DISPOSITION_FLAG_IGNORE_READONLY_ATTRIBUTE,
+    let flags = if ignore_read_only {
+        FILE_DISPOSITION_FLAG_DELETE | FILE_DISPOSITION_FLAG_IGNORE_READONLY_ATTRIBUTE
+    } else {
+        FILE_DISPOSITION_FLAG_DELETE
     };
+    let disposition = FILE_DISPOSITION_INFO_EX { Flags: flags };
     // SAFETY: `entry` is a live handle opened with DELETE access and the
     // payload matches the FileDispositionInfoEx information class.
     let result = unsafe {
@@ -206,15 +210,15 @@ fn delete_with_attribute_fallback(entry: &File) -> Result<()> {
     }
 
     #[cfg(feature = "test-support")]
-    let delete_result = if crate::local::take_test_support("rooted-owned-delete-fallback-delete-once")
+    let delete_result = if crate::local::test_support_enabled("rooted-owned-delete-fallback-delete-once")
         || crate::local::test_support_enabled("rooted-owned-delete-restore-fail")
     {
         Err(crate::local::test_fault_error())
     } else {
-        delete_open_entry(entry)
+        delete_after_readonly_clear(entry)
     };
     #[cfg(not(feature = "test-support"))]
-    let delete_result = delete_open_entry(entry);
+    let delete_result = delete_after_readonly_clear(entry);
 
     match delete_result {
         Ok(()) => Ok(()),
@@ -238,6 +242,15 @@ fn delete_with_attribute_fallback(entry: &File) -> Result<()> {
                 )),
             }
         }
+    }
+}
+
+/// Retries deletion without the read-only override before using the legacy
+/// disposition class on filesystems that reject the extended class.
+fn delete_after_readonly_clear(entry: &File) -> Result<()> {
+    match delete_with_extended_disposition(entry, false) {
+        Err(error) if extended_disposition_is_unsupported(&error) => delete_open_entry(entry),
+        result => result,
     }
 }
 
