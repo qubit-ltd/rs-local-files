@@ -1,0 +1,92 @@
+# Shared desktop contracts; the toolchain comes from .infra/tools/defaults.toml.
+version = 1
+
+[[suites]]
+id = "default"
+platforms = ["linux", "windows", "macos"]
+timeout_seconds = 3600
+minimum_tests = 1
+commands = [{ kind = "test", argv = ["cargo", "test", "--locked", "--no-default-features", "--no-fail-fast"], cwd = "." }]
+
+[[suites]]
+id = "all-features"
+platforms = ["linux", "windows", "macos"]
+timeout_seconds = 3600
+minimum_tests = 1
+commands = [{ kind = "test", argv = ["cargo", "test", "--locked", "--all-features", "--no-fail-fast"], cwd = "." }]
+
+[[suites]]
+id = "digest-build"
+platforms = ["linux", "windows", "macos"]
+timeout_seconds = 1800
+minimum_tests = 0
+commands = [{ kind = "check", argv = ["cargo", "check", "--locked", "--features", "digest"], cwd = "." }]
+
+[[suites]]
+id = "digest-library"
+platforms = ["linux", "windows", "macos"]
+timeout_seconds = 1800
+minimum_tests = 1
+commands = [{ kind = "test", argv = ["cargo", "test", "--locked", "--features", "digest", "--lib", "conditional_"], cwd = "." }]
+
+[[suites]]
+id = "digest-integration"
+platforms = ["linux", "windows", "macos"]
+timeout_seconds = 1800
+minimum_tests = 1
+commands = [{ kind = "test", argv = ["cargo", "test", "--locked", "--features", "digest", "--test", "conditional_writer_tests", "--test", "conditional_vectored_tests", "--test", "conditional_backend_contract_tests"], cwd = "." }]
+
+[[suites]]
+id = "lifecycle-model"
+platforms = ["linux", "macos"]
+timeout_seconds = 1800
+minimum_tests = 1
+commands = [{ kind = "test", argv = ["cargo", "test", "--locked", "--manifest-path", "fuzz/Cargo.toml", "--test", "lifecycle_model_tests"], cwd = "." }]
+
+[[suites]]
+id = "conditional-contracts"
+platforms = ["linux", "windows", "macos"]
+timeout_seconds = 1800
+minimum_tests = 1
+commands = [{ kind = "test", argv = ["cargo", "test", "--locked", "--features", "digest,test-support", "--test", "conditional_writer_tests", "--test", "conditional_vectored_tests", "--test", "conditional_publication_race_tests", "--test", "conditional_recovery_tests", "--test", "conditional_fault_tests", "--test", "conditional_feature_gate_tests"], cwd = "." }]
+
+[[suites]]
+id = "conditional-library"
+platforms = ["linux", "windows", "macos"]
+timeout_seconds = 1800
+minimum_tests = 1
+commands = [{ kind = "test", argv = ["cargo", "test", "--locked", "--features", "digest,test-support", "--lib", "conditional_"], cwd = "." }]
+
+[[suites]]
+id = "conditional-recovery"
+platforms = ["windows"]
+timeout_seconds = 1800
+minimum_tests = 1
+commands = [{ kind = "test", argv = ["cargo", "test", "--locked", "--features", "digest,test-support", "--test", "conditional_recovery_tests"], cwd = "." }]
+
+# Native Android shell coverage only, using the configured emulator ABI.
+# The library filter selects four pure structured-error tests; error_tests
+# exercises public error values. io_reader_contract_tests uses temporary files,
+# seeking, vectored reads and adapters. It requires writable TMPDIR, without
+# symlink, privileged mount, APK permission or external fixture requirements.
+[[suites]]
+id = "android-native"
+platforms = ["android"]
+timeout_seconds = 1800
+minimum_tests = 1
+requirements = ["native-shell", "writable-tmpdir"]
+data = []
+commands = [
+    { kind = "test", argv = ["cargo", "test", "--locked", "--lib", "tests::error::local_file_error_tests::"], cwd = "." },
+    { kind = "test", argv = ["cargo", "test", "--locked", "--test", "error_tests", "--test", "io_reader_contract_tests"], cwd = "." },
+]
+
+# Linux compile-only coverage is independent of Android device configuration.
+# Keep --target explicit so this check never becomes a host-only build.
+[[suites]]
+id = "android-armv7-check"
+platforms = ["linux"]
+target = "armv7-linux-androideabi"
+timeout_seconds = 1800
+minimum_tests = 0
+commands = [{ kind = "check", argv = ["cargo", "check", "--locked", "--target", "armv7-linux-androideabi"], cwd = "." }]

@@ -31,35 +31,18 @@ jobs:
           persist-credentials: false
       - name: Install MSRV
         run: rustup toolchain install 1.94 --profile minimal
-      - name: Check plain digest build
+      # Enable remotely only after platform, manager and CI tools are distributable.
+      - name: Run shared conditional suites
         working-directory: ci-root/rs-local-files
-        run: cargo +1.94 check --locked --features digest
-      - name: Run plain digest library tests
-        working-directory: ci-root/rs-local-files
-        run: cargo +1.94 test --locked --features digest --lib conditional_
-      - name: Run plain digest integration contracts
-        working-directory: ci-root/rs-local-files
-        run: >-
-          cargo +1.94 test --locked --features digest
-          --test conditional_writer_tests --test conditional_vectored_tests
-          --test conditional_backend_contract_tests
-      - name: Run fuzz lifecycle model tests
-        if: runner.os != 'Windows'
-        working-directory: ci-root/rs-local-files
-        run: >-
-          cargo +1.94 test --locked --manifest-path fuzz/Cargo.toml
-          --test lifecycle_model_tests
-      - name: Run conditional contracts
-        working-directory: ci-root/rs-local-files
-        run: >-
-          cargo +1.94 test --locked --features digest,test-support
-          --test conditional_writer_tests --test conditional_vectored_tests
-          --test conditional_publication_race_tests
-          --test conditional_recovery_tests --test conditional_fault_tests
-          --test conditional_feature_gate_tests
-      - name: Run private state and native backend contracts
-        working-directory: ci-root/rs-local-files
-        run: cargo +1.94 test --locked --features digest,test-support --lib conditional_
+        run: |
+          suites=digest-build,digest-library,digest-integration,conditional-contracts,conditional-library
+          case "$RUNNER_OS" in
+            Linux) platform=linux; suites="$suites,lifecycle-model" ;;
+            Windows) platform=windows ;;
+            macOS) platform=macos; suites="$suites,lifecycle-model" ;;
+            *) echo "Unsupported runner OS: $RUNNER_OS" >&2; exit 1 ;;
+          esac
+          ./.infra/bin/infra-tool.sh rs-infra-platform --project . check --platform "$platform" --suite "$suites" --require "$platform"
 
   windows-recovery:
     name: Windows rollback recovery contracts
@@ -90,4 +73,4 @@ jobs:
         run: rustup toolchain install 1.94 --profile minimal
       - name: Run rollback recovery contracts
         working-directory: ci-root/rs-local-files
-        run: cargo +1.94 test --locked --features digest,test-support --test conditional_recovery_tests
+        run: ./.infra/bin/infra-tool.sh rs-infra-platform --project . check --platform windows --suite conditional-recovery --require windows
