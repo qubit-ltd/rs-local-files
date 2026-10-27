@@ -190,7 +190,7 @@ pub(crate) use rooted_namespace_io::open_rooted_directory_reader;
 pub(crate) use rooted_namespace_io::read_rooted_directory;
 #[cfg(unix)]
 pub(crate) use rooted_namespace_io::read_rooted_link;
-#[cfg(unix)]
+#[cfg(all(unix, feature = "test-support"))]
 pub(crate) use rooted_namespace_io::remove_rooted_entry;
 #[cfg(unix)]
 pub(crate) use rooted_namespace_io::remove_rooted_entry_typed;

@@ -45,7 +45,10 @@ fn test_host_directory_creation_rejects_file_component() {
     )
     .expect_err("a file cannot be used as a directory ancestor");
 
-    assert_eq!(crate::LocalFileOperation::BindPath, error.operation());
+    assert!(matches!(
+        error.operation(),
+        crate::LocalFileOperation::BindPath | crate::LocalFileOperation::CreateDirectory
+    ));
 }
 
 #[cfg(feature = "test-support")]

@@ -109,7 +109,7 @@ pub(crate) use internal::read_rooted_link;
 pub(crate) use internal::read_rooted_symlink_metadata;
 pub(crate) use internal::remove_directory_tree;
 pub(crate) use internal::remove_host_non_directory;
-#[cfg(any(unix, windows))]
+#[cfg(all(any(unix, windows), feature = "test-support"))]
 pub(crate) use internal::remove_rooted_entry;
 #[cfg(any(unix, windows))]
 pub(crate) use internal::remove_rooted_entry_typed;

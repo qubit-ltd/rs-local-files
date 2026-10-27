@@ -159,6 +159,7 @@ pub(crate) fn create_rooted_directory(
 /// Removes one rooted leaf or empty directory without following symbolic links.
 /// Traversal, inspection and unlink errors propagate. Recursive callers use
 /// the shared deletion scheduler before reaching this native boundary.
+#[cfg(feature = "test-support")]
 pub(crate) fn remove_rooted_entry(root: &File, diagnostic_root: &Path, path: &LocalRelativePath) -> Result<()> {
     let status = rooted_status(root, diagnostic_root, path)?;
     unlink_rooted_entry(
@@ -340,6 +341,7 @@ fn open_directory_component(parent: &File, name: &CString) -> Result<File> {
 /// Reads no-follow metadata for a rooted path.
 ///
 /// Propagates secure parent-traversal and final metadata errors.
+#[cfg(feature = "test-support")]
 #[inline]
 fn rooted_status(root: &File, diagnostic_root: &Path, path: &LocalRelativePath) -> Result<libc::stat> {
     super::rooted_file_io::read_rooted_symlink_metadata(root, diagnostic_root, path)

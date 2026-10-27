@@ -635,19 +635,18 @@ mod tests {
     /// Verifies verbatim absolute targets retain their filesystem referent.
     #[test]
     fn test_verbatim_symbolic_link_reparse_buffer_round_trips() {
-        for target in [
-            Path::new(r"\\?\C:\outside\target"),
-            Path::new(r"\\?\UNC\server\share\target"),
+        for (target, expected) in [
+            (Path::new(r"\\?\C:\outside\target"), Path::new(r"C:\outside\target")),
+            (
+                Path::new(r"\\?\UNC\server\share\target"),
+                Path::new(r"\\server\share\target"),
+            ),
         ] {
             let buffer = build_symbolic_link_buffer(target).expect("verbatim reparse buffer should encode");
 
             let parsed = parse_symbolic_link_target(&buffer).unwrap();
             assert_eq!(target.is_absolute(), parsed.is_absolute());
-            if target.starts_with(r"\\?\UNC\") {
-                assert_eq!(Path::new(r"\\server\share\target"), parsed);
-            } else {
-                assert_eq!(Path::new(r"C:\outside\target"), parsed);
-            }
+            assert_eq!(expected, parsed);
         }
     }
 
