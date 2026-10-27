@@ -13,6 +13,7 @@ mod support;
 use std::path::Path;
 
 use qubit_io::Output;
+#[cfg(unix)]
 use qubit_io::Streams;
 use qubit_local_files::LocalFileSystem;
 #[cfg(unix)]
@@ -25,6 +26,7 @@ use sha2::Digest;
 use sha2::Sha256;
 use support::conditional_temp_directory::tempdir;
 
+#[cfg(unix)]
 fn read_all(mut reader: impl qubit_io::Input<Item = u8>) -> Vec<u8> {
     let mut bytes = Vec::new();
     Streams::copy_input_to_output(&mut reader, &mut bytes).expect("file contents should be readable");
