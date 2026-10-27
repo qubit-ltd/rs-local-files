@@ -25,8 +25,9 @@ use super::Path;
 use super::operation_error;
 use super::reject_directory_qualified_file;
 use super::resolve_operation_path;
-use super::with_current_directory;
 use super::validate_scope_symlink_policy;
+use super::with_current_directory;
+use crate::LocalSymlinkPolicy;
 use crate::directory::binding::DirectoryPathBinding;
 use crate::directory::binding::PathBinding;
 #[cfg(feature = "test-support")]
@@ -39,7 +40,6 @@ use crate::options::LocalReadAllOptions;
 use crate::options::LocalSnapshotOptions;
 use crate::path::LocalNamespacePath;
 use crate::rooted::Root;
-use crate::LocalSymlinkPolicy;
 use crate::test_support::TestFaultPoint;
 
 impl LocalFileSystem {
@@ -566,7 +566,12 @@ impl LocalFileSystem {
         current_directory: Option<&Path>,
         symlink_policy: crate::LocalSymlinkPolicy,
     ) -> LocalResult<LocalFileReader> {
-        validate_scope_symlink_policy(self.scope(), symlink_policy, operation, Some(resolved.namespace_absolute()))?;
+        validate_scope_symlink_policy(
+            self.scope(),
+            symlink_policy,
+            operation,
+            Some(resolved.namespace_absolute()),
+        )?;
         reject_directory_qualified_file(resolved, operation, current_directory)?;
         match &self.core.namespace {
             LocalNamespace::Host => {

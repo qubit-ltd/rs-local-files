@@ -120,10 +120,12 @@ fn test_allowed_child_directory_opens_and_retains_authority() {
     let child = parent
         .open_directory(Path::new("allowed"), &LocalDirectoryOpenOptions::new())
         .expect("allowed child should open");
-    assert!(child
-        .entry_metadata(Path::new("."))
-        .expect("child metadata should resolve")
-        .is_some());
+    assert!(
+        child
+            .entry_metadata(Path::new("."))
+            .expect("child metadata should resolve")
+            .is_some()
+    );
 }
 
 #[cfg(unix)]
@@ -134,8 +136,7 @@ fn test_symlink_expansion_checks_denied_names_before_parent_collapse() {
     let fixture = tempdir().expect("fixture directory should exist");
     fs::create_dir(fixture.path().join("allowed")).expect("allowed directory should exist");
     fs::create_dir(fixture.path().join("hidden")).expect("hidden directory should exist");
-    symlink("hidden/../allowed", fixture.path().join("expand"))
-        .expect("expansion symlink should be created");
+    symlink("hidden/../allowed", fixture.path().join("expand")).expect("expansion symlink should be created");
 
     let parent = rooted_handle(fixture.path(), component_policy(&["hidden"]));
     assert_eq!(
