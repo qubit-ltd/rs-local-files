@@ -158,6 +158,7 @@ pub(crate) use policy::LocalDurabilityRequirement;
 pub(crate) use policy::LocalSymlinkPolicy;
 pub use temp::LocalTempDirectory;
 pub use temp::LocalTempFile;
+pub use temp::LocalTempRecovery;
 #[cfg(feature = "test-support")]
 #[doc(hidden)]
 pub(crate) use test_support::TestFaultPlan;
