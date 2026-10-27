@@ -9,6 +9,7 @@
 
 mod local_temp_directory;
 mod local_temp_file;
+#[path = "local_temp_recovery.rs"]
 pub(crate) mod types;
 
 /// Private storage implementations for temporary resources.

@@ -1,14 +1,25 @@
+// =============================================================================
+//    Copyright (c) 2025 - 2026 Haixing Hu.
+//
+//    SPDX-License-Identifier: Apache-2.0
+//
+//    Licensed under the Apache License, Version 2.0.
+// =============================================================================
 //! Fixed directory authorities and native component policies.
 
 pub(crate) mod binding;
+#[path = "local_component_policy.rs"]
 mod component_policy;
 mod conditional;
+#[path = "local_directory_handle.rs"]
 mod handle;
+#[path = "local_staged_directory.rs"]
 mod staged;
 #[cfg(test)]
 pub(crate) use staged::fail_tree_sync_after;
 #[cfg(test)]
 pub(crate) use staged::install_stage_created_hook;
+#[path = "local_tree_observer.rs"]
 mod tree_observer;
 #[cfg(test)]
 pub(crate) use tree_observer::reset_test_observation_count;

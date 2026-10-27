@@ -1,7 +1,16 @@
+// =============================================================================
+//    Copyright (c) 2025 - 2026 Haixing Hu.
+//
+//    SPDX-License-Identifier: Apache-2.0
+//
+//    Licensed under the Apache License, Version 2.0.
+// =============================================================================
 //! Same-handle file observations and source verification values.
 
 pub(crate) mod query;
+#[path = "local_observed_reader.rs"]
 pub(crate) mod reader;
+#[path = "local_file_snapshot.rs"]
 pub(crate) mod snapshot;
 mod types;
 #[cfg(unix)]
