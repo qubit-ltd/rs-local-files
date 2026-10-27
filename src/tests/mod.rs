@@ -24,6 +24,7 @@ mod lf3_privacy_windows_tests;
 mod lf3_conditional_tests;
 mod lf3_sync_tests;
 mod lf3_temp_tests;
+mod lf3_tree_observer_tests;
 mod local;
 mod local_file_metadata_tests;
 mod outcome;

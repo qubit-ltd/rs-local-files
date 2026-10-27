@@ -38,6 +38,7 @@ pub use local_create_directory_options::LocalCreateDirectoryOptions;
 pub use local_delete_options::LocalDeleteOptions;
 pub use local_directory_reopen_policy::LocalDirectoryReopenPolicy;
 mod local_directory_open_options;
+pub use crate::directory::LocalTreeValidationOptions;
 pub use local_directory_open_options::LocalDirectoryOpenOptions;
 pub use local_list_options::LocalListOptions;
 pub use local_metadata_preserve_policy::LocalMetadataPreservePolicy;

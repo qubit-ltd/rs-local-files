@@ -43,6 +43,14 @@ pub struct LocalDirectoryHandle {
 }
 
 impl LocalDirectoryHandle {
+    pub(super) const fn filesystem(&self) -> &LocalFileSystem {
+        &self.filesystem
+    }
+
+    pub(super) fn diagnostic_path(&self) -> &Path {
+        &self.diagnostic_path
+    }
+
     pub(crate) fn open(
         filesystem: &LocalFileSystem,
         path: &Path,
@@ -473,6 +481,34 @@ impl LocalDirectoryHandle {
         )
     }
 
+    /// Observes one entry relative to this authority without following its final link.
+    pub fn observe_entry(&self, relative: &Path) -> LocalResult<LocalFileObservation> {
+        self.observe_entry_with_link_count(relative).map(|(observation, _)| observation)
+    }
+
+    pub(crate) fn observe_entry_with_link_count(&self, relative: &Path) -> LocalResult<(LocalFileObservation, Option<u64>)> {
+        let relative = self.checked(relative, false)?;
+        let mut components = relative.components().filter_map(|component| match component {
+            Component::Normal(name) => Some(name),
+            _ => None,
+        }).peekable();
+        let mut cursor = self.root_authority()?.resolution_cursor().map_err(|source| {
+            LocalFileError::from_io(LocalFileOperation::Metadata, Some(self.diagnostic_path.clone()), None, source)
+        })?;
+        let mut final_name = None;
+        while let Some(name) = components.next() {
+            if components.peek().is_some() {
+                cursor.descend(name).map_err(|source| {
+                    LocalFileError::from_io(LocalFileOperation::Metadata, Some(self.diagnostic_path.join(&relative)), None, source)
+                })?;
+            } else {
+                final_name = Some(name);
+            }
+        }
+        let name = final_name.ok_or_else(|| LocalFileError::new(LocalFileErrorKind::InvalidPath, LocalFileOperation::Metadata))?;
+        cursor.observe_entry_with_link_count(name).map_err(|error| error.with_path(self.diagnostic_path.join(relative)))
+    }
+
     /// Returns observations retained when this handle's path binding opened.
     ///
     /// # Errors
@@ -624,7 +660,7 @@ impl LocalDirectoryHandle {
         }
     }
 
-    fn root_authority(&self) -> LocalResult<&Root> {
+    pub(super) fn root_authority(&self) -> LocalResult<&Root> {
         match &self.filesystem.core.namespace {
             LocalNamespace::Rooted(rooted) => Ok(rooted.root_authority()),
             LocalNamespace::Host => Err(LocalFileError::new(

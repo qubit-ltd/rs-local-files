@@ -60,6 +60,44 @@ impl RootedResolutionCursor {
         }
     }
 
+    /// Observes the final entry without following a link, and reports its native hardlink count.
+    pub(crate) fn observe_entry_with_link_count(
+        &self,
+        name: &OsStr,
+    ) -> crate::LocalResult<(crate::observation::LocalFileObservation, Option<u64>)> {
+        #[cfg(unix)]
+        {
+            let status = crate::local::read_rooted_component_metadata(&self.current, name).map_err(|source| {
+                crate::LocalFileError::from_io(crate::LocalFileOperation::Metadata, None, None, source)
+            })?;
+            let metadata = Metadata::from_stat(&status);
+            let identity = metadata.native_identity().map(|(device, inode)| crate::observation::LocalFileIdentity::unix(device, inode));
+            let observation = crate::observation::LocalFileObservation::from_parts(local_file_metadata(metadata), identity, None);
+            Ok((observation, Some(status.st_nlink as u64)))
+        }
+        #[cfg(windows)]
+        {
+            use std::os::windows::io::AsRawHandle;
+            let file = crate::local::read_rooted_component_metadata(&self.current, name).map_err(|source| {
+                crate::LocalFileError::from_io(crate::LocalFileOperation::Metadata, None, None, source)
+            })?;
+            let observation = crate::observation::query::query_observation(&file, crate::observation::LocalObservationRequirement::Optional)?;
+            use windows_sys::Win32::Storage::FileSystem::{FILE_STANDARD_INFO, FileStandardInfo, GetFileInformationByHandleEx};
+            let mut standard = FILE_STANDARD_INFO::default();
+            // SAFETY: `file` owns a live reparse-point handle and `standard` is a correctly sized writable result buffer.
+            let result = unsafe { GetFileInformationByHandleEx(file.as_raw_handle(), FileStandardInfo, (&raw mut standard).cast(), std::mem::size_of::<FILE_STANDARD_INFO>() as u32) };
+            if result == 0 {
+                return Err(crate::LocalFileError::from_io(crate::LocalFileOperation::Metadata, None, None, std::io::Error::last_os_error()));
+            }
+            Ok((observation, Some(u64::from(standard.NumberOfLinks))))
+        }
+        #[cfg(not(any(unix, windows)))]
+        {
+            let _ = name;
+            Err(crate::LocalFileError::new(crate::LocalFileErrorKind::Unsupported, crate::LocalFileOperation::Metadata))
+        }
+    }
+
     /// Descends into one child after verifying that it is a real directory.
     ///
     /// The current handle is left unchanged if opening or verification fails.
@@ -78,6 +116,29 @@ impl RootedResolutionCursor {
             Err(unsupported_resolution_error())
         }
     }
+}
+
+#[cfg(unix)]
+fn local_file_metadata(metadata: Metadata) -> crate::LocalFileMetadata {
+    let kind = match metadata.kind() {
+        super::EntryKind::File => crate::LocalFileKind::File,
+        super::EntryKind::Directory => crate::LocalFileKind::Directory,
+        super::EntryKind::Symlink => crate::LocalFileKind::Symlink,
+        super::EntryKind::Fifo => crate::LocalFileKind::Fifo,
+        super::EntryKind::Socket => crate::LocalFileKind::Socket,
+        super::EntryKind::BlockDevice => crate::LocalFileKind::BlockDevice,
+        super::EntryKind::CharDevice => crate::LocalFileKind::CharDevice,
+        super::EntryKind::Other => crate::LocalFileKind::Other,
+    };
+    let permissions = metadata.permissions();
+    crate::LocalFileMetadata::from_parts(
+        kind,
+        metadata.size(),
+        metadata.accessed_at(),
+        metadata.modified_at(),
+        metadata.created_at(),
+        crate::LocalFilePermissions::new(permissions.is_read_only(), permissions.unix_mode()),
+    )
 }
 
 /// Returns the stable unsupported-platform error for rooted cursors.
