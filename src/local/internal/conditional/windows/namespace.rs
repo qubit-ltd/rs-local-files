@@ -56,7 +56,9 @@ use windows_sys::Win32::Storage::FileSystem::SYNCHRONIZE;
 
 use super::super::ConditionalEntry;
 use super::super::RecoveryAccess;
+use crate::LocalFileReader;
 use crate::LocalRelativePath;
+use crate::LocalResult;
 use crate::local::internal::windows_rooted::create_rooted_directory;
 use crate::local::internal::windows_rooted::native::nt_open_at_with_share_mode;
 use crate::local::internal::windows_rooted::open_conditional_entry_at;
@@ -296,7 +298,6 @@ impl Namespace {
         let access = EntryAccess {
             parent: self.parent.try_clone()?,
             name: name.clone(),
-            namespace_path: self.child_path(&name),
             diagnostic_path: self.diagnostic_path.clone(),
             identity,
             _retained: Some(file.try_clone()?),
