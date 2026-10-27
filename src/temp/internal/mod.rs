@@ -14,6 +14,8 @@ mod local_temp_resource_core;
 mod local_temp_resource_state;
 #[cfg(unix)]
 pub(crate) mod privacy_unix;
+#[cfg(windows)]
+pub(crate) mod privacy_windows;
 mod persist_target;
 mod rooted_temp_resource_backend;
 mod temp_entry_identity;

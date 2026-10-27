@@ -15,6 +15,8 @@ mod lf3_observation_unix_tests;
 mod lf3_observation_windows_tests;
 #[cfg(unix)]
 mod lf3_privacy_unix_tests;
+#[cfg(windows)]
+mod lf3_privacy_windows_tests;
 mod lf3_sync_tests;
 mod local;
 mod local_file_metadata_tests;
