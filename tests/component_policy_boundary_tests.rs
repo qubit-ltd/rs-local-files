@@ -10,12 +10,14 @@ use std::ffi::OsString;
 use std::fs;
 use std::path::Path;
 
+#[cfg(unix)]
 use qubit_io::Streams;
 use qubit_local_files::LocalFileSystem;
 use qubit_local_files::directory::LocalComponentPolicy;
 use qubit_local_files::options::LocalCopyOptions;
 use qubit_local_files::options::LocalDirectoryOpenOptions;
 use qubit_local_files::options::LocalListOptions;
+#[cfg(unix)]
 use qubit_local_files::options::LocalObservedReadOptions;
 use qubit_local_files::policy::LocalSymlinkPolicy;
 use tempfile::tempdir;
