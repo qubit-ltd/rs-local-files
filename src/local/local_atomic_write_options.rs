@@ -12,6 +12,7 @@ use std::time::Duration;
 use super::internal::LocalAtomicPublicationMode;
 use crate::LocalDurabilityRequirement;
 use crate::options::LocalWriteMetadataPolicy;
+use crate::policy::LocalFileSyncRequirement;
 
 /// Options used when beginning a local atomic write.
 ///
@@ -51,6 +52,7 @@ pub struct LocalAtomicWriteOptions {
     publication_mode: LocalAtomicPublicationMode,
     /// Durability requested for staging and parent synchronization.
     durability: LocalDurabilityRequirement,
+    file_sync: LocalFileSyncRequirement,
 }
 
 impl LocalAtomicWriteOptions {
@@ -67,6 +69,7 @@ impl LocalAtomicWriteOptions {
             replace_target_symlink: false,
             publication_mode: LocalAtomicPublicationMode::ReplaceOrCreate,
             durability: LocalDurabilityRequirement::Required,
+            file_sync: LocalFileSyncRequirement::NotRequired,
         }
     }
 
@@ -155,6 +158,17 @@ impl LocalAtomicWriteOptions {
     pub const fn with_durability(mut self, durability: LocalDurabilityRequirement) -> Self {
         self.durability = durability;
         self
+    }
+
+    #[inline]
+    pub(crate) const fn with_file_sync(mut self, requirement: LocalFileSyncRequirement) -> Self {
+        self.file_sync = requirement;
+        self
+    }
+
+    #[inline]
+    pub(crate) const fn file_sync(&self) -> LocalFileSyncRequirement {
+        self.file_sync
     }
 
     /// Requires final publication to preserve every existing destination.

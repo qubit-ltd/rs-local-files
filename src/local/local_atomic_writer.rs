@@ -44,6 +44,8 @@ use crate::LocalAtomicWriteError;
 use crate::LocalAtomicWriteOptions;
 use crate::LocalAtomicWriteStage;
 use crate::LocalDurabilityRequirement;
+use crate::policy::LocalFileSyncRequirement;
+use crate::writer::internal::LocalCommitSyncOutcome;
 use crate::options::LocalWriteMetadataPolicy;
 
 /// Default suffix used by atomic-write temporary files.
@@ -98,6 +100,7 @@ pub(crate) struct LocalAtomicWriter {
     destination_is_regular: bool,
     /// Durability requested for this publication.
     durability: LocalDurabilityRequirement,
+    file_sync: LocalFileSyncRequirement,
     /// Optional limit for retrying a nonblocking destination open.
     #[cfg(unix)]
     open_retry_timeout: Option<Duration>,
@@ -208,6 +211,7 @@ impl LocalAtomicWriter {
             destination_is_regular,
             metadata_policy: options.metadata_policy(),
             durability: options.durability(),
+            file_sync: options.file_sync(),
             #[cfg(unix)]
             open_retry_timeout: options.open_retry_timeout(),
             staged_file: StagedFile::new(temp_path, file),
@@ -225,7 +229,12 @@ impl LocalAtomicWriter {
     ///
     /// Returns a recoverable error when publication did not begin, or a
     /// terminal error after destination state may have changed.
+    #[allow(dead_code)]
     pub(crate) fn commit_recoverable_with_durability(self) -> Result<bool, LocalAtomicCommitError<Self>> {
+        self.commit_recoverable_with_sync().map(|outcome| outcome.durable)
+    }
+
+    pub(crate) fn commit_recoverable_with_sync(self) -> Result<LocalCommitSyncOutcome, LocalAtomicCommitError<Self>> {
         commit_recoverably(self, Self::commit_attempt, |writer| writer.staged_file.is_open())
     }
 
@@ -257,7 +266,7 @@ impl LocalAtomicWriter {
     ///
     /// Returns the structured commit failure. Errors raised before installation
     /// leave the staging handle open for the public recoverable commit API.
-    fn commit_attempt(&mut self) -> Result<bool, LocalAtomicWriteError> {
+    fn commit_attempt(&mut self) -> Result<LocalCommitSyncOutcome, LocalAtomicWriteError> {
         #[cfg(unix)]
         let destination = self.open_destination_for_commit()?;
         #[cfg(unix)]
@@ -276,7 +285,7 @@ impl LocalAtomicWriter {
         } else {
             None
         };
-        let file_durable = self.sync_temporary_file()?;
+        let file_synced = self.sync_temporary_file()?;
         #[cfg(unix)]
         self.verify_destination_for_commit(destination.as_ref())?;
         #[cfg(not(unix))]
@@ -308,7 +317,8 @@ impl LocalAtomicWriter {
         #[cfg(windows)]
         drop(windows_destination);
         let parent_durable = self.install_and_sync_parent()?;
-        Ok(file_durable && parent_durable)
+        let durable = self.durability != LocalDurabilityRequirement::NotRequired && file_synced && parent_durable;
+        Ok(LocalCommitSyncOutcome { durable, file_synced })
     }
 
     /// Observes commit-time destination identity and optional metadata.
@@ -410,7 +420,7 @@ impl LocalAtomicWriter {
     /// Returns a structured staging synchronization error while retaining
     /// staging when the native synchronization fails.
     fn sync_temporary_file(&mut self) -> Result<bool, LocalAtomicWriteError> {
-        synchronize_staging_file(self.staged_file.file(), self.durability, |result| {
+        synchronize_staging_file(self.staged_file.file(), self.durability, self.file_sync, |result| {
             with_atomic_context(
                 result,
                 LocalAtomicWriteStage::SyncTemporaryFile,

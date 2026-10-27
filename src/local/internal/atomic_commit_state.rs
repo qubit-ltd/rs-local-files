@@ -14,6 +14,7 @@ use crate::LocalAtomicCommitError;
 use crate::LocalAtomicDestinationState;
 use crate::LocalAtomicWriteError;
 use crate::LocalDurabilityRequirement;
+use crate::policy::LocalFileSyncRequirement;
 
 /// Runs an atomic publication attempt and retains pre-publication staging.
 ///
@@ -28,11 +29,11 @@ use crate::LocalDurabilityRequirement;
 ///
 /// Preserves the attempt's structured error and returns writer ownership only
 /// while its staging handle remains open. Otherwise the writer is dropped.
-pub(crate) fn commit_recoverably<W>(
+pub(crate) fn commit_recoverably<W, R>(
     mut writer: W,
-    attempt: impl FnOnce(&mut W) -> Result<bool, LocalAtomicWriteError>,
+    attempt: impl FnOnce(&mut W) -> Result<R, LocalAtomicWriteError>,
     staging_is_open: impl FnOnce(&W) -> bool,
-) -> Result<bool, LocalAtomicCommitError<W>> {
+) -> Result<R, LocalAtomicCommitError<W>> {
     match attempt(&mut writer) {
         Ok(durable) => Ok(durable),
         Err(error) if staging_is_open(&writer) => Err(LocalAtomicCommitError::new(error, Some(writer))),
@@ -74,16 +75,30 @@ pub(crate) fn finalize_failed_commit<W>(
 pub(crate) fn synchronize_staging_file(
     file: &File,
     durability: LocalDurabilityRequirement,
+    file_sync: LocalFileSyncRequirement,
     map_required_error: impl FnOnce(io::Result<()>) -> Result<(), LocalAtomicWriteError>,
 ) -> Result<bool, LocalAtomicWriteError> {
-    match durability {
-        LocalDurabilityRequirement::NotRequired => Ok(false),
-        LocalDurabilityRequirement::Preferred => Ok(file.sync_all().is_ok()),
-        LocalDurabilityRequirement::Required => {
-            map_required_error(file.sync_all())?;
+    let requirement = match (durability, file_sync) {
+        (LocalDurabilityRequirement::Required, _) | (_, LocalFileSyncRequirement::Required) => LocalFileSyncRequirement::Required,
+        (LocalDurabilityRequirement::Preferred, _) | (_, LocalFileSyncRequirement::Preferred) => LocalFileSyncRequirement::Preferred,
+        _ => LocalFileSyncRequirement::NotRequired,
+    };
+    match requirement {
+        LocalFileSyncRequirement::NotRequired => Ok(false),
+        LocalFileSyncRequirement::Preferred => Ok(sync_file(file).is_ok()),
+        LocalFileSyncRequirement::Required => {
+            map_required_error(sync_file(file))?;
             Ok(true)
         }
     }
+}
+
+fn sync_file(file: &File) -> io::Result<()> {
+    #[cfg(feature = "test-support")]
+    if crate::local::test_support_enabled("writer-staged-file-sync") {
+        return Err(crate::local::test_fault_error());
+    }
+    file.sync_all()
 }
 
 #[cfg(test)]
@@ -98,6 +113,7 @@ mod tests {
     use crate::LocalAtomicWriteError;
     use crate::LocalAtomicWriteStage;
     use crate::LocalDurabilityRequirement;
+    use crate::policy::LocalFileSyncRequirement;
     fn write_error(state: LocalAtomicDestinationState) -> LocalAtomicWriteError {
         LocalAtomicWriteError::new(
             LocalAtomicWriteStage::ReplaceDestination,
@@ -175,6 +191,7 @@ mod tests {
             !synchronize_staging_file(
                 fixture.as_file(),
                 LocalDurabilityRequirement::NotRequired,
+                LocalFileSyncRequirement::NotRequired,
                 map_required_sync,
             )
             .expect("not-required durability should skip synchronization")
@@ -183,6 +200,7 @@ mod tests {
             synchronize_staging_file(
                 fixture.as_file(),
                 LocalDurabilityRequirement::Preferred,
+                LocalFileSyncRequirement::NotRequired,
                 map_required_sync,
             )
             .expect("preferred durability should synchronize a regular file")
@@ -191,6 +209,7 @@ mod tests {
             synchronize_staging_file(
                 fixture.as_file(),
                 LocalDurabilityRequirement::Required,
+                LocalFileSyncRequirement::NotRequired,
                 map_required_sync,
             )
             .expect("required durability should synchronize a regular file")

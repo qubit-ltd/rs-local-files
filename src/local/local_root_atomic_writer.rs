@@ -73,6 +73,8 @@ use crate::LocalAtomicWriteError;
 use crate::LocalAtomicWriteOptions;
 use crate::LocalAtomicWriteStage;
 use crate::LocalDurabilityRequirement;
+use crate::policy::LocalFileSyncRequirement;
+use crate::writer::internal::LocalCommitSyncOutcome;
 #[cfg(any(unix, windows))]
 use crate::LocalRelativePath;
 use crate::options::LocalWriteMetadataPolicy;
@@ -123,6 +125,8 @@ pub struct LocalRootAtomicWriter {
     /// Durability requested for staging and parent synchronization.
     #[cfg(unix)]
     durability: LocalDurabilityRequirement,
+    #[cfg(unix)]
+    file_sync: LocalFileSyncRequirement,
     /// Descriptor-relative staging lifecycle.
     #[cfg(unix)]
     staged_file: RootedStagedFile,
@@ -138,6 +142,8 @@ pub struct LocalRootAtomicWriter {
     /// Durability requested for staging and parent synchronization.
     #[cfg(windows)]
     durability: LocalDurabilityRequirement,
+    #[cfg(windows)]
+    file_sync: LocalFileSyncRequirement,
     /// Handle-relative staging lifecycle.
     #[cfg(windows)]
     staged_file: WindowsRootedStagedFile,
@@ -226,6 +232,7 @@ impl LocalRootAtomicWriter {
             destination_is_regular,
             metadata_policy: options.metadata_policy(),
             durability: options.durability(),
+            file_sync: options.file_sync(),
             staged_file,
         })
     }
@@ -368,6 +375,7 @@ impl LocalRootAtomicWriter {
                         destination_is_regular,
                         metadata_policy: options.metadata_policy(),
                         durability: options.durability(),
+                        file_sync: options.file_sync(),
                     });
                 }
                 Err(source) if source.kind() == io::ErrorKind::AlreadyExists => {}
@@ -405,6 +413,10 @@ impl LocalRootAtomicWriter {
     /// Returns a recoverable error before installation or a terminal error
     /// after destination state may have changed.
     pub(crate) fn commit_recoverable_with_durability(self) -> Result<bool, LocalAtomicCommitError<Self>> {
+        self.commit_recoverable_with_sync().map(|outcome| outcome.durable)
+    }
+
+    pub(crate) fn commit_recoverable_with_sync(self) -> Result<LocalCommitSyncOutcome, LocalAtomicCommitError<Self>> {
         #[cfg(unix)]
         {
             commit_recoverably(self, Self::commit_attempt, |writer| writer.staged_file.is_open())
@@ -478,7 +490,7 @@ impl LocalRootAtomicWriter {
     /// Native metadata/permission/rename failures retain structured stage and
     /// destination state; staging remains armed until successful installation.
     #[cfg(windows)]
-    fn commit_attempt_windows(&mut self) -> Result<bool, LocalAtomicWriteError> {
+    fn commit_attempt_windows(&mut self) -> Result<LocalCommitSyncOutcome, LocalAtomicWriteError> {
         let destination = if self.destination_is_regular {
             Some(
                 read_rooted_symlink_metadata(&self.staged_file.root, Path::new(""), &self.destination).map_err(
@@ -545,7 +557,9 @@ impl LocalRootAtomicWriter {
             })?;
         }
         self.apply_copy_permissions()?;
-        if self.durability == LocalDurabilityRequirement::Required {
+        let file_synced = if self.durability == LocalDurabilityRequirement::Required
+            || self.file_sync == LocalFileSyncRequirement::Required
+        {
             self.staged_file.file().sync_all().map_err(|source| {
                 LocalAtomicWriteError::new(
                     LocalAtomicWriteStage::SyncTemporaryFile,
@@ -555,9 +569,12 @@ impl LocalRootAtomicWriter {
                     source,
                 )
             })?;
+            true
         } else if self.durability == LocalDurabilityRequirement::Preferred {
-            let _ = self.staged_file.file().sync_all();
-        }
+            self.staged_file.file().sync_all().is_ok()
+        } else if self.file_sync == LocalFileSyncRequirement::Preferred {
+            self.staged_file.file().sync_all().is_ok()
+        } else { false };
         if let Some(opened_destination) = destination.as_ref() {
             #[cfg(feature = "test-support")]
             if crate::local::test_support_enabled("rooted-writer-identity-replace") {
@@ -662,7 +679,7 @@ impl LocalRootAtomicWriter {
                 io::Error::other("injected error after rooted destination rename"),
             ));
         }
-        Ok(false)
+        Ok(LocalCommitSyncOutcome { durable: false, file_synced })
     }
 
     /// Runs one rooted commit attempt without consuming recoverable staging.
@@ -672,14 +689,15 @@ impl LocalRootAtomicWriter {
     /// Returns the structured commit failure. Errors raised before installation
     /// leave the staging handle open for the public recoverable commit API.
     #[cfg(unix)]
-    fn commit_attempt(&mut self) -> Result<bool, LocalAtomicWriteError> {
+    fn commit_attempt(&mut self) -> Result<LocalCommitSyncOutcome, LocalAtomicWriteError> {
         let destination = self.open_destination_for_commit()?;
         self.apply_destination_metadata(destination.as_ref())?;
         self.apply_copy_permissions()?;
-        let file_durable = self.sync_temporary_file()?;
+        let file_synced = self.sync_temporary_file()?;
         self.verify_destination_for_commit(destination.as_ref())?;
         let parent_durable = self.install_and_sync_parent()?;
-        Ok(file_durable && parent_durable)
+        let durable = self.durability != LocalDurabilityRequirement::NotRequired && file_synced && parent_durable;
+        Ok(LocalCommitSyncOutcome { durable, file_synced })
     }
 
     /// Applies the copy-only permission override after destination metadata.
@@ -823,7 +841,7 @@ impl LocalRootAtomicWriter {
     /// staging when the native synchronization fails.
     #[cfg(unix)]
     fn sync_temporary_file(&mut self) -> Result<bool, LocalAtomicWriteError> {
-        synchronize_staging_file(self.staged_file.file(), self.durability, |result| {
+        synchronize_staging_file(self.staged_file.file(), self.durability, self.file_sync, |result| {
             map_atomic_error(
                 result,
                 LocalAtomicWriteStage::SyncTemporaryFile,

@@ -13,6 +13,7 @@ use std::path::PathBuf;
 
 use super::internal::LocalFileWriterBackend;
 use crate::LocalDurabilityRequirement;
+use crate::policy::LocalFileSyncRequirement;
 use crate::LocalFileCommitError;
 use crate::LocalFileError;
 use crate::LocalFileErrorKind;
@@ -178,18 +179,26 @@ impl LocalFileWriter {
                         None,
                     ));
                 }
-                let durable = match self.options.durability() {
-                    LocalDurabilityRequirement::NotRequired => false,
-                    LocalDurabilityRequirement::Preferred => file.sync_all().is_ok(),
-                    LocalDurabilityRequirement::Required => {
+                let sync_requirement = match (self.options.durability(), self.options.file_sync()) {
+                    (LocalDurabilityRequirement::Required, _) | (_, LocalFileSyncRequirement::Required) => LocalFileSyncRequirement::Required,
+                    (LocalDurabilityRequirement::Preferred, _) | (_, LocalFileSyncRequirement::Preferred) => LocalFileSyncRequirement::Preferred,
+                    _ => LocalFileSyncRequirement::NotRequired,
+                };
+                let (durable, file_synced) = match sync_requirement {
+                    LocalFileSyncRequirement::NotRequired => (false, false),
+                    LocalFileSyncRequirement::Preferred => {
+                        let synced = sync_append_file(&file).is_ok();
+                        (self.options.durability() == LocalDurabilityRequirement::Preferred && synced, synced)
+                    }
+                    LocalFileSyncRequirement::Required => {
                         #[cfg(feature = "test-support")]
                         let sync_result = if crate::local::test_support_enabled("writer-append-required-sync") {
                             Err(crate::local::test_fault_error())
                         } else {
-                            file.sync_all()
+                            sync_append_file(&file)
                         };
                         #[cfg(not(feature = "test-support"))]
-                        let sync_result = file.sync_all();
+                        let sync_result = sync_append_file(&file);
                         if let Err(error) = sync_result {
                             return Err(LocalFileCommitError::new(
                                 self.contextualize_error(publication_error(
@@ -200,7 +209,7 @@ impl LocalFileWriter {
                                 None,
                             ));
                         }
-                        true
+                        (self.options.durability() != LocalDurabilityRequirement::NotRequired, true)
                     }
                 };
                 self.state = LocalWriterState::Committed;
@@ -211,7 +220,7 @@ impl LocalFileWriter {
                     durable,
                     self.bytes_written,
                     self.failure_state,
-                ))
+                ).with_file_synced(file_synced))
             }
         }
     }
@@ -311,16 +320,16 @@ impl LocalFileWriter {
         backend: LocalFileWriterBackend,
     ) -> Result<LocalWriteOutcome, LocalFileCommitError> {
         match backend.commit_staged() {
-            Ok(durable) => {
+            Ok(sync_outcome) => {
                 self.state = LocalWriterState::Committed;
                 Ok(LocalWriteOutcome::new(
                     self.state,
                     true,
                     LocalWritePublicationMethod::AtomicRename,
-                    durable,
+                    sync_outcome.durable,
                     self.bytes_written,
                     self.failure_state,
-                ))
+                ).with_file_synced(sync_outcome.file_synced))
             }
             Err(commit_error) => {
                 let (error, retained) = commit_error.into_parts();
@@ -593,4 +602,12 @@ fn publication_error(error: LocalFileError, state: LocalWriteFailureState) -> Lo
         LocalWriteFailureState::Published => error.with_kind(LocalFileErrorKind::PublicationIncomplete),
         LocalWriteFailureState::Indeterminate => error.with_kind(LocalFileErrorKind::Indeterminate),
     }
+}
+
+fn sync_append_file(file: &std::fs::File) -> io::Result<()> {
+    #[cfg(feature = "test-support")]
+    if crate::local::test_support_enabled("writer-append-file-sync") {
+        return Err(crate::local::test_fault_error());
+    }
+    file.sync_all()
 }

@@ -46,6 +46,8 @@ pub struct LocalWriteOutcome {
     publication_method: LocalWritePublicationMethod,
     /// Whether requested durability synchronization completed.
     durable: bool,
+    /// Whether file data and metadata synchronization completed.
+    file_synced: bool,
     /// Bytes accepted by the writer stream.
     bytes_written: usize,
     /// Failure state retained when a stream failure preceded terminal cleanup.
@@ -77,6 +79,7 @@ impl LocalWriteOutcome {
             atomic,
             publication_method,
             durable,
+            file_synced: false,
             bytes_written,
             failure_state,
         }
@@ -108,6 +111,20 @@ impl LocalWriteOutcome {
     #[inline]
     pub const fn durable(self) -> bool {
         self.durable
+    }
+
+    /// Reports whether file synchronization completed.
+    #[must_use]
+    #[inline]
+    pub const fn file_synced(self) -> bool {
+        self.file_synced
+    }
+
+    /// Sets the achieved file synchronization state.
+    #[inline]
+    pub(crate) const fn with_file_synced(mut self, file_synced: bool) -> Self {
+        self.file_synced = file_synced;
+        self
     }
 
     /// Returns the number of bytes accepted by the writer stream.
