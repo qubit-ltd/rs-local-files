@@ -17,6 +17,147 @@ use crate::options::LocalTempFileOptions;
 use crate::policy::LocalPrivacyRequirement;
 
 #[test]
+fn lf_review_stage_cleanup_retains_creation_limit() {
+    use std::path::Path;
+
+    use crate::error::LocalFileErrorKind;
+    use crate::options::LocalDirectoryOpenOptions;
+
+    let fixture = tempfile::tempdir().expect("fixture");
+    let fs = LocalFileSystem::host().expect("Host");
+    let parent = fs
+        .open_directory_with_options(fixture.path(), &LocalDirectoryOpenOptions::new())
+        .expect("parent");
+    let mut stage = parent
+        .create_staged_directory(
+            &LocalTempDirectoryOptions::new()
+                .with_cleanup_limits(LocalTempCleanupLimits::new().with_max_entries(0)),
+        )
+        .expect("stage");
+    stage
+        .write_file_new(Path::new("file"), &mut b"x".as_slice(), 1)
+        .expect("write");
+    let native = fixture.path().join(stage.relative_name());
+    let failure = stage.cleanup().expect_err("zero budget must reject cleanup");
+    assert_eq!(failure.cause().kind(), LocalFileErrorKind::ResourceLimit);
+    assert!(native.join("file").exists());
+    let mut owners = failure.into_retained_resources();
+    assert_eq!(owners.len(), 1);
+    let mut owner = owners.pop().expect("retained owner");
+    owner.set_cleanup_limits(LocalTempCleanupLimits::new());
+    owner.cleanup().expect("retry with relaxed budget");
+    assert!(!native.exists());
+}
+
+#[test]
+fn lf_review_stage_cleanup_drop_retains_zero_entry_budget() {
+    use std::path::Path;
+
+    use crate::options::LocalDirectoryOpenOptions;
+
+    let fixture = tempfile::tempdir().expect("fixture");
+    let fs = LocalFileSystem::host().expect("Host");
+    let parent = fs
+        .open_directory_with_options(fixture.path(), &LocalDirectoryOpenOptions::new())
+        .expect("parent");
+    let mut stage = parent
+        .create_staged_directory(
+            &LocalTempDirectoryOptions::new()
+                .with_cleanup_limits(LocalTempCleanupLimits::new().with_max_entries(0)),
+        )
+        .expect("stage");
+    stage
+        .write_file_new(Path::new("file"), &mut b"x".as_slice(), 1)
+        .expect("write");
+    let native = fixture.path().join(stage.relative_name());
+    drop(stage);
+    assert!(native.join("file").exists());
+    assert!(native.is_dir());
+}
+
+#[test]
+fn lf_review_stage_cleanup_retains_zero_deadline() {
+    use std::path::Path;
+    use std::time::Duration;
+
+    use crate::error::LocalFileErrorKind;
+    use crate::options::LocalDirectoryOpenOptions;
+
+    let fixture = tempfile::tempdir().expect("fixture");
+    let fs = LocalFileSystem::host().expect("Host");
+    let parent = fs
+        .open_directory_with_options(fixture.path(), &LocalDirectoryOpenOptions::new())
+        .expect("parent");
+    let mut stage = parent
+        .create_staged_directory(
+            &LocalTempDirectoryOptions::new().with_cleanup_limits(
+                LocalTempCleanupLimits::new().with_deadline(Duration::ZERO),
+            ),
+        )
+        .expect("stage");
+    stage
+        .write_file_new(Path::new("file"), &mut b"x".as_slice(), 1)
+        .expect("write");
+    let native = fixture.path().join(stage.relative_name());
+    let failure = stage.cleanup().expect_err("zero deadline must reject cleanup");
+    assert_eq!(failure.cause().kind(), LocalFileErrorKind::ResourceLimit);
+    assert!(native.join("file").exists());
+    let mut owners = failure.into_retained_resources();
+    let mut owner = owners.pop().expect("retained owner");
+    owner.set_cleanup_limits(LocalTempCleanupLimits::new());
+    owner.cleanup().expect("retry with relaxed deadline");
+    assert!(!native.exists());
+}
+
+#[test]
+fn lf_review_stage_cleanup_creation_failure_retains_creation_limit() {
+    use crate::error::LocalFileErrorKind;
+    use crate::options::LocalDirectoryOpenOptions;
+
+    let fixture = tempfile::tempdir().expect("fixture");
+    let fs = LocalFileSystem::host().expect("Host");
+    let parent = fs
+        .open_directory_with_options(fixture.path(), &LocalDirectoryOpenOptions::new())
+        .expect("parent");
+    let fixture_path = fixture.path().to_path_buf();
+    let original_stage = fixture.path().join("original-stage");
+    let original_stage_for_hook = original_stage.clone();
+    let _hook = crate::directory::install_stage_created_hook(move |name| {
+        let stage = fixture_path.join(name);
+        std::fs::rename(&stage, &original_stage_for_hook).expect("move created stage");
+        std::fs::write(&stage, b"residual").expect("replace with residual file");
+    });
+    let failure = parent
+        .create_staged_directory(
+            &LocalTempDirectoryOptions::new()
+                .with_privacy(LocalPrivacyRequirement::Required)
+                .with_cleanup_limits(LocalTempCleanupLimits::new().with_max_entries(0)),
+        )
+        .expect_err("opening the replaced stage must fail");
+    assert_eq!(failure.cause().kind(), LocalFileErrorKind::NotDirectory);
+    let path = failure
+        .retained_resources()
+        .first()
+        .expect("creation failure owner")
+        .diagnostic_path()
+        .to_path_buf();
+    assert!(path.is_file());
+    std::fs::remove_file(&path).expect("remove injected replacement");
+    std::fs::rename(&original_stage, &path).expect("restore original stage identity");
+    let mut owners = failure.into_retained_resources();
+    assert_eq!(owners.len(), 1);
+    let owner = owners.pop().expect("retained owner");
+    let error = owner.cleanup().expect_err("creation limit must be preserved");
+    assert_eq!(error.cause().kind(), LocalFileErrorKind::ResourceLimit);
+    assert!(path.exists());
+    let mut owners = error.into_retained_resources();
+    let mut owner = owners.pop().expect("owner retained after cleanup failure");
+    owner.set_cleanup_limits(LocalTempCleanupLimits::new());
+    owner.cleanup().expect("retry with relaxed budget");
+    assert!(!path.exists());
+}
+
+#[test]
 fn lf3_temp_seal_returns_read_only_owner() {
     let fixture = tempfile::tempdir().expect("fixture");
     let filesystem = LocalFileSystem::host().expect("host filesystem");

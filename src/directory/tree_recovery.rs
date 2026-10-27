@@ -57,6 +57,7 @@ impl LocalTreeRetainedResource {
         identity: Option<LocalFileIdentity>,
         parent: LocalDirectoryHandle,
         child: Option<LocalDirectoryHandle>,
+        cleanup_limits: LocalTempCleanupLimits,
     ) -> Self {
         Self {
             path,
@@ -65,7 +66,7 @@ impl LocalTreeRetainedResource {
             parent,
             child,
             cleanup_armed: true,
-            cleanup_limits: LocalTempCleanupLimits::new(),
+            cleanup_limits,
             owned_entries: Vec::new(),
             mutation_state: LocalTreeMutationState::NotStarted,
         }

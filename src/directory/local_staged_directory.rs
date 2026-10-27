@@ -739,6 +739,7 @@ impl LocalDirectoryHandle {
             identity.clone(),
             self.clone(),
             Some(directory.clone()),
+            LocalTempCleanupLimits::new(),
         );
         let stage = LocalStagedDirectory::new(owner, directory, relative.to_path_buf(), identity, private);
         if let Some(entries) = options.exact_entries() {
@@ -800,6 +801,7 @@ impl LocalDirectoryHandle {
                                     Some(identity),
                                     self.clone(),
                                     None,
+                                    options.cleanup_limits(),
                                 )
                             })
                             .into_iter()
@@ -865,8 +867,14 @@ impl LocalDirectoryHandle {
             ) {
                 Ok(observation) => observation,
                 Err(cause) => {
-                    let owner =
-                        LocalTreeRetainedResource::new(path.clone(), relative.clone(), None, self.clone(), None);
+                    let owner = LocalTreeRetainedResource::new(
+                        path.clone(),
+                        relative.clone(),
+                        None,
+                        self.clone(),
+                        None,
+                        options.cleanup_limits(),
+                    );
                     return Err(LocalTreeCreateError::new(
                         cause,
                         None,
@@ -878,8 +886,14 @@ impl LocalDirectoryHandle {
             match observation.identity().cloned() {
                 Some(identity) => Some(identity),
                 None => {
-                    let owner =
-                        LocalTreeRetainedResource::new(path.clone(), relative.clone(), None, self.clone(), None);
+                    let owner = LocalTreeRetainedResource::new(
+                        path.clone(),
+                        relative.clone(),
+                        None,
+                        self.clone(),
+                        None,
+                        options.cleanup_limits(),
+                    );
                     return Err(LocalTreeCreateError::new(
                         LocalFileError::new(LocalFileErrorKind::Unsupported, LocalFileOperation::Metadata)
                             .with_path(path.clone()),
@@ -902,7 +916,14 @@ impl LocalDirectoryHandle {
                         .ok()
                         .and_then(|observation| observation.identity().cloned())
                 });
-                let resource = LocalTreeRetainedResource::new(path, relative, identity, self.clone(), None);
+                let resource = LocalTreeRetainedResource::new(
+                    path,
+                    relative,
+                    identity,
+                    self.clone(),
+                    None,
+                    options.cleanup_limits(),
+                );
                 return Err(LocalTreeCreateError::new(
                     cause,
                     None,
@@ -924,7 +945,14 @@ impl LocalDirectoryHandle {
                 } else {
                     Some(directory.clone())
                 };
-                let resource = LocalTreeRetainedResource::new(path, relative, identity, self.clone(), child);
+                let resource = LocalTreeRetainedResource::new(
+                    path,
+                    relative,
+                    identity,
+                    self.clone(),
+                    child,
+                    options.cleanup_limits(),
+                );
                 return Err(LocalTreeCreateError::new(
                     cause,
                     None,
@@ -943,6 +971,7 @@ impl LocalDirectoryHandle {
                 created_identity.clone(),
                 self.clone(),
                 None,
+                options.cleanup_limits(),
             );
             return Err(LocalTreeCreateError::new(
                 LocalFileError::new(LocalFileErrorKind::ChangedDuringRead, LocalFileOperation::Metadata)
@@ -959,6 +988,7 @@ impl LocalDirectoryHandle {
             identity.clone(),
             self.clone(),
             Some(directory.clone()),
+            options.cleanup_limits(),
         );
         Ok(LocalStagedDirectory::new(
             owner,
