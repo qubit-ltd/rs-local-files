@@ -178,7 +178,7 @@ fn lf3_conditional_preferred_file_sync_failure_reports_false_and_publishes() {
 
 #[cfg(windows)]
 #[test]
-fn lf3_conditional_windows_rooted_content_preflight_is_unchanged() {
+fn lf3_conditional_windows_content_preflight_and_rooted_absent_are_unchanged() {
     let fixture = tempfile::tempdir().expect("fixture directory");
     fs::write(fixture.path().join("target"), b"before").expect("write target");
     let mut fsys = LocalFileSystem::host().expect("host filesystem");
@@ -215,10 +215,10 @@ fn lf3_conditional_windows_rooted_content_preflight_is_unchanged() {
     rooted
         .set_symlink_policy(LocalSymlinkPolicy::Reject)
         .expect("set rooted link policy");
-    let error = rooted
+    let writer = rooted
         .open_conditional_writer::<Sha256>(Path::new("direct-new"), LocalWritePrecondition::Absent, &options)
-        .expect_err("Rooted Required durability is unsupported before staging");
-    assert_eq!(error.kind(), crate::error::LocalFileErrorKind::RequirementNotMet);
+        .expect("Rooted Absent remains supported");
+    drop(writer);
     let final_entries = fs::read_dir(fixture.path())
         .expect("enumerate after direct Rooted open")
         .map(|entry| entry.expect("entry").file_name())
