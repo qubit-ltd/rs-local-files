@@ -92,8 +92,8 @@ fn test_host_temp_identity_failure_reports_sandbox_cleanup_failure() {
         .iter()
         .find(|entry| entry.starts_with("sandbox-"))
         .expect("failed cleanup should leave this sandbox");
-    let sandbox_path = fs::canonicalize(parent.path())
-        .expect("parent path should canonicalize")
+    let sandbox_path = std::path::absolute(parent.path())
+        .expect("parent path should resolve absolutely")
         .join(sandbox);
     assert!(diagnostic.contains(&sandbox_path.display().to_string()));
     let contents = fs::read_dir(&sandbox_path)
