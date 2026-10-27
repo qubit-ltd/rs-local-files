@@ -62,3 +62,6 @@ pub use local_write_precondition::LocalWritePrecondition;
 pub use crate::local::LocalCopyConflictPolicy;
 pub use crate::local::LocalCopyTypeConflictPolicy;
 pub use crate::local::LocalPersistOptions;
+
+mod local_tree_publish_options;
+pub use local_tree_publish_options::LocalTreePublishOptions;

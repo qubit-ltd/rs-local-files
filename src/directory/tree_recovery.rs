@@ -53,6 +53,44 @@ impl LocalTreeRetainedResource {
     pub fn set_cleanup_limits(&mut self, limits: LocalTempCleanupLimits) {
         self.cleanup_limits = limits;
     }
+    #[cfg(windows)]
+    pub(crate) fn open_child_for_access(&self) -> crate::LocalResult<std::fs::File> {
+        let parent = self
+            .parent
+            .root_authority()?
+            .try_clone_authority()
+            .map_err(|source| {
+                crate::LocalFileError::from_io(
+                    crate::LocalFileOperation::OpenRoot,
+                    Some(self.path.clone()),
+                    None,
+                    source,
+                )
+            })?;
+        crate::temp::internal::privacy_windows::open_existing_relative(
+            &parent,
+            &self.relative,
+            true,
+        )
+        .map_err(|source| {
+            crate::LocalFileError::from_io(
+                crate::LocalFileOperation::OpenRoot,
+                Some(self.path.clone()),
+                None,
+                source,
+            )
+        })
+    }
+
+    pub(crate) fn disarm_after_publish(&mut self) {
+        self.cleanup_armed = false;
+        self.child.take();
+    }
+    pub(crate) fn parent_matches(&self, parent: &LocalDirectoryHandle) -> crate::LocalResult<bool> {
+        let expected = self.parent.observe()?.identity().cloned();
+        let actual = parent.observe()?.identity().cloned();
+        Ok(expected.is_some() && expected == actual)
+    }
     pub(crate) fn record_entry(
         &mut self,
         relative: &Path,
@@ -417,3 +455,129 @@ impl std::fmt::Display for LocalTreeCreateError {
     }
 }
 impl std::error::Error for LocalTreeCreateError {}
+
+/// Failure while applying a staged tree access policy.
+#[derive(Debug)]
+pub struct LocalTreeAccessError {
+    cause: LocalFileError,
+    access_state: crate::outcome::LocalTreeAccessState,
+    retained: Vec<LocalTreeRetainedResource>,
+}
+impl LocalTreeAccessError {
+    pub(crate) fn new(
+        cause: LocalFileError,
+        access_state: crate::outcome::LocalTreeAccessState,
+    ) -> Self {
+        Self {
+            cause,
+            access_state,
+            retained: Vec::new(),
+        }
+    }
+    pub fn cause(&self) -> &LocalFileError {
+        &self.cause
+    }
+    pub const fn access_state(&self) -> crate::outcome::LocalTreeAccessState {
+        self.access_state
+    }
+    pub fn retained_resources(&self) -> &[LocalTreeRetainedResource] {
+        &self.retained
+    }
+    pub fn into_retained_resources(mut self) -> Vec<LocalTreeRetainedResource> {
+        std::mem::take(&mut self.retained)
+    }
+    pub fn into_parts(
+        mut self,
+    ) -> (
+        LocalFileError,
+        crate::outcome::LocalTreeAccessState,
+        Vec<LocalTreeRetainedResource>,
+    ) {
+        (
+            self.cause,
+            self.access_state,
+            std::mem::take(&mut self.retained),
+        )
+    }
+}
+impl std::fmt::Display for LocalTreeAccessError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "tree access policy failed: {}", self.cause)
+    }
+}
+impl std::error::Error for LocalTreeAccessError {}
+
+/// Failure while publishing a staged directory.
+#[derive(Debug)]
+pub struct LocalTreePublishError {
+    cause: LocalFileError,
+    stage: Option<super::staged::LocalStagedDirectory>,
+    retained: Vec<LocalTreeRetainedResource>,
+    mutation: LocalTreeMutationState,
+    publication: crate::outcome::LocalTreePublication,
+    access_state: crate::outcome::LocalTreeAccessState,
+}
+impl LocalTreePublishError {
+    pub(crate) fn new(
+        cause: LocalFileError,
+        stage: Option<super::staged::LocalStagedDirectory>,
+        mutation: LocalTreeMutationState,
+        publication: crate::outcome::LocalTreePublication,
+        access_state: crate::outcome::LocalTreeAccessState,
+    ) -> Self {
+        Self {
+            cause,
+            stage,
+            retained: Vec::new(),
+            mutation,
+            publication,
+            access_state,
+        }
+    }
+    pub(crate) fn with_retained(mut self, retained: Option<LocalTreeRetainedResource>) -> Self {
+        if let Some(retained) = retained {
+            self.retained.push(retained);
+        }
+        self
+    }
+    pub fn cause(&self) -> &LocalFileError {
+        &self.cause
+    }
+    pub const fn mutation_state(&self) -> LocalTreeMutationState {
+        self.mutation
+    }
+    pub fn retained_resources(&self) -> &[LocalTreeRetainedResource] {
+        &self.retained
+    }
+    pub const fn publication(&self) -> crate::outcome::LocalTreePublication {
+        self.publication
+    }
+    pub const fn access_state(&self) -> crate::outcome::LocalTreeAccessState {
+        self.access_state
+    }
+    pub fn into_stage(self) -> Option<super::staged::LocalStagedDirectory> {
+        self.stage
+    }
+    pub fn into_retained_resources(mut self) -> Vec<LocalTreeRetainedResource> {
+        std::mem::take(&mut self.retained)
+    }
+    pub fn into_parts(
+        mut self,
+    ) -> (
+        LocalFileError,
+        Option<super::staged::LocalStagedDirectory>,
+        Vec<LocalTreeRetainedResource>,
+    ) {
+        (
+            self.cause,
+            self.stage.take(),
+            std::mem::take(&mut self.retained),
+        )
+    }
+}
+impl std::fmt::Display for LocalTreePublishError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "tree publish failed: {}", self.cause)
+    }
+}
+impl std::error::Error for LocalTreePublishError {}

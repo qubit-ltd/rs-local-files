@@ -5,6 +5,39 @@ use std::os::fd::{AsRawFd, FromRawFd};
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::MetadataExt;
 
+#[cfg(test)]
+use std::cell::Cell;
+
+#[cfg(test)]
+thread_local! {
+    static ACCESS_FAILURE_AFTER: Cell<Option<usize>> = const { Cell::new(None) };
+}
+
+#[cfg(test)]
+pub(crate) fn fail_access_after(successful_steps: usize) {
+    ACCESS_FAILURE_AFTER.with(|slot| slot.set(Some(successful_steps)));
+}
+
+#[cfg(test)]
+fn fail_access_if_scheduled() -> io::Result<()> {
+    let fail = ACCESS_FAILURE_AFTER.with(|slot| match slot.get() {
+        Some(0) => {
+            slot.set(None);
+            true
+        }
+        Some(remaining) => {
+            slot.set(Some(remaining - 1));
+            false
+        }
+        None => false,
+    });
+    if fail {
+        Err(io::Error::other("injected access policy failure"))
+    } else {
+        Ok(())
+    }
+}
+
 use crate::observation::LocalFileIdentity;
 use crate::temp::types::{NativePrivateCreateError, NativePrivateEntry};
 
@@ -252,6 +285,8 @@ pub(crate) fn apply_current_user_access(
         (true, false) => 0o700,
         (true, true) => 0o500,
     };
+    #[cfg(test)]
+    fail_access_if_scheduled()?;
     if unsafe { libc::fchmod(file.as_raw_fd(), mode) } < 0 {
         return Err(io::Error::last_os_error());
     }

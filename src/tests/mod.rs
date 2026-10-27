@@ -33,3 +33,4 @@ pub(crate) mod rooted;
 mod vectored_read_tests;
 mod vectored_tests;
 mod write;
+mod lf3_tree_publish_tests;

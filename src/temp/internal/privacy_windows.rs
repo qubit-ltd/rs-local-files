@@ -22,6 +22,8 @@ use windows_sys::Wdk::Foundation::OBJECT_ATTRIBUTES;
 use windows_sys::Wdk::Storage::FileSystem::FILE_CREATE;
 use windows_sys::Wdk::Storage::FileSystem::FILE_DIRECTORY_FILE;
 use windows_sys::Wdk::Storage::FileSystem::FILE_NON_DIRECTORY_FILE;
+use windows_sys::Wdk::Storage::FileSystem::FILE_OPEN;
+use windows_sys::Wdk::Storage::FileSystem::FILE_OPEN_REPARSE_POINT;
 use windows_sys::Wdk::Storage::FileSystem::NtCreateFile;
 use windows_sys::Win32::Foundation::CloseHandle;
 use windows_sys::Win32::Foundation::GetLastError;
@@ -98,6 +100,7 @@ pub(crate) enum FailurePoint {
     Descriptor,
     Create,
     AclApply,
+    AccessApplyBefore,
     AclReadback,
     ReadOnly,
 }
@@ -232,7 +235,16 @@ impl SecurityDescriptor {
             return Err(last_os_error());
         }
         let access = if directory {
-            DIRECTORY_ACCESS
+            if read_only {
+                DIRECTORY_ACCESS
+                    & !(FILE_ADD_FILE
+                        | FILE_ADD_SUBDIRECTORY
+                        | FILE_DELETE_CHILD
+                        | FILE_WRITE_ATTRIBUTES
+                        | DELETE)
+            } else {
+                DIRECTORY_ACCESS
+            }
         } else if read_only {
             FILE_INITIAL_ACCESS & !(FILE_WRITE_DATA | FILE_APPEND_DATA)
         } else {
@@ -359,6 +371,118 @@ fn create_at(parent: &File, name: &OsStr, directory: bool) -> io::Result<File> {
     Ok(file)
 }
 
+/// Opens one existing child by native directory handle with rights to update its DACL.
+pub(crate) fn open_existing_entry_at(
+    parent: &File,
+    name: &OsStr,
+    directory: bool,
+) -> io::Result<File> {
+    let mut name: Vec<u16> = name.encode_wide().collect();
+    if name.is_empty()
+        || name.contains(&0)
+        || name.contains(&(b'/' as u16))
+        || name.contains(&(b'\\' as u16))
+        || name.contains(&(b':' as u16))
+        || name.as_slice() == [b'.' as u16]
+        || name.as_slice() == [b'.' as u16, b'.' as u16]
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "name must be one native path component",
+        ));
+    }
+    let byte_length = name
+        .len()
+        .checked_mul(size_of::<u16>())
+        .and_then(|length| u16::try_from(length).ok())
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "entry name is too long"))?;
+    let unicode_name = UNICODE_STRING {
+        Length: byte_length,
+        MaximumLength: byte_length,
+        Buffer: name.as_mut_ptr(),
+    };
+    let attributes = OBJECT_ATTRIBUTES {
+        Length: size_of::<OBJECT_ATTRIBUTES>() as u32,
+        RootDirectory: parent.as_raw_handle().cast(),
+        ObjectName: &unicode_name,
+        Attributes: 0,
+        SecurityDescriptor: ptr::null(),
+        SecurityQualityOfService: ptr::null(),
+    };
+    let access = READ_CONTROL
+        | WRITE_DAC
+        | FILE_READ_ATTRIBUTES
+        | FILE_WRITE_ATTRIBUTES
+        | if directory {
+            FILE_LIST_DIRECTORY | FILE_TRAVERSE
+        } else {
+            0
+        };
+    let mut handle = ptr::null_mut();
+    let mut io_status = unsafe { std::mem::zeroed::<IO_STATUS_BLOCK>() };
+    let status = unsafe {
+        NtCreateFile(
+            &mut handle,
+            access,
+            &attributes,
+            &mut io_status,
+            ptr::null(),
+            0,
+            0x7,
+            FILE_OPEN,
+            FILE_OPEN_REPARSE_POINT
+                | if directory {
+                    FILE_DIRECTORY_FILE
+                } else {
+                    FILE_NON_DIRECTORY_FILE
+                },
+            ptr::null(),
+            0,
+        )
+    };
+    if status < 0 {
+        return Err(io::Error::from_raw_os_error(status));
+    }
+    let handle = NativeHandle(handle);
+    let file = unsafe { File::from_raw_handle(handle.0.cast()) };
+    std::mem::forget(handle);
+    let metadata = file.metadata()?;
+    use std::os::windows::fs::MetadataExt;
+    if metadata.file_attributes()
+        & windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_REPARSE_POINT
+        != 0
+        || (directory && !metadata.is_dir())
+        || (!directory && !metadata.is_file())
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "entry is a reparse point or has an unexpected type",
+        ));
+    }
+    Ok(file)
+}
+
+/// Opens an existing relative path one component at a time with no-follow semantics.
+pub(crate) fn open_existing_relative(
+    parent: &File,
+    relative: &std::path::Path,
+    directory: bool,
+) -> io::Result<File> {
+    let mut current = parent.try_clone()?;
+    let mut components = relative.components().peekable();
+    while let Some(component) = components.next() {
+        let std::path::Component::Normal(name) = component else {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "path must contain only normal components",
+            ));
+        };
+        let is_directory = components.peek().is_some() || directory;
+        current = open_existing_entry_at(&current, name, is_directory)?;
+    }
+    Ok(current)
+}
+
 /// Creates a file relative to a retained parent handle with a protected current-user DACL.
 pub(crate) fn create_private_file_at(
     parent: &File,
@@ -419,6 +543,7 @@ pub(crate) fn apply_current_user_access(
     read_only: bool,
 ) -> io::Result<()> {
     let descriptor = SecurityDescriptor::for_current_user(directory, read_only)?;
+    check_failure!(AccessApplyBefore);
     let status = unsafe {
         windows_sys::Win32::Security::Authorization::SetSecurityInfo(
             file.as_raw_handle().cast(),
@@ -555,7 +680,16 @@ pub(crate) fn verify_current_user_access(
     let allowed = unsafe { &*ace.cast::<ACCESS_ALLOWED_ACE>() };
     let ace_sid = ptr::addr_of!(allowed.SidStart).cast_mut().cast();
     let expected_access = if directory {
-        DIRECTORY_ACCESS
+        if read_only {
+            DIRECTORY_ACCESS
+                & !(FILE_ADD_FILE
+                    | FILE_ADD_SUBDIRECTORY
+                    | FILE_DELETE_CHILD
+                    | FILE_WRITE_ATTRIBUTES
+                    | DELETE)
+        } else {
+            DIRECTORY_ACCESS
+        }
     } else if read_only {
         FILE_INITIAL_ACCESS & !(FILE_WRITE_DATA | FILE_APPEND_DATA)
     } else {

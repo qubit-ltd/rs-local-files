@@ -71,3 +71,8 @@ pub use crate::walk::LocalDirectoryEntry;
 pub use crate::writer::LocalWriteFailureState;
 pub use crate::writer::LocalWriteOutcome;
 pub use crate::writer::LocalWriterState;
+
+mod local_tree_publish_outcome;
+pub use local_tree_publish_outcome::LocalTreePublishOutcome;
+mod local_tree_access_outcome;
+pub use local_tree_access_outcome::LocalTreeAccessOutcome;

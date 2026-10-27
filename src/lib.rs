@@ -156,6 +156,12 @@ pub(crate) use path::LocalPathCodec;
 pub(crate) use policy::LocalAtomicityRequirement;
 pub(crate) use policy::LocalDurabilityRequirement;
 pub(crate) use policy::LocalSymlinkPolicy;
+pub use directory::{LocalTreeAccessError, LocalTreePublishError};
+pub use options::LocalTreePublishOptions;
+pub use outcome::{
+    LocalTreeAccessOutcome, LocalTreeAccessState, LocalTreeMutationState, LocalTreePublication,
+    LocalTreePublishOutcome,
+};
 pub use temp::LocalTempDirectory;
 pub use temp::LocalTempFile;
 pub use temp::LocalTempRecovery;
