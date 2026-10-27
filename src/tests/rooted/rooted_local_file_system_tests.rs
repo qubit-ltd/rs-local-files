@@ -15,6 +15,7 @@ use tempfile::tempdir;
 use crate::LocalCreateDirectoryOptions;
 use crate::LocalListOptions;
 use crate::LocalSymlinkPolicy;
+#[cfg(unix)]
 use crate::LocalWalkErrorPolicy;
 use crate::rooted_local_file_system::RootedLocalFileSystem;
 

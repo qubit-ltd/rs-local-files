@@ -291,10 +291,10 @@ impl WindowsConditionalBackend {
         if let Some(backup) = backup {
             displaced.push(backup);
         }
-        if let Some(candidate) = candidate {
-            if installed_is_candidate != Some(true) {
-                displaced.push(candidate);
-            }
+        if let Some(candidate) = candidate
+            && installed_is_candidate != Some(true)
+        {
+            displaced.push(candidate);
         }
         NativeAttempt {
             publication_method: if backup_container.is_some() {
@@ -801,11 +801,11 @@ impl ConditionalBackend for WindowsConditionalBackend {
         {
             self.candidate_copy = None;
         }
-        if let Some(parent) = entry.namespace_path().parent() {
-            if self.recovery_containers.iter().any(|container| container == parent) {
-                self.namespace.remove_container(parent)?;
-                self.recovery_containers.retain(|container| container != parent);
-            }
+        if let Some(parent) = entry.namespace_path().parent()
+            && self.recovery_containers.iter().any(|container| container == parent)
+        {
+            self.namespace.remove_container(parent)?;
+            self.recovery_containers.retain(|container| container != parent);
         }
         Ok(())
     }

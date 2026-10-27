@@ -268,13 +268,17 @@ fn conditional_windows_host_content_preserves_destination_acl() {
         .expect("Host candidate should open");
     put(&mut backend, b"B");
 
-    commit_conditional::<Sha256, _>(
+    let result = commit_conditional::<Sha256, _>(
         backend,
         LocalWritePrecondition::Content(digest(b"A")),
         options(LocalWriteMode::CreateOrReplace),
         1,
     )
     .expect("matching content should publish");
+    assert!(
+        result.cleanup_errors().is_empty(),
+        "successful cleanup should have no errors"
+    );
     let dacl_after = dacl_bytes(&target);
     assert!(
         dacl_after[8..]
@@ -413,13 +417,17 @@ fn conditional_windows_rooted_absent_uses_handle_relative_no_replace() {
     )
     .expect("Rooted candidate should open");
     put(&mut backend, b"B");
-    commit_conditional::<Sha256, _>(
+    let result = commit_conditional::<Sha256, _>(
         backend,
         LocalWritePrecondition::Absent,
         options(LocalWriteMode::CreateNew),
         1,
     )
     .expect("Rooted absent target should install");
+    assert!(
+        result.cleanup_errors().is_empty(),
+        "successful cleanup should have no errors"
+    );
     assert_eq!(fs::read(target).expect("Rooted target should be readable"), b"B");
 }
 
@@ -499,6 +507,7 @@ fn conditional_windows_sharing_conflict_preserves_candidate_and_target() {
 }
 
 #[test]
+#[allow(clippy::permissions_set_readonly_false)]
 fn conditional_windows_read_only_target_conflict_preserves_candidate_and_target() {
     let directory = tempfile::tempdir().expect("fixture directory should be created");
     let target = directory.path().join("target");

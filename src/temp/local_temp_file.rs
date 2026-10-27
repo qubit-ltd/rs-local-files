@@ -988,7 +988,7 @@ fn sync_identity_error() -> Error {
     )
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod sync_identity_tests {
     use std::fs;
     use std::path::Path;
@@ -1001,7 +1001,6 @@ mod sync_identity_tests {
     use crate::LocalTempFileOptions;
     use crate::outcome::LocalTempSourceState;
 
-    #[cfg(unix)]
     #[test]
     fn closed_reopen_rejects_path_replacement_after_source_precheck() {
         for rooted in [false, true] {

@@ -56,9 +56,7 @@ use windows_sys::Win32::Storage::FileSystem::SYNCHRONIZE;
 
 use super::super::ConditionalEntry;
 use super::super::RecoveryAccess;
-use crate::LocalFileReader;
 use crate::LocalRelativePath;
-use crate::LocalResult;
 use crate::local::internal::windows_rooted::create_rooted_directory;
 use crate::local::internal::windows_rooted::native::nt_open_at_with_share_mode;
 use crate::local::internal::windows_rooted::open_conditional_entry_at;
@@ -80,13 +78,8 @@ pub(super) struct FileIdentity {
 
 #[derive(Debug)]
 enum Scope {
-    Host {
-        parent_path: PathBuf,
-    },
-    Rooted {
-        relative: LocalRelativePath,
-        namespace_absolute: PathBuf,
-    },
+    Host { parent_path: PathBuf },
+    Rooted { namespace_absolute: PathBuf },
 }
 
 #[derive(Debug)]
@@ -147,7 +140,6 @@ impl Namespace {
         let (parent, target_name) = open_conditional_parent(&root, &relative)?;
         Ok(Self {
             scope: Scope::Rooted {
-                relative,
                 namespace_absolute: namespace_absolute.to_path_buf(),
             },
             parent,
@@ -165,9 +157,6 @@ impl Namespace {
     }
     pub(super) fn target_path(&self) -> &Path {
         &self.target_path
-    }
-    pub(super) fn diagnostic_path(&self) -> Option<&Path> {
-        self.diagnostic_path.as_deref()
     }
     pub(super) fn is_rooted(&self) -> bool {
         matches!(self.scope, Scope::Rooted { .. })
@@ -284,7 +273,6 @@ impl Namespace {
         let access = EntryAccess {
             parent,
             name: name.clone(),
-            namespace_path: backup_path.to_path_buf(),
             diagnostic_path: self.diagnostic_path.clone(),
             identity,
             _retained: None,
@@ -352,7 +340,7 @@ impl Namespace {
             .ok_or_else(|| io::Error::new(ErrorKind::InvalidInput, "entry has no leaf"))?;
         let file = match &self.scope {
             Scope::Host { .. } => open_host_file(
-                &entry.namespace_path().to_path_buf(),
+                entry.namespace_path(),
                 GENERIC_READ | windows_sys::Win32::Foundation::GENERIC_WRITE | FILE_READ_ATTRIBUTES | SYNCHRONIZE,
             )?,
             Scope::Rooted { .. } => open_conditional_entry_at(
@@ -364,24 +352,6 @@ impl Namespace {
             )?,
         };
         file.sync_all()
-    }
-
-    pub(super) fn rename_into_target(
-        &self,
-        source_path: &Path,
-        source_name: &OsStr,
-        overwrite: bool,
-    ) -> io::Result<()> {
-        match &self.scope {
-            Scope::Host { .. } => fs::rename(source_path, &self.target_path),
-            Scope::Rooted { .. } => {
-                rename_conditional_entry_at(&self.parent, source_name, &self.parent, &self.target_name, overwrite)
-            }
-        }
-    }
-
-    pub(super) fn delete_host_path(&self, path: &Path) -> io::Result<()> {
-        fs::remove_file(path)
     }
 
     pub(super) fn child_path(&self, name: &OsStr) -> PathBuf {
@@ -410,7 +380,6 @@ impl Namespace {
         let access = EntryAccess {
             parent: self.parent.try_clone()?,
             name: name.clone(),
-            namespace_path: self.child_path(&name),
             diagnostic_path: self.diagnostic_path.clone(),
             identity,
             _retained: None,
@@ -443,8 +412,7 @@ impl Namespace {
                     )
                     .share_mode(SHARE_ALL)
                     .create_new(true)
-                    .open(self.host_child_path(&name)?)
-                    .map_err(|error| error),
+                    .open(self.host_child_path(&name)?),
                 Scope::Rooted { .. } => open_conditional_entry_at(
                     &self.parent,
                     &name,
@@ -478,41 +446,6 @@ impl Namespace {
         }
     }
 
-    pub(super) fn create_reader(&self, name: &OsStr, expected: FileIdentity) -> LocalResult<LocalFileReader> {
-        let file = self.open_entry(name).map_err(|error| {
-            crate::LocalFileError::from_io(
-                crate::LocalFileOperation::OpenReader,
-                self.diagnostic_path.clone(),
-                None,
-                error,
-            )
-        })?;
-        let observed = file_identity(&file).map_err(|error| {
-            crate::LocalFileError::from_io(
-                crate::LocalFileOperation::OpenReader,
-                self.diagnostic_path.clone(),
-                None,
-                error,
-            )
-        })?;
-        if observed != expected {
-            return Err(crate::LocalFileError::from_io(
-                crate::LocalFileOperation::OpenReader,
-                self.diagnostic_path.clone(),
-                None,
-                io::Error::new(ErrorKind::InvalidData, "conditional recovery entry identity changed"),
-            ));
-        }
-        LocalFileReader::from_file(file).map_err(|error| {
-            crate::LocalFileError::from_io(
-                crate::LocalFileOperation::OpenReader,
-                self.diagnostic_path.clone(),
-                None,
-                error,
-            )
-        })
-    }
-
     pub(super) fn identity_at(&self, name: &OsStr) -> io::Result<Option<FileIdentity>> {
         match self.open_entry(name) {
             Ok(file) => Ok(Some(file_identity(&file)?)),
@@ -543,12 +476,6 @@ impl Namespace {
             ));
         }
         Ok(())
-    }
-
-    pub(super) fn same_identity(&self, left: &ConditionalEntry, right: &ConditionalEntry) -> io::Result<bool> {
-        let left_reader = left.open_reader().map_err(io::Error::other)?;
-        let right_reader = right.open_reader().map_err(io::Error::other)?;
-        Ok(file_identity(left_reader.as_file())? == file_identity(right_reader.as_file())?)
     }
 
     pub(super) fn rename(&self, source: &OsStr, destination: &OsStr, overwrite: bool) -> io::Result<()> {
@@ -588,7 +515,7 @@ impl Namespace {
                     .ok_or_else(|| io::Error::new(ErrorKind::InvalidInput, "entry has no filename"))?;
                 let file = open_conditional_entry_at(
                     &parent,
-                    &name,
+                    name,
                     windows_sys::Win32::Storage::FileSystem::DELETE | FILE_READ_ATTRIBUTES | SYNCHRONIZE,
                     FILE_OPEN,
                     FILE_NON_DIRECTORY_FILE,
@@ -605,13 +532,13 @@ impl Namespace {
     }
 
     pub(super) fn delete_created_private(&self, file: &File, expected: Option<FileIdentity>) -> io::Result<()> {
-        if let Some(expected) = expected {
-            if file_identity(file)? != expected {
-                return Err(io::Error::new(
-                    ErrorKind::InvalidData,
-                    "private entry handle identity changed before cleanup",
-                ));
-            }
+        if let Some(expected) = expected
+            && file_identity(file)? != expected
+        {
+            return Err(io::Error::new(
+                ErrorKind::InvalidData,
+                "private entry handle identity changed before cleanup",
+            ));
         }
         verify_regular_no_reparse(file)?;
         delete_open_entry(file)
@@ -638,7 +565,6 @@ impl Namespace {
 struct EntryAccess {
     parent: File,
     name: OsString,
-    namespace_path: PathBuf,
     diagnostic_path: Option<PathBuf>,
     identity: FileIdentity,
     _retained: Option<File>,
