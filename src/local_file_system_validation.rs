@@ -27,6 +27,12 @@ use crate::LocalSymlinkPolicy;
 use crate::LocalWriteMode;
 use crate::LocalWriteOptions;
 
+#[cfg(feature = "digest")]
+mod conditional_open;
+
+#[cfg(feature = "digest")]
+pub(crate) use conditional_open::validate_conditional_open;
+
 /// Rejects a file operation whose original syntax explicitly requires a
 /// directory.
 /// Returns `InvalidPath` with the namespace path and optional PWD snapshot;

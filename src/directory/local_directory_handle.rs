@@ -8,6 +8,14 @@
 use std::path::Component;
 use std::path::Path;
 use std::path::PathBuf;
+#[cfg(test)]
+use std::sync::Arc;
+#[cfg(test)]
+use std::sync::Barrier;
+#[cfg(test)]
+use std::sync::Mutex;
+#[cfg(test)]
+use std::sync::OnceLock;
 use std::time::Duration;
 use std::time::Instant;
 
@@ -37,6 +45,11 @@ use crate::options::LocalDirectoryOpenOptions;
 use crate::options::LocalObservedReadOptions;
 use crate::options::LocalPathBindingOptions;
 use crate::rooted::Root;
+
+#[cfg(test)]
+type ComponentPolicyCheckpoint = (PathBuf, PathBuf, PathBuf, Arc<Barrier>);
+#[cfg(test)]
+static COMPONENT_POLICY_CHECKPOINT: OnceLock<Mutex<Option<ComponentPolicyCheckpoint>>> = OnceLock::new();
 
 /// Cloneable fixed directory capability with independent operation policy.
 #[derive(Clone, Debug)]
@@ -311,10 +324,22 @@ impl LocalDirectoryHandle {
     /// this authority and cannot escape its root. The returned handle retains
     /// this handle's denied component names and adds any names denied by the
     /// supplied options.
+    /// Rooted paths and platform prefixes are also rejected with `InvalidPath`.
     ///
     /// # Errors
     /// Returns path, policy, type, resource-limit, or native I/O errors.
     pub fn open_directory(&self, relative: &Path, options: &LocalDirectoryOpenOptions) -> LocalResult<Self> {
+        if relative.is_absolute()
+            || relative.has_root()
+            || relative
+                .components()
+                .any(|component| matches!(component, Component::Prefix(_)))
+        {
+            return Err(
+                LocalFileError::new(LocalFileErrorKind::InvalidPath, LocalFileOperation::BindPath)
+                    .with_path(relative.to_path_buf()),
+            );
+        }
         let raw_relative = relative;
         let component_policy = self.component_policy.combined_with(options.component_policy());
         let policy = options.symlink_policy().unwrap_or(self.filesystem.symlink_policy());
@@ -463,6 +488,11 @@ impl LocalDirectoryHandle {
 
     /// Observes one entry relative to this authority without following its
     /// final link.
+    ///
+    /// The returned identity, when available, can be compared with a later
+    /// observation through this same fixed directory authority. That
+    /// comparison identifies the native object; it does not guarantee
+    /// unchanged contents.
     pub fn observe_entry(&self, relative: &Path) -> LocalResult<LocalFileObservation> {
         self.observe_entry_with_link_count(relative)
             .map(|(observation, _)| observation)
@@ -585,6 +615,10 @@ impl LocalDirectoryHandle {
 
     /// Starts a directory listing for a relative path under this authority.
     ///
+    /// The component policy validates the supplied path during path
+    /// resolution. Names discovered by recursive traversal are not filtered
+    /// by that policy.
+    ///
     /// # Errors
     /// Returns path, policy, option, type, or native opening errors.
     pub fn list_with_options(&self, relative: &Path, options: &LocalListOptions) -> LocalResult<LocalDirectoryWalker> {
@@ -621,6 +655,10 @@ impl LocalDirectoryHandle {
 
     /// Copies between two relative paths beneath this authority.
     ///
+    /// The component policy validates the source and destination paths during
+    /// path resolution. Names discovered while copying a tree are not filtered
+    /// by that policy.
+    ///
     /// Invalid operands produce an unchanged typed copy failure.
     pub fn copy_with_options(&self, source: &Path, destination: &Path, options: &LocalCopyOptions) -> LocalCopyResult {
         let policy = options
@@ -630,7 +668,12 @@ impl LocalDirectoryHandle {
             self.validate_with_policy(source, false, policy),
             self.validate_with_policy(destination, false, policy),
         ) {
-            (Ok(source), Ok(destination)) => self.filesystem.copy_with_options(&source, &destination, options),
+            (Ok(resolved_source), Ok(resolved_destination)) => {
+                #[cfg(test)]
+                wait_at_component_policy_checkpoint(&self.diagnostic_path, source, destination);
+                self.filesystem
+                    .copy_with_options(&resolved_source, &resolved_destination, options)
+            }
             (Err(error), _) | (_, Err(error)) => Err(crate::outcome::LocalCopyFailure::new(
                 error,
                 crate::outcome::LocalCopyFailureState::Unchanged,
@@ -649,6 +692,42 @@ impl LocalDirectoryHandle {
                 LocalFileOperation::OpenRoot,
             )),
         }
+    }
+}
+
+#[cfg(test)]
+pub(crate) fn install_component_policy_checkpoint(
+    handle: &LocalDirectoryHandle,
+    source: &Path,
+    destination: &Path,
+    barrier: Arc<Barrier>,
+) {
+    let checkpoint = COMPONENT_POLICY_CHECKPOINT.get_or_init(|| Mutex::new(None));
+    *checkpoint.lock().expect("component policy checkpoint lock") = Some((
+        handle.diagnostic_path.clone(),
+        source.to_path_buf(),
+        destination.to_path_buf(),
+        barrier,
+    ));
+}
+
+#[cfg(test)]
+fn wait_at_component_policy_checkpoint(root: &Path, source: &Path, destination: &Path) {
+    let checkpoint = COMPONENT_POLICY_CHECKPOINT.get_or_init(|| Mutex::new(None));
+    let barrier = {
+        let mut checkpoint = checkpoint.lock().expect("component policy checkpoint lock");
+        match checkpoint.as_ref() {
+            Some((expected_root, expected_source, expected_destination, _))
+                if expected_root == root && expected_source == source && expected_destination == destination =>
+            {
+                checkpoint.take().map(|(_, _, _, barrier)| barrier)
+            }
+            _ => None,
+        }
+    };
+    if let Some(barrier) = barrier {
+        barrier.wait();
+        barrier.wait();
     }
 }
 

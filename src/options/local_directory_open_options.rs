@@ -30,9 +30,12 @@ impl LocalDirectoryOpenOptions {
         self
     }
 
-    /// Sets additional native component names to reject through the opened
-    /// handle. When opening a child directory from an existing handle, its
-    /// denied names are combined with the existing handle's denied names.
+    /// Sets additional native component names to reject while binding paths
+    /// through the opened handle. When opening a child directory from an
+    /// existing handle, its denied names are combined with the existing
+    /// handle's denied names. This does not filter names discovered during
+    /// recursive listing or copying, or provide isolation from concurrent
+    /// namespace changes.
     pub fn with_component_policy(mut self, policy: LocalComponentPolicy) -> Self {
         self.component_policy = policy;
         self

@@ -11,6 +11,8 @@
 mod support;
 
 use std::path::Path;
+use std::path::PathBuf;
+use std::process::Command;
 
 use qubit_io::Output;
 #[cfg(unix)]
@@ -145,9 +147,77 @@ fn rooted_abort_invalid_state_keeps_the_open_time_pwd_snapshot() {
 
 #[test]
 fn host_relative_commit_error_keeps_the_open_time_pwd_snapshot() {
+    const CHILD_SENTINEL_ENV: &str = "QUBIT_LOCAL_FILES_HOST_CWD_SCENARIO_SENTINEL";
+    const CHILD_SENTINEL_CONTENT: &[u8] = b"host-relative-cwd-scenario-complete";
+
+    if let Some(sentinel) = std::env::var_os(CHILD_SENTINEL_ENV) {
+        let original_directory = std::env::current_dir().expect("current directory should be readable");
+        let directory = tempdir().expect("fixture parent should be created");
+        let fixture_path = directory.path().to_path_buf();
+        let restore = CurrentDirectoryRestore::new(original_directory);
+        host_relative_commit_scenario(directory.path());
+        restore
+            .restore()
+            .expect("child process current directory should be restored");
+        drop(restore);
+        drop(directory);
+        assert!(
+            !fixture_path.exists(),
+            "child fixture should be deleted before writing the sentinel",
+        );
+        std::fs::write(sentinel, CHILD_SENTINEL_CONTENT)
+            .expect("child should write its completion sentinel after cleanup");
+        return;
+    }
+
+    let original_directory = std::env::current_dir().expect("current directory should be readable");
     let directory = tempdir().expect("fixture parent should be created");
-    let first = directory.path().join("dir");
-    let second = directory.path().join("other");
+    let sentinel = directory.path().join("child-complete");
+    assert!(sentinel.is_absolute(), "child sentinel path should be absolute");
+    let status = Command::new(std::env::current_exe().expect("test executable should be available"))
+        .args([
+            "--exact",
+            "host_relative_commit_error_keeps_the_open_time_pwd_snapshot",
+            "--nocapture",
+        ])
+        .env(CHILD_SENTINEL_ENV, &sentinel)
+        .status()
+        .expect("child test process should start");
+    assert!(status.success(), "child test process failed with {status}");
+    assert_eq!(
+        CHILD_SENTINEL_CONTENT,
+        std::fs::read(&sentinel).expect("child should leave its completion sentinel"),
+        "child should execute the scenario, restore CWD, and clean its fixture",
+    );
+    assert_eq!(
+        original_directory,
+        std::env::current_dir().expect("current directory should be readable")
+    );
+}
+
+struct CurrentDirectoryRestore {
+    original: PathBuf,
+}
+
+impl CurrentDirectoryRestore {
+    fn new(original: PathBuf) -> Self {
+        Self { original }
+    }
+
+    fn restore(&self) -> std::io::Result<()> {
+        std::env::set_current_dir(&self.original)
+    }
+}
+
+impl Drop for CurrentDirectoryRestore {
+    fn drop(&mut self) {
+        let _ = self.restore();
+    }
+}
+
+fn host_relative_commit_scenario(directory: &Path) {
+    let first = directory.join("dir");
+    let second = directory.join("other");
     std::fs::create_dir(&first).expect("first directory should be created");
     std::fs::create_dir(&second).expect("alternate directory should be created");
     std::fs::write(first.join("model"), b"old").expect("target should be written");

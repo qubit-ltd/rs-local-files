@@ -10,14 +10,14 @@ use digest::Digest;
 use digest::Output;
 
 use super::LocalFileError;
-use super::LocalFileErrorKind;
 use super::LocalFileOperation;
 use super::LocalFileSystem;
 use super::LocalResult;
 use super::LocalWriteOptions;
 use super::Path;
+use crate::capability::LocalConditionalKind;
 use crate::local::conditional::ConditionalWriterBackend;
-use crate::local_file_system_validation::validate_write_options;
+use crate::local_file_system_validation::validate_conditional_open;
 use crate::options::LocalWritePrecondition;
 use crate::writer::LocalConditionalWriter;
 
@@ -33,6 +33,13 @@ impl LocalFileSystem {
     /// not a strict compare-and-swap: the digest checks surround a native
     /// publication protocol and cannot prevent writes through an already-open
     /// handle.
+    ///
+    /// Mode, symlink-policy, scope, and capability checks run before path
+    /// resolution or staging creation. `InvalidOptions` identifies invalid
+    /// option combinations, `Unsupported` identifies unavailable backend
+    /// support, and `RequirementNotMet` identifies an unavailable requested
+    /// guarantee. Path and native failures are reported only after those
+    /// static checks pass.
     ///
     /// Backend support differs by platform. Linux and macOS support Host and
     /// Rooted `Content`; on Windows, Host supports `Content` with
@@ -60,59 +67,23 @@ impl LocalFileSystem {
         precondition: LocalWritePrecondition<Output<D>>,
         options: &LocalWriteOptions,
     ) -> LocalResult<LocalConditionalWriter<D>> {
-        if options.mode() == crate::LocalWriteMode::Append {
-            return Err(
-                LocalFileError::new(LocalFileErrorKind::InvalidOptions, LocalFileOperation::OpenWriter)
-                    .with_reason("conditional writes do not support append mode")
-                    .with_path(path.to_path_buf()),
-            );
-        }
-        if matches!(&precondition, LocalWritePrecondition::Content(_))
-            && options.mode() == crate::LocalWriteMode::CreateNew
-        {
-            return Err(
-                LocalFileError::new(LocalFileErrorKind::InvalidOptions, LocalFileOperation::OpenWriter)
-                    .with_reason("Content precondition requires CreateOrReplace mode")
-                    .with_path(path.to_path_buf()),
-            );
-        }
-        if self.symlink_policy.follows() {
-            return Err(
-                LocalFileError::new(LocalFileErrorKind::InvalidOptions, LocalFileOperation::OpenWriter)
-                    .with_reason("conditional writes require a non-following symlink policy")
-                    .with_path(path.to_path_buf()),
-            );
-        }
-        #[cfg(windows)]
-        if matches!(&self.core.namespace, crate::local::LocalNamespace::Rooted(_))
-            && options.durability() == crate::policy::LocalDurabilityRequirement::Required
-        {
-            return Err(super::with_current_directory(
-                LocalFileError::new(LocalFileErrorKind::RequirementNotMet, LocalFileOperation::OpenWriter)
-                    .with_reason("Windows Rooted conditional writes do not support required namespace durability")
-                    .with_path(path.to_path_buf()),
-                self.current_directory.virtual_path(),
-            ));
-        }
-        validate_write_options(options, self.core.capabilities, LocalFileOperation::OpenWriter).map_err(|error| {
-            super::with_current_directory(
-                error.with_path(path.to_path_buf()),
-                self.current_directory.virtual_path(),
-            )
-        })?;
-        #[cfg(windows)]
-        if matches!(&precondition, LocalWritePrecondition::Content(_))
-            && (self.scope() == crate::path::LocalFileSystemScope::Rooted
-                || options.metadata_policy() != crate::options::LocalWriteMetadataPolicy::PreserveExisting)
-        {
-            let error = LocalFileError::new(LocalFileErrorKind::Unsupported, LocalFileOperation::OpenWriter)
-                .with_path(path.to_path_buf())
-                .with_reason("this Windows conditional Content configuration is unsupported");
-            return Err(match self.current_directory.virtual_path() {
-                Some(current_directory) => error.with_current_directory(current_directory.to_path_buf()),
-                None => error,
-            });
-        }
+        let kind = match &precondition {
+            LocalWritePrecondition::Absent => LocalConditionalKind::Absent,
+            LocalWritePrecondition::Content(_) => LocalConditionalKind::Content,
+        };
+        validate_conditional_open(self.scope(), self.core.capabilities, self.symlink_policy, kind, options).map_err(
+            |error| {
+                let error = error.with_path(path.to_path_buf());
+                if matches!(
+                    error.kind(),
+                    crate::LocalFileErrorKind::RequirementNotMet | crate::LocalFileErrorKind::Unsupported
+                ) {
+                    super::with_current_directory(error, self.current_directory.virtual_path())
+                } else {
+                    error
+                }
+            },
+        )?;
         let resolver = self.resolver_for(path, LocalFileOperation::OpenWriter)?;
         let resolved = super::resolve_operation_path(&resolver, path, LocalFileOperation::OpenWriter)?;
         self.reject_root_operand(&resolved, LocalFileOperation::OpenWriter, resolver.current_directory())?;

@@ -128,6 +128,85 @@ fn test_allowed_child_directory_opens_and_retains_authority() {
     );
 }
 
+#[test]
+fn test_open_directory_accepts_relative_parent_shape() {
+    let fixture = tempdir().expect("fixture directory should exist");
+    fs::create_dir(fixture.path().join("child")).expect("child directory should exist");
+    fs::create_dir(fixture.path().join("nested")).expect("nested directory should exist");
+
+    let parent = rooted_handle(fixture.path(), LocalComponentPolicy::allow_all());
+    let child = parent
+        .open_directory(Path::new("nested/../child"), &LocalDirectoryOpenOptions::new())
+        .expect("a relative parent component should resolve within the authority");
+    assert!(
+        child
+            .entry_metadata(Path::new("."))
+            .expect("child metadata should resolve")
+            .is_some()
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn test_open_directory_rejects_absolute_path_shapes_before_resolution() {
+    let fixture = tempdir().expect("fixture directory should exist");
+    let child = fixture.path().join("child");
+    fs::create_dir(&child).expect("real child directory should exist");
+    fs::write(child.join("sentinel"), b"unchanged").expect("sentinel should be written");
+
+    let parent = rooted_handle(fixture.path(), LocalComponentPolicy::allow_all());
+    for input in [Path::new("/"), Path::new("/child")] {
+        let error = parent
+            .open_directory(input, &LocalDirectoryOpenOptions::new())
+            .expect_err("rooted and absolute paths must be rejected");
+        assert_eq!(LocalFileErrorKind::InvalidPath, error.kind());
+        assert_eq!(
+            qubit_local_files::error::LocalFileOperation::BindPath,
+            error.operation()
+        );
+        assert_eq!(Some(input), error.path());
+    }
+    assert_eq!(
+        b"unchanged",
+        fs::read(child.join("sentinel"))
+            .expect("sentinel should remain")
+            .as_slice()
+    );
+}
+
+#[cfg(windows)]
+#[test]
+fn test_open_directory_rejects_windows_absolute_and_prefix_shapes_before_resolution() {
+    let fixture = tempdir().expect("fixture directory should exist");
+    let child = fixture.path().join("child");
+    fs::create_dir(&child).expect("real child directory should exist");
+    fs::write(child.join("sentinel"), b"unchanged").expect("sentinel should be written");
+
+    let parent = rooted_handle(fixture.path(), LocalComponentPolicy::allow_all());
+    for input in [
+        Path::new(r"\child"),
+        Path::new(r"C:\child"),
+        Path::new(r"C:child"),
+        Path::new(r"\\server\share\child"),
+    ] {
+        let error = parent
+            .open_directory(input, &LocalDirectoryOpenOptions::new())
+            .expect_err("rooted, absolute, and prefixed paths must be rejected");
+        assert_eq!(LocalFileErrorKind::InvalidPath, error.kind());
+        assert_eq!(
+            qubit_local_files::error::LocalFileOperation::BindPath,
+            error.operation()
+        );
+        assert_eq!(Some(input), error.path());
+    }
+    assert_eq!(
+        b"unchanged",
+        fs::read(child.join("sentinel"))
+            .expect("sentinel should remain")
+            .as_slice()
+    );
+}
+
 #[cfg(unix)]
 #[test]
 fn test_symlink_expansion_checks_denied_names_before_parent_collapse() {

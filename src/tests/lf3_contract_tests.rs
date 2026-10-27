@@ -238,3 +238,74 @@ fn lf3_contract_directory_backup_preserves_links_until_strictly_rejected() {
     assert!(strict_path.join("link").exists(), "stage remains owned by caller");
     strict.cleanup().expect("cleanup rejected stage");
 }
+
+#[cfg(unix)]
+#[test]
+fn lf3_contract_component_policy_does_not_isolate_copy_from_ancestor_replacement() {
+    use std::path::Path;
+    use std::sync::Arc;
+    use std::sync::Barrier;
+
+    use crate::LocalCopyConflictPolicy;
+    use crate::LocalFileSystem;
+    use crate::directory::LocalComponentPolicy;
+    use crate::directory::install_component_policy_checkpoint;
+    use crate::options::LocalCopyOptions;
+    use crate::options::LocalDirectoryOpenOptions;
+    use crate::policy::LocalSymlinkPolicy;
+
+    let fixture = tempfile::tempdir().expect("fixture");
+    let allowed = fixture.path().join("allowed");
+    let blocked = fixture.path().join("blocked");
+    std::fs::create_dir(&allowed).expect("allowed directory");
+    std::fs::create_dir(&blocked).expect("blocked directory");
+    std::fs::write(allowed.join("source"), b"allowed source").expect("allowed source");
+    std::fs::write(allowed.join("target"), b"allowed target").expect("allowed target");
+    std::fs::write(blocked.join("source"), b"blocked source").expect("blocked source");
+    std::fs::write(blocked.join("target"), b"blocked target").expect("blocked target");
+
+    let filesystem = LocalFileSystem::rooted(fixture.path()).expect("Rooted filesystem");
+    let handle = filesystem
+        .open_directory_with_options(
+            Path::new("/"),
+            &LocalDirectoryOpenOptions::new()
+                .with_symlink_policy(LocalSymlinkPolicy::FollowWithinScope)
+                .with_component_policy(LocalComponentPolicy::deny_names(vec!["blocked".into()]).expect("policy")),
+        )
+        .expect("fixed directory handle");
+    let barrier = Arc::new(Barrier::new(2));
+    install_component_policy_checkpoint(
+        &handle,
+        Path::new("allowed/source"),
+        Path::new("allowed/target"),
+        Arc::clone(&barrier),
+    );
+
+    let worker = std::thread::spawn(move || {
+        handle
+            .copy_with_options(
+                Path::new("allowed/source"),
+                Path::new("allowed/target"),
+                &LocalCopyOptions::new().with_conflict(LocalCopyConflictPolicy::Overwrite),
+            )
+            .expect("copy through the replaced ancestor should complete")
+    });
+    barrier.wait();
+    std::fs::rename(&allowed, fixture.path().join("allowed-original")).expect("move validated ancestor");
+    std::os::unix::fs::symlink("blocked", &allowed).expect("replace ancestor with a link");
+    barrier.wait();
+
+    let _result = worker.join().expect("copy worker should complete");
+    assert_eq!(
+        b"blocked source",
+        std::fs::read(blocked.join("target"))
+            .expect("the replacement destination should exist")
+            .as_slice()
+    );
+    assert_eq!(
+        b"allowed target",
+        std::fs::read(fixture.path().join("allowed-original/target"))
+            .expect("the renamed original target should remain")
+            .as_slice()
+    );
+}

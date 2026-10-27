@@ -9,17 +9,13 @@
 use std::path::Path;
 
 #[cfg(feature = "digest")]
-use crate::LocalFileError;
-#[cfg(feature = "digest")]
-use crate::LocalFileErrorKind;
-#[cfg(feature = "digest")]
-use crate::LocalFileOperation;
-#[cfg(feature = "digest")]
 use crate::LocalResult;
 use crate::LocalWriteOptions;
 use crate::capability::LocalCapabilitySupport;
 use crate::capability::LocalConditionalKind;
 use crate::directory::LocalDirectoryHandle;
+#[cfg(feature = "digest")]
+use crate::local_file_system_validation::validate_conditional_open;
 
 impl LocalDirectoryHandle {
     /// Reports whether this fixed authority implements the requested
@@ -53,6 +49,10 @@ impl LocalDirectoryHandle {
     ///
     /// On Windows, `Content` is unsupported for rooted authorities and is
     /// rejected before creating a candidate.
+    /// Mode, symlink-policy, scope, and capability checks happen before
+    /// resolving the relative path or creating staging resources. Errors
+    /// preserve the distinction between `InvalidOptions`, `Unsupported`,
+    /// `RequirementNotMet`, and later path or native I/O failures.
     #[cfg(feature = "digest")]
     pub fn open_conditional_writer<D: digest::Digest>(
         &self,
@@ -65,13 +65,14 @@ impl LocalDirectoryHandle {
         } else {
             LocalConditionalKind::Content
         };
-        if self.conditional_support(kind, options) == LocalCapabilitySupport::Unsupported {
-            return Err(
-                LocalFileError::new(LocalFileErrorKind::RequirementNotMet, LocalFileOperation::OpenWriter)
-                    .with_path(relative.to_path_buf())
-                    .with_reason("the fixed-directory conditional protocol is unsupported"),
-            );
-        }
+        validate_conditional_open(
+            self.filesystem().scope(),
+            self.filesystem().capabilities(),
+            self.filesystem().symlink_policy(),
+            kind,
+            options,
+        )
+        .map_err(|error| error.with_path(relative.to_path_buf()))?;
         self.filesystem()
             .open_conditional_writer(&self.checked(relative, true)?, precondition, options)
     }

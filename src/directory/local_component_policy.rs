@@ -14,7 +14,12 @@ use crate::LocalFileErrorKind;
 use crate::LocalFileOperation;
 use crate::LocalResult;
 
-/// Exact native names rejected by fixed-directory operations.
+/// Exact native names rejected while binding paths through a fixed directory.
+///
+/// This policy checks names supplied to handle operations and names encountered
+/// while resolving those paths. It does not filter names discovered by a
+/// recursive listing or copy, and it does not isolate those names from changes
+/// made concurrently in the namespace.
 #[derive(Clone, Debug, Default)]
 pub struct LocalComponentPolicy {
     denied: Vec<OsString>,
