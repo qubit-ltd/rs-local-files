@@ -11,6 +11,7 @@ use std::error::Error;
 use std::fmt;
 use std::io;
 
+use super::LocalFileError;
 use super::LocalPathCodecError;
 use super::LocalResourceLimitError;
 
@@ -50,6 +51,11 @@ pub enum LocalFileErrorSource {
         /// Retained structured resource-budget error.
         LocalResourceLimitError,
     ),
+    /// Structured failure retaining an explicit recovery resource.
+    Recovery(
+        /// The complete error and its owned recovery resource.
+        Box<LocalFileError>,
+    ),
 }
 
 impl fmt::Display for LocalFileErrorSource {
@@ -60,6 +66,7 @@ impl fmt::Display for LocalFileErrorSource {
             Self::Io(error) => error.fmt(formatter),
             Self::PathCodec(error) => error.fmt(formatter),
             Self::ResourceLimit(error) => error.fmt(formatter),
+            Self::Recovery(error) => error.fmt(formatter),
         }
     }
 }
@@ -73,6 +80,7 @@ impl Error for LocalFileErrorSource {
             Self::Io(error) => Some(error),
             Self::PathCodec(error) => Some(error),
             Self::ResourceLimit(error) => Some(error),
+            Self::Recovery(error) => Some(error.as_ref()),
         }
     }
 }

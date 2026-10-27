@@ -52,6 +52,8 @@ pub struct LocalFileError {
     source: Option<LocalFileErrorSource>,
     /// Secondary cleanup failure retained without replacing the primary error.
     cleanup_error: Option<Box<LocalFileError>>,
+    /// Private temporary resource retained after a partial creation failure.
+    temp_recovery: Option<Box<crate::LocalTempRecovery>>,
 }
 
 impl LocalFileError {
@@ -72,6 +74,7 @@ impl LocalFileError {
             reason: None,
             source: None,
             cleanup_error: None,
+            temp_recovery: None,
         }
     }
 
@@ -112,6 +115,7 @@ impl LocalFileError {
             reason: None,
             source: Some(LocalFileErrorSource::Io(source)),
             cleanup_error: None,
+            temp_recovery: None,
         }
     }
 
@@ -131,6 +135,7 @@ impl LocalFileError {
             reason: None,
             source: Some(LocalFileErrorSource::InvalidEncoding(source)),
             cleanup_error: None,
+            temp_recovery: None,
         }
     }
 
@@ -161,6 +166,7 @@ impl LocalFileError {
             reason: None,
             source: Some(LocalFileErrorSource::PathCodec(error)),
             cleanup_error: None,
+            temp_recovery: None,
         }
     }
 
@@ -191,6 +197,7 @@ impl LocalFileError {
             reason: None,
             source: Some(LocalFileErrorSource::ResourceLimit(source)),
             cleanup_error: None,
+            temp_recovery: None,
         }
     }
 
@@ -274,6 +281,31 @@ impl LocalFileError {
         self.cleanup_error.as_deref()
     }
 
+    /// Adds ownership of a partially created private temporary resource.
+    #[inline]
+    pub(crate) fn with_temp_recovery(mut self, recovery: crate::LocalTempRecovery) -> Self {
+        self.temp_recovery = Some(Box::new(recovery));
+        self
+    }
+
+    /// Returns the private temporary resource retained after a partial
+    /// creation failure.
+    #[must_use]
+    #[inline]
+    pub fn temp_recovery(&self) -> Option<&crate::LocalTempRecovery> {
+        self.temp_recovery.as_deref()
+    }
+
+    /// Consumes this error and transfers its retained recovery resource.
+    #[must_use]
+    #[inline]
+    pub fn into_temp_recovery_parts(
+        mut self,
+    ) -> (LocalFileError, Option<crate::LocalTempRecovery>) {
+        let recovery = self.temp_recovery.take().map(|recovery| *recovery);
+        (self, recovery)
+    }
+
     /// Returns the stable failure classification.
     #[must_use = "the stable error classification should be inspected"]
     #[inline]
@@ -310,6 +342,7 @@ impl LocalFileError {
             Some(LocalFileErrorSource::InvalidEncoding(_)) => {
                 Some(LocalFileErrorKind::InvalidEncoding)
             }
+            Some(LocalFileErrorSource::Recovery(error)) => error.cause_kind(),
             Some(LocalFileErrorSource::Io(source)) => Some(classify_io_error(source)),
             Some(LocalFileErrorSource::ResourceLimit(_)) => Some(LocalFileErrorKind::ResourceLimit),
             Some(LocalFileErrorSource::PathCodec(_)) => Some(LocalFileErrorKind::InvalidPath),
@@ -383,6 +416,7 @@ impl LocalFileError {
     pub fn resource_limit_error(&self) -> Option<&LocalResourceLimitError> {
         match self.source.as_ref() {
             Some(LocalFileErrorSource::ResourceLimit(error)) => Some(error),
+            Some(LocalFileErrorSource::Recovery(error)) => error.resource_limit_error(),
             _ => None,
         }
     }
@@ -394,6 +428,7 @@ impl LocalFileError {
     pub fn io_error(&self) -> Option<&io::Error> {
         match self.source.as_ref() {
             Some(LocalFileErrorSource::Io(error)) => Some(error),
+            Some(LocalFileErrorSource::Recovery(error)) => error.io_error(),
             _ => None,
         }
     }
@@ -413,8 +448,12 @@ impl LocalFileError {
     /// `None` means this error was constructed without an originating source.
     #[must_use]
     #[inline]
-    pub fn into_source(self) -> Option<LocalFileErrorSource> {
-        self.source
+    pub fn into_source(mut self) -> Option<LocalFileErrorSource> {
+        if self.temp_recovery.is_some() {
+            Some(LocalFileErrorSource::Recovery(Box::new(self)))
+        } else {
+            self.source.take()
+        }
     }
 
     /// Consumes this structured error as a standard I/O error.
@@ -461,6 +500,7 @@ fn standard_io_error_kind(error: &LocalFileError) -> io::ErrorKind {
     match error.source.as_ref() {
         Some(LocalFileErrorSource::Io(source)) => source.kind(),
         Some(LocalFileErrorSource::InvalidEncoding(_)) => io::ErrorKind::InvalidData,
+        Some(LocalFileErrorSource::Recovery(error)) => error.io_error_kind(),
         Some(LocalFileErrorSource::PathCodec(_)) => io::ErrorKind::InvalidInput,
         Some(LocalFileErrorSource::ResourceLimit(_)) => io::ErrorKind::Other,
         None => match error.kind {
