@@ -389,6 +389,41 @@ impl LocalTempFile {
     }
 
     /// Seals this temporary file and returns an owner without write access.
+    ///
+    /// This consumes the writer owner. If sealing fails, the returned error
+    /// retains it; call [`LocalTempSealError::into_resource`] to recover the
+    /// `LocalTempFile` for inspection, cleanup, or another attempt. The error's
+    /// [`LocalTempSealError::access_state`] reports whether access is still
+    /// writable, read-only, or indeterminate: permission changes may already
+    /// have taken effect before a later step fails.
+    ///
+    /// `file_sync` controls synchronization of file contents and metadata.
+    /// It does not synchronize the containing directory or promise namespace
+    /// durability. A successful seal removes the public write handle, but it
+    /// does not make the file an immutable snapshot against other processes.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use qubit_io::{Output, Streams};
+    ///
+    /// use qubit_local_files::{LocalFileSystem, LocalSealOptions};
+    ///
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let filesystem = LocalFileSystem::host()?;
+    /// let mut temporary = filesystem.create_temp_file()?;
+    /// temporary.write_fully(b"sealed data")?;
+    /// let mut sealed = temporary.seal_with_options(&LocalSealOptions::default())?;
+    /// let observation = sealed.observation()?;
+    /// assert_eq!(observation.metadata().len(), 11);
+    /// let mut reader = filesystem.open_reader(sealed.path())?;
+    /// let mut bytes = Vec::new();
+    /// Streams::copy_input_to_output(&mut reader, &mut bytes)?;
+    /// assert_eq!(bytes, b"sealed data");
+    /// sealed.cleanup()?;
+    /// # Ok(())
+    /// # }
+    /// ```
     pub fn seal_with_options(
         mut self,
         options: &LocalSealOptions,
@@ -1173,6 +1208,12 @@ fn reopen_read_only(path: &Path, _original: &File) -> Result<File> {
 }
 
 /// A cleanup-owned temporary file with no public write handle.
+///
+/// Sealing removes this library owner's write access, but does not guarantee
+/// immutability against other processes or aliases. [`Self::observation`]
+/// reports the retained read-only handle; it is an observation, not a content
+/// version. [`Self::native_path`] is available only for Host authority and is
+/// provided for observation, not as a way to bypass the bound authority.
 ///
 /// The sealed owner does not implement [`qubit_io::ByteOutput`]:
 ///

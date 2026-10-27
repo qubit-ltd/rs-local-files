@@ -219,7 +219,7 @@ Options。调用方可以通过 `set_default_*_options` 一次配置，然后使
 链接策略按以下顺序确定：外层操作显式指定的策略优先，其次是所选嵌套读取选项的
 `symlink_policy`，最后才是 filesystem 实例策略。Rooted 会在 I/O 前拒绝
 `FollowAcrossScope`。目录子 handle 的拒绝组件名称与父 handle 的集合取并集；子 handle
-不能解除父级限制，包括通过 `.` 打开时。
+不能解除父级限制，包括通过 `.` 打开时。筛选只作用于绑定输入和解析路径时遇到的组件；递归列表和复制仍可能发现并复制被拒绝名称。该策略不隔离私有子树，也不防护并发重命名。
 
 例如，若 `defaults.read` 设置了 `open_retry_timeout`，`read_all_with_options` 未提供嵌套读取选项时
 会继承该 timeout。调用 `LocalReadAllOptions::new().with_read_options(LocalReadOptions::new())` 则会
@@ -540,7 +540,7 @@ sandbox 会和资源一起清理。需要观察清理失败时应显式调用 `c
 后续 PWD 即使变化，也能把它们再次传给同一个 filesystem。持久化失败会保留资源，后续允许
 的操作由发布状态和源资格共同决定。创建前会组合前缀、随机名称和后缀并校验完整组件；原生
 分隔符、NUL、控制字符、Windows 禁用标点、末尾空格或句点，以及 `CON.txt` 这类设备保留名称
-都会被拒绝，且校验先于父目录创建。除非调用方设置 `max_attempts`，名称冲突尝试次数没有上限。
+都会被拒绝，且校验先于父目录创建。名称冲突时，`max_attempts` 为 `None` 表示不限尝试次数；零表示不尝试。非冲突原生错误立即返回。
 
 ## 临时资源发布与失败恢复
 
@@ -550,8 +550,7 @@ sandbox 会和资源一起清理。需要观察清理失败时应显式调用 `c
 `cleanup_error()`。sandbox 残留通过成功结果报告，不会撤销发布，也不表示可以再次发布。
 文件同步前会核对当前打开句柄是否仍指向 guard 持有的源实体。通过 `as_file_mut()` 换入其他
 文件句柄不会得到针对该文件的耐久成功；若内容句柄已关闭，库会经创建时的 authority 重新打开，
-并在同步前再次核对实体身份。Windows 私有句柄的原生同步 I/O 契约尚未在 Windows runner 上验证，
-此行为仍待原生平台验证。
+并在同步前再次核对实体身份。Linux 普通用户下已验证私有句柄同步 I/O 的 `NotRequired`、`Preferred` 和 `Required` 路径；Windows 原生运行行为仍待验证。
 
 失败时要分别检查目标发布结果与源资源资格：
 

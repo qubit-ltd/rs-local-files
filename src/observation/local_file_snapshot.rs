@@ -43,6 +43,35 @@ pub(crate) fn run_read_hook() {
 }
 
 /// Bytes bracketed by required observations of one opened file.
+///
+/// The before and after observations use the same opened handle. They must
+/// agree on object identity, length, and available native change timestamps,
+/// and the byte count must match that length. This detects many concurrent
+/// changes, but the bytes and observations are not an atomic filesystem
+/// snapshot; an identity is not a content version and same-size writes can
+/// evade timestamp granularity or races.
+///
+/// # Example
+///
+/// ```no_run
+/// use qubit_io::Output;
+/// use std::path::Path;
+///
+/// use qubit_local_files::LocalFileSystem;
+/// use qubit_local_files::options::LocalSnapshotOptions;
+///
+/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+/// let filesystem = LocalFileSystem::host()?;
+/// let mut source = filesystem.create_temp_file()?;
+/// source.write_fully(b"snapshot data")?;
+/// let path = source.path().to_path_buf();
+/// let options = LocalSnapshotOptions::builder(1024).build();
+/// let snapshot = filesystem.read_consistent_with_options(&path, &options)?;
+/// assert_eq!(snapshot.bytes(), b"snapshot data");
+/// source.cleanup()?;
+/// # Ok(())
+/// # }
+/// ```
 #[derive(Clone, Debug)]
 pub struct LocalFileSnapshot {
     bytes: Vec<u8>,

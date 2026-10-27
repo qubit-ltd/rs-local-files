@@ -446,7 +446,7 @@ direct_operation_options = explicit_options.unwrap_or(instance_default_options)
 
 链接策略优先级为：外层显式策略、选中的嵌套 `LocalReadOptions.symlink_policy`、filesystem
 实例策略。Rooted 在 I/O 前拒绝 `FollowAcrossScope`。目录子 handle 的拒绝组件名称取自身与父
-handle 拒绝集合的并集；子 handle 不能解除父级限制，包括以 `open_directory(".")` 打开时。
+handle 拒绝集合的并集；子 handle 不能解除父级限制，包括以 `open_directory(".")` 打开时。该策略只筛选绑定输入及解析路径时遇到的组件；递归列表和复制仍可能发现并复制被拒绝名称。它不是私有子树边界，也不提供并发重命名隔离。
 
 如果调用方需要“默认值基础上的单次修改”，必须显式复制：
 
@@ -981,6 +981,11 @@ commit 先按策略应用元数据，再同步 staging、复核身份、安装�
 元数据失败发生在发布前，父目录同步失败则可能为 `Published`。CreateNew 没有旧元数据
 可复制，仍采用原子 no-replace 安装；Append 在两种策略下都直接写入。
 
+暂存目录使用 `ReadOnlyCurrentUser` 转换权限时，普通用户 Linux 证据确认了 `file_sync` 的结果：
+`NotRequired` 可以不做同步直接发布；同步失败时，`Preferred` 发布并报告 `file_synced = false`；
+`Required` 保留 stage 且不发布。该证据不能证明 Windows 原生行为。权限策略只完成部分转换时，stage
+仍由调用方持有，错误通过 `access_state()` 报告；库不承诺回滚整棵树。
+
 ### 14.2 生命周期与发布状态
 
 `LocalFileWriter` 实现 `qubit_io::ByteOutput`（由 `qubit_io::Output<Item = u8>` 自动实现），同时承担 publication session。
@@ -1360,7 +1365,7 @@ parent 可以是命名空间绝对或相对路径；未指定时使用创建操�
 链接策略和命名空间绝对路径，之后修改 filesystem 配置或 PWD 不会改变它们。
 prefix、suffix 会先组合成完整名称再校验。分隔符、NUL、控制字符、Windows 禁用标点、末尾
 空格或句点，以及 `CON.txt` 这类设备保留名称都会被拒绝；校验先于父目录创建和条目 I/O。
-名称冲突次数默认不限，调用方可设置 `max_attempts`，非冲突原生错误立即返回。
+`max_attempts` 为 `None` 时名称冲突尝试不限；设为零则不尝试。非冲突原生错误立即返回。
 
 ### 18.3 私有 sandbox
 
@@ -1383,6 +1388,8 @@ Windows 私有句柄的原生同步 I/O 契约尚未在 Windows runner 上验证
 删除后进入 `Released`。部分目录删除失败且源树仍归 guard 所有时保持 `Owned`，同时保留
 准确副作用与失败路径。Drop 只对仍能证明的责任尽力清理，静默失败，绝不删除 Indeterminate
 源。丢弃错误也会丢弃它保留的资源，仍受同样约束。
+Unix 身份检查会以非阻塞方式打开被替换的条目，因此 FIFO 不会令检查等待；身份不匹配的 FIFO 会保留。
+Linux 子进程证据覆盖显式 cleanup 和 Drop，但不消除检查与 unlink 之间的独立竞态，也不证明 Windows 原生行为。
 
 ### 18.5 Persist 与恢复
 

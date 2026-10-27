@@ -161,11 +161,14 @@ Rooted 实例的同名方法只修改该实例。
 
 资源预算均由调用方选择。遍历和复制的深度、条目数、字节数、打开目录数、deadline、
 重复名称内存、打开重试时间以及临时名称尝试次数，在调用方显式设置前都不会形成库内隐藏上限。
+临时名称冲突时，`None` 表示不限尝试次数，零表示不尝试。
 
 符号链接策略按 `LocalFileSystem` 实例配置；Rooted 默认
 `FollowWithinScope`，Host 默认 `FollowAcrossScope`。Rooted 仅支持
 `Reject` 和 `FollowWithinScope`；选择 `FollowAcrossScope` 会返回
 `InvalidOptions`。各类操作对最终链接的具体语义请参阅[用户手册](doc/user_guide.zh_CN.md)。
+目录 handle 的组件策略只在绑定输入和解析路径时筛选名称；递归列表和复制仍可能发现并复制被拒绝名称。
+它不隔离私有子树，也不防护并发重命名。具体边界见[用户手册](doc/user_guide.zh_CN.md)。
 
 临时资源清理会校验所有权，但它不是并发同步边界。调用方需要观察清理失败时应显式调用
 `cleanup()`；drop 只提供静默、尽力而为的兜底，不报告或记录失败。guard 删除前会比较创建时保存的

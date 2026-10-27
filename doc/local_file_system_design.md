@@ -332,6 +332,9 @@ Link-policy precedence is outer explicit policy, then the selected nested
 rejects `FollowAcrossScope` before I/O. A directory child handle's denied
 component names are the union of its own and its parent's denied names, so a
 child cannot remove a parent restriction, including for `open_directory(".")`.
+This filters input names and components resolved while binding the handle.
+Recursive listing and copy may discover and copy denied names; the policy is not
+a private-subtree boundary and provides no concurrent-rename isolation.
 
 ```text
 let options = filesystem
@@ -763,6 +766,14 @@ the final pre-install check is `NotPublished`; staging remains available for
 recovery and the competing destination is left intact. Errors after a native
 rename attempt follow the separately observed publication state.
 
+For staged-directory `ReadOnlyCurrentUser` access conversion, ordinary-user
+Linux evidence verifies the `file_sync` outcomes: `NotRequired` can publish
+without syncing, `Preferred` publishes with `file_synced = false` when sync
+fails, and `Required` retains the stage without publication. This evidence does
+not establish Windows native behavior. A partially applied access policy keeps
+the stage with the caller and reports its `access_state()`; whole-tree rollback
+is not promised.
+
 ### 14.6 Conditional write protocol
 
 The optional `digest` feature adds `LocalWritePrecondition<T>`,
@@ -1104,8 +1115,8 @@ and suffixes are composed and the complete generated component is validated
 before creating entries. Portable validation rejects separators, NUL, control
 characters, Windows-forbidden punctuation, trailing spaces or dots, and
 reserved device names such as `CON.txt`; invalid names fail before parent
-creation or entry I/O. Collision retries have no hidden maximum; callers may
-set `max_attempts`, and non-collision native errors return immediately.
+creation or entry I/O. Collision retries are unbounded when `max_attempts` is
+`None`; zero permits no attempts. Non-collision native errors return immediately.
 
 ### 18.3 Private sandbox
 
@@ -1127,9 +1138,9 @@ target outside the sandbox and returns `LocalPersistOutcome`. Before file
 synchronization, the open handle is checked against the retained source
 identity; replacing the handle through `as_file_mut()` cannot synchronize a
 different file. A closed file is reopened through its creating authority and
-its identity is checked again before synchronization. The Windows native
-private-handle synchronous-I/O contract remains unverified on a Windows runner;
-this behavior is pending native validation.
+its identity is checked again before synchronization. Ordinary-user Linux
+evidence verified the private-handle synchronous-I/O paths for `NotRequired`,
+`Preferred`, and `Required`. Windows native runtime behavior remains unverified.
 
 `cleanup(&mut self)` reports failure explicitly. Removing the source transitions
 to `CleanupRequired`; removing the remaining sandbox transitions to `Released`.
@@ -1138,6 +1149,10 @@ with its exact effect information and failed path. Drop is silent best effort
 only for the responsibility still proven by the source state; it never deletes
 an Indeterminate source. Dropping an error also drops its retained resource
 under these same restrictions.
+On Unix, identity inspection opens a replacement entry without blocking on a
+FIFO; a mismatched FIFO is retained. Linux subprocess evidence covered explicit
+cleanup and Drop. It does not remove the separate check/unlink race or establish
+Windows runtime behavior.
 
 ### 18.5 Persist and recovery
 

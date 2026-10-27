@@ -188,12 +188,19 @@ directory; calling it on a Rooted instance changes only that instance.
 Resource budgets are opt-in. Listing and copy depth, entries, bytes, open
 directories, deadlines, duplicate-name memory, retry timeouts, and temporary
 name attempts are unbounded or disabled until the caller sets them explicitly.
+For temporary-name collisions, `None` means unbounded attempts and zero means
+no attempts.
 
 Symbolic-link behavior is configurable per `LocalFileSystem` instance; Rooted
 defaults to `FollowWithinScope` and Host defaults to `FollowAcrossScope`. Rooted
 supports only `Reject` and `FollowWithinScope`; selecting `FollowAcrossScope`
 returns `InvalidOptions`. See the [user guide](doc/user_guide.md) for
 operation-specific final-link semantics.
+
+Directory-handle component policies filter names in the input and while binding
+the handle. Recursive listing and copy can still discover and copy denied names;
+the policy does not isolate a private subtree or protect against concurrent
+renames. See the user guide for the precise boundary.
 
 Temporary-resource cleanup is ownership-aware, not a synchronization boundary.
 Call `cleanup()` when the caller must observe cleanup failures; dropping a

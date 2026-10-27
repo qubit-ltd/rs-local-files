@@ -19,6 +19,10 @@ pub enum LocalObservationRequirement {
 }
 
 /// Opaque identity of a native filesystem object.
+///
+/// Identity distinguishes filesystem objects when the platform supplies it;
+/// it is not a version of the object's contents. Rechecking identity alone
+/// cannot prove that file bytes remained unchanged.
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct LocalFileIdentity {
     native: LocalNativeIdentity,
@@ -141,6 +145,11 @@ impl LocalUnixFileDetails {
 }
 
 /// Windows volume, file ID, and native change-time details.
+///
+/// The timestamp accessors expose the signed native `FILETIME` count in
+/// 100-nanosecond units since 1601-01-01 UTC. Values are kept as returned by
+/// the operating system, including special or otherwise non-date values;
+/// callers must not assume every value converts to a Unix timestamp.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LocalWindowsFileDetails {
     volume_serial: u64,
@@ -179,6 +188,12 @@ impl LocalWindowsFileDetails {
 }
 
 /// Metadata and native identity gathered from one retained handle.
+///
+/// Obtain observations from public filesystem operations such as
+/// [`crate::directory::LocalDirectoryHandle::observe_entry`]. When identity is
+/// available, it can be compared across observations from the same fixed
+/// authority to check whether a name still refers to the same object. It does
+/// not identify a content version or make separate observations atomic.
 #[derive(Clone, Debug)]
 pub struct LocalFileObservation {
     metadata: LocalFileMetadata,

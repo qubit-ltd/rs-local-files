@@ -265,7 +265,10 @@ For link handling, an explicit outer-operation policy takes precedence over
 the selected nested read option's `symlink_policy`, which takes precedence over
 the filesystem instance policy. Rooted rejects `FollowAcrossScope` before I/O.
 Directory child handles combine denied component names with the parent's set;
-a child cannot remove a parent's restriction, including when opened as `.`.
+a child cannot remove a parent's restriction, including when opened as `.`. The
+filter applies to input names and components resolved while binding the handle.
+Recursive listing and copy can still discover and copy denied names; this does
+not isolate a private subtree or protect against concurrent renames.
 
 For example, if `defaults.read` sets `open_retry_timeout`, omitting nested read
 options from `read_all_with_options` inherits that timeout. Passing
@@ -665,8 +668,8 @@ native separators, NUL, and portable reserved-name violations do not leave an
 entry behind. The complete prefix + generated name + suffix is checked before
 parent creation. Portable names reject control characters, Windows-forbidden
 punctuation, trailing spaces or dots, and reserved device names such as
-`CON.txt`. Name-collision attempts are unbounded unless the caller sets
-`max_attempts`.
+`CON.txt`. Name-collision attempts are unbounded when `max_attempts` is `None`; zero
+permits no attempts. Non-collision native errors return immediately.
 
 ## Temporary publication and recovery
 
@@ -682,8 +685,9 @@ handle still identifies the owned temporary entry. Replacing the handle exposed
 by `as_file_mut()` with another file cannot produce a durable success for that
 other file. If the content handle was closed, the library reopens through the
 creating authority and checks the reopened identity before synchronization.
-The Windows native private-handle synchronous-I/O contract has not yet been
-verified on a Windows runner; this behavior remains pending native validation.
+Ordinary-user Linux evidence verified the private-handle synchronous-I/O paths
+for `NotRequired`, `Preferred`, and `Required`. Windows native runtime behavior
+remains unverified.
 
 On failure, inspect two independent facts:
 

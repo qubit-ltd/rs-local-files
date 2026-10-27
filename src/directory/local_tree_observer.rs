@@ -27,6 +27,12 @@ pub(crate) fn test_observation_count() -> usize {
 }
 
 /// Lazy iterator over entries observed beneath a staged directory.
+///
+/// Each item is observed only when requested. Walker enumeration and the
+/// subsequent metadata observation are separate native operations, so an
+/// entry can change or disappear between them. Errors are yielded as items;
+/// requesting later items continues the walk. The iterator is not a
+/// consistent snapshot of the tree.
 #[derive(Debug)]
 pub struct LocalTreeObserver {
     directory: LocalDirectoryHandle,
