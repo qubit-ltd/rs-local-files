@@ -106,7 +106,7 @@ fn lf_review_tree_special_allowed_with_only_limits() {
     use std::os::unix::fs::FileTypeExt;
     use std::os::unix::net::UnixListener;
 
-    let fixture = tempfile::tempdir().expect("fixture");
+    let fixture = tempfile::tempdir_in("/tmp").expect("fixture");
     let root = std::fs::canonicalize(fixture.path()).expect("canonicalize fixture");
     let fs = crate::LocalFileSystem::host().expect("Host");
     let parent = fs
@@ -138,7 +138,7 @@ fn lf_review_tree_special_allowed_with_only_limits() {
 fn lf_review_tree_special_rejected_when_requested() {
     use std::os::unix::net::UnixListener;
 
-    let fixture = tempfile::tempdir().expect("fixture");
+    let fixture = tempfile::tempdir_in("/tmp").expect("fixture");
     let root = std::fs::canonicalize(fixture.path()).expect("canonicalize fixture");
     let fs = crate::LocalFileSystem::host().expect("Host");
     let parent = fs
