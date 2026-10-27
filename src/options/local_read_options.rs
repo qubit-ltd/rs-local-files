@@ -56,7 +56,9 @@ impl LocalReadOptions {
     }
 
     /// Sets the symbolic-link policy override for readers opened with these
-    /// options.
+    /// options. This value takes precedence over the filesystem instance
+    /// policy; an outer complete-read option, when present, takes precedence
+    /// over this value.
     #[inline]
     pub const fn with_symlink_policy(mut self, policy: LocalSymlinkPolicy) -> Self {
         self.symlink_policy = Some(policy);

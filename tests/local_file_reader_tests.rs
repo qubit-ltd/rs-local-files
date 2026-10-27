@@ -12,11 +12,195 @@ use std::io::Seek;
 use std::io::SeekFrom;
 
 use qubit_io::Input;
-#[cfg(windows)]
 use qubit_io::Streams;
 use qubit_local_files::LocalFileSystem;
+use qubit_local_files::error::LocalFileErrorKind;
+use qubit_local_files::options::LocalDirectoryOpenOptions;
+use qubit_local_files::options::LocalObservedReadOptions;
+use qubit_local_files::options::LocalPathBindingOptions;
+use qubit_local_files::options::LocalReadAllOptions;
 use qubit_local_files::options::LocalReadOptions;
+use qubit_local_files::options::LocalSnapshotOptions;
+use qubit_local_files::policy::LocalSymlinkPolicy;
 use tempfile::tempdir;
+
+/// Verifies explicit reader policies override Host and Rooted instance policies.
+#[cfg(unix)]
+#[test]
+fn test_read_policy_reject_override_in_host_and_rooted() {
+    use std::os::unix::fs::symlink;
+    use std::path::Path;
+
+    let fixture = tempdir().expect("temporary directory should be created");
+    std::fs::write(fixture.path().join("target"), b"payload").expect("target should be written");
+    symlink("target", fixture.path().join("link")).expect("link should be created");
+    let host = LocalFileSystem::host().expect("Host filesystem should open");
+    let mut rooted =
+        LocalFileSystem::rooted(fixture.path()).expect("Rooted filesystem should open");
+    rooted
+        .set_symlink_policy(LocalSymlinkPolicy::FollowWithinScope)
+        .expect("Rooted policy should be configured");
+    let cases = [
+        (host, fixture.path().join("link")),
+        (rooted, Path::new("link").to_path_buf()),
+    ];
+    for (filesystem, path) in cases {
+        let options = LocalReadOptions::new().with_symlink_policy(LocalSymlinkPolicy::Reject);
+        let error = filesystem
+            .open_reader_with_options(&path, &options)
+            .expect_err("explicit Reject should reject a symbolic link");
+        assert_eq!(error.kind(), LocalFileErrorKind::Unsupported);
+    }
+}
+
+/// Verifies all reader entry points honor the selected policy precedence.
+#[cfg(unix)]
+#[test]
+fn test_read_policy_override_precedence_across_read_apis() {
+    use std::os::unix::fs::symlink;
+    use std::path::Path;
+
+    let fixture = tempdir().expect("temporary directory should be created");
+    std::fs::write(fixture.path().join("target"), b"payload").expect("target should be written");
+    symlink("target", fixture.path().join("link")).expect("link should be created");
+    let mut filesystem =
+        LocalFileSystem::rooted(fixture.path()).expect("Rooted filesystem should open");
+    filesystem
+        .set_symlink_policy(LocalSymlinkPolicy::Reject)
+        .expect("Rooted policy should be configured");
+    let path = Path::new("link");
+    let follow = LocalReadOptions::new().with_symlink_policy(LocalSymlinkPolicy::FollowWithinScope);
+
+    filesystem
+        .set_default_read_options(follow)
+        .expect("default reader options should be configured");
+    assert_eq!(
+        filesystem
+            .read_prefix(path, 7)
+            .expect("default policy should follow"),
+        b"payload"
+    );
+    assert_eq!(
+        filesystem
+            .read_text_with_options(
+                path,
+                &LocalReadAllOptions::new()
+                    .with_read_options(LocalReadOptions::new())
+                    .with_symlink_policy(LocalSymlinkPolicy::FollowWithinScope)
+            )
+            .expect("outer policy should override nested options"),
+        "payload"
+    );
+
+    let mut reader = filesystem
+        .open_reader_with_options(path, &follow)
+        .expect("option override should follow");
+    let mut bytes = Vec::new();
+    Streams::copy_input_to_output(&mut reader, &mut bytes).expect("reader should return payload");
+    assert_eq!(bytes, b"payload");
+    assert_eq!(
+        filesystem
+            .read_prefix_with_options(path, 0, &follow)
+            .expect("zero prefix should still open link"),
+        b""
+    );
+    assert_eq!(
+        filesystem
+            .read_all_with_options(path, &LocalReadAllOptions::new().with_read_options(follow))
+            .expect("nested override should follow"),
+        b"payload"
+    );
+    assert_eq!(
+        filesystem
+            .read_all_with_options(
+                path,
+                &LocalReadAllOptions::new()
+                    .with_read_options(LocalReadOptions::new())
+                    .with_symlink_policy(LocalSymlinkPolicy::FollowWithinScope)
+            )
+            .expect("outer override should win"),
+        b"payload"
+    );
+    assert_eq!(
+        filesystem
+            .read_consistent_with_options(
+                path,
+                &LocalSnapshotOptions::builder(64)
+                    .read_options(follow)
+                    .build()
+            )
+            .expect("snapshot override should follow")
+            .bytes(),
+        b"payload"
+    );
+    assert_eq!(
+        filesystem
+            .read_consistent_with_options(
+                path,
+                &LocalSnapshotOptions::builder(64)
+                    .read_options(
+                        LocalReadOptions::new().with_symlink_policy(LocalSymlinkPolicy::Reject)
+                    )
+                    .symlink_policy(LocalSymlinkPolicy::FollowWithinScope)
+                    .build()
+            )
+            .expect("snapshot outer policy should win")
+            .bytes(),
+        b"payload"
+    );
+
+    let reject = LocalReadOptions::new().with_symlink_policy(LocalSymlinkPolicy::Reject);
+    let error = filesystem
+        .open_observed_reader(
+            path,
+            &LocalObservedReadOptions::new().with_read_options(reject),
+        )
+        .expect_err("observed reader should honor nested policy");
+    assert_eq!(error.kind(), LocalFileErrorKind::Unsupported);
+
+    let observed = filesystem
+        .open_observed_reader(
+            path,
+            &LocalObservedReadOptions::new()
+                .with_read_options(follow)
+                .with_path_binding(LocalPathBindingOptions::new()),
+        )
+        .expect("observed reader should apply the nested policy to binding");
+    assert_eq!(observed.observation().metadata().len(), 7);
+
+    let directory = filesystem
+        .open_directory_with_options(
+            Path::new("."),
+            &LocalDirectoryOpenOptions::new()
+                .with_symlink_policy(LocalSymlinkPolicy::FollowWithinScope),
+        )
+        .expect("directory handle should open");
+    let directory_reader = directory
+        .open_observed_reader(
+            path,
+            &LocalObservedReadOptions::new().with_read_options(follow),
+        )
+        .expect("directory handle should use the read option policy");
+    assert_eq!(directory_reader.observation().metadata().len(), 7);
+}
+
+/// Verifies Rooted scope rejects an outer cross-scope policy before reading.
+#[cfg(unix)]
+#[test]
+fn test_read_policy_rooted_rejects_outer_cross_scope() {
+    use std::path::Path;
+
+    let fixture = tempdir().expect("temporary directory should be created");
+    std::fs::write(fixture.path().join("payload"), b"payload").expect("file should be written");
+    let filesystem =
+        LocalFileSystem::rooted(fixture.path()).expect("Rooted filesystem should open");
+    let options =
+        LocalReadAllOptions::new().with_symlink_policy(LocalSymlinkPolicy::FollowAcrossScope);
+    let error = filesystem
+        .read_all_with_options(Path::new("payload"), &options)
+        .expect_err("cross-scope override is invalid");
+    assert_eq!(error.kind(), LocalFileErrorKind::InvalidOptions);
+}
 
 /// Verifies readers expose the native handle and support sequential seeking.
 #[test]

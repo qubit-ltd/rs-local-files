@@ -26,6 +26,7 @@ use super::operation_error;
 use super::reject_directory_qualified_file;
 use super::resolve_operation_path;
 use super::with_current_directory;
+use super::validate_scope_symlink_policy;
 use crate::directory::binding::DirectoryPathBinding;
 use crate::directory::binding::PathBinding;
 #[cfg(feature = "test-support")]
@@ -38,6 +39,7 @@ use crate::options::LocalReadAllOptions;
 use crate::options::LocalSnapshotOptions;
 use crate::path::LocalNamespacePath;
 use crate::rooted::Root;
+use crate::LocalSymlinkPolicy;
 use crate::test_support::TestFaultPoint;
 
 impl LocalFileSystem {
@@ -97,10 +99,12 @@ impl LocalFileSystem {
         resolver_started: std::time::Instant,
         attach_binding: bool,
     ) -> LocalResult<LocalObservedReader> {
+        let read_options = options.read_options().unwrap_or(&self.defaults.read);
+        let symlink_policy = self.read_symlink_policy(read_options, None);
+        validate_scope_symlink_policy(self.scope(), symlink_policy, LocalFileOperation::OpenReader, Some(path))?;
         let mut path_budget =
             binding_options.map(|limits| crate::directory::binding::PathBindingBudget::new(limits.max_path_bytes()));
         check_binding_deadline(binding_deadline, path)?;
-        let read_options = options.read_options().unwrap_or(&self.defaults.read);
         let resolver = self.resolver_for(path, LocalFileOperation::OpenReader)?;
         let resolved = resolve_operation_path(&resolver, path, LocalFileOperation::OpenReader)?;
         check_binding_deadline(binding_deadline, path)?;
@@ -146,10 +150,10 @@ impl LocalFileSystem {
                             source,
                         )
                     })?,
-                    if self.symlink_policy == crate::LocalSymlinkPolicy::FollowAcrossScope {
-                        crate::LocalSymlinkPolicy::FollowWithinScope
+                    if symlink_policy == LocalSymlinkPolicy::FollowAcrossScope {
+                        LocalSymlinkPolicy::FollowWithinScope
                     } else {
-                        self.symlink_policy
+                        symlink_policy
                     },
                 ),
                 LocalNamespace::Rooted(rooted) => {
@@ -164,7 +168,7 @@ impl LocalFileSystem {
                     })?;
                     (
                         Root::from_directory_authority(file, authority.path().to_path_buf()),
-                        self.symlink_policy,
+                        symlink_policy,
                     )
                 }
             };
@@ -181,11 +185,12 @@ impl LocalFileSystem {
             )?;
             check_binding_deadline(binding_deadline, resolved.namespace_absolute())?;
         }
-        let reader = self.open_resolved_reader(
+        let reader = self.open_resolved_reader_with_policy(
             &resolved,
             read_options,
             LocalFileOperation::OpenReader,
             resolver.current_directory(),
+            symlink_policy,
         )?;
         check_binding_deadline(binding_deadline, path)?;
         let mut observed = LocalObservedReader::from_reader(reader, options.native_observation())?;
@@ -228,10 +233,10 @@ impl LocalFileSystem {
                         )
                     })?;
                     let relative_parent = parent_path.strip_prefix("/").unwrap_or(parent_path);
-                    let policy = if self.symlink_policy == crate::LocalSymlinkPolicy::FollowAcrossScope {
-                        crate::LocalSymlinkPolicy::FollowWithinScope
+                    let policy = if symlink_policy == LocalSymlinkPolicy::FollowAcrossScope {
+                        LocalSymlinkPolicy::FollowWithinScope
                     } else {
-                        self.symlink_policy
+                        symlink_policy
                     };
                     let allow_all = crate::directory::LocalComponentPolicy::allow_all();
                     let relative_parent = crate::rooted_local_file_system::resolve_rooted_path_allow_root_with_component_policy_and_budget(
@@ -254,7 +259,7 @@ impl LocalFileSystem {
                 LocalNamespace::Rooted(rooted) => {
                     let allow_all = crate::directory::LocalComponentPolicy::allow_all();
                     let resolved_parent = crate::rooted_local_file_system::resolve_rooted_path_allow_root_with_component_policy_and_budget(
-                        rooted.root_authority(), parent_path, self.symlink_policy, true, LocalFileOperation::OpenRoot,
+                        rooted.root_authority(), parent_path, symlink_policy, true, LocalFileOperation::OpenRoot,
                         &allow_all, binding_deadline, path_budget.as_mut(),
                     )?;
                     check_binding_deadline(binding_deadline, &resolved_parent)?;
@@ -271,10 +276,10 @@ impl LocalFileSystem {
                     (root, anchors.unwrap_or_default())
                 }
             };
-            let binding_policy = if self.symlink_policy == crate::LocalSymlinkPolicy::FollowAcrossScope {
-                crate::LocalSymlinkPolicy::FollowWithinScope
+            let binding_policy = if symlink_policy == LocalSymlinkPolicy::FollowAcrossScope {
+                LocalSymlinkPolicy::FollowWithinScope
             } else {
-                self.symlink_policy
+                symlink_policy
             };
             let parent_fs = LocalFileSystem::from_root_authority(parent_root, binding_policy)?;
             check_binding_deadline(binding_deadline, resolved.namespace_absolute())?;
@@ -374,14 +379,17 @@ impl LocalFileSystem {
     /// the configured maximum. Other open/read failures retain structured
     /// operation context; partial bytes are discarded.
     pub fn read_all_with_options(&self, path: &Path, options: &LocalReadAllOptions) -> LocalResult<Vec<u8>> {
+        let read_options = options.read_options().unwrap_or(&self.defaults.read);
+        let symlink_policy = self.read_symlink_policy(read_options, options.symlink_policy());
+        validate_scope_symlink_policy(self.scope(), symlink_policy, LocalFileOperation::Read, Some(path))?;
         let resolver = self.resolver_for(path, LocalFileOperation::Read)?;
         let resolved = resolve_operation_path(&resolver, path, LocalFileOperation::Read)?;
         let mut reader = self.open_resolved_reader_with_policy(
             &resolved,
-            options.read_options().unwrap_or(&self.defaults.read),
+            read_options,
             LocalFileOperation::Read,
             resolver.current_directory(),
-            options.symlink_policy().unwrap_or(self.symlink_policy),
+            symlink_policy,
         )?;
         let maximum = options.max_bytes();
         if maximum.is_some_and(|limit| reader.metadata().len() > limit) {
@@ -421,6 +429,8 @@ impl LocalFileSystem {
         path: &Path,
         options: &LocalSnapshotOptions,
     ) -> LocalResult<crate::LocalFileSnapshot> {
+        let symlink_policy = self.read_symlink_policy(options.read_options(), options.symlink_policy());
+        validate_scope_symlink_policy(self.scope(), symlink_policy, LocalFileOperation::Read, Some(path))?;
         let resolver = self.resolver_for(path, LocalFileOperation::Read)?;
         let resolved = resolve_operation_path(&resolver, path, LocalFileOperation::Read)?;
         let reader = self.open_resolved_reader_with_policy(
@@ -428,7 +438,7 @@ impl LocalFileSystem {
             options.read_options(),
             LocalFileOperation::Read,
             resolver.current_directory(),
-            options.symlink_policy().unwrap_or(self.symlink_policy),
+            symlink_policy,
         )?;
         let mut observed = LocalObservedReader::from_reader(reader, LocalObservationRequirement::Required)
             .map_err(|error| error.with_path(resolved.namespace_absolute().to_path_buf()))?;
@@ -507,6 +517,8 @@ impl LocalFileSystem {
     /// Returns path-resolution, type, or native open errors, including retry
     /// timeout failures. The returned reader owns the opened native handle.
     pub fn open_reader_with_options(&self, path: &Path, options: &LocalReadOptions) -> LocalResult<LocalFileReader> {
+        let symlink_policy = self.read_symlink_policy(options, None);
+        validate_scope_symlink_policy(self.scope(), symlink_policy, LocalFileOperation::OpenReader, Some(path))?;
         let resolver = self.resolver_for(path, LocalFileOperation::OpenReader)?;
         let resolved = resolve_operation_path(&resolver, path, LocalFileOperation::OpenReader)?;
         self.open_resolved_reader(
@@ -528,7 +540,22 @@ impl LocalFileSystem {
         operation: LocalFileOperation,
         current_directory: Option<&Path>,
     ) -> LocalResult<LocalFileReader> {
-        self.open_resolved_reader_with_policy(resolved, options, operation, current_directory, self.symlink_policy)
+        let symlink_policy = self.read_symlink_policy(options, None);
+        self.open_resolved_reader_with_policy(resolved, options, operation, current_directory, symlink_policy)
+    }
+
+    pub(crate) const fn read_symlink_policy(
+        &self,
+        options: &LocalReadOptions,
+        outer_override: Option<LocalSymlinkPolicy>,
+    ) -> LocalSymlinkPolicy {
+        match outer_override {
+            Some(policy) => policy,
+            None => match options.symlink_policy() {
+                Some(policy) => policy,
+                None => self.symlink_policy,
+            },
+        }
     }
 
     fn open_resolved_reader_with_policy(
@@ -539,6 +566,7 @@ impl LocalFileSystem {
         current_directory: Option<&Path>,
         symlink_policy: crate::LocalSymlinkPolicy,
     ) -> LocalResult<LocalFileReader> {
+        validate_scope_symlink_policy(self.scope(), symlink_policy, operation, Some(resolved.namespace_absolute()))?;
         reject_directory_qualified_file(resolved, operation, current_directory)?;
         match &self.core.namespace {
             LocalNamespace::Host => {
@@ -571,6 +599,8 @@ impl LocalFileSystem {
         max_bytes: usize,
         options: &LocalReadOptions,
     ) -> LocalResult<Vec<u8>> {
+        let symlink_policy = self.read_symlink_policy(options, None);
+        validate_scope_symlink_policy(self.scope(), symlink_policy, LocalFileOperation::Read, Some(path))?;
         let resolver = self.resolver_for(path, LocalFileOperation::Read)?;
         let resolved = resolve_operation_path(&resolver, path, LocalFileOperation::Read)?;
         let error_path = resolved.namespace_absolute().to_path_buf();
