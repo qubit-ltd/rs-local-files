@@ -35,14 +35,48 @@ jobs:
       - name: Run shared conditional suites
         working-directory: ci-root/rs-local-files
         run: |
-          suites=digest-build,digest-library,digest-integration,conditional-contracts,conditional-library
+          run_tests() {
+            output=$(cargo test "$@" 2>&1) || {
+              printf '%s\n' "$output"
+              return 1
+            }
+            printf '%s\n' "$output"
+            if ! grep -Eq 'test result: ok\. [1-9][0-9]* passed' <<<"$output"; then
+              echo "expected at least one test for: cargo test $*" >&2
+              return 1
+            fi
+          }
+          cargo check --locked --features digest
+          run_tests --locked --features digest --lib conditional_
+          run_tests --locked --features digest \
+            --test conditional_writer_tests \
+            --test conditional_vectored_tests \
+            --test conditional_backend_contract_tests
+          run_tests --locked --features digest,test-support \
+            --test conditional_writer_tests \
+            --test conditional_vectored_tests \
+            --test conditional_publication_race_tests \
+            --test conditional_recovery_tests \
+            --test conditional_fault_tests \
+            --test conditional_feature_gate_tests
+          run_tests --locked --features digest,test-support --lib conditional_
           case "$RUNNER_OS" in
-            Linux) platform=linux; suites="$suites,lifecycle-model" ;;
-            Windows) platform=windows ;;
-            macOS) platform=macos; suites="$suites,lifecycle-model" ;;
+            Linux|macOS)
+              cargo test --locked --manifest-path fuzz/Cargo.toml --test lifecycle_model_tests
+              ;;
+            Windows)
+              run_tests --locked --lib lf_review_stage_cleanup_
+              run_tests --locked --lib lf_review_tree_
+              run_tests --locked --lib lf3_temp_windows_required_private_creation_and_seal
+              run_tests --locked --features digest,test-support \
+                --test conditional_recovery_tests windows_cleanup_
+              run_tests --locked --features digest,test-support \
+                --test conditional_writer_tests windows_open_
+              run_tests --locked --test local_temp_file_tests test_required_private_windows_
+              run_tests --locked --test local_temp_file_tests windows_sealed_cleanup_
+              ;;
             *) echo "Unsupported runner OS: $RUNNER_OS" >&2; exit 1 ;;
           esac
-          ./.infra/bin/infra-tool.sh rs-infra-platform --project . check --platform "$platform" --suite "$suites" --require "$platform"
 
   windows-recovery:
     name: Windows rollback recovery contracts
@@ -73,4 +107,4 @@ jobs:
         run: rustup toolchain install 1.94 --profile minimal
       - name: Run rollback recovery contracts
         working-directory: ci-root/rs-local-files
-        run: ./.infra/bin/infra-tool.sh rs-infra-platform --project . check --platform windows --suite conditional-recovery --require windows
+        run: cargo test --locked --features digest,test-support --test conditional_recovery_tests windows_cleanup_

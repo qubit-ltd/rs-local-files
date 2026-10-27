@@ -28,17 +28,12 @@ jobs:
       fuzz-check: false
       # Enable remotely only after platform, manager and CI tools are distributable.
       verify-extra-script: |
-        case "$RUNNER_OS" in
-          Linux) platform=linux ;;
-          Windows) platform=windows ;;
-          macOS) platform=macos ;;
-          *) echo "Unsupported runner OS: $RUNNER_OS" >&2; exit 1 ;;
-        esac
-        ./.infra/bin/infra-tool.sh rs-infra-platform --project . check --platform "$platform" --suite default,all-features --require "$platform"
+        cargo test --locked --no-default-features --no-fail-fast
+        cargo test --locked --all-features --no-fail-fast
         if [ "$RUNNER_OS" = Linux ]; then
           rustup target add --toolchain 1.94 x86_64-unknown-freebsd armv7-linux-androideabi
           cargo +1.94 check --locked --target x86_64-unknown-freebsd
-          ./.infra/bin/infra-tool.sh rs-infra-platform --project . check --platform linux --suite android-armv7-check --require linux
+          cargo +1.94 check --locked --target armv7-linux-androideabi
           RUSTFLAGS="-D warnings" cargo +1.94 check --locked --manifest-path fuzz/Cargo.toml --bins
         fi
 
