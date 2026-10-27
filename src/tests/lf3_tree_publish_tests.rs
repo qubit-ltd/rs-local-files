@@ -34,6 +34,37 @@ fn lf3_tree_publish_conflict_retains_original() {
     );
 }
 
+#[test]
+fn tree_publish_conflict_reports_prior_access_mutation() {
+    let fixture = tempfile::tempdir().expect("fixture should be created");
+    std::fs::create_dir(fixture.path().join("target")).expect("target should be created");
+    let fs = crate::LocalFileSystem::host().expect("host filesystem should open");
+    let parent = fs
+        .open_directory_with_options(fixture.path(), &LocalDirectoryOpenOptions::new())
+        .expect("parent should open");
+    let stage = parent
+        .create_staged_directory(&LocalTempDirectoryOptions::new())
+        .expect("stage should be created");
+    let name = stage.relative_name().to_os_string();
+    let error = stage
+        .publish_new(
+            &parent,
+            OsStr::new("target"),
+            &LocalTreePublishOptions::new().with_access(LocalTreeFinalAccess::CurrentUserOnly),
+        )
+        .expect_err("no-replace collision should fail");
+    assert_eq!(error.publication(), LocalTreePublication::NotPublished);
+    assert_eq!(
+        error.mutation_state(),
+        crate::outcome::LocalTreeMutationState::Started
+    );
+    assert_eq!(error.access_state(), LocalTreeAccessState::CurrentUserOnly);
+    let stage = error.into_stage().expect("unpublished stage remains owned");
+    assert_eq!(stage.relative_name(), name.as_os_str());
+    stage.cleanup().expect("stage remains cleanable");
+    assert!(fixture.path().join("target").is_dir());
+}
+
 #[cfg(unix)]
 #[test]
 fn tree_access_policy_round_trips_without_releasing_stage() {

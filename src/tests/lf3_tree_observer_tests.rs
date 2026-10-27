@@ -452,6 +452,55 @@ fn lf3_tree_private_stage_retries_name_collisions_without_deleting_conflicts() {
     stage.cleanup().expect("created stage should clean up");
 }
 
+#[cfg(unix)]
+#[test]
+fn lf3_tree_private_stage_does_not_claim_or_cleanup_replaced_name() {
+    use std::sync::{Arc, Mutex};
+
+    let fixture = tempfile::tempdir().expect("fixture should exist");
+    let fs = LocalFileSystem::host().expect("host filesystem should open");
+    let parent = fs
+        .open_directory_with_options(fixture.path(), &LocalDirectoryOpenOptions::new())
+        .expect("parent should open");
+    let fixture_path = fixture.path().to_path_buf();
+    let moved_original = fixture.path().join("moved-original");
+    let moved_original_for_hook = moved_original.clone();
+    let replacement_path = Arc::new(Mutex::new(None));
+    let replacement_path_for_hook = Arc::clone(&replacement_path);
+    let _hook = crate::directory::install_stage_created_hook(move |name| {
+        let created = fixture_path.join(name);
+        std::fs::rename(&created, &moved_original_for_hook).expect("move original private stage");
+        std::fs::create_dir(&created).expect("install replacement directory");
+        std::fs::write(created.join("sentinel"), b"replacement")
+            .expect("write replacement sentinel");
+        *replacement_path_for_hook
+            .lock()
+            .expect("replacement path lock") = Some(created);
+    });
+
+    let error = parent
+        .create_staged_directory(&LocalTempDirectoryOptions::new().with_privacy(LocalPrivacyRequirement::Required))
+        .expect_err("replaced stage name must be rejected");
+    assert_eq!(
+        error.cause().kind(),
+        crate::error::LocalFileErrorKind::ChangedDuringRead
+    );
+    drop(error);
+    let replacement_path = replacement_path
+        .lock()
+        .expect("replacement path lock")
+        .clone()
+        .expect("replacement path should be recorded");
+    assert_eq!(
+        std::fs::read(replacement_path.join("sentinel")).expect("replacement must remain"),
+        b"replacement"
+    );
+    assert!(
+        moved_original.is_dir(),
+        "original entry is not confused with its replacement"
+    );
+}
+
 #[cfg(feature = "test-support")]
 #[test]
 fn lf3_tree_partial_private_stage_retains_identity_and_cleanup_owner() {

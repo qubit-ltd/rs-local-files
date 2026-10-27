@@ -6,7 +6,7 @@ mod conditional;
 mod handle;
 mod staged;
 #[cfg(test)]
-pub(crate) use staged::fail_tree_sync_after;
+pub(crate) use staged::{fail_tree_sync_after, install_stage_created_hook};
 mod tree_observer;
 #[cfg(test)]
 pub(crate) use tree_observer::{reset_test_observation_count, test_observation_count};

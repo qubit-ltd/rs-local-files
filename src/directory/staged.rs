@@ -6,15 +6,50 @@ use qubit_io::ByteInput;
 
 #[cfg(test)]
 use std::cell::Cell;
+#[cfg(test)]
+use std::cell::RefCell;
 
 #[cfg(test)]
 thread_local! {
     static TREE_SYNC_FAILURE_AFTER: Cell<Option<usize>> = const { Cell::new(None) };
+    static STAGE_CREATED_HOOK: RefCell<Option<Box<dyn FnOnce(&Path)>>> = const { RefCell::new(None) };
 }
 
 #[cfg(test)]
 pub(crate) fn fail_tree_sync_after(successful_steps: usize) {
     TREE_SYNC_FAILURE_AFTER.with(|slot| slot.set(Some(successful_steps)));
+}
+
+#[cfg(test)]
+pub(crate) struct StageCreatedHookGuard;
+
+#[cfg(test)]
+impl Drop for StageCreatedHookGuard {
+    fn drop(&mut self) {
+        STAGE_CREATED_HOOK.with(|slot| slot.borrow_mut().take());
+    }
+}
+
+#[cfg(test)]
+pub(crate) fn install_stage_created_hook(
+    hook: impl FnOnce(&Path) + 'static,
+) -> StageCreatedHookGuard {
+    STAGE_CREATED_HOOK.with(|slot| {
+        assert!(
+            slot.borrow().is_none(),
+            "stage creation hook already installed"
+        );
+        *slot.borrow_mut() = Some(Box::new(hook));
+    });
+    StageCreatedHookGuard
+}
+
+#[cfg(test)]
+fn run_stage_created_hook(name: &Path) {
+    let hook = STAGE_CREATED_HOOK.with(|slot| slot.borrow_mut().take());
+    if let Some(hook) = hook {
+        hook(name);
+    }
 }
 
 #[cfg(test)]
@@ -911,15 +946,70 @@ impl LocalDirectoryHandle {
             ));
         };
         let path = self.diagnostic_path().join(&relative);
+        let created_identity = if let Some(file) = created_file.as_ref() {
+            let observation = match crate::observation::query::query_observation(
+                file,
+                crate::observation::LocalObservationRequirement::Required,
+            ) {
+                Ok(observation) => observation,
+                Err(cause) => {
+                    let owner = LocalTreeRetainedResource::new(
+                        path.clone(),
+                        relative.clone(),
+                        None,
+                        self.clone(),
+                        None,
+                    );
+                    return Err(LocalTreeCreateError::new(
+                        cause,
+                        None,
+                        vec![owner],
+                        LocalTreeMutationState::Started,
+                    ));
+                }
+            };
+            match observation.identity().cloned() {
+                Some(identity) => Some(identity),
+                None => {
+                    let owner = LocalTreeRetainedResource::new(
+                        path.clone(),
+                        relative.clone(),
+                        None,
+                        self.clone(),
+                        None,
+                    );
+                    return Err(LocalTreeCreateError::new(
+                        LocalFileError::new(
+                            LocalFileErrorKind::Unsupported,
+                            LocalFileOperation::Metadata,
+                        )
+                        .with_path(path.clone()),
+                        None,
+                        vec![owner],
+                        LocalTreeMutationState::Started,
+                    ));
+                }
+            }
+        } else {
+            None
+        };
+        #[cfg(test)]
+        run_stage_created_hook(&relative);
         let directory = match self.open_directory(&relative, &LocalDirectoryOpenOptions::new()) {
             Ok(directory) => directory,
             Err(cause) => {
-                let identity = self
-                    .observe_entry(&relative)
-                    .ok()
-                    .and_then(|observation| observation.identity().cloned());
-                let resource =
-                    LocalTreeRetainedResource::new(path, relative, identity, self.clone(), None);
+                let identity = created_identity.clone().or_else(|| {
+                    self.observe_entry(&relative)
+                        .ok()
+                        .and_then(|observation| observation.identity().cloned())
+                });
+                let resource = LocalTreeRetainedResource::new(
+                    path,
+                    relative,
+                    identity,
+                    self.clone(),
+                    None,
+                );
                 return Err(LocalTreeCreateError::new(
                     cause,
                     None,
@@ -931,16 +1021,22 @@ impl LocalDirectoryHandle {
         let observation = match directory.observe() {
             Ok(observation) => observation,
             Err(cause) => {
-                let identity = self
-                    .observe_entry(&relative)
-                    .ok()
-                    .and_then(|observation| observation.identity().cloned());
+                let identity = created_identity.clone().or_else(|| {
+                    self.observe_entry(&relative)
+                        .ok()
+                        .and_then(|observation| observation.identity().cloned())
+                });
+                let child = if created_identity.is_some() {
+                    None
+                } else {
+                    Some(directory.clone())
+                };
                 let resource = LocalTreeRetainedResource::new(
                     path,
                     relative,
                     identity,
                     self.clone(),
-                    Some(directory.clone()),
+                    child,
                 );
                 return Err(LocalTreeCreateError::new(
                     cause,
@@ -950,48 +1046,29 @@ impl LocalDirectoryHandle {
                 ));
             }
         };
-        let identity = observation.identity().cloned();
-        if let Some(file) = created_file {
-            let native_observation = match crate::observation::query::query_observation(
-                &file,
-                crate::observation::LocalObservationRequirement::Required,
-            ) {
-                Ok(observation) => observation,
-                Err(cause) => {
-                    let owner = LocalTreeRetainedResource::new(
-                        path.clone(),
-                        relative.clone(),
-                        identity.clone(),
-                        self.clone(),
-                        Some(directory.clone()),
-                    );
-                    return Err(LocalTreeCreateError::new(
-                        cause,
-                        None,
-                        vec![owner],
-                        LocalTreeMutationState::Started,
-                    ));
-                }
-            };
-            if identity.as_ref() != native_observation.identity() {
-                let owner = LocalTreeRetainedResource::new(
-                    path.clone(),
-                    relative.clone(),
-                    identity.clone(),
-                    self.clone(),
-                    Some(directory.clone()),
-                );
-                return Err(LocalTreeCreateError::new(
-                    LocalFileError::new(
-                        LocalFileErrorKind::ChangedDuringRead,
-                        LocalFileOperation::Metadata,
-                    ),
-                    None,
-                    vec![owner],
-                    LocalTreeMutationState::Indeterminate,
-                ));
-            }
+        if created_identity
+            .as_ref()
+            .is_some_and(|identity| observation.identity() != Some(identity))
+        {
+            let owner = LocalTreeRetainedResource::new(
+                path.clone(),
+                relative.clone(),
+                created_identity.clone(),
+                self.clone(),
+                None,
+            );
+            return Err(LocalTreeCreateError::new(
+                LocalFileError::new(
+                    LocalFileErrorKind::ChangedDuringRead,
+                    LocalFileOperation::Metadata,
+                )
+                .with_path(path),
+                None,
+                vec![owner],
+                LocalTreeMutationState::Indeterminate,
+            ));
         }
+        let identity = created_identity.or_else(|| observation.identity().cloned());
         let owner = LocalTreeRetainedResource::new(
             path,
             relative.clone(),
@@ -2049,7 +2126,7 @@ impl LocalStagedDirectory {
                 let (cause, state) = failure.into_parts();
                 let (publication, mutation, keep_stage) = match state {
                     crate::outcome::LocalRenameFailureState::Unchanged => {
-                        (Publication::NotPublished, Mutation::NotStarted, true)
+                        (Publication::NotPublished, access_mutation, true)
                     }
                     crate::outcome::LocalRenameFailureState::Renamed => {
                         (Publication::Published, Mutation::Started, false)
