@@ -90,3 +90,24 @@ target = "armv7-linux-androideabi"
 timeout_seconds = 1800
 minimum_tests = 0
 commands = [{ kind = "check", argv = ["cargo", "check", "--locked", "--target", "armv7-linux-androideabi"], cwd = "." }]
+
+[[suites]]
+id = "lf3-unit-default"
+platforms = ["linux", "windows", "macos"]
+timeout_seconds = 3600
+minimum_tests = 1
+commands = [{ kind = "test", argv = ["cargo", "test", "--locked", "--lib"], cwd = "." }]
+
+[[suites]]
+id = "lf3-unit-all-features"
+platforms = ["linux", "windows", "macos"]
+timeout_seconds = 3600
+minimum_tests = 1
+commands = [{ kind = "test", argv = ["cargo", "test", "--locked", "--lib", "--all-features"], cwd = "." }]
+
+[[suites]]
+id = "lf3-unit-digest"
+platforms = ["linux", "windows", "macos"]
+timeout_seconds = 3600
+minimum_tests = 1
+commands = [{ kind = "test", argv = ["cargo", "test", "--locked", "--lib", "--features", "digest"], cwd = "." }]

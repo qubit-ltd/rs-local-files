@@ -2,10 +2,11 @@ use qubit_io::Output;
 
 use crate::directory::LocalComponentPolicy;
 use crate::error::LocalFileErrorKind;
-use crate::options::{
-    LocalDirectoryOpenOptions, LocalObservedReadOptions, LocalPathBindingOptions, LocalWriteMode,
-    LocalWriteOptions,
-};
+use crate::options::LocalDirectoryOpenOptions;
+use crate::options::LocalObservedReadOptions;
+use crate::options::LocalPathBindingOptions;
+use crate::options::LocalWriteMode;
+use crate::options::LocalWriteOptions;
 
 #[test]
 fn lf3_authority_rejects_absolute_and_escape() {
@@ -40,9 +41,8 @@ fn lf3_authority_rejects_absolute_and_escape() {
     let restricted = fs
         .open_directory_with_options(
             fixture.path(),
-            &LocalDirectoryOpenOptions::new().with_component_policy(
-                LocalComponentPolicy::deny_names(vec!["denied".into()]).unwrap(),
-            ),
+            &LocalDirectoryOpenOptions::new()
+                .with_component_policy(LocalComponentPolicy::deny_names(vec!["denied".into()]).unwrap()),
         )
         .expect("restricted directory should open");
     assert_eq!(
@@ -61,11 +61,9 @@ fn lf3_authority_checks_expanded_symlink_components() {
     let denied = fixture.path().join("private");
     std::fs::create_dir(&denied).expect("denied directory should exist");
     std::fs::write(denied.join("value"), b"value").expect("target file should exist");
-    std::os::unix::fs::symlink("private/value", fixture.path().join("alias"))
-        .expect("link should exist");
+    std::os::unix::fs::symlink("private/value", fixture.path().join("alias")).expect("link should exist");
     let fs = crate::LocalFileSystem::host().expect("host should open");
-    let policy =
-        LocalComponentPolicy::deny_names(vec!["private".into()]).expect("policy should be valid");
+    let policy = LocalComponentPolicy::deny_names(vec!["private".into()]).expect("policy should be valid");
     let handle = fs
         .open_directory_with_options(
             fixture.path(),
@@ -74,10 +72,7 @@ fn lf3_authority_checks_expanded_symlink_components() {
         .expect("directory should open");
     assert_eq!(
         handle
-            .open_observed_reader(
-                std::path::Path::new("alias"),
-                &LocalObservedReadOptions::new()
-            )
+            .open_observed_reader(std::path::Path::new("alias"), &LocalObservedReadOptions::new())
             .unwrap_err()
             .kind(),
         LocalFileErrorKind::InvalidPath
@@ -91,17 +86,20 @@ fn lf3_authority_checks_symlink_components_before_parent_collapse() {
     std::fs::create_dir(fixture.path().join("private")).expect("denied directory should exist");
     std::fs::create_dir(fixture.path().join("public")).expect("target directory should exist");
     std::fs::write(fixture.path().join("public/value"), b"value").expect("target should exist");
-    std::os::unix::fs::symlink("private/../public/value", fixture.path().join("alias"))
-        .expect("link should exist");
+    std::os::unix::fs::symlink("private/../public/value", fixture.path().join("alias")).expect("link should exist");
     let fs = crate::LocalFileSystem::host().expect("host should open");
     let policy = LocalComponentPolicy::deny_names(vec!["private".into()]).expect("policy should be valid");
-    let handle = fs.open_directory_with_options(
-        fixture.path(),
-        &LocalDirectoryOpenOptions::new().with_component_policy(policy),
-    ).expect("directory should open");
+    let handle = fs
+        .open_directory_with_options(
+            fixture.path(),
+            &LocalDirectoryOpenOptions::new().with_component_policy(policy),
+        )
+        .expect("directory should open");
     assert_eq!(
-        handle.open_observed_reader(std::path::Path::new("alias"), &LocalObservedReadOptions::new())
-            .unwrap_err().kind(),
+        handle
+            .open_observed_reader(std::path::Path::new("alias"), &LocalObservedReadOptions::new())
+            .unwrap_err()
+            .kind(),
         LocalFileErrorKind::InvalidPath,
     );
 }
@@ -115,22 +113,17 @@ fn lf3_authority_initial_host_open_checks_link_target_policy() {
     let alias = fixture.path().join("alias");
     std::os::unix::fs::symlink(&denied, &alias).expect("directory link should exist");
     let fs = crate::LocalFileSystem::host().expect("host should open");
-    let policy =
-        LocalComponentPolicy::deny_names(vec!["private".into()]).expect("policy should be valid");
+    let policy = LocalComponentPolicy::deny_names(vec!["private".into()]).expect("policy should be valid");
     assert_eq!(
-        fs.open_directory_with_options(
-            &alias,
-            &LocalDirectoryOpenOptions::new().with_component_policy(policy),
-        )
-        .unwrap_err()
-        .kind(),
+        fs.open_directory_with_options(&alias, &LocalDirectoryOpenOptions::new().with_component_policy(policy),)
+            .unwrap_err()
+            .kind(),
         LocalFileErrorKind::InvalidPath,
     );
     assert_eq!(
         fs.open_directory_with_options(
             &alias,
-            &LocalDirectoryOpenOptions::new()
-                .with_symlink_policy(crate::policy::LocalSymlinkPolicy::Reject),
+            &LocalDirectoryOpenOptions::new().with_symlink_policy(crate::policy::LocalSymlinkPolicy::Reject),
         )
         .unwrap_err()
         .kind(),
@@ -173,12 +166,9 @@ fn lf3_authority_windows_host_rejects_unavailable_path_binding() {
         LocalFileErrorKind::Unsupported,
     );
     assert_eq!(
-        fs.open_observed_reader(
-            &source,
-            &LocalObservedReadOptions::new().with_path_binding(binding),
-        )
-        .unwrap_err()
-        .kind(),
+        fs.open_observed_reader(&source, &LocalObservedReadOptions::new().with_path_binding(binding),)
+            .unwrap_err()
+            .kind(),
         LocalFileErrorKind::Unsupported,
     );
 }
@@ -187,8 +177,7 @@ fn lf3_authority_windows_host_rejects_unavailable_path_binding() {
 fn lf3_authority_applies_component_policy_to_facades() {
     let fixture = tempfile::tempdir().expect("fixture should exist");
     let fs = crate::LocalFileSystem::host().expect("host should open");
-    let policy =
-        LocalComponentPolicy::deny_names(vec!["blocked".into()]).expect("policy should be valid");
+    let policy = LocalComponentPolicy::deny_names(vec!["blocked".into()]).expect("policy should be valid");
     let handle = fs
         .open_directory_with_options(
             fixture.path(),
@@ -197,10 +186,7 @@ fn lf3_authority_applies_component_policy_to_facades() {
         .expect("directory should open");
     assert_eq!(
         handle
-            .list_with_options(
-                std::path::Path::new("blocked"),
-                &crate::LocalListOptions::new()
-            )
+            .list_with_options(std::path::Path::new("blocked"), &crate::LocalListOptions::new())
             .unwrap_err()
             .kind(),
         LocalFileErrorKind::InvalidPath,
@@ -243,9 +229,7 @@ fn lf3_authority_survives_directory_rename_and_replacement() {
             &LocalWriteOptions::new(LocalWriteMode::CreateNew),
         )
         .expect("writer should use retained directory");
-    writer
-        .write_fully(b"original")
-        .expect("write should succeed");
+    writer.write_fully(b"original").expect("write should succeed");
     let _outcome = writer.commit().expect("commit should succeed");
     assert_eq!(
         std::fs::read(old.join("payload")).expect("old target should exist"),
@@ -262,10 +246,7 @@ fn lf3_authority_opens_and_retains_rooted_child() {
     std::fs::create_dir(&directory).expect("directory should exist");
     let fs = crate::LocalFileSystem::rooted(fixture.path()).expect("rooted filesystem should open");
     let handle = fs
-        .open_directory_with_options(
-            std::path::Path::new("/d"),
-            &LocalDirectoryOpenOptions::new(),
-        )
+        .open_directory_with_options(std::path::Path::new("/d"), &LocalDirectoryOpenOptions::new())
         .expect("rooted child should open");
     std::fs::rename(&directory, &old).expect("directory should move");
     std::fs::create_dir(&directory).expect("replacement should exist");
@@ -309,6 +290,54 @@ fn lf3_authority_binding_detects_final_name_replacement() {
 }
 
 #[test]
+fn lf3_authority_binding_and_snapshot_keep_name_and_handle_observations_separate() {
+    use crate::options::LocalSnapshotOptions;
+
+    let fixture = tempfile::tempdir().expect("fixture should exist");
+    let path = fixture.path().join("source");
+    std::fs::write(&path, b"opened object").expect("source should exist");
+    let filesystem = crate::LocalFileSystem::rooted(fixture.path()).expect("root should open");
+    let snapshot = filesystem
+        .read_consistent_with_options(
+            std::path::Path::new("/source"),
+            &LocalSnapshotOptions::builder(64).build(),
+        )
+        .expect("same-handle snapshot should be captured");
+    assert_eq!(snapshot.bytes(), b"opened object");
+    let mut reader = filesystem
+        .open_observed_reader(
+            std::path::Path::new("/source"),
+            &LocalObservedReadOptions::new()
+                .with_native_observation(crate::observation::LocalObservationRequirement::Required)
+                .with_path_binding(LocalPathBindingOptions::new()),
+        )
+        .expect("observed reader and name binding should open");
+    let opened_identity = reader
+        .observation()
+        .identity()
+        .expect("native identity should be present")
+        .clone();
+    assert_eq!(snapshot.before().identity(), Some(&opened_identity));
+    assert_eq!(snapshot.after().identity(), Some(&opened_identity));
+
+    std::fs::rename(&path, fixture.path().join("renamed-source")).expect("move source name");
+    std::fs::write(&path, b"replacement").expect("install replacement name");
+
+    assert_eq!(
+        reader.verify_path_binding().expect("verify name binding"),
+        crate::observation::LocalSourceVerification::Changed
+    );
+    assert_eq!(
+        reader.read_to_end_limited(64).expect("read retained handle"),
+        b"opened object"
+    );
+    assert_eq!(
+        reader.observe_now().expect("refresh opened handle").identity(),
+        Some(&opened_identity)
+    );
+}
+
+#[test]
 fn lf3_authority_binding_reports_disappeared_final_name() {
     let fixture = tempfile::tempdir().expect("fixture should exist");
     let path = fixture.path().join("source");
@@ -338,21 +367,17 @@ fn lf3_authority_binding_enforces_zero_budgets() {
         LocalPathBindingOptions::new().with_max_path_bytes(0),
     ] {
         assert_eq!(
-            fs.open_observed_reader(
-                &path,
-                &LocalObservedReadOptions::new().with_path_binding(binding)
-            )
-            .unwrap_err()
-            .kind(),
+            fs.open_observed_reader(&path, &LocalObservedReadOptions::new().with_path_binding(binding))
+                .unwrap_err()
+                .kind(),
             LocalFileErrorKind::ResourceLimit,
         );
     }
     let error = fs
         .open_observed_reader(
             &path,
-            &LocalObservedReadOptions::new().with_path_binding(
-                LocalPathBindingOptions::new().with_deadline(std::time::Duration::ZERO),
-            ),
+            &LocalObservedReadOptions::new()
+                .with_path_binding(LocalPathBindingOptions::new().with_deadline(std::time::Duration::ZERO)),
         )
         .unwrap_err();
     assert_eq!(error.io_error().unwrap().kind(), std::io::ErrorKind::TimedOut);
@@ -367,9 +392,8 @@ fn lf3_authority_binding_budgets_expanded_components_and_anchor_paths() {
     for maximum in [1, 8] {
         let result = fs.open_directory_with_options(
             &nested,
-            &LocalDirectoryOpenOptions::new().with_path_binding(
-                LocalPathBindingOptions::new().with_max_path_bytes(maximum),
-            ),
+            &LocalDirectoryOpenOptions::new()
+                .with_path_binding(LocalPathBindingOptions::new().with_max_path_bytes(maximum)),
         );
         assert_eq!(result.unwrap_err().kind(), LocalFileErrorKind::ResourceLimit);
     }
@@ -384,9 +408,8 @@ fn lf3_authority_binding_uses_one_budget_for_resolution_and_anchors() {
     let anchor_bytes = fixture.path().as_os_str().len() + child.as_os_str().len();
     let result = fs.open_directory_with_options(
         std::path::Path::new("child"),
-        &LocalDirectoryOpenOptions::new().with_path_binding(
-            LocalPathBindingOptions::new().with_max_path_bytes(anchor_bytes),
-        ),
+        &LocalDirectoryOpenOptions::new()
+            .with_path_binding(LocalPathBindingOptions::new().with_max_path_bytes(anchor_bytes)),
     );
     assert_eq!(result.unwrap_err().kind(), LocalFileErrorKind::ResourceLimit);
 }
@@ -402,9 +425,7 @@ fn lf3_observed_reader_binding_shares_budget_across_parent_resolution_and_anchor
     let maximum = retained_anchor_bytes.max(42) + 1;
     let result = filesystem.open_observed_reader(
         std::path::Path::new("parent/source"),
-        &LocalObservedReadOptions::new().with_path_binding(
-            LocalPathBindingOptions::new().with_max_path_bytes(maximum),
-        ),
+        &LocalObservedReadOptions::new().with_path_binding(LocalPathBindingOptions::new().with_max_path_bytes(maximum)),
     );
     assert_eq!(result.unwrap_err().kind(), LocalFileErrorKind::ResourceLimit);
 }
@@ -454,10 +475,7 @@ fn lf3_authority_binding_detects_fixed_root_replacement() {
             >= 1
     );
     let reader = handle
-        .open_observed_reader(
-            std::path::Path::new("source"),
-            &LocalObservedReadOptions::new(),
-        )
+        .open_observed_reader(std::path::Path::new("source"), &LocalObservedReadOptions::new())
         .expect("reader should open");
     std::fs::rename(&directory, &old).expect("directory should move");
     std::fs::create_dir(&directory).expect("replacement should exist");

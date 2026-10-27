@@ -1,19 +1,16 @@
-use crate::options::{LocalSealOptions, LocalWriteMode, LocalWriteOptions};
+use crate::options::LocalSealOptions;
+use crate::options::LocalWriteMode;
+use crate::options::LocalWriteOptions;
+use crate::policy::LocalDurabilityRequirement;
+use crate::policy::LocalFileSyncRequirement;
 use crate::policy::LocalPrivacyRequirement;
-use crate::policy::{LocalDurabilityRequirement, LocalFileSyncRequirement};
 
 #[test]
 fn lf3_contract_defaults_preserve_old_guarantees() {
     let options = LocalWriteOptions::new(LocalWriteMode::CreateNew);
     assert_eq!(options.file_sync(), LocalFileSyncRequirement::NotRequired);
-    assert_eq!(
-        options.durability(),
-        LocalDurabilityRequirement::NotRequired
-    );
-    assert_eq!(
-        LocalSealOptions::new().file_sync(),
-        LocalFileSyncRequirement::Required
-    );
+    assert_eq!(options.durability(), LocalDurabilityRequirement::NotRequired);
+    assert_eq!(LocalSealOptions::new().file_sync(), LocalFileSyncRequirement::Required);
 }
 
 #[test]
@@ -31,14 +28,8 @@ fn lf3_contract_byte_traits_accept_unsized_values() {
 fn lf3_contract_privacy_defaults_and_copy_configuration() {
     let file_options = crate::options::LocalTempFileOptions::new();
     let directory_options = crate::options::LocalTempDirectoryOptions::new();
-    assert_eq!(
-        file_options.privacy(),
-        LocalPrivacyRequirement::PlatformDefault
-    );
-    assert_eq!(
-        directory_options.privacy(),
-        LocalPrivacyRequirement::PlatformDefault
-    );
+    assert_eq!(file_options.privacy(), LocalPrivacyRequirement::PlatformDefault);
+    assert_eq!(directory_options.privacy(), LocalPrivacyRequirement::PlatformDefault);
     assert_eq!(
         file_options
             .clone()
@@ -46,18 +37,16 @@ fn lf3_contract_privacy_defaults_and_copy_configuration() {
             .privacy(),
         LocalPrivacyRequirement::Required
     );
-    assert_eq!(
-        file_options.privacy(),
-        LocalPrivacyRequirement::PlatformDefault
-    );
+    assert_eq!(file_options.privacy(), LocalPrivacyRequirement::PlatformDefault);
 }
 
 #[test]
 fn lf3_contract_read_options_keep_explicit_budgets_and_snapshot_limit() {
-    use crate::options::{
-        LocalObservedReadOptions, LocalPathBindingOptions, LocalReadAllOptions, LocalReadOptions,
-        LocalSnapshotOptions,
-    };
+    use crate::options::LocalObservedReadOptions;
+    use crate::options::LocalPathBindingOptions;
+    use crate::options::LocalReadAllOptions;
+    use crate::options::LocalReadOptions;
+    use crate::options::LocalSnapshotOptions;
     use crate::policy::LocalSymlinkPolicy;
 
     assert_eq!(LocalReadAllOptions::new().max_bytes(), None);
@@ -87,7 +76,9 @@ fn lf3_contract_read_options_keep_explicit_budgets_and_snapshot_limit() {
 
 #[test]
 fn lf3_contract_invalid_encoding_retains_utf8_source() {
-    use crate::error::{LocalFileError, LocalFileErrorKind, LocalFileOperation};
+    use crate::error::LocalFileError;
+    use crate::error::LocalFileErrorKind;
+    use crate::error::LocalFileOperation;
 
     let invalid = String::from_utf8(vec![0xff]).expect_err("test byte is invalid UTF-8");
     let error = LocalFileError::from_utf8(LocalFileOperation::Read, None, invalid);
@@ -97,4 +88,146 @@ fn lf3_contract_invalid_encoding_retains_utf8_source() {
         error.typed_source(),
         Some(crate::error::LocalFileErrorSource::InvalidEncoding(_))
     ));
+}
+
+#[test]
+fn lf3_contract_configuration_edit_uses_utf8_snapshot_and_fixed_writer() {
+    use std::path::Path;
+
+    use crate::LocalFileSystem;
+    use crate::options::LocalDirectoryOpenOptions;
+    use crate::options::LocalSnapshotOptions;
+    use crate::options::LocalWriteOptions;
+
+    let fixture = tempfile::tempdir().expect("fixture");
+    std::fs::write(fixture.path().join("settings.toml"), "title = \"原始\"\n").expect("initial config");
+    let filesystem = LocalFileSystem::host().expect("host filesystem");
+    let text = filesystem
+        .read_text(&fixture.path().join("settings.toml"))
+        .expect("read UTF-8 config");
+    assert_eq!(text, "title = \"原始\"\n");
+    let snapshot = filesystem
+        .read_consistent_with_options(
+            &fixture.path().join("settings.toml"),
+            &LocalSnapshotOptions::builder(128).build(),
+        )
+        .expect("same-handle snapshot");
+    assert_eq!(snapshot.bytes(), text.as_bytes());
+
+    let parent = filesystem
+        .open_directory_with_options(fixture.path(), &LocalDirectoryOpenOptions::new())
+        .expect("fixed config directory");
+    let mut writer = parent
+        .open_writer_with_options(
+            Path::new("settings.toml"),
+            &LocalWriteOptions::new(crate::LocalWriteMode::CreateOrReplace),
+        )
+        .expect("fixed-directory writer");
+    qubit_io::Output::write_fully(&mut writer, "title = \"更新\"\n".as_bytes()).expect("write updated config");
+    let _outcome = writer.commit().expect("commit updated config");
+    assert_eq!(
+        filesystem
+            .read_text(&fixture.path().join("settings.toml"))
+            .expect("read updated config"),
+        "title = \"更新\"\n"
+    );
+}
+
+#[test]
+fn lf3_contract_shared_cache_uses_private_sealed_native_file() {
+    use std::io::Write;
+
+    use crate::LocalFileSystem;
+    use crate::LocalSealOptions;
+    use crate::options::LocalTempFileOptions;
+    use crate::policy::LocalPrivacyRequirement;
+
+    let fixture = tempfile::tempdir().expect("fixture");
+    let filesystem = LocalFileSystem::host().expect("host filesystem");
+    let mut cache = filesystem
+        .create_temp_file_with_options(
+            &LocalTempFileOptions::new()
+                .with_parent(fixture.path())
+                .with_privacy(LocalPrivacyRequirement::Required),
+        )
+        .expect("private cache file");
+    cache
+        .as_file_mut()
+        .expect("writable cache handle")
+        .write_all(b"cache payload")
+        .expect("write cache data");
+    let sealed = cache.seal_with_options(&LocalSealOptions::new()).expect("seal cache");
+    assert_eq!(sealed.native_path(), Some(sealed.path()));
+    assert_eq!(
+        std::fs::read(sealed.native_path().expect("host path")).expect("cache bytes"),
+        b"cache payload"
+    );
+    assert!(
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(sealed.native_path().expect("host path"))
+            .is_err()
+    );
+    let mut sealed = sealed;
+    sealed.cleanup().expect("cleanup cache");
+}
+
+#[cfg(unix)]
+#[test]
+fn lf3_contract_directory_backup_preserves_links_until_strictly_rejected() {
+    use std::path::PathBuf;
+
+    use crate::LocalFileKind;
+    use crate::LocalFileSystem;
+    use crate::directory::LocalTreeEntry;
+    use crate::options::LocalDirectoryOpenOptions;
+    use crate::options::LocalTempDirectoryOptions;
+    use crate::options::LocalTreeValidationOptions;
+
+    let fixture = tempfile::tempdir().expect("fixture");
+    let filesystem = LocalFileSystem::host().expect("host filesystem");
+    let parent = filesystem
+        .open_directory_with_options(fixture.path(), &LocalDirectoryOpenOptions::new())
+        .expect("backup parent");
+
+    let stage = parent
+        .create_staged_directory(&LocalTempDirectoryOptions::new())
+        .expect("backup stage");
+    let stage_path = fixture.path().join(stage.relative_name());
+    std::fs::write(stage_path.join("payload"), b"inside tree").expect("backup payload");
+    std::os::unix::fs::symlink("payload", stage_path.join("link")).expect("create preserved link");
+    let entries = vec![
+        LocalTreeEntry::new(PathBuf::from("payload"), LocalFileKind::File).expect("safe expected payload"),
+        LocalTreeEntry::new(PathBuf::from("link"), LocalFileKind::Symlink).expect("safe expected link"),
+    ];
+    stage
+        .verify_entries(&entries, &LocalTreeValidationOptions::new())
+        .expect("default verification preserves legal links");
+    let published = stage
+        .publish_new(
+            &parent,
+            std::ffi::OsStr::new("backup"),
+            &crate::options::LocalTreePublishOptions::new(),
+        )
+        .expect("backup should publish without following the link");
+    assert_eq!(published.publication(), crate::outcome::LocalTreePublication::Published);
+    assert!(
+        std::fs::symlink_metadata(fixture.path().join("backup/link"))
+            .expect("published link should remain")
+            .file_type()
+            .is_symlink()
+    );
+
+    let strict = parent
+        .create_staged_directory(&LocalTempDirectoryOptions::new())
+        .expect("strict stage");
+    let strict_path = fixture.path().join(strict.relative_name());
+    std::fs::write(strict_path.join("payload"), b"inside tree").expect("strict payload");
+    std::os::unix::fs::symlink("payload", strict_path.join("link")).expect("create link for strict validation");
+    let error = strict
+        .verify_entries(&entries, &LocalTreeValidationOptions::new().with_reject_symlinks())
+        .expect_err("explicit strict rule rejects the link");
+    assert_eq!(error.kind(), crate::error::LocalFileErrorKind::RequirementNotMet);
+    assert!(strict_path.join("link").exists(), "stage remains owned by caller");
+    strict.cleanup().expect("cleanup rejected stage");
 }
