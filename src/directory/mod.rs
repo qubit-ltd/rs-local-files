@@ -16,7 +16,7 @@ mod handle;
 mod internal;
 #[path = "local_staged_directory.rs"]
 mod staged;
-#[cfg(test)]
+#[cfg(all(test, unix))]
 pub(crate) use handle::install_component_policy_checkpoint;
 #[cfg(test)]
 pub(crate) use staged::fail_tree_sync_after;

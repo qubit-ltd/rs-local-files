@@ -207,7 +207,7 @@ fn lf3_conditional_windows_content_preflight_and_rooted_absent_are_unchanged() {
             &options,
         )
         .expect_err("rooted Content is unsupported");
-    assert_eq!(error.kind(), crate::error::LocalFileErrorKind::RequirementNotMet);
+    assert_eq!(error.kind(), crate::error::LocalFileErrorKind::Unsupported);
     let after = fs::read_dir(&root)
         .expect("enumerate after")
         .map(|entry| entry.expect("entry").file_name())

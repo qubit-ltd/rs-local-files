@@ -8,13 +8,13 @@
 use std::path::Component;
 use std::path::Path;
 use std::path::PathBuf;
-#[cfg(test)]
+#[cfg(all(test, unix))]
 use std::sync::Arc;
-#[cfg(test)]
+#[cfg(all(test, unix))]
 use std::sync::Barrier;
-#[cfg(test)]
+#[cfg(all(test, unix))]
 use std::sync::Mutex;
-#[cfg(test)]
+#[cfg(all(test, unix))]
 use std::sync::OnceLock;
 use std::time::Duration;
 use std::time::Instant;
@@ -46,9 +46,9 @@ use crate::options::LocalObservedReadOptions;
 use crate::options::LocalPathBindingOptions;
 use crate::rooted::Root;
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 type ComponentPolicyCheckpoint = (PathBuf, PathBuf, PathBuf, Arc<Barrier>);
-#[cfg(test)]
+#[cfg(all(test, unix))]
 static COMPONENT_POLICY_CHECKPOINT: OnceLock<Mutex<Option<ComponentPolicyCheckpoint>>> = OnceLock::new();
 
 /// Cloneable fixed directory capability with independent operation policy.
@@ -669,7 +669,7 @@ impl LocalDirectoryHandle {
             self.validate_with_policy(destination, false, policy),
         ) {
             (Ok(resolved_source), Ok(resolved_destination)) => {
-                #[cfg(test)]
+                #[cfg(all(test, unix))]
                 wait_at_component_policy_checkpoint(&self.diagnostic_path, source, destination);
                 self.filesystem
                     .copy_with_options(&resolved_source, &resolved_destination, options)
@@ -695,7 +695,7 @@ impl LocalDirectoryHandle {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 pub(crate) fn install_component_policy_checkpoint(
     handle: &LocalDirectoryHandle,
     source: &Path,
@@ -711,7 +711,7 @@ pub(crate) fn install_component_policy_checkpoint(
     ));
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 fn wait_at_component_policy_checkpoint(root: &Path, source: &Path, destination: &Path) {
     let checkpoint = COMPONENT_POLICY_CHECKPOINT.get_or_init(|| Mutex::new(None));
     let barrier = {
