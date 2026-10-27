@@ -6,7 +6,7 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 #[cfg(windows)]
-use crate::LocalObservationRequirement;
+use crate::observation::LocalObservationRequirement;
 
 #[cfg(windows)]
 #[test]
