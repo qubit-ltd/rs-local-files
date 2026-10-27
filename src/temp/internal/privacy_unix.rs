@@ -12,10 +12,34 @@ pub(crate) fn create_private_file_at(
     parent: &File,
     name: &OsStr,
 ) -> Result<File, NativePrivateCreateError> {
+    create_private_file_at_impl(parent, name, File::try_clone)
+}
+
+#[cfg(test)]
+pub(crate) fn create_private_file_at_with_clone_hook<F>(
+    parent: &File,
+    name: &OsStr,
+    clone_parent: F,
+) -> Result<File, NativePrivateCreateError>
+where
+    F: FnOnce(&File) -> io::Result<File>,
+{
+    create_private_file_at_impl(parent, name, clone_parent)
+}
+
+fn create_private_file_at_impl<F>(
+    parent: &File,
+    name: &OsStr,
+    clone_parent: F,
+) -> Result<File, NativePrivateCreateError>
+where
+    F: FnOnce(&File) -> io::Result<File>,
+{
     let name = match component_name(name) {
         Ok(name) => name,
         Err(source) => return Err(pre_create_error(source)),
     };
+    let retained_parent = clone_parent(parent).map_err(pre_create_error)?;
     let descriptor = unsafe {
         libc::openat(
             parent.as_raw_fd(),
@@ -35,7 +59,7 @@ pub(crate) fn create_private_file_at(
             let identity = identity_for_file(&file).ok();
             return Err(create_error(
                 source,
-                parent,
+                retained_parent,
                 OsStr::from_bytes(name.as_bytes()),
                 Some(file),
                 identity,
@@ -50,7 +74,7 @@ pub(crate) fn create_private_file_at(
                 io::ErrorKind::PermissionDenied,
                 "created entry is not an owned regular file",
             ),
-            parent,
+            retained_parent,
             OsStr::from_bytes(name.as_bytes()),
             Some(file),
             identity,
@@ -62,7 +86,7 @@ pub(crate) fn create_private_file_at(
                 io::ErrorKind::PermissionDenied,
                 "umask prevented required private file mode 0600",
             ),
-            parent,
+            retained_parent,
             OsStr::from_bytes(name.as_bytes()),
             Some(file),
             identity,
@@ -75,7 +99,19 @@ pub(crate) fn create_private_directory_at(
     parent: &File,
     name: &OsStr,
 ) -> Result<File, NativePrivateCreateError> {
-    create_private_directory_at_impl(parent, name, || {})
+    create_private_directory_at_impl(parent, name, File::try_clone, || {})
+}
+
+#[cfg(test)]
+pub(crate) fn create_private_directory_at_with_clone_hook<F>(
+    parent: &File,
+    name: &OsStr,
+    clone_parent: F,
+) -> Result<File, NativePrivateCreateError>
+where
+    F: FnOnce(&File) -> io::Result<File>,
+{
+    create_private_directory_at_impl(parent, name, clone_parent, || {})
 }
 
 #[cfg(test)]
@@ -87,21 +123,24 @@ pub(crate) fn create_private_directory_at_with_hook<F>(
 where
     F: FnOnce(),
 {
-    create_private_directory_at_impl(parent, name, after_open)
+    create_private_directory_at_impl(parent, name, File::try_clone, after_open)
 }
 
-fn create_private_directory_at_impl<F>(
+fn create_private_directory_at_impl<C, H>(
     parent: &File,
     name: &OsStr,
-    after_open: F,
+    clone_parent: C,
+    after_open: H,
 ) -> Result<File, NativePrivateCreateError>
 where
-    F: FnOnce(),
+    C: FnOnce(&File) -> io::Result<File>,
+    H: FnOnce(),
 {
     let name = match component_name(name) {
         Ok(name) => name,
         Err(source) => return Err(pre_create_error(source)),
     };
+    let retained_parent = clone_parent(parent).map_err(pre_create_error)?;
     let result = unsafe { libc::mkdirat(parent.as_raw_fd(), name.as_ptr(), 0o700) };
     if result < 0 {
         return Err(pre_create_error(io::Error::last_os_error()));
@@ -117,7 +156,7 @@ where
         let source = io::Error::last_os_error();
         return Err(create_error(
             source,
-            parent,
+            retained_parent,
             OsStr::from_bytes(name.as_bytes()),
             None,
             None,
@@ -132,7 +171,7 @@ where
             let identity = identity_for_file(&directory).ok();
             return Err(create_error(
                 source,
-                parent,
+                retained_parent,
                 OsStr::from_bytes(name.as_bytes()),
                 Some(directory),
                 identity,
@@ -145,7 +184,7 @@ where
         Err(source) => {
             return Err(create_error(
                 source,
-                parent,
+                retained_parent,
                 OsStr::from_bytes(name.as_bytes()),
                 Some(directory),
                 identity,
@@ -158,7 +197,7 @@ where
                 io::ErrorKind::PermissionDenied,
                 "directory entry changed after handle acquisition",
             ),
-            parent,
+            retained_parent,
             OsStr::from_bytes(name.as_bytes()),
             Some(directory),
             identity,
@@ -171,7 +210,7 @@ where
                 io::ErrorKind::PermissionDenied,
                 "created entry is not an owned directory",
             ),
-            parent,
+            retained_parent,
             OsStr::from_bytes(name.as_bytes()),
             Some(directory),
             identity,
@@ -183,7 +222,7 @@ where
                 io::ErrorKind::PermissionDenied,
                 "umask prevented required private directory mode 0700",
             ),
-            parent,
+            retained_parent,
             OsStr::from_bytes(name.as_bytes()),
             Some(directory),
             identity,
@@ -289,15 +328,14 @@ fn identity_for_name(parent: &File, name: &OsStr) -> io::Result<LocalFileIdentit
 
 fn create_error(
     source: io::Error,
-    parent: &File,
+    parent: File,
     name: &OsStr,
     file: Option<File>,
     identity: Option<LocalFileIdentity>,
 ) -> NativePrivateCreateError {
-    let retained_parent = parent.try_clone().ok();
     NativePrivateCreateError {
         source,
-        retained: retained_parent.map(|parent| NativePrivateEntry {
+        retained: Some(NativePrivateEntry {
             parent,
             name: name.to_os_string(),
             file,

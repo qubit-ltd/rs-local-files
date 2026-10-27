@@ -36,6 +36,31 @@ fn lf3_privacy_unix_private_at_creation() {
 }
 
 #[test]
+fn lf3_privacy_unix_parent_clone_failure_precedes_mutation() {
+    let fixture = tempfile::tempdir().expect("create fixture");
+    let parent = File::open(fixture.path()).expect("open parent");
+    let file_error = privacy_unix::create_private_file_at_with_clone_hook(
+        &parent,
+        OsStr::new("file"),
+        |_: &File| Err(std::io::Error::from_raw_os_error(libc::EMFILE)),
+    )
+    .expect_err("file creation must fail when parent retention cannot be prepared");
+    assert_eq!(file_error.source.raw_os_error(), Some(libc::EMFILE));
+    assert!(file_error.retained.is_none());
+    assert!(!fixture.path().join("file").exists());
+
+    let directory_error = privacy_unix::create_private_directory_at_with_clone_hook(
+        &parent,
+        OsStr::new("directory"),
+        |_: &File| Err(std::io::Error::from_raw_os_error(libc::EMFILE)),
+    )
+    .expect_err("directory creation must fail when parent retention cannot be prepared");
+    assert_eq!(directory_error.source.raw_os_error(), Some(libc::EMFILE));
+    assert!(directory_error.retained.is_none());
+    assert!(!fixture.path().join("directory").exists());
+}
+
+#[test]
 fn lf3_privacy_unix_rejects_symlink_and_non_regular_open_targets() {
     let fixture = tempfile::tempdir().expect("create fixture");
     let parent = File::open(fixture.path()).expect("open parent");
