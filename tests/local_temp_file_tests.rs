@@ -404,8 +404,7 @@ fn windows_sealed_cleanup_platform_default_rooted() {
         .expect("PlatformDefault Rooted temporary file should be created");
     let virtual_path = temporary.path().to_path_buf();
     let native_path = rooted_host_path(root.path(), &virtual_path);
-    Output::write_fully(&mut temporary, b"sealed payload")
-        .expect("Rooted temporary file should accept bytes");
+    Output::write_fully(&mut temporary, b"sealed payload").expect("Rooted temporary file should accept bytes");
 
     let mut sealed = temporary
         .seal_with_options(&LocalSealOptions::new())
@@ -436,8 +435,7 @@ fn windows_sealed_cleanup_required_private_rooted() {
         .expect("Required-private Rooted temporary file should be created");
     let virtual_path = temporary.path().to_path_buf();
     let native_path = rooted_host_path(root.path(), &virtual_path);
-    Output::write_fully(&mut temporary, b"sealed payload")
-        .expect("Rooted temporary file should accept bytes");
+    Output::write_fully(&mut temporary, b"sealed payload").expect("Rooted temporary file should accept bytes");
 
     let mut sealed = temporary
         .seal_with_options(&LocalSealOptions::new())
@@ -468,8 +466,7 @@ fn windows_sealed_cleanup_drop_removes_owned_entry() {
         .expect("PlatformDefault Rooted temporary file should be created");
     let virtual_path = temporary.path().to_path_buf();
     let native_path = rooted_host_path(root.path(), &virtual_path);
-    Output::write_fully(&mut temporary, b"sealed payload")
-        .expect("Rooted temporary file should accept bytes");
+    Output::write_fully(&mut temporary, b"sealed payload").expect("Rooted temporary file should accept bytes");
     let sealed = temporary
         .seal_with_options(&LocalSealOptions::new())
         .expect("Rooted temporary file should seal");
@@ -508,15 +505,13 @@ fn windows_sealed_cleanup_rejects_replacement() {
         .expect("PlatformDefault Rooted temporary file should be created");
     let virtual_path = temporary.path().to_path_buf();
     let native_path = rooted_host_path(root.path(), &virtual_path);
-    Output::write_fully(&mut temporary, b"owned payload")
-        .expect("Rooted temporary file should accept bytes");
+    Output::write_fully(&mut temporary, b"owned payload").expect("Rooted temporary file should accept bytes");
     let mut sealed = temporary
         .seal_with_options(&LocalSealOptions::new())
         .expect("Rooted temporary file should seal");
     let original = root.path().join("original-sealed-file");
     fs::rename(&native_path, &original).expect("owned file should be moved aside");
-    fs::write(&native_path, b"replacement")
-        .expect("replacement file should occupy the original name");
+    fs::write(&native_path, b"replacement").expect("replacement file should occupy the original name");
 
     let error = sealed
         .cleanup()

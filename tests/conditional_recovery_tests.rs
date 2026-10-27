@@ -79,7 +79,11 @@ fn find_windows_backup_file(parent: &std::path::Path) -> std::io::Result<(std::p
             let entry = entry?;
             let path = entry.path();
             if entry.file_type()?.is_dir() {
-                if entry.file_name().to_string_lossy().starts_with(".qubit-conditional-recovery-") {
+                if entry
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with(".qubit-conditional-recovery-")
+                {
                     for child in std::fs::read_dir(&path)? {
                         let child = child?;
                         if child.file_type()?.is_file() && std::fs::read(child.path())?.as_slice() == b"A" {
@@ -96,7 +100,10 @@ fn find_windows_backup_file(parent: &std::path::Path) -> std::io::Result<(std::p
     }
 
     visit(parent)?.ok_or_else(|| {
-        std::io::Error::new(std::io::ErrorKind::NotFound, "Windows backup container with A was not found")
+        std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            "Windows backup container with A was not found",
+        )
     })
 }
 
@@ -134,9 +141,22 @@ fn windows_cleanup_removed_file_reports_container_residual() {
     let (container, backup_file) = backup.lock().expect("backup lock").clone().expect("backup container");
     assert_eq!(std::fs::read(&path).expect("installed target"), b"B");
     assert_eq!(outcome.digest(), &Sha256::digest(b"B"));
-    assert!(outcome.cleanup_errors().iter().any(|error| error.path() == Some(container.as_path())));
-    assert!(outcome.retained_files().iter().all(|file| file.namespace_path() != backup_file.as_path()));
-    assert_eq!(std::fs::read(container.join("marker")).expect("marker remains"), b"leave this entry");
+    assert!(
+        outcome
+            .cleanup_errors()
+            .iter()
+            .any(|error| error.path() == Some(container.as_path()))
+    );
+    assert!(
+        outcome
+            .retained_files()
+            .iter()
+            .all(|file| file.namespace_path() != backup_file.as_path())
+    );
+    assert_eq!(
+        std::fs::read(container.join("marker")).expect("marker remains"),
+        b"leave this entry"
+    );
 }
 
 #[cfg(windows)]
@@ -191,7 +211,12 @@ fn windows_cleanup_failed_file_remains_readable() {
         .iter()
         .find(|file| file.role() == LocalRecoveryFileRole::Displaced)
         .expect("failed file deletion should retain old file");
-    assert!(outcome.cleanup_errors().iter().any(|error| error.path() == Some(retained.namespace_path())));
+    assert!(
+        outcome
+            .cleanup_errors()
+            .iter()
+            .any(|error| error.path() == Some(retained.namespace_path()))
+    );
     assert_eq!(conditional::read_recovery(retained), b"A");
 }
 

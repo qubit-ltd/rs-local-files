@@ -102,19 +102,13 @@ impl LocalFileSystem {
         #[cfg(windows)]
         if matches!(&precondition, LocalWritePrecondition::Content(_))
             && (self.scope() == crate::path::LocalFileSystemScope::Rooted
-                || options.metadata_policy()
-                    != crate::options::LocalWriteMetadataPolicy::PreserveExisting)
+                || options.metadata_policy() != crate::options::LocalWriteMetadataPolicy::PreserveExisting)
         {
-            let error = LocalFileError::new(
-                LocalFileErrorKind::Unsupported,
-                LocalFileOperation::OpenWriter,
-            )
+            let error = LocalFileError::new(LocalFileErrorKind::Unsupported, LocalFileOperation::OpenWriter)
                 .with_path(path.to_path_buf())
                 .with_reason("this Windows conditional Content configuration is unsupported");
             return Err(match self.current_directory.virtual_path() {
-                Some(current_directory) => {
-                    error.with_current_directory(current_directory.to_path_buf())
-                }
+                Some(current_directory) => error.with_current_directory(current_directory.to_path_buf()),
                 None => error,
             });
         }

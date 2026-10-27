@@ -30,8 +30,7 @@ fn lf_review_stage_cleanup_retains_creation_limit() {
         .expect("parent");
     let mut stage = parent
         .create_staged_directory(
-            &LocalTempDirectoryOptions::new()
-                .with_cleanup_limits(LocalTempCleanupLimits::new().with_max_entries(0)),
+            &LocalTempDirectoryOptions::new().with_cleanup_limits(LocalTempCleanupLimits::new().with_max_entries(0)),
         )
         .expect("stage");
     stage
@@ -62,8 +61,7 @@ fn lf_review_stage_cleanup_drop_retains_zero_entry_budget() {
         .expect("parent");
     let mut stage = parent
         .create_staged_directory(
-            &LocalTempDirectoryOptions::new()
-                .with_cleanup_limits(LocalTempCleanupLimits::new().with_max_entries(0)),
+            &LocalTempDirectoryOptions::new().with_cleanup_limits(LocalTempCleanupLimits::new().with_max_entries(0)),
         )
         .expect("stage");
     stage
@@ -90,9 +88,8 @@ fn lf_review_stage_cleanup_retains_zero_deadline() {
         .expect("parent");
     let mut stage = parent
         .create_staged_directory(
-            &LocalTempDirectoryOptions::new().with_cleanup_limits(
-                LocalTempCleanupLimits::new().with_deadline(Duration::ZERO),
-            ),
+            &LocalTempDirectoryOptions::new()
+                .with_cleanup_limits(LocalTempCleanupLimits::new().with_deadline(Duration::ZERO)),
         )
         .expect("stage");
     stage

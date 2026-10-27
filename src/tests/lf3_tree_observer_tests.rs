@@ -57,15 +57,9 @@ fn lf_review_tree_finite_depth_accepts_complete_shallow_tree() {
         .create_staged_directory(&LocalTempDirectoryOptions::new())
         .expect("stage");
     let mut bytes = b"x".as_slice();
-    stage
-        .write_file_new(Path::new("file"), &mut bytes, 1)
-        .expect("write");
-    let expected = [
-        LocalTreeEntry::new(Path::new("file").to_path_buf(), LocalFileKind::File)
-            .expect("expected"),
-    ];
-    let validation =
-        LocalTreeValidationOptions::new().with_limits(LocalListOptions::new().with_max_depth(1));
+    stage.write_file_new(Path::new("file"), &mut bytes, 1).expect("write");
+    let expected = [LocalTreeEntry::new(Path::new("file").to_path_buf(), LocalFileKind::File).expect("expected")];
+    let validation = LocalTreeValidationOptions::new().with_limits(LocalListOptions::new().with_max_depth(1));
     stage
         .verify_entries(&expected, &validation)
         .expect("a fully observed depth-one tree is within budget");
@@ -85,8 +79,7 @@ fn lf_review_tree_depth_zero_and_boundary() {
     empty
         .verify_entries(
             &[],
-            &LocalTreeValidationOptions::new()
-                .with_limits(LocalListOptions::new().with_max_depth(0)),
+            &LocalTreeValidationOptions::new().with_limits(LocalListOptions::new().with_max_depth(0)),
         )
         .expect("empty tree is within depth zero");
     empty.cleanup().expect("empty cleanup");
@@ -95,31 +88,21 @@ fn lf_review_tree_depth_zero_and_boundary() {
         .create_staged_directory(&LocalTempDirectoryOptions::new())
         .expect("stage");
     let mut bytes = b"x".as_slice();
-    stage
-        .write_file_new(Path::new("file"), &mut bytes, 1)
-        .expect("write");
-    let expected = [
-        LocalTreeEntry::new(Path::new("file").to_path_buf(), LocalFileKind::File)
-            .expect("expected"),
-    ];
+    stage.write_file_new(Path::new("file"), &mut bytes, 1).expect("write");
+    let expected = [LocalTreeEntry::new(Path::new("file").to_path_buf(), LocalFileKind::File).expect("expected")];
     stage
         .verify_entries(
             &expected,
-            &LocalTreeValidationOptions::new()
-                .with_limits(LocalListOptions::new().with_max_depth(1)),
+            &LocalTreeValidationOptions::new().with_limits(LocalListOptions::new().with_max_depth(1)),
         )
         .expect("direct child is within depth one");
     let error = stage
         .verify_entries(
             &expected,
-            &LocalTreeValidationOptions::new()
-                .with_limits(LocalListOptions::new().with_max_depth(0)),
+            &LocalTreeValidationOptions::new().with_limits(LocalListOptions::new().with_max_depth(0)),
         )
         .expect_err("direct child exceeds depth zero");
-    assert_eq!(
-        error.kind(),
-        crate::error::LocalFileErrorKind::ResourceLimit
-    );
+    assert_eq!(error.kind(), crate::error::LocalFileErrorKind::ResourceLimit);
     stage.cleanup().expect("stage cleanup");
 }
 
@@ -141,33 +124,23 @@ fn lf_review_tree_directory_links_are_entries() {
     std::fs::write(root.join("dir/file"), b"x").expect("file");
     symlink("dir", root.join("alias")).expect("directory link");
     let mut entries = Vec::new();
-    let options = LocalListOptions::new()
-        .with_symlink_policy(crate::policy::LocalSymlinkPolicy::FollowWithinScope);
+    let options = LocalListOptions::new().with_symlink_policy(crate::policy::LocalSymlinkPolicy::FollowWithinScope);
     for item in stage.observe_tree_with_options(&options).expect("observer") {
         let item = item.expect("entry");
-        entries.push((
-            item.relative_path().to_path_buf(),
-            item.observation().metadata().kind(),
-        ));
+        entries.push((item.relative_path().to_path_buf(), item.observation().metadata().kind()));
     }
     assert!(
         entries
             .iter()
             .any(|(path, kind)| path == Path::new("alias") && *kind == LocalFileKind::Symlink)
     );
-    assert!(
-        !entries
-            .iter()
-            .any(|(path, _)| path == Path::new("alias/file"))
-    );
+    assert!(!entries.iter().any(|(path, _)| path == Path::new("alias/file")));
     let expected = [
         ("dir", LocalFileKind::Directory),
         ("dir/file", LocalFileKind::File),
         ("alias", LocalFileKind::Symlink),
     ]
-    .map(|(path, kind)| {
-        LocalTreeEntry::new(Path::new(path).to_path_buf(), kind).expect("expected")
-    });
+    .map(|(path, kind)| LocalTreeEntry::new(Path::new(path).to_path_buf(), kind).expect("expected"));
     stage
         .verify_entries(&expected, &LocalTreeValidationOptions::new())
         .expect("entry-only tree matches");
@@ -190,23 +163,15 @@ fn lf_review_tree_dangling_and_loop_links_are_entries() {
     let root = fixture.path().join(stage.relative_name());
     symlink("missing", root.join("dangling")).expect("dangling link");
     symlink(".", root.join("loop")).expect("loop link");
-    let expected = ["dangling", "loop"].map(|path| {
-        LocalTreeEntry::new(Path::new(path).to_path_buf(), LocalFileKind::Symlink)
-            .expect("expected")
-    });
+    let expected = ["dangling", "loop"]
+        .map(|path| LocalTreeEntry::new(Path::new(path).to_path_buf(), LocalFileKind::Symlink).expect("expected"));
     stage
         .verify_entries(&expected, &LocalTreeValidationOptions::new())
         .expect("link targets are not traversed");
     let failure = stage
-        .verify_entries(
-            &expected,
-            &LocalTreeValidationOptions::new().with_reject_symlinks(),
-        )
+        .verify_entries(&expected, &LocalTreeValidationOptions::new().with_reject_symlinks())
         .expect_err("explicit symlink rule rejects links");
-    assert_eq!(
-        failure.kind(),
-        crate::error::LocalFileErrorKind::RequirementNotMet
-    );
+    assert_eq!(failure.kind(), crate::error::LocalFileErrorKind::RequirementNotMet);
     stage.cleanup().expect("cleanup");
 }
 
@@ -227,22 +192,15 @@ fn lf_review_tree_duplicate_expected_paths_are_invalid_options() {
     let error = stage
         .verify_entries(&duplicate, &LocalTreeValidationOptions::new())
         .expect_err("duplicate expected paths are invalid");
-    assert_eq!(
-        error.kind(),
-        crate::error::LocalFileErrorKind::InvalidOptions
-    );
+    assert_eq!(error.kind(), crate::error::LocalFileErrorKind::InvalidOptions);
     let different_kinds = [
         LocalTreeEntry::new(Path::new("same").to_path_buf(), LocalFileKind::File).expect("entry"),
-        LocalTreeEntry::new(Path::new("same").to_path_buf(), LocalFileKind::Directory)
-            .expect("entry"),
+        LocalTreeEntry::new(Path::new("same").to_path_buf(), LocalFileKind::Directory).expect("entry"),
     ];
     let error = stage
         .verify_entries(&different_kinds, &LocalTreeValidationOptions::new())
         .expect_err("same path with different kinds is still a duplicate");
-    assert_eq!(
-        error.kind(),
-        crate::error::LocalFileErrorKind::InvalidOptions
-    );
+    assert_eq!(error.kind(), crate::error::LocalFileErrorKind::InvalidOptions);
 }
 
 #[test]
@@ -255,21 +213,14 @@ fn lf_review_tree_expected_path_budget_is_checked_before_matching() {
     let stage = parent
         .create_staged_directory(&LocalTempDirectoryOptions::new())
         .expect("stage");
-    let expected = [
-        LocalTreeEntry::new(Path::new("long-name").to_path_buf(), LocalFileKind::File)
-            .expect("entry"),
-    ];
+    let expected = [LocalTreeEntry::new(Path::new("long-name").to_path_buf(), LocalFileKind::File).expect("entry")];
     let error = stage
         .verify_entries(
             &expected,
-            &LocalTreeValidationOptions::new()
-                .with_limits(LocalListOptions::new().with_max_seen_name_bytes(2)),
+            &LocalTreeValidationOptions::new().with_limits(LocalListOptions::new().with_max_seen_name_bytes(2)),
         )
         .expect_err("expected path bytes exceed budget before observing tree");
-    assert_eq!(
-        error.kind(),
-        crate::error::LocalFileErrorKind::ResourceLimit
-    );
+    assert_eq!(error.kind(), crate::error::LocalFileErrorKind::ResourceLimit);
 }
 
 #[test]
@@ -283,25 +234,16 @@ fn lf_review_tree_zero_deadline_and_entry_limit_fail() {
         .create_staged_directory(&LocalTempDirectoryOptions::new())
         .expect("stage");
     let mut bytes = b"x".as_slice();
-    stage
-        .write_file_new(Path::new("file"), &mut bytes, 1)
-        .expect("write");
-    let expected = [
-        LocalTreeEntry::new(Path::new("file").to_path_buf(), LocalFileKind::File)
-            .expect("expected"),
-    ];
+    stage.write_file_new(Path::new("file"), &mut bytes, 1).expect("write");
+    let expected = [LocalTreeEntry::new(Path::new("file").to_path_buf(), LocalFileKind::File).expect("expected")];
     for validation in [
-        LocalTreeValidationOptions::new()
-            .with_limits(LocalListOptions::new().with_deadline(std::time::Duration::ZERO)),
+        LocalTreeValidationOptions::new().with_limits(LocalListOptions::new().with_deadline(std::time::Duration::ZERO)),
         LocalTreeValidationOptions::new().with_limits(LocalListOptions::new().with_max_entries(0)),
     ] {
         let error = stage
             .verify_entries(&expected, &validation)
             .expect_err("zero budget rejects tree");
-        assert_eq!(
-            error.kind(),
-            crate::error::LocalFileErrorKind::ResourceLimit
-        );
+        assert_eq!(error.kind(), crate::error::LocalFileErrorKind::ResourceLimit);
     }
     stage.cleanup().expect("cleanup");
 }
@@ -317,9 +259,7 @@ fn lf_review_tree_observer_depth_still_limits_display() {
         .create_staged_directory(&LocalTempDirectoryOptions::new())
         .expect("stage");
     let mut bytes = b"x".as_slice();
-    stage
-        .write_file_new(Path::new("file"), &mut bytes, 1)
-        .expect("write");
+    stage.write_file_new(Path::new("file"), &mut bytes, 1).expect("write");
     assert!(
         stage
             .observe_tree_with_options(&LocalListOptions::new().with_max_depth(0))

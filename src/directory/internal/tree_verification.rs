@@ -3,8 +3,7 @@
 //
 //    SPDX-License-Identifier: Apache-2.0
 //
-//    Licensed under the Apache License, Version 2.0 (the "License");
-//    you may not use this file except in compliance with the License.
+//    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 use std::collections::HashMap;
 use std::path::Path;
@@ -64,10 +63,7 @@ pub(in crate::directory) fn verify_tree(
 
     let limits = options.limits();
     let expected_name_bytes = if let Some(entries) = expected {
-        if limits
-            .max_entries()
-            .is_some_and(|maximum| entries.len() > maximum)
-        {
+        if limits.max_entries().is_some_and(|maximum| entries.len() > maximum) {
             return Err(resource_limit());
         }
         let mut bytes = 0_usize;
@@ -87,10 +83,7 @@ pub(in crate::directory) fn verify_tree(
         for entry in entries {
             check_deadline(deadline)?;
             index.try_reserve(1).map_err(|_| resource_limit())?;
-            if index
-                .insert(entry.relative_path(), (entry.kind(), false))
-                .is_some()
-            {
+            if index.insert(entry.relative_path(), (entry.kind(), false)).is_some() {
                 return Err(LocalFileError::new(
                     LocalFileErrorKind::InvalidOptions,
                     LocalFileOperation::ValidateName,
@@ -110,8 +103,8 @@ pub(in crate::directory) fn verify_tree(
         .with_recursive()
         .with_symlink_policy(LocalSymlinkPolicy::Reject)
         .with_error_policy(crate::options::LocalWalkErrorPolicy::FailFast);
-    let mut observer = stage.observe_tree_with_options(&walk_limits)?;
-    while let Some(result) = observer.next() {
+    let observer = stage.observe_tree_with_options(&walk_limits)?;
+    for result in observer {
         check_deadline(deadline)?;
         let item = result?;
         let path = item.relative_path();
@@ -207,10 +200,7 @@ fn requires_tree_walk(options: &LocalTreeValidationOptions) -> bool {
         || limits.deadline().is_some()
 }
 
-fn verify_root_privacy(
-    stage: &LocalStagedDirectory,
-    options: &LocalTreeValidationOptions,
-) -> LocalResult<()> {
+fn verify_root_privacy(stage: &LocalStagedDirectory, options: &LocalTreeValidationOptions) -> LocalResult<()> {
     if options.privacy() != LocalPrivacyRequirement::Required {
         return Ok(());
     }
@@ -227,14 +217,13 @@ fn verify_root_privacy(
                     source,
                 )
             })?;
-        crate::temp::internal::privacy_unix::verify_current_user_access(&file, true, false)
-            .map_err(|source| {
-                file_error(
-                    LocalFileOperation::Metadata,
-                    stage.directory().diagnostic_path(),
-                    source,
-                )
-            })?;
+        crate::temp::internal::privacy_unix::verify_current_user_access(&file, true, false).map_err(|source| {
+            file_error(
+                LocalFileOperation::Metadata,
+                stage.directory().diagnostic_path(),
+                source,
+            )
+        })?;
     }
     #[cfg(windows)]
     {
@@ -243,24 +232,20 @@ fn verify_root_privacy(
             .as_ref()
             .expect("stage owner exists")
             .open_child_for_access()?;
-        let observation = crate::observation::query::query_observation(
-            &root,
-            LocalObservationRequirement::Required,
-        )?;
+        let observation = crate::observation::query::query_observation(&root, LocalObservationRequirement::Required)?;
         if observation.identity() != stage.identity.as_ref() {
             return Err(LocalFileError::new(
                 LocalFileErrorKind::ChangedDuringRead,
                 LocalFileOperation::Metadata,
             ));
         }
-        crate::temp::internal::privacy_windows::verify_current_user_access(&root, true, false)
-            .map_err(|source| {
-                file_error(
-                    LocalFileOperation::Metadata,
-                    stage.directory().diagnostic_path(),
-                    source,
-                )
-            })?;
+        crate::temp::internal::privacy_windows::verify_current_user_access(&root, true, false).map_err(|source| {
+            file_error(
+                LocalFileOperation::Metadata,
+                stage.directory().diagnostic_path(),
+                source,
+            )
+        })?;
     }
     Ok(())
 }
@@ -283,8 +268,7 @@ fn verify_entry_privacy(
     let file = crate::directory::staged::open_unix_tree_entry(stage, path, kind)?;
     #[cfg(windows)]
     let file = crate::directory::staged::open_windows_tree_entry(stage, path, kind)?;
-    let current =
-        crate::observation::query::query_observation(&file, LocalObservationRequirement::Required)?;
+    let current = crate::observation::query::query_observation(&file, LocalObservationRequirement::Required)?;
     if current.identity() != Some(identity) {
         return Err(LocalFileError::new(
             LocalFileErrorKind::ChangedDuringRead,
@@ -292,39 +276,27 @@ fn verify_entry_privacy(
         ));
     }
     #[cfg(unix)]
-    crate::temp::internal::privacy_unix::verify_current_user_access(
-        &file,
-        kind == LocalFileKind::Directory,
-        false,
-    )
-    .map_err(|source| {
-        file_error(
-            LocalFileOperation::Metadata,
-            &stage.directory().diagnostic_path().join(path),
-            source,
-        )
-    })?;
+    crate::temp::internal::privacy_unix::verify_current_user_access(&file, kind == LocalFileKind::Directory, false)
+        .map_err(|source| {
+            file_error(
+                LocalFileOperation::Metadata,
+                &stage.directory().diagnostic_path().join(path),
+                source,
+            )
+        })?;
     #[cfg(windows)]
-    crate::temp::internal::privacy_windows::verify_current_user_access(
-        &file,
-        kind == LocalFileKind::Directory,
-        false,
-    )
-    .map_err(|source| {
-        file_error(
-            LocalFileOperation::Metadata,
-            &stage.directory().diagnostic_path().join(path),
-            source,
-        )
-    })?;
+    crate::temp::internal::privacy_windows::verify_current_user_access(&file, kind == LocalFileKind::Directory, false)
+        .map_err(|source| {
+            file_error(
+                LocalFileOperation::Metadata,
+                &stage.directory().diagnostic_path().join(path),
+                source,
+            )
+        })?;
     Ok(())
 }
 
-fn file_error(
-    operation: LocalFileOperation,
-    path: &Path,
-    source: std::io::Error,
-) -> LocalFileError {
+fn file_error(operation: LocalFileOperation, path: &Path, source: std::io::Error) -> LocalFileError {
     LocalFileError::from_io(operation, Some(path.to_path_buf()), None, source)
 }
 
@@ -337,10 +309,7 @@ fn check_deadline(deadline: Option<Instant>) -> LocalResult<()> {
 }
 
 fn check_name_budget(options: &LocalListOptions, bytes: usize) -> LocalResult<()> {
-    if options
-        .max_seen_name_bytes()
-        .is_some_and(|maximum| bytes > maximum)
-    {
+    if options.max_seen_name_bytes().is_some_and(|maximum| bytes > maximum) {
         Err(resource_limit())
     } else {
         Ok(())
@@ -352,15 +321,9 @@ fn resource_limit() -> LocalFileError {
 }
 
 fn requirement_not_met() -> LocalFileError {
-    LocalFileError::new(
-        LocalFileErrorKind::RequirementNotMet,
-        LocalFileOperation::Metadata,
-    )
+    LocalFileError::new(LocalFileErrorKind::RequirementNotMet, LocalFileOperation::Metadata)
 }
 
 fn unsupported() -> LocalFileError {
-    LocalFileError::new(
-        LocalFileErrorKind::Unsupported,
-        LocalFileOperation::Metadata,
-    )
+    LocalFileError::new(LocalFileErrorKind::Unsupported, LocalFileOperation::Metadata)
 }

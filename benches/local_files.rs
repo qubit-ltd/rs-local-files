@@ -23,6 +23,7 @@ use criterion::criterion_main;
 use qubit_io::Output;
 use qubit_local_files::LocalFileSystem;
 use qubit_local_files::LocalTempDirectory;
+use qubit_local_files::directory::LocalTreeEntry;
 use qubit_local_files::error::LocalFileError;
 use qubit_local_files::error::LocalFileErrorKind;
 use qubit_local_files::error::LocalResourceKind;
@@ -40,10 +41,9 @@ use qubit_local_files::options::LocalWriteMode;
 use qubit_local_files::options::LocalWriteOptions;
 use qubit_local_files::outcome::LocalCopyFailureState;
 use qubit_local_files::outcome::LocalCopyResult;
+use qubit_local_files::outcome::LocalFileKind;
 use qubit_local_files::outcome::LocalWriteOutcome;
 use qubit_local_files::outcome::LocalWriterState;
-use qubit_local_files::outcome::LocalFileKind;
-use qubit_local_files::directory::LocalTreeEntry;
 use qubit_local_files::path::LocalPathCodec;
 use qubit_local_files::policy::LocalDurabilityRequirement;
 use tempfile::tempdir;
@@ -186,9 +186,9 @@ fn bench_walk_handle_budget(c: &mut Criterion) {
     group.finish();
 }
 
-/// Counts a complete traversal and fails the benchmark on any entry error.
-/// Measures validation through publication because the verifier is crate-private.
-/// Setup and fixture cleanup are outside the measured interval; the measurement
+/// Measures staged-tree validation across wide and deep fixtures.
+/// The verifier is crate-private, so the benchmark calls publication to reach
+/// it. Setup and fixture cleanup are outside the measured interval; the timing
 /// includes the final no-replace rename in addition to validation.
 fn bench_tree_validation_index(c: &mut Criterion) {
     let mut group = c.benchmark_group("tree_validation_index");
@@ -203,13 +203,9 @@ fn bench_tree_validation_index(c: &mut Criterion) {
                     let mut elapsed = Duration::ZERO;
                     for _ in 0..iterations {
                         let fixture = tempdir().expect("tree validation fixture should exist");
-                        let filesystem =
-                            LocalFileSystem::host().expect("Host filesystem should open");
+                        let filesystem = LocalFileSystem::host().expect("Host filesystem should open");
                         let parent = filesystem
-                            .open_directory_with_options(
-                                fixture.path(),
-                                &LocalDirectoryOpenOptions::new(),
-                            )
+                            .open_directory_with_options(fixture.path(), &LocalDirectoryOpenOptions::new())
                             .expect("benchmark parent should open");
                         let stage = parent
                             .create_staged_directory(&LocalTempDirectoryOptions::new())
@@ -217,20 +213,15 @@ fn bench_tree_validation_index(c: &mut Criterion) {
                         let root = fixture.path().join(stage.relative_name());
                         let mut expected = Vec::new();
                         if mode == "hardlink" {
-                            fs::write(root.join("entry-00000"), b"x")
-                                .expect("hardlink source should be written");
+                            fs::write(root.join("entry-00000"), b"x").expect("hardlink source should be written");
                             for index in 1..width {
-                                fs::hard_link(
-                                    root.join("entry-00000"),
-                                    root.join(format!("entry-{index:05}")),
-                                )
-                                .expect("hardlink entry should be created");
+                                fs::hard_link(root.join("entry-00000"), root.join(format!("entry-{index:05}")))
+                                    .expect("hardlink entry should be created");
                             }
                         } else {
                             for index in 0..width {
                                 let name = format!("entry-{index:05}");
-                                fs::write(root.join(&name), b"x")
-                                    .expect("wide entry should be written");
+                                fs::write(root.join(&name), b"x").expect("wide entry should be written");
                                 expected.push(
                                     LocalTreeEntry::new(PathBuf::from(name), LocalFileKind::File)
                                         .expect("expected entry should be valid"),
@@ -238,9 +229,7 @@ fn bench_tree_validation_index(c: &mut Criterion) {
                             }
                         }
                         let validation = match mode {
-                            "exact" => {
-                                LocalTreeValidationOptions::new().with_exact_entries(expected)
-                            }
+                            "exact" => LocalTreeValidationOptions::new().with_exact_entries(expected),
                             "hardlink" => LocalTreeValidationOptions::new()
                                 .with_reject_external_hardlinks()
                                 .with_limits(LocalListOptions::new().with_max_entries(width)),
@@ -268,79 +257,76 @@ fn bench_tree_validation_index(c: &mut Criterion) {
                 continue;
             }
             group.bench_function(format!("deep/{mode}/{depth}"), |bench| {
-            bench.iter_custom(|iterations| {
-                let mut elapsed = Duration::ZERO;
-                for _ in 0..iterations {
-                    let fixture = tempdir().expect("deep validation fixture should exist");
-                    let filesystem = LocalFileSystem::host().expect("Host filesystem should open");
-                    let parent = filesystem
-                        .open_directory_with_options(
-                            fixture.path(),
-                            &LocalDirectoryOpenOptions::new(),
-                        )
-                        .expect("benchmark parent should open");
-                    let stage = parent
-                        .create_staged_directory(&LocalTempDirectoryOptions::new())
-                        .expect("benchmark stage should be created");
-                    let mut path = fixture.path().join(stage.relative_name());
-                    let mut expected = Vec::new();
-                    for _ in 0..depth {
-                        path.push("level");
-                        fs::create_dir(&path).expect("deep directory should be created");
-                        expected.push(
-                            LocalTreeEntry::new(
-                                path.strip_prefix(fixture.path())
-                                    .expect("deep path is beneath fixture")
-                                    .strip_prefix(stage.relative_name())
-                                    .expect("deep path is beneath stage")
-                                    .to_path_buf(),
-                                LocalFileKind::Directory,
-                            )
-                            .expect("expected directory should be valid"),
-                        );
+                bench.iter_custom(|iterations| {
+                    let mut elapsed = Duration::ZERO;
+                    for _ in 0..iterations {
+                        let fixture = tempdir().expect("deep validation fixture should exist");
+                        let filesystem = LocalFileSystem::host().expect("Host filesystem should open");
+                        let parent = filesystem
+                            .open_directory_with_options(fixture.path(), &LocalDirectoryOpenOptions::new())
+                            .expect("benchmark parent should open");
+                        let stage = parent
+                            .create_staged_directory(&LocalTempDirectoryOptions::new())
+                            .expect("benchmark stage should be created");
+                        let mut path = fixture.path().join(stage.relative_name());
+                        let mut expected = Vec::new();
+                        for _ in 0..depth {
+                            path.push("level");
+                            fs::create_dir(&path).expect("deep directory should be created");
+                            expected.push(
+                                LocalTreeEntry::new(
+                                    path.strip_prefix(fixture.path())
+                                        .expect("deep path is beneath fixture")
+                                        .strip_prefix(stage.relative_name())
+                                        .expect("deep path is beneath stage")
+                                        .to_path_buf(),
+                                    LocalFileKind::Directory,
+                                )
+                                .expect("expected directory should be valid"),
+                            );
+                        }
+                        let leaf = path.join(if mode == "hardlink" { "leaf-0" } else { "leaf" });
+                        fs::write(&leaf, b"x").expect("deep leaf should be written");
+                        if mode == "hardlink" {
+                            fs::hard_link(&leaf, path.join("leaf-1")).expect("deep hardlink should be created");
+                        } else {
+                            expected.push(
+                                LocalTreeEntry::new(
+                                    leaf.strip_prefix(fixture.path())
+                                        .expect("leaf path is beneath fixture")
+                                        .strip_prefix(stage.relative_name())
+                                        .expect("leaf path is beneath stage")
+                                        .to_path_buf(),
+                                    LocalFileKind::File,
+                                )
+                                .expect("expected file should be valid"),
+                            );
+                        }
+                        let validation = match mode {
+                            "exact" => LocalTreeValidationOptions::new()
+                                .with_exact_entries(expected)
+                                .with_limits(LocalListOptions::new().with_max_depth(depth + 1)),
+                            "hardlink" => LocalTreeValidationOptions::new()
+                                .with_reject_external_hardlinks()
+                                .with_limits(
+                                    LocalListOptions::new()
+                                        .with_max_depth(depth + 1)
+                                        .with_max_entries(depth + 2),
+                                ),
+                            _ => LocalTreeValidationOptions::new()
+                                .with_limits(LocalListOptions::new().with_max_depth(depth + 1)),
+                        };
+                        let options = LocalTreePublishOptions::new().with_validation(validation);
+                        let started = std::time::Instant::now();
+                        let result = stage.publish_new(&parent, OsStr::new("published"), &options);
+                        elapsed += started.elapsed();
+                        let outcome = result.expect("deep validation and publication should succeed");
+                        black_box(outcome);
+                        drop(parent);
+                        drop(fixture);
                     }
-                    let leaf = path.join(if mode == "hardlink" { "leaf-0" } else { "leaf" });
-                    fs::write(&leaf, b"x").expect("deep leaf should be written");
-                    if mode == "hardlink" {
-                        fs::hard_link(&leaf, path.join("leaf-1")).expect("deep hardlink should be created");
-                    } else {
-                        expected.push(
-                            LocalTreeEntry::new(
-                                leaf.strip_prefix(fixture.path())
-                                    .expect("leaf path is beneath fixture")
-                                    .strip_prefix(stage.relative_name())
-                                    .expect("leaf path is beneath stage")
-                                    .to_path_buf(),
-                                LocalFileKind::File,
-                            )
-                            .expect("expected file should be valid"),
-                        );
-                    }
-                    let validation = match mode {
-                        "exact" => LocalTreeValidationOptions::new()
-                            .with_exact_entries(expected)
-                            .with_limits(LocalListOptions::new().with_max_depth(depth + 1)),
-                        "hardlink" => LocalTreeValidationOptions::new()
-                            .with_reject_external_hardlinks()
-                            .with_limits(
-                                LocalListOptions::new()
-                                    .with_max_depth(depth + 1)
-                                    .with_max_entries(depth + 2),
-                            ),
-                        _ => LocalTreeValidationOptions::new()
-                            .with_limits(LocalListOptions::new().with_max_depth(depth + 1)),
-                    };
-                    let options = LocalTreePublishOptions::new().with_validation(validation);
-                    let started = std::time::Instant::now();
-                    let result = stage.publish_new(&parent, OsStr::new("published"), &options);
-                    elapsed += started.elapsed();
-                    let outcome = result.expect("deep validation and publication should succeed");
-                    black_box(outcome);
-                    drop(parent);
-                    drop(fixture);
-                }
-                elapsed
-            });
+                    elapsed
+                });
             });
         }
     }

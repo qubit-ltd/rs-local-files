@@ -351,12 +351,14 @@ impl LocalStagedDirectory {
         crate::observation::query::query_observation(&file, crate::observation::LocalObservationRequirement::Required)
     }
 
-    /// Creates a lazy, recursive, entry-only observer using the supplied resource ceilings.
+    /// Creates a lazy, recursive, entry-only observer using the supplied
+    /// resource ceilings.
     ///
-    /// Recursion and symbolic-link handling are fixed for tree observation: a link is
-    /// yielded as an entry and its target is never traversed. The supplied recursion
-    /// and symlink policies do not change this behavior; resource ceilings, error
-    /// policy, and listing depth still control this display-oriented observer.
+    /// Recursion and symbolic-link handling are fixed for tree observation: a
+    /// link is yielded as an entry and its target is never traversed. The
+    /// supplied recursion and symlink policies do not change this behavior;
+    /// resource ceilings, error policy, and listing depth still control
+    /// this display-oriented observer.
     pub fn observe_tree_with_options(&self, options: &LocalListOptions) -> LocalResult<LocalTreeObserver> {
         let recursive = (*options)
             .with_recursive()
@@ -368,8 +370,9 @@ impl LocalStagedDirectory {
     /// Validates the complete tree against an expected entry set and optional
     /// constraints. Exact paths must be unique; repeated paths return
     /// `InvalidOptions`. Directory and dangling symbolic links are checked as
-    /// entries without following their targets. Finite depth limits fail when an
-    /// actual entry exceeds the limit instead of silently truncating validation.
+    /// entries without following their targets. Finite depth limits fail when
+    /// an actual entry exceeds the limit instead of silently truncating
+    /// validation.
     ///
     /// The observations detect identity changes at checked entries but do not
     /// provide an atomic snapshot against concurrent filesystem mutations.
@@ -1578,20 +1581,17 @@ impl LocalStagedDirectory {
                 Access::Preserved,
             ));
         }
-        if let Some(validation) = options.validation() {
-            if let Err(cause) = super::internal::tree_verification::verify_tree(
-                &self,
-                validation.exact_entries(),
-                validation,
-            ) {
-                return Err(super::tree_recovery::LocalTreePublishError::new(
-                    cause,
-                    Some(self),
-                    Mutation::NotStarted,
-                    Publication::NotPublished,
-                    Access::Preserved,
-                ));
-            }
+        if let Some(validation) = options.validation()
+            && let Err(cause) =
+                super::internal::tree_verification::verify_tree(&self, validation.exact_entries(), validation)
+        {
+            return Err(super::tree_recovery::LocalTreePublishError::new(
+                cause,
+                Some(self),
+                Mutation::NotStarted,
+                Publication::NotPublished,
+                Access::Preserved,
+            ));
         }
         let default_limits = LocalListOptions::new();
         let access_limits = options

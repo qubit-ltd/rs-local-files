@@ -20,9 +20,9 @@ use qubit_local_files::LocalFileSystem;
 use qubit_local_files::error::LocalFileErrorKind;
 #[cfg(any(unix, windows))]
 use qubit_local_files::error::LocalFileOperation;
-use qubit_local_files::options::LocalWriteMode;
 #[cfg(windows)]
 use qubit_local_files::options::LocalWriteMetadataPolicy;
+use qubit_local_files::options::LocalWriteMode;
 use qubit_local_files::options::LocalWriteOptions;
 use qubit_local_files::options::LocalWritePrecondition;
 use sha2::Digest;
@@ -283,10 +283,7 @@ fn windows_open_rejects_rooted_content_without_artifacts() {
             Some("this Windows conditional Content configuration is unsupported"),
             error.reason()
         );
-        assert!(
-            !dir.path().join(parent).exists(),
-            "the parent must not be created"
-        );
+        assert!(!dir.path().join(parent).exists(), "the parent must not be created");
         assert_eq!(
             0,
             std::fs::read_dir(dir.path()).unwrap().count(),
@@ -328,10 +325,7 @@ fn windows_open_rejects_host_content_use_staging_without_artifacts() {
             Some("this Windows conditional Content configuration is unsupported"),
             error.reason()
         );
-        assert!(
-            !missing_parent.exists(),
-            "the parent must not be created"
-        );
+        assert!(!missing_parent.exists(), "the parent must not be created");
         assert_eq!(
             0,
             std::fs::read_dir(dir.path()).unwrap().count(),
