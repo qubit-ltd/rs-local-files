@@ -46,7 +46,10 @@ fn compare_facades(
 #[test]
 fn conditional_facades_share_static_errors_without_creating_resources() {
     let fixture = tempfile::tempdir().expect("fixture");
-    let filesystem = LocalFileSystem::rooted(fixture.path()).expect("rooted filesystem");
+    let mut filesystem = LocalFileSystem::rooted(fixture.path()).expect("rooted filesystem");
+    filesystem
+        .set_symlink_policy(LocalSymlinkPolicy::Reject)
+        .expect("set filesystem symlink policy");
     let directory = filesystem
         .open_directory_with_options(
             Path::new("."),
