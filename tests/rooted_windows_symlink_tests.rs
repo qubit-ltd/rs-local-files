@@ -45,8 +45,7 @@ fn create_directory_link(target: &Path, link: &Path) -> bool {
 
 /// Replaces a file link's record with distinct actual and display names.
 fn set_distinct_reparse_names(link: &Path, actual: &Path, display: &Path) {
-    let mut substitute: Vec<u16> = r"\??\".encode_utf16().collect();
-    substitute.extend(actual.as_os_str().encode_wide());
+    let substitute: Vec<u16> = actual.as_os_str().encode_wide().collect();
     let print: Vec<u16> = display.as_os_str().encode_wide().collect();
     let substitute_bytes = (substitute.len() * 2) as u16;
     let print_bytes = (print.len() * 2) as u16;
@@ -58,7 +57,7 @@ fn set_distinct_reparse_names(link: &Path, actual: &Path, display: &Path) {
     buffer[10..12].copy_from_slice(&substitute_bytes.to_le_bytes());
     buffer[12..14].copy_from_slice(&substitute_bytes.to_le_bytes());
     buffer[14..16].copy_from_slice(&print_bytes.to_le_bytes());
-    buffer[16..20].copy_from_slice(&0_u32.to_le_bytes());
+    buffer[16..20].copy_from_slice(&1_u32.to_le_bytes());
     for (index, unit) in substitute.iter().chain(print.iter()).enumerate() {
         let start = 20 + index * 2;
         buffer[start..start + 2].copy_from_slice(&unit.to_le_bytes());
@@ -184,19 +183,23 @@ fn test_rooted_copy_preserves_link_to_existing_external_file() {
 #[test]
 fn test_rooted_copy_uses_actual_reparse_target_instead_of_display_name() {
     let root = tempdir().expect("temporary root should be created");
-    let outside = tempdir().expect("external directory should be created");
-    let actual = outside.path().join("actual-payload");
-    let display = outside.path().join("display-payload");
+    let actual = root.path().join("actual-payload");
+    let display = root.path().join("display-payload");
+    let actual_link_target = Path::new("actual-payload");
     fs::write(&actual, b"actual target").expect("actual target should be written");
     fs::write(&display, b"display target").expect("display target should be written");
     if !create_file_link(&actual, &root.path().join("source")) {
         return;
     }
-    set_distinct_reparse_names(&root.path().join("source"), &actual, &display);
+    set_distinct_reparse_names(
+        &root.path().join("source"),
+        actual_link_target,
+        Path::new("display-payload"),
+    );
     let mut filesystem = LocalFileSystem::rooted(root.path()).expect("root authority should open");
     filesystem
-        .set_symlink_policy(qubit_local_files::policy::LocalSymlinkPolicy::FollowAcrossScope)
-        .expect("Rooted policy should permit the external target for this regression");
+        .set_symlink_policy(qubit_local_files::policy::LocalSymlinkPolicy::FollowWithinScope)
+        .expect("Rooted policy should permit the in-scope target for this regression");
 
     let mut reader = filesystem
         .open_reader(Path::new("source"))
@@ -209,7 +212,10 @@ fn test_rooted_copy_uses_actual_reparse_target_instead_of_display_name() {
         .copy(Path::new("source"), Path::new("destination"))
         .expect("link with distinct names should copy through its actual target");
 
-    assert_eq!(actual, fs::read_link(root.path().join("destination")).unwrap());
+    assert_eq!(
+        actual_link_target,
+        fs::read_link(root.path().join("destination")).unwrap()
+    );
     assert_eq!(
         b"actual target",
         fs::read(root.path().join("destination")).unwrap().as_slice()
