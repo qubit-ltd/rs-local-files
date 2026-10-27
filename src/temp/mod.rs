@@ -9,6 +9,7 @@
 
 mod local_temp_directory;
 mod local_temp_file;
+pub(crate) mod types;
 
 /// Private storage implementations for temporary resources.
 pub(crate) mod internal;

@@ -63,6 +63,7 @@ mod local_file_system;
 mod local_file_system_scope;
 mod local_file_system_validation;
 pub mod options;
+pub mod observation;
 pub mod outcome;
 pub mod path;
 pub mod policy;
