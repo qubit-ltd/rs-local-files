@@ -75,6 +75,29 @@ pub(crate) fn create_private_directory_at(
     parent: &File,
     name: &OsStr,
 ) -> Result<File, NativePrivateCreateError> {
+    create_private_directory_at_impl(parent, name, || {})
+}
+
+#[cfg(test)]
+pub(crate) fn create_private_directory_at_with_hook<F>(
+    parent: &File,
+    name: &OsStr,
+    after_open: F,
+) -> Result<File, NativePrivateCreateError>
+where
+    F: FnOnce(),
+{
+    create_private_directory_at_impl(parent, name, after_open)
+}
+
+fn create_private_directory_at_impl<F>(
+    parent: &File,
+    name: &OsStr,
+    after_open: F,
+) -> Result<File, NativePrivateCreateError>
+where
+    F: FnOnce(),
+{
     let name = match component_name(name) {
         Ok(name) => name,
         Err(source) => return Err(pre_create_error(source)),
@@ -83,20 +106,6 @@ pub(crate) fn create_private_directory_at(
     if result < 0 {
         return Err(pre_create_error(io::Error::last_os_error()));
     }
-
-    let created_identity = match identity_for_name(parent, OsStr::from_bytes(name.as_bytes())) {
-        Ok(identity) => identity,
-        Err(source) => {
-            return Err(create_error(
-                source,
-                parent,
-                OsStr::from_bytes(name.as_bytes()),
-                None,
-                None,
-            ));
-        }
-    };
-
     let descriptor = unsafe {
         libc::openat(
             parent.as_raw_fd(),
@@ -106,17 +115,17 @@ pub(crate) fn create_private_directory_at(
     };
     if descriptor < 0 {
         let source = io::Error::last_os_error();
-        let identity = identity_for_name(parent, OsStr::from_bytes(name.as_bytes())).ok();
         return Err(create_error(
             source,
             parent,
             OsStr::from_bytes(name.as_bytes()),
             None,
-            identity,
+            None,
         ));
     }
     // SAFETY: openat returned a fresh descriptor owned by this function.
     let directory = unsafe { File::from_raw_fd(descriptor) };
+    after_open();
     let metadata = match directory.metadata() {
         Ok(metadata) => metadata,
         Err(source) => {
@@ -131,11 +140,23 @@ pub(crate) fn create_private_directory_at(
         }
     };
     let identity = identity_for_file(&directory).ok();
-    if identity.as_ref() != Some(&created_identity) {
+    let name_identity = match identity_for_name(parent, OsStr::from_bytes(name.as_bytes())) {
+        Ok(identity) => identity,
+        Err(source) => {
+            return Err(create_error(
+                source,
+                parent,
+                OsStr::from_bytes(name.as_bytes()),
+                Some(directory),
+                identity,
+            ));
+        }
+    };
+    if identity.as_ref() != Some(&name_identity) {
         return Err(create_error(
             io::Error::new(
                 io::ErrorKind::PermissionDenied,
-                "directory entry changed between creation and handle acquisition",
+                "directory entry changed after handle acquisition",
             ),
             parent,
             OsStr::from_bytes(name.as_bytes()),

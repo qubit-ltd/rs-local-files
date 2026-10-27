@@ -3,7 +3,7 @@
 use std::ffi::OsStr;
 use std::fs::{self, File};
 use std::os::unix::fs::symlink;
-use std::os::unix::fs::{FileTypeExt, PermissionsExt};
+use std::os::unix::fs::{FileTypeExt, MetadataExt, PermissionsExt};
 
 use crate::temp::internal::privacy_unix;
 
@@ -67,6 +67,50 @@ fn lf3_privacy_unix_creates_relative_to_retained_parent_after_rename() {
         .expect("create through retained handle");
     assert!(moved.join("created").is_file());
     assert!(!original.exists());
+}
+
+#[test]
+fn lf3_privacy_unix_directory_swap_after_open_is_indeterminate() {
+    let fixture = tempfile::tempdir().expect("create fixture");
+    let parent = File::open(fixture.path()).expect("open parent");
+    let replaced_path = fixture.path().join("created");
+
+    let error =
+        privacy_unix::create_private_directory_at_with_hook(&parent, OsStr::new("created"), || {
+            fs::remove_dir(&replaced_path).expect("remove just-created directory");
+            fs::create_dir(&replaced_path).expect("install replacement directory");
+            fs::set_permissions(&replaced_path, fs::Permissions::from_mode(0o700))
+                .expect("make replacement look private");
+        })
+        .expect_err("must not return a handle after its name is replaced");
+
+    assert!(replaced_path.is_dir(), "replacement must be retained");
+    let retained = error.retained.expect("preserve partial entry guard");
+    let replacement_metadata = fs::symlink_metadata(&replaced_path).expect("stat replacement");
+    let replacement_identity = crate::observation::LocalFileIdentity::unix(
+        replacement_metadata.dev(),
+        replacement_metadata.ino(),
+    );
+    assert_ne!(
+        retained.identity.as_ref(),
+        Some(&replacement_identity),
+        "guard identity must describe the opened directory, never the replacement"
+    );
+    let opened_directory = retained
+        .file
+        .as_ref()
+        .expect("retain the opened directory handle");
+    privacy_unix::apply_current_user_access(opened_directory, true, true)
+        .expect("change access on retained handle");
+    assert_eq!(
+        fs::symlink_metadata(&replaced_path)
+            .expect("restat replacement")
+            .permissions()
+            .mode()
+            & 0o777,
+        0o700,
+        "handle access changes must leave the replacement untouched"
+    );
 }
 
 #[test]
