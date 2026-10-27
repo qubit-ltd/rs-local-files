@@ -46,6 +46,16 @@ impl LocalComponentPolicy {
         self.denied.iter().any(|name| name == component)
     }
 
+    pub(crate) fn combined_with(&self, other: &Self) -> Self {
+        let mut denied = self.denied.clone();
+        for name in &other.denied {
+            if !denied.iter().any(|existing| existing == name) {
+                denied.push(name.clone());
+            }
+        }
+        Self { denied }
+    }
+
     #[cfg(not(unix))]
     pub(crate) fn is_allow_all(&self) -> bool {
         self.denied.is_empty()

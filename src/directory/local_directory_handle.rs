@@ -308,12 +308,15 @@ impl LocalDirectoryHandle {
     /// Opens a child directory and returns a narrower fixed authority.
     ///
     /// Absolute paths are rejected; parent components are resolved inside
-    /// this authority and cannot escape its root.
+    /// this authority and cannot escape its root. The returned handle retains
+    /// this handle's denied component names and adds any names denied by the
+    /// supplied options.
     ///
     /// # Errors
     /// Returns path, policy, type, resource-limit, or native I/O errors.
     pub fn open_directory(&self, relative: &Path, options: &LocalDirectoryOpenOptions) -> LocalResult<Self> {
         let raw_relative = relative;
+        let component_policy = self.component_policy.combined_with(options.component_policy());
         let policy = options.symlink_policy().unwrap_or(self.filesystem.symlink_policy());
         let started_at = Instant::now();
         let deadline = options
@@ -330,14 +333,14 @@ impl LocalDirectoryHandle {
                 policy,
                 true,
                 LocalFileOperation::OpenRoot,
-                options.component_policy(),
+                &component_policy,
                 deadline,
                 path_budget.as_mut(),
             )?;
         let diagnostic = self.diagnostic_path.join(&relative);
         for component in relative.components() {
             if let Component::Normal(name) = component {
-                options.component_policy().validate_component(name)?;
+                component_policy.validate_component(name)?;
             }
         }
         if options.symlink_policy() == Some(LocalSymlinkPolicy::FollowAcrossScope) {
@@ -415,7 +418,7 @@ impl LocalDirectoryHandle {
             };
         Ok(Self {
             filesystem,
-            component_policy: options.component_policy().clone(),
+            component_policy,
             diagnostic_path: diagnostic,
             binding_observations,
             binding_anchors,
