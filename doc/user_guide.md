@@ -701,9 +701,10 @@ Only sandbox cleanup is allowed. `Released` has no cleanup obligation and
 `cleanup()` succeeds idempotently. `Indeterminate` forbids persist, keep,
 cleanup, and Drop deletion because source authority cannot be proven.
 
-If cleanup removes a temporary file but cannot remove its now-empty sandbox,
-the cleanup error identifies the sandbox path; the deleted file is not listed
-as a retained resource.
+If conditional cleanup removes a displaced file but cannot remove its recovery
+container, the cleanup error identifies the container path; the deleted file
+is not listed as a retained resource. Unexpected entries in the container are
+left in place for separately authorized cleanup.
 
 | Failure situation | Publication | Source | Recovery |
 | --- | --- | --- | --- |

@@ -224,10 +224,10 @@ Temporary directories accept `LocalTempCleanupLimits` for depth, entries,
 pending-path bytes, and elapsed time. Limits stay on the directory and apply to
 explicit `cleanup()` and Drop, with a fresh budget per call and no unbounded
 Drop fallback. Staged-directory owners likewise retain creation limits unless
-the caller replaces them. If file deletion succeeds but empty-sandbox removal
-fails, the error identifies the sandbox path and does not report the deleted
-file as retained. `descendant` accepts only nonempty relative paths of normal
-names: `a/b` succeeds, while `a/../b`, `a/./b`, and empty input fail.
+the caller replaces them. If cleanup deletes a displaced file but cannot remove
+its recovery container, the error identifies the container path and does not
+report the deleted file as retained. `descendant` accepts only nonempty relative
+paths of normal names: `a/b` succeeds, while `a/../b`, `a/./b`, and empty input fail.
 
 ## Choose the right authority
 

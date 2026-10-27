@@ -1473,8 +1473,10 @@ the complete tree before mutation. `verify_entries()` compares the observed
 entry set with the supplied expected set exactly. Expected paths must be unique
 or verification returns `InvalidOptions`; path bytes are charged before the
 borrowed-reference index is built, and traversal/indexing share the selected
-entry, depth, byte, open-directory, and deadline limits. A finite depth limit
-fails if any entry lies beyond it rather than silently truncating validation.
+entry, depth, byte, open-directory, and deadline limits. The byte budget counts
+logical path bytes; it is not a process-wide heap limit for hash buckets or
+allocator overhead. A finite depth limit fails if any entry lies beyond it
+rather than silently truncating validation.
 Links are observed as entries and their targets are not followed or expanded
 into alias children. Special entries are allowed unless explicitly rejected.
 Tree observations detect identity changes at checked entries, but are not an
