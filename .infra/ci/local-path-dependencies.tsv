@@ -1,2 +1,3 @@
 # relative git root<TAB>repository URL<TAB>default branch
 ../rs-redact	https://github.com/qubit-ltd/rs-redact.git	main
+../rs-json	https://github.com/qubit-ltd/rs-json.git	main
