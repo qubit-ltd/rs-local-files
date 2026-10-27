@@ -75,6 +75,7 @@ use crate::LocalAtomicWriteStage;
 use crate::LocalDurabilityRequirement;
 use crate::policy::LocalFileSyncRequirement;
 use crate::writer::internal::LocalCommitSyncOutcome;
+use crate::writer::internal::LocalCommitSyncObserver;
 #[cfg(any(unix, windows))]
 use crate::LocalRelativePath;
 use crate::options::LocalWriteMetadataPolicy;
@@ -413,13 +414,16 @@ impl LocalRootAtomicWriter {
     /// Returns a recoverable error before installation or a terminal error
     /// after destination state may have changed.
     pub(crate) fn commit_recoverable_with_durability(self) -> Result<bool, LocalAtomicCommitError<Self>> {
-        self.commit_recoverable_with_sync().map(|outcome| outcome.durable)
+        self.commit_recoverable_with_sync(None).map(|outcome| outcome.durable)
     }
 
-    pub(crate) fn commit_recoverable_with_sync(self) -> Result<LocalCommitSyncOutcome, LocalAtomicCommitError<Self>> {
+    pub(crate) fn commit_recoverable_with_sync(
+        self,
+        observer: Option<&LocalCommitSyncObserver>,
+    ) -> Result<LocalCommitSyncOutcome, LocalAtomicCommitError<Self>> {
         #[cfg(unix)]
         {
-            commit_recoverably(self, Self::commit_attempt, |writer| writer.staged_file.is_open())
+            commit_recoverably(self, |writer| writer.commit_attempt(observer), |writer| writer.staged_file.is_open())
         }
         #[cfg(windows)]
         {
@@ -429,7 +433,7 @@ impl LocalRootAtomicWriter {
                     Some(self),
                 ));
             }
-            commit_recoverably(self, Self::commit_attempt_windows, |writer| writer.staged_file.armed)
+            commit_recoverably(self, |writer| writer.commit_attempt_windows(observer), |writer| writer.staged_file.armed)
         }
         #[cfg(not(any(unix, windows)))]
         {
@@ -490,7 +494,7 @@ impl LocalRootAtomicWriter {
     /// Native metadata/permission/rename failures retain structured stage and
     /// destination state; staging remains armed until successful installation.
     #[cfg(windows)]
-    fn commit_attempt_windows(&mut self) -> Result<LocalCommitSyncOutcome, LocalAtomicWriteError> {
+    fn commit_attempt_windows(&mut self, observer: Option<&LocalCommitSyncObserver>) -> Result<LocalCommitSyncOutcome, LocalAtomicWriteError> {
         let destination = if self.destination_is_regular {
             Some(
                 read_rooted_symlink_metadata(&self.staged_file.root, Path::new(""), &self.destination).map_err(
@@ -560,7 +564,10 @@ impl LocalRootAtomicWriter {
         let file_synced = if self.durability == LocalDurabilityRequirement::Required
             || self.file_sync == LocalFileSyncRequirement::Required
         {
-            self.staged_file.file().sync_all().map_err(|source| {
+            if let Some(observer) = observer {
+                observer.record_file_sync();
+            }
+            sync_rooted_staging_file(self.staged_file.file()).map_err(|source| {
                 LocalAtomicWriteError::new(
                     LocalAtomicWriteStage::SyncTemporaryFile,
                     self.path.clone(),
@@ -571,9 +578,15 @@ impl LocalRootAtomicWriter {
             })?;
             true
         } else if self.durability == LocalDurabilityRequirement::Preferred {
-            self.staged_file.file().sync_all().is_ok()
+            if let Some(observer) = observer {
+                observer.record_file_sync();
+            }
+            sync_rooted_staging_file(self.staged_file.file()).is_ok()
         } else if self.file_sync == LocalFileSyncRequirement::Preferred {
-            self.staged_file.file().sync_all().is_ok()
+            if let Some(observer) = observer {
+                observer.record_file_sync();
+            }
+            sync_rooted_staging_file(self.staged_file.file()).is_ok()
         } else { false };
         if let Some(opened_destination) = destination.as_ref() {
             #[cfg(feature = "test-support")]
@@ -689,13 +702,13 @@ impl LocalRootAtomicWriter {
     /// Returns the structured commit failure. Errors raised before installation
     /// leave the staging handle open for the public recoverable commit API.
     #[cfg(unix)]
-    fn commit_attempt(&mut self) -> Result<LocalCommitSyncOutcome, LocalAtomicWriteError> {
+    fn commit_attempt(&mut self, observer: Option<&LocalCommitSyncObserver>) -> Result<LocalCommitSyncOutcome, LocalAtomicWriteError> {
         let destination = self.open_destination_for_commit()?;
         self.apply_destination_metadata(destination.as_ref())?;
         self.apply_copy_permissions()?;
-        let file_synced = self.sync_temporary_file()?;
+        let file_synced = self.sync_temporary_file(observer)?;
         self.verify_destination_for_commit(destination.as_ref())?;
-        let parent_durable = self.install_and_sync_parent()?;
+        let parent_durable = self.install_and_sync_parent(observer)?;
         let durable = self.durability != LocalDurabilityRequirement::NotRequired && file_synced && parent_durable;
         Ok(LocalCommitSyncOutcome { durable, file_synced })
     }
@@ -840,8 +853,8 @@ impl LocalRootAtomicWriter {
     /// Returns a structured staging synchronization error while retaining
     /// staging when the native synchronization fails.
     #[cfg(unix)]
-    fn sync_temporary_file(&mut self) -> Result<bool, LocalAtomicWriteError> {
-        synchronize_staging_file(self.staged_file.file(), self.durability, self.file_sync, |result| {
+    fn sync_temporary_file(&mut self, observer: Option<&LocalCommitSyncObserver>) -> Result<bool, LocalAtomicWriteError> {
+        synchronize_staging_file(self.staged_file.file(), self.durability, self.file_sync, observer, |result| {
             map_atomic_error(
                 result,
                 LocalAtomicWriteStage::SyncTemporaryFile,
@@ -926,7 +939,7 @@ impl LocalRootAtomicWriter {
     /// Returns the structured installation or recovery error, or a parent
     /// synchronization error after the destination has been replaced.
     #[cfg(unix)]
-    fn install_and_sync_parent(&mut self) -> Result<bool, LocalAtomicWriteError> {
+    fn install_and_sync_parent(&mut self, observer: Option<&LocalCommitSyncObserver>) -> Result<bool, LocalAtomicWriteError> {
         let install_result =
             install_rooted_atomic_file(&mut self.staged_file, &self.final_name, self.destination_existed);
         if let Err((source, destination_state, staging_state)) = install_result {
@@ -954,6 +967,9 @@ impl LocalRootAtomicWriter {
             self.staged_file.disarm();
             return Ok(false);
         }
+        if let Some(observer) = observer {
+            observer.record_parent_sync();
+        }
         let temporary_path = self.staged_file.diagnostic_path().to_path_buf();
         self.staged_file.disarm();
         match sync_rooted_parent_chain(self.staged_file.parent(), &self.parent_dirs_to_sync) {
@@ -969,6 +985,15 @@ impl LocalRootAtomicWriter {
             .map(|()| true),
         }
     }
+}
+
+#[cfg(windows)]
+fn sync_rooted_staging_file(file: &File) -> io::Result<()> {
+    #[cfg(feature = "test-support")]
+    if crate::local::test_support_enabled("writer-staged-file-sync") {
+        return Err(crate::local::test_fault_error());
+    }
+    file.sync_all()
 }
 
 impl LocalRootAtomicWriter {

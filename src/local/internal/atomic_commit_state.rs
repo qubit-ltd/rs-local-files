@@ -15,6 +15,7 @@ use crate::LocalAtomicDestinationState;
 use crate::LocalAtomicWriteError;
 use crate::LocalDurabilityRequirement;
 use crate::policy::LocalFileSyncRequirement;
+use crate::writer::internal::LocalCommitSyncObserver;
 
 /// Runs an atomic publication attempt and retains pre-publication staging.
 ///
@@ -76,6 +77,7 @@ pub(crate) fn synchronize_staging_file(
     file: &File,
     durability: LocalDurabilityRequirement,
     file_sync: LocalFileSyncRequirement,
+    observer: Option<&LocalCommitSyncObserver>,
     map_required_error: impl FnOnce(io::Result<()>) -> Result<(), LocalAtomicWriteError>,
 ) -> Result<bool, LocalAtomicWriteError> {
     let requirement = match (durability, file_sync) {
@@ -85,15 +87,18 @@ pub(crate) fn synchronize_staging_file(
     };
     match requirement {
         LocalFileSyncRequirement::NotRequired => Ok(false),
-        LocalFileSyncRequirement::Preferred => Ok(sync_file(file).is_ok()),
+        LocalFileSyncRequirement::Preferred => Ok(sync_file(file, observer).is_ok()),
         LocalFileSyncRequirement::Required => {
-            map_required_error(sync_file(file))?;
+            map_required_error(sync_file(file, observer))?;
             Ok(true)
         }
     }
 }
 
-fn sync_file(file: &File) -> io::Result<()> {
+fn sync_file(file: &File, observer: Option<&LocalCommitSyncObserver>) -> io::Result<()> {
+    if let Some(observer) = observer {
+        observer.record_file_sync();
+    }
     #[cfg(feature = "test-support")]
     if crate::local::test_support_enabled("writer-staged-file-sync") {
         return Err(crate::local::test_fault_error());
@@ -192,6 +197,7 @@ mod tests {
                 fixture.as_file(),
                 LocalDurabilityRequirement::NotRequired,
                 LocalFileSyncRequirement::NotRequired,
+                None,
                 map_required_sync,
             )
             .expect("not-required durability should skip synchronization")
@@ -201,6 +207,7 @@ mod tests {
                 fixture.as_file(),
                 LocalDurabilityRequirement::Preferred,
                 LocalFileSyncRequirement::NotRequired,
+                None,
                 map_required_sync,
             )
             .expect("preferred durability should synchronize a regular file")
@@ -210,6 +217,7 @@ mod tests {
                 fixture.as_file(),
                 LocalDurabilityRequirement::Required,
                 LocalFileSyncRequirement::NotRequired,
+                None,
                 map_required_sync,
             )
             .expect("required durability should synchronize a regular file")

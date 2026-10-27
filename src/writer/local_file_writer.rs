@@ -10,8 +10,10 @@ use std::io;
 use std::io::IoSlice;
 use std::path::Path;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use super::internal::LocalFileWriterBackend;
+use super::internal::LocalCommitSyncObserver;
 use crate::LocalDurabilityRequirement;
 use crate::policy::LocalFileSyncRequirement;
 use crate::LocalFileCommitError;
@@ -71,6 +73,8 @@ pub struct LocalFileWriter {
     bytes_written: usize,
     /// Publication certainty retained after a non-retryable stream failure.
     failure_state: Option<LocalWriteFailureState>,
+    /// Per-writer synchronization observer used by focused crate tests.
+    sync_observer: Option<Arc<LocalCommitSyncObserver>>,
 }
 
 impl LocalFileWriter {
@@ -92,6 +96,7 @@ impl LocalFileWriter {
             state: LocalWriterState::Open,
             bytes_written: 0,
             failure_state: None,
+            sync_observer: None,
         }
     }
 
@@ -187,10 +192,16 @@ impl LocalFileWriter {
                 let (durable, file_synced) = match sync_requirement {
                     LocalFileSyncRequirement::NotRequired => (false, false),
                     LocalFileSyncRequirement::Preferred => {
+                        if let Some(observer) = &self.sync_observer {
+                            observer.record_file_sync();
+                        }
                         let synced = sync_append_file(&file).is_ok();
                         (self.options.durability() == LocalDurabilityRequirement::Preferred && synced, synced)
                     }
                     LocalFileSyncRequirement::Required => {
+                        if let Some(observer) = &self.sync_observer {
+                            observer.record_file_sync();
+                        }
                         #[cfg(feature = "test-support")]
                         let sync_result = if crate::local::test_support_enabled("writer-append-required-sync") {
                             Err(crate::local::test_fault_error())
@@ -309,6 +320,12 @@ impl LocalFileWriter {
         self
     }
 
+    #[cfg(test)]
+    pub(crate) fn with_sync_observer(mut self, observer: Arc<LocalCommitSyncObserver>) -> Self {
+        self.sync_observer = Some(observer);
+        self
+    }
+
     /// Commits either staged backend through the shared publication contract.
     ///
     /// Consumes `backend` and marks this writer committed on success. On
@@ -319,7 +336,7 @@ impl LocalFileWriter {
         &mut self,
         backend: LocalFileWriterBackend,
     ) -> Result<LocalWriteOutcome, LocalFileCommitError> {
-        match backend.commit_staged() {
+        match backend.commit_staged(self.sync_observer.as_deref()) {
             Ok(sync_outcome) => {
                 self.state = LocalWriterState::Committed;
                 Ok(LocalWriteOutcome::new(
@@ -367,6 +384,7 @@ impl LocalFileWriter {
             state: self.state,
             bytes_written: self.bytes_written,
             failure_state: self.failure_state,
+            sync_observer: self.sync_observer.clone(),
         }
     }
 

@@ -10,6 +10,7 @@
 use std::fs::File;
 
 use super::LocalCommitSyncOutcome;
+use super::LocalCommitSyncObserver;
 use super::LocalStagedCommitError;
 use crate::local::LocalAtomicWriteError;
 use crate::local::LocalAtomicWriter;
@@ -50,16 +51,19 @@ impl LocalFileWriterBackend {
     /// # Panics
     ///
     /// Panics when called for the direct append backend.
-    pub(crate) fn commit_staged(self) -> Result<LocalCommitSyncOutcome, LocalStagedCommitError> {
+    pub(crate) fn commit_staged(
+        self,
+        observer: Option<&LocalCommitSyncObserver>,
+    ) -> Result<LocalCommitSyncOutcome, LocalStagedCommitError> {
         match self {
-            Self::Staged(writer) => writer.commit_recoverable_with_sync().map_err(|commit_error| {
+            Self::Staged(writer) => writer.commit_recoverable_with_sync(observer).map_err(|commit_error| {
                 let (error, retained) = commit_error.into_parts();
                 LocalStagedCommitError {
                     error,
                     backend: retained.map(Self::Staged).map(Box::new),
                 }
             }),
-            Self::Rooted(writer) => writer.commit_recoverable_with_sync().map_err(|commit_error| {
+            Self::Rooted(writer) => writer.commit_recoverable_with_sync(observer).map_err(|commit_error| {
                 let (error, retained) = commit_error.into_parts();
                 LocalStagedCommitError {
                     error,
