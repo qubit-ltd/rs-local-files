@@ -15,6 +15,7 @@ use crate::options::LocalPathBindingOptions;
 use crate::options::LocalWriteMode;
 use crate::options::LocalWriteOptions;
 
+#[cfg(unix)]
 fn fixture_on_canonical_current_directory() -> tempfile::TempDir {
     let current = std::env::current_dir().expect("current directory should be available");
     let current = std::fs::canonicalize(current).expect("current directory should be canonical");

@@ -180,6 +180,7 @@ fn lf3_conditional_preferred_file_sync_failure_reports_false_and_publishes() {
 
 #[cfg(windows)]
 #[test]
+#[allow(clippy::useless_conversion)]
 fn lf3_conditional_windows_content_preflight_and_rooted_absent_are_unchanged() {
     let fixture = tempfile::tempdir().expect("fixture directory");
     let root = fixture_root(&fixture);
@@ -349,6 +350,7 @@ fn lf3_conditional_replaced_installed_entry_is_not_reported_synced() {
 
 #[cfg(windows)]
 #[test]
+#[allow(clippy::useless_conversion)]
 fn lf3_conditional_windows_host_content_syncs_installed_object() {
     use sha2::Digest;
 

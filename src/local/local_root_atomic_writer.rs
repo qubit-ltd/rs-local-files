@@ -600,12 +600,9 @@ impl LocalRootAtomicWriter {
                 )
             })?;
             true
-        } else if self.durability == LocalDurabilityRequirement::Preferred {
-            if let Some(observer) = observer {
-                observer.record_file_sync();
-            }
-            sync_rooted_staging_file(self.staged_file.file()).is_ok()
-        } else if self.file_sync == LocalFileSyncRequirement::Preferred {
+        } else if self.durability == LocalDurabilityRequirement::Preferred
+            || self.file_sync == LocalFileSyncRequirement::Preferred
+        {
             if let Some(observer) = observer {
                 observer.record_file_sync();
             }

@@ -16,7 +16,9 @@ use crate::observation::LocalFileIdentity;
 /// Native private resource retained after a creation step partially succeeds.
 #[derive(Debug)]
 pub(crate) struct NativePrivateEntry {
+    #[cfg_attr(windows, allow(dead_code))]
     pub(crate) parent: File,
+    #[cfg_attr(windows, allow(dead_code))]
     pub(crate) name: OsString,
     pub(crate) file: Option<File>,
     pub(crate) identity: Option<LocalFileIdentity>,

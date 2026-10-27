@@ -8,6 +8,7 @@
 use std::path::Path;
 
 use crate::LocalFileSystem;
+#[cfg(unix)]
 use crate::LocalSymlinkPolicy;
 use crate::error::LocalFileErrorKind;
 use crate::observation::LocalObservationRequirement;

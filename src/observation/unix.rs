@@ -60,15 +60,22 @@ where
             #[allow(clippy::useless_conversion)]
             let changed_nanos_valid = u64::try_from(changed_nanos).is_ok_and(valid_nanos);
             if nanos_valid && changed_nanos_valid {
+                // Some Unix targets expose nanoseconds as unsigned integers.
+                // Keep these casts for those targets while avoiding a Clippy
+                // error where the native type is already `i64`.
+                #[allow(clippy::unnecessary_cast)]
+                let nanos = nanos as i64;
+                #[allow(clippy::unnecessary_cast)]
+                let changed_nanos = changed_nanos as i64;
                 (
                     identity,
                     Some(LocalNativeFileDetails::from_unix(LocalUnixFileDetails::from_parts(
                         device,
                         inode,
                         seconds,
-                        nanos as i64,
+                        nanos,
                         changed_seconds,
-                        changed_nanos as i64,
+                        changed_nanos,
                     ))),
                 )
             } else {

@@ -171,7 +171,7 @@ impl Drop for Token {
 
 #[derive(Debug)]
 struct CurrentUser {
-    token: Token,
+    _token: Token,
     information: Vec<usize>,
 }
 
@@ -208,7 +208,10 @@ impl CurrentUser {
         {
             return Err(last_os_error());
         }
-        Ok(Self { token, information })
+        Ok(Self {
+            _token: token,
+            information,
+        })
     }
 
     fn sid(&self) -> io::Result<PSID> {
@@ -667,7 +670,7 @@ pub(crate) fn verify_current_user_access(file: &File, directory: bool, read_only
     }
     if read_only && !directory {
         let metadata = file.metadata()?;
-        if metadata.permissions().readonly() == false {
+        if !metadata.permissions().readonly() {
             return Err(io::Error::new(io::ErrorKind::PermissionDenied, "file is not read-only"));
         }
     }

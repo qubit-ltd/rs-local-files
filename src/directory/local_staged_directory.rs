@@ -995,7 +995,7 @@ impl LocalStagedDirectory {
         }
         #[cfg(windows)]
         {
-            return self.apply_windows_access_policy(policy, limits);
+            self.apply_windows_access_policy(policy, limits)
         }
         #[cfg(not(any(unix, windows)))]
         {
