@@ -32,6 +32,10 @@ static ONE_SHOT_FAULT_TAKEN: AtomicBool = AtomicBool::new(false);
 #[cfg(feature = "test-support")]
 static NTH_FAULT_OCCURRENCES: AtomicUsize = AtomicUsize::new(0);
 
+/// Number of matching calls configured for the active repeated selector.
+#[cfg(feature = "test-support")]
+static REPEATED_FAULT_COUNT: AtomicUsize = AtomicUsize::new(1);
+
 /// Process-local selector and waiter notification shared by integration tests.
 #[cfg(feature = "test-support")]
 static ACTIVE_FAULT: (Mutex<Option<ActiveFault>>, Condvar) = (Mutex::new(None), Condvar::new());
@@ -45,6 +49,18 @@ static ACTIVE_FAULT: (Mutex<Option<ActiveFault>>, Condvar) = (Mutex::new(None), 
 #[cfg(feature = "test-support")]
 #[doc(hidden)]
 pub fn install_test_fault(name: &str) -> io::Result<TestFaultGuard> {
+    install_test_fault_for(name, 1)
+}
+
+/// Installs a fault selector that fails a finite number of matching calls.
+#[cfg(all(feature = "test-support", test))]
+#[doc(hidden)]
+pub(crate) fn install_test_fault_repeated(name: &str, count: usize) -> io::Result<TestFaultGuard> {
+    install_test_fault_for(name, count)
+}
+
+#[cfg(feature = "test-support")]
+fn install_test_fault_for(name: &str, repeat_count: usize) -> io::Result<TestFaultGuard> {
     let owner = std::thread::current().id();
     let mut active = ACTIVE_FAULT.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     loop {
@@ -70,6 +86,7 @@ pub fn install_test_fault(name: &str) -> io::Result<TestFaultGuard> {
     });
     ONE_SHOT_FAULT_TAKEN.store(false, Ordering::Relaxed);
     NTH_FAULT_OCCURRENCES.store(0, Ordering::Relaxed);
+    REPEATED_FAULT_COUNT.store(repeat_count, Ordering::Relaxed);
     Ok(TestFaultGuard { active: true })
 }
 
@@ -84,6 +101,7 @@ impl Drop for TestFaultGuard {
         active.take();
         ONE_SHOT_FAULT_TAKEN.store(false, Ordering::Relaxed);
         NTH_FAULT_OCCURRENCES.store(0, Ordering::Relaxed);
+        REPEATED_FAULT_COUNT.store(1, Ordering::Relaxed);
         self.active = false;
         ACTIVE_FAULT.1.notify_one();
     }
@@ -158,6 +176,19 @@ pub(crate) fn is_enabled(name: &str) -> bool {
 #[inline]
 pub(crate) fn take(name: &str) -> bool {
     take_impl(name)
+}
+
+/// Takes the selected fault for each of its configured matching calls.
+#[cfg(feature = "test-support")]
+#[inline]
+pub(crate) fn take_repeated(name: &str) -> bool {
+    is_enabled(name)
+        && NTH_FAULT_OCCURRENCES.fetch_add(1, Ordering::Relaxed) < REPEATED_FAULT_COUNT.load(Ordering::Relaxed)
+}
+
+#[cfg(all(feature = "test-support", test))]
+pub(crate) fn test_fault_occurrence_count() -> usize {
+    NTH_FAULT_OCCURRENCES.load(Ordering::Relaxed)
 }
 
 /// Returns whether this is the selected occurrence of one isolated fault.

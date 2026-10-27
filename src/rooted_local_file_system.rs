@@ -16,6 +16,7 @@ mod delete;
 mod directory;
 #[path = "rooted_local_file_system/fixed_directory.rs"]
 mod fixed_directory;
+mod temp_sandbox_cleanup_error;
 // Implements rooted metadata, reader, and writer operations.
 #[path = "rooted_local_file_system/io.rs"]
 mod io_operations;

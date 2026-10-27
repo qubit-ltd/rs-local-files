@@ -373,6 +373,14 @@ fn create_at(parent: &File, name: &OsStr, directory: bool) -> io::Result<File> {
 /// Opens one existing child by native directory handle with rights to update
 /// its DACL.
 pub(crate) fn open_existing_entry_at(parent: &File, name: &OsStr, directory: bool) -> io::Result<File> {
+    open_existing_entry_at_with_sync(parent, name, directory, false)
+}
+
+pub(crate) fn open_existing_entry_at_for_sync(parent: &File, name: &OsStr, directory: bool) -> io::Result<File> {
+    open_existing_entry_at_with_sync(parent, name, directory, true)
+}
+
+fn open_existing_entry_at_with_sync(parent: &File, name: &OsStr, directory: bool, for_sync: bool) -> io::Result<File> {
     let mut name: Vec<u16> = name.encode_wide().collect();
     if name.is_empty()
         || name.contains(&0)
@@ -410,6 +418,7 @@ pub(crate) fn open_existing_entry_at(parent: &File, name: &OsStr, directory: boo
         | SYNCHRONIZE
         | FILE_READ_ATTRIBUTES
         | FILE_WRITE_ATTRIBUTES
+        | if for_sync && !directory { FILE_WRITE_DATA } else { 0 }
         | if directory {
             FILE_LIST_DIRECTORY | FILE_TRAVERSE
         } else {

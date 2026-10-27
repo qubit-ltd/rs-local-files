@@ -233,8 +233,12 @@ fn create_private_host_temp_file(
                 error,
             )
         })?;
-        let maximum = options.max_attempts().unwrap_or(128);
-        for _ in 0..maximum {
+        let mut attempts = 0_usize;
+        loop {
+            if options.max_attempts().is_some_and(|limit| attempts >= limit) {
+                break;
+            }
+            attempts = attempts.saturating_add(1);
             let recovery_parent = reserve_private_parent(&parent_handle).map_err(|error| {
                 LocalFileError::from_io(
                     LocalFileOperation::CreateTempFile,
@@ -252,7 +256,18 @@ fn create_private_host_temp_file(
                 )
             })?;
             let sandbox_os = std::ffi::OsStr::new(&sandbox_name);
-            let sandbox_handle = match private_create_directory_at(&parent_handle, sandbox_os) {
+            #[cfg(feature = "test-support")]
+            let sandbox_result = if crate::local::take_repeated_test_support("temp-private-sandbox-collision") {
+                Err(crate::temp::types::NativePrivateCreateError {
+                    source: io::Error::from(io::ErrorKind::AlreadyExists),
+                    retained: None,
+                })
+            } else {
+                private_create_directory_at(&parent_handle, sandbox_os)
+            };
+            #[cfg(not(feature = "test-support"))]
+            let sandbox_result = private_create_directory_at(&parent_handle, sandbox_os);
+            let sandbox_handle = match sandbox_result {
                 Ok(handle) => handle,
                 Err(error) if error.retained.is_none() && error.source.kind() == io::ErrorKind::AlreadyExists => {
                     continue;
@@ -393,8 +408,12 @@ fn create_private_host_temp_directory(
                 error,
             )
         })?;
-        let maximum = options.max_attempts().unwrap_or(128);
-        for _ in 0..maximum {
+        let mut attempts = 0_usize;
+        loop {
+            if options.max_attempts().is_some_and(|limit| attempts >= limit) {
+                break;
+            }
+            attempts = attempts.saturating_add(1);
             let recovery_parent = reserve_private_parent(&parent_handle).map_err(|error| {
                 LocalFileError::from_io(
                     LocalFileOperation::CreateTempDirectory,
@@ -412,7 +431,18 @@ fn create_private_host_temp_directory(
                 )
             })?;
             let sandbox = parent.join(&sandbox_name);
-            let sandbox_handle = match private_create_directory_at(&parent_handle, OsStr::new(&sandbox_name)) {
+            #[cfg(feature = "test-support")]
+            let sandbox_result = if crate::local::take_repeated_test_support("temp-private-sandbox-collision") {
+                Err(crate::temp::types::NativePrivateCreateError {
+                    source: io::Error::from(io::ErrorKind::AlreadyExists),
+                    retained: None,
+                })
+            } else {
+                private_create_directory_at(&parent_handle, OsStr::new(&sandbox_name))
+            };
+            #[cfg(not(feature = "test-support"))]
+            let sandbox_result = private_create_directory_at(&parent_handle, OsStr::new(&sandbox_name));
+            let sandbox_handle = match sandbox_result {
                 Ok(handle) => handle,
                 Err(error) if error.retained.is_none() && error.source.kind() == io::ErrorKind::AlreadyExists => {
                     continue;
@@ -459,7 +489,8 @@ fn create_private_host_temp_directory(
                     }
                 };
             #[cfg(feature = "test-support")]
-            let target_created = if crate::local::take_test_support("temp-private-directory-target-collision") {
+            let target_created = if crate::local::take_repeated_test_support("temp-private-directory-target-collision")
+            {
                 Err(crate::temp::types::NativePrivateCreateError {
                     source: io::Error::from(io::ErrorKind::AlreadyExists),
                     retained: None,
@@ -545,7 +576,7 @@ fn open_host_directory_handle(path: &Path) -> io::Result<File> {
 #[cfg(any(unix, windows))]
 fn private_create_file_at(parent: &File, name: &OsStr) -> Result<File, crate::temp::types::NativePrivateCreateError> {
     #[cfg(feature = "test-support")]
-    if crate::local::take_test_support("temp-private-file-collision") {
+    if crate::local::take_repeated_test_support("temp-private-file-collision") {
         return Err(crate::temp::types::NativePrivateCreateError {
             source: io::Error::from(io::ErrorKind::AlreadyExists),
             retained: None,
@@ -567,7 +598,7 @@ fn private_create_directory_at(
     name: &OsStr,
 ) -> Result<File, crate::temp::types::NativePrivateCreateError> {
     #[cfg(feature = "test-support")]
-    if crate::local::take_test_support("temp-private-directory-collision") {
+    if crate::local::take_repeated_test_support("temp-private-directory-collision") {
         return Err(crate::temp::types::NativePrivateCreateError {
             source: io::Error::from(io::ErrorKind::AlreadyExists),
             retained: None,

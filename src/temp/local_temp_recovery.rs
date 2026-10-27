@@ -151,7 +151,7 @@ fn cleanup_native_entry(entry: &mut NativePrivateEntry, path: &Path) -> crate::L
             libc::openat(
                 entry.parent.as_raw_fd(),
                 name.as_ptr(),
-                libc::O_RDONLY | libc::O_NOFOLLOW | libc::O_CLOEXEC,
+                libc::O_RDONLY | libc::O_NOFOLLOW | libc::O_CLOEXEC | libc::O_NONBLOCK,
             )
         };
         if named < 0 {

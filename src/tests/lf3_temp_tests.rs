@@ -17,6 +17,146 @@ use crate::options::LocalTempFileOptions;
 use crate::policy::LocalPrivacyRequirement;
 
 #[test]
+#[cfg(feature = "test-support")]
+fn lf_revision_private_attempt_budget_is_optional_and_bounded() {
+    for rooted in [false, true] {
+        for directory in [false, true] {
+            for collision in [
+                "temp-private-sandbox-collision",
+                if directory {
+                    "temp-private-directory-target-collision"
+                } else {
+                    "temp-private-file-collision"
+                },
+            ] {
+                let fixture = tempfile::tempdir().expect("fixture");
+                let host = LocalFileSystem::host().expect("Host");
+                let rooted_fs = LocalFileSystem::rooted(fixture.path()).expect("Rooted");
+                for limit in [None, Some(128)] {
+                    let guard = crate::local::install_test_fault_repeated(collision, 129).expect("bounded fault");
+                    let result = match (rooted, directory, limit) {
+                        (false, false, None) => host
+                            .create_temp_file_with_options(
+                                &LocalTempFileOptions::new()
+                                    .with_parent(fixture.path())
+                                    .with_privacy(LocalPrivacyRequirement::Required),
+                            )
+                            .map(|_| ()),
+                        (false, false, Some(n)) => host
+                            .create_temp_file_with_options(
+                                &LocalTempFileOptions::new()
+                                    .with_parent(fixture.path())
+                                    .with_privacy(LocalPrivacyRequirement::Required)
+                                    .with_max_attempts(n),
+                            )
+                            .map(|_| ()),
+                        (true, false, None) => rooted_fs
+                            .create_temp_file_with_options(
+                                &LocalTempFileOptions::new().with_privacy(LocalPrivacyRequirement::Required),
+                            )
+                            .map(|_| ()),
+                        (true, false, Some(n)) => rooted_fs
+                            .create_temp_file_with_options(
+                                &LocalTempFileOptions::new()
+                                    .with_privacy(LocalPrivacyRequirement::Required)
+                                    .with_max_attempts(n),
+                            )
+                            .map(|_| ()),
+                        (false, true, None) => host
+                            .create_temp_directory_with_options(
+                                &LocalTempDirectoryOptions::new()
+                                    .with_parent(fixture.path())
+                                    .with_privacy(LocalPrivacyRequirement::Required),
+                            )
+                            .map(|_| ()),
+                        (false, true, Some(n)) => host
+                            .create_temp_directory_with_options(
+                                &LocalTempDirectoryOptions::new()
+                                    .with_parent(fixture.path())
+                                    .with_privacy(LocalPrivacyRequirement::Required)
+                                    .with_max_attempts(n),
+                            )
+                            .map(|_| ()),
+                        (true, true, None) => rooted_fs
+                            .create_temp_directory_with_options(
+                                &LocalTempDirectoryOptions::new().with_privacy(LocalPrivacyRequirement::Required),
+                            )
+                            .map(|_| ()),
+                        (true, true, Some(n)) => rooted_fs
+                            .create_temp_directory_with_options(
+                                &LocalTempDirectoryOptions::new()
+                                    .with_privacy(LocalPrivacyRequirement::Required)
+                                    .with_max_attempts(n),
+                            )
+                            .map(|_| ()),
+                    };
+                    assert_eq!(
+                        crate::local::test_fault_occurrence_count(),
+                        if limit.is_none() { 130 } else { 128 },
+                        "collision attempt count"
+                    );
+                    drop(guard);
+                    match (limit, result) {
+                        (None, Ok(())) => (),
+                        (Some(128), Err(_)) => assert_eq!(fs::read_dir(fixture.path()).expect("entries").count(), 0),
+                        (None, Err(error)) => panic!("unbounded budget must recover after 129 faults: {error}"),
+                        (Some(128), Ok(_)) => panic!("finite budget must exhaust after 128 attempts"),
+                        _ => unreachable!(),
+                    }
+                    assert_eq!(fs::read_dir(fixture.path()).expect("no sandbox residue").count(), 0);
+                }
+                for limit in [0, 1] {
+                    let guard = crate::local::install_test_fault_repeated(collision, 129).expect("bounded fault");
+                    let result = if rooted {
+                        if directory {
+                            rooted_fs
+                                .create_temp_directory_with_options(
+                                    &LocalTempDirectoryOptions::new()
+                                        .with_privacy(LocalPrivacyRequirement::Required)
+                                        .with_max_attempts(limit),
+                                )
+                                .map(|_| ())
+                        } else {
+                            rooted_fs
+                                .create_temp_file_with_options(
+                                    &LocalTempFileOptions::new()
+                                        .with_privacy(LocalPrivacyRequirement::Required)
+                                        .with_max_attempts(limit),
+                                )
+                                .map(|_| ())
+                        }
+                    } else if directory {
+                        host.create_temp_directory_with_options(
+                            &LocalTempDirectoryOptions::new()
+                                .with_parent(fixture.path())
+                                .with_privacy(LocalPrivacyRequirement::Required)
+                                .with_max_attempts(limit),
+                        )
+                        .map(|_| ())
+                    } else {
+                        host.create_temp_file_with_options(
+                            &LocalTempFileOptions::new()
+                                .with_parent(fixture.path())
+                                .with_privacy(LocalPrivacyRequirement::Required)
+                                .with_max_attempts(limit),
+                        )
+                        .map(|_| ())
+                    };
+                    assert_eq!(
+                        crate::local::test_fault_occurrence_count(),
+                        limit,
+                        "boundary attempt count"
+                    );
+                    drop(guard);
+                    assert!(result.is_err(), "limit {limit} must fail");
+                    assert_eq!(fs::read_dir(fixture.path()).expect("no sandbox residue").count(), 0);
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn lf_review_stage_cleanup_retains_creation_limit() {
     use std::path::Path;
 
@@ -639,6 +779,249 @@ fn lf3_temp_recovery_unknown_or_replaced_entries_are_not_removed() {
     );
     directory_recovery.cleanup().expect("remove retained directory");
     assert!(!directory_path.exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn lf_revision_recovery_fifo_original_cleanup_and_symlink_are_safe() {
+    use std::ffi::OsString;
+    use std::fs::File;
+    use std::os::unix::fs::symlink;
+
+    let fixture = tempfile::tempdir().expect("fixture");
+    let parent = File::open(fixture.path()).expect("parent handle");
+    let original_path = fixture.path().join("original");
+    fs::write(&original_path, b"original").expect("original");
+    let original = OpenOptions::new()
+        .read(true)
+        .open(&original_path)
+        .expect("open original");
+    let identity = crate::observation::query::query_observation(
+        &original,
+        crate::observation::LocalObservationRequirement::Required,
+    )
+    .expect("identity")
+    .identity()
+    .cloned();
+    let mut recovery = crate::LocalTempRecovery::from_native(
+        original_path.clone(),
+        crate::temp::types::NativePrivateEntry {
+            parent: parent.try_clone().expect("clone parent"),
+            name: OsString::from("original"),
+            file: Some(original),
+            identity,
+            directory: false,
+        },
+    );
+    recovery.cleanup().expect("original entry cleanup succeeds");
+    assert!(!original_path.exists());
+
+    let target = fixture.path().join("target");
+    let link = fixture.path().join("link");
+    fs::write(&target, b"target").expect("link target");
+    fs::write(&link, b"original link name").expect("link original name");
+    let original_link_entry = OpenOptions::new().read(true).open(&link).expect("open original");
+    let identity = crate::observation::query::query_observation(
+        &original_link_entry,
+        crate::observation::LocalObservationRequirement::Required,
+    )
+    .expect("identity")
+    .identity()
+    .cloned();
+    fs::remove_file(&link).expect("remove original link name");
+    symlink(&target, &link).expect("replacement symlink");
+    let mut recovery = crate::LocalTempRecovery::from_native(
+        link.clone(),
+        crate::temp::types::NativePrivateEntry {
+            parent,
+            name: OsString::from("link"),
+            file: Some(original_link_entry),
+            identity,
+            directory: false,
+        },
+    );
+    assert!(recovery.cleanup().is_err());
+    assert!(
+        fs::symlink_metadata(&link)
+            .expect("replacement link remains")
+            .file_type()
+            .is_symlink()
+    );
+    assert_eq!(fs::read(&target).expect("target remains"), b"target");
+}
+
+#[cfg(unix)]
+#[test]
+fn lf_revision_recovery_fifo_explicit_cleanup_does_not_block() {
+    use std::process::Command;
+    use std::thread;
+    use std::time::Duration;
+    use std::time::Instant;
+
+    const CHILD: &str = "LF_REVISION_FIFO_CHILD";
+    const FIXTURE: &str = "LF_REVISION_FIFO_FIXTURE";
+    const MODE: &str = "LF_REVISION_FIFO_MODE";
+    const SENTINEL: &str = "LF_REVISION_FIFO_SENTINEL";
+    const ENTERED: &str = "LF_REVISION_FIFO_ENTERED";
+
+    if std::env::var_os(CHILD).is_some() {
+        recovery_fifo_child(FIXTURE, MODE, SENTINEL, "explicit");
+        return;
+    }
+
+    let fixture = tempfile::tempdir().expect("fixture");
+    let sentinel = fixture.path().join("returned");
+    let mut child = Command::new(std::env::current_exe().expect("test executable"))
+        .args([
+            "--exact",
+            "tests::lf3_temp_tests::lf_revision_recovery_fifo_explicit_cleanup_does_not_block",
+            "--nocapture",
+        ])
+        .env(CHILD, "1")
+        .env(FIXTURE, fixture.path())
+        .env(MODE, "explicit")
+        .env(SENTINEL, &sentinel)
+        .env(ENTERED, fixture.path().join("entered"))
+        .spawn()
+        .expect("spawn isolated cleanup child");
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let status = loop {
+        if let Some(status) = child.try_wait().expect("poll child") {
+            break Some(status);
+        }
+        if Instant::now() >= deadline {
+            child.kill().expect("kill timed out child");
+            child.wait().expect("reap timed out child");
+            break None;
+        }
+        thread::sleep(Duration::from_millis(10));
+    };
+    assert!(
+        fixture.path().join("entered").exists(),
+        "child never reached explicit cleanup call"
+    );
+    assert!(
+        sentinel.exists(),
+        "child never returned from explicit cleanup; status={status:?}"
+    );
+    assert!(status.expect("child exited").success(), "child cleanup failed");
+    assert!(fixture.path().join("entry").exists(), "replacement FIFO must remain");
+}
+
+#[cfg(unix)]
+#[test]
+fn lf_revision_recovery_fifo_drop_does_not_block() {
+    use std::process::Command;
+    use std::thread;
+    use std::time::Duration;
+    use std::time::Instant;
+
+    const CHILD: &str = "LF_REVISION_FIFO_CHILD";
+    const FIXTURE: &str = "LF_REVISION_FIFO_FIXTURE";
+    const MODE: &str = "LF_REVISION_FIFO_MODE";
+    const SENTINEL: &str = "LF_REVISION_FIFO_SENTINEL";
+    const ENTERED: &str = "LF_REVISION_FIFO_ENTERED";
+
+    if std::env::var_os(CHILD).is_some() {
+        recovery_fifo_child(FIXTURE, MODE, SENTINEL, "drop");
+        return;
+    }
+
+    let fixture = tempfile::tempdir().expect("fixture");
+    let sentinel = fixture.path().join("returned");
+    let mut child = Command::new(std::env::current_exe().expect("test executable"))
+        .args([
+            "--exact",
+            "tests::lf3_temp_tests::lf_revision_recovery_fifo_drop_does_not_block",
+            "--nocapture",
+        ])
+        .env(CHILD, "1")
+        .env(FIXTURE, fixture.path())
+        .env(MODE, "drop")
+        .env(SENTINEL, &sentinel)
+        .env(ENTERED, fixture.path().join("entered"))
+        .spawn()
+        .expect("spawn isolated Drop child");
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let status = loop {
+        if let Some(status) = child.try_wait().expect("poll child") {
+            break Some(status);
+        }
+        if Instant::now() >= deadline {
+            child.kill().expect("kill timed out child");
+            child.wait().expect("reap timed out child");
+            break None;
+        }
+        thread::sleep(Duration::from_millis(10));
+    };
+    assert!(fixture.path().join("entered").exists(), "child never reached Drop call");
+    assert!(sentinel.exists(), "child never returned from Drop; status={status:?}");
+    assert!(status.expect("child exited").success(), "child Drop failed");
+    assert!(fixture.path().join("entry").exists(), "replacement FIFO must remain");
+}
+
+#[cfg(unix)]
+fn recovery_fifo_child(child_env: &str, mode_env: &str, sentinel_env: &str, expected_mode: &str) {
+    use std::ffi::OsString;
+    use std::fs::File;
+    use std::os::fd::AsRawFd;
+    use std::os::unix::ffi::OsStrExt;
+
+    if std::env::var(mode_env).as_deref() != Ok(expected_mode) {
+        return;
+    }
+    assert!(
+        std::env::var_os(child_env).is_some(),
+        "child sentinel reached test body"
+    );
+    let fixture = std::path::PathBuf::from(std::env::var_os("LF_REVISION_FIFO_FIXTURE").expect("fixture path"));
+    let path = fixture.join("entry");
+    let parent = File::open(&fixture).expect("open parent directory");
+    fs::write(&path, b"original").expect("create original");
+    let original = OpenOptions::new().read(true).open(&path).expect("open original");
+    let identity = crate::observation::query::query_observation(
+        &original,
+        crate::observation::LocalObservationRequirement::Required,
+    )
+    .expect("original identity")
+    .identity()
+    .cloned();
+    fs::remove_file(&path).expect("remove original namespace entry");
+    let name = std::ffi::CString::new(path.file_name().expect("name").as_bytes()).expect("CString");
+    assert_eq!(
+        unsafe { libc::mkfifoat(parent.as_raw_fd(), name.as_ptr(), 0o600) },
+        0,
+        "create replacement FIFO"
+    );
+    let mut recovery = crate::LocalTempRecovery::from_native(
+        path.clone(),
+        crate::temp::types::NativePrivateEntry {
+            parent,
+            name: OsString::from("entry"),
+            file: Some(original),
+            identity,
+            directory: false,
+        },
+    );
+    if expected_mode == "explicit" {
+        fs::write(
+            std::env::var_os("LF_REVISION_FIFO_ENTERED").expect("entered marker"),
+            b"entered",
+        )
+        .expect("write pre-cleanup sentinel");
+        assert!(recovery.cleanup().is_err(), "replaced FIFO must fail identity check");
+        drop(recovery);
+    } else {
+        fs::write(
+            std::env::var_os("LF_REVISION_FIFO_ENTERED").expect("entered marker"),
+            b"entered",
+        )
+        .expect("write pre-Drop sentinel");
+        drop(recovery);
+    }
+    fs::write(std::env::var_os(sentinel_env).expect("sentinel path"), b"returned")
+        .expect("write post-operation sentinel");
+    assert!(path.exists(), "replacement FIFO remains after operation");
 }
 
 #[cfg(windows)]
