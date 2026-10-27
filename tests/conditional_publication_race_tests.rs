@@ -51,6 +51,7 @@ use qubit_local_files::test_support::TestConditionalHooks;
 use qubit_local_files::test_support::TestConditionalPoint;
 use qubit_local_files::test_support::TestFaultPlan;
 use qubit_local_files::test_support::TestFaultPoint;
+#[cfg(unix)]
 use sha2::Digest;
 use sha2::Sha256;
 use support::conditional_temp_directory::tempdir;

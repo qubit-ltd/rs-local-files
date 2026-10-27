@@ -22,7 +22,7 @@ use qubit_local_files::error::LocalFileOperation;
 use qubit_local_files::error::LocalPersistErrorParts;
 use qubit_local_files::options::LocalPersistOptions;
 use qubit_local_files::options::LocalTempDirectoryOptions;
-#[cfg(feature = "test-support")]
+#[cfg(all(unix, feature = "test-support"))]
 use qubit_local_files::outcome::LocalPersistCleanupState;
 use qubit_local_files::outcome::LocalPersistFailureState;
 #[cfg(feature = "test-support")]

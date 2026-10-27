@@ -15,7 +15,7 @@ use qubit_io::Output;
 use qubit_local_files::LocalFileSystem;
 use qubit_local_files::options::LocalWriteMode;
 use qubit_local_files::options::LocalWriteOptions;
-#[cfg(feature = "test-support")]
+#[cfg(all(unix, feature = "test-support"))]
 use qubit_local_files::test_support::install_test_fault;
 
 #[test]

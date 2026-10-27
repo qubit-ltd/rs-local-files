@@ -41,6 +41,7 @@ mod conditional {
     }
 }
 
+#[cfg(unix)]
 use std::error::Error;
 
 use qubit_io::Output;

@@ -46,6 +46,7 @@ use qubit_local_files::LocalFileSystem;
 use qubit_local_files::options::LocalWriteMode;
 use qubit_local_files::options::LocalWriteOptions;
 use qubit_local_files::options::LocalWritePrecondition;
+#[cfg(unix)]
 use qubit_local_files::outcome::LocalWriterState;
 use qubit_local_files::test_support::TestConditionalHooks;
 use qubit_local_files::test_support::TestConditionalPoint;

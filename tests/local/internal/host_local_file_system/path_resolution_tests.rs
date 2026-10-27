@@ -11,6 +11,7 @@ use std::fs;
 #[cfg(any(unix, windows))]
 use std::path::Path;
 
+#[cfg(unix)]
 use qubit_io::Streams;
 #[cfg(any(unix, windows))]
 use qubit_local_files::LocalFileSystem;

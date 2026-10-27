@@ -10,6 +10,7 @@ use std::fs;
 use std::path::Path;
 
 use qubit_io::Output;
+#[cfg(not(windows))]
 use qubit_io::Streams;
 use qubit_local_files::LocalFileSystem;
 use qubit_local_files::error::LocalFileErrorKind;

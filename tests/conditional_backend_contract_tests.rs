@@ -15,6 +15,7 @@ use std::path::Path;
 use qubit_io::Output;
 use qubit_io::Streams;
 use qubit_local_files::LocalFileSystem;
+#[cfg(unix)]
 use qubit_local_files::options::LocalReadOptions;
 use qubit_local_files::options::LocalWriteMode;
 use qubit_local_files::options::LocalWriteOptions;
