@@ -11,6 +11,7 @@ use std::io;
 use super::ConditionalEntry;
 #[cfg(any(test, all(feature = "digest", feature = "test-support")))]
 use super::ConditionalHooks;
+use crate::LocalFileError;
 use crate::outcome::LocalConditionalPublicationState;
 use crate::outcome::LocalWritePublicationMethod;
 
@@ -126,6 +127,10 @@ pub(crate) trait ConditionalBackend: qubit_io::Output<Item = u8> {
     /// Transfers retained recovery entries without resolving them by path
     /// again.
     fn take_recovery_entries(&mut self) -> Vec<ConditionalEntry>;
+    /// Transfers cleanup errors that do not correspond to retained files.
+    fn take_cleanup_errors(&mut self) -> Vec<LocalFileError> {
+        Vec::new()
+    }
     /// Installs deterministic test hooks for backend checkpoints.
     #[cfg(any(test, all(feature = "digest", feature = "test-support")))]
     fn set_hooks(&mut self, hooks: ConditionalHooks);

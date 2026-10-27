@@ -168,6 +168,7 @@ pub(crate) struct WindowsConditionalBackend {
     hooks: ConditionalHooks,
     recovery_entries: Vec<ConditionalEntry>,
     recovery_containers: Vec<PathBuf>,
+    cleanup_errors: Vec<crate::LocalFileError>,
 }
 
 impl WindowsConditionalBackend {
@@ -204,6 +205,7 @@ impl WindowsConditionalBackend {
             hooks: ConditionalHooks::default(),
             recovery_entries: Vec::new(),
             recovery_containers: Vec::new(),
+            cleanup_errors: Vec::new(),
         })
     }
 
@@ -804,8 +806,16 @@ impl ConditionalBackend for WindowsConditionalBackend {
         if let Some(parent) = entry.namespace_path().parent()
             && self.recovery_containers.iter().any(|container| container == parent)
         {
-            self.namespace.remove_container(parent)?;
-            self.recovery_containers.retain(|container| container != parent);
+            if let Err(source) = self.namespace.remove_container(parent) {
+                self.cleanup_errors.push(crate::LocalFileError::from_io(
+                    crate::LocalFileOperation::Cleanup,
+                    Some(parent.to_path_buf()),
+                    None,
+                    source,
+                ));
+            } else {
+                self.recovery_containers.retain(|container| container != parent);
+            }
         }
         Ok(())
     }
@@ -828,6 +838,9 @@ impl ConditionalBackend for WindowsConditionalBackend {
             self.retain_original_candidate();
         }
         std::mem::take(&mut self.recovery_entries)
+    }
+    fn take_cleanup_errors(&mut self) -> Vec<crate::LocalFileError> {
+        std::mem::take(&mut self.cleanup_errors)
     }
     #[cfg(any(test, all(feature = "digest", feature = "test-support")))]
     fn set_hooks(&mut self, hooks: ConditionalHooks) {

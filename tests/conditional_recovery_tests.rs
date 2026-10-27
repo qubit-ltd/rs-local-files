@@ -73,6 +73,129 @@ fn windows_file_identity(path: &std::path::Path) -> (u32, u64) {
 }
 
 #[cfg(windows)]
+fn find_windows_backup_file(parent: &std::path::Path) -> std::io::Result<(std::path::PathBuf, std::path::PathBuf)> {
+    fn visit(directory: &std::path::Path) -> std::io::Result<Option<(std::path::PathBuf, std::path::PathBuf)>> {
+        for entry in std::fs::read_dir(directory)? {
+            let entry = entry?;
+            let path = entry.path();
+            if entry.file_type()?.is_dir() {
+                if entry.file_name().to_string_lossy().starts_with(".qubit-conditional-recovery-") {
+                    for child in std::fs::read_dir(&path)? {
+                        let child = child?;
+                        if child.file_type()?.is_file() && std::fs::read(child.path())?.as_slice() == b"A" {
+                            return Ok(Some((path, child.path())));
+                        }
+                    }
+                }
+                if let Some(found) = visit(&path)? {
+                    return Ok(Some(found));
+                }
+            }
+        }
+        Ok(None)
+    }
+
+    visit(parent)?.ok_or_else(|| {
+        std::io::Error::new(std::io::ErrorKind::NotFound, "Windows backup container with A was not found")
+    })
+}
+
+#[cfg(windows)]
+#[test]
+fn windows_cleanup_removed_file_reports_container_residual() {
+    use std::sync::Arc;
+    use std::sync::Mutex;
+
+    let directory = support::conditional_temp_directory::tempdir().expect("fixture directory");
+    let path = directory.path().join("target");
+    std::fs::write(&path, b"A").expect("old target should be written");
+    let backup = Arc::new(Mutex::new(None));
+    let hook_backup = Arc::clone(&backup);
+    let parent = directory.path().to_path_buf();
+    let filesystem = conditional::host().with_conditional_test_hooks(TestConditionalHooks::once(
+        TestConditionalPoint::BeforeCleanupOld,
+        move || {
+            let (backup_container, backup_file) = find_windows_backup_file(&parent)?;
+            std::fs::write(backup_container.join("marker"), b"leave this entry").map(|()| {
+                *hook_backup.lock().expect("backup lock") = Some((backup_container, backup_file));
+            })
+        },
+    ));
+    let mut writer = filesystem
+        .open_conditional_writer::<Sha256>(
+            &path,
+            LocalWritePrecondition::Content(Sha256::digest(b"A")),
+            &LocalWriteOptions::new(LocalWriteMode::CreateOrReplace),
+        )
+        .expect("conditional writer should open");
+    writer.write_fully(b"B").expect("candidate should be written");
+    let outcome = writer.commit().expect("publication should succeed");
+
+    let (container, backup_file) = backup.lock().expect("backup lock").clone().expect("backup container");
+    assert_eq!(std::fs::read(&path).expect("installed target"), b"B");
+    assert_eq!(outcome.digest(), &Sha256::digest(b"B"));
+    assert!(outcome.cleanup_errors().iter().any(|error| error.path() == Some(container.as_path())));
+    assert!(outcome.retained_files().iter().all(|file| file.namespace_path() != backup_file.as_path()));
+    assert_eq!(std::fs::read(container.join("marker")).expect("marker remains"), b"leave this entry");
+}
+
+#[cfg(windows)]
+#[test]
+fn windows_cleanup_failed_file_remains_readable() {
+    use std::fs::OpenOptions;
+    use std::os::windows::fs::OpenOptionsExt;
+    use std::sync::Arc;
+    use std::sync::Mutex;
+
+    use qubit_local_files::recovery::LocalRecoveryFileRole;
+    use windows_sys::Win32::Storage::FileSystem::FILE_SHARE_READ;
+    use windows_sys::Win32::Storage::FileSystem::FILE_SHARE_WRITE;
+
+    let directory = support::conditional_temp_directory::tempdir().expect("fixture directory");
+    let path = directory.path().join("target");
+    std::fs::write(&path, b"A").expect("old target should be written");
+    let held_file = Arc::new(Mutex::new(None));
+    let hook_file = Arc::clone(&held_file);
+    let parent = directory.path().to_path_buf();
+    let filesystem = conditional::host().with_conditional_test_hooks(TestConditionalHooks::once(
+        TestConditionalPoint::BeforeCleanupOld,
+        move || {
+            let (_, backup_file) = find_windows_backup_file(&parent)?;
+            let file = OpenOptions::new()
+                .read(true)
+                .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE)
+                .open(backup_file)?;
+            *hook_file.lock().expect("file lock") = Some(file);
+            Ok(())
+        },
+    ));
+    let mut writer = filesystem
+        .open_conditional_writer::<Sha256>(
+            &path,
+            LocalWritePrecondition::Content(Sha256::digest(b"A")),
+            &LocalWriteOptions::new(LocalWriteMode::CreateOrReplace),
+        )
+        .expect("conditional writer should open");
+    writer.write_fully(b"B").expect("candidate should be written");
+    let outcome = writer.commit().expect("publication should succeed");
+    drop(
+        held_file
+            .lock()
+            .expect("file lock")
+            .take()
+            .expect("hook should hold the backup without DELETE sharing"),
+    );
+
+    let retained = outcome
+        .retained_files()
+        .iter()
+        .find(|file| file.role() == LocalRecoveryFileRole::Displaced)
+        .expect("failed file deletion should retain old file");
+    assert!(outcome.cleanup_errors().iter().any(|error| error.path() == Some(retained.namespace_path())));
+    assert_eq!(conditional::read_recovery(retained), b"A");
+}
+
+#[cfg(windows)]
 fn mutate_displaced_copy(parent: &std::path::Path, installed: &std::path::Path) -> std::io::Result<()> {
     fn visit(directory: &std::path::Path, installed: &std::path::Path) -> std::io::Result<bool> {
         for entry in std::fs::read_dir(directory)? {

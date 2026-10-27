@@ -47,6 +47,7 @@ pub(super) fn cleanup_entries<B: ConditionalBackend>(
             retained.push(entry.into_recovery(role));
         }
     }
+    errors.extend(backend.take_cleanup_errors());
     (errors, retained)
 }
 //    Copyright (c) 2025 - 2026 Haixing Hu.
