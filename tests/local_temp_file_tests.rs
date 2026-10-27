@@ -451,6 +451,48 @@ fn windows_sealed_cleanup_required_private_rooted() {
     assert!(!sandbox.exists(), "sealed file sandbox should be removed");
 }
 
+/// Verifies a sealed Rooted owner can retry sandbox cleanup after its file is
+/// removed.
+#[cfg(all(windows, feature = "test-support"))]
+#[test]
+fn windows_sealed_cleanup_retries_sandbox_removal() {
+    run_in_test_fault_process(
+        "windows_sealed_cleanup_retries_sandbox_removal",
+        "temp-file-sandbox-remove",
+        || {
+            let root = tempdir().expect("Rooted fixture should be created");
+            let filesystem = LocalFileSystem::rooted(root.path()).expect("Rooted filesystem should open");
+            let mut temporary = filesystem
+                .create_temp_file_with_options(
+                    &LocalTempFileOptions::new()
+                        .with_parent(Path::new("/"))
+                        .with_privacy(LocalPrivacyRequirement::PlatformDefault),
+                )
+                .expect("PlatformDefault Rooted temporary file should be created");
+            let virtual_path = temporary.path().to_path_buf();
+            let native_path = rooted_host_path(root.path(), &virtual_path);
+            Output::write_fully(&mut temporary, b"sealed payload").expect("Rooted temporary file should accept bytes");
+            let mut sealed = temporary
+                .seal_with_options(&LocalSealOptions::new())
+                .expect("Rooted temporary file should seal");
+            let sandbox = native_path
+                .parent()
+                .expect("Rooted temporary file should have a sandbox")
+                .to_path_buf();
+
+            let error = sealed
+                .cleanup()
+                .expect_err("the injected sandbox cleanup failure should be reported");
+            assert_eq!(LocalFileOperation::Cleanup, error.operation());
+            assert!(!native_path.exists(), "owned file deletion should have completed");
+            assert!(sandbox.exists(), "failed sandbox cleanup should remain retryable");
+
+            sealed.cleanup().expect("sandbox cleanup should be retryable");
+            assert!(!sandbox.exists(), "retry should remove the sandbox");
+        },
+    );
+}
+
 /// Verifies dropping a sealed Rooted owner removes its owned read-only entry.
 #[cfg(windows)]
 #[test]
