@@ -65,7 +65,44 @@ const SYMLINK_REPARSE_FIXED_DATA_LENGTH: usize = 12;
 pub(crate) fn read_rooted_link(root: &File, _diagnostic_root: &Path, path: &LocalRelativePath) -> Result<PathBuf> {
     let link = open_link(root, path, GENERIC_READ | FILE_READ_ATTRIBUTES | SYNCHRONIZE)?;
     let buffer = read_reparse_buffer(&link)?;
-    parse_symbolic_link_target(&buffer)
+    parse_symbolic_link_target(buffer.as_bytes())
+}
+
+/// Result of reading a symbolic-link target under a byte limit.
+#[derive(Debug)]
+pub(crate) enum RootedLinkTargetRead {
+    /// The target fits within the requested byte limit.
+    Target(RootedLinkTarget),
+    /// The target exceeds the limit; the value is its bounded observed byte length.
+    Exceeded(usize),
+}
+
+/// Bounded raw substitute target and reparse flags, before namespace normalization.
+#[derive(Debug)]
+pub(crate) struct RootedLinkTarget {
+    pub(crate) raw_path: PathBuf,
+    pub(crate) flags: u32,
+}
+
+/// Reads one final symbolic-link target, constructing a `PathBuf` only when it fits.
+pub(crate) fn read_rooted_link_limited(
+    root: &File,
+    _diagnostic_root: &Path,
+    path: &LocalRelativePath,
+    maximum_bytes: Option<usize>,
+) -> Result<RootedLinkTargetRead> {
+    let link = open_link(root, path, GENERIC_READ | FILE_READ_ATTRIBUTES | SYNCHRONIZE)?;
+    let buffer = read_reparse_buffer(&link)?;
+    parse_limited_symbolic_link_target(buffer.as_bytes(), maximum_bytes)
+}
+
+/// Normalizes a bounded target only after policy has inspected its raw spelling.
+pub(crate) fn normalize_rooted_link_target(raw_path: &Path, flags: u32) -> Result<PathBuf> {
+    use std::os::windows::ffi::OsStrExt;
+
+    let units = raw_path.as_os_str().encode_wide().collect();
+    let normalized = normalize_symbolic_link_target(units, flags)?;
+    Ok(PathBuf::from(OsString::from_wide(&normalized)))
 }
 
 /// Creates one final symbolic link relative to its already-opened parent.
@@ -189,7 +226,21 @@ fn open_link(root: &File, path: &LocalRelativePath, access: u32) -> Result<File>
 
 /// Retrieves the opaque reparse record for an already-opened link handle.
 /// Returns a native query error or `InvalidData` for an oversized response.
-fn read_reparse_buffer(link: &File) -> Result<Vec<u8>> {
+struct ReparseBuffer {
+    storage: Vec<usize>,
+    length: usize,
+}
+
+impl ReparseBuffer {
+    fn as_bytes(&self) -> &[u8] {
+        // SAFETY: storage is initialized, aligned native workspace; `length`
+        // was checked against MAXIMUM_REPARSE_DATA_BUFFER_SIZE before this
+        // view was constructed, and DeviceIoControl wrote that many bytes.
+        unsafe { std::slice::from_raw_parts(self.storage.as_ptr().cast::<u8>(), self.length) }
+    }
+}
+
+fn read_reparse_buffer(link: &File) -> Result<ReparseBuffer> {
     let mut storage = vec![0_usize; (MAXIMUM_REPARSE_DATA_BUFFER_SIZE as usize).div_ceil(size_of::<usize>())];
     let mut returned = 0_u32;
     // SAFETY: `link` remains open, the output allocation is writable for the
@@ -213,9 +264,7 @@ fn read_reparse_buffer(link: &File) -> Result<Vec<u8>> {
     if returned > MAXIMUM_REPARSE_DATA_BUFFER_SIZE as usize {
         return Err(corrupt_reparse("reparse query returned an oversized buffer"));
     }
-    // SAFETY: `storage` contains `returned` initialized bytes written by the
-    // successful synchronous query.
-    Ok(unsafe { std::slice::from_raw_parts(storage.as_ptr().cast::<u8>(), returned) }.to_vec())
+    Ok(ReparseBuffer { storage, length: returned })
 }
 
 /// Installs a complete symbolic-link reparse record on a placeholder handle.
@@ -299,6 +348,37 @@ fn build_symbolic_link_buffer(target: &Path) -> Result<Vec<u8>> {
 /// Returns `Unsupported` for other reparse tags or unsupported absolute
 /// namespaces, and `InvalidData` for malformed names or inconsistent flags.
 fn parse_symbolic_link_target(buffer: &[u8]) -> Result<PathBuf> {
+    let units = parse_symbolic_link_target_units(buffer)?;
+    Ok(PathBuf::from(OsString::from_wide(&units)))
+}
+
+/// Parses and validates the target's UTF-16 units without constructing a path.
+fn parse_symbolic_link_target_units(buffer: &[u8]) -> Result<Vec<u16>> {
+    let (record_length, substitute_offset, substitute_length, flags) = parse_symbolic_link_fields(buffer)?;
+    let units = read_wide_range(buffer, record_length, substitute_offset, substitute_length)?;
+    normalize_symbolic_link_target(units, flags)
+}
+
+/// Checks the raw substitute name limit before copying any target UTF-16 units.
+fn parse_limited_symbolic_link_target(buffer: &[u8], maximum_bytes: Option<usize>) -> Result<RootedLinkTargetRead> {
+    let (record_length, substitute_offset, substitute_length, flags) = parse_symbolic_link_fields(buffer)?;
+    let (start, end) = wide_range(record_length, substitute_offset, substitute_length)?;
+    let target_bytes = end - start;
+    if maximum_bytes.is_some_and(|maximum| target_bytes > maximum) {
+        // Return before read_wide_range copies any target UTF-16 units or a
+        // raw PathBuf is constructed. The record itself remains borrowed from
+        // the fixed native workspace throughout bounded parsing.
+        return Ok(RootedLinkTargetRead::Exceeded(target_bytes));
+    }
+    let units = read_wide_range(buffer, record_length, substitute_offset, substitute_length)?;
+    Ok(RootedLinkTargetRead::Target(RootedLinkTarget {
+        raw_path: PathBuf::from(OsString::from_wide(&units)),
+        flags,
+    }))
+}
+
+/// Reads and validates the fixed fields of a symbolic-link reparse record.
+fn parse_symbolic_link_fields(buffer: &[u8]) -> Result<(usize, usize, usize, u32)> {
     if buffer.len() < SYMLINK_PATH_BUFFER_OFFSET {
         return Err(corrupt_reparse("symbolic-link reparse buffer is truncated"));
     }
@@ -318,7 +398,11 @@ fn parse_symbolic_link_target(buffer: &[u8]) -> Result<PathBuf> {
     let _print_offset = read_u16(buffer, 12)?;
     let _print_length = read_u16(buffer, 14)?;
     let flags = read_u32(buffer, 16)?;
-    let units = read_wide_range(buffer, record_length, substitute_offset, substitute_length)?;
+    Ok((record_length, substitute_offset, substitute_length, flags))
+}
+
+/// Validates target semantics and normalizes supported absolute NT names.
+fn normalize_symbolic_link_target(units: Vec<u16>, flags: u32) -> Result<Vec<u16>> {
     let units = match flags {
         SYMLINK_FLAG_RELATIVE if is_rooted_wide_path(&units) => {
             return Err(corrupt_reparse("relative symbolic-link target is rooted"));
@@ -327,7 +411,7 @@ fn parse_symbolic_link_target(buffer: &[u8]) -> Result<PathBuf> {
         0 => normalize_absolute_substitute_name(&units)?,
         _ => return Err(corrupt_reparse("symbolic-link reparse flags are unsupported")),
     };
-    Ok(PathBuf::from(OsString::from_wide(&units)))
+    Ok(units)
 }
 
 /// Converts supported absolute NT substitute names to equivalent Win32 paths.
@@ -456,6 +540,15 @@ fn read_u32(buffer: &[u8], offset: usize) -> Result<u32> {
 /// `InvalidData` for misalignment, arithmetic overflow, or a range extending
 /// beyond that validated record length.
 fn read_wide_range(buffer: &[u8], record_length: usize, offset: usize, length: usize) -> Result<Vec<u16>> {
+    let (start, end) = wide_range(record_length, offset, length)?;
+    Ok(buffer[start..end]
+        .chunks_exact(size_of::<u16>())
+        .map(|bytes| u16::from_le_bytes([bytes[0], bytes[1]]))
+        .collect())
+}
+
+/// Validates a UTF-16 range and returns its byte bounds without allocating.
+fn wide_range(record_length: usize, offset: usize, length: usize) -> Result<(usize, usize)> {
     if !offset.is_multiple_of(size_of::<u16>()) || !length.is_multiple_of(size_of::<u16>()) {
         return Err(corrupt_reparse("symbolic-link reparse name is not UTF-16 aligned"));
     }
@@ -466,10 +559,7 @@ fn read_wide_range(buffer: &[u8], record_length: usize, offset: usize, length: u
         .checked_add(length)
         .filter(|end| *end <= record_length)
         .ok_or_else(|| corrupt_reparse("symbolic-link reparse name exceeds its record"))?;
-    Ok(buffer[start..end]
-        .chunks_exact(size_of::<u16>())
-        .map(|bytes| u16::from_le_bytes([bytes[0], bytes[1]]))
-        .collect())
+    Ok((start, end))
 }
 
 /// Builds an invalid-data error for a malformed native reparse record.
@@ -502,7 +592,9 @@ mod tests {
 
     use super::SYMLINK_FLAG_RELATIVE;
     use super::build_symbolic_link_buffer;
+    use super::parse_limited_symbolic_link_target;
     use super::parse_symbolic_link_target;
+    use super::RootedLinkTargetRead;
 
     fn raw_symbolic_link_buffer(substitute: &[u16], print: &[u16], flags: u32, print_first: bool) -> Vec<u8> {
         let substitute_length = (substitute.len() * 2) as u16;
@@ -550,6 +642,102 @@ mod tests {
         let buffer = build_symbolic_link_buffer(target).expect("absolute reparse buffer should encode");
 
         assert_eq!(target, parse_symbolic_link_target(&buffer).unwrap());
+    }
+
+    /// Verifies target limits accept L bytes and reject L+1 bytes before path conversion.
+    #[test]
+    fn test_limited_target_read_checks_byte_boundary_before_path_conversion() {
+        assert!(matches!(
+            parse_limited_symbolic_link_target(
+                &raw_symbolic_link_buffer(&[b'a' as u16, b'b' as u16], &[], SYMLINK_FLAG_RELATIVE, false),
+                Some(4),
+            )
+            .unwrap(),
+            RootedLinkTargetRead::Target(_)
+        ));
+        assert!(matches!(
+            parse_limited_symbolic_link_target(
+                &raw_symbolic_link_buffer(
+                    &[b'a' as u16, b'b' as u16, b'c' as u16],
+                    &[],
+                    SYMLINK_FLAG_RELATIVE,
+                    false,
+                ),
+                Some(4),
+            )
+            .unwrap(),
+            RootedLinkTargetRead::Exceeded(6)
+        ));
+        assert!(matches!(
+            parse_limited_symbolic_link_target(
+                &raw_symbolic_link_buffer(&[b'a' as u16], &[], SYMLINK_FLAG_RELATIVE, false),
+                Some(0),
+            )
+            .unwrap(),
+            RootedLinkTargetRead::Exceeded(2)
+        ));
+    }
+
+    /// Verifies a supplementary character is charged as two UTF-16 code units.
+    #[test]
+    fn test_limited_target_read_counts_non_bmp_utf16_units() {
+        let units: Vec<u16> = "🦀".encode_utf16().collect();
+        assert_eq!(units.len(), 2);
+        assert!(matches!(
+            parse_limited_symbolic_link_target(
+                &raw_symbolic_link_buffer(&units, &[], SYMLINK_FLAG_RELATIVE, false),
+                Some(4),
+            )
+            .unwrap(),
+            RootedLinkTargetRead::Target(_)
+        ));
+        assert!(matches!(
+            parse_limited_symbolic_link_target(
+                &raw_symbolic_link_buffer(&units, &[], SYMLINK_FLAG_RELATIVE, false),
+                Some(3),
+            )
+            .unwrap(),
+            RootedLinkTargetRead::Exceeded(4)
+        ));
+    }
+
+    #[test]
+    fn test_limited_target_checks_malformed_offset_before_limit() {
+        let mut buffer = raw_symbolic_link_buffer(&[b'a' as u16], &[], SYMLINK_FLAG_RELATIVE, false);
+        buffer[8..10].copy_from_slice(&1_u16.to_le_bytes());
+
+        assert_eq!(
+            parse_limited_symbolic_link_target(&buffer, Some(0))
+                .unwrap_err()
+                .kind(),
+            ErrorKind::InvalidData
+        );
+    }
+
+    #[test]
+    fn test_limited_target_counts_raw_nt_substitute_name_before_normalization() {
+        let target: Vec<u16> = r"\??\C:\x".encode_utf16().collect();
+        let buffer = raw_symbolic_link_buffer(&target, &[], 0, false);
+
+        assert!(matches!(
+            parse_limited_symbolic_link_target(&buffer, Some(14)).unwrap(),
+            RootedLinkTargetRead::Exceeded(16)
+        ));
+        assert_eq!(
+            Path::new(r"\??\C:\x"),
+            match parse_limited_symbolic_link_target(&buffer, Some(16)).unwrap() {
+                RootedLinkTargetRead::Target(target) => target.raw_path,
+                RootedLinkTargetRead::Exceeded(bytes) => panic!("unexpectedly exceeded at {bytes} bytes"),
+            }
+        );
+        let raw = parse_limited_symbolic_link_target(&buffer, Some(16)).unwrap();
+        let RootedLinkTargetRead::Target(raw) = raw else {
+            panic!("target unexpectedly exceeded its byte limit");
+        };
+        assert_eq!(
+            Path::new(r"C:\x"),
+            normalize_rooted_link_target(&raw.raw_path, raw.flags).unwrap(),
+        );
     }
 
     #[test]

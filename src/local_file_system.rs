@@ -161,6 +161,7 @@ impl LocalFileSystem {
                     crate::SizeLimit::VariesByPath,
                     crate::LocalPathLengthUnit::native(),
                 ),
+                resolution: crate::resolution::ResolutionContract::unrestricted(),
                 #[cfg(feature = "test-support")]
                 test_faults: None,
                 #[cfg(all(feature = "digest", feature = "test-support"))]
@@ -194,21 +195,32 @@ impl LocalFileSystem {
     /// Returns [`LocalFileError`] when `root` cannot be opened, does not name a
     /// directory, or the target cannot provide the required rooted authority.
     pub fn rooted(root: &Path) -> LocalResult<Self> {
-        let rooted = RootedLocalFileSystem::open(root)?;
+        Self::rooted_with_options(root, &crate::options::LocalRootOpenOptions::new())
+    }
+
+    /// Opens a rooted filesystem using the supplied opening and descendant resolution contract.
+    ///
+    /// The host path is resolved component by component from its native root.
+    /// Limits and policies apply during opening and are retained by descendants.
+    pub fn rooted_with_options(root: &Path, options: &crate::options::LocalRootOpenOptions) -> LocalResult<Self> {
+        let rooted = RootedLocalFileSystem::open_with_options(root, options)?;
         let capabilities = rooted.capabilities();
         let limits = rooted.limits();
+        let resolution = rooted.root_authority().resolution_contract().clone();
+        let symlink_policy = options.symlink_policy().unwrap_or(LocalSymlinkPolicy::FollowWithinScope);
         Ok(Self {
             core: Arc::new(LocalFileSystemCore {
                 namespace: LocalNamespace::Rooted(rooted),
                 capabilities,
                 limits,
+                resolution,
                 #[cfg(feature = "test-support")]
                 test_faults: None,
                 #[cfg(all(feature = "digest", feature = "test-support"))]
                 conditional_hooks: None,
             }),
             current_directory: LocalCurrentDirectory::Virtual(PathBuf::from(std::path::MAIN_SEPARATOR_STR)),
-            symlink_policy: LocalSymlinkPolicy::FollowWithinScope,
+            symlink_policy,
             defaults: LocalFileSystemDefaults::default(),
         })
     }

@@ -21,7 +21,6 @@ use std::path::Path;
 use std::path::PathBuf;
 
 use rustix::fs::Dir;
-use rustix::fs::readlinkat;
 use rustix::fs::symlinkat;
 
 use super::path_operations::add_path_context;
@@ -85,17 +84,60 @@ pub(crate) fn read_rooted_directory(
 ///
 /// Returns the stored target without resolving it. Parent traversal and
 /// `readlinkat` errors, including a final entry that is not a link, propagate.
-pub(crate) fn read_rooted_link(root: &File, diagnostic_root: &Path, path: &LocalRelativePath) -> Result<PathBuf> {
+pub(crate) fn read_rooted_link(
+    root: &File,
+    diagnostic_root: &Path,
+    path: &LocalRelativePath,
+    maximum_bytes: Option<usize>,
+) -> Result<(Option<PathBuf>, usize)> {
     let diagnostic_path = diagnostic_root.join(path.as_path());
     let (parent, name, _) =
         open_rooted_parent(root, &diagnostic_path, path, RootedParentMode::OpenExisting)?.into_parts();
-    match readlinkat(&parent, &name, Vec::new()) {
-        Ok(target) => Ok(PathBuf::from(OsString::from_vec(target.into_bytes()))),
-        Err(error) => Err(add_path_context(
-            Error::from(error),
-            "read rooted symbolic link",
-            &diagnostic_path,
-        )),
+    let maximum_capacity = maximum_bytes.and_then(|maximum| maximum.checked_add(1));
+    let initial_capacity = maximum_capacity.map_or(256, |maximum| maximum.min(256)).max(1);
+    let mut capacity = initial_capacity;
+    loop {
+        let mut bytes = Vec::new();
+        bytes.try_reserve_exact(capacity).map_err(|error| {
+            Error::new(ErrorKind::OutOfMemory, error)
+        })?;
+        bytes.resize(capacity, 0);
+        // SAFETY: `parent` is a live directory descriptor, `name` is a
+        // validated NUL-terminated entry name, and `bytes` is writable for
+        // `capacity` bytes. `readlinkat` does not append a NUL terminator.
+        let read = unsafe {
+            libc::readlinkat(
+                parent.as_raw_fd(),
+                name.as_ptr(),
+                bytes.as_mut_ptr().cast(),
+                bytes.len(),
+            )
+        };
+        if read < 0 {
+            return Err(add_path_context(
+                Error::last_os_error(),
+                "read rooted symbolic link",
+                &diagnostic_path,
+            ));
+        }
+        let read = read as usize;
+        if read < capacity {
+            bytes.truncate(read);
+            return Ok((Some(PathBuf::from(OsString::from_vec(bytes))), read));
+        }
+        if let Some(maximum) = maximum_bytes {
+            // The one-byte probe distinguishes an exact limit from L+1
+            // without retaining the rest of an over-limit target.
+            if read > maximum {
+                return Ok((None, read));
+            }
+        }
+        capacity = capacity.checked_mul(2).ok_or_else(|| {
+            Error::new(ErrorKind::InvalidData, "symbolic-link target length overflow")
+        })?;
+        if let Some(maximum) = maximum_capacity {
+            capacity = capacity.min(maximum);
+        }
     }
 }
 

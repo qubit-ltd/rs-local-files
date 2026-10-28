@@ -101,6 +101,13 @@ impl LocalFileSystem {
     ) -> LocalResult<LocalObservedReader> {
         let read_options = options.read_options().unwrap_or(&self.defaults.read);
         let symlink_policy = self.read_symlink_policy(read_options, None);
+        let mut resolution = self.core.resolution.clone();
+        if let Some(limits) = options.resolution_limits() {
+            resolution = resolution.tightened(limits);
+        }
+        if let Some(limits) = binding_options.and_then(|binding| binding.resolution_limits()) {
+            resolution = resolution.tightened(limits);
+        }
         validate_scope_symlink_policy(self.scope(), symlink_policy, LocalFileOperation::OpenReader, Some(path))?;
         let mut path_budget =
             binding_options.map(|limits| crate::directory::binding::PathBindingBudget::new(limits.max_path_bytes()));
@@ -108,6 +115,17 @@ impl LocalFileSystem {
         let resolver = self.resolver_for(path, LocalFileOperation::OpenReader)?;
         let resolved = resolve_operation_path(&resolver, path, LocalFileOperation::OpenReader)?;
         check_binding_deadline(binding_deadline, path)?;
+        let namespace_absolute = if path.is_absolute() {
+            path.to_path_buf()
+        } else {
+            resolver
+                .current_directory()
+                .unwrap_or_else(|| Path::new("/"))
+                .join(path)
+        };
+        let authority_path = namespace_absolute
+            .strip_prefix(Path::new(std::path::MAIN_SEPARATOR_STR))
+            .unwrap_or(&namespace_absolute);
         if binding_options.is_some() {
             let absolute_bytes = resolved.namespace_absolute().as_os_str().len();
             let raw_component_bytes = path
@@ -129,17 +147,6 @@ impl LocalFileSystem {
                     resolved.namespace_absolute(),
                 )?;
             }
-            let namespace_absolute = if path.is_absolute() {
-                path.to_path_buf()
-            } else {
-                resolver
-                    .current_directory()
-                    .unwrap_or_else(|| Path::new("/"))
-                    .join(path)
-            };
-            let authority_path = namespace_absolute
-                .strip_prefix(Path::new(std::path::MAIN_SEPARATOR_STR))
-                .unwrap_or(&namespace_absolute);
             let (root, symlink_policy) = match &self.core.namespace {
                 LocalNamespace::Host => (
                     Root::open(Path::new("/")).map_err(|source| {
@@ -149,7 +156,7 @@ impl LocalFileSystem {
                             None,
                             source,
                         )
-                    })?,
+                    })?.with_resolution_contract(resolution.clone()),
                     if symlink_policy == LocalSymlinkPolicy::FollowAcrossScope {
                         LocalSymlinkPolicy::FollowWithinScope
                     } else {
@@ -167,7 +174,7 @@ impl LocalFileSystem {
                         )
                     })?;
                     (
-                        Root::from_directory_authority(file, authority.path().to_path_buf()),
+                        Root::from_directory_authority_with_contract(file, authority.path().to_path_buf(), resolution.clone()),
                         symlink_policy,
                     )
                 }
@@ -185,12 +192,13 @@ impl LocalFileSystem {
             )?;
             check_binding_deadline(binding_deadline, resolved.namespace_absolute())?;
         }
-        let reader = self.open_resolved_reader_with_policy(
+        let reader = self.open_resolved_reader_with_policy_and_contract(
             &resolved,
             read_options,
             LocalFileOperation::OpenReader,
             resolver.current_directory(),
             symlink_policy,
+            Some(resolution.clone()),
         )?;
         check_binding_deadline(binding_deadline, path)?;
         let mut observed = LocalObservedReader::from_reader(reader, options.native_observation())?;
@@ -231,7 +239,7 @@ impl LocalFileSystem {
                             None,
                             source,
                         )
-                    })?;
+                    })?.with_resolution_contract(resolution.clone());
                     let relative_parent = parent_path.strip_prefix("/").unwrap_or(parent_path);
                     let policy = if symlink_policy == LocalSymlinkPolicy::FollowAcrossScope {
                         LocalSymlinkPolicy::FollowWithinScope
@@ -249,28 +257,43 @@ impl LocalFileSystem {
                         &host_root,
                         &relative_parent,
                         &diagnostic_parent,
+                        Some(namespace_absolute.parent().unwrap_or(Path::new("/"))),
                         true,
                         Some(&binding_options),
                         path_budget.as_mut(),
+                        policy,
                         resolver_started,
                     )?;
                     (root, anchors.unwrap_or_default())
                 }
                 LocalNamespace::Rooted(rooted) => {
+                    let source_root = rooted.root_authority();
+                    let working_root = Root::from_directory_authority_with_contract(
+                        source_root.try_clone_authority().map_err(|source| LocalFileError::from_io(
+                            LocalFileOperation::OpenRoot, Some(resolved.namespace_absolute().to_path_buf()), None, source,
+                        ))?,
+                        source_root.path().to_path_buf(),
+                        resolution.clone(),
+                    );
                     let allow_all = crate::directory::LocalComponentPolicy::allow_all();
                     let resolved_parent = crate::rooted_local_file_system::resolve_rooted_path_allow_root_with_component_policy_and_budget(
-                        rooted.root_authority(), parent_path, symlink_policy, true, LocalFileOperation::OpenRoot,
+                        &working_root, parent_path, symlink_policy, true, LocalFileOperation::OpenRoot,
                         &allow_all, binding_deadline, path_budget.as_mut(),
                     )?;
                     check_binding_deadline(binding_deadline, &resolved_parent)?;
                     let diagnostic_parent = rooted.diagnostic_path().join(&resolved_parent);
+                    let recipe_parent = rooted
+                        .diagnostic_path()
+                        .join(authority_path.parent().unwrap_or_else(|| Path::new("")));
                     let (root, _, anchors) = crate::directory::retain_directory_chain(
-                        rooted.root_authority(),
+                        &working_root,
                         &resolved_parent,
                         &diagnostic_parent,
+                        Some(&recipe_parent),
                         true,
                         Some(&binding_options),
                         path_budget.as_mut(),
+                        symlink_policy,
                         resolver_started,
                     )?;
                     (root, anchors.unwrap_or_default())
@@ -566,6 +589,20 @@ impl LocalFileSystem {
         current_directory: Option<&Path>,
         symlink_policy: crate::LocalSymlinkPolicy,
     ) -> LocalResult<LocalFileReader> {
+        self.open_resolved_reader_with_policy_and_contract(
+            resolved, options, operation, current_directory, symlink_policy, None,
+        )
+    }
+
+    fn open_resolved_reader_with_policy_and_contract(
+        &self,
+        resolved: &LocalNamespacePath,
+        options: &LocalReadOptions,
+        operation: LocalFileOperation,
+        current_directory: Option<&Path>,
+        symlink_policy: crate::LocalSymlinkPolicy,
+        resolution: Option<crate::resolution::ResolutionContract>,
+    ) -> LocalResult<LocalFileReader> {
         validate_scope_symlink_policy(
             self.scope(),
             symlink_policy,
@@ -578,7 +615,10 @@ impl LocalFileSystem {
                 HostLocalFileSystem::open_reader_with_policy(resolved.authority_relative(), options, symlink_policy)
             }
             LocalNamespace::Rooted(rooted) => {
-                rooted.open_reader(resolved.authority_relative(), options, symlink_policy)
+                match resolution {
+                    Some(contract) => rooted.open_reader_with_contract(resolved.authority_relative(), options, symlink_policy, contract),
+                    None => rooted.open_reader(resolved.authority_relative(), options, symlink_policy),
+                }
             }
         }
         .map_err(|error| operation_error(error, operation, resolved.namespace_absolute(), None, current_directory))

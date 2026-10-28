@@ -111,6 +111,10 @@ pub(crate) use internal::read_rooted_component_metadata;
 pub(crate) use internal::read_rooted_directory;
 #[cfg(any(unix, windows))]
 pub(crate) use internal::read_rooted_link;
+#[cfg(windows)]
+pub(crate) use internal::{
+    normalize_rooted_link_target, read_rooted_link_limited, RootedLinkTargetRead,
+};
 #[cfg(any(unix, windows))]
 pub(crate) use internal::read_rooted_symlink_metadata;
 pub(crate) use internal::remove_directory_tree;

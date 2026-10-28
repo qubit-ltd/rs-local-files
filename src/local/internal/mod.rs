@@ -241,6 +241,12 @@ pub(crate) use windows_rooted::read_rooted_directory;
 #[cfg(windows)]
 pub(crate) use windows_rooted::read_rooted_link;
 #[cfg(windows)]
+pub(crate) use windows_rooted::read_rooted_link_limited;
+#[cfg(windows)]
+pub(crate) use windows_rooted::normalize_rooted_link_target;
+#[cfg(windows)]
+pub(crate) use windows_rooted::RootedLinkTargetRead;
+#[cfg(windows)]
 pub(crate) use windows_rooted::read_rooted_symlink_metadata;
 #[cfg(windows)]
 pub(crate) use windows_rooted::remove_rooted_entry;

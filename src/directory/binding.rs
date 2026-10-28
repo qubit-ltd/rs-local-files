@@ -102,11 +102,27 @@ impl ReaderPathBinding for PathBinding {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub(crate) struct BindingAnchor {
+    /// Diagnostic path associated with the retained identity.
     pub(crate) path: PathBuf,
+    /// Original namespace name used to reopen this identity during binding checks.
+    pub(crate) opening_recipe: PathBuf,
     pub(crate) identity: crate::observation::LocalFileIdentity,
     pub(crate) authority: Arc<crate::rooted::Root>,
+    pub(crate) contract: crate::resolution::ResolutionContract,
+    pub(crate) symlink_policy: crate::LocalSymlinkPolicy,
+}
+
+impl std::fmt::Debug for BindingAnchor {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("BindingAnchor")
+            .field("path", &self.path)
+            .field("opening_recipe", &self.opening_recipe)
+            .field("symlink_policy", &self.symlink_policy)
+            .finish_non_exhaustive()
+    }
 }
 
 #[derive(Debug)]
@@ -152,24 +168,23 @@ impl ReaderPathBinding for DirectoryPathBinding {
             if retained_observation.identity() != Some(&anchor.identity) {
                 return Ok(LocalSourceVerification::Changed);
             }
-            let root_result = crate::rooted::Root::open(&anchor.path);
+            let root_result = crate::rooted_local_file_system::RootedLocalFileSystem::open_with_contract(
+                &anchor.opening_recipe,
+                anchor.contract.clone(),
+                anchor.symlink_policy,
+            );
             check_verification_deadline(deadline, &anchor.path)?;
             let root = match root_result {
                 Ok(root) => root,
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                Err(error) if error.kind() == crate::error::LocalFileErrorKind::NotFound => {
                     return Ok(LocalSourceVerification::Missing);
                 }
                 Err(error) => {
-                    return Err(crate::LocalFileError::from_io(
-                        crate::LocalFileOperation::Metadata,
-                        Some(anchor.path.clone()),
-                        None,
-                        error,
-                    ));
+                    return Err(error.with_operation(crate::LocalFileOperation::Metadata).with_path(anchor.path.clone()));
                 }
             };
             check_verification_deadline(deadline, &anchor.path)?;
-            let file = root.try_clone_authority().map_err(|error| {
+            let file = root.root_authority().try_clone_authority().map_err(|error| {
                 crate::LocalFileError::from_io(
                     crate::LocalFileOperation::Metadata,
                     Some(anchor.path.clone()),

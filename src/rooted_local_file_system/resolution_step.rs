@@ -7,6 +7,7 @@
 // =============================================================================
 
 use std::ffi::OsString;
+use crate::directory::LocalResolutionOrigin;
 
 use super::symlink_identity::SymlinkIdentity;
 
@@ -15,12 +16,16 @@ use super::symlink_identity::SymlinkIdentity;
 pub(super) enum ResolutionStep {
     /// Restarts resolution at the virtual root.
     ResetRoot,
-    /// Removes the most recently resolved normal component.
-    Parent,
+    /// Treats a current-directory step as a no-op after budget accounting.
+    Current(LocalResolutionOrigin),
+    /// Resolves the real current directory before removing a component.
+    Parent(LocalResolutionOrigin),
     /// Appends one normal namespace component.
     Normal(
         /// Native component to append to the pending resolution queue.
         OsString,
+        /// Input or symlink-target spelling that introduced this component.
+        LocalResolutionOrigin,
     ),
     /// Ends expansion of the identified symbolic link.
     EndSymlink(

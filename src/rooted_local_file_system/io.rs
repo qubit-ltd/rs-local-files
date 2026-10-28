@@ -54,14 +54,30 @@ impl RootedLocalFileSystem {
         options: &LocalReadOptions,
         symlink_policy: LocalSymlinkPolicy,
     ) -> LocalResult<LocalFileReader> {
-        let relative = resolve_rooted_path(&self.root, path, symlink_policy, true, LocalFileOperation::OpenReader)?;
+        self.open_reader_with_contract(path, options, symlink_policy, self.root.resolution_contract().clone())
+    }
+
+    pub(crate) fn open_reader_with_contract(
+        &self,
+        path: &Path,
+        options: &LocalReadOptions,
+        symlink_policy: LocalSymlinkPolicy,
+        contract: crate::resolution::ResolutionContract,
+    ) -> LocalResult<LocalFileReader> {
+        let root = crate::rooted::Root::from_directory_authority_with_contract(
+            self.root.try_clone_authority().map_err(|source| LocalFileError::from_io(
+                LocalFileOperation::OpenReader, Some(path.to_path_buf()), None, source,
+            ))?,
+            self.root.path().to_path_buf(),
+            contract,
+        );
+        let relative = resolve_rooted_path(&root, path, symlink_policy, true, LocalFileOperation::OpenReader)?;
         let native_options = options
             .open_retry_timeout()
             .map_or_else(crate::read::OpenOptions::default, |timeout| {
                 crate::read::OpenOptions::default().with_open_retry_timeout(timeout)
             });
-        let metadata = self
-            .root
+        let metadata = root
             .symlink_metadata(&relative)
             .map_err(|error| rooted_io_error(LocalFileOperation::OpenReader, path, error))?;
         if metadata.kind() != crate::rooted::EntryKind::File {
@@ -70,7 +86,7 @@ impl RootedLocalFileSystem {
                     .with_path(path.to_path_buf()),
             );
         }
-        self.root
+        root
             .open_reader(&relative, &native_options)
             .and_then(LocalFileReader::from_file)
             .map_err(|error| rooted_io_error(LocalFileOperation::OpenReader, path, error))

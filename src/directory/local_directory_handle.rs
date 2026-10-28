@@ -71,12 +71,24 @@ impl LocalDirectoryHandle {
         &self.diagnostic_path
     }
 
+    pub(crate) fn security_authority(&self) -> LocalResult<std::fs::File> {
+        self.root_authority()?.try_clone_authority().map_err(|source| {
+            LocalFileError::from_io(LocalFileOperation::Metadata, Some(self.diagnostic_path.clone()), None, source)
+        })
+    }
+
     pub(crate) fn open(
         filesystem: &LocalFileSystem,
         path: &Path,
         options: &LocalDirectoryOpenOptions,
     ) -> LocalResult<Self> {
         let started_at = std::time::Instant::now();
+        let mut resolution = filesystem.core.resolution.clone().tightened(
+            options.resolution_limits().unwrap_or(crate::options::LocalResolutionLimits::new()),
+        );
+        if let Some(policy) = options.resolution_policy() {
+            resolution = resolution.with_policy(policy.clone());
+        }
         let policy = options.symlink_policy().unwrap_or(filesystem.symlink_policy());
         if options.symlink_policy() == Some(LocalSymlinkPolicy::FollowAcrossScope) {
             return Err(LocalFileError::new(
@@ -109,7 +121,7 @@ impl LocalDirectoryHandle {
                     })?;
                     let host_root = Root::open(Path::new("/")).map_err(|source| {
                         LocalFileError::from_io(LocalFileOperation::OpenRoot, Some(path.to_path_buf()), None, source)
-                    })?;
+                    })?.with_resolution_contract(resolution.clone());
                     let relative = absolute.strip_prefix("/").unwrap_or(&absolute);
                     let policy = if policy == LocalSymlinkPolicy::FollowAcrossScope {
                         LocalSymlinkPolicy::FollowWithinScope
@@ -147,14 +159,49 @@ impl LocalDirectoryHandle {
                         &host_root,
                         &resolved,
                         &diagnostic,
+                        Some(&absolute),
                         binding_enabled,
                         options.path_binding(),
                         path_budget.as_mut(),
+                        policy,
                         started_at,
                     )?;
                     (root, observations, anchors, diagnostic)
                 }
-                #[cfg(not(unix))]
+                #[cfg(windows)]
+                {
+                    if !options.component_policy().is_allow_all() {
+                        return Err(
+                            LocalFileError::new(LocalFileErrorKind::Unsupported, LocalFileOperation::OpenRoot)
+                                .with_reason("Windows Host directory opening cannot validate legacy component-policy target expansions"),
+                        );
+                    }
+                    let opened = crate::rooted_local_file_system::RootedLocalFileSystem::open_with_contract(
+                        path, resolution.clone(), policy,
+                    )?;
+                    let authority = opened.root_authority();
+                    let root = Root::from_directory_authority_with_contract(
+                        authority.try_clone_authority().map_err(|source| LocalFileError::from_io(
+                            LocalFileOperation::OpenRoot, Some(path.to_path_buf()), None, source,
+                        ))?,
+                        authority.path().to_path_buf(),
+                        resolution.clone(),
+                    );
+                    let diagnostic = root.path().to_path_buf();
+                    let (root, observations, anchors) = retain_directory_chain(
+                        &root,
+                        Path::new(""),
+                        &diagnostic,
+                        Some(path),
+                        binding_enabled,
+                        options.path_binding(),
+                        None,
+                        policy,
+                        started_at,
+                    )?;
+                    (root, observations, anchors, diagnostic)
+                }
+                #[cfg(not(any(unix, windows)))]
                 {
                     if !options.component_policy().is_allow_all() {
                         return Err(
@@ -170,15 +217,24 @@ impl LocalDirectoryHandle {
                         &root,
                         Path::new(""),
                         &diagnostic,
+                        Some(root.path()),
                         binding_enabled,
                         options.path_binding(),
                         None,
+                        policy,
                         started_at,
                     )?;
                     (root, observations, anchors, diagnostic)
                 }
             }
             LocalNamespace::Rooted(rooted) => {
+                let source_root = rooted.root_authority();
+                let authority = source_root.try_clone_authority().map_err(|source| LocalFileError::from_io(
+                    LocalFileOperation::OpenRoot, Some(path.to_path_buf()), None, source,
+                ))?;
+                let working_root = Root::from_directory_authority_with_contract(
+                    authority, source_root.path().to_path_buf(), resolution.clone(),
+                );
                 let virtual_path = if path.is_absolute() {
                     path.to_path_buf()
                 } else {
@@ -189,7 +245,7 @@ impl LocalDirectoryHandle {
                     .unwrap_or(&virtual_path);
                 let deadline = path_binding_deadline(started_at, options.path_binding());
                 validate_parent_steps(
-                    rooted.root_authority(),
+                    &working_root,
                     authority_path,
                     policy,
                     path,
@@ -199,7 +255,7 @@ impl LocalDirectoryHandle {
                 )?;
                 let resolved =
                     crate::rooted_local_file_system::resolve_rooted_path_allow_root_with_component_policy_and_budget(
-                        rooted.root_authority(),
+                        &working_root,
                         authority_path,
                         policy,
                         true,
@@ -214,13 +270,16 @@ impl LocalDirectoryHandle {
                     }
                 }
                 let diagnostic = rooted.diagnostic_path().join(&resolved);
+                let opening_recipe = rooted.diagnostic_path().join(authority_path);
                 let (root, observations, anchors) = retain_directory_chain(
-                    rooted.root_authority(),
+                    &working_root,
                     &resolved,
                     &diagnostic,
+                    Some(&opening_recipe),
                     binding_enabled,
                     options.path_binding(),
                     path_budget.as_mut(),
+                    policy,
                     started_at,
                 )?;
                 (root, observations, anchors, diagnostic)
@@ -342,6 +401,20 @@ impl LocalDirectoryHandle {
         }
         let raw_relative = relative;
         let component_policy = self.component_policy.combined_with(options.component_policy());
+        let mut resolution = self.filesystem.core.resolution.clone().tightened(
+            options.resolution_limits().unwrap_or(crate::options::LocalResolutionLimits::new()),
+        );
+        if let Some(policy) = options.resolution_policy() {
+            resolution = resolution.with_policy(policy.clone());
+        }
+        let parent_root = self.root_authority()?;
+        let working_root = Root::from_directory_authority_with_contract(
+            parent_root.try_clone_authority().map_err(|source| LocalFileError::from_io(
+                LocalFileOperation::OpenRoot, Some(relative.to_path_buf()), None, source,
+            ))?,
+            parent_root.path().to_path_buf(),
+            resolution,
+        );
         let policy = options.symlink_policy().unwrap_or(self.filesystem.symlink_policy());
         let started_at = Instant::now();
         let deadline = options
@@ -353,7 +426,7 @@ impl LocalDirectoryHandle {
             .map(|limits| PathBindingBudget::new(limits.max_path_bytes()));
         let relative =
             crate::rooted_local_file_system::resolve_rooted_path_allow_root_with_component_policy_and_budget(
-                self.root_authority()?,
+                &working_root,
                 raw_relative,
                 policy,
                 true,
@@ -375,12 +448,14 @@ impl LocalDirectoryHandle {
             ));
         }
         let (root, child_observations, child_anchors) = retain_directory_chain(
-            self.root_authority()?,
+            &working_root,
             &relative,
             &diagnostic,
+            Some(&self.diagnostic_path.join(raw_relative)),
             options.path_binding().is_some(),
             options.path_binding(),
             path_budget.as_mut(),
+            policy,
             started_at,
         )?;
         let filesystem = LocalFileSystem::from_root_authority(
@@ -413,7 +488,7 @@ impl LocalDirectoryHandle {
                             LocalFileError::new(LocalFileErrorKind::ResourceLimit, LocalFileOperation::OpenRoot)
                         })?;
                         let root = self.root_authority()?;
-                        anchors.push(binding_anchor(root, root.path().to_path_buf(), identity)?);
+                        anchors.push(binding_anchor(root, root.path().to_path_buf(), identity, self.filesystem.symlink_policy())?);
                         (observations, anchors)
                     };
                 let additional = child_observations.len().saturating_sub(1);
@@ -736,9 +811,11 @@ pub(crate) fn retain_directory_chain(
     root: &Root,
     relative: &Path,
     diagnostic_path: &Path,
+    opening_recipe: Option<&Path>,
     retain_binding: bool,
     limits: Option<&LocalPathBindingOptions>,
     mut path_budget: Option<&mut PathBindingBudget>,
+    symlink_policy: LocalSymlinkPolicy,
     started_at: std::time::Instant,
 ) -> LocalResult<(Root, Option<Vec<LocalFileObservation>>, Option<Vec<BindingAnchor>>)> {
     let depth = relative.components().count();
@@ -785,7 +862,7 @@ pub(crate) fn retain_directory_chain(
             .identity()
             .cloned()
             .ok_or_else(|| LocalFileError::new(LocalFileErrorKind::Unsupported, LocalFileOperation::Metadata))?;
-        anchors.push(binding_anchor(root, root.path().to_path_buf(), identity)?);
+        anchors.push(binding_anchor(root, root.path().to_path_buf(), identity, symlink_policy)?);
         observations.push(observation);
     }
     let mut cursor = root.resolution_cursor().map_err(|source| {
@@ -853,17 +930,32 @@ pub(crate) fn retain_directory_chain(
                 .identity()
                 .cloned()
                 .ok_or_else(|| LocalFileError::new(LocalFileErrorKind::Unsupported, LocalFileOperation::Metadata))?;
-            let authority = Root::from_directory_authority(file, authority_path.clone());
+            let authority = Root::from_directory_authority_with_contract(
+                file, authority_path.clone(), root.resolution_contract().clone(),
+            );
             anchors.push(BindingAnchor {
-                path: authority_path,
+                path: authority_path.clone(),
+                opening_recipe: authority_path,
                 identity,
                 authority: std::sync::Arc::new(authority),
+                contract: root.resolution_contract().clone(),
+                symlink_policy,
             });
             observations.push(observation);
         }
     }
+    if retain_binding {
+        if let (Some(recipe), Some(anchor)) = (opening_recipe, anchors.last_mut()) {
+            if let Some(budget) = path_budget.as_deref_mut() {
+                budget.debit(recipe.as_os_str().len(), LocalFileOperation::OpenRoot, diagnostic_path)?;
+            }
+            anchor.opening_recipe = recipe.to_path_buf();
+        }
+    }
     check_binding_deadline(limits, started_at, diagnostic_path)?;
-    let root = Root::from_directory_authority(cursor.into_file(), diagnostic_path.to_path_buf());
+    let root = Root::from_directory_authority_with_contract(
+        cursor.into_file(), diagnostic_path.to_path_buf(), root.resolution_contract().clone(),
+    );
     Ok((
         root,
         retain_binding.then_some(observations),
@@ -947,16 +1039,21 @@ fn binding_anchor(
     root: &Root,
     path: PathBuf,
     identity: crate::observation::LocalFileIdentity,
+    symlink_policy: LocalSymlinkPolicy,
 ) -> LocalResult<BindingAnchor> {
-    let authority = Root::from_directory_authority(
+    let authority = Root::from_directory_authority_with_contract(
         root.try_clone_authority().map_err(|source| {
             LocalFileError::from_io(LocalFileOperation::OpenRoot, Some(path.clone()), None, source)
         })?,
         path.clone(),
+        root.resolution_contract().clone(),
     );
     Ok(BindingAnchor {
+        opening_recipe: path.clone(),
         path,
         identity,
         authority: std::sync::Arc::new(authority),
+        contract: root.resolution_contract().clone(),
+        symlink_policy,
     })
 }

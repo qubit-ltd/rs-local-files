@@ -11,13 +11,13 @@ use std::io;
 
 use crate::LocalFileSystemCapabilities;
 use crate::LocalFileSystemLimits;
+use crate::resolution::ResolutionContract;
 #[cfg(feature = "test-support")]
 use crate::TestFaultPlan;
 use crate::local::LocalNamespace;
 use crate::test_support::TestFaultPoint;
 
 /// Immutable state shared by all clones of a configured filesystem.
-#[derive(Debug)]
 pub(crate) struct LocalFileSystemCore {
     /// Native Host or opened Rooted authority selected at construction.
     pub(crate) namespace: LocalNamespace,
@@ -25,6 +25,8 @@ pub(crate) struct LocalFileSystemCore {
     pub(crate) capabilities: LocalFileSystemCapabilities,
     /// Authority-level path-limit observation shared by clones.
     pub(crate) limits: LocalFileSystemLimits,
+    /// Effective resolution restrictions retained by this filesystem.
+    pub(crate) resolution: ResolutionContract,
     /// Instance-local deterministic faults available only to tests.
     #[cfg(feature = "test-support")]
     pub(crate) test_faults: Option<TestFaultPlan>,
@@ -32,6 +34,17 @@ pub(crate) struct LocalFileSystemCore {
     /// tests.
     #[cfg(all(feature = "digest", feature = "test-support"))]
     pub(crate) conditional_hooks: Option<crate::local::conditional::ConditionalHooks>,
+}
+
+impl std::fmt::Debug for LocalFileSystemCore {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("LocalFileSystemCore")
+            .field("namespace", &self.namespace)
+            .field("capabilities", &self.capabilities)
+            .field("limits", &self.limits)
+            .finish_non_exhaustive()
+    }
 }
 
 impl LocalFileSystemCore {

@@ -1044,6 +1044,18 @@ fn next_rooted_entry(
         let entry_metadata = entry.metadata();
         let metadata = crate::rooted_local_file_system::rooted_metadata(entry_metadata);
         let may_descend = options.recursive() && options.max_depth().is_none_or(|max_depth| entry_depth < max_depth);
+        {
+            if let Err(error) = crate::rooted_local_file_system::resolve_rooted_path_allow_root_with_deadline(
+                &state.root,
+                &authority_path,
+                state.symlink_policy,
+                false,
+                LocalFileOperation::List,
+                deadline,
+            ) {
+                return Some(Err(error.with_path(namespace_root.join(&output_path))));
+            }
+        }
         let mut followed_directory = None;
         if metadata.kind() == crate::LocalFileKind::Directory {
             let identity = DirectoryIdentity::from_rooted_metadata(&entry_metadata, &authority_path);

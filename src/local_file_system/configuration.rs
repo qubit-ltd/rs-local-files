@@ -360,6 +360,7 @@ impl LocalFileSystem {
             namespace: self.core.namespace.clone(),
             capabilities: self.core.capabilities,
             limits: self.core.limits,
+            resolution: self.core.resolution.clone(),
             test_faults,
             #[cfg(all(feature = "digest", feature = "test-support"))]
             conditional_hooks: self.core.conditional_hooks.clone(),
@@ -381,6 +382,7 @@ impl LocalFileSystem {
             namespace: self.core.namespace.clone(),
             capabilities: self.core.capabilities,
             limits: self.core.limits,
+            resolution: self.core.resolution.clone(),
             #[cfg(feature = "test-support")]
             test_faults: self.core.test_faults.clone(),
             conditional_hooks: Some(conditional_hooks),

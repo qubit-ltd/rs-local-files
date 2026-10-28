@@ -26,11 +26,13 @@ impl LocalFileSystem {
         let rooted = crate::rooted_local_file_system::RootedLocalFileSystem::from_root(root)?;
         let capabilities = rooted.capabilities();
         let limits = rooted.limits();
+        let resolution = rooted.root_authority().resolution_contract().clone();
         Ok(Self {
             core: Arc::new(LocalFileSystemCore {
                 namespace: LocalNamespace::Rooted(rooted),
                 capabilities,
                 limits,
+                resolution,
                 #[cfg(feature = "test-support")]
                 test_faults: None,
                 #[cfg(all(feature = "digest", feature = "test-support"))]

@@ -38,7 +38,10 @@ pub(crate) use namespace_mutation::set_rooted_permissions;
 #[cfg(feature = "digest")]
 pub(in crate::local::internal) use native::open_conditional_entry_at;
 pub(crate) use symlink::create_rooted_symlink;
+pub(crate) use symlink::normalize_rooted_link_target;
 pub(crate) use symlink::read_rooted_link;
+pub(crate) use symlink::read_rooted_link_limited;
+pub(crate) use symlink::RootedLinkTargetRead;
 pub(crate) use symlink::rooted_link_targets_directory;
 pub(crate) use volume_probe::probe_windows_limits;
 pub(crate) use volume_probe::probe_windows_space;

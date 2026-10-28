@@ -51,13 +51,19 @@ use crate::write;
 /// assert_eq!(root.path(), directory.path());
 /// ```
 #[must_use]
-#[derive(Debug)]
 pub struct Root {
     /// Absolute path retained only for diagnostics.
     path: PathBuf,
     /// Open descriptor used as the sole descendant authority.
     #[cfg(any(unix, windows))]
     directory: File,
+    /// Resolution contract inherited by every operation using this authority.
+    contract: crate::resolution::ResolutionContract,
+}
+impl std::fmt::Debug for Root {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.debug_struct("Root").field("path", &self.path).finish_non_exhaustive()
+    }
 }
 impl Root {
     /// Builds a root from an already-open directory authority.
@@ -65,7 +71,25 @@ impl Root {
         Self {
             path: diagnostic_path,
             directory,
+            contract: crate::resolution::ResolutionContract::unrestricted(),
         }
+    }
+
+    pub(crate) fn from_directory_authority_with_contract(
+        directory: File,
+        diagnostic_path: PathBuf,
+        contract: crate::resolution::ResolutionContract,
+    ) -> Self {
+        Self { path: diagnostic_path, directory, contract }
+    }
+
+    pub(crate) fn resolution_contract(&self) -> &crate::resolution::ResolutionContract {
+        &self.contract
+    }
+
+    pub(crate) fn with_resolution_contract(mut self, contract: crate::resolution::ResolutionContract) -> Self {
+        self.contract = contract;
+        self
     }
 
     /// Opens an existing descendant without following its final reparse point,
@@ -85,7 +109,7 @@ impl Root {
         #[cfg(any(unix, windows))]
         {
             let directory = local::open_root_directory(&path)?;
-            Ok(Self { path, directory })
+            Ok(Self { path, directory, contract: crate::resolution::ResolutionContract::unrestricted() })
         }
         #[cfg(not(any(unix, windows)))]
         {
@@ -218,7 +242,13 @@ impl Root {
     /// Returns an I/O error when the final entry is not a readable symbolic
     /// link or descriptor-relative traversal fails.
     pub fn read_link(&self, path: &path::Path) -> Result<PathBuf> {
-        #[cfg(any(unix, windows))]
+        #[cfg(unix)]
+        {
+            local::read_rooted_link(&self.directory, &self.path, path, None).and_then(|(target, _)| {
+                target.ok_or_else(|| Error::new(ErrorKind::InvalidData, "unbounded link read was truncated"))
+            })
+        }
+        #[cfg(windows)]
         {
             local::read_rooted_link(&self.directory, &self.path, path)
         }
@@ -229,6 +259,82 @@ impl Root {
                 ErrorKind::Unsupported,
                 "symbolic links are unsupported on this platform",
             ))
+        }
+    }
+
+    pub(crate) fn read_link_limited(
+        &self,
+        path: &path::Path,
+        maximum_bytes: Option<usize>,
+        validate_raw_target: impl FnOnce(&std::path::Path) -> crate::LocalResult<()>,
+    ) -> crate::LocalResult<PathBuf> {
+        #[cfg(unix)]
+        {
+            let (target, observed) = local::read_rooted_link(&self.directory, &self.path, path, maximum_bytes)
+                .map_err(|source| crate::LocalFileError::from_io(
+                    crate::LocalFileOperation::Metadata,
+                    Some(path.as_path().to_path_buf()),
+                    None,
+                    source,
+                ))?;
+            let Some(target) = target else {
+                let limit = maximum_bytes.unwrap_or(usize::MAX);
+                let facts = crate::error::LocalResourceLimitError::new(
+                    crate::error::LocalResourceKind::SymlinkTargetBytes,
+                    limit,
+                    0,
+                    1,
+                ).with_observed(observed);
+                return Err(crate::LocalFileError::from_resource_limit(
+                    crate::LocalFileOperation::Metadata,
+                    Some(path.as_path().to_path_buf()),
+                    facts,
+                ));
+            };
+            validate_raw_target(&target)?;
+            Ok(target)
+        }
+        #[cfg(windows)]
+        {
+            match local::read_rooted_link_limited(&self.directory, &self.path, path, maximum_bytes)
+                .map_err(|source| crate::LocalFileError::from_io(
+                    crate::LocalFileOperation::Metadata,
+                    Some(path.as_path().to_path_buf()),
+                    None,
+                    source,
+                ))?
+            {
+                local::RootedLinkTargetRead::Target(target) => {
+                    validate_raw_target(&target.raw_path)?;
+                    local::normalize_rooted_link_target(&target.raw_path, target.flags).map_err(|source| {
+                        crate::LocalFileError::from_io(
+                            crate::LocalFileOperation::Metadata,
+                            Some(path.as_path().to_path_buf()),
+                            None,
+                            source,
+                        )
+                    })
+                }
+                local::RootedLinkTargetRead::Exceeded(observed) => {
+                    let limit = maximum_bytes.unwrap_or(usize::MAX);
+                    let facts = crate::error::LocalResourceLimitError::new(
+                        crate::error::LocalResourceKind::SymlinkTargetBytes,
+                        limit,
+                        0,
+                        1,
+                    ).with_observed(observed);
+                    Err(crate::LocalFileError::from_resource_limit(
+                        crate::LocalFileOperation::Metadata,
+                        Some(path.as_path().to_path_buf()),
+                        facts,
+                    ))
+                }
+            }
+        }
+        #[cfg(not(any(unix, windows)))]
+        {
+            let _ = (path, maximum_bytes, validate_raw_target);
+            Err(crate::LocalFileError::new(crate::LocalFileErrorKind::Unsupported, crate::LocalFileOperation::Metadata))
         }
     }
 
