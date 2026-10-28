@@ -17,6 +17,8 @@ use crate::error::LocalFileOperation;
 use crate::observation::LocalFileObservation;
 use crate::observation::LocalObservationRequirement;
 use crate::observation::LocalSourceVerification;
+use crate::observation::LocalSecurityObservation;
+use crate::observation::LocalSecurityObservationOptions;
 
 const BLOCK_SIZE: usize = 8 * 1024;
 
@@ -171,6 +173,25 @@ impl LocalObservedReader {
     /// This does not change the value returned by [`Self::observation`].
     pub fn observe_now(&self) -> LocalResult<LocalFileObservation> {
         super::query::query_observation(self.reader.as_file(), self.requirement)
+    }
+
+    /// Queries security facts from this reader's retained file handle.
+    ///
+    /// Each requested field is queried independently, so returned facts may
+    /// describe different instants. The result is not an atomic snapshot;
+    /// `Unknown` locality does not establish that the filesystem is local.
+    /// Reparse-point handling is governed by the resolution policy used to
+    /// open the reader, not by this observation.
+    ///
+    /// # Errors
+    /// Returns `RequirementNotMet` when a required fact cannot be supplied,
+    /// and propagates permission, malformed-data, identity-change, and I/O
+    /// failures from the retained handle.
+    pub fn security_observation(
+        &self,
+        options: &LocalSecurityObservationOptions,
+    ) -> LocalResult<LocalSecurityObservation> {
+        super::security::query_security(self.reader.as_file(), options)
     }
 
     /// Checks the optional path binding retained when opening this reader.

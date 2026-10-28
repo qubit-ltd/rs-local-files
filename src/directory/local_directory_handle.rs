@@ -41,6 +41,8 @@ use crate::directory::binding::PathBindingBudget;
 use crate::local::LocalNamespace;
 use crate::observation::LocalFileObservation;
 use crate::observation::LocalObservedReader;
+use crate::observation::LocalSecurityObservation;
+use crate::observation::LocalSecurityObservationOptions;
 use crate::options::LocalDirectoryOpenOptions;
 use crate::options::LocalObservedReadOptions;
 use crate::options::LocalPathBindingOptions;
@@ -63,6 +65,26 @@ pub struct LocalDirectoryHandle {
 }
 
 impl LocalDirectoryHandle {
+    /// Queries security facts from this handle's retained directory authority.
+    ///
+    /// Each requested field is queried independently, so returned facts may
+    /// describe different instants. The result is not an atomic snapshot;
+    /// `Unknown` locality does not establish that the filesystem is local.
+    /// Reparse-point handling remains the responsibility of the resolution
+    /// policy used to obtain this handle.
+    ///
+    /// # Errors
+    /// Returns `RequirementNotMet` when a required fact cannot be supplied,
+    /// and propagates permission, malformed-data, identity-change, and I/O
+    /// failures from the retained authority.
+    pub fn security_observation(
+        &self,
+        options: &LocalSecurityObservationOptions,
+    ) -> LocalResult<LocalSecurityObservation> {
+        let authority = self.security_authority()?;
+        crate::observation::security::query_security(&authority, options)
+    }
+
     pub(super) const fn filesystem(&self) -> &LocalFileSystem {
         &self.filesystem
     }
