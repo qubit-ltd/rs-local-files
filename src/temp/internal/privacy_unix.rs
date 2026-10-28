@@ -470,6 +470,85 @@ pub(crate) fn verify_current_user_access(file: &File, directory: bool, read_only
     Ok(())
 }
 
+fn verify_owner_and_type(file: &File, directory: bool) -> io::Result<()> {
+    let metadata = file.metadata()?;
+    let correct_type = if directory {
+        metadata.is_dir()
+    } else {
+        metadata.is_file()
+    };
+    if !correct_type || metadata.uid() != unsafe { libc::geteuid() } {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "handle is not an owned entry of the expected type",
+        ));
+    }
+    Ok(())
+}
+
+fn component_name(name: &OsStr) -> io::Result<CString> {
+    let bytes = name.as_bytes();
+    if bytes.is_empty() || bytes == b"." || bytes == b".." || bytes.contains(&b'/') {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "name must be one native path component",
+        ));
+    }
+    CString::new(bytes).map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "name contains a nul byte"))
+}
+
+fn identity_for_file(file: &File) -> io::Result<LocalFileIdentity> {
+    let metadata = file.metadata()?;
+    Ok(LocalFileIdentity::unix(metadata.dev(), metadata.ino()))
+}
+
+fn identity_for_name(parent: &File, name: &OsStr) -> io::Result<LocalFileIdentity> {
+    let name = component_name(name)?;
+    let mut status = std::mem::MaybeUninit::<libc::stat>::uninit();
+    let result = unsafe {
+        libc::fstatat(
+            parent.as_raw_fd(),
+            name.as_ptr(),
+            status.as_mut_ptr(),
+            libc::AT_SYMLINK_NOFOLLOW,
+        )
+    };
+    if result < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    // SAFETY: fstatat initialized status on success.
+    let status = unsafe { status.assume_init() };
+    #[allow(clippy::unnecessary_cast)]
+    let device = status.st_dev as u64;
+    #[allow(clippy::unnecessary_cast)]
+    let inode = status.st_ino as u64;
+    Ok(LocalFileIdentity::unix(device, inode))
+}
+
+fn create_error(
+    directory: bool,
+    source: io::Error,
+    parent: File,
+    name: &OsStr,
+    file: Option<File>,
+    identity: Option<LocalFileIdentity>,
+) -> NativePrivateCreateError {
+    NativePrivateCreateError {
+        source,
+        retained: Some(NativePrivateEntry {
+            parent,
+            name: name.to_os_string(),
+            file,
+            identity,
+            directory,
+        }),
+    }
+}
+
+fn pre_create_error(source: io::Error) -> NativePrivateCreateError {
+    NativePrivateCreateError { source, retained: None }
+}
+
 #[cfg(test)]
 mod owner_policy_unix_tests {
     use super::{apply_owner_access, create_owner_entry_at, verify_owner_access};
@@ -591,83 +670,4 @@ mod owner_policy_unix_tests {
         assert_eq!(error.kind(), std::io::ErrorKind::PermissionDenied);
         assert_eq!(file.metadata().expect("file metadata").mode() & 0o7777, 0o600);
     }
-}
-
-fn verify_owner_and_type(file: &File, directory: bool) -> io::Result<()> {
-    let metadata = file.metadata()?;
-    let correct_type = if directory {
-        metadata.is_dir()
-    } else {
-        metadata.is_file()
-    };
-    if !correct_type || metadata.uid() != unsafe { libc::geteuid() } {
-        return Err(io::Error::new(
-            io::ErrorKind::PermissionDenied,
-            "handle is not an owned entry of the expected type",
-        ));
-    }
-    Ok(())
-}
-
-fn component_name(name: &OsStr) -> io::Result<CString> {
-    let bytes = name.as_bytes();
-    if bytes.is_empty() || bytes == b"." || bytes == b".." || bytes.contains(&b'/') {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "name must be one native path component",
-        ));
-    }
-    CString::new(bytes).map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "name contains a nul byte"))
-}
-
-fn identity_for_file(file: &File) -> io::Result<LocalFileIdentity> {
-    let metadata = file.metadata()?;
-    Ok(LocalFileIdentity::unix(metadata.dev(), metadata.ino()))
-}
-
-fn identity_for_name(parent: &File, name: &OsStr) -> io::Result<LocalFileIdentity> {
-    let name = component_name(name)?;
-    let mut status = std::mem::MaybeUninit::<libc::stat>::uninit();
-    let result = unsafe {
-        libc::fstatat(
-            parent.as_raw_fd(),
-            name.as_ptr(),
-            status.as_mut_ptr(),
-            libc::AT_SYMLINK_NOFOLLOW,
-        )
-    };
-    if result < 0 {
-        return Err(io::Error::last_os_error());
-    }
-    // SAFETY: fstatat initialized status on success.
-    let status = unsafe { status.assume_init() };
-    #[allow(clippy::unnecessary_cast)]
-    let device = status.st_dev as u64;
-    #[allow(clippy::unnecessary_cast)]
-    let inode = status.st_ino as u64;
-    Ok(LocalFileIdentity::unix(device, inode))
-}
-
-fn create_error(
-    directory: bool,
-    source: io::Error,
-    parent: File,
-    name: &OsStr,
-    file: Option<File>,
-    identity: Option<LocalFileIdentity>,
-) -> NativePrivateCreateError {
-    NativePrivateCreateError {
-        source,
-        retained: Some(NativePrivateEntry {
-            parent,
-            name: name.to_os_string(),
-            file,
-            identity,
-            directory,
-        }),
-    }
-}
-
-fn pre_create_error(source: io::Error) -> NativePrivateCreateError {
-    NativePrivateCreateError { source, retained: None }
 }
