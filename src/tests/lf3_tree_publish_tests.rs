@@ -650,6 +650,116 @@ fn required_file_sync_is_completed_before_publish() {
 
 #[cfg(unix)]
 #[test]
+fn readonly_publish_collision_restores_stage_access() {
+    let fixture = tempfile::tempdir().expect("fixture should be created");
+    std::fs::write(fixture.path().join("published"), b"existing").expect("destination");
+    let fs = crate::LocalFileSystem::host().expect("host filesystem should open");
+    let parent = fs
+        .open_directory_with_options(fixture.path(), &LocalDirectoryOpenOptions::new())
+        .expect("parent should open");
+    let stage = parent
+        .create_staged_directory(&LocalTempDirectoryOptions::new())
+        .expect("stage should be created");
+    let error = stage
+        .publish_new(
+            &parent,
+            OsStr::new("published"),
+            &LocalTreePublishOptions::new().with_access(LocalTreeFinalAccess::ReadOnlyCurrentUser),
+        )
+        .expect_err("existing destination must be preserved");
+    assert_eq!(error.publication(), LocalTreePublication::NotPublished);
+    assert_eq!(error.access_state(), LocalTreeAccessState::ReadOnlyCurrentUser);
+    let mut stage = error.into_stage().expect("unpublished stage should be retained");
+    assert_eq!(
+        stage
+            .observation()
+            .expect("stage observation")
+            .metadata()
+            .permissions()
+            .unix_mode(),
+        Some(0o500)
+    );
+    stage
+        .apply_access_policy(LocalTreeFinalAccess::CurrentUserOnly)
+        .expect("restore stage access");
+    stage.cleanup().expect("cleanup");
+    assert_eq!(
+        std::fs::read(fixture.path().join("published")).expect("destination bytes"),
+        b"existing"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn readonly_publish_collision_and_restore_failure_preserve_both_errors() {
+    let fixture = tempfile::tempdir().expect("fixture should be created");
+    std::fs::write(fixture.path().join("published"), b"existing").expect("destination");
+    let fs = crate::LocalFileSystem::host().expect("host filesystem should open");
+    let parent = fs
+        .open_directory_with_options(fixture.path(), &LocalDirectoryOpenOptions::new())
+        .expect("parent should open");
+    let mut stage = parent
+        .create_staged_directory(&LocalTempDirectoryOptions::new())
+        .expect("stage should be created");
+    stage
+        .write_file_new(Path::new("file"), &mut &b"payload"[..], 16)
+        .expect("file should be staged");
+    crate::temp::internal::privacy_unix::fail_access_after(3);
+    let error = stage
+        .publish_new(
+            &parent,
+            OsStr::new("published"),
+            &LocalTreePublishOptions::new().with_access(LocalTreeFinalAccess::ReadOnlyCurrentUser),
+        )
+        .expect_err("collision and access failure must be reported");
+    assert_eq!(error.publication(), LocalTreePublication::NotPublished);
+    assert_eq!(error.access_state(), LocalTreeAccessState::Indeterminate);
+    assert!(error.cause().cleanup_error().is_some());
+    let mut stage = error.into_stage().expect("unpublished stage should be retained");
+    stage
+        .apply_access_policy(LocalTreeFinalAccess::CurrentUserOnly)
+        .expect("restore stage access");
+    stage.cleanup().expect("cleanup");
+    assert_eq!(
+        std::fs::read(fixture.path().join("published")).expect("destination bytes"),
+        b"existing"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn readonly_publish_final_access_failure_reports_published() {
+    let fixture = tempfile::tempdir().expect("fixture should be created");
+    let fs = crate::LocalFileSystem::host().expect("host filesystem should open");
+    let parent = fs
+        .open_directory_with_options(fixture.path(), &LocalDirectoryOpenOptions::new())
+        .expect("parent should open");
+    let mut stage = parent
+        .create_staged_directory(&LocalTempDirectoryOptions::new())
+        .expect("stage should be created");
+    stage
+        .write_file_new(Path::new("file"), &mut &b"payload"[..], 16)
+        .expect("file should be staged");
+    crate::temp::internal::privacy_unix::fail_access_after(3);
+    let error = stage
+        .publish_new(
+            &parent,
+            OsStr::new("published"),
+            &LocalTreePublishOptions::new().with_access(LocalTreeFinalAccess::ReadOnlyCurrentUser),
+        )
+        .expect_err("final root permission failure must be reported");
+    assert_eq!(error.publication(), LocalTreePublication::Published);
+    assert_eq!(error.mutation_state(), crate::outcome::LocalTreeMutationState::Started);
+    assert_eq!(error.access_state(), LocalTreeAccessState::Indeterminate);
+    assert!(error.into_stage().is_none());
+    assert_eq!(
+        std::fs::read(fixture.path().join("published/file")).expect("published payload"),
+        b"payload"
+    );
+}
+
+#[cfg(unix)]
+#[test]
 fn lf_revision_readonly_sync_publishes_all_sync_requirements() {
     assert_ne!(
         unsafe { libc::geteuid() },
@@ -680,6 +790,12 @@ fn lf_revision_readonly_sync_publishes_all_sync_requirements() {
             .publish_new(&parent, OsStr::new("published"), &options)
             .expect("read-only stage should publish with requested file sync");
         assert_eq!(outcome.publication(), LocalTreePublication::Published);
+        assert_eq!(
+            std::os::unix::fs::MetadataExt::mode(
+                &std::fs::metadata(fixture.path().join("published")).expect("root metadata")
+            ) & 0o777,
+            0o500,
+        );
         assert_eq!(
             outcome.file_synced(),
             requirement != crate::policy::LocalFileSyncRequirement::NotRequired

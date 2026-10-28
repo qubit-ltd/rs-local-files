@@ -54,7 +54,7 @@ impl LocalTreePublishOutcome {
     pub const fn file_synced(&self) -> bool {
         self.file_synced
     }
-    /// Returns the final access state confirmed before publication.
+    /// Returns the final access state confirmed when publication completed.
     pub const fn access_state(&self) -> LocalTreeAccessState {
         self.access_state
     }

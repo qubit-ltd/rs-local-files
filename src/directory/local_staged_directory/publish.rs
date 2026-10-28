@@ -21,6 +21,12 @@ use crate::options::LocalListOptions;
 impl LocalStagedDirectory {
     /// Publishes this stage under a single native name without replacing an
     /// entry.
+    ///
+    /// On Apple platforms, a read-only stage root is temporarily writable for
+    /// the rename and is made read-only through its retained handle afterward.
+    /// The published name can therefore briefly expose a writable root. If the
+    /// final permission change fails, the error reports that publication
+    /// occurred.
     pub fn publish_new(
         mut self,
         parent: &LocalDirectoryHandle,
@@ -258,17 +264,88 @@ impl LocalStagedDirectory {
                 access_state,
             ));
         }
+        #[cfg(any(target_os = "macos", target_os = "ios", all(test, unix)))]
+        let writable_root = if options.access() == crate::policy::LocalTreeFinalAccess::ReadOnlyCurrentUser {
+            let root = match self.directory().root_authority().and_then(|root| {
+                root.try_clone_authority().map_err(|source| {
+                    LocalFileError::from_io(
+                        LocalFileOperation::Metadata,
+                        Some(self.directory().diagnostic_path().to_path_buf()),
+                        None,
+                        source,
+                    )
+                })
+            }) {
+                Ok(root) => root,
+                Err(cause) => {
+                    return Err(super::super::tree_recovery::LocalTreePublishError::new(
+                        cause,
+                        Some(self),
+                        Mutation::Started,
+                        Publication::NotPublished,
+                        access_state,
+                    ));
+                }
+            };
+            if let Err(source) = crate::temp::internal::privacy_unix::apply_current_user_access(&root, true, false) {
+                let cause = LocalFileError::from_io(
+                    LocalFileOperation::Metadata,
+                    Some(self.directory().diagnostic_path().to_path_buf()),
+                    None,
+                    source,
+                );
+                return Err(super::super::tree_recovery::LocalTreePublishError::new(
+                    cause,
+                    Some(self),
+                    Mutation::Started,
+                    Publication::NotPublished,
+                    Access::Indeterminate,
+                ));
+            }
+            Some(root)
+        } else {
+            None
+        };
         let rename_options = crate::options::LocalRenameOptions::new().with_durability(options.durability());
-        match parent
+        let rename_result = parent
             .filesystem()
-            .rename_with_options(&source, &target, &rename_options)
-        {
+            .rename_with_options(&source, &target, &rename_options);
+        #[cfg(any(target_os = "macos", target_os = "ios", all(test, unix)))]
+        let access_path = match &rename_result {
+            Err(failure) if failure.state() == crate::outcome::LocalRenameFailureState::Unchanged => &source,
+            _ => &target,
+        };
+        #[cfg(any(target_os = "macos", target_os = "ios", all(test, unix)))]
+        let restore_error = writable_root.and_then(|root| {
+            crate::temp::internal::privacy_unix::apply_current_user_access(&root, true, true)
+                .err()
+                .map(|source| {
+                    LocalFileError::from_io(
+                        LocalFileOperation::Metadata,
+                        Some(parent.diagnostic_path().join(access_path)),
+                        None,
+                        source,
+                    )
+                })
+        });
+        #[cfg(not(any(target_os = "macos", target_os = "ios", all(test, unix))))]
+        let restore_error: Option<LocalFileError> = None;
+        match rename_result {
             Ok(outcome) => {
                 if let Some(owner) = self.owner.as_mut() {
                     owner.disarm_after_publish();
                 }
                 self.owner.take();
                 drop(self.directory.take());
+                if let Some(cause) = restore_error {
+                    return Err(super::super::tree_recovery::LocalTreePublishError::new(
+                        cause,
+                        None,
+                        Mutation::Started,
+                        Publication::Published,
+                        Access::Indeterminate,
+                    ));
+                }
                 let mut result = crate::outcome::LocalTreePublishOutcome::new(
                     Publication::Published,
                     outcome.durable(),
@@ -279,7 +356,13 @@ impl LocalStagedDirectory {
                 Ok(result)
             }
             Err(failure) => {
-                let (cause, state) = failure.into_parts();
+                let (mut cause, state) = failure.into_parts();
+                let access_state = if let Some(restore_error) = restore_error {
+                    cause = cause.with_cleanup_error(restore_error);
+                    Access::Indeterminate
+                } else {
+                    access_state
+                };
                 let (publication, mutation, keep_stage) = match state {
                     crate::outcome::LocalRenameFailureState::Unchanged => {
                         (Publication::NotPublished, access_mutation, true)
