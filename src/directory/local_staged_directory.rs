@@ -1334,19 +1334,19 @@ impl LocalStagedDirectory {
             }
         }
         #[cfg(feature = "test-support")]
-        if crate::local::take_test_support("owner-policy-replace-before-final-verify") {
-            if let Some((path, _, _, _)) = retained.iter().find(|(_, kind, _, _)| *kind == crate::LocalFileKind::File) {
-                let native = self.directory().diagnostic_path().join(path);
-                let mut backup_name = native.as_os_str().to_os_string();
-                backup_name.push(".owner-policy-original");
-                let backup = PathBuf::from(backup_name);
-                std::fs::rename(&native, &backup).map_err(|source| super::tree_recovery::LocalTreeAccessError::new(
-                    LocalFileError::from_io(LocalFileOperation::Metadata, Some(native.clone()), None, source), State::Indeterminate,
-                ))?;
-                std::fs::write(&native, b"replacement").map_err(|source| super::tree_recovery::LocalTreeAccessError::new(
-                    LocalFileError::from_io(LocalFileOperation::Metadata, Some(native), None, source), State::Indeterminate,
-                ))?;
-            }
+        if crate::local::take_test_support("owner-policy-replace-before-final-verify")
+            && let Some((path, _, _, _)) = retained.iter().find(|(_, kind, _, _)| *kind == crate::LocalFileKind::File)
+        {
+            let native = self.directory().diagnostic_path().join(path);
+            let mut backup_name = native.as_os_str().to_os_string();
+            backup_name.push(".owner-policy-original");
+            let backup = PathBuf::from(backup_name);
+            std::fs::rename(&native, &backup).map_err(|source| super::tree_recovery::LocalTreeAccessError::new(
+                LocalFileError::from_io(LocalFileOperation::Metadata, Some(native.clone()), None, source), State::Indeterminate,
+            ))?;
+            std::fs::write(&native, b"replacement").map_err(|source| super::tree_recovery::LocalTreeAccessError::new(
+                LocalFileError::from_io(LocalFileOperation::Metadata, Some(native), None, source), State::Indeterminate,
+            ))?;
         }
         #[cfg(feature = "test-support")]
         if crate::local::take_test_support("owner-policy-add-root-entry-before-final-verify") {
