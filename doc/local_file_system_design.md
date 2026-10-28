@@ -858,8 +858,11 @@ files. An open writer's `abort()` or Drop cancels publication and attempts to
 remove unpublished resources; a commit error transfers retained recovery
 resources to the error. Process abort and machine crash may interrupt any step,
 and restart-time orphan scanning is not provided.
-On Windows, opening a conditional writer with `Required` durability returns
-`RequirementNotMet` before path resolution or backend resource creation.
+On Windows, opening a conditional writer with `Required` writer durability
+returns `RequirementNotMet` for both Host and Rooted scopes before path
+resolution or backend resource creation. Linux and macOS can attempt valid
+`Required` and `UseStaging` configurations, subject to filesystem and runtime
+support.
 Recovery files and conditional commit errors are `Send + Sync`; a conditional
 write outcome is also `Send + Sync` when its digest type supports those bounds.
 This does not imply that an open writer is thread-safe.
@@ -869,8 +872,8 @@ Backend scope currently established by the implementation:
 | Namespace | `Absent` | `Content` | Metadata/durability notes |
 | --- | --- | --- | --- |
 | Linux/macOS Host and Rooted | Native no-replace install | Supported | Rooted operations use retained directory descriptors; `Required` depends on file and namespace sync support. |
-| Windows Host | Native no-replace install | `PreserveExisting` only | Content with another metadata policy is unsupported; required directory durability is unsupported. |
-| Windows Rooted | Native no-replace install | Unsupported | Rooted `Absent` is handle-relative. |
+| Windows Host | Native no-replace install | `PreserveExisting` only | Content with another metadata policy and `Required` writer durability are unsupported. |
+| Windows Rooted | Native no-replace install | Unsupported | Rooted `Absent` is handle-relative; `Required` writer durability is unsupported. |
 | Android and FreeBSD | Not claimed | Not claimed | Do not infer support from other Unix targets. |
 
 Windows Rooted `Content` and Host `Content` with `UseStaging` return
@@ -1164,6 +1167,15 @@ characters, Windows-forbidden punctuation, trailing spaces or dots, and
 reserved device names such as `CON.txt`; invalid names fail before parent
 creation or entry I/O. Collision retries are unbounded when `max_attempts` is
 `None`; zero permits no attempts. Non-collision native errors return immediately.
+
+`LocalTempFile::creation_parent()` and
+`LocalTempDirectory::creation_parent()` expose the absolute parent coordinate
+captured at resource creation. Host reports its backend parent, which may
+resolve an input alias; Rooted reports a virtual absolute path and never exposes
+the diagnostic root. The snapshot survives close and cleanup. Adapters can
+project a resource path by taking its suffix relative to this coordinate and
+applying that suffix to the caller-requested parent, preserving the requested
+alias without depending on sandbox naming or depth.
 
 `LocalDirectoryHandle::create_staged_directory()` is a fixed-authority entry
 point: it always creates beneath the opened handle. Its `LocalTempDirectoryOptions`

@@ -413,11 +413,16 @@ filesystem will accept the native operation. Conditional-write support is:
 | Windows | `Absent`; `Content` with `PreserveExisting` metadata | `Absent`; `Content` unsupported |
 | Android / FreeBSD | Compile-checked only; protocol support not declared | Compile-checked only; protocol support not declared |
 
-Host `Content` with
-`UseStaging`, `Append`, `Content` with `CreateNew`, and required namespace
-durability are unsupported. Check `LocalDirectoryHandle::conditional_support`
+Across platforms, `Append`, `Content` with `CreateNew`, and symlink-following
+policies are rejected as invalid conditional-write configurations. On Windows,
+Rooted `Content` and Host `Content` with `UseStaging` are unsupported. `Required`
+writer durability is rejected with `RequirementNotMet` for both Host and Rooted
+before path resolution or staging creation. Linux and macOS can attempt valid
+`Required` durability and `UseStaging` configurations, subject to the selected
+filesystem and runtime operation. Check `LocalDirectoryHandle::conditional_support`
 when the application needs to present a capability hint, and still handle
-open/commit errors.
+open/commit errors. Android and FreeBSD remain compile-checked only; protocol
+support is not declared.
 
 Use a conditional write when an application reads document A, prepares an edit B,
 and must avoid replacing a newer version written by someone else. Add the
@@ -714,6 +719,16 @@ parent creation. Portable names reject control characters, Windows-forbidden
 punctuation, trailing spaces or dots, and reserved device names such as
 `CON.txt`. Name-collision attempts are unbounded when `max_attempts` is `None`; zero
 permits no attempts. Non-collision native errors return immediately.
+
+`LocalTempFile::creation_parent()` and
+`LocalTempDirectory::creation_parent()` return the absolute parent coordinate
+captured at creation. Host returns the backend's actual parent (which may have
+resolved a caller-supplied alias); Rooted returns a virtual absolute path and
+never exposes `diagnostic_root()`. The snapshot remains available after close
+or cleanup. An adapter that projects a resource path into a caller-requested
+parent can use the path relative to `creation_parent()` while retaining the
+requested alias; it must not infer the parent from a sandbox name or fixed
+directory depth.
 
 `LocalDirectoryHandle::create_staged_directory` always creates directly below
 that handle's fixed authority. `LocalTempDirectoryOptions::prefix()`,

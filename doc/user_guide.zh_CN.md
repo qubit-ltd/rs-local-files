@@ -336,9 +336,13 @@ assert_eq!(text, r#"{"complete":true}"#);
 | Linux / macOS | `Absent`、`Content` | `Absent`、`Content` |
 | Windows | `Absent`；`Content` 需使用 `PreserveExisting` 元数据策略 | `Absent`；`Content` 不支持 |
 | Android / FreeBSD | 仅编译检查；未声明协议支持 | 仅编译检查；未声明协议支持 |
-Host `Content` 配合 `UseStaging`、`Append`、`Content` 配合 `CreateNew`，以及 Required
-namespace durability 均不支持。应用需要展示能力提示时可查询
-`LocalDirectoryHandle::conditional_support`，但仍须处理打开和提交错误。
+跨平台都会拒绝 `Append`、`Content` 配合 `CreateNew`，以及跟随符号链接策略等无效条件写入配置。
+Windows 不支持 Rooted `Content` 和 Host `Content` 配合 `UseStaging`。Host 与 Rooted
+使用 `Required` writer durability 时，都会在路径解析或创建 staging 前返回
+`RequirementNotMet`。Linux 和 macOS 可尝试有效配置下的 `Required` 耐久性与 `UseStaging`，
+但仍受所选文件系统和实际运行操作约束。应用需要展示能力提示时可查询
+`LocalDirectoryHandle::conditional_support`，但仍须处理打开和提交错误。Android 与 FreeBSD
+仍仅做编译检查，未声明条件写入协议支持。
 
 当应用读取文档 A、基于它准备新内容 B，并且不能覆盖其他人后来保存的版本时，使用
 条件写入。应用清单需启用可选 feature，并加入算法实现：
@@ -568,6 +572,12 @@ sandbox 会和资源一起清理。需要观察清理失败时应显式调用 `c
 重试预算；`parent`、`create_parent` 不会替这个入口选择或创建其他父目录。stage 的深度上限用于
 验证整棵树：位于上限的条目有效，超出上限返回 `ResourceLimit`，空树在深度零也有效。
 展示用 walker 仍会按 `max_depth` 截断输出。
+
+`LocalTempFile::creation_parent()` 与 `LocalTempDirectory::creation_parent()` 返回创建时捕获的
+绝对父目录坐标。Host 返回 backend 实际使用的父目录（可能已解析调用方提供的别名）；Rooted
+返回虚拟根下的绝对路径，不暴露 `diagnostic_root()`。该快照在 close 或 cleanup 后仍可查询。
+适配器需要把资源路径映射到调用方请求的 parent 时，可相对 `creation_parent()` 计算路径后缀，
+再保留请求中的别名；不要从 sandbox 名称或固定目录层级反推父目录。
 
 ### 让读取结果仍对应原名称
 

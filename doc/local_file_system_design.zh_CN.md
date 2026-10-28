@@ -1112,8 +1112,9 @@ Windows Rooted staged writer 若在最终安装前的 identity 复核中发现�
 删除文件。打开中的 writer 调用 `abort()` 或离开作用域会取消发布并尝试删除未发布资源；
 commit 错误则把保留的恢复资源移交给错误对象。进程 abort 或机器崩溃可能中断任一步骤，
 库不会在重启时扫描孤儿文件。
-Windows 上，使用 `Required` 耐久性打开条件 writer 会在路径解析或创建后端资源前返回
-`RequirementNotMet`。恢复文件和条件提交错误满足 `Send + Sync`；条件写入 outcome 也会在
+Windows 上，Host 与 Rooted 使用 `Required` writer durability 打开条件 writer，都会在路径解析
+或创建后端资源前返回 `RequirementNotMet`。Linux 和 macOS 可尝试有效配置下的 `Required` 与
+`UseStaging`，但仍受文件系统和实际运行操作支持情况约束。恢复文件和条件提交错误满足 `Send + Sync`；条件写入 outcome 也会在
 其 digest 类型满足相应约束时满足 `Send + Sync`。这不表示打开中的 writer 可跨线程安全使用。
 
 Windows 会在创建时为条件候选 B 及其独立恢复副本设置受保护的当前用户 DACL。
@@ -1126,8 +1127,8 @@ Windows 会在创建时为条件候选 B 及其独立恢复副本设置受保护
 | 命名空间 | `Absent` | `Content` | 元数据/耐久性说明 |
 | --- | --- | --- | --- |
 | Linux/macOS Host 和 Rooted | 原生 no-replace 安装 | 支持 | Rooted 使用保留的目录描述符；`Required` 取决于文件及命名空间同步能力。 |
-| Windows Host | 原生 no-replace 安装 | 仅 `PreserveExisting` | Content 配合其他元数据策略不受支持；不支持 Required 目录耐久性。 |
-| Windows Rooted | 原生 no-replace 安装 | 不支持 | Rooted `Absent` 使用相对已打开句柄的安装。 |
+| Windows Host | 原生 no-replace 安装 | 仅 `PreserveExisting` | Content 配合其他元数据策略及 `Required` writer durability 不受支持。 |
+| Windows Rooted | 原生 no-replace 安装 | 不支持 | Rooted `Absent` 使用相对已打开句柄的安装；不支持 `Required` writer durability。 |
 | Android 和 FreeBSD | 未声明支持 | 未声明支持 | 不应从其他 Unix 目标推断支持。 |
 
 Windows Rooted `Content`，以及 Host `Content` 配合 `UseStaging`，在打开 writer 阶段返回
@@ -1399,6 +1400,11 @@ parent 可以是命名空间绝对或相对路径；未指定时使用创建操�
 prefix、suffix 会先组合成完整名称再校验。分隔符、NUL、控制字符、Windows 禁用标点、末尾
 空格或句点，以及 `CON.txt` 这类设备保留名称都会被拒绝；校验先于父目录创建和条目 I/O。
 `max_attempts` 为 `None` 时名称冲突尝试不限；设为零则不尝试。非冲突原生错误立即返回。
+
+`LocalTempFile::creation_parent()` 与 `LocalTempDirectory::creation_parent()` 返回创建时捕获的
+绝对父目录坐标。Host 返回 backend 实际使用的父目录，可能已解析输入别名；Rooted 返回虚拟根下
+的绝对路径，不暴露 diagnostic root。该快照在 close 和 cleanup 后仍可查询。适配器可相对该坐标
+计算资源路径后缀，再拼到调用方请求的 parent 上，以保留请求别名；无需依赖 sandbox 名称或层级。
 
 `LocalDirectoryHandle::create_staged_directory()` 始终在已打开的固定 authority 下创建。
 其中 `LocalTempDirectoryOptions` 的 prefix、suffix 和可选 `max_attempts` 会控制名称和重试预算；
