@@ -156,6 +156,13 @@ impl LocalCopyFailure {
         failure
     }
 
+    /// Adjusts the proof state when the caller knows the full request scope.
+    #[must_use]
+    pub(crate) fn with_state(mut self, state: LocalCopyFailureState) -> Self {
+        self.details.state = state;
+        self
+    }
+
     /// Returns the primary typed filesystem error.
     #[must_use = "inspect the primary copy error"]
     #[inline]

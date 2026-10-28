@@ -243,6 +243,25 @@ pub(super) fn copy_file(
             });
         }
     };
+    let mut completed_statistics = match completed_file_statistics(
+        statistics,
+        bytes,
+        destination_metadata.is_some(),
+        destination_directory_requires_removal,
+        source,
+        destination,
+    ) {
+        Ok(statistics) => statistics,
+        Err(mut failure) => {
+            if let Err(cleanup) = writer.abort() {
+                failure = failure.with_staging_context(
+                    writer.staging_path().to_path_buf(),
+                    Some(cleanup.into_staging_parts().2),
+                );
+            }
+            return Err(mark_partial_after_removal(failure, destination_removed));
+        }
+    };
     if delayed_replacement {
         #[cfg(feature = "test-support")]
         if crate::local::take_test_support("rooted-copy-replacement-before-remove") {
@@ -380,22 +399,37 @@ pub(super) fn copy_file(
                 statistics.skipped = checked_add(statistics.skipped, 1, source, destination, statistics)?;
                 return Ok(statistics);
             }
-            return Err(mark_partial_after_removal(
-                rooted_commit_error(source, destination, statistics, source_error),
-                destination_removed,
-            ));
+            let failure = rooted_commit_error(source, destination, statistics, completed_statistics, source_error);
+            return Err(mark_partial_after_removal(failure, destination_removed));
         }
     };
-    statistics.files_durable &= file_durable;
-    statistics.files = checked_add(statistics.files, 1, source, destination, statistics)?;
-    statistics.bytes = checked_add(statistics.bytes, bytes, source, destination, statistics)?;
-    if destination_metadata.is_some() {
-        statistics.overwritten = checked_add(statistics.overwritten, 1, source, destination, statistics)?;
-    }
-    if destination_directory_requires_removal {
-        statistics.non_atomic_publication = true;
-    }
-    Ok(statistics)
+    completed_statistics.files_durable &= file_durable;
+    Ok(completed_statistics)
+}
+
+/// Computes counters for a completed file before publication is attempted.
+fn completed_file_statistics(
+    statistics: Statistics,
+    bytes: u64,
+    overwritten: bool,
+    non_atomic_publication: bool,
+    source: &Path,
+    destination: &Path,
+) -> Result<Statistics, Error> {
+    let files = checked_add(statistics.files, 1, source, destination, statistics)?;
+    let bytes = checked_add(statistics.bytes, bytes, source, destination, statistics)?;
+    let overwritten = if overwritten {
+        checked_add(statistics.overwritten, 1, source, destination, statistics)?
+    } else {
+        statistics.overwritten
+    };
+    Ok(Statistics {
+        files,
+        bytes,
+        overwritten,
+        non_atomic_publication: statistics.non_atomic_publication || non_atomic_publication,
+        ..statistics
+    })
 }
 
 /// Creates a deterministic competing destination through the retained Root
@@ -522,8 +556,11 @@ fn rooted_commit_error(
     source: &Path,
     destination: &Path,
     statistics: Statistics,
+    completed_statistics: Statistics,
     source_error: crate::LocalAtomicWriteError,
 ) -> Error {
+    let installed_before_sync_failure = source_error.stage() == crate::LocalAtomicWriteStage::SyncParent
+        && source_error.destination_state() == crate::LocalAtomicDestinationState::Replaced;
     let prepublication_metadata_failure = source_error.stage()
         == crate::LocalAtomicWriteStage::ApplyDestinationMetadata
         && source_error.destination_state() == crate::LocalAtomicDestinationState::Unchanged;
@@ -542,14 +579,24 @@ fn rooted_commit_error(
         },
         source,
         destination,
-        statistics,
+        if installed_before_sync_failure {
+            completed_statistics
+        } else {
+            statistics
+        },
         io::Error::new(source_kind, source_error),
     );
-    match (temporary_path, cleanup_error) {
+    let copy_error = match (temporary_path, cleanup_error) {
         (Some(temporary_path), Some(cleanup_error)) => {
             copy_error.with_staging_context(temporary_path, Some(cleanup_error))
         }
+        (None, Some(cleanup_error)) => copy_error.with_cleanup_error(cleanup_error),
         _ => copy_error,
+    };
+    if installed_before_sync_failure {
+        copy_error.with_failure_state(crate::LocalCopyFailureState::Published)
+    } else {
+        copy_error
     }
 }
 
@@ -622,6 +669,7 @@ mod tests {
             &source,
             &destination,
             super::super::Statistics::default(),
+            super::super::Statistics::default(),
             crate::LocalAtomicWriteError::new(
                 crate::LocalAtomicWriteStage::ApplyDestinationMetadata,
                 PathBuf::from("destination"),
@@ -632,6 +680,7 @@ mod tests {
             .with_cleanup_error(Some(io::Error::from(io::ErrorKind::Other))),
         );
         assert_eq!(super::super::Stage::PrepareDestination, metadata_error.stage());
+        assert_eq!(None, metadata_error.failure_state());
         assert_eq!(Some(Path::new("staging")), metadata_error.temporary_path());
         assert_eq!(
             Some(io::ErrorKind::Other),
@@ -643,6 +692,7 @@ mod tests {
             &source,
             &destination,
             super::super::Statistics::default(),
+            super::super::Statistics::default(),
             crate::LocalAtomicWriteError::new(
                 crate::LocalAtomicWriteStage::ReplaceDestination,
                 PathBuf::from("destination"),
@@ -652,7 +702,35 @@ mod tests {
             ),
         );
         assert_eq!(super::super::Stage::CommitFile, replacement_error.stage());
+        assert_eq!(None, replacement_error.failure_state());
         assert_eq!(io::ErrorKind::Other, replacement_error.error().kind());
+
+        let installed_statistics = super::super::Statistics {
+            files: 1,
+            bytes: 7,
+            overwritten: 1,
+            ..super::super::Statistics::default()
+        };
+        let sync_error = rooted_commit_error(
+            &source,
+            &destination,
+            super::super::Statistics::default(),
+            installed_statistics,
+            crate::LocalAtomicWriteError::new(
+                crate::LocalAtomicWriteStage::SyncParent,
+                PathBuf::from("destination"),
+                None,
+                crate::LocalAtomicDestinationState::Replaced,
+                io::Error::from(io::ErrorKind::Other),
+            ),
+        );
+        assert_eq!(super::super::Stage::CommitFile, sync_error.stage());
+        assert_eq!(
+            Some(crate::LocalCopyFailureState::Published),
+            sync_error.failure_state()
+        );
+        assert_eq!(1, sync_error.stats().files);
+        assert_eq!(7, sync_error.stats().bytes);
     }
 
     #[test]

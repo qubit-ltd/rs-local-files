@@ -1081,7 +1081,16 @@ impl LocalRootAtomicWriter {
         }
         let temporary_path = self.staged_file.diagnostic_path().to_path_buf();
         self.staged_file.disarm();
-        match sync_rooted_parent_chain_observed(self.staged_file.parent(), &self.parent_dirs_to_sync, observer) {
+        #[cfg(feature = "test-support")]
+        let parent_sync_result = if crate::local::test_support_enabled("rooted-copy-writer-parent-sync-after-install") {
+            Err(crate::local::test_fault_error())
+        } else {
+            sync_rooted_parent_chain_observed(self.staged_file.parent(), &self.parent_dirs_to_sync, observer)
+        };
+        #[cfg(not(feature = "test-support"))]
+        let parent_sync_result =
+            sync_rooted_parent_chain_observed(self.staged_file.parent(), &self.parent_dirs_to_sync, observer);
+        match parent_sync_result {
             Ok(()) => Ok(true),
             Err(_) if self.durability == LocalDurabilityRequirement::Preferred => Ok(false),
             Err(error) => map_atomic_error(

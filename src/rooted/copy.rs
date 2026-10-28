@@ -48,7 +48,7 @@ pub(super) fn deletion_failure_hint(error: &LocalFileError) -> Option<LocalCopyF
 
 /// Retains a successful conflicting-entry removal through a later error.
 pub(super) fn mark_partial_after_removal(mut error: Error, removed: bool) -> Error {
-    if removed {
+    if removed && error.failure_state() != Some(LocalCopyFailureState::Published) {
         error = error.with_failure_state(LocalCopyFailureState::PartiallyPublished);
     }
     error

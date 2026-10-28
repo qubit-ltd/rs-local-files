@@ -160,7 +160,7 @@ impl RootedLocalFileSystem {
         let stats = self
             .root
             .copy_with_durability(&source_path, &target_path, internal_options, options.durability())
-            .map_err(|error| LocalCopyFailure::from_copy_dir_error(source, target, error))?;
+            .map_err(|error| copy_failure_from_dir_error(source, target, error, directory))?;
         let parent_durable = published_durability(
             options.durability(),
             || {
@@ -188,5 +188,62 @@ impl RootedLocalFileSystem {
             durable,
             options.preserve_metadata(),
         ))
+    }
+}
+
+fn copy_failure_from_dir_error(
+    source: &Path,
+    target: &Path,
+    error: crate::local::LocalCopyDirError,
+    directory: bool,
+) -> LocalCopyFailure {
+    let installed_file = error.failure_state() == Some(crate::LocalCopyFailureState::Published);
+    let failure = LocalCopyFailure::from_copy_dir_error(source, target, error);
+    if directory && installed_file {
+        failure.with_state(crate::LocalCopyFailureState::PartiallyPublished)
+    } else {
+        failure
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::io;
+    use std::path::Path;
+    use std::path::PathBuf;
+
+    use super::copy_failure_from_dir_error;
+
+    #[test]
+    fn rooted_directory_request_downgrades_installed_child_proof() {
+        let error = || {
+            crate::local::LocalCopyDirError::new(
+                crate::LocalCopyDirStage::CommitFile,
+                PathBuf::from("/source/first"),
+                PathBuf::from("/target/first"),
+                crate::LocalCopyDirStats {
+                    files: 1,
+                    bytes: 7,
+                    ..crate::LocalCopyDirStats::default()
+                },
+                io::Error::from(io::ErrorKind::Other),
+            )
+            .with_failure_state(crate::LocalCopyFailureState::Published)
+        };
+        let source = Path::new("source");
+        let target = Path::new("target");
+
+        let directory_failure = copy_failure_from_dir_error(source, target, error(), true);
+        assert_eq!(
+            crate::LocalCopyFailureState::PartiallyPublished,
+            directory_failure.state()
+        );
+        assert_eq!(1, directory_failure.partial_stats().files());
+        assert_eq!(7, directory_failure.partial_stats().bytes());
+        assert_eq!(Some(Path::new("/source/first")), directory_failure.failed_source_path());
+        assert_eq!(Some(Path::new("/target/first")), directory_failure.failed_target_path());
+
+        let file_failure = copy_failure_from_dir_error(source, target, error(), false);
+        assert_eq!(crate::LocalCopyFailureState::Published, file_failure.state());
     }
 }
