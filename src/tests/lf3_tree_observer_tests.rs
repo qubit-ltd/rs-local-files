@@ -742,6 +742,117 @@ fn lf3_tree_create_error_retains_structured_failure() {
     assert!(error.into_parts().1.is_none());
 }
 
+#[test]
+fn lf_n04_stage_name_affixes_and_invalid_names_follow_options() {
+    let fixture = tempfile::tempdir().expect("fixture");
+    let fs = LocalFileSystem::host().expect("host filesystem");
+    let parent = fs
+        .open_directory_with_options(fixture.path(), &LocalDirectoryOpenOptions::new())
+        .expect("parent authority");
+    let stage = parent
+        .create_staged_directory(
+            &LocalTempDirectoryOptions::new()
+                .with_prefix("prefix-")
+                .with_suffix("-suffix"),
+        )
+        .expect("stage with affixes");
+    let name = stage.relative_name().to_string_lossy();
+    assert!(name.starts_with("prefix-"));
+    assert!(name.ends_with("-suffix"));
+    stage.cleanup().expect("stage cleanup");
+
+    let error = parent
+        .create_staged_directory(&LocalTempDirectoryOptions::new().with_prefix("../invalid"))
+        .expect_err("path-like affix must be rejected");
+    assert_eq!(crate::error::LocalFileErrorKind::InvalidOptions, error.cause().kind());
+    assert_eq!(
+        crate::outcome::LocalTreeMutationState::NotStarted,
+        error.mutation_state()
+    );
+    assert_eq!(
+        0,
+        fs::read_dir(fixture.path()).expect("parent listing").count(),
+        "invalid affix leaves no stage"
+    );
+}
+
+#[cfg(feature = "test-support")]
+#[test]
+fn lf_n04_unbounded_attempts_survive_more_than_sixty_four_collisions() {
+    for privacy in [
+        LocalPrivacyRequirement::PlatformDefault,
+        LocalPrivacyRequirement::Required,
+    ] {
+        let fixture = tempfile::tempdir().expect("fixture");
+        let fs = LocalFileSystem::host().expect("host filesystem");
+        let parent = fs
+            .open_directory_with_options(fixture.path(), &LocalDirectoryOpenOptions::new())
+            .expect("parent authority");
+        let fault = crate::local::install_test_fault_repeated("staged-directory-collision", 65)
+            .expect("collision fault installs");
+        let stage = parent
+            .create_staged_directory(&LocalTempDirectoryOptions::new().with_privacy(privacy))
+            .expect("unbounded allocation succeeds after injected collisions");
+        assert_eq!(66, crate::local::test_fault_occurrence_count());
+        drop(fault);
+        stage.cleanup().expect("stage cleanup");
+        assert_eq!(0, fs::read_dir(fixture.path()).expect("parent listing").count());
+    }
+}
+
+#[cfg(feature = "test-support")]
+#[test]
+fn lf_n04_finite_attempts_and_zero_attempts_are_exact() {
+    for privacy in [
+        LocalPrivacyRequirement::PlatformDefault,
+        LocalPrivacyRequirement::Required,
+    ] {
+        for (maximum, collisions) in [(64, 64), (1, 1)] {
+            let fixture = tempfile::tempdir().expect("fixture");
+            let fs = LocalFileSystem::host().expect("host filesystem");
+            let parent = fs
+                .open_directory_with_options(fixture.path(), &LocalDirectoryOpenOptions::new())
+                .expect("parent authority");
+            let fault = crate::local::install_test_fault_repeated("staged-directory-collision", collisions)
+                .expect("collision fault installs");
+            let error = parent
+                .create_staged_directory(
+                    &LocalTempDirectoryOptions::new()
+                        .with_privacy(privacy)
+                        .with_max_attempts(maximum),
+                )
+                .expect_err("finite collision budget is exhausted");
+            assert_eq!(crate::error::LocalFileErrorKind::AlreadyExists, error.cause().kind());
+            assert_eq!(
+                crate::outcome::LocalTreeMutationState::NotStarted,
+                error.mutation_state()
+            );
+            assert_eq!(collisions, crate::local::test_fault_occurrence_count());
+            drop(fault);
+            assert_eq!(0, fs::read_dir(fixture.path()).expect("parent listing").count());
+        }
+
+        let fixture = tempfile::tempdir().expect("fixture");
+        let fs = LocalFileSystem::host().expect("host filesystem");
+        let parent = fs
+            .open_directory_with_options(fixture.path(), &LocalDirectoryOpenOptions::new())
+            .expect("parent authority");
+        let fault = crate::local::install_test_fault_repeated("staged-directory-collision", 1)
+            .expect("collision fault installs");
+        let error = parent
+            .create_staged_directory(
+                &LocalTempDirectoryOptions::new()
+                    .with_privacy(privacy)
+                    .with_max_attempts(0),
+            )
+            .expect_err("zero attempts are invalid");
+        assert_eq!(crate::error::LocalFileErrorKind::InvalidOptions, error.cause().kind());
+        assert_eq!(0, crate::local::test_fault_occurrence_count());
+        drop(fault);
+        assert_eq!(0, fs::read_dir(fixture.path()).expect("parent listing").count());
+    }
+}
+
 #[cfg(feature = "test-support")]
 #[test]
 fn lf3_tree_private_stage_retries_name_collisions_without_deleting_conflicts() {

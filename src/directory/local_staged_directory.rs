@@ -521,9 +521,7 @@ impl LocalDirectoryHandle {
             LocalTempCleanupLimits::new(),
         );
         let mut stage = LocalStagedDirectory::new(owner, directory, relative.to_path_buf(), identity, private);
-        if let Some(entries) = options.exact_entries() {
-            stage.verify_entries(entries, options)?;
-        }
+        super::internal::tree_verification::verify_tree(&stage, options.exact_entries(), options)?;
         stage
             .owner
             .as_mut()
@@ -533,16 +531,13 @@ impl LocalDirectoryHandle {
     }
 
     /// Creates a uniquely named stage directly beneath this fixed directory
-    /// authority.
+    /// authority. The `parent` and `create_parent` options do not select or
+    /// create an alternate parent for this fixed-authority entry point.
     pub fn create_staged_directory(
         &self,
         options: &LocalTempDirectoryOptions,
     ) -> Result<LocalStagedDirectory, LocalTreeCreateError> {
-        let parent = self
-            .root_authority()
-            .map_err(|cause| LocalTreeCreateError::new(cause, None, Vec::new(), LocalTreeMutationState::NotStarted))?;
-        let maximum_attempts = options.max_attempts().unwrap_or(64);
-        if maximum_attempts == 0 {
+        if options.max_attempts() == Some(0) {
             return Err(LocalTreeCreateError::new(
                 LocalFileError::new(LocalFileErrorKind::InvalidOptions, LocalFileOperation::GenerateName),
                 None,
@@ -550,12 +545,21 @@ impl LocalDirectoryHandle {
                 LocalTreeMutationState::NotStarted,
             ));
         }
+        let parent = self
+            .root_authority()
+            .map_err(|cause| LocalTreeCreateError::new(cause, None, Vec::new(), LocalTreeMutationState::NotStarted))?;
         let mut created_file = None;
         let mut relative = None;
-        for _ in 0..maximum_attempts {
-            let name = stage_name().map_err(|cause| {
+        let mut attempts = 0_usize;
+        while options.max_attempts().is_none_or(|maximum| attempts < maximum) {
+            attempts = attempts.saturating_add(1);
+            let name = stage_name(options).map_err(|cause| {
                 LocalTreeCreateError::new(cause, None, Vec::new(), LocalTreeMutationState::NotStarted)
             })?;
+            #[cfg(all(test, feature = "test-support"))]
+            if crate::local::take_repeated_test_support("staged-directory-collision") {
+                continue;
+            }
             if options.privacy() == crate::policy::LocalPrivacyRequirement::Required {
                 match create_private_directory(parent, &name) {
                     Ok(file) => {
@@ -887,22 +891,18 @@ fn resource_limit() -> LocalFileError {
     LocalFileError::new(LocalFileErrorKind::ResourceLimit, LocalFileOperation::Read)
 }
 
-fn stage_name() -> LocalResult<std::ffi::OsString> {
-    let mut random = [0_u8; 16];
-    getrandom::fill(&mut random).map_err(|source| {
-        LocalFileError::from_io(
-            LocalFileOperation::GenerateName,
-            None,
-            None,
-            std::io::Error::other(source.to_string()),
-        )
-    })?;
-    let mut name = String::from("qubit-stage-");
-    for byte in random {
-        use std::fmt::Write as _;
-        write!(&mut name, "{byte:02x}").expect("writing to a string cannot fail");
-    }
-    Ok(name.into())
+fn stage_name(options: &LocalTempDirectoryOptions) -> LocalResult<std::ffi::OsString> {
+    crate::local::try_random_file_name("qubit-stage-", options.prefix(), options.suffix())
+        .map(Into::into)
+        .map_err(|source| {
+            let invalid = source.kind() == std::io::ErrorKind::InvalidInput;
+            let error = LocalFileError::from_io(LocalFileOperation::GenerateName, None, None, source);
+            if invalid {
+                error.with_kind(LocalFileErrorKind::InvalidOptions)
+            } else {
+                error
+            }
+        })
 }
 
 fn create_private_directory(
@@ -1049,18 +1049,18 @@ impl LocalStagedDirectory {
         {
             let mut entries = Vec::new();
             let mut bytes = 0_usize;
+            let traversal = limits
+                .without_max_depth()
+                .with_error_policy(crate::options::LocalWalkErrorPolicy::FailFast);
             let collect = (|| -> LocalResult<()> {
-                for item in self.observe_tree_with_options(limits)? {
+                for item in self.observe_tree_with_options(&traversal)? {
                     let item = item?;
+                    let depth = item.relative_path().components().count();
                     bytes = bytes
                         .checked_add(item.relative_path().as_os_str().as_encoded_bytes().len())
                         .ok_or_else(resource_limit)?;
-                    if limits.max_seen_name_bytes().is_some_and(|maximum| bytes > maximum) {
-                        return Err(resource_limit());
-                    }
-                    if limits
-                        .max_depth()
-                        .is_some_and(|maximum| item.relative_path().components().count() >= maximum)
+                    if limits.max_seen_name_bytes().is_some_and(|maximum| bytes > maximum)
+                        || limits.max_depth().is_some_and(|maximum| depth > maximum)
                     {
                         return Err(resource_limit());
                     }
@@ -1324,16 +1324,18 @@ impl LocalStagedDirectory {
         use crate::outcome::LocalTreeAccessState as State;
         let mut entries = Vec::new();
         let mut bytes = 0_usize;
+        let traversal = limits
+            .without_max_depth()
+            .with_error_policy(crate::options::LocalWalkErrorPolicy::FailFast);
         let collect = (|| -> LocalResult<()> {
-            for item in self.observe_tree_with_options(limits)? {
+            for item in self.observe_tree_with_options(&traversal)? {
                 let item = item?;
+                let depth = item.relative_path().components().count();
                 bytes = bytes
                     .checked_add(item.relative_path().as_os_str().as_encoded_bytes().len())
                     .ok_or_else(resource_limit)?;
                 if limits.max_seen_name_bytes().is_some_and(|maximum| bytes > maximum)
-                    || limits
-                        .max_depth()
-                        .is_some_and(|maximum| item.relative_path().components().count() >= maximum)
+                    || limits.max_depth().is_some_and(|maximum| depth > maximum)
                 {
                     return Err(resource_limit());
                 }
@@ -1521,12 +1523,13 @@ impl LocalStagedDirectory {
         }
         let root = self.directory().root_authority()?;
         let mut synced = true;
-        for item in self.observe_tree_with_options(limits)? {
+        let traversal = limits
+            .without_max_depth()
+            .with_error_policy(crate::options::LocalWalkErrorPolicy::FailFast);
+        for item in self.observe_tree_with_options(&traversal)? {
             let item = item?;
-            if limits
-                .max_depth()
-                .is_some_and(|maximum| item.relative_path().components().count() >= maximum)
-            {
+            let depth = item.relative_path().components().count();
+            if limits.max_depth().is_some_and(|maximum| depth > maximum) {
                 return Err(resource_limit());
             }
             if item.observation().metadata().kind() != crate::LocalFileKind::File {

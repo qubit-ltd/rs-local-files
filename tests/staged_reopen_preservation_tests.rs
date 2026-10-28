@@ -10,6 +10,7 @@
 use std::fs;
 use std::path::MAIN_SEPARATOR_STR;
 use std::path::Path;
+use std::time::Duration;
 
 use qubit_local_files::LocalFileSystem;
 use qubit_local_files::directory::LocalTreeEntry;
@@ -81,7 +82,13 @@ fn failed_reopen_preserves_tree(rooted: bool, options: LocalTreeValidationOption
             result.expect_err("identity mismatch should fail").kind()
         );
     } else {
-        assert!(result.is_err(), "validation should fail: options={options:?}");
+        match result {
+            Err(_) => {}
+            Ok(stage) => {
+                drop(stage.retain_in_place());
+                panic!("validation should fail: options={options:?}");
+            }
+        }
     }
     assert_eq!(
         b"recovery bytes",
@@ -108,7 +115,109 @@ fn test_failed_reopen_preserves_host_and_rooted_recovery_trees() {
             .with_limits(LocalListOptions::new().with_max_entries(0));
         failed_reopen_preserves_tree(rooted, zero_budget, false);
 
+        failed_reopen_preserves_tree(
+            rooted,
+            LocalTreeValidationOptions::new().with_limits(LocalListOptions::new().with_max_entries(0)),
+            false,
+        );
+        failed_reopen_preserves_tree(
+            rooted,
+            LocalTreeValidationOptions::new().with_limits(LocalListOptions::new().with_max_depth(0)),
+            false,
+        );
+        failed_reopen_preserves_tree(
+            rooted,
+            LocalTreeValidationOptions::new().with_limits(LocalListOptions::new().with_deadline(Duration::ZERO)),
+            false,
+        );
+
         failed_reopen_preserves_tree(rooted, LocalTreeValidationOptions::new(), true);
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn test_failed_reopen_rejects_symlink_special_and_external_hardlink_without_cleanup() {
+    use std::os::unix::fs::symlink;
+
+    for rooted in [false, true] {
+        for (entry_name, options, setup) in [
+            ("link", LocalTreeValidationOptions::new().with_reject_symlinks(), 0_u8),
+            (
+                "fifo",
+                LocalTreeValidationOptions::new().with_reject_special_files(),
+                1_u8,
+            ),
+            (
+                "payload",
+                LocalTreeValidationOptions::new().with_reject_external_hardlinks(),
+                2_u8,
+            ),
+        ] {
+            let scratch = tempfile::tempdir().expect("scratch parent");
+            let fs = if rooted {
+                LocalFileSystem::rooted(scratch.path())
+            } else {
+                LocalFileSystem::host()
+            }
+            .expect("filesystem");
+            let parent = fs
+                .open_directory_with_options(
+                    if rooted {
+                        Path::new(MAIN_SEPARATOR_STR)
+                    } else {
+                        scratch.path()
+                    },
+                    &LocalDirectoryOpenOptions::new(),
+                )
+                .expect("parent authority");
+            let mut stage = parent
+                .create_staged_directory(&LocalTempDirectoryOptions::new())
+                .expect("stage");
+            stage
+                .write_file_new(Path::new("payload"), &mut &b"recovery bytes"[..], 64)
+                .expect("payload");
+            let name = stage.relative_name().to_os_string();
+            let native = native_stage(&scratch, &name);
+            let identity = stage.identity().expect("identity").clone();
+            drop(stage.retain_in_place());
+
+            match setup {
+                0 => symlink("payload", native.join(entry_name)).expect("symlink fixture"),
+                1 => {
+                    let fifo = std::ffi::CString::new(native.join(entry_name).as_os_str().as_encoded_bytes())
+                        .expect("fifo path");
+                    assert_eq!(
+                        0,
+                        unsafe { libc::mkfifo(fifo.as_ptr(), 0o600) },
+                        "fifo fixture should be created"
+                    );
+                }
+                2 => std::fs::hard_link(native.join("payload"), scratch.path().join("outside"))
+                    .expect("outside hardlink"),
+                _ => unreachable!(),
+            }
+
+            let result = parent.open_staged_directory(Path::new(&name), &identity, &options);
+            match result {
+                Err(error) => {
+                    assert!(matches!(
+                        error.kind(),
+                        LocalFileErrorKind::RequirementNotMet | LocalFileErrorKind::ResourceLimit
+                    ));
+                }
+                Ok(stage) => {
+                    drop(stage.retain_in_place());
+                    panic!("enabled rejection option must reject fixture {entry_name}");
+                }
+            }
+            assert_eq!(
+                b"recovery bytes".as_slice(),
+                std::fs::read(native.join("payload"))
+                    .expect("recovery bytes remain")
+                    .as_slice()
+            );
+        }
     }
 }
 

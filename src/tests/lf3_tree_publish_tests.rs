@@ -71,6 +71,66 @@ fn lf_review_tree_exact_set_conflicts_leave_destination_and_owner_untouched() {
 }
 
 #[test]
+fn lf_n02_required_sync_accepts_a_file_at_the_depth_boundary() {
+    let fixture = tempfile::tempdir().expect("fixture");
+    let fs = crate::LocalFileSystem::host().expect("Host");
+    let parent = fs
+        .open_directory_with_options(fixture.path(), &LocalDirectoryOpenOptions::new())
+        .expect("parent");
+    let mut stage = parent
+        .create_staged_directory(&LocalTempDirectoryOptions::new())
+        .expect("stage");
+    stage
+        .write_file_new(Path::new("file"), &mut &b"payload"[..], 16)
+        .expect("file");
+    let options = LocalTreePublishOptions::new()
+        .with_validation(LocalTreeValidationOptions::new().with_limits(LocalListOptions::new().with_max_depth(1)))
+        .with_file_sync(crate::policy::LocalFileSyncRequirement::Required);
+
+    let outcome = stage
+        .publish_new(&parent, OsStr::new("published"), &options)
+        .expect("depth-one file should be validated and synced");
+    assert_eq!(outcome.publication(), LocalTreePublication::Published);
+    assert!(outcome.file_synced());
+    assert_eq!(
+        std::fs::read(fixture.path().join("published/file")).expect("published file"),
+        b"payload"
+    );
+}
+
+#[test]
+fn lf_n02_over_depth_publish_is_not_published_and_returns_stage() {
+    let fixture = tempfile::tempdir().expect("fixture");
+    let fs = crate::LocalFileSystem::host().expect("Host");
+    let parent = fs
+        .open_directory_with_options(fixture.path(), &LocalDirectoryOpenOptions::new())
+        .expect("parent");
+    let mut stage = parent
+        .create_staged_directory(&LocalTempDirectoryOptions::new())
+        .expect("stage");
+    std::fs::create_dir(fixture.path().join(stage.relative_name()).join("one")).expect("first directory");
+    std::fs::create_dir(fixture.path().join(stage.relative_name()).join("one/two")).expect("second directory");
+    stage
+        .write_file_new(Path::new("one/two/file"), &mut &b"payload"[..], 16)
+        .expect("nested file");
+    let options = LocalTreePublishOptions::new()
+        .with_validation(LocalTreeValidationOptions::new().with_limits(LocalListOptions::new().with_max_depth(2)))
+        .with_file_sync(crate::policy::LocalFileSyncRequirement::Required);
+
+    let error = stage
+        .publish_new(&parent, OsStr::new("published"), &options)
+        .expect_err("deep entry must prevent publication");
+    assert_eq!(error.cause().kind(), crate::error::LocalFileErrorKind::ResourceLimit);
+    assert_eq!(error.publication(), LocalTreePublication::NotPublished);
+    assert!(!fixture.path().join("published").exists());
+    error
+        .into_stage()
+        .expect("stage owner retained")
+        .cleanup()
+        .expect("stage cleanup");
+}
+
+#[test]
 fn lf_review_tree_duplicate_expected_paths_preserve_publish_owner() {
     let fixture = tempfile::tempdir().expect("fixture");
     let fs = crate::LocalFileSystem::host().expect("Host");
