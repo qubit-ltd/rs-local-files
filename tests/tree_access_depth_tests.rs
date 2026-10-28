@@ -90,14 +90,14 @@ fn lf_n02_nonempty_tree_zero_depth_fails_without_partial_permission_changes() {
         LocalTreeFinalAccess::ReadOnlyCurrentUser,
     ] {
         let fixture = tempfile::tempdir().expect("fixture");
-        let (_parent, mut stage, root) = staged_tree(&fixture, false);
+        let (_parent, mut stage, _root) = staged_tree(&fixture, false);
         #[cfg(unix)]
-        let leaf = root.join("leaf");
+        let leaf = _root.join("leaf");
         #[cfg(unix)]
         let original_modes = {
             use std::os::unix::fs::MetadataExt;
             (
-                std::fs::metadata(&root).expect("root metadata").mode() & 0o777,
+                std::fs::metadata(&_root).expect("root metadata").mode() & 0o777,
                 std::fs::metadata(&leaf).expect("leaf metadata").mode() & 0o777,
             )
         };
@@ -115,7 +115,7 @@ fn lf_n02_nonempty_tree_zero_depth_fails_without_partial_permission_changes() {
             use std::os::unix::fs::MetadataExt;
             assert_eq!(
                 original_modes.0,
-                std::fs::metadata(&root).expect("root metadata").mode() & 0o777
+                std::fs::metadata(&_root).expect("root metadata").mode() & 0o777
             );
             assert_eq!(
                 original_modes.1,
@@ -163,15 +163,15 @@ fn lf_n02_over_depth_nested_tree_fails_before_any_permission_change() {
         LocalTreeFinalAccess::ReadOnlyCurrentUser,
     ] {
         let fixture = tempfile::tempdir().expect("fixture");
-        let (_parent, mut stage, root) = staged_tree(&fixture, true);
+        let (_parent, mut stage, _root) = staged_tree(&fixture, true);
         #[cfg(unix)]
-        let leaf = root.join("one/leaf");
+        let leaf = _root.join("one/leaf");
         #[cfg(unix)]
         let original_modes = {
             use std::os::unix::fs::MetadataExt;
             [
-                std::fs::metadata(&root).expect("root metadata").mode() & 0o777,
-                std::fs::metadata(root.join("one")).expect("directory metadata").mode() & 0o777,
+                std::fs::metadata(&_root).expect("root metadata").mode() & 0o777,
+                std::fs::metadata(_root.join("one")).expect("directory metadata").mode() & 0o777,
                 std::fs::metadata(&leaf).expect("leaf metadata").mode() & 0o777,
             ]
         };
@@ -188,11 +188,11 @@ fn lf_n02_over_depth_nested_tree_fails_before_any_permission_change() {
             use std::os::unix::fs::MetadataExt;
             assert_eq!(
                 original_modes[0],
-                std::fs::metadata(&root).expect("root metadata").mode() & 0o777
+                std::fs::metadata(&_root).expect("root metadata").mode() & 0o777
             );
             assert_eq!(
                 original_modes[1],
-                std::fs::metadata(root.join("one")).expect("directory metadata").mode() & 0o777
+                std::fs::metadata(_root.join("one")).expect("directory metadata").mode() & 0o777
             );
             assert_eq!(
                 original_modes[2],
