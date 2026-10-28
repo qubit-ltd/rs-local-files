@@ -15,6 +15,7 @@ use std::fs;
 use std::hint::black_box;
 use std::path::Path;
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::Duration;
 
 use criterion::Criterion;
@@ -23,6 +24,9 @@ use criterion::criterion_main;
 use qubit_io::Output;
 use qubit_local_files::LocalFileSystem;
 use qubit_local_files::LocalTempDirectory;
+use qubit_local_files::directory::LocalResolutionOrigin;
+use qubit_local_files::directory::LocalResolutionPolicy;
+use qubit_local_files::directory::LocalResolutionScope;
 use qubit_local_files::directory::LocalTreeEntry;
 use qubit_local_files::error::LocalFileError;
 use qubit_local_files::error::LocalFileErrorKind;
@@ -32,6 +36,8 @@ use qubit_local_files::options::LocalDirectoryOpenOptions;
 use qubit_local_files::options::LocalDirectoryReopenPolicy;
 use qubit_local_files::options::LocalListOptions;
 use qubit_local_files::options::LocalReadOptions;
+use qubit_local_files::options::LocalResolutionLimits;
+use qubit_local_files::options::LocalRootOpenOptions;
 use qubit_local_files::options::LocalTempCleanupLimits;
 use qubit_local_files::options::LocalTempDirectoryOptions;
 use qubit_local_files::options::LocalTreePublishOptions;
@@ -47,6 +53,24 @@ use qubit_local_files::outcome::LocalWriterState;
 use qubit_local_files::path::LocalPathCodec;
 use qubit_local_files::policy::LocalDurabilityRequirement;
 use tempfile::tempdir;
+
+#[derive(Debug)]
+struct NoopResolutionPolicy;
+
+impl LocalResolutionPolicy for NoopResolutionPolicy {
+    fn validate_component(
+        &self,
+        _: &OsStr,
+        _: LocalResolutionScope,
+        _: LocalResolutionOrigin,
+    ) -> qubit_local_files::LocalResult<()> {
+        Ok(())
+    }
+
+    fn validate_symlink_target(&self, _: &Path, _: LocalResolutionScope) -> qubit_local_files::LocalResult<()> {
+        Ok(())
+    }
+}
 
 fn bench_path_codec(c: &mut Criterion) {
     let native = OsStr::new("manifest%2Fready");
@@ -852,6 +876,25 @@ fn bench_deep_metadata(c: &mut Criterion) {
         fs::write(&physical, b"payload").expect("deep metadata benchmark payload should be written");
         let host = LocalFileSystem::host().expect("Host filesystem should open");
         let rooted = LocalFileSystem::rooted(directory.path()).expect("Rooted filesystem should open");
+        let finite = LocalFileSystem::rooted_with_options(
+            directory.path(),
+            &LocalRootOpenOptions::new().with_resolution_limits(
+                LocalResolutionLimits::new().with_max_actual_components(
+                    directory
+                        .path()
+                        .components()
+                        .filter(|component| matches!(component, std::path::Component::Normal(_)))
+                        .count()
+                        .saturating_add(depth + 1),
+                ),
+            ),
+        )
+        .expect("finite-resolution Rooted filesystem should open");
+        let policy = LocalFileSystem::rooted_with_options(
+            directory.path(),
+            &LocalRootOpenOptions::new().with_resolution_policy(Arc::new(NoopResolutionPolicy)),
+        )
+        .expect("policy Rooted filesystem should open");
         group.bench_function(format!("std/depth_{depth}"), |bench| {
             bench.iter(|| {
                 let metadata =
@@ -872,6 +915,22 @@ fn bench_deep_metadata(c: &mut Criterion) {
                 let metadata = rooted
                     .metadata(black_box(&relative))
                     .expect("Rooted deep metadata lookup should succeed");
+                black_box(metadata.len());
+            });
+        });
+        group.bench_function(format!("rooted_finite/depth_{depth}"), |bench| {
+            bench.iter(|| {
+                let metadata = finite
+                    .metadata(black_box(&relative))
+                    .expect("finite Rooted deep metadata lookup should succeed");
+                black_box(metadata.len());
+            });
+        });
+        group.bench_function(format!("rooted_policy/depth_{depth}"), |bench| {
+            bench.iter(|| {
+                let metadata = policy
+                    .metadata(black_box(&relative))
+                    .expect("policy Rooted deep metadata lookup should succeed");
                 black_box(metadata.len());
             });
         });
