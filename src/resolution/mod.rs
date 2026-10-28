@@ -1,11 +1,39 @@
-use crate::{directory::LocalResolutionPolicy, options::LocalResolutionLimits};
+use crate::{
+    directory::{LocalResolutionOrigin, LocalResolutionPolicy, LocalResolutionScope},
+    options::LocalResolutionLimits,
+};
 use std::sync::Arc;
 
+#[derive(Clone)]
 pub(crate) struct ResolutionContract {
     limits: LocalResolutionLimits,
     policies: Vec<Arc<dyn LocalResolutionPolicy>>,
 }
 impl ResolutionContract {
+    pub(crate) fn limits(&self) -> LocalResolutionLimits {
+        self.limits
+    }
+    pub(crate) fn validate_component(
+        &self,
+        component: &std::ffi::OsStr,
+        scope: LocalResolutionScope,
+        origin: LocalResolutionOrigin,
+    ) -> crate::LocalResult<()> {
+        for policy in &self.policies {
+            policy.validate_component(component, scope, origin)?;
+        }
+        Ok(())
+    }
+    pub(crate) fn validate_target(
+        &self,
+        target: &std::path::Path,
+        scope: LocalResolutionScope,
+    ) -> crate::LocalResult<()> {
+        for policy in &self.policies {
+            policy.validate_symlink_target(target, scope)?;
+        }
+        Ok(())
+    }
     pub(crate) fn unrestricted() -> Self {
         Self {
             limits: LocalResolutionLimits::new(),
@@ -31,7 +59,49 @@ impl ResolutionContract {
 #[cfg(test)]
 mod tests {
     use super::ResolutionContract;
-    use crate::options::LocalResolutionLimits;
+    use crate::{
+        directory::{LocalResolutionOrigin, LocalResolutionPolicy, LocalResolutionScope},
+        options::LocalResolutionLimits,
+        LocalResult,
+    };
+    use std::{
+        ffi::OsStr,
+        path::Path,
+        sync::{Arc, Mutex},
+    };
+
+    #[derive(Debug)]
+    struct Recorder(&'static str, Arc<Mutex<Vec<&'static str>>>);
+    impl LocalResolutionPolicy for Recorder {
+        fn validate_component(
+            &self,
+            _: &OsStr,
+            _: LocalResolutionScope,
+            _: LocalResolutionOrigin,
+        ) -> LocalResult<()> {
+            self.1.lock().unwrap().push(self.0);
+            Ok(())
+        }
+        fn validate_symlink_target(&self, _: &Path, _: LocalResolutionScope) -> LocalResult<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn resolution_session_policy_chain_runs_parent_then_child() {
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        let parent = ResolutionContract::unrestricted()
+            .with_policy(Arc::new(Recorder("parent", calls.clone())));
+        let child = parent.with_policy(Arc::new(Recorder("child", calls.clone())));
+        child
+            .validate_component(
+                OsStr::new("x"),
+                LocalResolutionScope::Descendant,
+                LocalResolutionOrigin::Input,
+            )
+            .unwrap();
+        assert_eq!(*calls.lock().unwrap(), ["parent", "child"]);
+    }
 
     fn values(limits: LocalResolutionLimits) -> [Option<usize>; 4] {
         [
