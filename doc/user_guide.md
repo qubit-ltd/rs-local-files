@@ -817,7 +817,8 @@ and `access_state()` before transferring ownership with `into_resource()`. The
 state tells the application whether another bounded write attempt could still
 be considered. This example chooses explicit cleanup in every state; if
 cleanup fails, the returned `LocalFileError` retains the resource recovery
-information for a later retry.
+information for a later retry. See the [`LocalTempRecovery` Rustdoc source](../src/temp/local_temp_recovery.rs)
+for its ownership and cleanup contract.
 
 ```rust
 use qubit_io::Output;
@@ -1228,6 +1229,14 @@ limits. Supplying `None` at a child does not remove a finite parent bound.
 open options themselves are owned configuration values. Defaults add no new
 limits.
 
+`LocalObservedReadOptions::with_resolution_limits` applies finite limits to
+Rooted observed reads. Host observed reads return `Unsupported` when the
+effective limits are finite, including limits supplied through path binding;
+an unbounded Host request keeps its existing behavior. Use Rooted when the
+observed read must enforce finite resolution limits. The budget applies to the
+path the selected operation actually resolves: a component removed by ordinary
+Rooted lexical normalization is not visited or charged.
+
 `LocalResolutionPolicy` is a pure validation hook for each normal component
 and raw symlink target. It receives whether resolution is opening a root or
 descending from an established authority, and whether a component came from
@@ -1236,12 +1245,19 @@ query or open; it must not perform I/O or be relied on for a fixed call count.
 The existing component deny-name policy remains a separate restriction and is
 combined with the resolution policy.
 
-Resolution preserves traversal semantics. For example, `missing/../file` is
-not simplified to `file`: the missing component must resolve before `..` can
-move to its parent. Literal `.` and `..` are counted before their resolver
-meaning is applied. Finite limits are checked before expanding or allocating
-the corresponding work; `LocalFileErrorKind::ResourceLimit` identifies the
-dimension that was exceeded.
+Path handling depends on which interface receives the path:
+
+| Input | Resolution behavior |
+| --- | --- |
+| An ordinary Rooted operation such as `rooted.open_reader(Path::new("missing/../file"))` | Lexically normalizes the caller path first, so it may open `file` without visiting `missing`. |
+| The Host-native path passed to `LocalFileSystem::rooted_with_options` | Traverses components in order; `missing/../dir` must access `missing` before applying `..`, and fails if `missing` is absent. Root-open limits measure this native construction path. |
+| A symbolic-link target or a path resolved by a fixed directory handle | Follows that resolver's component-by-component contract; do not infer ordinary Rooted caller-path folding. |
+
+Finite Rooted resolution limits count the work at the relevant resolution layer,
+including raw link-target components and resolved-prefix work where applicable.
+Literal `.` and `..` are counted before their resolver meaning is applied.
+Limits are checked before expanding or allocating the corresponding work;
+`LocalFileErrorKind::ResourceLimit` identifies the dimension exceeded.
 
 Security observation options distinguish `Optional` from `Required`. Optional
 returns no field only when the platform mechanism is explicitly unsupported;
@@ -1264,15 +1280,20 @@ reports `OwnerPolicyApplied` only after applying and verifying the exact policy.
 The bounded application operation fixes at most 256 child identities and
 management handles before changing access; a larger tree returns
 `ResourceLimit` without mutation. Caller-supplied traversal limits can impose a
-smaller bound.
+smaller bound. When file synchronization is requested, regular files are
+synchronized again through their retained handles after the access policy is
+applied and verified. `file_synced()` is true only when all requested file
+syncs succeed. `NotRequired` adds no post-policy file sync; `Preferred` may
+publish with `file_synced() == false`, while `Required` prevents publication
+and retains the stage if a final sync cannot complete. The access state
+reflects policy changes already applied.
 This does not mean that operating-system ACL inheritance or all effective
 access behavior is identical across platforms.
 
-Platform evidence status: Darwin ACL interpretation remains `BLOCKED_DESIGN`;
-Windows native security-observation runtime coverage is `BLOCKED_PLATFORM`.
-Native owner-policy lifecycle suites on macOS and Windows are also
-`BLOCKED_PLATFORM`. The public API being present does not turn these states
-into native-platform PASS results.
+On macOS, exact Unix owner-access verification is not implemented, so an owner
+policy that requires it returns `Unsupported`. Mode bits alone are not a claim
+that extended ACLs exclude other identities; the library does not claim
+`CurrentUserOnly` access against an unverified Darwin ACL.
 
 ## Errors and Diagnostics
 

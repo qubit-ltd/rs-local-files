@@ -475,6 +475,20 @@ At PWD `/work/project`:
 "/tmp"              -> "/tmp"
 ```
 
+Path budgets apply to the input at the layer that resolves it:
+
+| Input | Resolution and budget boundary |
+| --- | --- |
+| Ordinary Rooted operation, such as `open_reader(Path::new("missing/../file"))` | The caller path is lexically normalized first; the operation may open `file` without visiting or charging `missing`. |
+| Host-native construction path passed to `rooted_with_options`, such as `missing/../dir` | The native path is traversed in order; `missing` must be accessed before `..` and fails if absent. Root-open limits measure this construction path. |
+| Raw symbolic-link target or path resolved by a fixed directory handle | Each resolver follows its component-by-component contract; ordinary Rooted caller-path folding does not apply. |
+
+Finite limits on `LocalObservedReadOptions` are supported for Rooted observed
+reads. A Host observed read returns `Unsupported` if its effective resolution
+limits are finite, including limits supplied by path binding; an unbounded Host
+request keeps its existing behavior. This prevents a bounded preflight from
+being mistaken for a bound on the actual Host open.
+
 ### 8.4 Two-path operations
 
 Resolution retains directory intent from trailing separators, trailing `.`, or

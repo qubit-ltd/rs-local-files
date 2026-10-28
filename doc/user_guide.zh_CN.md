@@ -649,6 +649,7 @@ match reader.verify_path_binding()? {
 `seal_with_options` 会消费可写 owner。失败后应先读取 `cause()` 和 `access_state()`，再通过
 `into_resource()` 取回临时资源。状态用于判断是否有理由考虑再次写入；下面的应用统一选择显式
 cleanup。若清理失败，返回的 `LocalFileError` 会保留资源恢复信息，可供之后重试。
+`LocalTempRecovery` 的所有权与清理合同见[Rustdoc 源码](../src/temp/local_temp_recovery.rs)。
 
 ```rust
 use qubit_io::Output;
@@ -1001,14 +1002,26 @@ Windows Rooted 的符号链接读取、类型判断和创建均相对于已打�
 `LocalResolutionLimits` 实现 `Copy`，其 builder 是 `const`；root open options 是拥有配置值。
 默认配置没有新增额度。
 
+`LocalObservedReadOptions::with_resolution_limits` 可为 Rooted observed read 设置有限解析预算。
+如果 Host observed read 的有效预算有限，包括由 path binding 提供的预算，则返回 `Unsupported`；
+Host 请求未设置有限预算时保持原行为。需要对 observed read 强制执行有限解析预算时，应使用 Rooted。
+预算作用于该接口实际解析的路径；普通 Rooted 操作在词法规范化中消去的组件不会被访问或计费。
+
 `LocalResolutionPolicy` 提供纯校验回调，检查普通路径组件和原始符号链接目标。回调能区分正在打开
 Rooted、还是从既有 authority 向下解析，也能区分名称来自调用方输入还是链接目标。对应 metadata
 查询或 open 之前会调用校验；回调不得执行 I/O，也不能依赖固定调用次数。既有组件 deny-name
 策略仍单独生效，并与它组合。
 
-解析会保留真实遍历顺序。例如 `missing/../file` 不会先化简成 `file`：必须先确认
-`missing` 存在，才能沿 `..` 返回父目录。字面 `.`、`..` 也会先计入解析预算，再按解析器语义处理。
-有限额度会在展开或分配对应工作之前检查；超限通过
+不同接口的路径语义不同：
+
+| 输入 | 解析行为 |
+| --- | --- |
+| 普通 Rooted 操作，例如 `rooted.open_reader(Path::new("missing/../file"))` | 先对调用方路径做词法规范化，因此可能不访问 `missing`，直接打开 `file`。 |
+| 传给 `LocalFileSystem::rooted_with_options` 的 Host 原生路径 | 按组件顺序遍历；`missing/../dir` 必须先访问 `missing`，缺少时失败。Root-open 预算计量这条原生构造路径。 |
+| 符号链接原始目标或固定目录 handle 解析的路径 | 遵循对应解析器逐组件解析的合同；不能套用普通 Rooted 调用方路径折叠规则。 |
+
+Rooted 有限解析预算按相应解析层实际处理的工作计量；适用时包括链接目标组件和已解析前缀。
+字面 `.`、`..` 会先计入预算，再按解析器语义处理。有限额度在展开或分配对应工作前检查；超限通过
 `LocalFileErrorKind::ResourceLimit` 报告具体维度。
 
 安全观测选项区分 `Optional` 和 `Required`。只有机制明确不支持时，Optional 才会省略相应字段；权限拒绝、
@@ -1024,9 +1037,14 @@ Unix 使用 `with_unix_modes(directory_mode, file_mode)`，Windows 使用
 `OwnerPolicyApplied`。修改权限前，操作最多固定 256 个子项 identity 和管理句柄；树更大时会在 mutation
 前以 `ResourceLimit` 失败。调用方设置的遍历额度可以更小。这不代表不同平台的 ACL 继承或有效访问语义完全相同。
 
-平台证据状态：Darwin ACL 语义仍为 `BLOCKED_DESIGN`；Windows 原生安全观测运行覆盖为
-`BLOCKED_PLATFORM`。macOS 和 Windows 原生 owner-policy lifecycle suite 也仍是
-`BLOCKED_PLATFORM`。API 已公开不代表这些平台已有原生 PASS 证据。
+请求文件同步时，权限策略应用并验证后，库还会通过保留的句柄再次同步普通文件。
+只有所有请求的文件同步成功，`file_synced()` 才为 true。`NotRequired` 不增加权限变更后的文件同步；
+`Preferred` 在最终同步失败时仍可发布，但 `file_synced()` 为 false；`Required` 会阻止发布并保留 stage。
+访问状态反映已经发生的权限变更。
+
+macOS 上尚未实现精确 Unix owner-access ACL 验证，因此需要该验证的 owner policy 会返回
+`Unsupported`。单独设置 mode bits 不表示扩展 ACL 已排除其他身份；库不声称在未经验证的 Darwin ACL
+上实现了 `CurrentUserOnly`。
 
 Windows Rooted 条件 `Content` 发布仍为 `Unsupported`。Windows 尚未证明所需的相对目录发布和恢复协议，
 不能把 Unix 支持矩阵当成 Windows 原生证据。

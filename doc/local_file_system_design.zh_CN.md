@@ -637,6 +637,18 @@ PWD 为 `/work/project`：
 "/tmp"              -> "/tmp"
 ```
 
+路径预算作用于实际接收并解析该路径的层：
+
+| 输入 | 解析与预算边界 |
+| --- | --- |
+| 普通 Rooted 操作，例如 `open_reader(Path::new("missing/../file"))` | 先对调用方路径进行词法规范化；操作可能不访问或计费 `missing`，直接打开 `file`。 |
+| 传给 `rooted_with_options` 的 Host 原生构造路径，例如 `missing/../dir` | 按顺序遍历原生路径；必须先访问 `missing` 再处理 `..`，缺失时失败。Root-open 限制计量这条构造路径。 |
+| 符号链接原始目标或固定目录 handle 解析的路径 | 对应解析器逐组件处理；不套用普通 Rooted 调用方路径折叠规则。 |
+
+Rooted observed read 支持通过 `LocalObservedReadOptions` 设置有限预算。Host observed read 的有效解析预算
+有限时（包括 path binding 提供的预算）返回 `Unsupported`；未设置有限预算的 Host 请求保持原行为。
+这样不会把有界预检误称为实际 Host open 也受到了预算限制。
+
 重复分隔符和末尾分隔符按平台 native `Path` 语义规范化。NUL、无效 prefix 组合以及不能
 无损表示的 native value 必须拒绝。
 
