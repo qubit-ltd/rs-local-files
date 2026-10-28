@@ -1,8 +1,8 @@
 use super::session::ResolutionSession;
 use crate::{
+    LocalResult,
     directory::LocalResolutionOrigin,
     error::{LocalFileError, LocalFileOperation, LocalResourceKind},
-    LocalResult,
 };
 use std::{ffi::OsString, path::Path};
 
@@ -161,6 +161,7 @@ fn windows_prefix_units(path: &Path) -> Option<usize> {
     prefix_units_from_wide(path.as_os_str().encode_wide())
 }
 
+#[cfg(any(windows, test))]
 fn prefix_units_from_wide<I>(mut units: I) -> Option<usize>
 where
     I: Iterator<Item = u16>,
@@ -199,15 +200,18 @@ where
     Some(0)
 }
 
+#[cfg(any(windows, test))]
 const fn is_separator(unit: u16) -> bool {
     unit == b'/' as u16 || unit == b'\\' as u16
 }
 
+#[cfg(any(windows, test))]
 struct UncSegment {
     is_extended_marker: bool,
     is_unc_marker: bool,
 }
 
+#[cfg(any(windows, test))]
 fn consume_unc_segment<I>(
     units: &mut std::iter::Peekable<I>,
     skipped: &mut usize,
@@ -242,6 +246,7 @@ fn checked_sum(current: usize, added: usize) -> Option<usize> {
     current.checked_add(added)
 }
 
+#[cfg(any(windows, test))]
 fn measure_windows_units<I>(units: I) -> Option<(usize, usize)>
 where
     I: Iterator<Item = u16> + Clone,
@@ -270,6 +275,7 @@ where
     Some((components, bytes))
 }
 
+#[cfg(any(windows, test))]
 fn ascii_upper(unit: u16) -> u16 {
     if (b'a' as u16..=b'z' as u16).contains(&unit) {
         unit - (b'a' as u16 - b'A' as u16)
@@ -289,11 +295,11 @@ fn allocation_error(error: std::collections::TryReserveError) -> LocalFileError 
 
 #[cfg(test)]
 mod tests {
-    use super::{measure_path, prefix_units_from_wide, tokenize, NativeToken};
+    use super::{NativeToken, measure_path, prefix_units_from_wide, tokenize};
     use crate::{
         directory::{LocalResolutionOrigin, LocalResolutionScope},
         options::LocalResolutionLimits,
-        resolution::{session::ResolutionSession, ResolutionContract},
+        resolution::{ResolutionContract, session::ResolutionSession},
     };
     use std::path::Path;
 

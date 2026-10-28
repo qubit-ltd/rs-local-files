@@ -1,8 +1,8 @@
 use super::ResolutionContract;
 use crate::{
+    LocalResult,
     directory::{LocalResolutionOrigin, LocalResolutionScope},
     error::{LocalFileError, LocalFileOperation, LocalResourceKind, LocalResourceLimitError},
-    LocalResult,
 };
 use std::{ffi::OsStr, path::Path};
 
@@ -27,15 +27,15 @@ impl ResolutionSession {
             .hops
             .checked_add(1)
             .ok_or_else(|| limit_error(LocalResourceKind::SymlinkHops, usize::MAX, true))?;
-        if let Some(limit) = self.contract.limits().symlink_hops() {
-            if self.hops > limit {
-                return Err(limit_error_with_limit(
-                    LocalResourceKind::SymlinkHops,
-                    limit,
-                    self.hops,
-                    false,
-                ));
-            }
+        if let Some(limit) = self.contract.limits().symlink_hops()
+            && self.hops > limit
+        {
+            return Err(limit_error_with_limit(
+                LocalResourceKind::SymlinkHops,
+                limit,
+                self.hops,
+                false,
+            ));
         }
         Ok(())
     }
@@ -92,10 +92,10 @@ impl ResolutionSession {
         observed: usize,
         limit: Option<usize>,
     ) -> LocalResult<()> {
-        if let Some(limit) = limit {
-            if observed > limit {
-                return Err(limit_error_with_limit(kind, limit, observed, false));
-            }
+        if let Some(limit) = limit
+            && observed > limit
+        {
+            return Err(limit_error_with_limit(kind, limit, observed, false));
         }
         Ok(())
     }
