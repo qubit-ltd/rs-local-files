@@ -22,6 +22,13 @@ use super::LocalResourceLimitError;
 
 /// Structured failure from a local filesystem operation.
 ///
+/// Some partial temporary-resource failures attach a
+/// [`crate::LocalTempRecovery`] to the error. In that case, the error owns
+/// cleanup responsibility: dropping the error also drops the recovery owner and
+/// makes its silent best-effort cleanup attempt. Use [`Self::temp_recovery`] to
+/// inspect the owner or [`Self::into_temp_recovery_parts`] to transfer it
+/// before dropping the error.
+///
 /// # Examples
 ///
 /// ```
@@ -50,6 +57,8 @@ pub struct LocalFileError {
     reason: Option<&'static str>,
     /// Typed source retained from the originating failure.
     source: Option<LocalFileErrorSource>,
+    /// Namespace effect explicitly established by an operation scheduler.
+    effect_state: Option<LocalFileEffectState>,
     /// Secondary cleanup failure retained without replacing the primary error.
     cleanup_error: Option<Box<LocalFileError>>,
     /// Private temporary resource retained after a partial creation failure.
@@ -73,6 +82,7 @@ impl LocalFileError {
             target: None,
             reason: None,
             source: None,
+            effect_state: None,
             cleanup_error: None,
             temp_recovery: None,
         }
@@ -114,6 +124,7 @@ impl LocalFileError {
             target,
             reason: None,
             source: Some(LocalFileErrorSource::Io(source)),
+            effect_state: None,
             cleanup_error: None,
             temp_recovery: None,
         }
@@ -134,6 +145,7 @@ impl LocalFileError {
             target: None,
             reason: None,
             source: Some(LocalFileErrorSource::InvalidEncoding(source)),
+            effect_state: None,
             cleanup_error: None,
             temp_recovery: None,
         }
@@ -165,6 +177,7 @@ impl LocalFileError {
             target: None,
             reason: None,
             source: Some(LocalFileErrorSource::PathCodec(error)),
+            effect_state: None,
             cleanup_error: None,
             temp_recovery: None,
         }
@@ -196,6 +209,7 @@ impl LocalFileError {
             target: None,
             reason: None,
             source: Some(LocalFileErrorSource::ResourceLimit(source)),
+            effect_state: None,
             cleanup_error: None,
             temp_recovery: None,
         }
@@ -290,6 +304,12 @@ impl LocalFileError {
 
     /// Returns the private temporary resource retained after a partial
     /// creation failure.
+    ///
+    /// `Some` borrows the owner held by this error; `None` means no recovery
+    /// resource was attached. The error itself owns cleanup responsibility, so
+    /// dropping it also drops the owner and attempts cleanup silently. Use
+    /// [`Self::into_temp_recovery_parts`] to keep the owner beyond the error's
+    /// lifetime.
     #[must_use]
     #[inline]
     pub fn temp_recovery(&self) -> Option<&crate::LocalTempRecovery> {
@@ -297,6 +317,12 @@ impl LocalFileError {
     }
 
     /// Consumes this error and transfers its retained recovery resource.
+    ///
+    /// The returned `Some` owner carries the cleanup responsibility formerly
+    /// held by this error. If it is dropped, it attempts cleanup silently; keep
+    /// the owner if you need to inspect or retry cleanup. The returned error
+    /// preserves the primary failure and no longer owns the recovery resource.
+    /// `None` means this error had no retained recovery resource.
     #[inline]
     pub fn into_temp_recovery_parts(mut self) -> (LocalFileError, Option<crate::LocalTempRecovery>) {
         let recovery = self.temp_recovery.take().map(|recovery| *recovery);
@@ -353,11 +379,21 @@ impl LocalFileError {
     #[must_use = "the namespace effect state should be inspected"]
     #[inline]
     pub fn effect_state(&self) -> Option<LocalFileEffectState> {
+        if let Some(effect_state) = self.effect_state {
+            return Some(effect_state);
+        }
         match self.kind {
             LocalFileErrorKind::PublicationIncomplete => Some(LocalFileEffectState::PartiallyApplied),
             LocalFileErrorKind::Indeterminate => Some(LocalFileEffectState::Indeterminate),
             _ => None,
         }
+    }
+
+    /// Retains namespace effect facts established by an operation scheduler.
+    #[inline]
+    pub(crate) const fn with_effect_state(mut self, effect_state: LocalFileEffectState) -> Self {
+        self.effect_state = Some(effect_state);
+        self
     }
 
     /// Returns the namespace-absolute PWD retained from relative path binding.
@@ -395,8 +431,9 @@ impl LocalFileError {
     ///
     /// # Returns
     ///
-    /// `Some` contains an I/O, UTF-8, path codec, or resource-limit source;
-    /// `None` means this error was constructed without an originating source.
+    /// `Some` contains an I/O, UTF-8, path codec, resource-limit, or recovery
+    /// source; `None` means this error was constructed without an originating
+    /// source or retained recovery resource.
     #[must_use]
     #[inline]
     pub const fn typed_source(&self) -> Option<&LocalFileErrorSource> {
@@ -437,8 +474,13 @@ impl LocalFileError {
     ///
     /// # Returns
     ///
-    /// `Some` contains an I/O, UTF-8, path codec, or resource-limit source;
-    /// `None` means this error was constructed without an originating source.
+    /// `Some` contains an I/O, UTF-8, path codec, resource-limit, or recovery
+    /// source; `None` means there is no originating source or retained recovery
+    /// resource.
+    /// If this error owns a temporary recovery resource, the returned
+    /// [`LocalFileErrorSource::Recovery`] retains the whole error, including
+    /// that cleanup responsibility. Dropping the returned source eventually
+    /// drops the recovery owner and attempts cleanup silently.
     #[must_use]
     #[inline]
     pub fn into_source(mut self) -> Option<LocalFileErrorSource> {

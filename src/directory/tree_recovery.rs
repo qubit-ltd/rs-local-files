@@ -226,9 +226,6 @@ impl LocalTreeRetainedResource {
             let mut list_options = LocalListOptions::new()
                 .with_recursive()
                 .with_symlink_policy(crate::LocalSymlinkPolicy::Reject);
-            if let Some(maximum) = self.cleanup_limits.max_depth() {
-                list_options = list_options.with_max_depth(maximum);
-            }
             if let Some(maximum) = self.cleanup_limits.max_entries() {
                 list_options = list_options.with_max_entries(maximum.saturating_sub(1));
             }
@@ -247,6 +244,17 @@ impl LocalTreeRetainedResource {
                 }
                 let entry = entry?;
                 let relative = entry.relative_path().to_path_buf();
+                let depth = relative.components().count();
+                if let Some(maximum) = self.cleanup_limits.max_depth()
+                    && depth > maximum
+                {
+                    return Err(crate::LocalFileError::from_resource_limit(
+                        crate::LocalFileOperation::Cleanup,
+                        Some(self.path.join(&relative)),
+                        crate::LocalResourceLimitError::new(crate::LocalResourceKind::Depth, maximum, 0, depth)
+                            .with_observed(depth),
+                    ));
+                }
                 pending_path_bytes = pending_path_bytes
                     .checked_add(relative.as_os_str().as_encoded_bytes().len())
                     .ok_or_else(|| {

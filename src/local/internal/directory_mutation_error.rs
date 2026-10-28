@@ -13,6 +13,7 @@ use std::path::Path;
 use crate::LocalFileError;
 use crate::LocalFileErrorKind;
 use crate::LocalFileOperation;
+use crate::error::LocalFileEffectState;
 
 /// Adds partial-publication state after a directory mutation has changed the
 /// tree.
@@ -24,7 +25,9 @@ pub(crate) fn directory_mutation_error(
 ) -> LocalFileError {
     let error = LocalFileError::from_io(operation, Some(path.to_path_buf()), None, source);
     if changed {
-        error.with_kind(LocalFileErrorKind::PublicationIncomplete)
+        error
+            .with_effect_state(LocalFileEffectState::PartiallyApplied)
+            .with_kind(LocalFileErrorKind::PublicationIncomplete)
     } else {
         error
     }

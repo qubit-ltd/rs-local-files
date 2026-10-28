@@ -690,6 +690,26 @@ impl Root {
     /// Removes a descendant tree while retaining the typed partial-effect
     /// state.
     pub(crate) fn remove_tree_typed(&self, path: &path::Path) -> crate::LocalResult<()> {
+        self.remove_tree_typed_with_options(
+            path,
+            crate::LocalDeleteOptions::new().with_recursive(),
+            std::time::Instant::now(),
+        )
+    }
+
+    /// Removes a descendant tree using caller-supplied delete limits and the
+    /// original monotonic operation start.
+    ///
+    /// # Errors
+    /// Returns a typed local-file error when the target is not a directory,
+    /// secure traversal fails, or a configured delete limit is exceeded. The
+    /// error retains any deletion already completed.
+    pub(crate) fn remove_tree_typed_with_options(
+        &self,
+        path: &path::Path,
+        options: crate::LocalDeleteOptions,
+        started_at: std::time::Instant,
+    ) -> crate::LocalResult<()> {
         #[cfg(any(unix, windows))]
         {
             let metadata = self.symlink_metadata(path).map_err(|source| {
@@ -723,13 +743,13 @@ impl Root {
             local::remove_directory_tree(
                 &crate::temp::internal::TempDirectoryDeleteBackend { root: self },
                 path,
-                crate::LocalDeleteOptions::new().with_recursive(),
-                std::time::Instant::now(),
+                options,
+                started_at,
             )
         }
         #[cfg(not(any(unix, windows)))]
         {
-            let _ = path;
+            let _ = (path, options, started_at);
             Err(LocalFileError::from_io(
                 LocalFileOperation::DeleteDirectory,
                 None,

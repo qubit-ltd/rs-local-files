@@ -418,6 +418,7 @@ mod tests {
     use super::LocalFileErrorKind;
     use super::LocalFileIdentity;
     use super::LocalObservationRequirement;
+    #[cfg(target_os = "linux")]
     use super::LocalResourceKind;
     use super::LocalResult;
     use super::LocalSecurityObservationOptions;
@@ -427,6 +428,7 @@ mod tests {
     use super::io_error;
     use super::query_security;
     use super::requested_value;
+    #[cfg(target_os = "linux")]
     use super::validate_linux_acl;
 
     #[test]
@@ -439,16 +441,26 @@ mod tests {
         fs::remove_file(&path).expect("remove name");
         fs::write(&path, b"replacement").expect("create replacement");
 
-        let observation = query_security(
-            &retained,
-            &LocalSecurityObservationOptions::new().with_access(LocalObservationRequirement::Required),
-        )
-        .expect("observe retained object");
+        #[cfg(target_os = "linux")]
+        let options = LocalSecurityObservationOptions::new().with_access(LocalObservationRequirement::Required);
+        #[cfg(not(target_os = "linux"))]
+        let options = LocalSecurityObservationOptions::new();
+        let observation = query_security(&retained, &options).expect("observe retained object");
         assert_eq!(
             observation.identity().expect("identity").clone(),
             LocalFileIdentity::unix(retained.metadata().unwrap().dev(), expected)
         );
         assert_eq!(observation.link_count(), Some(0));
+        #[cfg(target_os = "macos")]
+        assert_eq!(
+            query_security(
+                &retained,
+                &LocalSecurityObservationOptions::new().with_access(LocalObservationRequirement::Required),
+            )
+            .expect_err("macOS cannot provide the required complete Unix ACL observation")
+            .kind(),
+            LocalFileErrorKind::RequirementNotMet,
+        );
     }
 
     #[test]
@@ -482,6 +494,7 @@ mod tests {
         assert!(!acl_read_requires_retry(&io::Error::from_raw_os_error(libc::EACCES)));
     }
 
+    #[cfg(target_os = "linux")]
     #[test]
     fn security_unix_zero_acl_byte_limit_rejects_nonempty_acl() {
         let acl = [

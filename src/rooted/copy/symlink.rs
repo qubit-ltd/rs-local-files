@@ -134,26 +134,34 @@ pub(super) fn copy_symlink(
     let mut destination_removed = false;
     if replaced_existing {
         if destination_is_directory {
-            root.remove_tree_typed(destination).map_err(|delete_error| {
-                let failure_hint = deletion_failure_hint(&delete_error);
-                let mut copy_error = error(
-                    Stage::PrepareDestination,
-                    source,
-                    destination,
-                    statistics,
-                    delete_error.into_io_error(),
-                );
-                if let Some(failure_hint) = failure_hint {
-                    copy_error = copy_error.with_failure_state(failure_hint);
-                }
-                copy_error
-            })?;
+            let (delete_options, started_at) = budget.deletion_options();
+            root.remove_tree_typed_with_options(destination, delete_options, started_at)
+                .map_err(|delete_error| {
+                    let failure_hint = deletion_failure_hint(&delete_error);
+                    let mut copy_error = error(
+                        Stage::PrepareDestination,
+                        source,
+                        destination,
+                        statistics,
+                        delete_error.into_io_error(),
+                    );
+                    if let Some(failure_hint) = failure_hint {
+                        copy_error = copy_error.with_failure_state(failure_hint);
+                    }
+                    copy_error
+                })?;
         } else {
             root.remove_file(destination).map_err(|source_error| {
                 error(Stage::PrepareDestination, source, destination, statistics, source_error)
             })?;
         }
         destination_removed = true;
+    }
+    if let Err(source_error) = budget.check_deadline() {
+        return Err(mark_partial_after_removal(
+            error(Stage::PrepareDestination, source, destination, statistics, source_error),
+            destination_removed,
+        ));
     }
     root.create_symlink_for_copy(&link_target, destination, targets_directory)
         .map_err(|failure| {

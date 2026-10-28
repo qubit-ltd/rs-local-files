@@ -53,6 +53,10 @@ impl LocalObservedReadOptions {
     ///
     /// The limits are combined with any limits already present on the
     /// filesystem, so they can only make resolution more restrictive.
+    /// Host observed reads return `Unsupported` when the effective resolution
+    /// limits are finite, including limits supplied through path binding. An
+    /// unbounded Host request keeps its existing behavior. Use a Rooted
+    /// filesystem when the observed read must enforce finite resolution limits.
     pub const fn with_resolution_limits(mut self, limits: LocalResolutionLimits) -> Self {
         self.resolution_limits = Some(limits);
         self

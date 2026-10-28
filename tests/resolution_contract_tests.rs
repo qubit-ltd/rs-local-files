@@ -7,7 +7,9 @@
 // =============================================================================
 
 use std::ffi::OsStr;
+use std::path::Component;
 use std::path::Path;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::Mutex;
 
@@ -19,6 +21,7 @@ use qubit_local_files::directory::LocalResolutionPolicy;
 use qubit_local_files::directory::LocalResolutionScope;
 use qubit_local_files::error::LocalFileErrorKind;
 use qubit_local_files::error::LocalFileOperation;
+use qubit_local_files::error::LocalResourceKind;
 use qubit_local_files::options::LocalDirectoryOpenOptions;
 use qubit_local_files::options::LocalObservedReadOptions;
 use qubit_local_files::options::LocalResolutionLimits;
@@ -93,6 +96,25 @@ impl LocalResolutionPolicy for OriginRecorder {
     }
 
     fn validate_symlink_target(&self, _: &Path, _: LocalResolutionScope) -> LocalResult<()> {
+        Ok(())
+    }
+}
+
+#[derive(Debug)]
+struct SymlinkTargetRecorder {
+    expected: PathBuf,
+    observed: Arc<Mutex<Option<PathBuf>>>,
+}
+
+impl LocalResolutionPolicy for SymlinkTargetRecorder {
+    fn validate_component(&self, _: &OsStr, _: LocalResolutionScope, _: LocalResolutionOrigin) -> LocalResult<()> {
+        Ok(())
+    }
+
+    fn validate_symlink_target(&self, target: &Path, _: LocalResolutionScope) -> LocalResult<()> {
+        if target == self.expected {
+            *self.observed.lock().expect("symlink target record should be available") = Some(target.to_path_buf());
+        }
         Ok(())
     }
 }
@@ -265,15 +287,58 @@ fn opening_root_checks_missing_and_file_predecessors_before_parent_steps() {
 fn opening_root_enforces_pending_component_budget_after_link_expansion() {
     use std::os::unix::fs::symlink;
 
-    let tmp = tempfile::tempdir().expect("fixture directory should exist");
-    std::fs::create_dir_all(tmp.path().join("real/a/b")).expect("target hierarchy should exist");
-    symlink("real", tmp.path().join("alias")).expect("root alias should exist");
-    let options =
-        LocalRootOpenOptions::new().with_resolution_limits(LocalResolutionLimits::new().with_max_actual_components(2));
+    let scratch = tempfile::tempdir().expect("fixture directory should exist");
+    let base = std::fs::canonicalize(scratch.path()).expect("fixture prefix should canonicalize");
+    let input = base.join("alias/a/b");
+    let maximum = input
+        .components()
+        .filter(|component| matches!(component, Component::Normal(_)))
+        .count();
+    let mut target = PathBuf::new();
+    for _ in 0..maximum - 1 {
+        target.push("segment");
+    }
+    std::fs::create_dir_all(base.join(&target).join("a/b")).expect("expanded target hierarchy should exist");
+    symlink(&target, base.join("alias")).expect("root alias should exist");
 
-    let error = LocalFileSystem::rooted_with_options(&tmp.path().join("alias/a/b"), &options)
-        .expect_err("expanded target and its input suffix must fit one pending component budget");
-    assert_eq!(error.kind(), LocalFileErrorKind::ResourceLimit);
+    let observed_target = Arc::new(Mutex::new(None));
+    let policy = SymlinkTargetRecorder {
+        expected: target.clone(),
+        observed: Arc::clone(&observed_target),
+    };
+    let options = LocalRootOpenOptions::new()
+        .with_resolution_limits(LocalResolutionLimits::new().with_max_actual_components(maximum))
+        .with_resolution_policy(Arc::new(policy));
+    let error = LocalFileSystem::rooted_with_options(&input, &options)
+        .expect_err("expanded target and its input suffix should exceed the pending component budget");
+
+    assert_eq!(
+        *observed_target
+            .lock()
+            .expect("symlink target record should be available"),
+        Some(target.clone()),
+        "the resolver should reach validation of this link target before rejecting the budget",
+    );
+    let facts = error
+        .resource_limit_error()
+        .expect("resource-limit facts should be available");
+    assert_eq!(facts.resource(), LocalResourceKind::PendingResolutionComponents);
+    assert_eq!(facts.limit(), maximum);
+    assert_eq!(facts.observed(), Some(maximum + 1));
+
+    let successful_maximum = base
+        .components()
+        .filter(|component| matches!(component, Component::Normal(_)))
+        .count()
+        + target.components().count()
+        + 2;
+    let success_options = LocalRootOpenOptions::new()
+        .with_resolution_limits(LocalResolutionLimits::new().with_max_actual_components(successful_maximum));
+    let filesystem = LocalFileSystem::rooted_with_options(&input, &success_options)
+        .expect("a budget covering the prefix, expanded target, and suffix should open the root");
+    let _metadata = filesystem
+        .metadata(Path::new("."))
+        .expect("opened terminal directory should be accessible");
 }
 
 #[cfg(unix)]

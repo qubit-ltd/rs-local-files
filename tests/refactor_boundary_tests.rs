@@ -393,7 +393,7 @@ fn acl_budget_failure_reports_acl_dimension_and_stage_remains_the_only_cleanup_o
     assert!(!stage_path.exists());
 }
 
-#[cfg(windows)]
+#[cfg(all(windows, feature = "digest"))]
 #[test]
 fn rooted_content_remains_unsupported_without_mutation_while_l01_is_blocked() {
     use qubit_local_files::options::LocalWriteMode;
@@ -404,7 +404,9 @@ fn rooted_content_remains_unsupported_without_mutation_while_l01_is_blocked() {
 
     let tmp = tempfile::tempdir().expect("fixture directory");
     std::fs::write(tmp.path().join("target"), b"old").expect("old target");
-    let fs = LocalFileSystem::rooted(tmp.path()).expect("rooted authority");
+    let mut fs = LocalFileSystem::rooted(tmp.path()).expect("rooted authority");
+    fs.set_symlink_policy(qubit_local_files::policy::LocalSymlinkPolicy::Reject)
+        .expect("conditional write policy");
     let mut entries_before = std::fs::read_dir(tmp.path())
         .expect("list namespace before conditional open")
         .map(|entry| entry.expect("entry").file_name())

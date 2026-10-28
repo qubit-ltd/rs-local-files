@@ -299,10 +299,12 @@ pub(super) fn copy_file(
         }
         if destination_metadata.is_some() {
             let removal = if destination_metadata.is_some_and(|metadata| metadata.kind() == EntryKind::Directory) {
-                root.remove_tree_typed(destination).map_err(|delete_error| {
-                    let hint = deletion_failure_hint(&delete_error);
-                    (delete_error.into_io_error(), hint)
-                })
+                let (delete_options, started_at) = budget.deletion_options();
+                root.remove_tree_typed_with_options(destination, delete_options, started_at)
+                    .map_err(|delete_error| {
+                        let hint = deletion_failure_hint(&delete_error);
+                        (delete_error.into_io_error(), hint)
+                    })
             } else {
                 root.remove_file(destination)
                     .map_err(|source_error| (source_error, None))
@@ -322,6 +324,16 @@ pub(super) fn copy_file(
             }
             destination_removed = true;
         }
+    }
+    if let Err(source_error) = budget.check_deadline() {
+        let mut failure = error(Stage::CommitFile, source, destination, statistics, source_error);
+        if let Err(cleanup) = writer.abort() {
+            failure = failure.with_staging_context(
+                writer.staging_path().to_path_buf(),
+                Some(cleanup.into_staging_parts().2),
+            );
+        }
+        return Err(mark_partial_after_removal(failure, destination_removed));
     }
     #[cfg(feature = "test-support")]
     if let Err(source_error) = inject_race_destination(root, destination, "rooted-copy-race-before-writer-commit") {

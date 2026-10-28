@@ -33,6 +33,56 @@ pub(crate) struct NativePrivateCreateError {
 }
 
 /// Owns a private temporary object left behind by a failed operation.
+///
+/// This value owns the cleanup responsibility. Dropping it makes one best-
+/// effort cleanup attempt and silently discards any error. A path returned by
+/// [`Self::path`] is only diagnostic information; keeping that path does not
+/// keep this owner alive. Conditional-write recovery files retain access
+/// without automatically deleting them; this type attempts to remove its
+/// retained object when dropped.
+///
+/// An error from [`Self::cleanup`] may follow partial cleanup. Keep the owner
+/// if you want to inspect the error or choose to retry; a later call retries
+/// resources that remain owned. If the native identity is unavailable,
+/// cleanup refuses to delete by path, since the path alone cannot establish
+/// that the entry is still the retained object.
+///
+/// # Examples
+///
+/// The failed operation's error can own the recovery resource. Extract the
+/// owner to keep that cleanup responsibility after handling the error:
+///
+/// ```
+/// use qubit_local_files::LocalFileError;
+/// use qubit_local_files::LocalTempRecovery;
+///
+/// fn take_recovery(error: LocalFileError) -> Option<LocalTempRecovery> {
+///     let (_cause, recovery) = error.into_temp_recovery_parts();
+///     recovery
+/// }
+///
+/// fn try_cleanup(owner: &mut LocalTempRecovery) -> Result<(), LocalFileError> {
+///     owner.cleanup()
+/// }
+/// ```
+///
+/// The returned owner still has drop-time cleanup responsibility. Keep it
+/// alive while handling a cleanup error if you may retry:
+///
+/// ```
+/// use qubit_local_files::LocalFileError;
+/// use qubit_local_files::LocalTempRecovery;
+///
+/// fn cleanup_or_keep(owner: &mut LocalTempRecovery) -> Result<(), LocalFileError> {
+///     match owner.cleanup() {
+///         Ok(()) => Ok(()),
+///         Err(error) => {
+///             // The owner remains available for a later, caller-controlled retry.
+///             Err(error)
+///         }
+///     }
+/// }
+/// ```
 #[derive(Debug)]
 pub struct LocalTempRecovery {
     path: PathBuf,
@@ -89,8 +139,22 @@ impl LocalTempRecovery {
     pub fn identity(&self) -> Option<&LocalFileIdentity> {
         self.identity.as_ref()
     }
-    /// Removes the retained object only when its identity is known and still
-    /// matches.
+    /// Removes retained objects only when their identities are known and
+    /// still match.
+    ///
+    /// Successful entries are released as cleanup proceeds. If a later entry
+    /// fails, earlier entries may already have been removed and the owner
+    /// retains the resources that remain. Calling this method again retries
+    /// those resources. When an identity is unavailable or no longer matches,
+    /// cleanup refuses to delete the object by path.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`crate::LocalFileError`] if identity observation fails, the
+    /// retained identity or object kind does not match, or the native removal
+    /// operation fails. An error can therefore be returned after partial
+    /// cleanup; keep this owner to retain responsibility for any remaining
+    /// resources and decide whether to retry.
     pub fn cleanup(&mut self) -> crate::LocalResult<()> {
         let Some(resource) = self.resource.as_mut() else {
             return Ok(());

@@ -52,8 +52,6 @@ fn query_security_with(
 
 #[cfg(test)]
 mod tests {
-    use std::os::fd::AsRawFd;
-
     use super::query_security_with;
     use crate::error::LocalFileError;
     use crate::error::LocalFileErrorKind;
@@ -66,20 +64,17 @@ mod tests {
         let path = directory.path().join("file");
         std::fs::write(&path, b"data").expect("create file");
         let file = std::fs::File::open(&path).expect("open file");
-        let handle = file.as_raw_fd();
-
         for kind in [
             LocalFileErrorKind::PermissionDenied,
             LocalFileErrorKind::DataCorruption,
             LocalFileErrorKind::ChangedDuringRead,
         ] {
             let error = query_security_with(&file, &LocalSecurityObservationOptions::new(), |queried_file, _| {
-                assert_eq!(queried_file.as_raw_fd(), handle);
+                assert!(std::ptr::eq(queried_file, &file));
                 Err(LocalFileError::new(kind, LocalFileOperation::Metadata))
             })
             .expect_err("injected failure should propagate");
             assert_eq!(error.kind(), kind);
-            assert_eq!(file.as_raw_fd(), handle);
         }
     }
 }

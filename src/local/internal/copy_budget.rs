@@ -21,6 +21,7 @@ use qubit_io::Input;
 use qubit_io::Output;
 
 use crate::LocalCopyDirOptions;
+use crate::LocalDeleteOptions;
 use crate::LocalResourceKind;
 use crate::LocalResourceLimitError;
 
@@ -67,6 +68,20 @@ impl CopyBudget {
             deadline: options
                 .deadline()
                 .map(|duration| (options.started_at().unwrap_or_else(Instant::now), duration)),
+        }
+    }
+
+    /// Projects the copy deadline onto recursive target deletion without
+    /// applying source-entry, depth, or open-directory limits to the target.
+    ///
+    /// The returned instant is the original copy start when a deadline is
+    /// configured; otherwise deletion remains unbounded.
+    #[must_use = "the copy budget's deletion limits and original start time should be used"]
+    pub(crate) fn deletion_options(&self) -> (LocalDeleteOptions, Instant) {
+        let options = LocalDeleteOptions::new().with_recursive();
+        match self.deadline {
+            Some((started, duration)) => (options.with_deadline(duration), started),
+            None => (options, Instant::now()),
         }
     }
 

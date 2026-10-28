@@ -108,6 +108,15 @@ impl LocalFileSystem {
         if let Some(limits) = binding_options.and_then(|binding| binding.resolution_limits()) {
             resolution = resolution.tightened(limits);
         }
+        if matches!(&self.core.namespace, LocalNamespace::Host)
+            && resolution.limits() != crate::options::LocalResolutionLimits::new()
+        {
+            return Err(
+                LocalFileError::new(LocalFileErrorKind::Unsupported, LocalFileOperation::OpenReader)
+                    .with_path(path.to_path_buf())
+                    .with_reason("Host observed reads do not support finite resolution limits"),
+            );
+        }
         validate_scope_symlink_policy(self.scope(), symlink_policy, LocalFileOperation::OpenReader, Some(path))?;
         let mut path_budget =
             binding_options.map(|limits| crate::directory::binding::PathBindingBudget::new(limits.max_path_bytes()));
@@ -415,6 +424,15 @@ impl LocalFileSystem {
     /// the configured maximum. Other open/read failures retain structured
     /// operation context; partial bytes are discarded.
     pub fn read_all_with_options(&self, path: &Path, options: &LocalReadAllOptions) -> LocalResult<Vec<u8>> {
+        self.read_all_with_context(path, options, |bytes, _, _| Ok(bytes))
+    }
+
+    fn read_all_with_context<T>(
+        &self,
+        path: &Path,
+        options: &LocalReadAllOptions,
+        finish: impl FnOnce(Vec<u8>, &Path, Option<&Path>) -> LocalResult<T>,
+    ) -> LocalResult<T> {
         let read_options = options.read_options().unwrap_or(&self.defaults.read);
         let symlink_policy = self.read_symlink_policy(read_options, options.symlink_policy());
         validate_scope_symlink_policy(self.scope(), symlink_policy, LocalFileOperation::Read, Some(path))?;
@@ -436,8 +454,9 @@ impl LocalFileSystem {
         }
         #[cfg(test)]
         crate::observation::snapshot::run_read_hook();
-        crate::observation::reader::collect_limited(&mut reader, maximum)
-            .map_err(|error| error.with_path(resolved.namespace_absolute().to_path_buf()))
+        let bytes = crate::observation::reader::collect_limited(&mut reader, maximum)
+            .map_err(|error| error.with_path(resolved.namespace_absolute().to_path_buf()))?;
+        finish(bytes, resolved.namespace_absolute(), resolver.current_directory())
     }
 
     /// Reads a complete UTF-8 text file using the filesystem's reader defaults.
@@ -450,9 +469,14 @@ impl LocalFileSystem {
     /// Returns `InvalidEncoding` with the original UTF-8 conversion error
     /// when the complete file is not valid UTF-8.
     pub fn read_text_with_options(&self, path: &Path, options: &LocalReadAllOptions) -> LocalResult<String> {
-        let bytes = self.read_all_with_options(path, options)?;
-        String::from_utf8(bytes)
-            .map_err(|error| LocalFileError::from_utf8(LocalFileOperation::Read, Some(path.to_path_buf()), error))
+        self.read_all_with_context(path, options, |bytes, absolute, pwd| {
+            String::from_utf8(bytes).map_err(|source| {
+                with_current_directory(
+                    LocalFileError::from_utf8(LocalFileOperation::Read, Some(absolute.to_path_buf()), source),
+                    pwd,
+                )
+            })
+        })
     }
 
     /// Reads bytes while checking same-handle observations before and after.

@@ -131,3 +131,26 @@ fn test_recursive_delete_missing_ok_does_not_swallow_missing_descendant() {
         });
     }
 }
+
+/// A root-level `NotFound` returned by recursive traversal remains covered by
+/// `missing_ok` when the scheduler proves that no namespace mutation occurred.
+#[test]
+fn test_recursive_delete_missing_ok_accepts_unchanged_root_race() {
+    run_in_test_fault_process(
+        "recursive_delete_missing_root_race",
+        "host-delete-directory-root-not-found",
+        || {
+            let directory = tempdir().expect("temporary directory should be created");
+            let tree = directory.path().join("tree");
+            std::fs::create_dir(&tree).expect("tree should be created");
+            let filesystem = LocalFileSystem::host().expect("Host filesystem should open");
+
+            let outcome = filesystem
+                .delete_directory_with_options(&tree, &LocalDeleteOptions::new().with_recursive().with_missing_ok())
+                .expect("a missing root race should be accepted");
+
+            assert!(!outcome.deleted());
+            assert!(tree.is_dir(), "the injected race must not remove the root");
+        },
+    );
+}

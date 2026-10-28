@@ -40,6 +40,7 @@ use super::published_durability;
 use super::resolve_host_path;
 use super::sync_parent_directory;
 use super::test_io_fault;
+use crate::error::LocalFileEffectState;
 use crate::local::internal::internal_copy_options;
 
 impl HostLocalFileSystem {
@@ -209,7 +210,7 @@ impl HostLocalFileSystem {
             ));
         }
         if source_metadata.file_type().is_symlink() {
-            return copy_symlink_entry(source, target, options, &mut budget);
+            return copy_symlink_entry(source, target, options, symlink_policy, &mut budget);
         }
         let effective_metadata = &source_metadata;
 
@@ -315,6 +316,7 @@ fn copy_symlink_entry(
     source: &Path,
     target: &Path,
     options: &LocalCopyOptions,
+    symlink_policy: LocalSymlinkPolicy,
     budget: &mut crate::local::CopyBudget,
 ) -> LocalCopyResult {
     let existing = match fs::symlink_metadata(target) {
@@ -365,18 +367,55 @@ fn copy_symlink_entry(
     }
     let parent_dirs_to_sync = prepare_copy_parent(target, options)
         .map_err(|error| copy_failure_unchanged(copy_io_error(source, target, error)))?;
+    let mut destination_removed = false;
     if action == CopyDestinationAction::Replace {
+        let (delete_options, started_at) = budget.deletion_options();
         let remove_result = match existing.as_ref() {
-            Some(metadata) if metadata.file_type().is_dir() => fs::remove_dir_all(target),
+            Some(metadata) if metadata.file_type().is_dir() => {
+                HostLocalFileSystem::delete_directory_with_policy(target, &delete_options, symlink_policy, started_at)
+                    .map(|_| ())
+                    .map_err(|delete_error| {
+                        let state = match delete_error.effect_state() {
+                            Some(LocalFileEffectState::PartiallyApplied | LocalFileEffectState::Applied) => {
+                                crate::LocalCopyFailureState::PartiallyPublished
+                            }
+                            Some(LocalFileEffectState::Indeterminate) => crate::LocalCopyFailureState::Indeterminate,
+                            Some(LocalFileEffectState::Unchanged) => crate::LocalCopyFailureState::Unchanged,
+                            None => crate::LocalCopyFailureState::Indeterminate,
+                        };
+                        let error = LocalFileError::from_io(
+                            LocalFileOperation::Copy,
+                            Some(source.to_path_buf()),
+                            Some(target.to_path_buf()),
+                            delete_error.into_io_error(),
+                        );
+                        LocalCopyFailure::new(error, state, LocalCopyStats::default(), None, None)
+                    })
+            }
             #[cfg(windows)]
             Some(metadata) if metadata.file_type().is_symlink_dir() => {
                 crate::local::internal::file_move::remove_directory_symlink(target)
+                    .map_err(|error| copy_failure_indeterminate(copy_io_error(source, target, error)))
             }
-            _ => fs::remove_file(target),
+            _ => fs::remove_file(target)
+                .map_err(|error| copy_failure_indeterminate(copy_io_error(source, target, error))),
         };
-        if let Err(error) = remove_result {
-            return Err(copy_failure_indeterminate(copy_io_error(source, target, error)));
-        }
+        remove_result?;
+        destination_removed = true;
+    }
+    if let Err(error) = budget.check_deadline() {
+        let copy_error = copy_io_error(source, target, error);
+        return Err(if destination_removed {
+            LocalCopyFailure::new(
+                copy_error,
+                crate::LocalCopyFailureState::PartiallyPublished,
+                LocalCopyStats::default(),
+                None,
+                None,
+            )
+        } else {
+            copy_failure_unchanged(copy_error)
+        });
     }
     let create_result = test_io_fault("local-fs-copy-symlink-create")
         .map_or_else(|| create_symlink_entry(&link_target, source, target), Err);

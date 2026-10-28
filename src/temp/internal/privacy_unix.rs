@@ -616,6 +616,7 @@ mod owner_policy_unix_tests {
     use super::verify_owner_access;
     use crate::policy::LocalOwnerAccessPolicy;
 
+    #[cfg(target_os = "linux")]
     #[test]
     fn owner_policy_unix_creates_exact_modes_and_applies_read_only_policy() {
         let temp = tempfile::tempdir().expect("temporary directory");
@@ -660,6 +661,19 @@ mod owner_policy_unix_tests {
         let directory = create_owner_entry_at(&parent, std::ffi::OsStr::new("owner-directory"), true, &readonly)
             .expect("create read-only owner directory");
         assert_eq!(directory.metadata().expect("directory metadata").mode() & 0o7777, 0o500);
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    #[test]
+    fn owner_policy_unix_is_unsupported_without_creating_entries() {
+        let temp = tempfile::tempdir().expect("temporary directory");
+        let parent = File::open(temp.path()).expect("open parent directory");
+        let policy = LocalOwnerAccessPolicy::new().with_unix_modes(0o700, 0o600);
+        let error = create_owner_entry_at(&parent, std::ffi::OsStr::new("owner-file"), false, &policy)
+            .expect_err("owner ACL verification is unsupported outside Linux");
+        assert_eq!(error.source.kind(), std::io::ErrorKind::Unsupported);
+        assert!(error.retained.is_none());
+        assert!(!temp.path().join("owner-file").exists());
     }
 
     #[test]

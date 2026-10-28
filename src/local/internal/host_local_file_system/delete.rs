@@ -24,6 +24,7 @@ use super::fs;
 use super::io;
 use super::resolve_host_path;
 use super::test_io_fault;
+use crate::error::LocalFileEffectState;
 use crate::local::DeleteBackend;
 #[cfg(windows)]
 use crate::local::internal::file_move::remove_directory_symlink;
@@ -113,7 +114,7 @@ impl HostLocalFileSystem {
                 Ok(()) => Ok(LocalDeleteOutcome::new(true)),
                 Err(error)
                     if options.missing_ok()
-                        && error.effect_state().is_none()
+                        && matches!(error.effect_state(), None | Some(LocalFileEffectState::Unchanged))
                         && error.cause_kind() == Some(LocalFileErrorKind::NotFound)
                         && error.path() == Some(bound.as_path()) =>
                 {
@@ -175,6 +176,10 @@ impl DeleteBackend for HostLocalFileSystem {
     /// Returns native inspection errors, including disappearance during
     /// traversal.
     fn metadata(&self, path: &Self::Path) -> io::Result<Self::Metadata> {
+        #[cfg(feature = "test-support")]
+        if crate::local::take_test_support_on_nth("host-delete-directory-root-not-found", 1) {
+            return Err(io::Error::from(io::ErrorKind::NotFound));
+        }
         #[cfg(feature = "test-support")]
         if crate::local::take_test_support_on_nth("host-delete-directory-child-not-found", 2) {
             return Err(io::Error::from(io::ErrorKind::NotFound));

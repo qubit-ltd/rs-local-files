@@ -17,6 +17,7 @@ use super::directory_mutation_error::directory_mutation_error;
 use crate::LocalDeleteOptions;
 use crate::LocalFileOperation;
 use crate::LocalResult;
+use crate::error::LocalFileEffectState;
 
 /// Removes `root` and its descendants in post-order without following directory
 /// links.
@@ -49,7 +50,20 @@ pub(crate) fn remove_directory_tree<B: DeleteBackend>(
     let mut budget = DeleteBudget::new(options, started_at);
     let operation = LocalFileOperation::DeleteDirectory;
     let fail = |path: &B::Path, changed: bool, source: io::Error| {
-        directory_mutation_error(operation, backend.path(path), changed, source)
+        let error = directory_mutation_error(operation, backend.path(path), changed, source);
+        if changed {
+            error
+        } else {
+            error.with_effect_state(LocalFileEffectState::Unchanged)
+        }
+    };
+    let fail_during_removal = |path: &B::Path, changed: bool, source: io::Error| {
+        let error = directory_mutation_error(operation, backend.path(path), changed, source);
+        if changed {
+            error
+        } else {
+            error.with_effect_state(LocalFileEffectState::Indeterminate)
+        }
     };
 
     budget
@@ -101,7 +115,7 @@ pub(crate) fn remove_directory_tree<B: DeleteBackend>(
                         .map_err(|error| fail(&path, changed, error))?;
                     backend
                         .remove_non_directory(&path, &metadata)
-                        .map_err(|error| fail(&path, changed, error))?;
+                        .map_err(|error| fail_during_removal(&path, changed, error))?;
                     changed = true;
                 }
             }
@@ -111,7 +125,7 @@ pub(crate) fn remove_directory_tree<B: DeleteBackend>(
                     .map_err(|error| fail(&path, changed, error))?;
                 backend
                     .remove_empty_directory(&path)
-                    .map_err(|error| fail(&path, changed, error))?;
+                    .map_err(|error| fail_during_removal(&path, changed, error))?;
                 changed = true;
             }
         }

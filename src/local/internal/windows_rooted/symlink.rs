@@ -600,6 +600,7 @@ mod tests {
     use super::RootedLinkTargetRead;
     use super::SYMLINK_FLAG_RELATIVE;
     use super::build_symbolic_link_buffer;
+    use super::normalize_rooted_link_target;
     use super::parse_limited_symbolic_link_target;
     use super::parse_symbolic_link_target;
 
