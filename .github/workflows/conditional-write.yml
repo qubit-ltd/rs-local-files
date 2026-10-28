@@ -29,6 +29,13 @@ jobs:
           path: ci-root/rs-redact
           submodules: recursive
           persist-credentials: false
+      - uses: actions/checkout@v6
+        with:
+          repository: qubit-ltd/rs-json
+          ref: main
+          path: ci-root/rs-json
+          submodules: recursive
+          persist-credentials: false
       - name: Install MSRV
         run: rustup toolchain install 1.94 --profile minimal
       # Enable remotely only after platform, manager and CI tools are distributable.
