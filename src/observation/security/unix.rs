@@ -360,11 +360,19 @@ fn explicitly_unsupported(error: &io::Error) -> bool {
     })
 }
 
+#[cfg(any(target_os = "linux", test))]
 fn acl_read_requires_retry(error: &io::Error) -> bool {
-    matches!(
-        error.raw_os_error(),
-        Some(libc::ERANGE) | Some(libc::ENODATA)
-    )
+    let Some(code) = error.raw_os_error() else {
+        return false;
+    };
+    if code == libc::ERANGE {
+        return true;
+    }
+    #[cfg(target_os = "linux")]
+    if code == libc::ENODATA {
+        return true;
+    }
+    false
 }
 
 fn check_acl_size_io(length: usize, options: &LocalSecurityObservationOptions) -> io::Result<()> {
@@ -462,6 +470,7 @@ mod tests {
         assert!(acl_read_requires_retry(&io::Error::from_raw_os_error(
             libc::ERANGE
         )));
+        #[cfg(target_os = "linux")]
         assert!(acl_read_requires_retry(&io::Error::from_raw_os_error(
             libc::ENODATA
         )));
