@@ -4,7 +4,7 @@ use qubit_local_files::directory::{
     LocalResolutionOrigin, LocalResolutionPolicy, LocalResolutionScope, LocalTreeValidationOptions,
 };
 use qubit_local_files::error::{
-    LocalFileError, LocalFileErrorKind, LocalFileErrorSource, LocalFileOperation, LocalResourceKind,
+    LocalFileError, LocalFileErrorKind, LocalFileOperation, LocalResourceKind,
 };
 use qubit_local_files::observation::{
     LocalObservationRequirement, LocalSecurityObservationOptions, LocalSourceVerification,
@@ -324,6 +324,7 @@ fn resolution_quota_failure_keeps_structured_measurement_and_no_stage_owner_alia
 #[cfg(all(target_os = "linux", feature = "test-support"))]
 #[test]
 fn acl_budget_failure_reports_acl_dimension_and_stage_remains_the_only_cleanup_owner() {
+    use qubit_local_files::error::LocalFileErrorSource;
     use qubit_local_files::test_support::install_test_fault;
     use std::ffi::CString;
     use std::os::unix::ffi::OsStrExt;
