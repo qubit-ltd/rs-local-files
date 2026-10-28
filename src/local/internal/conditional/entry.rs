@@ -19,6 +19,8 @@ use crate::recovery::LocalRecoveryFileRole;
 ///
 /// Implementations must use their retained namespace authority and validate
 /// the current entry identity. A diagnostic path is not an access capability.
+/// Ownership of this value represents responsibility for future read access;
+/// it does not itself schedule deletion of the named entry.
 pub(crate) trait RecoveryAccess: Debug + Send + Sync {
     fn open_reader(&self) -> LocalResult<LocalFileReader>;
     fn sync_file(&self) -> io::Result<()>;
@@ -28,7 +30,9 @@ pub(crate) trait RecoveryAccess: Debug + Send + Sync {
 ///
 /// Its role changes only when the protocol verifies a state transition. Moving
 /// the access object into recovery transfers the read permission and paths
-/// without scheduling deletion.
+/// without scheduling deletion. `namespace_path` identifies the retained
+/// namespace entry, while `diagnostic_path` is optional user-facing context and
+/// grants no authority to access it.
 #[derive(Debug)]
 pub(crate) struct ConditionalEntry {
     role: LocalRecoveryFileRole,

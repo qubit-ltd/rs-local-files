@@ -9,16 +9,19 @@
 
 use qubit_local_files::LocalFileSystem;
 
-/// Verifies operation capability queries remain coherent on the host target.
+/// Verifies Host capability queries follow the Host target contract.
 #[test]
-fn test_local_file_system_capabilities_report_operation_support() {
+fn test_host_capabilities_report_operation_support() {
     let capabilities = LocalFileSystem::host()
         .expect("Host filesystem should open")
         .capabilities();
 
-    assert!(capabilities.supports_rooted_operations());
-    assert!(capabilities.supports_atomic_rename());
-    assert!(capabilities.supports_atomic_replace());
+    assert_eq!(cfg!(any(unix, windows)), capabilities.supports_rooted_operations(),);
+    assert_eq!(
+        cfg!(any(target_os = "linux", target_os = "macos", windows)),
+        capabilities.supports_atomic_rename(),
+    );
+    assert_eq!(cfg!(any(unix, windows)), capabilities.supports_atomic_replace(),);
     assert_eq!(
         cfg!(any(target_os = "linux", target_os = "macos", windows)),
         capabilities.can_attempt_atomic_temp_persist(),
@@ -27,6 +30,49 @@ fn test_local_file_system_capabilities_report_operation_support() {
     assert_eq!(cfg!(unix), capabilities.supports_durable_file_copy());
     assert_eq!(cfg!(unix), capabilities.supports_durable_write());
     assert_eq!(cfg!(unix), capabilities.supports_durable_temp_file_persist(),);
+}
+
+/// Verifies Rooted capability queries follow their independent target contract.
+#[test]
+fn test_rooted_capabilities_report_operation_support() {
+    #[cfg(any(unix, windows))]
+    {
+        let directory = tempfile::tempdir().expect("root should be created");
+        let capabilities = LocalFileSystem::rooted(directory.path())
+            .expect("root authority should open")
+            .capabilities();
+        assert!(capabilities.supports_rooted_operations());
+        assert_eq!(
+            cfg!(any(
+                target_os = "linux",
+                target_os = "android",
+                target_os = "macos",
+                target_os = "ios",
+                windows
+            )),
+            capabilities.supports_atomic_rename(),
+        );
+        assert_eq!(cfg!(any(unix, windows)), capabilities.supports_atomic_replace(),);
+        assert_eq!(
+            cfg!(any(
+                target_os = "linux",
+                target_os = "android",
+                target_os = "macos",
+                target_os = "ios",
+                windows
+            )),
+            capabilities.can_attempt_atomic_temp_persist(),
+        );
+        assert_eq!(cfg!(unix), capabilities.supports_durable_rename());
+        assert_eq!(cfg!(unix), capabilities.supports_durable_file_copy());
+        assert_eq!(cfg!(unix), capabilities.supports_durable_write());
+        assert_eq!(cfg!(unix), capabilities.supports_durable_temp_file_persist());
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        let directory = tempfile::tempdir().expect("root should be created");
+        assert!(LocalFileSystem::rooted(directory.path()).is_err());
+    }
 }
 
 /// Verifies the compatibility query delegates to the explicitly conditional

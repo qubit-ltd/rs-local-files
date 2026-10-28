@@ -246,22 +246,42 @@ fn test_local_file_writer_reports_parent_sync_result() {
             .expect("staged writer should open before permissions change");
         Output::write_fully(&mut writer, b"published").expect("staged bytes should be written");
         fs::set_permissions(&parent, fs::Permissions::from_mode(0o300))
-            .expect("parent should reject read-only directory opens");
+            .expect("parent permissions should be restricted");
+        let probe = fs::File::open(&parent);
+        let precondition_holds = match &probe {
+            Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied => true,
+            Ok(_) => false,
+            Err(error) => {
+                fs::set_permissions(&parent, fs::Permissions::from_mode(0o700))
+                    .expect("parent permissions should be restored before reporting probe error");
+                panic!("parent read-open probe failed unexpectedly: {error}");
+            }
+        };
+        drop(probe);
+        if !precondition_holds {
+            fs::set_permissions(&parent, fs::Permissions::from_mode(0o700))
+                .expect("parent permissions should be restored before skipping privileged scenario");
+            eprintln!(
+                "skipping {:?} chmod scenario: current process can still read-open the restricted parent",
+                requirement
+            );
+            continue;
+        }
+        let commit_result = writer.commit();
+        fs::set_permissions(&parent, fs::Permissions::from_mode(0o700))
+            .expect("parent permissions should be restored before assertions");
         match requirement {
             LocalDurabilityRequirement::Preferred => {
-                let outcome = writer.commit().expect("preferred durability may downgrade");
+                let outcome = commit_result.expect("preferred durability may downgrade");
                 assert!(!outcome.durable());
             }
             LocalDurabilityRequirement::Required => {
-                let error = writer
-                    .commit()
-                    .expect_err("required durability must report sync failure");
+                let error = commit_result.expect_err("required durability must report sync failure");
                 assert_eq!(LocalWriteFailureState::Published, error.state());
                 assert_eq!(LocalFileErrorKind::PublicationIncomplete, error.error().kind(),);
             }
             LocalDurabilityRequirement::NotRequired => unreachable!(),
         }
-        fs::set_permissions(&parent, fs::Permissions::from_mode(0o700)).expect("parent permissions should be restored");
         assert_eq!(
             b"published",
             fs::read(&target).expect("published target should remain").as_slice(),

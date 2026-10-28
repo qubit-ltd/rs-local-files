@@ -10,7 +10,6 @@
 #![cfg(windows)]
 
 use std::fs;
-use std::io::ErrorKind;
 use std::os::windows::ffi::OsStrExt;
 use std::os::windows::fs::OpenOptionsExt;
 use std::os::windows::io::AsRawHandle;
@@ -25,21 +24,23 @@ use windows_sys::Win32::Storage::FileSystem::FILE_FLAG_OPEN_REPARSE_POINT;
 use windows_sys::Win32::System::IO::DeviceIoControl;
 use windows_sys::Win32::System::Ioctl::FSCTL_SET_REPARSE_POINT;
 
-/// Creates a file link or reports that the host has not granted link creation.
-fn create_file_link(target: &Path, link: &Path) -> bool {
-    match std::os::windows::fs::symlink_file(target, link) {
-        Ok(()) => true,
-        Err(error) if error.kind() == ErrorKind::PermissionDenied => false,
-        Err(error) => panic!("file-link fixture should be created: {error}"),
-    }
-}
+mod support;
+use support::windows_symlink::create_directory_link;
+use support::windows_symlink::create_file_link;
 
-/// Creates a directory link or reports that link creation is unavailable.
-fn create_directory_link(target: &Path, link: &Path) -> bool {
-    match std::os::windows::fs::symlink_dir(target, link) {
-        Ok(()) => true,
-        Err(error) if error.kind() == ErrorKind::PermissionDenied => false,
-        Err(error) => panic!("directory-link fixture should be created: {error}"),
+/// Preflights both native link kinds before the Windows contract tests run.
+#[test]
+fn test_windows_symlink_fixture_preflight() {
+    let root = tempdir().expect("preflight root should be created");
+    let file_target = root.path().join("file-target");
+    let directory_target = root.path().join("directory-target");
+    fs::write(&file_target, b"target").expect("file target should be written");
+    fs::create_dir(&directory_target).expect("directory target should be created");
+    if !create_file_link(&file_target, &root.path().join("file-link")) {
+        return;
+    }
+    if !create_directory_link(&directory_target, &root.path().join("directory-link")) {
+        return;
     }
 }
 
@@ -145,10 +146,10 @@ fn test_rooted_link_copy_ignores_replacement_diagnostic_root() {
     let filesystem = LocalFileSystem::rooted(&original).expect("root authority should open");
     fs::rename(&original, &renamed).expect("opened root should be renamed");
     fs::create_dir(&original).expect("replacement root should be created");
-    assert!(
-        create_file_link(Path::new(r"replacement\missing"), &original.join("source")),
-        "replacement link should be created after link permission was established",
-    );
+    assert!(create_file_link(
+        Path::new(r"replacement\missing"),
+        &original.join("source")
+    ));
 
     let _ = filesystem
         .copy(Path::new("source"), Path::new("destination"))

@@ -41,6 +41,8 @@ use qubit_local_files::options::LocalWriteOptions;
 use qubit_local_files::outcome::LocalCopyFailureState;
 #[cfg(feature = "test-support")]
 use qubit_local_files::outcome::LocalRenameFailureState;
+#[cfg(feature = "test-support")]
+use qubit_local_files::outcome::LocalWriteFailureState;
 use qubit_local_files::policy::LocalAtomicityRequirement;
 use qubit_local_files::policy::LocalDurabilityRequirement;
 use qubit_local_files::policy::LocalSymlinkPolicy;
@@ -703,6 +705,47 @@ fn test_copy_required_durability_syncs_staging_before_publication() {
         assert_eq!(LocalCopyFailureState::Indeterminate, failure.state());
         assert_eq!(b"old", fs::read(&target).expect("target should remain").as_slice(),);
     });
+}
+
+/// Verifies staged writer sync failures remain deterministic when process
+/// permissions cannot enforce the native parent-directory precondition.
+#[cfg(feature = "test-support")]
+#[test]
+fn test_writer_sync_failure_obeys_preferred_and_required_durability() {
+    const TEST_NAME: &str = "test_writer_sync_failure_obeys_preferred_and_required_durability";
+    for requirement in [
+        LocalDurabilityRequirement::Preferred,
+        LocalDurabilityRequirement::Required,
+    ] {
+        run_facade_fault(TEST_NAME, "writer-staged-file-sync", || {
+            let directory = tempdir().expect("temporary directory should be created");
+            let target = directory.path().join("target");
+            let mut writer = LocalFileSystem::host()
+                .expect("Host filesystem should open")
+                .open_writer_with_options(
+                    &target,
+                    &LocalWriteOptions::new(LocalWriteMode::CreateNew).with_durability(requirement),
+                )
+                .expect("staged writer should open");
+            Output::write_fully(&mut writer, b"payload").expect("staged bytes should be written");
+            let result = writer.commit();
+            match requirement {
+                LocalDurabilityRequirement::Preferred => {
+                    assert!(!result.expect("preferred sync failure may publish").durable());
+                    assert_eq!(
+                        b"payload",
+                        fs::read(target).expect("target should be published").as_slice()
+                    );
+                }
+                LocalDurabilityRequirement::Required => {
+                    let failure = result.expect_err("required sync failure must stop publication");
+                    assert_eq!(LocalWriteFailureState::NotPublished, failure.state());
+                    assert!(!target.exists());
+                }
+                LocalDurabilityRequirement::NotRequired => unreachable!(),
+            }
+        });
+    }
 }
 
 /// Verifies a host lacking directory synchronization rejects a required

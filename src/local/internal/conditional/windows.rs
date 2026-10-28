@@ -512,6 +512,13 @@ impl ConditionalBackend for WindowsConditionalBackend {
         &self.candidate_entry
     }
 
+    /// Copies the staged candidate into a separately named private entry.
+    ///
+    /// The guard retains cleanup responsibility until the copy has been
+    /// flushed, identified, and reopened as a verified recovery entry. If any
+    /// step fails, the guard attempts identity-checked cleanup and the backend
+    /// keeps its original candidate available. Each write uses only the
+    /// initialized prefix returned by the corresponding read.
     fn create_candidate_copy(&mut self) -> io::Result<ConditionalEntry> {
         let (name, mut destination) = match self.namespace.create_private("candidate-copy") {
             Ok(created) => created,

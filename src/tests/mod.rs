@@ -24,8 +24,8 @@ mod lf3_privacy_unix_tests;
 #[cfg(windows)]
 mod lf3_privacy_windows_tests;
 mod lf3_read_tests;
-mod lf3_sync_tests;
 mod lf3_staged_sync_tests;
+mod lf3_sync_tests;
 mod lf3_temp_tests;
 mod lf3_tree_observer_tests;
 mod lf3_tree_publish_tests;

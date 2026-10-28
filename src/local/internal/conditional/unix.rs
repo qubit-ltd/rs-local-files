@@ -393,6 +393,13 @@ impl ConditionalBackend for UnixConditionalBackend {
         &self.candidate_entry
     }
 
+    /// Creates and registers a private copy of the staged candidate.
+    ///
+    /// The recovery entry temporarily owns responsibility for the copy while
+    /// bytes are copied. The guard is disarmed only after that recovery entry
+    /// is registered; on success the candidate-copy identity is recorded and
+    /// the temporary recovery entry is removed. Each read uses only the
+    /// initialized prefix of the fixed-size buffer.
     fn create_candidate_copy(&mut self) -> io::Result<ConditionalEntry> {
         let (name, mut copy) = self.namespace.create_private("candidate-copy")?;
         let mut guard = match PrivateEntryGuard::new(&self.namespace, name.clone(), &copy) {

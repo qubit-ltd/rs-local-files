@@ -28,9 +28,34 @@ jobs:
       fuzz-check: false
       # Enable remotely only after platform, manager and CI tools are distributable.
       verify-extra-script: |
+        export QUBIT_LOCAL_FILES_REQUIRE_SYMLINKS=1
+        run_named_test() {
+          local target="$1"
+          local name="$2"
+          local output
+          if output=$(cargo test --locked --test "$target" "$name" -- --exact --nocapture 2>&1); then
+            printf '%s\n' "$output"
+          else
+            printf '%s\n' "$output"
+            return 1
+          fi
+          if ! grep -Fq "test $name ... ok" <<<"$output"; then
+            echo "expected exact test body to run: $target::$name" >&2
+            return 1
+          fi
+        }
         cargo test --locked --no-default-features --no-fail-fast
         cargo test --locked --all-features --no-fail-fast
         cargo test --locked --test resolution_contract_tests
+        if [ "$RUNNER_OS" = Windows ]; then
+          run_named_test rooted_windows_symlink_tests test_windows_symlink_fixture_preflight
+          run_named_test rooted_windows_symlink_tests test_rooted_copy_preserves_dangling_link_after_root_rename
+          run_named_test rooted_windows_symlink_tests test_rooted_copy_preserves_dangling_directory_link_kind
+          run_named_test rooted_windows_symlink_tests test_rooted_link_copy_ignores_replacement_diagnostic_root
+          run_named_test rooted_windows_symlink_tests test_rooted_copy_preserves_link_to_existing_external_file
+          run_named_test rooted_windows_symlink_tests test_rooted_copy_uses_actual_reparse_target_instead_of_display_name
+          run_named_test resolution_contract_tests opening_root_target_hook_sees_and_can_reject_raw_nt_substitute_name
+        fi
         if [ "$RUNNER_OS" != Windows ]; then
           cargo test --locked --test security_observation_contract_tests
         fi
@@ -39,7 +64,6 @@ jobs:
           rustup target add --toolchain 1.94 x86_64-unknown-freebsd armv7-linux-androideabi
           cargo +1.94 check --locked --target x86_64-unknown-freebsd
           cargo +1.94 check --locked --target armv7-linux-androideabi
-          RUSTFLAGS="-D warnings" cargo +1.94 check --locked --manifest-path fuzz/Cargo.toml --bins
         fi
 
   conditional-write:

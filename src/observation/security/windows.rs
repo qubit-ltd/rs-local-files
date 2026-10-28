@@ -49,6 +49,11 @@ use crate::observation::LocalWindowsAccessObservation;
 use crate::observation::LocalWindowsFileSystemObservation;
 
 const MAX_SECURITY_DESCRIPTOR_BYTES: usize = 1024 * 1024;
+const MAX_OWNER_DESCRIPTOR_BYTES: usize = 4096;
+// SECURITY_DESCRIPTOR_RELATIVE is Revision (u8), Sbz1 (u8), Control (u16),
+// and four offsets (u32 each): 1 + 1 + 2 + 4 * 4 = 20 bytes. The header is
+// already aligned for the 4-byte alignment required by the following ACL.
+const RELATIVE_DESCRIPTOR_HEADER_BYTES: usize = 20;
 const SECURITY_QUERY_ATTEMPTS: usize = 8;
 const STATUS_BUFFER_TOO_SMALL: i32 = 0xC000_0023u32 as i32;
 const STATUS_BUFFER_OVERFLOW: i32 = 0x8000_0005u32 as i32;
@@ -136,27 +141,55 @@ fn query_access(
     options: &LocalSecurityObservationOptions,
 ) -> LocalResult<LocalWindowsAccessObservation> {
     let current_sid = current_user_sid()?;
-    let descriptor = query_security_descriptor(handle)?;
+    let owner_descriptor = query_security_descriptor(
+        handle,
+        OWNER_SECURITY_INFORMATION,
+        Some(MAX_OWNER_DESCRIPTOR_BYTES),
+        None,
+    )?;
+    let owner_sid = decode_owner_sid(&owner_descriptor).ok_or_else(data_corruption)?;
+    let acl_limit = options.max_acl_bytes();
+    let descriptor = query_security_descriptor(handle, DACL_SECURITY_INFORMATION, acl_limit, acl_limit)?;
     check_acl_budget(&descriptor, options)?;
-    let decoded = decode_security_descriptor(&descriptor, None, None, &current_sid).ok_or_else(data_corruption)?;
+    let decoded =
+        decode_dacl_descriptor(&descriptor, None, acl_limit, &owner_sid, &current_sid).ok_or_else(data_corruption)?;
     Ok(decoded)
 }
 
-fn query_security_descriptor(handle: windows_sys::Win32::Foundation::HANDLE) -> LocalResult<Vec<u8>> {
-    let information = OWNER_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION;
+fn query_security_descriptor(
+    handle: windows_sys::Win32::Foundation::HANDLE,
+    information: u32,
+    max_bytes: Option<usize>,
+    acl_budget: Option<usize>,
+) -> LocalResult<Vec<u8>> {
+    query_security_descriptor_with(
+        information,
+        max_bytes,
+        acl_budget,
+        |information, output, capacity, needed| {
+            // SAFETY: the caller supplies either a null pointer with zero capacity
+            // for the probe or a writable allocation of exactly this capacity.
+            unsafe {
+                windows_sys::Wdk::Storage::FileSystem::NtQuerySecurityObject(
+                    handle,
+                    information,
+                    output,
+                    capacity,
+                    needed,
+                )
+            }
+        },
+    )
+}
+
+fn query_security_descriptor_with(
+    information: u32,
+    max_bytes: Option<usize>,
+    acl_budget: Option<usize>,
+    mut query: impl FnMut(u32, *mut core::ffi::c_void, u32, *mut u32) -> i32,
+) -> LocalResult<Vec<u8>> {
     let mut needed = 0u32;
-    // SAFETY: the zero-length probe does not dereference the null output; the
-    // handle is borrowed from the retained File. The returned length is capped
-    // before any allocation below.
-    let status = unsafe {
-        windows_sys::Wdk::Storage::FileSystem::NtQuerySecurityObject(
-            handle,
-            information,
-            ptr::null_mut(),
-            0,
-            &mut needed,
-        )
-    };
+    let status = query(information, ptr::null_mut(), 0, &mut needed);
     if status != STATUS_BUFFER_TOO_SMALL && status != STATUS_BUFFER_OVERFLOW {
         return Err(ntstatus_error(status));
     }
@@ -169,6 +202,21 @@ fn query_security_descriptor(handle: windows_sys::Win32::Foundation::HANDLE) -> 
                 length,
             ));
         }
+        let allowed = match (max_bytes, acl_budget) {
+            (Some(limit), Some(_)) => RELATIVE_DESCRIPTOR_HEADER_BYTES
+                .checked_add(limit)
+                .ok_or_else(|| resource_limit(LocalResourceKind::AclBytes, limit, usize::MAX))?
+                .min(MAX_SECURITY_DESCRIPTOR_BYTES),
+            (Some(limit), None) => limit.min(MAX_SECURITY_DESCRIPTOR_BYTES),
+            (None, _) => MAX_SECURITY_DESCRIPTOR_BYTES,
+        };
+        if length > allowed {
+            if let Some(limit) = acl_budget {
+                let requested = length.saturating_sub(RELATIVE_DESCRIPTOR_HEADER_BYTES);
+                return Err(resource_limit(LocalResourceKind::AclBytes, limit, requested));
+            }
+            return Err(resource_limit(LocalResourceKind::AclBytes, allowed, length));
+        }
         if length == 0 {
             return Err(data_corruption());
         }
@@ -180,15 +228,12 @@ fn query_security_descriptor(handle: windows_sys::Win32::Foundation::HANDLE) -> 
         let mut actual = 0u32;
         // SAFETY: `buffer` is writable for `length` bytes, and the API receives
         // that exact bounded size. `needed` remains an output scalar.
-        let status = unsafe {
-            windows_sys::Wdk::Storage::FileSystem::NtQuerySecurityObject(
-                handle,
-                information,
-                buffer.as_mut_ptr().cast(),
-                u32::try_from(length).map_err(|_| data_corruption())?,
-                &mut actual,
-            )
-        };
+        let status = query(
+            information,
+            buffer.as_mut_ptr().cast(),
+            u32::try_from(length).map_err(|_| data_corruption())?,
+            &mut actual,
+        );
         if status >= 0 {
             let actual = usize::try_from(actual).map_err(|_| data_corruption())?;
             if actual > buffer.len() {
@@ -277,6 +322,7 @@ fn query_file_info<T: Default>(
     Ok(output)
 }
 
+#[cfg(test)]
 fn decode_security_descriptor(
     bytes: &[u8],
     max_entries: Option<usize>,
@@ -349,6 +395,81 @@ fn decode_security_descriptor(
     ))
 }
 
+fn decode_owner_sid(bytes: &[u8]) -> Option<String> {
+    if bytes.len() < RELATIVE_DESCRIPTOR_HEADER_BYTES || bytes[0] != 1 {
+        return None;
+    }
+    let control = u16::from_le_bytes([bytes[2], bytes[3]]);
+    if control & 0x8000 == 0 {
+        return None;
+    }
+    let offset = usize::try_from(u32::from_le_bytes(bytes[4..8].try_into().ok()?)).ok()?;
+    if offset < RELATIVE_DESCRIPTOR_HEADER_BYTES || offset % 4 != 0 {
+        return None;
+    }
+    let end = sid_end(bytes, offset)?;
+    sid_string(&bytes[offset..end])
+}
+
+fn decode_dacl_descriptor(
+    bytes: &[u8],
+    max_entries: Option<usize>,
+    max_acl_bytes: Option<usize>,
+    owner_sid: &str,
+    current_sid: &str,
+) -> Option<LocalWindowsAccessObservation> {
+    if bytes.len() < RELATIVE_DESCRIPTOR_HEADER_BYTES || bytes[0] != 1 {
+        return None;
+    }
+    let control = u16::from_le_bytes([bytes[2], bytes[3]]);
+    if control & 0x8000 == 0 {
+        return None;
+    }
+    let dacl_offset = usize::try_from(u32::from_le_bytes(bytes[16..20].try_into().ok()?)).ok()?;
+    let dacl_present = control & SE_DACL_PRESENT != 0;
+    let dacl_is_null = dacl_present && dacl_offset == 0;
+    let aces = if !dacl_present {
+        if dacl_offset != 0 {
+            return None;
+        }
+        Vec::new()
+    } else if dacl_is_null {
+        Vec::new()
+    } else {
+        if dacl_offset < RELATIVE_DESCRIPTOR_HEADER_BYTES || dacl_offset % 4 != 0 {
+            return None;
+        }
+        let header_end = dacl_offset.checked_add(8)?;
+        if header_end > bytes.len() {
+            return None;
+        }
+        let acl_size = usize::from(u16::from_le_bytes([bytes[dacl_offset + 2], bytes[dacl_offset + 3]]));
+        let ace_count = usize::from(u16::from_le_bytes([bytes[dacl_offset + 4], bytes[dacl_offset + 5]]));
+        if max_acl_bytes.is_some_and(|limit| acl_size > limit) || max_entries.is_some_and(|limit| ace_count > limit) {
+            return None;
+        }
+        let acl_end = dacl_offset.checked_add(acl_size)?;
+        if acl_size < 8 || !matches!(bytes[dacl_offset], 2 | 4) || acl_end > bytes.len() {
+            return None;
+        }
+        decode_acl(
+            &bytes[dacl_offset..acl_end],
+            max_entries,
+            max_acl_bytes,
+            Some(current_sid),
+        )?
+    };
+    Some(LocalWindowsAccessObservation::new(
+        owner_sid.to_owned(),
+        owner_sid == current_sid,
+        dacl_present,
+        dacl_is_null,
+        control & SE_DACL_PROTECTED != 0,
+        true,
+        aces,
+    ))
+}
+
 fn sid_end(bytes: &[u8], offset: usize) -> Option<usize> {
     let header_end = offset.checked_add(8)?;
     if header_end > bytes.len() || bytes[offset] != 1 || bytes[offset + 1] > 15 {
@@ -359,6 +480,7 @@ fn sid_end(bytes: &[u8], offset: usize) -> Option<usize> {
     (end <= bytes.len()).then_some(end)
 }
 
+#[cfg(test)]
 fn ranges_overlap(left: std::ops::Range<usize>, right: std::ops::Range<usize>) -> bool {
     left.start < right.end && right.start < left.end
 }
@@ -425,10 +547,6 @@ fn requirement_for_unsupported(error: LocalFileError) -> LocalFileError {
     } else {
         error
     }
-}
-
-fn requirement_not_met() -> LocalFileError {
-    LocalFileError::new(LocalFileErrorKind::RequirementNotMet, LocalFileOperation::Metadata)
 }
 
 fn data_corruption() -> LocalFileError {
@@ -506,6 +624,9 @@ mod tests {
     use crate::error::LocalFileErrorKind;
     use crate::error::LocalResourceKind;
     use crate::observation::LocalSecurityObservationOptions;
+
+    #[path = "acl_budget_tests.rs"]
+    mod acl_budget_tests;
 
     #[test]
     fn security_windows_sid_decode_validates_length_and_formats_authority() {

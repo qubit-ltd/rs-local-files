@@ -1,3 +1,11 @@
+// =============================================================================
+//    Copyright (c) 2026 Haixing Hu.
+//
+//    SPDX-License-Identifier: Apache-2.0
+//
+//    Licensed under the Apache License, Version 2.0.
+// =============================================================================
+
 use std::path::Path;
 
 use crate::LocalFileSystem;
@@ -28,10 +36,7 @@ fn explicit_entry_limit_can_raise_owner_policy_default_ceiling() {
     }
 
     let outcome = stage
-        .apply_owner_access_policy_with_options(
-            &policy,
-            &LocalListOptions::new().with_max_entries(ENTRY_COUNT),
-        )
+        .apply_owner_access_policy_with_options(&policy, &LocalListOptions::new().with_max_entries(ENTRY_COUNT))
         .expect("explicit entry limit should permit all entries");
 
     assert_eq!(outcome.owner_access_policy(), Some(&policy));

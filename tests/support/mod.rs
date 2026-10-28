@@ -7,3 +7,5 @@
 // =============================================================================
 
 pub(crate) mod conditional_temp_directory;
+#[cfg(windows)]
+pub(crate) mod windows_symlink;

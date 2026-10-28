@@ -182,25 +182,69 @@ fn test_rooted_file_system_space_observes_nearest_existing_ancestor() {
 
 /// Verifies capability snapshots expose independent operation guarantees.
 #[test]
-fn test_local_file_system_capabilities_report_operation_support() {
+fn test_host_capabilities_report_operation_support() {
     let capabilities = LocalFileSystem::host()
         .expect("Host filesystem should open")
         .capabilities();
 
-    assert!(capabilities.supports_rooted_operations());
-    assert!(capabilities.supports_atomic_rename());
-    assert!(capabilities.supports_atomic_replace());
-    assert!(capabilities.can_attempt_atomic_temp_persist());
+    assert_eq!(cfg!(any(unix, windows)), capabilities.supports_rooted_operations(),);
+    assert_eq!(
+        cfg!(any(target_os = "linux", target_os = "macos", windows)),
+        capabilities.supports_atomic_rename(),
+    );
+    assert_eq!(cfg!(any(unix, windows)), capabilities.supports_atomic_replace(),);
+    assert_eq!(
+        cfg!(any(target_os = "linux", target_os = "macos", windows)),
+        capabilities.can_attempt_atomic_temp_persist(),
+    );
     assert_eq!(cfg!(unix), capabilities.supports_durable_rename());
-    assert_eq!(cfg!(unix), capabilities.supports_durable_file_copy(),);
+    assert_eq!(cfg!(unix), capabilities.supports_durable_file_copy());
     assert_eq!(cfg!(unix), capabilities.supports_durable_write());
-    assert_eq!(cfg!(unix), capabilities.supports_durable_temp_file_persist(),);
+    assert_eq!(cfg!(unix), capabilities.supports_durable_temp_file_persist());
+}
 
-    let rooted = tempdir().expect("root should be created");
-    let rooted_capabilities = LocalFileSystem::rooted(rooted.path())
-        .expect("root authority should open")
-        .capabilities();
-    assert_eq!(capabilities, rooted_capabilities);
+/// Verifies Rooted capabilities follow the separately implemented target
+/// contract.
+#[test]
+fn test_rooted_capabilities_report_operation_support() {
+    #[cfg(any(unix, windows))]
+    {
+        let rooted = tempdir().expect("root should be created");
+        let capabilities = LocalFileSystem::rooted(rooted.path())
+            .expect("root authority should open")
+            .capabilities();
+        assert!(capabilities.supports_rooted_operations());
+        assert_eq!(
+            cfg!(any(
+                target_os = "linux",
+                target_os = "android",
+                target_os = "macos",
+                target_os = "ios",
+                windows
+            )),
+            capabilities.supports_atomic_rename(),
+        );
+        assert_eq!(cfg!(any(unix, windows)), capabilities.supports_atomic_replace(),);
+        assert_eq!(
+            cfg!(any(
+                target_os = "linux",
+                target_os = "android",
+                target_os = "macos",
+                target_os = "ios",
+                windows
+            )),
+            capabilities.can_attempt_atomic_temp_persist(),
+        );
+        assert_eq!(cfg!(unix), capabilities.supports_durable_rename());
+        assert_eq!(cfg!(unix), capabilities.supports_durable_file_copy());
+        assert_eq!(cfg!(unix), capabilities.supports_durable_write());
+        assert_eq!(cfg!(unix), capabilities.supports_durable_temp_file_persist());
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        let rooted = tempdir().expect("root should be created");
+        assert!(LocalFileSystem::rooted(rooted.path()).is_err());
+    }
 }
 
 /// Verifies the host snapshot only advertises native no-replace operations

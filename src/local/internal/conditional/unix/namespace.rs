@@ -26,6 +26,12 @@ use crate::local::internal::open_rooted_parent;
 use crate::options::LocalWriteOptions;
 use crate::recovery::LocalRecoveryFileRole;
 
+/// Retained authority for conditional operations in one parent directory.
+///
+/// Operations address entries by single-component names relative to `parent`;
+/// stored paths describe or diagnose those entries and are not used as access
+/// authority. Cloned parent handles in recovery entries preserve the ability
+/// to reopen and verify a name after this namespace is dropped.
 #[derive(Debug)]
 pub(super) struct Namespace {
     pub(super) parent: File,
