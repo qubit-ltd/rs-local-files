@@ -170,6 +170,9 @@ fn resolve_rooted_path_allow_root_with_scope_and_deadline(
             .with_reason("FollowAcrossScope is incompatible with a Rooted filesystem")
             .with_path(path.to_path_buf()));
     }
+    if path.as_os_str().is_empty() {
+        return Ok(PathBuf::new());
+    }
     if has_only_normal_components(path) {
         let relative = rooted_path(path, operation)?;
         if root.resolution_contract().is_unrestricted()

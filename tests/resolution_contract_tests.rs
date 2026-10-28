@@ -9,6 +9,13 @@ use std::ffi::OsStr;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
+#[cfg(unix)]
+#[test]
+fn rooted_filesystem_can_open_the_native_root_directory() {
+    LocalFileSystem::rooted(Path::new("/"))
+        .expect("the native root directory should open as a Rooted filesystem");
+}
+
 #[derive(Debug)]
 struct TargetRecorder(Arc<Mutex<Vec<(String, LocalResolutionScope)>>>);
 
