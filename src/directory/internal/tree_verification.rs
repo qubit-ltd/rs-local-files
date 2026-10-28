@@ -48,7 +48,7 @@ pub(in crate::directory) fn verify_tree(
     check_deadline(deadline)?;
 
     let root = stage.directory().observe()?;
-    if root.identity() != stage.identity.as_ref() {
+    if root.identity() != stage.identity() {
         return Err(LocalFileError::new(
             LocalFileErrorKind::ChangedDuringRead,
             LocalFileOperation::Metadata,
@@ -239,7 +239,7 @@ fn verify_root_privacy(stage: &LocalStagedDirectory, options: &LocalTreeValidati
             .expect("stage owner exists")
             .open_child_for_access()?;
         let observation = crate::observation::query::query_observation(&root, LocalObservationRequirement::Required)?;
-        if observation.identity() != stage.identity.as_ref() {
+        if observation.identity() != stage.identity() {
             return Err(LocalFileError::new(
                 LocalFileErrorKind::ChangedDuringRead,
                 LocalFileOperation::Metadata,

@@ -355,7 +355,7 @@ where
 }
 
 pub(crate) fn create_private_directory_at(parent: &File, name: &OsStr) -> Result<File, NativePrivateCreateError> {
-    create_private_directory_at_impl(parent, name, File::try_clone, || {})
+    create_private_directory_at_impl(parent, name, File::try_clone, || Ok(()), || {})
 }
 
 #[cfg(test)]
@@ -367,7 +367,19 @@ pub(crate) fn create_private_directory_at_with_clone_hook<F>(
 where
     F: FnOnce(&File) -> io::Result<File>,
 {
-    create_private_directory_at_impl(parent, name, clone_parent, || {})
+    create_private_directory_at_impl(parent, name, clone_parent, || Ok(()), || {})
+}
+
+#[cfg(test)]
+pub(crate) fn create_private_directory_at_with_open_failure_hook<F>(
+    parent: &File,
+    name: &OsStr,
+    before_open: F,
+) -> Result<File, NativePrivateCreateError>
+where
+    F: FnOnce() -> io::Result<()>,
+{
+    create_private_directory_at_impl(parent, name, File::try_clone, before_open, || {})
 }
 
 #[cfg(test)]
@@ -379,17 +391,19 @@ pub(crate) fn create_private_directory_at_with_hook<F>(
 where
     F: FnOnce(),
 {
-    create_private_directory_at_impl(parent, name, File::try_clone, after_open)
+    create_private_directory_at_impl(parent, name, File::try_clone, || Ok(()), after_open)
 }
 
-fn create_private_directory_at_impl<C, H>(
+fn create_private_directory_at_impl<C, O, H>(
     parent: &File,
     name: &OsStr,
     clone_parent: C,
+    before_open: O,
     after_open: H,
 ) -> Result<File, NativePrivateCreateError>
 where
     C: FnOnce(&File) -> io::Result<File>,
+    O: FnOnce() -> io::Result<()>,
     H: FnOnce(),
 {
     let name = match component_name(name) {
@@ -400,6 +414,16 @@ where
     let result = unsafe { libc::mkdirat(parent.as_raw_fd(), name.as_ptr(), 0o700) };
     if result < 0 {
         return Err(pre_create_error(io::Error::last_os_error()));
+    }
+    if let Err(source) = before_open() {
+        return Err(create_error(
+            true,
+            source,
+            retained_parent,
+            OsStr::from_bytes(name.as_bytes()),
+            None,
+            None,
+        ));
     }
     let descriptor = unsafe {
         libc::openat(
@@ -604,6 +628,30 @@ fn create_error(
 
 fn pre_create_error(source: io::Error) -> NativePrivateCreateError {
     NativePrivateCreateError { source, retained: None }
+}
+
+#[cfg(test)]
+mod recovery_open_failure_unix_tests {
+    use std::fs::File;
+
+    use super::create_private_directory_at_with_open_failure_hook;
+
+    #[test]
+    fn open_failure_after_mkdir_retains_entry_without_unproven_identity() {
+        let fixture = tempfile::tempdir().expect("temporary directory");
+        let parent = File::open(fixture.path()).expect("open parent directory");
+        let error =
+            create_private_directory_at_with_open_failure_hook(&parent, std::ffi::OsStr::new("retained"), || {
+                Err(std::io::Error::other("injected directory open failure"))
+            })
+            .expect_err("injected open failure");
+
+        assert!(fixture.path().join("retained").is_dir());
+        let entry = error.retained.expect("mkdir entry is retained");
+        assert!(entry.file.is_none());
+        assert!(entry.identity.is_none());
+        assert_eq!(error.source.to_string(), "injected directory open failure");
+    }
 }
 
 #[cfg(test)]

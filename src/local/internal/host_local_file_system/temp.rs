@@ -615,6 +615,11 @@ fn private_create_directory_at(
 }
 
 #[cfg(any(unix, windows))]
+/// Builds an error and transfers any retained native entries to recovery.
+///
+/// The creation error may own a partially created target; `extra` may own a
+/// sandbox needed to reach that target. Both are kept in the returned recovery
+/// value so the caller can retry cleanup after this function returns.
 fn private_create_error(
     operation: LocalFileOperation,
     path: PathBuf,
@@ -633,6 +638,12 @@ fn private_create_error(
 }
 
 #[cfg(any(unix, windows))]
+/// Creates recovery ownership for a native temporary entry and optional
+/// sandbox.
+///
+/// The parent handle and name retain namespace access, while the file handle
+/// retains the created object. Identity observation is best-effort and may be
+/// absent; the returned owner carries both entries when a sandbox is supplied.
 fn native_temp_recovery(
     path: PathBuf,
     parent: File,
@@ -660,6 +671,7 @@ fn native_temp_recovery(
 }
 
 #[cfg(any(unix, windows))]
+/// Clones the parent handle for later native cleanup or recovery.
 fn reserve_private_parent(parent: &File) -> io::Result<File> {
     #[cfg(feature = "test-support")]
     if crate::local::take_test_support("temp-private-parent-clone") {
@@ -672,6 +684,10 @@ fn reserve_private_parent(parent: &File) -> io::Result<File> {
 }
 
 #[cfg(any(unix, windows))]
+/// Reserves recovery ownership for a created sandbox directory.
+///
+/// On failure, returns the parent handle to the caller so it can transfer that
+/// handle and the still-open directory into a recovery value.
 fn reserve_private_directory_guard(
     parent: File,
     name: &str,
@@ -704,6 +720,7 @@ fn reserve_private_directory_guard(
 }
 
 #[cfg(any(unix, windows))]
+/// Associates an operation failure with recovery ownership of its sandbox.
 fn sandbox_failure(
     operation: LocalFileOperation,
     path: PathBuf,
@@ -718,6 +735,7 @@ fn sandbox_failure(
 }
 
 #[cfg(any(unix, windows))]
+/// Attempts sandbox cleanup and returns ownership when cleanup fails.
 fn cleanup_private_sandbox(path: &Path, entry: crate::temp::types::NativePrivateEntry) -> LocalResult<()> {
     let mut owner = crate::LocalTempRecovery::from_native(path.to_path_buf(), entry);
     match owner.cleanup() {

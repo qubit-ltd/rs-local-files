@@ -1214,6 +1214,26 @@ fn reopen_read_only(path: &Path, _original: &File) -> Result<File> {
 /// reports the retained read-only handle; it is an observation, not a content
 /// version. [`Self::native_path`] is available only for Host authority and is
 /// provided for observation, not as a way to bypass the bound authority.
+/// After [`Self::cleanup`] closes the retained handle, `observation` returns an
+/// error.
+///
+/// # Example
+///
+/// ```no_run
+/// use qubit_io::Output;
+/// use qubit_local_files::{LocalFileSystem, LocalSealOptions};
+///
+/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+/// let filesystem = LocalFileSystem::host()?;
+/// let mut file = filesystem.create_temp_file()?;
+/// file.write_fully(b"sealed contents")?;
+/// let mut sealed = file.seal_with_options(&LocalSealOptions::default())?;
+/// let current = sealed.observation()?;
+/// let _ = current;
+/// sealed.cleanup()?;
+/// # Ok(())
+/// # }
+/// ```
 ///
 /// The sealed owner does not implement [`qubit_io::ByteOutput`]:
 ///
@@ -1235,32 +1255,8 @@ pub struct LocalSealedTempFile {
     resource: LocalTempFile,
 }
 
-impl LocalSealedTempFile {
-    /// Returns the namespace path of the sealed file.
-    pub fn path(&self) -> &Path {
-        self.resource.path()
-    }
-    /// Returns a native path for host resources.
-    pub fn native_path(&self) -> Option<&Path> {
-        matches!(self.resource.core.backend, LocalTempResourceBackend::Host(_)).then(|| self.path())
-    }
-    /// Observes the retained read-only handle.
-    pub fn observation(&self) -> LocalResult<crate::observation::LocalFileObservation> {
-        let file = self.resource.file.as_ref().ok_or_else(|| {
-            LocalFileError::from_io(
-                LocalFileOperation::Metadata,
-                Some(self.path().to_path_buf()),
-                None,
-                closed_file_error(),
-            )
-        })?;
-        crate::observation::query::query_observation(file, crate::observation::LocalObservationRequirement::Required)
-    }
-    /// Removes the sealed file and its sandbox.
-    pub fn cleanup(&mut self) -> LocalResult<()> {
-        self.resource.cleanup()
-    }
-}
+#[path = "local_sealed_temp_file.rs"]
+mod local_sealed_temp_file;
 
 /// Builds the error used when the opened synchronization object is not source.
 #[must_use]

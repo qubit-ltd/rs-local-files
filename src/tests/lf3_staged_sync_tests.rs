@@ -1,3 +1,11 @@
+// =============================================================================
+//    Copyright (c) 2026 Haixing Hu.
+//
+//    SPDX-License-Identifier: Apache-2.0
+//
+//    Licensed under the Apache License, Version 2.0.
+// =============================================================================
+
 use std::path::Path;
 
 use crate::LocalFileSystem;
@@ -27,10 +35,7 @@ fn staged_directory_exposes_bounded_file_synchronization() {
     );
     assert!(
         !stage
-            .sync_files_with_options(
-                &LocalListOptions::new(),
-                LocalFileSyncRequirement::NotRequired
-            )
+            .sync_files_with_options(&LocalListOptions::new(), LocalFileSyncRequirement::NotRequired)
             .expect("not-required synchronization should succeed")
     );
     stage
@@ -59,4 +64,16 @@ fn staged_tree_syncs_nested_directories_before_its_root_and_parent() {
     stage
         .sync_tree_with_options(&parent, &LocalListOptions::new())
         .expect("nested files, directories, stage root, and parent should sync");
+}
+
+#[cfg(unix)]
+#[test]
+fn test_review_tree_sync_orders_files_directories_root_and_parent() {
+    crate::directory::LocalStagedDirectory::test_review_tree_sync_orders_files_directories_root_and_parent();
+}
+
+#[cfg(unix)]
+#[test]
+fn test_review_tree_sync_stops_after_nested_directory_failure() {
+    crate::directory::LocalStagedDirectory::test_review_tree_sync_stops_after_nested_directory_failure();
 }

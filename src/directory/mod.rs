@@ -8,13 +8,19 @@
 //! Fixed directory authorities and native component policies.
 
 pub(crate) mod binding;
+mod binding_anchor;
 #[path = "local_component_policy.rs"]
 mod component_policy;
 mod conditional;
+mod directory_path_binding;
 #[path = "local_directory_handle.rs"]
 mod handle;
 mod internal;
 mod local_resolution_policy;
+mod local_tree_entry;
+mod local_tree_entry_observation;
+mod local_tree_validation_options;
+mod path_binding;
 #[path = "local_staged_directory.rs"]
 mod staged;
 #[cfg(all(test, unix))]

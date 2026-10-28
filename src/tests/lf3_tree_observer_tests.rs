@@ -921,6 +921,106 @@ fn lf3_tree_private_stage_does_not_claim_or_cleanup_replaced_name() {
     );
 }
 
+#[cfg(unix)]
+#[test]
+fn test_review_stage_creation_identity_rejects_replaced_name_for_all_policies() {
+    use std::sync::Arc;
+    use std::sync::Mutex;
+
+    let cases = [
+        ("default", LocalTempDirectoryOptions::new()),
+        (
+            "required-privacy",
+            LocalTempDirectoryOptions::new().with_privacy(LocalPrivacyRequirement::Required),
+        ),
+        (
+            "owner-policy",
+            LocalTempDirectoryOptions::new()
+                .with_owner_access_policy(crate::policy::LocalOwnerAccessPolicy::new().with_unix_modes(0o700, 0o600)),
+        ),
+    ];
+
+    for (label, options) in cases {
+        let fixture = tempfile::tempdir().expect("fixture should exist");
+        let fs = LocalFileSystem::host().expect("host filesystem should open");
+        let parent = fs
+            .open_directory_with_options(fixture.path(), &LocalDirectoryOpenOptions::new())
+            .expect("parent should open");
+        let fixture_path = fixture.path().to_path_buf();
+        let moved_original = fixture.path().join("moved-original");
+        let moved_original_for_hook = moved_original.clone();
+        let replacement_path = Arc::new(Mutex::new(None));
+        let replacement_path_for_hook = Arc::clone(&replacement_path);
+        let _hook = crate::directory::install_stage_created_hook(move |name| {
+            let created = fixture_path.join(name);
+            std::fs::rename(&created, &moved_original_for_hook).expect("move original stage");
+            std::fs::create_dir(&created).expect("install replacement directory");
+            std::fs::write(created.join("sentinel"), b"replacement").expect("write sentinel");
+            *replacement_path_for_hook.lock().expect("replacement path lock") = Some(created);
+        });
+
+        let error = match parent.create_staged_directory(&options) {
+            Ok(stage) => {
+                let returned_identity = stage.identity().cloned();
+                let observed_identity = stage
+                    .observation()
+                    .expect("returned stage can be observed")
+                    .identity()
+                    .cloned();
+                panic!(
+                    "{label}: replacement was accepted with identity {returned_identity:?}, observed {observed_identity:?}"
+                );
+            }
+            Err(error) => error,
+        };
+        assert_eq!(
+            error.cause().kind(),
+            crate::error::LocalFileErrorKind::ChangedDuringRead,
+            "{label}"
+        );
+        assert_eq!(
+            error.mutation_state(),
+            crate::outcome::LocalTreeMutationState::Indeterminate,
+            "{label}"
+        );
+        let expected_identity = parent
+            .observe_entry(Path::new("moved-original"))
+            .expect("moved original should remain observable")
+            .identity()
+            .cloned();
+        assert_eq!(
+            error.stage_identity(),
+            expected_identity.as_ref(),
+            "{label}: retain creation identity"
+        );
+        let owners = error.into_retained_resources();
+        assert_eq!(owners.len(), 1, "{label}: retain one cleanup owner");
+        let cleanup_error = owners
+            .into_iter()
+            .next()
+            .expect("cleanup owner should exist")
+            .cleanup()
+            .expect_err("cleanup must reject the replacement identity");
+        assert_eq!(
+            cleanup_error.cause().kind(),
+            crate::error::LocalFileErrorKind::InvalidState,
+            "{label}"
+        );
+        drop(cleanup_error);
+        let replacement_path = replacement_path
+            .lock()
+            .expect("replacement path lock")
+            .clone()
+            .expect("replacement path should be recorded");
+        assert_eq!(
+            std::fs::read(replacement_path.join("sentinel")).expect("replacement must remain"),
+            b"replacement",
+            "{label}: rejected replacement must survive cleanup/drop"
+        );
+        assert!(moved_original.is_dir(), "{label}: original must remain reachable");
+    }
+}
+
 #[cfg(feature = "test-support")]
 #[test]
 fn lf3_tree_partial_private_stage_retains_identity_and_cleanup_owner() {

@@ -48,6 +48,9 @@ use crate::options::LocalObservedReadOptions;
 use crate::options::LocalPathBindingOptions;
 use crate::rooted::Root;
 
+#[path = "local_directory_handle/staged.rs"]
+mod staged;
+
 #[cfg(all(test, unix))]
 type ComponentPolicyCheckpoint = (PathBuf, PathBuf, PathBuf, Arc<Barrier>);
 #[cfg(all(test, unix))]
@@ -581,6 +584,41 @@ impl LocalDirectoryHandle {
 
     pub(super) fn checked(&self, relative: &Path, follow_final: bool) -> LocalResult<PathBuf> {
         self.validate(relative, follow_final)
+    }
+
+    pub(super) fn validate_direct_input(&self, path: &Path) -> LocalResult<()> {
+        if path.is_absolute() || path.has_root() {
+            return Err(
+                LocalFileError::new(LocalFileErrorKind::InvalidPath, LocalFileOperation::BindPath)
+                    .with_path(path.to_path_buf()),
+            );
+        }
+        let mut depth = 0_usize;
+        for component in path.components() {
+            match component {
+                Component::CurDir => {}
+                Component::ParentDir if depth > 0 => depth -= 1,
+                Component::ParentDir => {
+                    return Err(
+                        LocalFileError::new(LocalFileErrorKind::InvalidPath, LocalFileOperation::BindPath)
+                            .with_path(path.to_path_buf()),
+                    );
+                }
+                Component::Normal(name) => {
+                    self.component_policy
+                        .validate_component(name)
+                        .map_err(|error| error.with_path(path.to_path_buf()))?;
+                    depth += 1;
+                }
+                Component::RootDir | Component::Prefix(_) => {
+                    return Err(
+                        LocalFileError::new(LocalFileErrorKind::InvalidPath, LocalFileOperation::BindPath)
+                            .with_path(path.to_path_buf()),
+                    );
+                }
+            }
+        }
+        Ok(())
     }
 
     /// Reads final-entry metadata beneath this authority.

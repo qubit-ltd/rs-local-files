@@ -626,6 +626,10 @@ fn create_private_entry_at(parent: &File, name: &OsStr, directory: bool) -> Resu
 }
 
 /// Applies the current user's access policy to an already-open entry.
+///
+/// For files, `read_only` controls the DACL and whether this function sets the
+/// `FILE_ATTRIBUTE_READONLY` attribute. Passing `false` does not clear a
+/// read-only attribute that was already present.
 pub(crate) fn apply_current_user_access(file: &File, directory: bool, read_only: bool) -> io::Result<()> {
     let descriptor = SecurityDescriptor::for_current_user(directory, read_only)?;
     check_failure!(AccessApplyBefore);
@@ -941,3 +945,7 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+#[path = "privacy_windows/access_transition_tests.rs"]
+mod access_transition_tests;

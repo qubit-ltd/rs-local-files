@@ -5,32 +5,16 @@
 //
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
-use std::ffi::OsString;
+#[cfg(unix)]
 use std::fs::File;
 use std::io;
 use std::path::Path;
 use std::path::PathBuf;
 
+pub(crate) use super::internal::NativePrivateCreateError;
+pub(crate) use super::internal::NativePrivateEntry;
+use super::internal::RecoveryResource;
 use crate::observation::LocalFileIdentity;
-
-/// Native private resource retained after a creation step partially succeeds.
-#[derive(Debug)]
-pub(crate) struct NativePrivateEntry {
-    #[cfg_attr(windows, allow(dead_code))]
-    pub(crate) parent: File,
-    #[cfg_attr(windows, allow(dead_code))]
-    pub(crate) name: OsString,
-    pub(crate) file: Option<File>,
-    pub(crate) identity: Option<LocalFileIdentity>,
-    pub(crate) directory: bool,
-}
-
-/// Native private creation failure with ownership of any partial resource.
-#[derive(Debug)]
-pub(crate) struct NativePrivateCreateError {
-    pub(crate) source: io::Error,
-    pub(crate) retained: Option<NativePrivateEntry>,
-}
 
 /// Owns a private temporary object left behind by a failed operation.
 ///
@@ -90,12 +74,6 @@ pub struct LocalTempRecovery {
     resource: Option<RecoveryResource>,
 }
 
-#[derive(Debug)]
-enum RecoveryResource {
-    LiveFile(Box<super::LocalTempFile>),
-    Native(Vec<NativePrivateEntry>),
-}
-
 impl LocalTempRecovery {
     pub(crate) fn from_file(resource: super::LocalTempFile) -> Self {
         let path = resource.path().to_path_buf();
@@ -135,7 +113,9 @@ impl LocalTempRecovery {
     pub fn path(&self) -> &Path {
         &self.path
     }
-    /// Returns the native identity when it was established.
+    /// Returns the native identity when it was established, or `None` when
+    /// cleanup cannot verify the object identity and therefore refuses to
+    /// delete the entry by path alone.
     pub fn identity(&self) -> Option<&LocalFileIdentity> {
         self.identity.as_ref()
     }
@@ -162,10 +142,21 @@ impl LocalTempRecovery {
         let result = match resource {
             RecoveryResource::LiveFile(resource) => resource.cleanup(),
             RecoveryResource::Native(entries) => {
-                for entry in entries {
-                    cleanup_native_entry(entry, &self.path)?;
+                let mut completed = 0;
+                let mut failure = None;
+                for entry in entries.iter_mut() {
+                    match cleanup_native_entry(entry, &self.path) {
+                        Ok(()) => completed += 1,
+                        Err(error) => {
+                            failure = Some(error);
+                            break;
+                        }
+                    }
                 }
-                Ok(())
+                if completed > 0 {
+                    entries.drain(..completed);
+                }
+                failure.map_or(Ok(()), Err)
             }
         };
         if result.is_ok() {
@@ -181,14 +172,17 @@ fn cleanup_native_entry(entry: &mut NativePrivateEntry, path: &Path) -> crate::L
     use crate::LocalFileOperation;
 
     if entry.file.is_none() {
-        return Ok(());
+        return Err(
+            LocalFileError::new(LocalFileErrorKind::RequirementNotMet, LocalFileOperation::Cleanup)
+                .with_path(path.to_path_buf()),
+        );
     }
     let file = entry.file.as_ref().expect("checked native recovery file");
     let Some(expected) = entry.identity.as_ref() else {
-        return Err(LocalFileError::new(
-            LocalFileErrorKind::RequirementNotMet,
-            LocalFileOperation::Cleanup,
-        ));
+        return Err(
+            LocalFileError::new(LocalFileErrorKind::RequirementNotMet, LocalFileOperation::Cleanup)
+                .with_path(path.to_path_buf()),
+        );
     };
     let observed =
         crate::observation::query::query_observation(file, crate::observation::LocalObservationRequirement::Required)?;
@@ -290,3 +284,7 @@ impl Drop for LocalTempRecovery {
         let _ = self.cleanup();
     }
 }
+
+#[cfg(all(test, unix))]
+#[path = "local_temp_recovery/recovery_cleanup_tests.rs"]
+mod recovery_cleanup_tests;

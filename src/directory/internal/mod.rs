@@ -5,4 +5,5 @@
 //
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
+pub(crate) mod path_binding_budget;
 pub(super) mod tree_verification;
