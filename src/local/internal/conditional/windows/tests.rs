@@ -229,6 +229,156 @@ fn dacl_bytes(path: &Path) -> Vec<u8> {
     descriptor[dacl_offset..dacl_offset + dacl_size].to_vec()
 }
 
+fn assert_private_file(path: &Path) {
+    let file = fs::File::open(path).expect("private file should open for ACL inspection");
+    crate::temp::internal::privacy_windows::verify_current_user_access(&file, false, false)
+        .expect("file should have a protected current-user DACL");
+}
+
+fn add_inheritable_everyone_read(path: &Path) {
+    use windows_sys::Win32::Foundation::LocalFree;
+    use windows_sys::Win32::Security::Authorization::EXPLICIT_ACCESS_W;
+    use windows_sys::Win32::Security::Authorization::GRANT_ACCESS;
+    use windows_sys::Win32::Security::Authorization::GetNamedSecurityInfoW;
+    use windows_sys::Win32::Security::Authorization::SE_FILE_OBJECT;
+    use windows_sys::Win32::Security::Authorization::SetEntriesInAclW;
+    use windows_sys::Win32::Security::Authorization::SetNamedSecurityInfoW;
+    use windows_sys::Win32::Security::Authorization::TRUSTEE_IS_SID;
+    use windows_sys::Win32::Security::Authorization::TRUSTEE_IS_WELL_KNOWN_GROUP;
+    use windows_sys::Win32::Security::CreateWellKnownSid;
+    use windows_sys::Win32::Security::DACL_SECURITY_INFORMATION;
+    use windows_sys::Win32::Security::OBJECT_INHERIT_ACE;
+    use windows_sys::Win32::Security::WinWorldSid;
+    use windows_sys::Win32::Storage::FileSystem::FILE_GENERIC_READ;
+
+    let wide: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
+    let mut old_dacl = std::ptr::null_mut();
+    let mut descriptor = std::ptr::null_mut();
+    // SAFETY: the path is NUL-terminated and output pointers remain valid for
+    // the descriptor lifetime returned by GetNamedSecurityInfoW.
+    let status = unsafe {
+        GetNamedSecurityInfoW(
+            wide.as_ptr(),
+            SE_FILE_OBJECT,
+            DACL_SECURITY_INFORMATION,
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            &mut old_dacl,
+            std::ptr::null_mut(),
+            &mut descriptor,
+        )
+    };
+    assert_eq!(status, 0, "parent security descriptor should be readable");
+
+    let mut world_sid_storage = [0_usize; 8];
+    let world_sid = world_sid_storage.as_mut_ptr().cast();
+    let mut world_sid_length = std::mem::size_of_val(&world_sid_storage) as u32;
+    // SAFETY: the aligned buffer is large enough for a well-known SID and the
+    // returned SID remains valid until this helper returns.
+    assert_ne!(
+        unsafe { CreateWellKnownSid(WinWorldSid, std::ptr::null_mut(), world_sid, &mut world_sid_length,) },
+        0,
+        "Everyone SID should be created"
+    );
+
+    let mut everyone_read = EXPLICIT_ACCESS_W::default();
+    everyone_read.grfAccessPermissions = FILE_GENERIC_READ;
+    everyone_read.grfAccessMode = GRANT_ACCESS;
+    everyone_read.grfInheritance = OBJECT_INHERIT_ACE | windows_sys::Win32::Security::CONTAINER_INHERIT_ACE;
+    everyone_read.Trustee.TrusteeForm = TRUSTEE_IS_SID;
+    everyone_read.Trustee.TrusteeType = TRUSTEE_IS_WELL_KNOWN_GROUP;
+    everyone_read.Trustee.ptstrName = world_sid.cast();
+
+    let mut updated_dacl = std::ptr::null_mut();
+    // SAFETY: old_dacl is owned by descriptor and the explicit entry and SID
+    // buffers remain live for the call.
+    let status = unsafe { SetEntriesInAclW(1, &everyone_read, old_dacl, &mut updated_dacl) };
+    assert_eq!(status, 0, "inheritable Everyone read ACE should be composed");
+    // SAFETY: updated_dacl is a valid ACL returned by SetEntriesInAclW.
+    let status = unsafe {
+        SetNamedSecurityInfoW(
+            wide.as_ptr(),
+            SE_FILE_OBJECT,
+            DACL_SECURITY_INFORMATION,
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            updated_dacl,
+            std::ptr::null_mut(),
+        )
+    };
+    // SAFETY: both allocations are owned by Windows LocalAlloc APIs.
+    unsafe {
+        LocalFree(updated_dacl.cast());
+        LocalFree(descriptor.cast());
+    }
+    assert_eq!(status, 0, "parent should receive the inheritable Everyone read ACE");
+}
+
+#[test]
+fn conditional_windows_private_candidate_and_copies_have_private_dacls() {
+    let directory = tempfile::tempdir().expect("fixture directory should be created");
+    let target = directory.path().join("target");
+    let original_parent_dacl = dacl_bytes(directory.path());
+    add_inheritable_everyone_read(directory.path());
+    let parent_dacl = dacl_bytes(directory.path());
+    assert_ne!(
+        parent_dacl, original_parent_dacl,
+        "fixture parent DACL should include the additional inheritable ACE"
+    );
+    let mut backend = WindowsConditionalBackend::open_host(&target, &options(LocalWriteMode::CreateOrReplace))
+        .expect("Host candidate should open");
+    let candidate_path = backend.candidate().namespace_path().to_path_buf();
+    assert_private_file(&candidate_path);
+    assert_ne!(
+        dacl_bytes(&candidate_path),
+        parent_dacl,
+        "candidate DACL should not inherit the parent DACL"
+    );
+
+    put(&mut backend, b"B");
+    assert_private_file(&candidate_path);
+    assert_eq!(fs::read(&candidate_path).expect("candidate should be readable"), b"B");
+
+    let copy = backend
+        .create_candidate_copy()
+        .expect("complete candidate copy should be created");
+    let copy_path = copy.namespace_path().to_path_buf();
+    assert_private_file(&copy_path);
+    assert_ne!(
+        dacl_bytes(&copy_path),
+        parent_dacl,
+        "candidate-copy DACL should not inherit the parent DACL"
+    );
+    assert_eq!(fs::read(&copy_path).expect("candidate copy should be readable"), b"B");
+
+    let mut failed_backend = WindowsConditionalBackend::open_host(&target, &options(LocalWriteMode::CreateOrReplace))
+        .expect("second Host candidate should open");
+    put(&mut failed_backend, b"B");
+    failed_backend.set_hooks(ConditionalHooks::fail_once(
+        ConditionalPoint::Publish,
+        io::ErrorKind::PermissionDenied,
+    ));
+    let failure = commit_conditional::<Sha256, _>(
+        failed_backend,
+        LocalWritePrecondition::Absent,
+        options(LocalWriteMode::CreateOrReplace),
+        1,
+    )
+    .expect_err("forced publication failure should retain a recovery copy");
+    let retained_path = failure
+        .candidate()
+        .expect("failed publication should retain candidate bytes")
+        .namespace_path()
+        .to_path_buf();
+    assert_private_file(&retained_path);
+    assert_ne!(
+        dacl_bytes(&retained_path),
+        parent_dacl,
+        "retained-copy DACL should not inherit the parent DACL"
+    );
+    assert_eq!(fs::read(retained_path).expect("retained copy should be readable"), b"B");
+}
+
 #[test]
 fn conditional_windows_host_content_replacement_retains_then_cleans_backup() {
     let directory = tempfile::tempdir().expect("fixture directory should be created");

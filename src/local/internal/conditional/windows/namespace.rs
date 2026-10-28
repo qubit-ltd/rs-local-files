@@ -18,11 +18,9 @@ use std::ffi::OsStr;
 use std::ffi::OsString;
 use std::fs;
 use std::fs::File;
-use std::fs::OpenOptions;
 use std::io;
 use std::io::ErrorKind;
 use std::os::windows::ffi::OsStrExt;
-use std::os::windows::fs::OpenOptionsExt;
 use std::os::windows::io::AsRawHandle;
 use std::os::windows::io::FromRawHandle;
 use std::path::Path;
@@ -379,36 +377,35 @@ impl Namespace {
                 None,
                 None,
             )?);
-            let result = match &self.scope {
-                Scope::Host { .. } => OpenOptions::new()
-                    .read(true)
-                    .write(true)
-                    .access_mode(
-                        GENERIC_READ
-                            | GENERIC_WRITE
-                            | windows_sys::Win32::Storage::FileSystem::DELETE
-                            | FILE_READ_ATTRIBUTES
-                            | SYNCHRONIZE,
-                    )
-                    .share_mode(SHARE_ALL)
-                    .create_new(true)
-                    .open(self.host_child_path(&name)?),
-                Scope::Rooted { .. } => open_conditional_entry_at(
-                    &self.parent,
-                    &name,
-                    windows_sys::Win32::Foundation::GENERIC_READ
-                        | windows_sys::Win32::Foundation::GENERIC_WRITE
-                        | windows_sys::Win32::Storage::FileSystem::DELETE
-                        | FILE_READ_ATTRIBUTES
-                        | SYNCHRONIZE,
-                    FILE_CREATE,
-                    FILE_NON_DIRECTORY_FILE,
-                ),
-            };
-            match result {
+            match crate::temp::internal::privacy_windows::create_private_file_at(&self.parent, &name) {
                 Ok(file) => return Ok((name, file)),
-                Err(error) if error.kind() == ErrorKind::AlreadyExists => continue,
-                Err(error) => return Err(error),
+                Err(error) => {
+                    let crate::temp::types::NativePrivateCreateError { source, retained } = error;
+                    if let Some(mut retained) = retained {
+                        let path = self.child_path(&retained.name);
+                        let cleanup = match retained.file.take() {
+                            Some(file) => self.delete_created_private(&file, None),
+                            None => Err(io::Error::other(
+                                "private creation retained no handle that can safely identify the entry",
+                            )),
+                        };
+                        return Err(match cleanup {
+                            Ok(()) => source,
+                            Err(cleanup) => io::Error::new(
+                                source.kind(),
+                                super::private_entry_setup_error::PrivateEntrySetupError {
+                                    primary: source,
+                                    cleanup,
+                                    path,
+                                },
+                            ),
+                        });
+                    }
+                    if source.kind() == ErrorKind::AlreadyExists {
+                        continue;
+                    }
+                    return Err(source);
+                }
             }
         }
         Err(io::Error::new(
