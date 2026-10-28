@@ -29,8 +29,9 @@ impl ResolutionSession {
             .ok_or_else(|| limit_error(LocalResourceKind::SymlinkHops, usize::MAX, true))?;
         if let Some(limit) = self.contract.limits().symlink_hops() {
             if self.hops > limit {
-                return Err(limit_error(
+                return Err(limit_error_with_limit(
                     LocalResourceKind::SymlinkHops,
+                    limit,
                     self.hops,
                     false,
                 ));
@@ -159,7 +160,11 @@ mod tests {
         assert_eq!(error.kind(), LocalFileErrorKind::ResourceLimit);
         let facts = error.resource_limit_error().unwrap();
         assert_eq!(facts.resource(), LocalResourceKind::SymlinkHops);
+        assert_eq!(facts.limit(), 0);
+        assert_eq!(facts.remaining(), 0);
+        assert_eq!(facts.requested(), 1);
         assert_eq!(facts.observed(), Some(1));
+        assert!(!facts.overflowed());
     }
 
     #[test]
