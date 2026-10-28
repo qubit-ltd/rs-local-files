@@ -347,16 +347,28 @@ impl LocalFileSystem {
     pub fn target_metadata(&self, path: &Path) -> LocalResult<LocalFileMetadata> {
         let resolver = self.resolver_for(path, LocalFileOperation::Metadata)?;
         let resolved = resolve_operation_path(&resolver, path, LocalFileOperation::Metadata)?;
-        match &self.core.namespace {
+        let metadata = match &self.core.namespace {
             LocalNamespace::Host => {
                 let entry =
-                    HostLocalFileSystem::metadata_with_policy(resolved.authority_relative(), self.symlink_policy)?;
+                    HostLocalFileSystem::metadata_with_policy(resolved.authority_relative(), self.symlink_policy)
+                        .map_err(|error| {
+                            operation_error(
+                                error,
+                                LocalFileOperation::Metadata,
+                                resolved.namespace_absolute(),
+                                None,
+                                resolver.current_directory(),
+                            )
+                        })?;
                 if entry.kind() == LocalFileKind::Symlink && !self.symlink_policy.follows() {
-                    return Err(
+                    return Err(operation_error(
                         LocalFileError::new(LocalFileErrorKind::Unsupported, LocalFileOperation::Metadata)
-                            .with_reason("target metadata requires following a symbolic link")
-                            .with_path(resolved.namespace_absolute().to_path_buf()),
-                    );
+                            .with_reason("target metadata requires following a symbolic link"),
+                        LocalFileOperation::Metadata,
+                        resolved.namespace_absolute(),
+                        None,
+                        resolver.current_directory(),
+                    ));
                 }
                 if entry.kind() == LocalFileKind::Symlink && self.symlink_policy.follows() {
                     std::fs::metadata(resolved.authority_relative())
@@ -377,6 +389,25 @@ impl LocalFileSystem {
                 rooted.target_metadata(resolved.authority_relative(), self.symlink_policy)
             }
         }
+        .map_err(|error| {
+            operation_error(
+                error,
+                LocalFileOperation::Metadata,
+                resolved.namespace_absolute(),
+                None,
+                resolver.current_directory(),
+            )
+        })?;
+        if resolved.directory_required() && metadata.kind() != LocalFileKind::Directory {
+            return Err(operation_error(
+                LocalFileError::new(LocalFileErrorKind::NotDirectory, LocalFileOperation::Metadata),
+                LocalFileOperation::Metadata,
+                resolved.namespace_absolute(),
+                None,
+                resolver.current_directory(),
+            ));
+        }
+        Ok(metadata)
     }
 
     /// Resolves an existing operand to its namespace coordinate.
@@ -387,16 +418,28 @@ impl LocalFileSystem {
     pub fn canonicalize(&self, path: &Path) -> LocalResult<std::path::PathBuf> {
         let resolver = self.resolver_for(path, LocalFileOperation::Metadata)?;
         let resolved = resolve_operation_path(&resolver, path, LocalFileOperation::Metadata)?;
-        match &self.core.namespace {
+        let canonical = match &self.core.namespace {
             LocalNamespace::Host => {
                 let entry =
-                    HostLocalFileSystem::metadata_with_policy(resolved.authority_relative(), self.symlink_policy)?;
+                    HostLocalFileSystem::metadata_with_policy(resolved.authority_relative(), self.symlink_policy)
+                        .map_err(|error| {
+                            operation_error(
+                                error,
+                                LocalFileOperation::Metadata,
+                                resolved.namespace_absolute(),
+                                None,
+                                resolver.current_directory(),
+                            )
+                        })?;
                 if entry.kind() == LocalFileKind::Symlink && !self.symlink_policy.follows() {
-                    return Err(
+                    return Err(operation_error(
                         LocalFileError::new(LocalFileErrorKind::Unsupported, LocalFileOperation::Metadata)
-                            .with_reason("canonicalization requires following a symbolic link")
-                            .with_path(resolved.namespace_absolute().to_path_buf()),
-                    );
+                            .with_reason("canonicalization requires following a symbolic link"),
+                        LocalFileOperation::Metadata,
+                        resolved.namespace_absolute(),
+                        None,
+                        resolver.current_directory(),
+                    ));
                 }
                 std::fs::canonicalize(resolved.authority_relative()).map_err(|source| {
                     LocalFileError::from_io(
@@ -411,6 +454,51 @@ impl LocalFileSystem {
                 rooted.canonicalize_virtual(resolved.authority_relative(), self.symlink_policy)
             }
         }
+        .map_err(|error| {
+            operation_error(
+                error,
+                LocalFileOperation::Metadata,
+                resolved.namespace_absolute(),
+                None,
+                resolver.current_directory(),
+            )
+        })?;
+        if resolved.directory_required() {
+            let metadata = match &self.core.namespace {
+                LocalNamespace::Host => std::fs::metadata(resolved.authority_relative())
+                    .map(|metadata| LocalFileMetadata::from_native(&metadata))
+                    .map_err(|error| {
+                        LocalFileError::from_io(
+                            LocalFileOperation::Metadata,
+                            Some(resolved.namespace_absolute().to_path_buf()),
+                            None,
+                            error,
+                        )
+                    }),
+                LocalNamespace::Rooted(rooted) => {
+                    rooted.target_metadata(resolved.authority_relative(), self.symlink_policy)
+                }
+            }
+            .map_err(|error| {
+                operation_error(
+                    error,
+                    LocalFileOperation::Metadata,
+                    resolved.namespace_absolute(),
+                    None,
+                    resolver.current_directory(),
+                )
+            })?;
+            if metadata.kind() != LocalFileKind::Directory {
+                return Err(operation_error(
+                    LocalFileError::new(LocalFileErrorKind::NotDirectory, LocalFileOperation::Metadata),
+                    LocalFileOperation::Metadata,
+                    resolved.namespace_absolute(),
+                    None,
+                    resolver.current_directory(),
+                ));
+            }
+        }
+        Ok(canonical)
     }
 
     /// Reads a regular file completely using the filesystem's reader defaults.

@@ -22,9 +22,6 @@ impl ResolutionContract {
     pub(crate) fn limits(&self) -> LocalResolutionLimits {
         self.limits
     }
-    pub(crate) fn is_unrestricted(&self) -> bool {
-        self.limits == LocalResolutionLimits::new() && self.policies.is_empty()
-    }
     pub(crate) fn validate_component(
         &self,
         component: &std::ffi::OsStr,
@@ -107,17 +104,6 @@ mod tests {
             )
             .unwrap();
         assert_eq!(*calls.lock().unwrap(), ["parent", "child"]);
-    }
-
-    #[test]
-    fn resolution_session_contract_is_unrestricted_only_without_limits_or_policies() {
-        let unrestricted = ResolutionContract::unrestricted();
-        assert!(unrestricted.is_unrestricted());
-        let limited = unrestricted.tightened(LocalResolutionLimits::new().with_max_symlink_hops(1));
-        assert!(!limited.is_unrestricted());
-        let calls = Arc::new(Mutex::new(Vec::new()));
-        let policy = ResolutionContract::unrestricted().with_policy(Arc::new(Recorder("policy", calls)));
-        assert!(!policy.is_unrestricted());
     }
 
     fn values(limits: LocalResolutionLimits) -> [Option<usize>; 4] {

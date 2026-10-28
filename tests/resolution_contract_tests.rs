@@ -13,6 +13,9 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::Mutex;
 
+#[cfg(windows)]
+mod support;
+
 use qubit_local_files::LocalFileError;
 use qubit_local_files::LocalFileSystem;
 use qubit_local_files::LocalResult;
@@ -376,16 +379,14 @@ fn rooted_writer_allows_only_the_final_leaf_to_be_missing() {
 #[cfg(windows)]
 #[test]
 fn opening_root_target_hook_sees_and_can_reject_raw_nt_substitute_name() {
-    use std::os::windows::fs::symlink_dir;
+    use crate::support::windows_symlink::create_directory_link;
 
     let tmp = tempfile::tempdir().expect("fixture directory should exist");
     let target = tmp.path().join("target");
     std::fs::create_dir(&target).expect("target directory should exist");
     let alias = tmp.path().join("alias");
-    match symlink_dir(&target, &alias) {
-        Ok(()) => {}
-        Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied => return,
-        Err(error) => panic!("symbolic-link fixture should be created: {error}"),
+    if !create_directory_link(&target, &alias) {
+        return;
     }
     let recorded = Arc::new(Mutex::new(None));
     let options = LocalRootOpenOptions::new().with_resolution_policy(Arc::new(RejectRawNtTarget(recorded.clone())));

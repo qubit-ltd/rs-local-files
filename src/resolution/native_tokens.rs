@@ -115,7 +115,7 @@ fn tokens_after_check(path: &Path, origin: LocalResolutionOrigin, capacity: usiz
 
 /// Computes the complete pending component and byte snapshot without
 /// allocating.
-fn measure_path(path: &Path) -> Option<(usize, usize)> {
+pub(crate) fn measure_path(path: &Path) -> Option<(usize, usize)> {
     #[cfg(unix)]
     {
         use std::os::unix::ffi::OsStrExt;

@@ -38,6 +38,19 @@ impl RootedLocalFileSystem {
             true,
             LocalFileOperation::Metadata,
         )?;
+        if relative.as_os_str().is_empty() {
+            let _metadata = self
+                .root
+                .metadata()
+                .map_err(|error| rooted_io_error(LocalFileOperation::Metadata, path, error))?;
+        } else {
+            let relative_path = crate::local::LocalRelativePath::new(&relative)
+                .map_err(|error| rooted_io_error(LocalFileOperation::Metadata, path, error))?;
+            let _metadata = self
+                .root
+                .symlink_metadata(&relative_path)
+                .map_err(|error| rooted_io_error(LocalFileOperation::Metadata, path, error))?;
+        }
         let mut absolute = Path::new(std::path::MAIN_SEPARATOR_STR).to_path_buf();
         absolute.push(relative);
         Ok(absolute)
@@ -53,9 +66,24 @@ impl RootedLocalFileSystem {
         if path.as_os_str().is_empty() {
             return self.metadata(path, symlink_policy);
         }
-        let relative = resolve_rooted_path(&self.root, path, symlink_policy, true, LocalFileOperation::Metadata)?;
+        let relative = super::resolve_rooted_path_allow_root(
+            &self.root,
+            path,
+            symlink_policy,
+            true,
+            LocalFileOperation::Metadata,
+        )?;
+        if relative.as_os_str().is_empty() {
+            return self
+                .root
+                .metadata()
+                .map(rooted_metadata)
+                .map_err(|error| rooted_io_error(LocalFileOperation::Metadata, path, error));
+        }
+        let relative_path = crate::local::LocalRelativePath::new(&relative)
+            .map_err(|error| rooted_io_error(LocalFileOperation::Metadata, path, error))?;
         self.root
-            .symlink_metadata(&relative)
+            .symlink_metadata(&relative_path)
             .map(rooted_metadata)
             .map_err(|error| rooted_io_error(LocalFileOperation::Metadata, path, error))
     }

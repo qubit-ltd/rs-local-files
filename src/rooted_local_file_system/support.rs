@@ -189,9 +189,9 @@ fn resolve_rooted_path_allow_root_with_scope_and_deadline(
     }
     if has_only_normal_components(path) {
         let relative = rooted_path(path, operation)?;
-        if root.resolution_contract().is_unrestricted()
-            && let Some(resolved) =
-                try_resolve_without_symlinks(root, &relative, follow_final, deadline, path, operation)?
+        let session = ResolutionSession::new(root.resolution_contract(), scope);
+        if let Some(resolved) =
+            try_resolve_without_symlinks(root, &relative, follow_final, deadline, path, operation, &session)?
         {
             return Ok(resolved);
         }
@@ -206,7 +206,7 @@ fn resolve_rooted_path_allow_root_with_scope_and_deadline(
             scope,
             None,
             None,
-            ResolutionSession::new(root.resolution_contract(), scope),
+            session,
         );
     }
     resolve_rooted_symlinks(
@@ -299,15 +299,49 @@ fn try_resolve_without_symlinks(
     deadline: Option<Instant>,
     original: &Path,
     operation: LocalFileOperation,
+    session: &ResolutionSession,
 ) -> LocalResult<Option<PathBuf>> {
     check_resolution_deadline(deadline, original, operation)?;
+    let (pending_components, pending_bytes) = crate::resolution::native_tokens::measure_path(path.as_path())
+        .ok_or_else(|| {
+            crate::resolution::session::overflow_error(crate::error::LocalResourceKind::PendingResolutionBytes)
+                .with_operation(operation)
+                .with_path(original.to_path_buf())
+        })?;
+    session
+        .check_pending(pending_components, pending_bytes)
+        .map_err(|error| error.with_operation(operation).with_path(original.to_path_buf()))?;
     let mut cursor = root
         .resolution_cursor()
         .map_err(|error| rooted_io_error(operation, original, error))?;
     let mut components = path.as_path().components().peekable();
+    let mut resolved_components = 0usize;
+    let mut resolved_bytes = 0usize;
     while let Some(component) = components.next() {
         check_resolution_deadline(deadline, original, operation)?;
         let name = component.as_os_str();
+        session
+            .validate_component(name, LocalResolutionOrigin::Input)
+            .map_err(|error| error.with_operation(operation).with_path(original.to_path_buf()))?;
+        let (_, component_bytes) =
+            crate::resolution::native_tokens::measure_path(Path::new(name)).ok_or_else(|| {
+                crate::resolution::session::overflow_error(crate::error::LocalResourceKind::ResolvedPathBytes)
+                    .with_operation(operation)
+                    .with_path(original.to_path_buf())
+            })?;
+        resolved_components = resolved_components.checked_add(1).ok_or_else(|| {
+            crate::resolution::session::overflow_error(crate::error::LocalResourceKind::ResolvedComponents)
+                .with_operation(operation)
+                .with_path(original.to_path_buf())
+        })?;
+        resolved_bytes = resolved_bytes.checked_add(component_bytes).ok_or_else(|| {
+            crate::resolution::session::overflow_error(crate::error::LocalResourceKind::ResolvedPathBytes)
+                .with_operation(operation)
+                .with_path(original.to_path_buf())
+        })?;
+        session
+            .check_resolved(resolved_components, resolved_bytes)
+            .map_err(|error| error.with_operation(operation).with_path(original.to_path_buf()))?;
         let final_component = components.peek().is_none();
         if final_component && !follow_final {
             return Ok(Some(path.as_path().to_path_buf()));
@@ -362,7 +396,7 @@ fn resolve_rooted_symlinks(
             .with_reason("FollowAcrossScope is incompatible with a Rooted filesystem")
             .with_path(original.to_path_buf()));
     }
-    let mut pending = steps_from_path(path, LocalResolutionOrigin::Input, &session)?;
+    let mut pending = steps_from_path(path, LocalResolutionOrigin::Input, &session, operation, original)?;
     let mut resolved = Vec::<std::ffi::OsString>::new();
     let mut active_symlinks = HashSet::<SymlinkIdentity>::new();
     while let Some(step) = pending.pop_front() {
@@ -473,7 +507,13 @@ fn resolve_rooted_symlinks(
                         .with_reason("absolute symbolic-link target uses a different native root")
                         .with_path(original.to_path_buf()));
                 }
-                let mut replacement = steps_from_path(&target, LocalResolutionOrigin::SymlinkTarget, &session)?;
+                let mut replacement = steps_from_path(
+                    &target,
+                    LocalResolutionOrigin::SymlinkTarget,
+                    &session,
+                    operation,
+                    original,
+                )?;
                 replacement.push_back(ResolutionStep::EndSymlink(identity));
                 replacement.extend(pending);
                 let (pending_count, pending_bytes) = pending_measure(&replacement).ok_or_else(|| {
@@ -600,6 +640,8 @@ fn steps_from_path(
     path: &Path,
     origin: LocalResolutionOrigin,
     session: &ResolutionSession,
+    operation: LocalFileOperation,
+    original: &Path,
 ) -> LocalResult<std::collections::VecDeque<ResolutionStep>> {
     use std::collections::VecDeque;
 
@@ -607,7 +649,9 @@ fn steps_from_path(
     if path.is_absolute() {
         steps.push_back(ResolutionStep::ResetRoot);
     }
-    for token in native_tokens::tokenize(path, origin, session)? {
+    for token in native_tokens::tokenize(path, origin, session)
+        .map_err(|error| error.with_operation(operation).with_path(original.to_path_buf()))?
+    {
         match token {
             NativeToken::Current(_) => steps.push_back(ResolutionStep::Current),
             NativeToken::Parent(_) => steps.push_back(ResolutionStep::Parent),
