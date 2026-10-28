@@ -76,6 +76,7 @@ use windows_sys::Win32::System::IO::IO_STATUS_BLOCK;
 use windows_sys::Win32::System::Threading::GetCurrentProcess;
 use windows_sys::Win32::System::Threading::OpenProcessToken;
 
+use crate::policy::LocalOwnerAccessPolicy;
 use crate::temp::types::NativePrivateCreateError;
 use crate::temp::types::NativePrivateEntry;
 
@@ -103,6 +104,7 @@ const DIRECTORY_ACCESS: u32 = FILE_LIST_DIRECTORY
     | WRITE_DAC
     | DELETE
     | SYNCHRONIZE;
+const OWNER_ACCESS_MASKS: u32 = 0x001f_01ff;
 
 #[cfg(test)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -234,37 +236,46 @@ struct SecurityDescriptor {
 
 impl SecurityDescriptor {
     fn for_current_user(directory: bool, read_only: bool) -> io::Result<Self> {
+        let access = default_access_mask(directory, read_only);
+        Self::for_current_user_with_mask(access)
+    }
+
+    fn for_current_user_with_mask(access: u32) -> io::Result<Self> {
         check_failure!(Descriptor);
         let current_user = CurrentUser::acquire()?;
         let current_sid = current_user.sid()?;
 
         let mut acl = vec![0_usize; ACL_BUFFER_SIZE.div_ceil(size_of::<usize>())];
         let acl_ptr = acl.as_mut_ptr().cast::<ACL>();
-        if unsafe { InitializeAcl(acl_ptr, (acl.len() * size_of::<usize>()) as u32, ACL_REVISION) } == 0 {
+        if unsafe {
+            InitializeAcl(
+                acl_ptr,
+                (acl.len() * size_of::<usize>()) as u32,
+                ACL_REVISION,
+            )
+        } == 0
+        {
             return Err(last_os_error());
         }
-        let access = if directory {
-            if read_only {
-                DIRECTORY_ACCESS
-                    & !(FILE_ADD_FILE | FILE_ADD_SUBDIRECTORY | FILE_DELETE_CHILD | FILE_WRITE_ATTRIBUTES | DELETE)
-            } else {
-                DIRECTORY_ACCESS
-            }
-        } else if read_only {
-            FILE_INITIAL_ACCESS & !(FILE_WRITE_DATA | FILE_APPEND_DATA)
-        } else {
-            FILE_INITIAL_ACCESS
-        };
         if unsafe { AddAccessAllowedAce(acl_ptr, ACL_REVISION, access, current_sid) } == 0 {
             return Err(last_os_error());
         }
 
         let mut descriptor = unsafe { std::mem::zeroed::<SECURITY_DESCRIPTOR>() };
-        if unsafe { InitializeSecurityDescriptor((&mut descriptor as *mut SECURITY_DESCRIPTOR).cast(), 1) } == 0 {
+        if unsafe {
+            InitializeSecurityDescriptor((&mut descriptor as *mut SECURITY_DESCRIPTOR).cast(), 1)
+        } == 0
+        {
             return Err(last_os_error());
         }
-        if unsafe { SetSecurityDescriptorDacl((&mut descriptor as *mut SECURITY_DESCRIPTOR).cast(), 1, acl_ptr, 0) }
-            == 0
+        if unsafe {
+            SetSecurityDescriptorDacl(
+                (&mut descriptor as *mut SECURITY_DESCRIPTOR).cast(),
+                1,
+                acl_ptr,
+                0,
+            )
+        } == 0
         {
             return Err(last_os_error());
         }
@@ -275,8 +286,45 @@ impl SecurityDescriptor {
     }
 
     fn as_ptr(&self) -> PSECURITY_DESCRIPTOR {
-        (&self.descriptor as *const SECURITY_DESCRIPTOR).cast_mut().cast()
+        (&self.descriptor as *const SECURITY_DESCRIPTOR)
+            .cast_mut()
+            .cast()
     }
+}
+
+fn default_access_mask(directory: bool, read_only: bool) -> u32 {
+    if directory {
+        if read_only {
+            DIRECTORY_ACCESS
+                & !(FILE_ADD_FILE
+                    | FILE_ADD_SUBDIRECTORY
+                    | FILE_DELETE_CHILD
+                    | FILE_WRITE_ATTRIBUTES
+                    | DELETE)
+        } else {
+            DIRECTORY_ACCESS
+        }
+    } else if read_only {
+        FILE_INITIAL_ACCESS & !(FILE_WRITE_DATA | FILE_APPEND_DATA)
+    } else {
+        FILE_INITIAL_ACCESS
+    }
+}
+
+fn owner_access_mask(policy: &LocalOwnerAccessPolicy, directory: bool) -> io::Result<u32> {
+    let (directory_mask, file_mask) = policy.windows_masks().ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "Windows owner access policy is not configured",
+        )
+    })?;
+    if directory_mask & !OWNER_ACCESS_MASKS != 0 || file_mask & !OWNER_ACCESS_MASKS != 0 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "Windows owner access policy contains unsupported access bits",
+        ));
+    }
+    Ok(if directory { directory_mask } else { file_mask })
 }
 
 #[derive(Debug)]
@@ -304,6 +352,26 @@ fn nt_status_error(status: i32) -> io::Error {
 }
 
 fn create_at(parent: &File, name: &OsStr, directory: bool) -> io::Result<File> {
+    create_at_with_mask(
+        parent,
+        name,
+        directory,
+        default_access_mask(directory, false),
+        if directory {
+            DIRECTORY_ACCESS
+        } else {
+            FILE_INITIAL_ACCESS
+        },
+    )
+}
+
+fn create_at_with_mask(
+    parent: &File,
+    name: &OsStr,
+    directory: bool,
+    access_mask: u32,
+    handle_access: u32,
+) -> io::Result<File> {
     let mut name: Vec<u16> = name.encode_wide().collect();
     if name.is_empty()
         || name.contains(&0)
@@ -313,7 +381,10 @@ fn create_at(parent: &File, name: &OsStr, directory: bool) -> io::Result<File> {
         || name.as_slice() == [b'.' as u16]
         || name.as_slice() == [b'.' as u16, b'.' as u16]
     {
-        return Err(io::Error::new(io::ErrorKind::InvalidInput, "invalid entry name"));
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "invalid entry name",
+        ));
     }
     let byte_length = name
         .len()
@@ -333,7 +404,7 @@ fn create_at(parent: &File, name: &OsStr, directory: bool) -> io::Result<File> {
         SecurityDescriptor: ptr::null(),
         SecurityQualityOfService: ptr::null(),
     };
-    let descriptor = SecurityDescriptor::for_current_user(directory, false)?;
+    let descriptor = SecurityDescriptor::for_current_user_with_mask(access_mask)?;
     attributes.SecurityDescriptor = descriptor.as_ptr().cast();
     check_failure!(Create);
     let mut handle = ptr::null_mut();
@@ -341,11 +412,7 @@ fn create_at(parent: &File, name: &OsStr, directory: bool) -> io::Result<File> {
     let status = unsafe {
         NtCreateFile(
             &mut handle,
-            if directory {
-                DIRECTORY_ACCESS
-            } else {
-                FILE_INITIAL_ACCESS
-            },
+            handle_access,
             &attributes,
             &mut io_status,
             ptr::null(),
@@ -374,15 +441,28 @@ fn create_at(parent: &File, name: &OsStr, directory: bool) -> io::Result<File> {
 
 /// Opens one existing child by native directory handle with rights to update
 /// its DACL.
-pub(crate) fn open_existing_entry_at(parent: &File, name: &OsStr, directory: bool) -> io::Result<File> {
+pub(crate) fn open_existing_entry_at(
+    parent: &File,
+    name: &OsStr,
+    directory: bool,
+) -> io::Result<File> {
     open_existing_entry_at_with_sync(parent, name, directory, false)
 }
 
-pub(crate) fn open_existing_entry_at_for_sync(parent: &File, name: &OsStr, directory: bool) -> io::Result<File> {
+pub(crate) fn open_existing_entry_at_for_sync(
+    parent: &File,
+    name: &OsStr,
+    directory: bool,
+) -> io::Result<File> {
     open_existing_entry_at_with_sync(parent, name, directory, true)
 }
 
-fn open_existing_entry_at_with_sync(parent: &File, name: &OsStr, directory: bool, for_sync: bool) -> io::Result<File> {
+fn open_existing_entry_at_with_sync(
+    parent: &File,
+    name: &OsStr,
+    directory: bool,
+    for_sync: bool,
+) -> io::Result<File> {
     let mut name: Vec<u16> = name.encode_wide().collect();
     if name.is_empty()
         || name.contains(&0)
@@ -420,7 +500,11 @@ fn open_existing_entry_at_with_sync(parent: &File, name: &OsStr, directory: bool
         | SYNCHRONIZE
         | FILE_READ_ATTRIBUTES
         | FILE_WRITE_ATTRIBUTES
-        | if for_sync && !directory { FILE_WRITE_DATA } else { 0 }
+        | if for_sync && !directory {
+            FILE_WRITE_DATA
+        } else {
+            0
+        }
         | if directory {
             FILE_LIST_DIRECTORY | FILE_TRAVERSE
         } else {
@@ -457,7 +541,9 @@ fn open_existing_entry_at_with_sync(parent: &File, name: &OsStr, directory: bool
     std::mem::forget(handle);
     let metadata = file.metadata()?;
     use std::os::windows::fs::MetadataExt;
-    if metadata.file_attributes() & windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_REPARSE_POINT != 0
+    if metadata.file_attributes()
+        & windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_REPARSE_POINT
+        != 0
         || (directory && !metadata.is_dir())
         || (!directory && !metadata.is_file())
     {
@@ -476,9 +562,9 @@ pub(crate) fn open_existing_host_file(path: &std::path::Path) -> io::Result<File
         .parent()
         .filter(|parent| !parent.as_os_str().is_empty())
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "file path has no parent"))?;
-    let name = path
-        .file_name()
-        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "file path has no entry name"))?;
+    let name = path.file_name().ok_or_else(|| {
+        io::Error::new(io::ErrorKind::InvalidInput, "file path has no entry name")
+    })?;
     let parent = std::fs::OpenOptions::new()
         .read(true)
         .custom_flags(FILE_FLAG_BACKUP_SEMANTICS)
@@ -488,7 +574,11 @@ pub(crate) fn open_existing_host_file(path: &std::path::Path) -> io::Result<File
 
 /// Opens an existing relative path one component at a time with no-follow
 /// semantics.
-pub(crate) fn open_existing_relative(parent: &File, relative: &std::path::Path, directory: bool) -> io::Result<File> {
+pub(crate) fn open_existing_relative(
+    parent: &File,
+    relative: &std::path::Path,
+    directory: bool,
+) -> io::Result<File> {
     let mut current = parent.try_clone()?;
     let mut components = relative.components().peekable();
     while let Some(component) = components.next() {
@@ -506,23 +596,87 @@ pub(crate) fn open_existing_relative(parent: &File, relative: &std::path::Path, 
 
 /// Creates a file relative to a retained parent handle with a protected
 /// current-user DACL.
-pub(crate) fn create_private_file_at(parent: &File, name: &OsStr) -> Result<File, NativePrivateCreateError> {
+pub(crate) fn create_private_file_at(
+    parent: &File,
+    name: &OsStr,
+) -> Result<File, NativePrivateCreateError> {
     create_private_entry_at(parent, name, false)
 }
 
 /// Creates a directory relative to a retained parent handle with a protected
 /// current-user DACL.
-pub(crate) fn create_private_directory_at(parent: &File, name: &OsStr) -> Result<File, NativePrivateCreateError> {
+pub(crate) fn create_private_directory_at(
+    parent: &File,
+    name: &OsStr,
+) -> Result<File, NativePrivateCreateError> {
     create_private_entry_at(parent, name, true)
 }
 
-fn create_private_entry_at(parent: &File, name: &OsStr, directory: bool) -> Result<File, NativePrivateCreateError> {
+pub(crate) fn create_owner_entry_at(
+    parent: &File,
+    name: &OsStr,
+    directory: bool,
+    policy: &LocalOwnerAccessPolicy,
+) -> Result<File, NativePrivateCreateError> {
+    let mask = match owner_access_mask(policy, directory) {
+        Ok(mask) => mask,
+        Err(source) => {
+            return Err(NativePrivateCreateError {
+                source,
+                retained: None,
+            });
+        }
+    };
     let retained_parent = parent
         .try_clone()
-        .map_err(|source| NativePrivateCreateError { source, retained: None })?;
+        .map_err(|source| NativePrivateCreateError {
+            source,
+            retained: None,
+        })?;
     let retained_name = name.to_os_string();
-    let file =
-        create_at(parent, name, directory).map_err(|source| NativePrivateCreateError { source, retained: None })?;
+    let file = create_at_with_mask(parent, name, directory, mask, mask).map_err(|source| {
+        NativePrivateCreateError {
+            source,
+            retained: None,
+        }
+    })?;
+    if let Err(source) = verify_owner_access(&file, directory, policy) {
+        let identity = crate::observation::query::query_observation(
+            &file,
+            crate::observation::LocalObservationRequirement::Optional,
+        )
+        .ok()
+        .and_then(|observation| observation.identity().cloned());
+        return Err(NativePrivateCreateError {
+            source,
+            retained: Some(NativePrivateEntry {
+                parent: retained_parent,
+                name: retained_name,
+                file: Some(file),
+                identity,
+                directory,
+            }),
+        });
+    }
+    Ok(file)
+}
+
+fn create_private_entry_at(
+    parent: &File,
+    name: &OsStr,
+    directory: bool,
+) -> Result<File, NativePrivateCreateError> {
+    let retained_parent = parent
+        .try_clone()
+        .map_err(|source| NativePrivateCreateError {
+            source,
+            retained: None,
+        })?;
+    let retained_name = name.to_os_string();
+    let file = create_at(parent, name, directory).map_err(|source| NativePrivateCreateError {
+        source,
+        retained: None,
+    })?;
     if let Err(source) = verify_current_user_access(&file, directory, false) {
         let identity = crate::observation::query::query_observation(
             &file,
@@ -545,7 +699,11 @@ fn create_private_entry_at(parent: &File, name: &OsStr, directory: bool) -> Resu
 }
 
 /// Applies the current user's access policy to an already-open entry.
-pub(crate) fn apply_current_user_access(file: &File, directory: bool, read_only: bool) -> io::Result<()> {
+pub(crate) fn apply_current_user_access(
+    file: &File,
+    directory: bool,
+    read_only: bool,
+) -> io::Result<()> {
     let descriptor = SecurityDescriptor::for_current_user(directory, read_only)?;
     check_failure!(AccessApplyBefore);
     let status = unsafe {
@@ -566,24 +724,29 @@ pub(crate) fn apply_current_user_access(file: &File, directory: bool, read_only:
     if read_only && !directory {
         check_failure!(ReadOnly);
         // Attribute changes are performed through the retained handle, not a path.
-        let mut information = unsafe { std::mem::zeroed::<windows_sys::Win32::Storage::FileSystem::FILE_BASIC_INFO>() };
+        let mut information = unsafe {
+            std::mem::zeroed::<windows_sys::Win32::Storage::FileSystem::FILE_BASIC_INFO>()
+        };
         if unsafe {
             windows_sys::Win32::Storage::FileSystem::GetFileInformationByHandleEx(
                 file.as_raw_handle().cast(),
                 windows_sys::Win32::Storage::FileSystem::FileBasicInfo,
-                (&mut information as *mut windows_sys::Win32::Storage::FileSystem::FILE_BASIC_INFO).cast(),
+                (&mut information as *mut windows_sys::Win32::Storage::FileSystem::FILE_BASIC_INFO)
+                    .cast(),
                 size_of::<windows_sys::Win32::Storage::FileSystem::FILE_BASIC_INFO>() as u32,
             )
         } == 0
         {
             return Err(last_os_error());
         }
-        information.FileAttributes = windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_READONLY;
+        information.FileAttributes =
+            windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_READONLY;
         if unsafe {
             windows_sys::Win32::Storage::FileSystem::SetFileInformationByHandle(
                 file.as_raw_handle().cast(),
                 windows_sys::Win32::Storage::FileSystem::FileBasicInfo,
-                (&information as *const windows_sys::Win32::Storage::FileSystem::FILE_BASIC_INFO).cast(),
+                (&information as *const windows_sys::Win32::Storage::FileSystem::FILE_BASIC_INFO)
+                    .cast(),
                 size_of::<windows_sys::Win32::Storage::FileSystem::FILE_BASIC_INFO>() as u32,
             )
         } == 0
@@ -594,9 +757,62 @@ pub(crate) fn apply_current_user_access(file: &File, directory: bool, read_only:
     verify_current_user_access(file, directory, read_only)
 }
 
+pub(crate) fn apply_owner_access(
+    file: &File,
+    directory: bool,
+    policy: &LocalOwnerAccessPolicy,
+) -> io::Result<()> {
+    let mask = owner_access_mask(policy, directory)?;
+    let descriptor = SecurityDescriptor::for_current_user_with_mask(mask)?;
+    check_failure!(AccessApplyBefore);
+    let status = unsafe {
+        windows_sys::Win32::Security::Authorization::SetSecurityInfo(
+            file.as_raw_handle().cast(),
+            windows_sys::Win32::Security::Authorization::SE_FILE_OBJECT,
+            DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION,
+            ptr::null_mut(),
+            ptr::null_mut(),
+            descriptor.acl.as_ptr().cast::<ACL>(),
+            ptr::null_mut(),
+        )
+    };
+    if status != 0 {
+        return Err(io::Error::from_raw_os_error(status as i32));
+    }
+    check_failure!(AclApply);
+    verify_owner_access(file, directory, policy)
+}
+
 /// Verifies owner, protected DACL, current-user ACE and required read-only
 /// attribute.
-pub(crate) fn verify_current_user_access(file: &File, directory: bool, read_only: bool) -> io::Result<()> {
+pub(crate) fn verify_current_user_access(
+    file: &File,
+    directory: bool,
+    read_only: bool,
+) -> io::Result<()> {
+    verify_access_mask(
+        file,
+        directory,
+        default_access_mask(directory, read_only),
+        read_only,
+    )
+}
+
+pub(crate) fn verify_owner_access(
+    file: &File,
+    directory: bool,
+    policy: &LocalOwnerAccessPolicy,
+) -> io::Result<()> {
+    let mask = owner_access_mask(policy, directory)?;
+    verify_access_mask(file, directory, mask, false)
+}
+
+fn verify_access_mask(
+    file: &File,
+    directory: bool,
+    expected_access: u32,
+    read_only: bool,
+) -> io::Result<()> {
     check_failure!(AclReadback);
     let current_user = CurrentUser::acquire()?;
     let current_sid = current_user.sid()?;
@@ -624,7 +840,8 @@ pub(crate) fn verify_current_user_access(file: &File, directory: bool, read_only
     }
     // GetSecurityInfo allocates this descriptor with LocalAlloc.
     let _descriptor = LocalSecurityDescriptor(descriptor_ptr);
-    if owner.is_null() || unsafe { windows_sys::Win32::Security::EqualSid(owner, current_sid) } == 0 {
+    if owner.is_null() || unsafe { windows_sys::Win32::Security::EqualSid(owner, current_sid) } == 0
+    {
         return Err(io::Error::new(
             io::ErrorKind::PermissionDenied,
             "owner SID is not current user",
@@ -633,13 +850,26 @@ pub(crate) fn verify_current_user_access(file: &File, directory: bool, read_only
     if unsafe { GetSecurityDescriptorControl(descriptor_ptr, &mut control, &mut revision) } == 0
         || control & SE_DACL_PROTECTED == 0
     {
-        return Err(io::Error::new(io::ErrorKind::PermissionDenied, "DACL is not protected"));
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "DACL is not protected",
+        ));
     }
-    if unsafe { GetSecurityDescriptorDacl(descriptor_ptr, &mut dacl_present, &mut dacl, &mut dacl_defaulted) } == 0
+    if unsafe {
+        GetSecurityDescriptorDacl(
+            descriptor_ptr,
+            &mut dacl_present,
+            &mut dacl,
+            &mut dacl_defaulted,
+        )
+    } == 0
         || dacl_present == 0
         || dacl.is_null()
     {
-        return Err(io::Error::new(io::ErrorKind::PermissionDenied, "missing DACL"));
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "missing DACL",
+        ));
     }
     let ace_count = unsafe { (*dacl).AceCount };
     if ace_count != 1 {
@@ -661,19 +891,9 @@ pub(crate) fn verify_current_user_access(file: &File, directory: bool, read_only
     }
     let allowed = unsafe { &*ace.cast::<ACCESS_ALLOWED_ACE>() };
     let ace_sid = ptr::addr_of!(allowed.SidStart).cast_mut().cast();
-    let expected_access = if directory {
-        if read_only {
-            DIRECTORY_ACCESS
-                & !(FILE_ADD_FILE | FILE_ADD_SUBDIRECTORY | FILE_DELETE_CHILD | FILE_WRITE_ATTRIBUTES | DELETE)
-        } else {
-            DIRECTORY_ACCESS
-        }
-    } else if read_only {
-        FILE_INITIAL_ACCESS & !(FILE_WRITE_DATA | FILE_APPEND_DATA)
-    } else {
-        FILE_INITIAL_ACCESS
-    };
-    if unsafe { windows_sys::Win32::Security::EqualSid(ace_sid, current_sid) } == 0 || allowed.Mask != expected_access {
+    if unsafe { windows_sys::Win32::Security::EqualSid(ace_sid, current_sid) } == 0
+        || allowed.Mask != expected_access
+    {
         return Err(io::Error::new(
             io::ErrorKind::PermissionDenied,
             "DACL does not match current-user policy",
@@ -682,7 +902,10 @@ pub(crate) fn verify_current_user_access(file: &File, directory: bool, read_only
     if read_only && !directory {
         let metadata = file.metadata()?;
         if !metadata.permissions().readonly() {
-            return Err(io::Error::new(io::ErrorKind::PermissionDenied, "file is not read-only"));
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "file is not read-only",
+            ));
         }
     }
     Ok(())
@@ -697,5 +920,166 @@ impl Drop for LocalSecurityDescriptor {
             // GetSecurityInfo documents LocalFree as the matching allocator.
             unsafe { LocalFree(self.0.cast()) };
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        FailurePoint, apply_owner_access, create_owner_entry_at, default_access_mask, fail_once_at,
+        owner_access_mask, verify_owner_access,
+    };
+    use crate::policy::LocalOwnerAccessPolicy;
+    use std::ffi::OsStr;
+    use std::fs::OpenOptions;
+    use std::os::windows::fs::OpenOptionsExt;
+
+    #[test]
+    fn owner_policy_windows_accepts_distinct_exact_masks() {
+        let policy = LocalOwnerAccessPolicy::new().with_windows_masks(0x0013_019f, 0x0012_0089);
+
+        assert_eq!(
+            owner_access_mask(&policy, true).expect("directory mask"),
+            0x0013_019f
+        );
+        assert_eq!(
+            owner_access_mask(&policy, false).expect("file mask"),
+            0x0012_0089
+        );
+    }
+
+    #[test]
+    fn owner_policy_windows_rejects_missing_or_unsupported_masks() {
+        let missing = LocalOwnerAccessPolicy::new();
+        assert_eq!(
+            owner_access_mask(&missing, false)
+                .expect_err("missing mask must fail")
+                .kind(),
+            std::io::ErrorKind::InvalidInput,
+        );
+
+        for unsupported in [
+            0x001f_0200,
+            0x0200_0000,
+            0x1000_0000,
+            0x0200_0000 | 0x0012_0089,
+        ] {
+            let policy = LocalOwnerAccessPolicy::new().with_windows_masks(0x0013_019f, unsupported);
+            assert_eq!(
+                owner_access_mask(&policy, false)
+                    .expect_err("unsupported mask must fail before native mutation")
+                    .kind(),
+                std::io::ErrorKind::InvalidInput,
+            );
+        }
+    }
+
+    #[test]
+    fn owner_policy_windows_keeps_default_access_masks_unchanged() {
+        use super::{
+            DELETE, FILE_APPEND_DATA, FILE_INITIAL_ACCESS, FILE_WRITE_ATTRIBUTES, FILE_WRITE_DATA,
+        };
+        use super::{DIRECTORY_ACCESS, FILE_ADD_FILE, FILE_ADD_SUBDIRECTORY, FILE_DELETE_CHILD};
+
+        assert_eq!(default_access_mask(false, false), FILE_INITIAL_ACCESS);
+        assert_eq!(default_access_mask(true, false), DIRECTORY_ACCESS);
+        assert_eq!(
+            default_access_mask(false, true),
+            FILE_INITIAL_ACCESS & !(FILE_WRITE_DATA | FILE_APPEND_DATA),
+        );
+        assert_eq!(
+            default_access_mask(true, true),
+            DIRECTORY_ACCESS
+                & !(FILE_ADD_FILE
+                    | FILE_ADD_SUBDIRECTORY
+                    | FILE_DELETE_CHILD
+                    | FILE_WRITE_ATTRIBUTES
+                    | DELETE),
+        );
+    }
+
+    fn test_parent() -> (tempfile::TempDir, std::fs::File) {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let parent = OpenOptions::new()
+            .read(true)
+            .custom_flags(super::FILE_FLAG_BACKUP_SEMANTICS)
+            .open(directory.path())
+            .expect("open temporary directory handle");
+        (directory, parent)
+    }
+
+    #[test]
+    fn owner_policy_windows_create_apply_verify_uses_exact_dacl_mask() {
+        let (_directory, parent) = test_parent();
+        let policy = LocalOwnerAccessPolicy::new().with_windows_masks(0x0016_0189, 0x0016_0089);
+        let file = create_owner_entry_at(&parent, OsStr::new("owner-policy-entry"), false, &policy)
+            .expect("create exact-owner file");
+
+        verify_owner_access(&file, false, &policy).expect("verify created owner ACL");
+        apply_owner_access(&file, false, &policy).expect("reapply exact owner ACL");
+        verify_owner_access(&file, false, &policy).expect("verify applied owner ACL");
+    }
+
+    #[test]
+    fn owner_policy_windows_directory_create_apply_verify_uses_exact_dacl_mask() {
+        let (_directory, parent) = test_parent();
+        let policy = LocalOwnerAccessPolicy::new().with_windows_masks(0x0016_0189, 0x0016_0089);
+        let directory =
+            create_owner_entry_at(&parent, OsStr::new("owner-policy-directory"), true, &policy)
+                .expect("create exact-owner directory");
+
+        verify_owner_access(&directory, true, &policy).expect("verify created directory ACL");
+        apply_owner_access(&directory, true, &policy).expect("reapply exact directory ACL");
+        verify_owner_access(&directory, true, &policy).expect("verify applied directory ACL");
+    }
+
+    #[test]
+    fn owner_policy_windows_apply_without_write_dac_fails_without_acl_expansion() {
+        let (_directory, parent) = test_parent();
+        let policy = LocalOwnerAccessPolicy::new().with_windows_masks(0x0012_0189, 0x0012_0089);
+        let file = create_owner_entry_at(
+            &parent,
+            OsStr::new("owner-policy-read-control"),
+            false,
+            &policy,
+        )
+        .expect("create owner file with read-control access");
+
+        assert!(apply_owner_access(&file, false, &policy).is_err());
+        verify_owner_access(&file, false, &policy)
+            .expect("failed apply must preserve the exact ACL");
+    }
+
+    #[test]
+    fn owner_policy_windows_missing_read_control_retains_created_resource() {
+        let (_directory, parent) = test_parent();
+        let policy = LocalOwnerAccessPolicy::new().with_windows_masks(0x0010_0189, 0x0010_0089);
+
+        let error = create_owner_entry_at(
+            &parent,
+            OsStr::new("owner-policy-no-read-control"),
+            false,
+            &policy,
+        )
+        .expect_err("readback without READ_CONTROL must fail");
+        assert!(
+            error.retained.is_some(),
+            "created object must retain its recovery owner"
+        );
+    }
+
+    #[test]
+    fn owner_policy_windows_verification_failure_retains_created_resource() {
+        let (_directory, parent) = test_parent();
+        let policy = LocalOwnerAccessPolicy::new().with_windows_masks(0x0016_0189, 0x0016_0089);
+        fail_once_at(FailurePoint::AclReadback);
+
+        let error =
+            create_owner_entry_at(&parent, OsStr::new("owner-policy-recovery"), false, &policy)
+                .expect_err("injected verification failure");
+        assert!(
+            error.retained.is_some(),
+            "created object must retain its recovery owner"
+        );
     }
 }
