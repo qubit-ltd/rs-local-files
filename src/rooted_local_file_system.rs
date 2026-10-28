@@ -121,6 +121,7 @@ impl RootedLocalFileSystem {
     ///
     /// Returns `LocalFileError` when the directory cannot be bound and opened
     /// securely or the current platform lacks rooted primitives.
+    #[allow(dead_code)] // Preserved as the public unrestricted-opening API.
     pub fn open(path: &Path) -> LocalResult<Self> {
         Self::open_with_options(path, &crate::options::LocalRootOpenOptions::new())
     }

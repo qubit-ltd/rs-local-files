@@ -349,8 +349,8 @@ fn resolve_rooted_symlinks(
         check_resolution_deadline(deadline, original, operation)?;
         match step {
             ResolutionStep::ResetRoot => resolved.clear(),
-            ResolutionStep::Current(_) => ensure_resolved_prefix_is_directory(root, &resolved, original, operation)?,
-            ResolutionStep::Parent(_) => {
+            ResolutionStep::Current => ensure_resolved_prefix_is_directory(root, &resolved, original, operation)?,
+            ResolutionStep::Parent => {
                 ensure_resolved_prefix_is_directory(root, &resolved, original, operation)?;
                 if resolved.pop().is_none() {
                     return Err(LocalFileError::new(LocalFileErrorKind::InvalidPath, operation)
@@ -536,7 +536,7 @@ fn pending_measure(steps: &std::collections::VecDeque<ResolutionStep>) -> Option
     for step in steps {
         match step {
             ResolutionStep::ResetRoot | ResolutionStep::EndSymlink(_) => {}
-            ResolutionStep::Current(_) | ResolutionStep::Parent(_) => {
+            ResolutionStep::Current | ResolutionStep::Parent => {
                 components = components.checked_add(1)?;
                 bytes = bytes.checked_add(if cfg!(windows) { 2 } else { 1 })?;
             }
@@ -572,8 +572,8 @@ fn steps_from_path(
     }
     for token in native_tokens::tokenize(path, origin, session)? {
         match token {
-            NativeToken::Current(origin) => steps.push_back(ResolutionStep::Current(origin)),
-            NativeToken::Parent(origin) => steps.push_back(ResolutionStep::Parent(origin)),
+            NativeToken::Current(_) => steps.push_back(ResolutionStep::Current),
+            NativeToken::Parent(_) => steps.push_back(ResolutionStep::Parent),
             NativeToken::Normal(name, origin) => steps.push_back(ResolutionStep::Normal(name, origin)),
         }
     }

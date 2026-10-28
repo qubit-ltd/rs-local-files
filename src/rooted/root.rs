@@ -67,6 +67,7 @@ impl std::fmt::Debug for Root {
 }
 impl Root {
     /// Builds a root from an already-open directory authority.
+    #[allow(dead_code)] // Retained as the unrestricted-authority constructor for internal callers.
     pub(crate) fn from_directory_authority(directory: File, diagnostic_path: PathBuf) -> Self {
         Self {
             path: diagnostic_path,
@@ -104,6 +105,7 @@ impl Root {
     ///
     /// # Errors
     /// Returns an I/O error when the directory cannot be securely opened.
+    #[allow(dead_code)] // Public standalone root-opening API; current crate paths use rooted options.
     pub fn open(path: &Path) -> Result<Self> {
         let path = std::path::absolute(path)?;
         #[cfg(any(unix, windows))]

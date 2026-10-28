@@ -106,7 +106,7 @@ impl LocalDirectoryHandle {
     ) -> LocalResult<Self> {
         let started_at = std::time::Instant::now();
         let mut resolution = filesystem.core.resolution.clone().tightened(
-            options.resolution_limits().unwrap_or(crate::options::LocalResolutionLimits::new()),
+            options.resolution_limits().unwrap_or_default(),
         );
         if let Some(policy) = options.resolution_policy() {
             resolution = resolution.with_policy(policy.clone());
@@ -424,7 +424,7 @@ impl LocalDirectoryHandle {
         let raw_relative = relative;
         let component_policy = self.component_policy.combined_with(options.component_policy());
         let mut resolution = self.filesystem.core.resolution.clone().tightened(
-            options.resolution_limits().unwrap_or(crate::options::LocalResolutionLimits::new()),
+            options.resolution_limits().unwrap_or_default(),
         );
         if let Some(policy) = options.resolution_policy() {
             resolution = resolution.with_policy(policy.clone());
@@ -828,7 +828,7 @@ fn wait_at_component_policy_checkpoint(root: &Path, source: &Path, destination: 
     }
 }
 
-#[allow(clippy::type_complexity)]
+#[allow(clippy::type_complexity, clippy::too_many_arguments)]
 pub(crate) fn retain_directory_chain(
     root: &Root,
     relative: &Path,
@@ -966,13 +966,11 @@ pub(crate) fn retain_directory_chain(
             observations.push(observation);
         }
     }
-    if retain_binding {
-        if let (Some(recipe), Some(anchor)) = (opening_recipe, anchors.last_mut()) {
-            if let Some(budget) = path_budget.as_deref_mut() {
-                budget.debit(recipe.as_os_str().len(), LocalFileOperation::OpenRoot, diagnostic_path)?;
-            }
-            anchor.opening_recipe = recipe.to_path_buf();
+    if retain_binding && let (Some(recipe), Some(anchor)) = (opening_recipe, anchors.last_mut()) {
+        if let Some(budget) = path_budget {
+            budget.debit(recipe.as_os_str().len(), LocalFileOperation::OpenRoot, diagnostic_path)?;
         }
+        anchor.opening_recipe = recipe.to_path_buf();
     }
     check_binding_deadline(limits, started_at, diagnostic_path)?;
     let root = Root::from_directory_authority_with_contract(

@@ -17,9 +17,9 @@ pub(super) enum ResolutionStep {
     /// Restarts resolution at the virtual root.
     ResetRoot,
     /// Treats a current-directory step as a no-op after budget accounting.
-    Current(LocalResolutionOrigin),
+    Current,
     /// Resolves the real current directory before removing a component.
-    Parent(LocalResolutionOrigin),
+    Parent,
     /// Appends one normal namespace component.
     Normal(
         /// Native component to append to the pending resolution queue.
