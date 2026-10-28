@@ -304,7 +304,7 @@ fn try_resolve_without_symlinks(
         }
         if !final_component {
             if metadata.kind() != crate::rooted::EntryKind::Directory {
-                return Err(LocalFileError::new(LocalFileErrorKind::NotDirectory, operation).with_path(original.to_path_buf()));
+                return Ok(None);
             }
             let descend_result = cursor.descend(name);
             check_resolution_deadline(deadline, original, operation)?;
