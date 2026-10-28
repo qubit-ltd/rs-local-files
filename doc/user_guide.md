@@ -510,6 +510,15 @@ Recovery files and conditional commit errors are `Send + Sync`; a conditional
 write outcome is also `Send + Sync` when its digest type supports those bounds.
 This does not imply that an open writer is thread-safe.
 
+On Windows, conditional candidates and their recovery copies are created with
+a protected current-user-only DACL. Consequently, an `Absent` write that
+creates a new target can publish stricter permissions than the inherited
+permissions of its parent directory. `PreserveExisting` continues to preserve
+an existing target's protection. Applications that need to share a newly
+created file should grant access through their own explicit post-publication
+ACL step; they should not weaken the candidate before publication. Native
+Windows runtime evidence is required for this platform-specific behavior.
+
 Conditional writers capture the operation's PWD context when created. Later
 commit, abort, and cleanup errors use that snapshot rather than querying a
 possibly changed process PWD; physical Host paths remain optional diagnostics
@@ -615,6 +624,14 @@ A final source link is never dereferenced by mode selection. Directory
 links encountered inside a tree still follow the effective traversal policy;
 mode selection does not change intermediate-link or tree-traversal semantics.
 
+For a Rooted file copy with `Replace` and an incompatible final target such as
+a directory, the library stages the complete replacement before removing
+that target. Source-open, copy, and budget failures leave the original target
+and its contents in place. Before deletion, the library rechecks the target's
+kind and identity; a replacement installed by another actor is preserved. A
+failure after removal can still be `PartiallyPublished`, and this sequence is
+not a transaction with full rollback.
+
 Directory-tree copies cannot provide required atomicity or durability; link
 copies cannot provide required atomicity. Unsupported `Required` guarantees
 fail with `RequirementNotMet` before destination mutation. Link durability
@@ -671,6 +688,62 @@ punctuation, trailing spaces or dots, and reserved device names such as
 `CON.txt`. Name-collision attempts are unbounded when `max_attempts` is `None`; zero
 permits no attempts. Non-collision native errors return immediately.
 
+`LocalDirectoryHandle::create_staged_directory` always creates directly below
+that handle's fixed authority. `LocalTempDirectoryOptions::prefix()`,
+`suffix()`, and `max_attempts()` apply to its generated name and retry budget;
+`parent` and `create_parent` do not select or create another parent for this
+entry point. A stage's finite depth limit is a completeness ceiling: an entry
+at the limit is accepted, an entry deeper than the limit returns
+`ResourceLimit`, and an empty tree is valid at depth zero. Display walkers
+still use `max_depth` to stop yielding entries.
+
+### Bind a read to its source name
+
+Use path binding when a decision based on a read is valid only while the
+opened name still identifies the same object. This Rooted example reads the
+bytes, then checks the name before the application acts on them:
+
+```rust
+use std::path::Path;
+use std::time::Duration;
+
+use qubit_local_files::LocalFileSystem;
+use qubit_local_files::observation::LocalSourceVerification;
+use qubit_local_files::options::{LocalObservedReadOptions, LocalPathBindingOptions};
+
+let fixture = tempfile::tempdir()?;
+std::fs::write(fixture.path().join("settings.toml"), b"mode = 'safe'\n")?;
+let filesystem = LocalFileSystem::rooted(fixture.path())?;
+let binding = LocalPathBindingOptions::new()
+    .with_max_ancestors(32)
+    .with_max_path_bytes(4096)
+    .with_deadline(Duration::from_secs(1));
+let options = LocalObservedReadOptions::new().with_path_binding(binding);
+let mut reader = filesystem.open_observed_reader(Path::new("/settings.toml"), &options)?;
+let bytes = reader.read_to_end_limited(4096)?;
+match reader.verify_path_binding()? {
+    LocalSourceVerification::Unchanged => {
+        // Apply the decision to `bytes` for this request.
+        let _accepted_bytes = bytes;
+    }
+    LocalSourceVerification::Changed | LocalSourceVerification::Missing => {
+        // Discard this decision, reopen the name, and read the replacement.
+        return Ok(());
+    }
+    _ => return Ok(()),
+}
+# Ok::<(), Box<dyn std::error::Error>>(())
+```
+
+`Changed` and `Missing` are ordinary verification results, not errors. The
+check does not lock the path after it returns, and object identity does not
+prove that file contents are unchanged or represent a particular content
+version. Compare content or use a snapshot when the application needs that
+stronger rule. Calling `verify_path_binding()` without enabling binding
+returns `InvalidState`; Windows Host cannot provide this binding and returns
+`Unsupported`. The ancestor, path-byte, and deadline budgets limit binding
+work; deadlines are cooperative and cannot interrupt a blocked native call.
+
 ## Temporary publication and recovery
 
 A generated temporary file is published only after writing finishes. `persist`
@@ -726,6 +799,59 @@ this call; a later rejected call does not erase an earlier published target.
 durability before publication because the guard cannot prove synchronization
 of arbitrary descendants. File persistence can fail after publication during
 parent synchronization; it never rolls the target back.
+
+### Recover a failed seal
+
+`seal_with_options` consumes the writable owner. If it fails, inspect the cause
+and `access_state()` before transferring ownership with `into_resource()`. The
+state tells the application whether another bounded write attempt could still
+be considered. This example chooses explicit cleanup in every state; if
+cleanup fails, the returned `LocalFileError` retains the resource recovery
+information for a later retry.
+
+```rust
+use qubit_io::Output;
+use qubit_local_files::error::LocalTempSealError;
+use qubit_local_files::outcome::LocalTempAccessState;
+use qubit_local_files::{LocalFileSystem, LocalSealOptions};
+
+fn cleanup_failed_seal(
+    error: LocalTempSealError,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let cause = error.cause().to_string();
+    let access_state = error.access_state();
+    eprintln!("seal failed: {cause}");
+    match access_state {
+        LocalTempAccessState::Writable => eprintln!("a retry may be considered; this path cleans up"),
+        LocalTempAccessState::ReadOnly => eprintln!("do not write; this path cleans up"),
+        LocalTempAccessState::Indeterminate => eprintln!("do not write or retry; this path cleans up"),
+        _ => eprintln!("unknown access state; clean up conservatively"),
+    }
+    let mut recovered = error.into_resource();
+    recovered
+        .cleanup()
+        .map_err(|cleanup_error| Box::new(cleanup_error) as Box<dyn std::error::Error>)
+}
+
+let filesystem = LocalFileSystem::host()?;
+let mut temporary = filesystem.create_temp_file()?;
+temporary.write_fully(b"generated data")?;
+match temporary.seal_with_options(&LocalSealOptions::new()) {
+    Ok(mut sealed) => sealed.cleanup()?,
+    Err(error) => {
+        if let Err(cleanup_error) = cleanup_failed_seal(error) {
+            return Err(cleanup_error);
+        }
+        return Err(std::io::Error::other("seal failed; recovered resource was cleaned").into());
+    }
+}
+# Ok::<(), Box<dyn std::error::Error>>(())
+```
+
+The original writer owner is consumed by the seal attempt and cannot be used
+afterward. Successful sealing returns a read-only cleanup owner. A failed
+cleanup error keeps the recovery owner attached; do not replace or discard it
+if the application still needs to retry cleanup.
 
 ### Recover an occupied output name
 

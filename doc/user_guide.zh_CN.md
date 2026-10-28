@@ -425,6 +425,11 @@ Windows 上，使用 `Required` 耐久性打开条件 writer 会在路径解析�
 `RequirementNotMet`。恢复文件和条件提交错误满足 `Send + Sync`；条件写入 outcome 也会在
 其 digest 类型满足相应约束时满足 `Send + Sync`。这不表示打开中的 writer 可跨线程安全使用。
 
+Windows 会用受保护的当前用户 DACL 创建条件候选文件及其恢复副本。因此，`Absent` 条件写入
+新建的目标可能比父目录继承的权限更严格；`PreserveExisting` 仍保留已有目标的保护方式。
+应用若要共享新建文件，应在成功发布后通过自己的显式 ACL 流程授权，不要为放宽候选文件权限
+而提前削弱 staging。该平台行为需要原生 Windows 运行证据确认。
+
 Conditional writer 创建时会保存本次操作的 PWD context。之后的 commit、abort 和 cleanup 错误
 使用该快照，不会重新查询可能已经变化的进程 PWD；Host 物理路径只是可选诊断，也不会替换
 Rooted namespace path。
@@ -512,6 +517,11 @@ Copy Options 默认使用 `LocalMetadataPreservePolicy::None`。显式请求 `Pe
 Windows 复制链接会保留源链接的文件/目录类型，包括悬空链接；覆盖目标链接时不会删除
 该链接指向的内容。
 
+Rooted 文件复制使用 `Replace` 覆盖不兼容的最终目标（例如已有目录）时，会先把完整替代文件复制到
+staging，再删除冲突目标。打开源、复制内容或预算耗尽等删除前失败会保留原目标及其内容。
+删除前还会复核目标类型和 identity；并发替换出的新条目会保留。删除后再失败仍可能是
+`PartiallyPublished`，整个过程不提供完整事务回滚。
+
 ## 遍历和临时资源
 
 `LocalFileSystem::list` 返回惰性的 `LocalDirectoryWalker`。它按需打开和推进目录；
@@ -541,6 +551,54 @@ sandbox 会和资源一起清理。需要观察清理失败时应显式调用 `c
 的操作由发布状态和源资格共同决定。创建前会组合前缀、随机名称和后缀并校验完整组件；原生
 分隔符、NUL、控制字符、Windows 禁用标点、末尾空格或句点，以及 `CON.txt` 这类设备保留名称
 都会被拒绝，且校验先于父目录创建。名称冲突时，`max_attempts` 为 `None` 表示不限尝试次数；零表示不尝试。非冲突原生错误立即返回。
+
+`LocalDirectoryHandle::create_staged_directory` 始终在该 handle 的固定 authority 下直接创建。
+`LocalTempDirectoryOptions` 中的 `prefix()`、`suffix()` 和 `max_attempts()` 会用于 stage 名称及
+重试预算；`parent`、`create_parent` 不会替这个入口选择或创建其他父目录。stage 的深度上限用于
+验证整棵树：位于上限的条目有效，超出上限返回 `ResourceLimit`，空树在深度零也有效。
+展示用 walker 仍会按 `max_depth` 截断输出。
+
+### 让读取结果仍对应原名称
+
+如果业务决定必须针对刚读取的那个名称对象，读取后可以检查路径绑定。下面用 Rooted authority
+打开配置文件、读取字节，再检查名称仍否指向原对象：
+
+```rust
+use std::path::Path;
+use std::time::Duration;
+
+use qubit_local_files::LocalFileSystem;
+use qubit_local_files::observation::LocalSourceVerification;
+use qubit_local_files::options::{LocalObservedReadOptions, LocalPathBindingOptions};
+
+let fixture = tempfile::tempdir()?;
+std::fs::write(fixture.path().join("settings.toml"), b"mode = 'safe'\n")?;
+let filesystem = LocalFileSystem::rooted(fixture.path())?;
+let binding = LocalPathBindingOptions::new()
+    .with_max_ancestors(32)
+    .with_max_path_bytes(4096)
+    .with_deadline(Duration::from_secs(1));
+let options = LocalObservedReadOptions::new().with_path_binding(binding);
+let mut reader = filesystem.open_observed_reader(Path::new("/settings.toml"), &options)?;
+let bytes = reader.read_to_end_limited(4096)?;
+match reader.verify_path_binding()? {
+    LocalSourceVerification::Unchanged => {
+        // 本次请求可以按 `bytes` 作出决定。
+        let _accepted_bytes = bytes;
+    }
+    LocalSourceVerification::Changed | LocalSourceVerification::Missing => {
+        // 丢弃这次决定，重新打开名称并读取当前内容。
+        return Ok(());
+    }
+    _ => return Ok(()),
+}
+# Ok::<(), Box<dyn std::error::Error>>(())
+```
+
+`Changed` 和 `Missing` 是普通验证结果，不是错误。检查通过后并不会锁住路径；对象 identity
+也不等于文件内容版本。若业务约束的是内容，需比较内容或使用快照。未启用绑定时调用
+`verify_path_binding()` 会返回 `InvalidState`；Windows Host 无法提供绑定，会返回
+`Unsupported`。祖先数、路径字节数和期限限制绑定过程的资源使用；期限是协作式的，不能中断阻塞的原生调用。
 
 ## 临时资源发布与失败恢复
 
@@ -578,6 +636,54 @@ sandbox 会和资源一起清理。需要观察清理失败时应显式调用 `c
 错误只描述本次调用，后来被拒绝的调用不会让先前已发布目标消失。`keep` 遵循同一源资格契约。
 目录 guard 无法证明任意后代都已同步，因此要求耐久性时会在发布前拒绝；文件则可能在安装
 目标后的父目录同步阶段失败，本库不会回滚已发布目标。
+
+### 处理 seal 失败
+
+`seal_with_options` 会消费可写 owner。失败后应先读取 `cause()` 和 `access_state()`，再通过
+`into_resource()` 取回临时资源。状态用于判断是否有理由考虑再次写入；下面的应用统一选择显式
+cleanup。若清理失败，返回的 `LocalFileError` 会保留资源恢复信息，可供之后重试。
+
+```rust
+use qubit_io::Output;
+use qubit_local_files::error::LocalTempSealError;
+use qubit_local_files::outcome::LocalTempAccessState;
+use qubit_local_files::{LocalFileSystem, LocalSealOptions};
+
+fn cleanup_failed_seal(
+    error: LocalTempSealError,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let cause = error.cause().to_string();
+    let access_state = error.access_state();
+    eprintln!("seal 失败：{cause}");
+    match access_state {
+        LocalTempAccessState::Writable => eprintln!("可以评估重试；本示例选择清理"),
+        LocalTempAccessState::ReadOnly => eprintln!("不要写入；本示例选择清理"),
+        LocalTempAccessState::Indeterminate => eprintln!("不要写入或重试；本示例选择清理"),
+        _ => eprintln!("未知状态，按保守方式清理"),
+    }
+    let mut recovered = error.into_resource();
+    recovered
+        .cleanup()
+        .map_err(|cleanup_error| Box::new(cleanup_error) as Box<dyn std::error::Error>)
+}
+
+let filesystem = LocalFileSystem::host()?;
+let mut temporary = filesystem.create_temp_file()?;
+temporary.write_fully(b"generated data")?;
+match temporary.seal_with_options(&LocalSealOptions::new()) {
+    Ok(mut sealed) => sealed.cleanup()?,
+    Err(error) => {
+        if let Err(cleanup_error) = cleanup_failed_seal(error) {
+            return Err(cleanup_error);
+        }
+        return Err(std::io::Error::other("seal 失败，已清理恢复资源").into());
+    }
+}
+# Ok::<(), Box<dyn std::error::Error>>(())
+```
+
+成功 seal 后，原 writer owner 已被消费，不能再通过它写入；返回的 owner 只允许读取观察和清理。
+若 cleanup 失败，不要丢弃含恢复资源的错误，也不要直接创建替代条目覆盖原路径。
 
 ### 从输出名称冲突中恢复
 

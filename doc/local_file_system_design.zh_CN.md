@@ -930,6 +930,12 @@ Path 泄漏。
 `read_prefix(path, max_bytes)` 最多读取 `max_bytes`，不会把整个文件隐式载入内存。`max_bytes`
 是该方法的业务参数，不是隐藏资源限制。
 
+`LocalObservedReadOptions::with_path_binding` 会保留打开名称的父目录 authority 链，供
+`LocalObservedReader::verify_path_binding()` 返回 `Unchanged`、`Changed` 或 `Missing`。
+这些都是成功验证结果；未启用绑定时调用该方法返回 `InvalidState`。Windows Host 无法提供
+此绑定，会返回 `Unsupported`。检查只代表当时的路径观察，不会锁定名称，也不保证内容不变；
+对象 identity 不定义内容版本。祖先数量、保留路径字节数和协作式 deadline 限制绑定开销。
+
 打开重试只在 `LocalReadOptions` 明确提供窗口时发生。重试不得吞掉不可重试错误，也不得在
 deadline 后继续。
 
@@ -1094,6 +1100,11 @@ Windows 上，使用 `Required` 耐久性打开条件 writer 会在路径解析�
 `RequirementNotMet`。恢复文件和条件提交错误满足 `Send + Sync`；条件写入 outcome 也会在
 其 digest 类型满足相应约束时满足 `Send + Sync`。这不表示打开中的 writer 可跨线程安全使用。
 
+Windows 会在创建时为条件候选 B 及其独立恢复副本设置受保护的当前用户 DACL。
+`Absent` 成功创建新目标时，发布权限可能比父目录继承权限更严格；已有目标的
+`PreserveExisting` 仍保留其保护方式。应用需要共享文件时，应在成功发布后显式授权。
+此平台行为须用原生 DACL 测试验证，交叉编译不能替代。
+
 当前实现已核实的平台范围：
 
 | 命名空间 | `Absent` | `Content` | 元数据/耐久性说明 |
@@ -1233,6 +1244,12 @@ Required semantics 不能通过 outcome 静默降级。Publish 成功而 parent 
 同步与安装前将源权限应用到 staging。发布前失败会保留原目标；如果准备阶段已删除类型冲突目标，
 copy failure 会保留该部分变更状态。
 
+Rooted 文件复制使用 `Replace` 替换不兼容的非普通最终目标时，会使用 copy 专用 staging 入口，
+保留真实 destination 坐标，只跳过普通 writer 的最终目标类型检查。它会先复制完整替代文件，
+再删除原目标；删除前重新核对目标类型和 identity，并保留被并发替换出的新条目。删除前的复制与
+预算失败会保留原目标及字节。typed remove 之后，no-replace 安装仍可能以 `PartiallyPublished`
+失败。这不提供目录替换事务或完整回滚；identity 核查与删除仍是两次原生操作。
+
 ### 16.5 Tree copy
 
 Tree copy 按 Options 控制递归、symlink、metadata 和预算。特殊文件默认拒绝，除非公开策略
@@ -1367,6 +1384,12 @@ prefix、suffix 会先组合成完整名称再校验。分隔符、NUL、控制�
 空格或句点，以及 `CON.txt` 这类设备保留名称都会被拒绝；校验先于父目录创建和条目 I/O。
 `max_attempts` 为 `None` 时名称冲突尝试不限；设为零则不尝试。非冲突原生错误立即返回。
 
+`LocalDirectoryHandle::create_staged_directory()` 始终在已打开的固定 authority 下创建。
+其中 `LocalTempDirectoryOptions` 的 prefix、suffix 和可选 `max_attempts` 会控制名称和重试预算；
+`parent`、`create_parent` 字段不为这个入口选择其他父目录。无界的冲突预算不会隐含收紧为固定
+次数。整树验证、权限转换和文件同步把 `max_depth` 视为包含边界的完整性上限：恰好位于上限的
+条目有效，超过上限返回 `ResourceLimit`，空树在深度零时有效。展示 walker 仍保留自己的截断语义。
+
 ### 18.3 私有 sandbox
 
 资源先在选定 parent 下创建私有 sandbox，再创建实际实体；`path()` 包含生成的 sandbox
@@ -1486,6 +1509,21 @@ sandbox 释放最多额外执行一次原生删除，不计入源树条目/路�
 发布的是剩余内容。源实体删除后 sandbox 失败为 CleanupRequired，重试只清理 sandbox。
 并发新增条目导致 DirectoryNotEmpty 时返回错误，不无限重扫。枚举、原生 I/O 与预算失败
 均保留原始原因和准确失败路径。
+
+### 18.9 Stage 恢复与 seal
+
+`open_staged_directory()` 会在保留的 parent authority 下重新解析 stage 名称，并先核对期望 identity。
+它创建的 cleanup owner 在所有启用的验证规则完成前保持未 armed；即使未提供 exact entry set，
+独立的链接、特殊文件、外部硬链接与资源预算规则也会执行。验证失败或 unwind 只释放句柄，
+不会删除恢复目录。全部验证通过后才接管后续清理责任；成功后的显式 cleanup 和 Drop 遵循普通
+owner 契约。默认选项保留 verifier 无需递归时的快速路径。
+
+`LocalTempFile::seal_with_options()` 会消费可写 owner。成功返回 `LocalSealedTempFile`，它是
+只读清理 owner；失败返回 `LocalTempSealError`，其中仍持有资源。调用方先读取 `cause()` 与
+access state 快照，再通过 `into_resource()` 取回 owner。`Writable` 可让应用考虑有限重试，
+`ReadOnly` 和 `Indeterminate` 不应触发再次写入。这个状态不是权限回滚证明：此前的权限修改可能已生效。
+保守恢复方式是显式 cleanup；若清理失败，结构化错误会继续保留资源供重试。seal 尝试后原 writer
+owner 已被消费，不能继续使用。
 
 ## 19. 结构化错误
 

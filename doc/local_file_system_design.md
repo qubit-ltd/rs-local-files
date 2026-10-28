@@ -669,6 +669,15 @@ Readers own their native file, implement `qubit_io::ByteInput` (automatically im
 `read_prefix` reads at most the requested byte count and never silently loads a
 whole file.
 
+`LocalObservedReadOptions::with_path_binding` retains the opened name's parent
+authority chain so `LocalObservedReader::verify_path_binding()` can report
+`Unchanged`, `Changed`, or `Missing`. These are successful verification values;
+calling the method without binding returns `InvalidState`. Windows Host does
+not support this binding and returns `Unsupported`. A check is an observation
+at that time, not a lock on the name or a guarantee about file contents;
+identity does not define a content version. Ancestor count, retained path
+bytes, and a cooperative deadline bound the work.
+
 ### 13.3 Filesystem limits and space
 
 ```text
@@ -850,6 +859,14 @@ Windows Rooted `Content` and Host `Content` with `UseStaging` return
 or candidate/staging creation. Host `Content` with `PreserveExisting` and valid
 `Absent` remain supported.
 
+On Windows, conditional candidate B and its independently copied recovery file
+are created with a protected current-user-only DACL. An `Absent` commit that
+creates a new target can therefore publish stricter permissions than those
+inherited from the parent; `PreserveExisting` keeps an existing target's
+protection. Applications grant any required sharing access after successful
+publication. Validate this platform behavior with native DACL tests, not only
+cross-compilation.
+
 On Linux, the extended-attribute value reader handles a size change between
 the length query and value read, including a zero-capacity buffer whose
 attribute grew before the read. If the native read reports a larger required
@@ -982,6 +999,16 @@ installation leaves the old destination intact unless preparation already
 removed a conflicting entry, in which case the copy failure retains that
 partial state.
 
+For Rooted file copy with `Replace` of an incompatible non-regular final target,
+the copy-specific staging path retains the actual destination coordinate while
+skipping only the ordinary writer's final-entry type check. It copies the full
+replacement before removing the old target. Before removal it rechecks target
+kind and identity; a substituted entry is preserved. Copy and budget failures
+before removal leave the old target and bytes unchanged. After typed removal,
+no-replace installation can still fail with `PartiallyPublished`. This is not a
+transactional directory rollback, and the identity check and removal remain
+separate native operations.
+
 ### 16.5 Tree copy
 
 Tree copy uses bounded lazy traversal, preserves partial statistics, and does
@@ -1015,6 +1042,7 @@ link removal operation and preserve its referent.
 Failure retains requested and failing operands, partial statistics, and staging
 context only when cleanup failed. Preflight includes destination-inside-source.
 Copy never mutates its source or silently downgrades required semantics.
+
 
 Statistics are portable across scopes: `files` counts copied regular files and
 links, `directories` counts newly created directories, and `bytes` counts
@@ -1117,6 +1145,17 @@ characters, Windows-forbidden punctuation, trailing spaces or dots, and
 reserved device names such as `CON.txt`; invalid names fail before parent
 creation or entry I/O. Collision retries are unbounded when `max_attempts` is
 `None`; zero permits no attempts. Non-collision native errors return immediately.
+
+`LocalDirectoryHandle::create_staged_directory()` is a fixed-authority entry
+point: it always creates beneath the opened handle. Its `LocalTempDirectoryOptions`
+prefix, suffix, and optional `max_attempts` configure the name and retry budget;
+the options' parent and `create_parent` fields do not choose another parent.
+An unbounded attempt budget remains unbounded rather than inheriting a hidden
+collision ceiling. For complete tree validation, permission conversion, and
+file synchronization, `max_depth` is an inclusive completeness ceiling: an
+entry at the boundary is valid, deeper entries return `ResourceLimit`, and an
+empty tree is valid at depth zero. Display walkers retain their separate
+truncation semantics.
 
 ### 18.3 Private sandbox
 
@@ -1281,6 +1320,28 @@ entries and never changes the source publication state.
 owner. `set_cleanup_limits()` replaces them explicitly; otherwise explicit
 cleanup and the final Drop attempt use the creation budget. Drop does not retry
 with unbounded limits.
+
+### 18.9 Stage restoration and sealing
+
+`open_staged_directory()` resolves the saved name beneath the retained parent
+authority and first verifies the expected identity. It creates a cleanup owner
+that remains unarmed while every enabled validation rule runs, including
+independent link, special-file, hard-link, and resource-budget rules when no
+exact entry set is supplied. Validation failure or unwind releases handles but
+leaves the recovery tree in place. Only after all rules pass is cleanup
+ownership armed; subsequent explicit cleanup and Drop follow the ordinary
+owner contract. Default options keep the verifier's no-recursion fast path.
+
+`LocalTempFile::seal_with_options()` consumes the writable owner. Success
+returns `LocalSealedTempFile`, a read-only cleanup owner. Failure returns
+`LocalTempSealError`, which retains the resource. Callers inspect `cause()` and
+the access-state snapshot before consuming the error with `into_resource()`.
+`Writable` may permit a caller-selected bounded retry; `ReadOnly` and
+`Indeterminate` do not justify another write attempt. An access-state result is
+not permission rollback: earlier permission changes may have taken effect.
+The conservative recovery path is explicit cleanup. If it fails, the structured
+cleanup error retains the resource for retry. The consumed writer owner cannot
+be used after the seal attempt.
 
 ## 19. Structured Errors
 
