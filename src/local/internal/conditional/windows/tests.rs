@@ -235,6 +235,7 @@ fn assert_private_file(path: &Path) {
         .expect("file should have a protected current-user DACL");
 }
 
+#[allow(clippy::field_reassign_with_default)]
 fn add_inheritable_everyone_read(path: &Path) {
     use windows_sys::Win32::Foundation::LocalFree;
     use windows_sys::Win32::Security::Authorization::EXPLICIT_ACCESS_W;

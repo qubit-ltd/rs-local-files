@@ -91,10 +91,10 @@ fn lf_n02_nonempty_tree_zero_depth_fails_without_partial_permission_changes() {
     ] {
         let fixture = tempfile::tempdir().expect("fixture");
         let (_parent, mut stage, root) = staged_tree(&fixture, false);
-        let leaf = root.join("leaf");
         #[cfg(unix)]
         let original_modes = {
             use std::os::unix::fs::MetadataExt;
+            let leaf = root.join("leaf");
             (
                 std::fs::metadata(&root).expect("root metadata").mode() & 0o777,
                 std::fs::metadata(&leaf).expect("leaf metadata").mode() & 0o777,
@@ -163,10 +163,10 @@ fn lf_n02_over_depth_nested_tree_fails_before_any_permission_change() {
     ] {
         let fixture = tempfile::tempdir().expect("fixture");
         let (_parent, mut stage, root) = staged_tree(&fixture, true);
-        let leaf = root.join("one/leaf");
         #[cfg(unix)]
         let original_modes = {
             use std::os::unix::fs::MetadataExt;
+            let leaf = root.join("one/leaf");
             [
                 std::fs::metadata(&root).expect("root metadata").mode() & 0o777,
                 std::fs::metadata(root.join("one")).expect("directory metadata").mode() & 0o777,
