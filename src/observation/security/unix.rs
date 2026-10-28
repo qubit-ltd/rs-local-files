@@ -22,8 +22,15 @@ pub(crate) fn query_security(
     options: &LocalSecurityObservationOptions,
 ) -> LocalResult<LocalSecurityObservation> {
     let before = stat(file)?;
-    let identity = LocalFileIdentity::unix(before.st_dev as u64, before.st_ino as u64);
-    let link_count = requested_value(options.link_count(), || Ok(before.st_nlink as u64))?;
+    #[allow(clippy::useless_conversion)]
+    let device = u64::try_from(before.st_dev).map_err(|_| invalid_native_metadata())?;
+    #[allow(clippy::useless_conversion)]
+    let inode = u64::try_from(before.st_ino).map_err(|_| invalid_native_metadata())?;
+    let identity = LocalFileIdentity::unix(device, inode);
+    #[allow(clippy::useless_conversion)]
+    let link_count = u64::try_from(before.st_nlink)
+        .map(Some)
+        .map_err(|_| invalid_native_metadata())?;
     let filesystem = query_filesystem(file, options.filesystem())?;
     let access = query_access(file, &before, options)?;
     let after = stat(file)?;
@@ -86,20 +93,25 @@ fn filesystem_facts(file: &File) -> io::Result<LocalFileSystemObservation> {
     if unsafe { libc::fstatfs(file.as_raw_fd(), &mut stats) } == -1 {
         return Err(io::Error::last_os_error());
     }
-    let native_type = stats.f_type as libc::c_ulong;
-    let fs_type = native_type as u32;
-    let locality = match fs_type {
-        0x6969 | 0x517B | 0xFF53 | 0xFE534D42 => LocalFileSystemLocality::Remote,
-        0xEF53 | 0x58465342 | 0x01021994 | 0x794C7630 | 0x9123683E => {
-            LocalFileSystemLocality::Local
-        }
-        _ => LocalFileSystemLocality::Unknown,
+    let native_type = libc::c_ulong::from_ne_bytes(stats.f_type.to_ne_bytes());
+    let locality = match u32::try_from(native_type).ok() {
+        Some(fs_type) => match fs_type {
+            0x6969 | 0x517B | 0xFF53 | 0xFE534D42 => LocalFileSystemLocality::Remote,
+            0xEF53 | 0x58465342 | 0x01021994 | 0x794C7630 | 0x9123683E => {
+                LocalFileSystemLocality::Local
+            }
+            _ => LocalFileSystemLocality::Unknown,
+        },
+        None => LocalFileSystemLocality::Unknown,
     };
+    // `c_ulong` is 32-bit on 32-bit Linux and 64-bit on 64-bit Linux.
+    #[allow(clippy::useless_conversion)]
+    let type_id = u64::from(native_type);
     Ok(LocalFileSystemObservation::new(
         locality,
         Some(LocalUnixFileSystemObservation::new(
             LocalUnixPlatform::Linux,
-            native_type as u64,
+            type_id,
             None,
         )),
         None,
@@ -177,8 +189,12 @@ fn query_linux_access(
     let default_acl = query_linux_acl(file, b"system.posix_acl_default\0", options)?;
     // SAFETY: geteuid has no preconditions.
     let owner_is_current_user = unsafe { libc::geteuid() } == stat.st_uid;
+    #[allow(clippy::useless_conversion)]
+    let mode = u32::try_from(stat.st_mode & 0o7777).map_err(|_| {
+        io::Error::new(io::ErrorKind::InvalidData, "invalid native permission mode")
+    })?;
     Ok(LocalUnixAccessObservation::new(
-        (stat.st_mode & 0o7777) as u32,
+        mode,
         owner_is_current_user,
         access_acl,
         default_acl,
@@ -244,10 +260,7 @@ fn query_linux_acl(
         validate_linux_acl(&buffer, options.max_acl_entries())?;
         return Ok(LocalAclPresence::Present);
     }
-    Err(io::Error::new(
-        io::ErrorKind::Other,
-        "ACL changed during bounded read retries",
-    ))
+    Err(io::Error::other("ACL changed during bounded read retries"))
 }
 
 #[cfg(target_os = "linux")]
@@ -259,18 +272,17 @@ fn validate_linux_acl(bytes: &[u8], max_entries: Option<usize>) -> io::Result<()
         return Err(invalid_acl());
     }
     let entries_bytes = bytes.len() - 4;
-    if entries_bytes % LINUX_ACL_ENTRY_SIZE != 0 {
+    if !entries_bytes.is_multiple_of(LINUX_ACL_ENTRY_SIZE) {
         return Err(invalid_acl());
     }
     let entries = entries_bytes / LINUX_ACL_ENTRY_SIZE;
-    if let Some(max) = max_entries {
-        if entries > max {
-            return Err(io::Error::new(
-                io::ErrorKind::Other,
-                LocalResourceLimitError::new(LocalResourceKind::AclEntries, max, max, entries)
-                    .with_observed(entries),
-            ));
-        }
+    if let Some(max) = max_entries
+        && entries > max
+    {
+        return Err(io::Error::other(
+            LocalResourceLimitError::new(LocalResourceKind::AclEntries, max, max, entries)
+                .with_observed(entries),
+        ));
     }
     let mut user_obj = 0;
     let mut group_obj = 0;
@@ -333,6 +345,13 @@ fn invalid_acl() -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, "malformed POSIX ACL")
 }
 
+fn invalid_native_metadata() -> LocalFileError {
+    LocalFileError::new(
+        LocalFileErrorKind::DataCorruption,
+        LocalFileOperation::Metadata,
+    )
+}
+
 fn explicitly_unsupported(error: &io::Error) -> bool {
     error.raw_os_error().is_some_and(|code| {
         code == libc::ENOTSUP || code == libc::EOPNOTSUPP || code == libc::ENOSYS
@@ -347,14 +366,13 @@ fn acl_read_requires_retry(error: &io::Error) -> bool {
 }
 
 fn check_acl_size_io(length: usize, options: &LocalSecurityObservationOptions) -> io::Result<()> {
-    if let Some(max) = options.max_acl_bytes() {
-        if length > max {
-            return Err(io::Error::new(
-                io::ErrorKind::Other,
-                LocalResourceLimitError::new(LocalResourceKind::AclBytes, max, max, length)
-                    .with_observed(length),
-            ));
-        }
+    if let Some(max) = options.max_acl_bytes()
+        && length > max
+    {
+        return Err(io::Error::other(
+            LocalResourceLimitError::new(LocalResourceKind::AclBytes, max, max, length)
+                .with_observed(length),
+        ));
     }
     Ok(())
 }
@@ -362,18 +380,17 @@ fn check_acl_size_io(length: usize, options: &LocalSecurityObservationOptions) -
 #[cfg(target_os = "linux")]
 fn check_acl_length(length: usize, options: &LocalSecurityObservationOptions) -> io::Result<()> {
     check_acl_size_io(length, options)?;
-    if length < 4 || (length - 4) % LINUX_ACL_ENTRY_SIZE != 0 {
+    if length < 4 || !(length - 4).is_multiple_of(LINUX_ACL_ENTRY_SIZE) {
         return Err(invalid_acl());
     }
     let entries = (length - 4) / LINUX_ACL_ENTRY_SIZE;
-    if let Some(max) = options.max_acl_entries() {
-        if entries > max {
-            return Err(io::Error::new(
-                io::ErrorKind::Other,
-                LocalResourceLimitError::new(LocalResourceKind::AclEntries, max, max, entries)
-                    .with_observed(entries),
-            ));
-        }
+    if let Some(max) = options.max_acl_entries()
+        && entries > max
+    {
+        return Err(io::Error::other(
+            LocalResourceLimitError::new(LocalResourceKind::AclEntries, max, max, entries)
+                .with_observed(entries),
+        ));
     }
     Ok(())
 }
