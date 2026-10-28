@@ -82,13 +82,110 @@ fn test_create_parent_remains_after_source_open_failure_without_destination_publ
 }
 
 #[test]
-fn test_writer_open_failure_after_tree_removal_is_partial() {
+fn test_writer_open_failure_preserves_conflicting_tree() {
     let directory = tempdir().expect("temporary root should be created");
     let failure = copy_file_over_replaced_tree(directory.path(), "rooted-copy-writer-open");
 
-    assert_eq!(LocalCopyFailureState::PartiallyPublished, failure.state());
-    assert!(!directory.path().join("target").exists());
+    assert_eq!(LocalCopyFailureState::Unchanged, failure.state());
+    assert_eq!(
+        b"first",
+        fs::read(directory.path().join("target/first/entry"))
+            .unwrap()
+            .as_slice()
+    );
+    assert_eq!(
+        b"second",
+        fs::read(directory.path().join("target/second")).unwrap().as_slice()
+    );
     assert_eq!(LocalFileErrorKind::PermissionDenied, failure.error().kind());
+}
+
+#[test]
+fn test_copy_contents_failure_preserves_conflicting_tree() {
+    let directory = tempdir().expect("temporary root should be created");
+    let _failure = copy_file_over_replaced_tree(directory.path(), "rooted-copy-file-contents-native");
+
+    assert_eq!(
+        b"first",
+        fs::read(directory.path().join("target/first/entry"))
+            .unwrap()
+            .as_slice()
+    );
+    assert_eq!(
+        b"second",
+        fs::read(directory.path().join("target/second")).unwrap().as_slice()
+    );
+}
+
+#[test]
+fn test_copy_failure_retains_staging_cleanup_error_context() {
+    let directory = tempdir().expect("temporary root should be created");
+    fs::write(directory.path().join("source"), b"replacement").expect("source file should be written");
+    fs::create_dir_all(directory.path().join("target/first")).expect("target subtree should be created");
+    fs::write(directory.path().join("target/first/entry"), b"first").expect("first target should be written");
+    let rooted = LocalFileSystem::rooted(directory.path()).expect("root authority should open");
+    let _fault =
+        install_test_fault("rooted-copy-file-contents-cleanup").expect("copy and cleanup fault should install");
+
+    let failure = rooted
+        .copy_with_options(
+            Path::new("source"),
+            Path::new("target"),
+            &LocalCopyOptions::new()
+                .with_conflict(LocalCopyConflictPolicy::Overwrite)
+                .with_type_conflict(LocalCopyTypeConflictPolicy::Replace),
+        )
+        .expect_err("injected copy and cleanup failures should be retained");
+
+    assert!(failure.staging_path().is_some());
+    assert_eq!(
+        Some(LocalFileErrorKind::Io),
+        failure
+            .cleanup_error()
+            .map(qubit_local_files::error::LocalFileError::kind)
+    );
+    assert_eq!(
+        b"first",
+        fs::read(directory.path().join("target/first/entry"))
+            .unwrap()
+            .as_slice()
+    );
+}
+
+#[test]
+fn test_destination_replaced_after_staging_is_preserved() {
+    let directory = tempdir().expect("temporary root should be created");
+    let failure = copy_file_over_replaced_tree(directory.path(), "rooted-copy-replacement-before-remove");
+
+    assert_eq!(LocalCopyFailureState::Unchanged, failure.state());
+    assert_eq!(
+        b"replacement sentinel",
+        fs::read(directory.path().join("target")).unwrap().as_slice()
+    );
+    assert_eq!(
+        b"first",
+        fs::read(directory.path().join("rooted-copy-displaced-target/first/entry"))
+            .unwrap()
+            .as_slice()
+    );
+    assert_eq!(
+        b"second",
+        fs::read(directory.path().join("rooted-copy-displaced-target/second"))
+            .unwrap()
+            .as_slice()
+    );
+}
+
+#[test]
+fn test_competitor_created_after_tree_removal_is_not_overwritten() {
+    let directory = tempdir().expect("temporary root should be created");
+    let failure = copy_file_over_replaced_tree(directory.path(), "rooted-copy-race-before-writer-commit");
+
+    assert_eq!(LocalCopyFailureState::PartiallyPublished, failure.state());
+    assert_eq!(
+        b"concurrent sentinel",
+        fs::read(directory.path().join("target")).unwrap().as_slice()
+    );
 }
 
 #[test]

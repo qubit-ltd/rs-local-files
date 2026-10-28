@@ -771,6 +771,40 @@ impl Root {
         }
     }
 
+    /// Prepares same-directory staging for a rooted copy that will replace an
+    /// incompatible destination only after the copied contents are complete.
+    /// The final entry is deliberately not inspected here; the copy operation
+    /// must revalidate its captured identity before removing it.
+    ///
+    /// # Errors
+    /// Returns a structured atomic-write error if parent or staging preparation
+    /// fails, or an unsupported-platform error when rooted operations are not
+    /// available.
+    pub(crate) fn begin_copy_replacement_staging(
+        &self,
+        path: &path::Path,
+        options: LocalAtomicWriteOptions,
+    ) -> std::result::Result<Writer, LocalAtomicWriteError> {
+        #[cfg(any(unix, windows))]
+        {
+            Writer::new_for_copy_replacement(&self.directory, &self.path, path, options)
+        }
+        #[cfg(not(any(unix, windows)))]
+        {
+            let _ = options;
+            Err(LocalAtomicWriteError::new(
+                LocalAtomicWriteStage::PrepareParent,
+                path.as_path().to_path_buf(),
+                None,
+                LocalAtomicDestinationState::Unchanged,
+                Error::new(
+                    ErrorKind::Unsupported,
+                    "descriptor-relative local roots are unsupported on this platform",
+                ),
+            ))
+        }
+    }
+
     /// Copies one descendant entry with an explicit synchronization policy.
     ///
     /// # Parameters

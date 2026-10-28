@@ -188,6 +188,27 @@ impl LocalRootAtomicWriter {
         path: &LocalRelativePath,
         options: LocalAtomicWriteOptions,
     ) -> Result<Self, LocalAtomicWriteError> {
+        Self::new_with_copy_replacement(root, diagnostic_root, path, options, false)
+    }
+
+    #[cfg(unix)]
+    pub(crate) fn new_for_copy_replacement(
+        root: &File,
+        diagnostic_root: &Path,
+        path: &LocalRelativePath,
+        options: LocalAtomicWriteOptions,
+    ) -> Result<Self, LocalAtomicWriteError> {
+        Self::new_with_copy_replacement(root, diagnostic_root, path, options, true)
+    }
+
+    #[cfg(unix)]
+    fn new_with_copy_replacement(
+        root: &File,
+        diagnostic_root: &Path,
+        path: &LocalRelativePath,
+        options: LocalAtomicWriteOptions,
+        defer_destination_check: bool,
+    ) -> Result<Self, LocalAtomicWriteError> {
         let requested_path = path.as_path().to_path_buf();
         let diagnostic_path = diagnostic_root.join(path.as_path());
         let parent_mode = if options.creates_parent() {
@@ -203,18 +224,22 @@ impl LocalRootAtomicWriter {
             LocalAtomicDestinationState::Unchanged,
         )?;
         let (parent, final_name, parent_dirs_to_sync) = rooted_parent.into_parts();
-        let (destination_existed, destination_is_regular) = map_atomic_error(
-            inspect_rooted_atomic_destination(
-                &parent,
-                &final_name,
-                options.replaces_target_symlink()
-                    || options.publication_mode() == LocalAtomicPublicationMode::CreateNew,
-            ),
-            LocalAtomicWriteStage::InspectDestination,
-            &requested_path,
-            None,
-            LocalAtomicDestinationState::Unchanged,
-        )?;
+        let (destination_existed, destination_is_regular) = if defer_destination_check {
+            (false, false)
+        } else {
+            map_atomic_error(
+                inspect_rooted_atomic_destination(
+                    &parent,
+                    &final_name,
+                    options.replaces_target_symlink()
+                        || options.publication_mode() == LocalAtomicPublicationMode::CreateNew,
+                ),
+                LocalAtomicWriteStage::InspectDestination,
+                &requested_path,
+                None,
+                LocalAtomicDestinationState::Unchanged,
+            )?
+        };
         if options.publication_mode() == LocalAtomicPublicationMode::CreateNew && destination_existed {
             return Err(LocalAtomicWriteError::new(
                 LocalAtomicWriteStage::InspectDestination,
@@ -262,6 +287,27 @@ impl LocalRootAtomicWriter {
         path: &LocalRelativePath,
         options: LocalAtomicWriteOptions,
     ) -> Result<Self, LocalAtomicWriteError> {
+        Self::new_with_copy_replacement(root, diagnostic_root, path, options, false)
+    }
+
+    #[cfg(windows)]
+    pub(crate) fn new_for_copy_replacement(
+        root: &File,
+        diagnostic_root: &Path,
+        path: &LocalRelativePath,
+        options: LocalAtomicWriteOptions,
+    ) -> Result<Self, LocalAtomicWriteError> {
+        Self::new_with_copy_replacement(root, diagnostic_root, path, options, true)
+    }
+
+    #[cfg(windows)]
+    fn new_with_copy_replacement(
+        root: &File,
+        diagnostic_root: &Path,
+        path: &LocalRelativePath,
+        options: LocalAtomicWriteOptions,
+        defer_destination_check: bool,
+    ) -> Result<Self, LocalAtomicWriteError> {
         let requested_path = path.as_path().to_path_buf();
         let diagnostic_path = diagnostic_root.join(path.as_path());
         if options.creates_parent()
@@ -284,7 +330,9 @@ impl LocalRootAtomicWriter {
                 LocalAtomicDestinationState::Unchanged,
             )?;
         }
-        let (destination_existed, destination_is_regular) =
+        let (destination_existed, destination_is_regular) = if defer_destination_check {
+            (false, false)
+        } else {
             match read_rooted_symlink_metadata(root, diagnostic_root, path) {
                 Ok(file) => {
                     if options.publication_mode() == LocalAtomicPublicationMode::CreateNew {
@@ -335,7 +383,8 @@ impl LocalRootAtomicWriter {
                         source,
                     ));
                 }
-            };
+            }
+        };
         let relative_parent = path.as_path().parent().unwrap_or(Path::new(""));
         let staging_root = root.try_clone().map_err(|source| {
             LocalAtomicWriteError::new(
@@ -467,6 +516,17 @@ impl LocalRootAtomicWriter {
         self.copy_permissions = Some(permissions);
     }
 
+    pub(crate) fn staging_path(&self) -> &Path {
+        #[cfg(unix)]
+        {
+            self.staged_file.diagnostic_path()
+        }
+        #[cfg(windows)]
+        {
+            &self.staged_file.diagnostic_path
+        }
+    }
+
     /// Aborts replacement and removes the descriptor-relative staging entry.
     ///
     /// # Errors
@@ -475,6 +535,18 @@ impl LocalRootAtomicWriter {
     /// attribute preparation failure; the caller may retry cleanup.
     #[cfg_attr(not(any(unix, windows)), allow(unused_mut))]
     pub(crate) fn abort(&mut self) -> Result<(), LocalAtomicWriteError> {
+        #[cfg(feature = "test-support")]
+        if crate::local::test_support_enabled("rooted-copy-staging-cleanup")
+            || crate::local::test_support_enabled("rooted-copy-file-contents-cleanup")
+        {
+            return Err(LocalAtomicWriteError::new(
+                LocalAtomicWriteStage::CleanupTemporaryFile,
+                self.path.clone(),
+                Some(self.staging_path().to_path_buf()),
+                LocalAtomicDestinationState::Unchanged,
+                crate::local::test_fault_error(),
+            ));
+        }
         #[cfg(unix)]
         {
             let temporary_path = self.staged_file.diagnostic_path().to_path_buf();

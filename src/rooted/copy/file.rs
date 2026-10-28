@@ -38,9 +38,9 @@ use crate::read;
 /// bytes and deadline checks to `budget`, and requests `durability` from the
 /// staged writer. Returns updated statistics, including skipped entries.
 /// Errors retain the statistics accumulated when the failure occurs and any
-/// available staging cleanup error. Destination preparation can remove an
-/// incompatible entry before a later failure, and permission preservation can
-/// fail after the copied content has been published.
+/// available staging cleanup error. Incompatible destinations remain in place
+/// until staging completes; removal or later installation can still partially
+/// publish the replacement.
 ///
 /// # Errors
 ///
@@ -125,6 +125,7 @@ pub(super) fn copy_file(
         .as_ref()
         .is_some_and(|metadata| metadata.kind() == EntryKind::Directory);
     let mut destination_removed = false;
+    let mut delayed_replacement = false;
     if let Some(metadata) = destination_metadata {
         let action = decide_copy_destination(
             false,
@@ -141,27 +142,7 @@ pub(super) fn copy_file(
                 if metadata.kind() == EntryKind::File {
                     // The staged writer replaces regular files at commit.
                 } else {
-                    if metadata.kind() == EntryKind::Directory {
-                        root.remove_tree_typed(destination).map_err(|delete_error| {
-                            let failure_hint = deletion_failure_hint(&delete_error);
-                            let mut copy_error = error(
-                                Stage::PrepareDestination,
-                                source,
-                                destination,
-                                statistics,
-                                delete_error.into_io_error(),
-                            );
-                            if let Some(failure_hint) = failure_hint {
-                                copy_error = copy_error.with_failure_state(failure_hint);
-                            }
-                            copy_error
-                        })?;
-                    } else {
-                        root.remove_file(destination).map_err(|source_error| {
-                            error(Stage::PrepareDestination, source, destination, statistics, source_error)
-                        })?;
-                    }
-                    destination_removed = true;
+                    delayed_replacement = true;
                 }
             }
             None => {
@@ -203,7 +184,11 @@ pub(super) fn copy_file(
     if options.conflict_policy() != crate::local::LocalCopyConflictPolicy::Overwrite {
         writer_options = writer_options.with_create_new();
     }
-    let mut writer = match root.begin_atomic_write_with_options(destination, writer_options) {
+    let mut writer = match if delayed_replacement {
+        root.begin_copy_replacement_staging(destination, writer_options)
+    } else {
+        root.begin_atomic_write_with_options(destination, writer_options)
+    } {
         Ok(writer) => writer,
         Err(source_error) => {
             if !destination_removed
@@ -231,31 +216,138 @@ pub(super) fn copy_file(
         writer.set_copy_permissions(source_metadata.permissions());
     }
     #[cfg(feature = "test-support")]
-    let copy_result = if crate::local::test_support_enabled("rooted-copy-file-contents-native") {
+    let copy_result = if crate::local::test_support_enabled("rooted-copy-file-contents-native")
+        || crate::local::test_support_enabled("rooted-copy-file-contents-cleanup")
+    {
         Err(crate::local::test_fault_error())
     } else {
         budget.copy(&mut reader, &mut writer)
     };
     #[cfg(not(feature = "test-support"))]
     let copy_result = budget.copy(&mut reader, &mut writer);
-    let bytes = copy_result.map_err(|source_error| {
-        mark_partial_after_removal(
-            error(Stage::CopyFileContents, source, destination, statistics, source_error),
-            destination_removed,
-        )
-    })?;
+    let bytes = match copy_result {
+        Ok(bytes) => bytes,
+        Err(source_error) => {
+            let mut failure = error(Stage::CopyFileContents, source, destination, statistics, source_error);
+            if let Err(cleanup) = writer.abort() {
+                failure = failure.with_staging_context(
+                    writer.staging_path().to_path_buf(),
+                    Some(cleanup.into_staging_parts().2),
+                );
+            }
+            let failure = mark_partial_after_removal(failure, destination_removed);
+            return Err(if delayed_replacement {
+                failure.with_failure_state(crate::LocalCopyFailureState::Unchanged)
+            } else {
+                failure
+            });
+        }
+    };
+    if delayed_replacement {
+        #[cfg(feature = "test-support")]
+        if crate::local::take_test_support("rooted-copy-replacement-before-remove") {
+            let displaced = Path::new("rooted-copy-displaced-target").expect("static rooted path is valid");
+            let race_result = root.rename_without_replacing(destination, &displaced).and_then(|()| {
+                let create = crate::write::OpenOptions::new(crate::write::Mode::CreateNew);
+                let mut sentinel = root.open_writer(destination, &create)?;
+                sentinel.write_all(b"replacement sentinel")
+            });
+            let source_error = race_result.err().unwrap_or_else(crate::local::test_fault_error);
+            let mut failure = error(Stage::PrepareDestination, source, destination, statistics, source_error);
+            if let Err(cleanup) = writer.abort() {
+                failure = failure.with_staging_context(
+                    writer.staging_path().to_path_buf(),
+                    Some(cleanup.into_staging_parts().2),
+                );
+            }
+            return Err(failure.with_failure_state(crate::LocalCopyFailureState::Unchanged));
+        }
+        match optional_metadata(root, destination) {
+            Ok(Some(current))
+                if destination_metadata
+                    .is_some_and(|original| current.kind() == original.kind() && current.is_same_file(&original)) => {}
+            Ok(None) => {}
+            Ok(Some(_)) => {
+                let mut failure = error(
+                    Stage::PrepareDestination,
+                    source,
+                    destination,
+                    statistics,
+                    io::Error::new(
+                        ErrorKind::AlreadyExists,
+                        "rooted copy destination changed during staging",
+                    ),
+                );
+                if let Err(cleanup) = writer.abort() {
+                    failure = failure.with_staging_context(
+                        writer.staging_path().to_path_buf(),
+                        Some(cleanup.into_staging_parts().2),
+                    );
+                }
+                return Err(failure.with_failure_state(crate::LocalCopyFailureState::Unchanged));
+            }
+            Err(source_error) => {
+                let mut failure = error(Stage::PrepareDestination, source, destination, statistics, source_error);
+                if let Err(cleanup) = writer.abort() {
+                    failure = failure.with_staging_context(
+                        writer.staging_path().to_path_buf(),
+                        Some(cleanup.into_staging_parts().2),
+                    );
+                }
+                return Err(failure.with_failure_state(crate::LocalCopyFailureState::Unchanged));
+            }
+        }
+        if destination_metadata.is_some() {
+            let removal = if destination_metadata.is_some_and(|metadata| metadata.kind() == EntryKind::Directory) {
+                root.remove_tree_typed(destination).map_err(|delete_error| {
+                    let hint = deletion_failure_hint(&delete_error);
+                    (delete_error.into_io_error(), hint)
+                })
+            } else {
+                root.remove_file(destination)
+                    .map_err(|source_error| (source_error, None))
+            };
+            if let Err((source_error, hint)) = removal {
+                let mut failure = error(Stage::PrepareDestination, source, destination, statistics, source_error);
+                if let Some(hint) = hint {
+                    failure = failure.with_failure_state(hint);
+                }
+                if let Err(cleanup) = writer.abort() {
+                    failure = failure.with_staging_context(
+                        writer.staging_path().to_path_buf(),
+                        Some(cleanup.into_staging_parts().2),
+                    );
+                }
+                return Err(failure);
+            }
+            destination_removed = true;
+        }
+    }
     #[cfg(feature = "test-support")]
-    inject_race_destination(root, destination, "rooted-copy-race-before-writer-commit")
-        .map_err(|source_error| error(Stage::CommitFile, source, destination, statistics, source_error))?;
+    if let Err(source_error) = inject_race_destination(root, destination, "rooted-copy-race-before-writer-commit") {
+        let mut failure = error(Stage::CommitFile, source, destination, statistics, source_error);
+        if let Err(cleanup) = writer.abort() {
+            failure = failure.with_staging_context(
+                writer.staging_path().to_path_buf(),
+                Some(cleanup.into_staging_parts().2),
+            );
+        }
+        return Err(mark_partial_after_removal(failure, destination_removed));
+    }
     #[cfg(feature = "test-support")]
     let commit_result = if crate::local::test_support_enabled("rooted-copy-file-commit-native") {
-        Err(crate::LocalAtomicWriteError::new(
+        let staging_path = writer.staging_path().to_path_buf();
+        let mut error = crate::LocalAtomicWriteError::new(
             crate::LocalAtomicWriteStage::ReplaceDestination,
             destination.as_path().to_path_buf(),
-            None,
+            Some(staging_path),
             crate::LocalAtomicDestinationState::Unchanged,
             crate::local::test_fault_error(),
-        ))
+        );
+        if let Err(cleanup) = writer.abort() {
+            error = error.with_cleanup_error(Some(cleanup.into_staging_parts().2));
+        }
+        Err(error)
     } else {
         writer.commit_with_durability()
     };

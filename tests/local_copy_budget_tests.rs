@@ -157,6 +157,39 @@ fn test_copy_budget_matrix_enforces_max_bytes() {
 }
 
 #[test]
+fn test_rooted_replacement_tree_survives_copy_byte_budget_failure() {
+    let directory = tempdir().expect("temporary directory should be created");
+    fs::write(directory.path().join("source"), b"replacement payload").expect("source should be written");
+    fs::create_dir_all(directory.path().join("target/first")).expect("target tree should be created");
+    fs::write(directory.path().join("target/first/entry"), b"original entry").expect("entry should be written");
+    fs::write(directory.path().join("target/second"), b"original second").expect("second should be written");
+    let rooted = LocalFileSystem::rooted(directory.path()).expect("root authority should open");
+
+    let failure = rooted
+        .copy_with_options(
+            std::path::Path::new("source"),
+            std::path::Path::new("target"),
+            &LocalCopyOptions::new()
+                .with_conflict(qubit_local_files::options::LocalCopyConflictPolicy::Overwrite)
+                .with_type_conflict(LocalCopyTypeConflictPolicy::Replace)
+                .with_max_bytes(0),
+        )
+        .expect_err("zero byte budget must fail before replacing the tree");
+
+    assert_eq!(LocalFileErrorKind::ResourceLimit, failure.error().kind());
+    assert_eq!(
+        b"original entry",
+        fs::read(directory.path().join("target/first/entry"))
+            .unwrap()
+            .as_slice()
+    );
+    assert_eq!(
+        b"original second",
+        fs::read(directory.path().join("target/second")).unwrap().as_slice()
+    );
+}
+
+#[test]
 fn test_copy_budget_matrix_enforces_max_open_directories() {
     for backend in Backend::all() {
         let _ = assert_resource_limit(
