@@ -54,6 +54,7 @@ pub struct LocalTreeRetainedResource {
     cleanup_limits: LocalTempCleanupLimits,
     owned_entries: HashMap<PathBuf, LocalFileIdentity>,
     mutation_state: LocalTreeMutationState,
+    owner_access_policy: Option<crate::policy::LocalOwnerAccessPolicy>,
 }
 
 impl LocalTreeRetainedResource {
@@ -102,7 +103,22 @@ impl LocalTreeRetainedResource {
             cleanup_limits,
             owned_entries: HashMap::new(),
             mutation_state: LocalTreeMutationState::NotStarted,
+            owner_access_policy: None,
         }
+    }
+
+    pub(crate) fn set_owner_access_policy(&mut self, policy: Option<crate::policy::LocalOwnerAccessPolicy>) {
+        self.owner_access_policy = policy;
+    }
+
+    pub(crate) fn with_owner_access_policy(mut self, policy: Option<crate::policy::LocalOwnerAccessPolicy>) -> Self {
+        self.owner_access_policy = policy;
+        self
+    }
+
+    /// Returns the owner policy retained for this recovery resource.
+    pub const fn owner_access_policy(&self) -> Option<&crate::policy::LocalOwnerAccessPolicy> {
+        self.owner_access_policy.as_ref()
     }
     /// Returns the namespace path kept for diagnostics.
     ///
@@ -153,6 +169,10 @@ impl LocalTreeRetainedResource {
         let expected = self.parent.observe()?.identity().cloned();
         let actual = parent.observe()?.identity().cloned();
         Ok(expected.is_some() && expected == actual)
+    }
+    pub(crate) fn binding_matches_identity(&self) -> crate::LocalResult<bool> {
+        let named = self.parent.observe_entry(&self.relative)?;
+        Ok(self.identity.as_ref().is_some_and(|identity| named.identity() == Some(identity)))
     }
     pub(crate) fn record_entry(&mut self, relative: &Path, identity: &LocalFileIdentity) -> crate::LocalResult<()> {
         if let Some(recorded_identity) = self.owned_entries.get(relative) {
@@ -401,6 +421,10 @@ impl LocalTreeCleanupError {
     /// Returns the primary cleanup failure without consuming retained owners.
     pub fn cause(&self) -> &LocalFileError {
         &self.cause
+    }
+    /// Returns the owner policy retained by the recovery stage, when known.
+    pub fn owner_access_policy(&self) -> Option<&crate::policy::LocalOwnerAccessPolicy> {
+        self.retained.as_ref().and_then(LocalTreeRetainedResource::owner_access_policy)
     }
     /// Reports whether cleanup had started mutating the tree before failing.
     pub const fn mutation_state(&self) -> LocalTreeMutationState {
@@ -791,6 +815,13 @@ impl LocalTreePublishError {
     /// Returns the publication failure without consuming any recovery owner.
     pub fn cause(&self) -> &LocalFileError {
         &self.cause
+    }
+    /// Returns the owner policy retained by the recovery stage, when known.
+    pub fn owner_access_policy(&self) -> Option<&crate::policy::LocalOwnerAccessPolicy> {
+        self.stage
+            .as_ref()
+            .and_then(|stage| stage.owner_access_policy())
+            .or_else(|| self.retained.iter().find_map(LocalTreeRetainedResource::owner_access_policy))
     }
     /// Returns whether publication may have mutated the destination namespace.
     pub const fn mutation_state(&self) -> LocalTreeMutationState {

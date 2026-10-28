@@ -193,6 +193,7 @@ fn requires_tree_walk(options: &LocalTreeValidationOptions) -> bool {
         || options.rejects_special_files()
         || options.rejects_external_hardlinks()
         || options.privacy() == LocalPrivacyRequirement::Required
+        || options.owner_access_policy().is_some()
         || limits.max_open_directories().is_some()
         || limits.max_depth().is_some()
         || limits.max_entries().is_some()
@@ -201,7 +202,7 @@ fn requires_tree_walk(options: &LocalTreeValidationOptions) -> bool {
 }
 
 fn verify_root_privacy(stage: &LocalStagedDirectory, options: &LocalTreeValidationOptions) -> LocalResult<()> {
-    if options.privacy() != LocalPrivacyRequirement::Required {
+    if options.privacy() != LocalPrivacyRequirement::Required && options.owner_access_policy().is_none() {
         return Ok(());
     }
     #[cfg(unix)]
@@ -217,7 +218,10 @@ fn verify_root_privacy(stage: &LocalStagedDirectory, options: &LocalTreeValidati
                     source,
                 )
             })?;
-        crate::temp::internal::privacy_unix::verify_current_user_access(&file, true, false).map_err(|source| {
+        let result = if let Some(policy) = options.owner_access_policy() {
+            crate::temp::internal::privacy_unix::verify_owner_access(&file, true, policy)
+        } else { crate::temp::internal::privacy_unix::verify_current_user_access(&file, true, false) };
+        result.map_err(|source| {
             file_error(
                 LocalFileOperation::Metadata,
                 stage.directory().diagnostic_path(),
@@ -239,7 +243,10 @@ fn verify_root_privacy(stage: &LocalStagedDirectory, options: &LocalTreeValidati
                 LocalFileOperation::Metadata,
             ));
         }
-        crate::temp::internal::privacy_windows::verify_current_user_access(&root, true, false).map_err(|source| {
+        let result = if let Some(policy) = options.owner_access_policy() {
+            crate::temp::internal::privacy_windows::verify_owner_access(&root, true, policy)
+        } else { crate::temp::internal::privacy_windows::verify_current_user_access(&root, true, false) };
+        result.map_err(|source| {
             file_error(
                 LocalFileOperation::Metadata,
                 stage.directory().diagnostic_path(),
@@ -257,7 +264,7 @@ fn verify_entry_privacy(
     identity: Option<&LocalFileIdentity>,
     options: &LocalTreeValidationOptions,
 ) -> LocalResult<()> {
-    if options.privacy() != LocalPrivacyRequirement::Required {
+    if options.privacy() != LocalPrivacyRequirement::Required && options.owner_access_policy().is_none() {
         return Ok(());
     }
     if !matches!(kind, LocalFileKind::File | LocalFileKind::Directory) {
@@ -276,7 +283,7 @@ fn verify_entry_privacy(
         ));
     }
     #[cfg(unix)]
-    crate::temp::internal::privacy_unix::verify_current_user_access(&file, kind == LocalFileKind::Directory, false)
+    (if let Some(policy) = options.owner_access_policy() { crate::temp::internal::privacy_unix::verify_owner_access(&file, kind == LocalFileKind::Directory, policy) } else { crate::temp::internal::privacy_unix::verify_current_user_access(&file, kind == LocalFileKind::Directory, false) })
         .map_err(|source| {
             file_error(
                 LocalFileOperation::Metadata,
@@ -285,7 +292,7 @@ fn verify_entry_privacy(
             )
         })?;
     #[cfg(windows)]
-    crate::temp::internal::privacy_windows::verify_current_user_access(&file, kind == LocalFileKind::Directory, false)
+    (if let Some(policy) = options.owner_access_policy() { crate::temp::internal::privacy_windows::verify_owner_access(&file, kind == LocalFileKind::Directory, policy) } else { crate::temp::internal::privacy_windows::verify_current_user_access(&file, kind == LocalFileKind::Directory, false) })
         .map_err(|source| {
             file_error(
                 LocalFileOperation::Metadata,

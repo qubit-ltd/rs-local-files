@@ -9,6 +9,7 @@ use crate::directory::LocalTreeValidationOptions;
 use crate::policy::LocalDurabilityRequirement;
 use crate::policy::LocalFileSyncRequirement;
 use crate::policy::LocalTreeFinalAccess;
+use crate::policy::LocalOwnerAccessPolicy;
 
 /// Optional verification, access, file synchronization, and durability
 /// requested before tree publication.
@@ -19,6 +20,7 @@ pub struct LocalTreePublishOptions {
     durability: LocalDurabilityRequirement,
     file_sync: LocalFileSyncRequirement,
     access: LocalTreeFinalAccess,
+    owner_access_policy: Option<LocalOwnerAccessPolicy>,
 }
 impl LocalTreePublishOptions {
     /// Creates no-replace options that preserve access and request no
@@ -29,6 +31,7 @@ impl LocalTreePublishOptions {
             durability: LocalDurabilityRequirement::NotRequired,
             file_sync: LocalFileSyncRequirement::NotRequired,
             access: LocalTreeFinalAccess::Preserve,
+            owner_access_policy: None,
         }
     }
     /// Validates the staged tree before any access or publication mutation.
@@ -52,6 +55,11 @@ impl LocalTreePublishOptions {
         self.access = access;
         self
     }
+    /// Sets an exact owner policy to apply before publication.
+    pub const fn with_owner_access_policy(mut self, policy: LocalOwnerAccessPolicy) -> Self {
+        self.owner_access_policy = Some(policy);
+        self
+    }
     pub(crate) const fn validation(&self) -> Option<&LocalTreeValidationOptions> {
         self.validation.as_ref()
     }
@@ -63,6 +71,9 @@ impl LocalTreePublishOptions {
     }
     pub(crate) const fn access(&self) -> LocalTreeFinalAccess {
         self.access
+    }
+    pub(crate) const fn owner_access_policy(&self) -> Option<&LocalOwnerAccessPolicy> {
+        self.owner_access_policy.as_ref()
     }
 }
 impl Default for LocalTreePublishOptions {

@@ -12,6 +12,7 @@ use std::path::PathBuf;
 
 use super::LocalTempCleanupLimits;
 use crate::policy::LocalPrivacyRequirement;
+use crate::policy::LocalOwnerAccessPolicy;
 
 /// Options for creating a temporary directory whose cleanup limits are
 /// retained.
@@ -41,6 +42,7 @@ pub struct LocalTempDirectoryOptions {
     cleanup_limits: LocalTempCleanupLimits,
     /// Requested privacy for the newly created directory.
     privacy: LocalPrivacyRequirement,
+    owner_access_policy: Option<LocalOwnerAccessPolicy>,
 }
 
 impl LocalTempDirectoryOptions {
@@ -55,6 +57,7 @@ impl LocalTempDirectoryOptions {
             create_parent: false,
             cleanup_limits: LocalTempCleanupLimits::new(),
             privacy: LocalPrivacyRequirement::PlatformDefault,
+            owner_access_policy: None,
         }
     }
 
@@ -75,6 +78,19 @@ impl LocalTempDirectoryOptions {
     pub const fn with_privacy(mut self, requirement: LocalPrivacyRequirement) -> Self {
         self.privacy = requirement;
         self
+    }
+
+    /// Sets the exact owner access policy used when creating the stage and
+    /// every entry written beneath it.
+    #[inline]
+    pub const fn with_owner_access_policy(mut self, policy: LocalOwnerAccessPolicy) -> Self {
+        self.owner_access_policy = Some(policy);
+        self
+    }
+
+    /// Returns the exact owner access policy requested for the stage.
+    pub const fn owner_access_policy(&self) -> Option<&LocalOwnerAccessPolicy> {
+        self.owner_access_policy.as_ref()
     }
 
     /// Returns the configured parent, or `None` for the owning filesystem's

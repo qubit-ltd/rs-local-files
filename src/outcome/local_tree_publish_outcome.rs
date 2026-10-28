@@ -9,6 +9,7 @@ use crate::directory::LocalTreeRetainedResource;
 use crate::error::LocalFileError;
 use crate::outcome::LocalTreeAccessState;
 use crate::outcome::LocalTreePublication;
+use crate::policy::LocalOwnerAccessPolicy;
 
 /// Reports publication and synchronization facts for a staged tree.
 #[derive(Debug)]
@@ -19,8 +20,12 @@ pub struct LocalTreePublishOutcome {
     access_state: LocalTreeAccessState,
     cleanup_errors: Vec<LocalFileError>,
     retained: Vec<LocalTreeRetainedResource>,
+    owner_access_policy: Option<LocalOwnerAccessPolicy>,
 }
 impl LocalTreePublishOutcome {
+    pub(crate) fn set_owner_access_policy(&mut self, policy: Option<LocalOwnerAccessPolicy>) {
+        self.owner_access_policy = policy;
+    }
     pub(crate) fn new(
         publication: LocalTreePublication,
         durable: bool,
@@ -34,6 +39,7 @@ impl LocalTreePublishOutcome {
             access_state,
             cleanup_errors: Vec::new(),
             retained: Vec::new(),
+            owner_access_policy: None,
         }
     }
     /// Returns whether publication completed.
@@ -51,6 +57,10 @@ impl LocalTreePublishOutcome {
     /// Returns the final access state confirmed before publication.
     pub const fn access_state(&self) -> LocalTreeAccessState {
         self.access_state
+    }
+    /// Returns the exact owner policy confirmed before publication, when applied.
+    pub const fn owner_access_policy(&self) -> Option<&LocalOwnerAccessPolicy> {
+        self.owner_access_policy.as_ref()
     }
     /// Returns secondary cleanup errors observed after publication.
     pub fn cleanup_errors(&self) -> &[LocalFileError] {

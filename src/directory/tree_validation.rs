@@ -16,6 +16,7 @@ use crate::LocalResult;
 use crate::observation::LocalFileObservation;
 use crate::options::LocalListOptions;
 use crate::policy::LocalPrivacyRequirement;
+use crate::policy::LocalOwnerAccessPolicy;
 
 /// One expected entry in a staged directory tree.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -104,6 +105,7 @@ pub struct LocalTreeValidationOptions {
     reject_special_files: bool,
     reject_external_hardlinks: bool,
     privacy: LocalPrivacyRequirement,
+    owner_access_policy: Option<LocalOwnerAccessPolicy>,
     limits: LocalListOptions,
 }
 
@@ -119,6 +121,7 @@ impl LocalTreeValidationOptions {
             reject_special_files: false,
             reject_external_hardlinks: false,
             privacy: LocalPrivacyRequirement::PlatformDefault,
+            owner_access_policy: None,
             limits: LocalListOptions::new(),
         }
     }
@@ -152,6 +155,11 @@ impl LocalTreeValidationOptions {
         self.privacy = privacy;
         self
     }
+    /// Requires every entry to match an exact owner access policy.
+    pub const fn with_owner_access_policy(mut self, policy: LocalOwnerAccessPolicy) -> Self {
+        self.owner_access_policy = Some(policy);
+        self
+    }
     /// Applies traversal resource limits to complete-tree validation.
     ///
     /// Finite depth is a complete-validation ceiling: empty trees and entries
@@ -177,6 +185,9 @@ impl LocalTreeValidationOptions {
     }
     pub(crate) const fn privacy(&self) -> LocalPrivacyRequirement {
         self.privacy
+    }
+    pub(crate) const fn owner_access_policy(&self) -> Option<&LocalOwnerAccessPolicy> {
+        self.owner_access_policy.as_ref()
     }
     pub(crate) const fn limits(&self) -> &LocalListOptions {
         &self.limits

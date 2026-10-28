@@ -15,6 +15,8 @@ pub enum LocalTreeAccessState {
     CurrentUserOnly,
     /// Access is restricted to the current user and files are read-only.
     ReadOnlyCurrentUser,
+    /// The exact configured owner policy was applied and verified.
+    OwnerPolicyApplied,
     /// A confirmed mixture of access states remains across entries.
     Mixed,
     /// The access state could not be determined safely.
