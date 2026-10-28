@@ -797,6 +797,11 @@ not establish Windows native behavior. A partially applied access policy keeps
 the stage with the caller and reports its `access_state()`; whole-tree rollback
 is not promised.
 
+On Apple platforms, publishing a read-only tree temporarily gives its root
+owner write permission for the rename, then restores read-only access through
+the retained handle. The published root can briefly be writable. A failure to
+restore its access is reported as `Published` with indeterminate access.
+
 ### 14.6 Conditional write protocol
 
 The optional `digest` feature adds `LocalWritePrecondition<T>`,

@@ -1004,6 +1004,10 @@ commit 先按策略应用元数据，再同步 staging、复核身份、安装�
 `Required` 保留 stage 且不发布。该证据不能证明 Windows 原生行为。权限策略只完成部分转换时，stage
 仍由调用方持有，错误通过 `access_state()` 报告；库不承诺回滚整棵树。
 
+在 Apple 平台发布只读目录树时，库临时赋予根目录所有者写权限以完成重命名，随后通过
+保留的句柄恢复只读权限。已发布的根目录可能短暂可写；恢复失败时报告 `Published`，
+访问状态为不确定。
+
 ### 14.2 生命周期与发布状态
 
 `LocalFileWriter` 实现 `qubit_io::ByteOutput`（由 `qubit_io::Output<Item = u8>` 自动实现），同时承担 publication session。
