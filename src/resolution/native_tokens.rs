@@ -65,7 +65,9 @@ fn tokens_after_check(
         let mut units = path
             .as_os_str()
             .encode_wide()
-            .skip(windows_prefix_units(path)?)
+            .skip(windows_prefix_units(path).ok_or_else(|| {
+                super::session::overflow_error(LocalResourceKind::PendingResolutionBytes)
+            })?)
             .peekable();
         while units.peek().is_some() {
             while matches!(units.peek(), Some(unit) if is_separator(*unit)) {
