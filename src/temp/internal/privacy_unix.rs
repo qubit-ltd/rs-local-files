@@ -47,8 +47,168 @@ fn fail_access_if_scheduled() -> io::Result<()> {
 }
 
 use crate::observation::LocalFileIdentity;
+use crate::policy::LocalOwnerAccessPolicy;
 use crate::temp::types::NativePrivateCreateError;
 use crate::temp::types::NativePrivateEntry;
+
+fn owner_mode(policy: &LocalOwnerAccessPolicy, directory: bool) -> io::Result<u32> {
+    let (directory_mode, file_mode) = policy.unix_modes().ok_or_else(|| {
+        io::Error::new(io::ErrorKind::InvalidInput, "Unix owner access policy is not configured")
+    })?;
+    if directory_mode & !0o700 != 0 || file_mode & !0o700 != 0 {
+        return Err(io::Error::new(io::ErrorKind::InvalidInput, "Unix owner modes may contain only 0o700 permission bits"));
+    }
+    Ok(if directory { directory_mode } else { file_mode })
+}
+
+pub(crate) fn verify_owner_access(file: &File, directory: bool, policy: &LocalOwnerAccessPolicy) -> io::Result<()> {
+    let expected = owner_mode(policy, directory)?;
+    ensure_acl_backend_supported()?;
+    verify_owner_and_type(file, directory)?;
+    let metadata = file.metadata()?;
+    if metadata.mode() & 0o7777 != expected {
+        return Err(io::Error::new(io::ErrorKind::PermissionDenied, "entry mode does not exactly match owner policy"));
+    }
+    verify_no_extra_acl(file, directory)
+}
+
+pub(crate) fn apply_owner_access(file: &File, directory: bool, policy: &LocalOwnerAccessPolicy) -> io::Result<()> {
+    let mode = owner_mode(policy, directory)?;
+    ensure_acl_backend_supported()?;
+    verify_owner_and_type(file, directory)?;
+    verify_no_extra_acl(file, directory)?;
+    #[cfg(test)]
+    fail_access_if_scheduled()?;
+    if unsafe { libc::fchmod(file.as_raw_fd(), mode) } < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    verify_owner_access(file, directory, policy)
+}
+
+pub(crate) fn create_owner_entry_at(
+    parent: &File,
+    name: &OsStr,
+    directory: bool,
+    policy: &LocalOwnerAccessPolicy,
+) -> Result<File, NativePrivateCreateError> {
+    let mode = match owner_mode(policy, directory) {
+        Ok(mode) => mode,
+        Err(source) => return Err(pre_create_error(source)),
+    };
+    if let Err(source) = ensure_acl_backend_supported() {
+        return Err(pre_create_error(source));
+    }
+    let name = match component_name(name) {
+        Ok(name) => name,
+        Err(source) => return Err(pre_create_error(source)),
+    };
+    let retained_parent = match parent.try_clone() {
+        Ok(parent) => parent,
+        Err(source) => return Err(pre_create_error(source)),
+    };
+    if directory {
+        if unsafe { libc::mkdirat(parent.as_raw_fd(), name.as_ptr(), mode as libc::mode_t) } < 0 {
+            return Err(pre_create_error(io::Error::last_os_error()));
+        }
+    } else {
+        let descriptor = unsafe {
+            libc::openat(parent.as_raw_fd(), name.as_ptr(), libc::O_RDWR | libc::O_CREAT | libc::O_EXCL | libc::O_NOFOLLOW | libc::O_CLOEXEC, mode as libc::mode_t)
+        };
+        if descriptor < 0 {
+            return Err(pre_create_error(io::Error::last_os_error()));
+        }
+        // SAFETY: openat returned a fresh descriptor owned by this function.
+        let file = unsafe { File::from_raw_fd(descriptor) };
+        return finish_owner_creation(parent, retained_parent, name, file, false, policy);
+    }
+    let descriptor = unsafe { libc::openat(parent.as_raw_fd(), name.as_ptr(), libc::O_RDONLY | libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC) };
+    if descriptor < 0 {
+        let source = io::Error::last_os_error();
+        let identity = identity_for_name(parent, OsStr::from_bytes(name.as_bytes())).ok();
+        return Err(create_error(
+            true,
+            source,
+            retained_parent,
+            OsStr::from_bytes(name.as_bytes()),
+            None,
+            identity,
+        ));
+    }
+    // SAFETY: openat returned a fresh descriptor owned by this function.
+    let file = unsafe { File::from_raw_fd(descriptor) };
+    finish_owner_creation(parent, retained_parent, name, file, true, policy)
+}
+
+fn finish_owner_creation(
+    parent: &File,
+    retained_parent: File,
+    name: CString,
+    file: File,
+    directory: bool,
+    policy: &LocalOwnerAccessPolicy,
+) -> Result<File, NativePrivateCreateError> {
+    let identity = identity_for_file(&file).ok();
+    let result = (|| {
+        let mode = owner_mode(policy, directory)?;
+        if unsafe { libc::fchmod(file.as_raw_fd(), mode) } < 0 {
+            return Err(io::Error::last_os_error());
+        }
+        if directory {
+            let found = identity_for_name(parent, OsStr::from_bytes(name.as_bytes()))?;
+            if identity.as_ref() != Some(&found) {
+                return Err(io::Error::new(io::ErrorKind::PermissionDenied, "directory entry changed after handle acquisition"));
+            }
+        }
+        verify_owner_access(&file, directory, policy)
+    })();
+    match result {
+        Ok(()) => Ok(file),
+        Err(source) => Err(create_error(directory, source, retained_parent, OsStr::from_bytes(name.as_bytes()), Some(file), identity)),
+    }
+}
+
+fn verify_no_extra_acl(file: &File, directory: bool) -> io::Result<()> {
+    #[cfg(target_os = "linux")]
+    {
+        use std::os::fd::AsRawFd;
+        use std::ffi::CString;
+        let names: &[&[u8]] = if directory {
+            &[b"system.posix_acl_access\0", b"system.posix_acl_default\0"]
+        } else {
+            &[b"system.posix_acl_access\0"]
+        };
+        for bytes in names {
+            let name = CString::new(&bytes[..bytes.len() - 1]).expect("static xattr name");
+            let result = unsafe { libc::fgetxattr(file.as_raw_fd(), name.as_ptr(), std::ptr::null_mut(), 0) };
+            if result >= 0 {
+                return Err(io::Error::new(io::ErrorKind::PermissionDenied, "entry has an extended POSIX ACL"));
+            }
+            let error = io::Error::last_os_error();
+            if error.raw_os_error() != Some(libc::ENODATA) {
+                return Err(error);
+            }
+        }
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = (file, directory);
+        return Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "exact Unix owner ACL verification is not implemented on this platform",
+        ));
+    }
+    Ok(())
+}
+
+fn ensure_acl_backend_supported() -> io::Result<()> {
+    #[cfg(not(target_os = "linux"))]
+    return Err(io::Error::new(
+        io::ErrorKind::Unsupported,
+        "exact Unix owner ACL verification is not implemented on this platform",
+    ));
+    #[cfg(target_os = "linux")]
+    Ok(())
+}
 
 pub(crate) fn create_private_file_at(parent: &File, name: &OsStr) -> Result<File, NativePrivateCreateError> {
     create_private_file_at_impl(parent, name, File::try_clone)
@@ -308,6 +468,129 @@ pub(crate) fn verify_current_user_access(file: &File, directory: bool, read_only
         ));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod owner_policy_unix_tests {
+    use super::{apply_owner_access, create_owner_entry_at, verify_owner_access};
+    use crate::policy::LocalOwnerAccessPolicy;
+    use std::fs::File;
+    use std::os::unix::fs::MetadataExt;
+
+    #[test]
+    fn owner_policy_unix_creates_exact_modes_and_applies_read_only_policy() {
+        let temp = tempfile::tempdir().expect("temporary directory");
+        let parent = File::open(temp.path()).expect("open parent directory");
+        let editable = LocalOwnerAccessPolicy::new().with_unix_modes(0o700, 0o600);
+        let file = create_owner_entry_at(&parent, std::ffi::OsStr::new("owner-file"), false, &editable)
+            .expect("create owner file");
+        assert_eq!(file.metadata().expect("file metadata").mode() & 0o7777, 0o600);
+        apply_owner_access(
+            &file,
+            false,
+            &LocalOwnerAccessPolicy::new().with_unix_modes(0o500, 0o400),
+        )
+        .expect("apply read-only access");
+        verify_owner_access(
+            &file,
+            false,
+            &LocalOwnerAccessPolicy::new().with_unix_modes(0o500, 0o400),
+        )
+        .expect("verify read-only access");
+        assert_eq!(file.metadata().expect("file metadata").mode() & 0o7777, 0o400);
+        apply_owner_access(&file, false, &editable).expect("restore editable access");
+        assert_eq!(file.metadata().expect("file metadata").mode() & 0o7777, 0o600);
+
+        let editable_directory = create_owner_entry_at(
+            &parent,
+            std::ffi::OsStr::new("editable-owner-directory"),
+            true,
+            &editable,
+        )
+        .expect("create editable owner directory");
+        assert_eq!(editable_directory.metadata().expect("directory metadata").mode() & 0o7777, 0o700);
+
+        let readonly = LocalOwnerAccessPolicy::new().with_unix_modes(0o500, 0o400);
+        let readonly_file = create_owner_entry_at(
+            &parent,
+            std::ffi::OsStr::new("readonly-owner-file"),
+            false,
+            &readonly,
+        )
+        .expect("create read-only owner file");
+        assert_eq!(readonly_file.metadata().expect("file metadata").mode() & 0o7777, 0o400);
+        let directory = create_owner_entry_at(
+            &parent,
+            std::ffi::OsStr::new("owner-directory"),
+            true,
+            &readonly,
+        )
+        .expect("create read-only owner directory");
+        assert_eq!(directory.metadata().expect("directory metadata").mode() & 0o7777, 0o500);
+    }
+
+    #[test]
+    fn owner_policy_unix_rejects_unconfigured_and_invalid_modes_before_mutation() {
+        let temp = tempfile::tempdir().expect("temporary directory");
+        let parent = File::open(temp.path()).expect("open parent directory");
+        for policy in [
+            LocalOwnerAccessPolicy::new(),
+            LocalOwnerAccessPolicy::new().with_unix_modes(0o770, 0o600),
+            LocalOwnerAccessPolicy::new().with_unix_modes(0o4700, 0o600),
+        ] {
+            let error = create_owner_entry_at(&parent, std::ffi::OsStr::new("invalid"), false, &policy)
+                .expect_err("invalid policy must fail");
+            assert_eq!(error.source.kind(), std::io::ErrorKind::InvalidInput);
+            assert!(!temp.path().join("invalid").exists());
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn owner_policy_unix_rejects_extended_access_acl() {
+        use std::ffi::CString;
+        use std::os::fd::AsRawFd;
+
+        let temp = tempfile::tempdir().expect("temporary directory");
+        let parent = File::open(temp.path()).expect("open parent directory");
+        let policy = LocalOwnerAccessPolicy::new().with_unix_modes(0o700, 0o600);
+        let file = create_owner_entry_at(&parent, std::ffi::OsStr::new("acl-file"), false, &policy)
+            .expect("create owner file");
+        let acl_name = CString::new("system.posix_acl_access").expect("static xattr name");
+        let acl = [
+            0x02_u8, 0x00, 0x00, 0x00,
+            0x01, 0x00, 0x07, 0x00, 0xff, 0xff, 0xff, 0xff,
+            0x02, 0x00, 0x04, 0x00, 0xfe, 0xff, 0x00, 0x00,
+            0x04, 0x00, 0x00, 0x00, 0xff, 0xff, 0xff, 0xff,
+            0x10, 0x00, 0x00, 0x00, 0xff, 0xff, 0xff, 0xff,
+            0x20, 0x00, 0x00, 0x00, 0xff, 0xff, 0xff, 0xff,
+        ];
+        let set_result = unsafe {
+            libc::fsetxattr(
+                file.as_raw_fd(),
+                acl_name.as_ptr(),
+                acl.as_ptr().cast(),
+                acl.len(),
+                0,
+            )
+        };
+        if set_result < 0 {
+            let error = std::io::Error::last_os_error();
+            panic!("Linux test filesystem must support installing the POSIX ACL fixture: {error}");
+        }
+        let chmod_result = unsafe { libc::fchmod(file.as_raw_fd(), 0o600) };
+        assert_eq!(chmod_result, 0, "preserve exact mode alongside ACL fixture");
+        let error = verify_owner_access(&file, false, &policy).expect_err("extended ACL is rejected");
+        assert_eq!(error.kind(), std::io::ErrorKind::PermissionDenied);
+        let error = apply_owner_access(
+            &file,
+            false,
+            &LocalOwnerAccessPolicy::new().with_unix_modes(0o500, 0o400),
+        )
+        .expect_err("extended ACL is rejected before applying a new mode");
+        assert_eq!(error.kind(), std::io::ErrorKind::PermissionDenied);
+        assert_eq!(file.metadata().expect("file metadata").mode() & 0o7777, 0o600);
+    }
 }
 
 fn verify_owner_and_type(file: &File, directory: bool) -> io::Result<()> {
