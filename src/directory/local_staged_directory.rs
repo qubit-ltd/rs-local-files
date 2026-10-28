@@ -1329,10 +1329,11 @@ impl LocalStagedDirectory {
     /// Applies an exact owner policy to every ordinary entry in the stage and
     /// verifies the resulting tree before reporting success.
     ///
-    /// The operation fixes at most 256 child identities and management
-    /// handles before changing access. Larger trees return `ResourceLimit`
-    /// without mutation. Nonempty trees also require the target directory
-    /// permissions to preserve owner read/list and traversal through each
+    /// The operation fixes child identities and management handles before
+    /// changing access. `limits.max_entries()` bounds this collection when
+    /// set; otherwise the library limits it to 256 entries. Larger trees
+    /// return `ResourceLimit` without mutation. Nonempty trees also require
+    /// target directory permissions to preserve owner read/list and traversal through each
     /// directory whose descendants must be verified; otherwise the method
     /// returns `RequirementNotMet` before mutation. An empty stage can use
     /// a mode or mask that removes all access because its already-open root
@@ -1366,6 +1367,7 @@ impl LocalStagedDirectory {
             .without_max_depth()
             .with_symlink_policy(crate::policy::LocalSymlinkPolicy::Reject)
             .with_error_policy(crate::options::LocalWalkErrorPolicy::FailFast);
+        let maximum_entries = limits.max_entries().unwrap_or(MAX_OWNER_POLICY_ENTRY_HANDLES);
         let mut entries = Vec::new();
         let mut seen_bytes = 0_usize;
         for item in self
@@ -1374,13 +1376,7 @@ impl LocalStagedDirectory {
         {
             let item =
                 item.map_err(|cause| super::tree_recovery::LocalTreeAccessError::new(cause, State::Preserved))?;
-            if entries.len() >= MAX_OWNER_POLICY_ENTRY_HANDLES {
-                return Err(super::tree_recovery::LocalTreeAccessError::new(
-                    resource_limit(),
-                    State::Preserved,
-                ));
-            }
-            if limits.max_entries().is_some_and(|maximum| entries.len() >= maximum) {
+            if entries.len() >= maximum_entries {
                 return Err(super::tree_recovery::LocalTreeAccessError::new(
                     resource_limit(),
                     State::Preserved,
@@ -1460,7 +1456,7 @@ impl LocalStagedDirectory {
                 State::Preserved,
             ));
         }
-        if entries.len() > MAX_OWNER_POLICY_ENTRY_HANDLES {
+        if entries.len() > maximum_entries {
             return Err(super::tree_recovery::LocalTreeAccessError::new(
                 resource_limit(),
                 State::Preserved,
@@ -1855,11 +1851,7 @@ impl LocalStagedDirectory {
             {
                 let item =
                     item.map_err(|cause| super::tree_recovery::LocalTreeAccessError::new(cause, State::Indeterminate))?;
-                if final_entries.len() >= MAX_OWNER_POLICY_ENTRY_HANDLES
-                    || limits
-                        .max_entries()
-                        .is_some_and(|maximum| final_entries.len() >= maximum)
-                {
+                if final_entries.len() >= maximum_entries {
                     return Err(super::tree_recovery::LocalTreeAccessError::new(
                         resource_limit(),
                         State::Indeterminate,
@@ -2664,6 +2656,118 @@ impl LocalStagedDirectory {
         requirement: LocalFileSyncRequirement,
     ) -> LocalResult<bool> {
         self.sync_tree_files(limits, requirement)
+    }
+
+    /// Synchronizes this stage's files, directories, root, and creating parent.
+    ///
+    /// Files are synchronized first, followed by descendant directories from
+    /// deepest to shallowest, the staged root, and finally `parent`. The stage
+    /// remains unpublished. `limits` bounds every tree traversal; a depth
+    /// limit that would truncate the tree is an error. This operation requires
+    /// all requested handle synchronizations to succeed.
+    ///
+    /// # Errors
+    /// Returns an error when the parent no longer names this stage, the staged
+    /// tree cannot be completely traversed, an entry changes during the
+    /// operation, a resource limit is exceeded, or any file/directory sync
+    /// fails.
+    pub fn sync_tree_with_options(
+        &self,
+        parent: &LocalDirectoryHandle,
+        limits: &LocalListOptions,
+    ) -> LocalResult<()> {
+        let expected_stage_identity = self.identity.as_ref().ok_or_else(|| {
+            LocalFileError::new(LocalFileErrorKind::Unsupported, LocalFileOperation::Metadata)
+        })?;
+        let stage_name = Path::new(&self.relative_name);
+        let parent_entry = parent.observe_entry(stage_name)?;
+        if parent_entry.identity() != Some(expected_stage_identity) {
+            return Err(LocalFileError::new(
+                LocalFileErrorKind::ChangedDuringRead,
+                LocalFileOperation::Metadata,
+            )
+            .with_path(parent.diagnostic_path().join(stage_name)));
+        }
+
+        self.sync_tree_files(limits, LocalFileSyncRequirement::Required)?;
+
+        let traversal = limits
+            .with_recursive()
+            .without_max_depth()
+            .with_symlink_policy(crate::policy::LocalSymlinkPolicy::Reject)
+            .with_error_policy(crate::options::LocalWalkErrorPolicy::FailFast);
+        let mut directories = Vec::new();
+        let mut seen_bytes = 0_usize;
+        for item in self.observe_tree_with_options(&traversal)? {
+            let item = item?;
+            let relative = item.relative_path();
+            let depth = relative.components().count();
+            if limits.max_depth().is_some_and(|maximum| depth > maximum) {
+                return Err(resource_limit());
+            }
+            seen_bytes = seen_bytes
+                .checked_add(relative.as_os_str().as_encoded_bytes().len())
+                .ok_or_else(resource_limit)?;
+            if limits.max_seen_name_bytes().is_some_and(|maximum| seen_bytes > maximum) {
+                return Err(resource_limit());
+            }
+            if item.observation().metadata().kind() == crate::LocalFileKind::Directory {
+                let identity = item
+                    .observation()
+                    .identity()
+                    .cloned()
+                    .ok_or_else(|| LocalFileError::new(LocalFileErrorKind::Unsupported, LocalFileOperation::Metadata))?;
+                directories.try_reserve(1).map_err(|_| resource_limit())?;
+                directories.push((relative.to_path_buf(), identity));
+            }
+        }
+        directories.sort_by_key(|(path, _)| std::cmp::Reverse(path.components().count()));
+
+        for (relative, expected_identity) in directories {
+            let directory = self.directory().open_directory(
+                &relative,
+                &crate::options::LocalDirectoryOpenOptions::new(),
+            )?;
+            if directory.observe()?.identity() != Some(&expected_identity) {
+                return Err(LocalFileError::new(
+                    LocalFileErrorKind::ChangedDuringRead,
+                    LocalFileOperation::Metadata,
+                )
+                .with_path(self.directory().diagnostic_path().join(&relative)));
+            }
+            directory
+                .security_authority()?
+                .sync_all()
+                .map_err(|source| {
+                    LocalFileError::from_io(
+                        LocalFileOperation::Commit,
+                        Some(self.directory().diagnostic_path().join(&relative)),
+                        None,
+                        source,
+                    )
+                })?;
+        }
+
+        self.directory()
+            .security_authority()?
+            .sync_all()
+            .map_err(|source| {
+                LocalFileError::from_io(
+                    LocalFileOperation::Commit,
+                    Some(self.directory().diagnostic_path().to_path_buf()),
+                    None,
+                    source,
+                )
+            })?;
+        parent.security_authority()?.sync_all().map_err(|source| {
+            LocalFileError::from_io(
+                LocalFileOperation::Commit,
+                Some(parent.diagnostic_path().to_path_buf()),
+                None,
+                source,
+            )
+        })?;
+        Ok(())
     }
 
     /// Publishes this stage under a single native name without replacing an

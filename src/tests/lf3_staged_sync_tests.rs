@@ -33,4 +33,30 @@ fn staged_directory_exposes_bounded_file_synchronization() {
             )
             .expect("not-required synchronization should succeed")
     );
+    stage
+        .sync_tree_with_options(&parent, &LocalListOptions::new())
+        .expect("the staged tree, root, and parent should synchronize");
+}
+
+#[cfg(unix)]
+#[test]
+fn staged_tree_syncs_nested_directories_before_its_root_and_parent() {
+    use crate::policy::LocalOwnerAccessPolicy;
+
+    let fixture = tempfile::tempdir().expect("fixture should be created");
+    let filesystem = LocalFileSystem::host().expect("Host filesystem should open");
+    let parent = filesystem
+        .open_directory_with_options(fixture.path(), &LocalDirectoryOpenOptions::new())
+        .expect("parent directory should open");
+    let policy = LocalOwnerAccessPolicy::new().with_unix_modes(0o700, 0o600);
+    let mut stage = parent
+        .create_staged_directory(&LocalTempDirectoryOptions::new().with_owner_access_policy(policy))
+        .expect("stage should be created");
+    stage
+        .write_file_new(Path::new("nested/entry"), &mut &b"payload"[..], 16)
+        .expect("nested file should be written");
+
+    stage
+        .sync_tree_with_options(&parent, &LocalListOptions::new())
+        .expect("nested files, directories, stage root, and parent should sync");
 }
