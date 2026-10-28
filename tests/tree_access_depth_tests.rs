@@ -126,7 +126,7 @@ fn lf_n02_depth_boundary_is_inclusive_for_both_access_policies() {
             LocalTreeFinalAccess::ReadOnlyCurrentUser,
         ] {
             let fixture = tempfile::tempdir().expect("fixture");
-            let (_parent, mut stage, _) = staged_tree(&fixture, nested);
+            let (_parent, mut stage, root) = staged_tree(&fixture, nested);
             stage
                 .apply_access_policy_with_options(policy, &LocalListOptions::new().with_max_depth(maximum))
                 .expect("entry at the configured depth is valid");
@@ -134,6 +134,14 @@ fn lf_n02_depth_boundary_is_inclusive_for_both_access_policies() {
                 stage
                     .apply_access_policy(LocalTreeFinalAccess::CurrentUserOnly)
                     .expect("restore writable permissions");
+            }
+            if cfg!(windows) && policy == LocalTreeFinalAccess::ReadOnlyCurrentUser {
+                let leaf = root.join(if nested { "one/leaf" } else { "leaf" });
+                let mut permissions = std::fs::metadata(&leaf)
+                    .expect("read-only leaf metadata should be available")
+                    .permissions();
+                permissions.set_readonly(false);
+                std::fs::set_permissions(&leaf, permissions).expect("clear read-only attribute before cleanup");
             }
             stage.cleanup().expect("cleanup");
         }
