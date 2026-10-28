@@ -43,6 +43,16 @@ fn staged_tree(
     (parent, stage, root)
 }
 
+#[cfg(windows)]
+#[allow(clippy::permissions_set_readonly_false)]
+fn clear_readonly_attribute(path: &Path) {
+    let mut permissions = std::fs::metadata(path)
+        .expect("read-only leaf metadata should be available")
+        .permissions();
+    permissions.set_readonly(false);
+    std::fs::set_permissions(path, permissions).expect("clear read-only attribute before cleanup");
+}
+
 #[test]
 fn lf_n02_empty_tree_at_zero_depth_is_allowed() {
     let fixture = tempfile::tempdir().expect("fixture");
@@ -135,13 +145,10 @@ fn lf_n02_depth_boundary_is_inclusive_for_both_access_policies() {
                     .apply_access_policy(LocalTreeFinalAccess::CurrentUserOnly)
                     .expect("restore writable permissions");
             }
-            if cfg!(windows) && policy == LocalTreeFinalAccess::ReadOnlyCurrentUser {
+            #[cfg(windows)]
+            if policy == LocalTreeFinalAccess::ReadOnlyCurrentUser {
                 let leaf = root.join(if nested { "one/leaf" } else { "leaf" });
-                let mut permissions = std::fs::metadata(&leaf)
-                    .expect("read-only leaf metadata should be available")
-                    .permissions();
-                permissions.set_readonly(false);
-                std::fs::set_permissions(&leaf, permissions).expect("clear read-only attribute before cleanup");
+                clear_readonly_attribute(&leaf);
             }
             stage.cleanup().expect("cleanup");
         }
