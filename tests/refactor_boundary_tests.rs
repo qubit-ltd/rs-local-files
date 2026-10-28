@@ -321,7 +321,7 @@ fn resolution_quota_failure_keeps_structured_measurement_and_no_stage_owner_alia
     assert!(error.temp_recovery().is_none());
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(all(target_os = "linux", feature = "test-support"))]
 #[test]
 fn acl_budget_failure_reports_acl_dimension_and_stage_remains_the_only_cleanup_owner() {
     use qubit_local_files::test_support::install_test_fault;
