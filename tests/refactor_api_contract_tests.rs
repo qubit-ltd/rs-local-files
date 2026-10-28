@@ -25,7 +25,7 @@ fn resource_limit_error_preserves_historical_facts_through_io_conversion() {
         qubit_local_files::error::LocalFileOperation::Metadata,
         None,
         None,
-        std::io::Error::new(std::io::ErrorKind::Other, facts),
+        std::io::Error::other(facts),
     );
     let retained = error
         .resource_limit_error()
