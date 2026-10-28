@@ -43,6 +43,7 @@ pub struct LocalSecurityObservation {
     link_count: Option<u64>,
 }
 impl LocalSecurityObservation {
+    #[allow(dead_code)] // Consumed when T09 connects the platform query backends.
     pub(crate) const fn new(
         identity: Option<super::LocalFileIdentity>,
         filesystem: Option<LocalFileSystemObservation>,
@@ -81,6 +82,7 @@ pub struct LocalFileSystemObservation {
     windows: Option<LocalWindowsFileSystemObservation>,
 }
 impl LocalFileSystemObservation {
+    #[allow(dead_code)] // Constructed by the platform query backends in T03/T04.
     pub(crate) const fn new(
         locality: LocalFileSystemLocality,
         unix: Option<LocalUnixFileSystemObservation>,
@@ -113,6 +115,8 @@ pub struct LocalUnixFileSystemObservation {
     type_name: Option<String>,
 }
 impl LocalUnixFileSystemObservation {
+    #[cfg(unix)]
+    #[allow(dead_code)] // Consumed when T03 connects Unix security queries.
     pub(crate) fn new(
         platform: LocalUnixPlatform,
         type_id: u64,
@@ -144,6 +148,8 @@ pub struct LocalWindowsFileSystemObservation {
     volume_attributes: u32,
 }
 impl LocalWindowsFileSystemObservation {
+    #[cfg(windows)]
+    #[allow(dead_code)] // Consumed when T04 connects Windows security queries.
     pub(crate) fn new(filesystem_name: String, volume_attributes: u32) -> Self {
         Self {
             filesystem_name,
@@ -166,6 +172,7 @@ pub struct LocalAccessObservation {
     windows: Option<LocalWindowsAccessObservation>,
 }
 impl LocalAccessObservation {
+    #[allow(dead_code)] // Constructed by the platform query backends in T03/T04.
     pub(crate) const fn new(
         unix: Option<LocalUnixAccessObservation>,
         windows: Option<LocalWindowsAccessObservation>,
@@ -190,6 +197,8 @@ pub struct LocalUnixAccessObservation {
     default_acl: LocalAclPresence,
 }
 impl LocalUnixAccessObservation {
+    #[cfg(unix)]
+    #[allow(dead_code)] // Consumed when T03 connects Unix security queries.
     pub(crate) const fn new(
         mode: u32,
         owner_is_current_user: bool,
@@ -232,6 +241,8 @@ pub struct LocalWindowsAccessObservation {
     aces: Vec<LocalWindowsAceObservation>,
 }
 impl LocalWindowsAccessObservation {
+    #[cfg(windows)]
+    #[allow(dead_code)] // Consumed when T04 connects Windows security queries.
     pub(crate) fn new(
         owner_sid: String,
         owner_is_current_user: bool,
@@ -292,6 +303,8 @@ pub struct LocalWindowsAceObservation {
     is_decoded: bool,
 }
 impl LocalWindowsAceObservation {
+    #[cfg(windows)]
+    #[allow(dead_code)] // Constructed while T04 decodes Windows ACEs.
     pub(crate) const fn new(
         ace_type: u8,
         flags: u8,

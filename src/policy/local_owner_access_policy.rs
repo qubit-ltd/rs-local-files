@@ -41,6 +41,8 @@ impl LocalOwnerAccessPolicy {
     pub(crate) const fn unix_modes(&self) -> Option<(u32, u32)> {
         self.unix_modes
     }
+    #[cfg(windows)]
+    #[allow(dead_code)] // Consumed by the Windows owner-policy backend in T06.
     pub(crate) const fn windows_masks(&self) -> Option<(u32, u32)> {
         self.windows_masks
     }
