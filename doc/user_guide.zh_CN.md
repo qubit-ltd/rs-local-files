@@ -43,8 +43,7 @@ sealed 临时文件的 `native_path()` 仅对 Host 资源可用；它只是路�
 `LocalPrivacyRequirement::Required`。该保证在创建过程中检查；先创建公开对象再收紧权限不满足
 要求。临时文件可使用 `LocalSealOptions` seal；返回的 `LocalSealedTempFile` 保留只读句柄用于观察
 和清理，但不公开字节流 reader 或可变原生句柄。需要读取字节时，应通过同一 filesystem authority
-重新打开它的命名空间路径。文件同步与命名空间耐久性是两项独立要求：同步文件本身不
-保证后续 rename 已耐久。
+重新打开它的命名空间路径。同步文件数据不代表后续 rename 已耐久。`Required` 的同步范围由操作决定：writer 和文件复制同步文件数据及相关命名空间更新；rename 同步命名空间更新。目录树发布分别用 `file_sync` 表示树中文件的同步要求，用 `durability` 表示发布命名空间的耐久性要求；前者与后者相互独立，`Required` 也不表示任意已有树内容都已同步。
 
 创建目录备份时，可创建 `LocalStagedDirectory`，通过其固定目录句柄填充，并只在需要时显式
 启用验证规则。目录树验证可以拒绝链接、特殊条目或树外硬链接，也可以设置明确的资源预算；
@@ -55,6 +54,8 @@ opaque identity，不含权限句柄；重新操作前须通过同一个 parent 
 `apply_access_policy` 是独立的 `&mut` 操作：`Preserve` 不执行原生修改；另外两种当前用户策略
 只修改经过 identity 复核的文件和目录。如果前面的条目已修改、后续某项失败，应检查错误中的
 `access_state()`；`Mixed` 表示权限只转换了一部分，stage 仍由调用方持有。库不会声称整棵树可回滚。
+
+创建 stage 时会记录新目录的 identity，并在接管前再次核对。Linux/Unix 竞态测试确认：若创建期间随机名称被替换，操作会拒绝接管替换目录。若其他参与者仍能修改父目录，后续按名称操作依然可能发生竞态。
 
 `verify_entries()` 会把观测到的条目与 expected 集合精确比较；expected 集合应包含链接条目本身，
 不要把通过 alias 可见的后代也加入集合。重复 expected path 返回 `InvalidOptions`。设置有限深度时，
@@ -328,9 +329,13 @@ assert_eq!(text, r#"{"complete":true}"#);
 
 ## 条件写入
 
-能力查询只是预检提示，不保证底层文件系统一定接受原生操作。Host 和 Rooted 在 Unix、Windows
-上都支持 `Absent`。Unix 的 Host 和 Rooted 都支持 `Content`；Windows Host 仅在
-`PreserveExisting` 下支持 `Content`，Windows Rooted `Content` 为 `Unsupported`。
+能力查询只是预检提示，不保证底层文件系统一定接受原生操作。条件写入支持范围如下：
+
+| 平台 | Host | Rooted |
+| --- | --- | --- |
+| Linux / macOS | `Absent`、`Content` | `Absent`、`Content` |
+| Windows | `Absent`；`Content` 需使用 `PreserveExisting` 元数据策略 | `Absent`；`Content` 不支持 |
+| Android / FreeBSD | 仅编译检查；未声明协议支持 | 仅编译检查；未声明协议支持 |
 Host `Content` 配合 `UseStaging`、`Append`、`Content` 配合 `CreateNew`，以及 Required
 namespace durability 均不支持。应用需要展示能力提示时可查询
 `LocalDirectoryHandle::conditional_support`，但仍须处理打开和提交错误。
@@ -405,8 +410,7 @@ assert_eq!(recovered, b"B");
 
 `LocalWritePrecondition::Absent` 用于仅创建、不覆盖的发布；只有后端支持安全的
 no-overwrite 安装时才可用。`Content(digest)` 必须搭配 `CreateOrReplace`，不能搭配
-`Append`。`LocalWriteOptions` 还控制原子性与耐久性。要求设为 `Required` 时，后端
-无法满足就会返回 `Err`。耐久性设为 `Preferred` 时，若同步不可用，结果会报告较弱的
+`Append`。`LocalWriteOptions` 还控制原子性与耐久性。对于 writer，`Required` 要求同步文件数据及相关命名空间更新；对于 rename，它要求同步命名空间更新。后端无法满足所选操作的要求时会返回 `Err`。耐久性设为 `Preferred` 时，若同步不可用，结果会报告较弱的
 耐久性；原子性要求不会降级为普通覆盖。
 
 默认 `NotRequired` 会跳过清理阶段的命名空间同步。`Preferred` 和 `Required` 仍会在删除
@@ -1010,7 +1014,7 @@ Host 请求未设置有限预算时保持原行为。需要对 observed read 强
 `LocalResolutionPolicy` 提供纯校验回调，检查普通路径组件和原始符号链接目标。回调能区分正在打开
 Rooted、还是从既有 authority 向下解析，也能区分名称来自调用方输入还是链接目标。对应 metadata
 查询或 open 之前会调用校验；回调不得执行 I/O，也不能依赖固定调用次数。既有组件 deny-name
-策略仍单独生效，并与它组合。
+策略仍单独生效，并与它组合。该回调约束 resolver 实际访问的组件，不会自动成为递归遍历的全树拒绝清单：walker 或 tree copy 发现一个子项名称，本身不保证对该名称调用此回调。若要检查完整暂存树，应使用 expected entries 或显式拒绝规则进行树验证。
 
 不同接口的路径语义不同：
 
@@ -1045,6 +1049,9 @@ Unix 使用 `with_unix_modes(directory_mode, file_mode)`，Windows 使用
 macOS 上尚未实现精确 Unix owner-access ACL 验证，因此需要该验证的 owner policy 会返回
 `Unsupported`。单独设置 mode bits 不表示扩展 ACL 已排除其他身份；库不声称在未经验证的 Darwin ACL
 上实现了 `CurrentUserOnly`。
+
+Windows 的访问转换尚无原生运行验证。实现设置 `read_only=false` 时只恢复 DACL，不会清除已有的
+`FILE_ATTRIBUTE_READONLY`；因此恢复当前用户 ACL 不保证一个原先带只读属性的文件可重新写入。
 
 Windows Rooted 条件 `Content` 发布仍为 `Unsupported`。Windows 尚未证明所需的相对目录发布和恢复协议，
 不能把 Unix 支持矩阵当成 Windows 原生证据。
@@ -1126,8 +1133,7 @@ authority 时缓存该快照。`scope()` 供集成层区分两种命名空间；
 
 ## 测试与性能基线
 
-项目使用 registry 依赖，`Cargo.lock` 固定解析版本与校验和。下游契约脚本以 `--locked`
-检查协调的 local-files、fs、fs-local 和 mime 依赖闭包。性能测量在 correctness tests 之外执行：
+依赖版本和校验和由 `Cargo.lock` 固定。可用 `cargo test --locked` 验证当前 crate；GitHub Actions 还会按 CI 配置检查当前 crate 的 feature 组合与平台。adapter 的兼容性和集成由 adapter 仓库或独立集成 job 验证。性能测量应与正确性测试分开执行：
 
 ```bash
 # 编译 Criterion benchmark

@@ -145,7 +145,13 @@ provider registration, application authorization, or async I/O.
 Request `LocalPrivacyRequirement::Required` at creation when a cache or
 temporary artifact must be private; tightening permissions after public
 creation does not meet that requirement. File sync and namespace durability
-are separate. Tree publication preserves legal links by default, applies only
+are separate: for writers and file copies, durability requires synchronizing
+file data and relevant namespace updates; for rename, it covers namespace
+updates.
+Tree publication reports file synchronization through `file_sync` and its
+namespace requirement through `durability`; `Required` does not mean that
+arbitrary existing tree contents were synchronized. Tree publication preserves
+legal links by default, applies only
 explicitly requested validation rules, and reports mutation separately from
 publication. A tree recovery location stores a namespace path and optional
 opaque identity, not an authority; reopen through the same parent and verify
@@ -315,8 +321,16 @@ separate integration job. This crate makes no runtime
 guarantee for those targets. `capabilities()` reports whether this build
 implements each complete operation protocol; it does not probe a particular
 runtime filesystem or claim that the underlying hardware has persisted data.
+Conditional-write support is operation- and authority-specific:
+
+| Platform | Host | Rooted |
+| --- | --- | --- |
+| Linux / macOS | `Absent`, `Content` | `Absent`, `Content` |
+| Windows | `Absent`, `Content` with `PreserveExisting` metadata | `Absent`; `Content` unsupported |
+| Android / FreeBSD | Compile check only; no protocol claimed | Compile check only; no protocol claimed |
+
 Required atomicity or durability is rejected before namespace changes when the
-protocol cannot be met.
+selected operation protocol cannot be met.
 Atomic rename, atomic replacement, the ability to attempt atomic temporary
 persistence, durable rename, durable file copy, durable writer publication,
 and durable temporary-file persistence are reported as independent

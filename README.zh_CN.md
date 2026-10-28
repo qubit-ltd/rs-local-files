@@ -133,7 +133,7 @@ let saved = writer.commit()?; // 检查 saved.digest()、cleanup_errors() 和 re
 | `path::LocalFileNames` / `path::LocalPaths` | 不丢失 UTF-8 以外文件名信息的原生文件名和词法路径工具。 |
 
 缓存或临时产物要求私有时，应在创建时请求 `LocalPrivacyRequirement::Required`；先公开创建再
-收紧权限不满足要求。文件同步与命名空间耐久性相互独立。目录树默认保留合法链接，只应用显式
+收紧权限不满足要求。耐久性按操作定义同步范围：writer 和文件复制同步文件数据及相关命名空间更新，rename 同步命名空间更新。目录树用 `file_sync` 单独报告文件同步，并用 `durability` 表示发布命名空间的要求；`Required` 不代表任意已有树内容都已同步。目录树默认保留合法链接，只应用显式
 选择的验证规则，并分别报告 mutation 与 publication。树恢复位置只保存命名空间路径和可选
 opaque identity，不含 authority；操作前应通过同一个 parent 重新打开并验证身份。这与 digest
 条件写入恢复文件不同，后者由调用方持有且不会自动删除。Windows Rooted `Content`，以及 Host
@@ -246,7 +246,15 @@ T3/T4 的 Windows 清理和条件写入行为，以及 LF-09 私有资源和 LF-
 adapter 兼容性由 adapter 仓库或独立集成 job 负责。FreeBSD 和 Android 仅编译检查配置路径；
 本 crate 不承诺这些目标上的运行时保证。`capabilities()` 只报告当前 build 是否实现了
 对应的完整操作协议，不会探测具体的运行时文件系统，也不声称证明底层硬件已经持久化数据；无法满足要求的原子性或耐久性时，
-会在命名空间变更前拒绝操作。
+会在命名空间变更前拒绝操作。条件写入支持范围取决于平台和 authority：
+
+| 平台 | Host | Rooted |
+| --- | --- | --- |
+| Linux / macOS | `Absent`、`Content` | `Absent`、`Content` |
+| Windows | `Absent`；`Content` 需使用 `PreserveExisting` 元数据策略 | `Absent`；`Content` 不支持 |
+| Android / FreeBSD | 仅编译检查；不声明协议支持 | 仅编译检查；不声明协议支持 |
+
+所选操作协议无法满足 Required 原子性或耐久性时，会在命名空间变更前拒绝操作。
 原子 rename、原子 replace、尝试临时资源原子持久化的能力、耐久 rename、耐久文件复制、
 耐久 writer 发布和耐久临时文件持久化均独立报告，因为各平台对这些协议的支持不同。
 `can_attempt_atomic_temp_persist()` 只描述实现能力，不承诺任意 source/target 都能原子完成；

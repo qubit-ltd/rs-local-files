@@ -56,9 +56,13 @@ and tightening permissions later does not satisfy it. A temporary file can be
 sealed with `LocalSealOptions`; the returned `LocalSealedTempFile` retains a
 read-only handle for observation and cleanup, but exposes neither a byte-stream
 reader nor a mutable native handle. Reopen its namespace path through the same
-filesystem authority when bytes must be read. File
-sync and namespace durability are separate requirements: syncing the file does
-not by itself promise that a later rename is durable.
+filesystem authority when bytes must be read. File sync and namespace durability
+are separate requirements: syncing file data does not by itself make a later
+rename durable. `Required` follows the selected operation's protocol: writers
+and file copies synchronize data plus relevant namespace updates, while rename
+synchronizes namespace updates. Tree publication keeps `file_sync` for tree-file
+data separate from `durability` for publication namespace updates; `Required`
+does not imply syncing arbitrary existing tree contents.
 
 For a directory backup, create a `LocalStagedDirectory`, populate it through
 its fixed directory handle, and opt into validation rules only when needed.
@@ -75,6 +79,12 @@ change, while the two current-user policies update only identity-checked files
 and directories. If an item fails after earlier entries changed, inspect the
 error's `access_state()`; `Mixed` reports partial conversion and the stage
 remains with the caller. The library does not claim to roll back a whole tree.
+
+Stage creation captures the new directory's identity and checks it again before
+adopting the staged owner. Linux/Unix race tests confirm that replacing the
+generated name during creation is rejected rather than adopted. This does not
+remove races in later name-based operations when another actor can mutate the
+parent directory.
 
 `verify_entries()` compares the observed entries with the expected set exactly;
 include each link entry, but do not add descendants reachable through an alias.
@@ -395,10 +405,15 @@ symbolic link.
 ## Conditional write
 
 The capability query is a preflight hint, not a promise that the underlying
-filesystem will accept the native operation. `Absent` is supported on Unix and
-Windows for Host and Rooted authorities. `Content` is supported on Unix for
-Host and Rooted. On Windows, Host `Content` is supported only with
-`PreserveExisting`; Rooted `Content` is `Unsupported`. Host `Content` with
+filesystem will accept the native operation. Conditional-write support is:
+
+| Platform | Host | Rooted |
+| --- | --- | --- |
+| Linux / macOS | `Absent`, `Content` | `Absent`, `Content` |
+| Windows | `Absent`; `Content` with `PreserveExisting` metadata | `Absent`; `Content` unsupported |
+| Android / FreeBSD | Compile-checked only; protocol support not declared | Compile-checked only; protocol support not declared |
+
+Host `Content` with
 `UseStaging`, `Append`, `Content` with `CreateNew`, and required namespace
 durability are unsupported. Check `LocalDirectoryHandle::conditional_support`
 when the application needs to present a capability hint, and still handle
@@ -478,8 +493,10 @@ assert_eq!(recovered, b"B");
 `LocalWritePrecondition::Absent` is for create-only publication and is available
 only where the backend can install without overwriting a concurrently created
 entry. `Content(digest)` requires `CreateOrReplace`; `Append` is invalid.
-`LocalWriteOptions` also controls atomicity and durability. `Required` fails with
-`Err` when the selected backend cannot meet the requirement. `Preferred` may
+`LocalWriteOptions` also controls atomicity and durability. For a writer,
+`Required` requires synchronization of file data and relevant namespace updates;
+for rename it applies to namespace updates. It fails with `Err` when the selected
+backend cannot meet the requirement. `Preferred` may
 report weaker durability when synchronization is unavailable; it never downgrades
 the requested atomic publication to an ordinary overwrite.
 
@@ -1243,7 +1260,12 @@ descending from an established authority, and whether a component came from
 the caller or a link target. The hook runs before the corresponding metadata
 query or open; it must not perform I/O or be relied on for a fixed call count.
 The existing component deny-name policy remains a separate restriction and is
-combined with the resolution policy.
+combined with the resolution policy. The hook applies when a resolver accesses
+a component; recursive discovery does not turn it into a whole-tree reject
+list. In particular, discovering a child name during walking or tree copying
+does not by itself promise that the policy callback runs for that name. Use
+explicit tree validation with expected entries or rejection rules when the
+application needs a complete staged-tree check.
 
 Path handling depends on which interface receives the path:
 
@@ -1294,6 +1316,11 @@ On macOS, exact Unix owner-access verification is not implemented, so an owner
 policy that requires it returns `Unsupported`. Mode bits alone are not a claim
 that extended ACLs exclude other identities; the library does not claim
 `CurrentUserOnly` access against an unverified Darwin ACL.
+
+Windows access transitions have not been verified on a native runner. Setting
+`read_only=false` restores the DACL but does not clear a pre-existing
+`FILE_ATTRIBUTE_READONLY`; restoring the current-user ACL therefore does not
+guarantee that a file which already had that attribute becomes writable.
 
 ## Errors and Diagnostics
 

@@ -9,6 +9,12 @@
 
 /// Required storage durability for a completed operation.
 ///
+/// `Required` makes synchronization failure fail the operation. `Preferred`
+/// attempts synchronization but allows the operation to succeed if native
+/// synchronization fails. `NotRequired` skips synchronization. The guarantee
+/// applies only to synchronization points performed by that operation and
+/// follows the platform's synchronization semantics.
+///
 /// # Examples
 ///
 /// ```
