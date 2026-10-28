@@ -15,6 +15,7 @@ use std::io::Result;
 #[cfg(windows)]
 use std::os::windows::fs::FileTypeExt;
 use std::path::Path;
+use std::time::Instant;
 
 use super::copy_dir_result::CopyDirResult;
 use super::error::copy_dir_error;
@@ -25,6 +26,9 @@ use crate::LocalCopyConflictPolicy;
 use crate::LocalCopyDirStage;
 use crate::LocalCopyDirStats;
 use crate::LocalCopyTypeConflictPolicy;
+use crate::LocalDeleteOptions;
+use crate::LocalSymlinkPolicy;
+use crate::error::LocalFileEffectState;
 use crate::local::CopyDestinationAction;
 use crate::local::decide_copy_destination;
 #[cfg(windows)]
@@ -141,32 +145,62 @@ pub(super) fn destination_metadata_if_exists(dst: &Path) -> Result<Option<fs::Me
 /// # Errors
 ///
 /// Returns the I/O error reported while inspecting or removing the directory.
-pub(super) fn remove_destination_directory_if_unchanged(dst: &Path) -> Result<()> {
+pub(super) fn remove_destination_directory_if_unchanged(
+    dst: &Path,
+    options: &LocalDeleteOptions,
+    symlink_policy: LocalSymlinkPolicy,
+    started_at: Instant,
+) -> std::result::Result<(), (Error, Option<crate::LocalCopyFailureState>)> {
     match inspect_destination_metadata(dst) {
         Ok(metadata) if is_real_directory(&metadata) => {
             #[cfg(feature = "test-support")]
             if test_support::is_enabled("copy-destination-remove-after-child") {
-                let child = fs::read_dir(dst)?
+                let child = fs::read_dir(dst)
+                    .map_err(|error| (error, None))?
                     .next()
-                    .transpose()?
-                    .ok_or_else(|| Error::other("injected partial destination removal requires a child"))?;
-                if child.file_type()?.is_dir() {
-                    fs::remove_dir_all(child.path())?;
+                    .transpose()
+                    .map_err(|error| (error, None))?
+                    .ok_or_else(|| {
+                        (
+                            Error::other("injected partial destination removal requires a child"),
+                            None,
+                        )
+                    })?;
+                if child.file_type().map_err(|error| (error, None))?.is_dir() {
+                    fs::remove_dir_all(child.path()).map_err(|error| (error, None))?;
                 } else {
-                    fs::remove_file(child.path())?;
+                    fs::remove_file(child.path()).map_err(|error| (error, None))?;
                 }
-                return Err(super::destination_removal_failure::mark_attempted(Error::other(
-                    "injected failure after partial destination removal",
-                )));
+                return Err((
+                    super::destination_removal_failure::mark_attempted(Error::other(
+                        "injected failure after partial destination removal",
+                    )),
+                    Some(crate::LocalCopyFailureState::Indeterminate),
+                ));
             }
-            fs::remove_dir_all(dst).map_err(super::destination_removal_failure::mark_attempted)
+            crate::local::internal::host_local_file_system::HostLocalFileSystem::delete_directory_with_policy(
+                dst,
+                options,
+                symlink_policy,
+                started_at,
+            )
+            .map(|_| ())
+            .map_err(|error| {
+                let state = match error.effect_state() {
+                    Some(LocalFileEffectState::PartiallyApplied | LocalFileEffectState::Applied) => {
+                        crate::LocalCopyFailureState::PartiallyPublished
+                    }
+                    Some(LocalFileEffectState::Indeterminate) | None => crate::LocalCopyFailureState::Indeterminate,
+                    Some(LocalFileEffectState::Unchanged) => crate::LocalCopyFailureState::Unchanged,
+                };
+                (error.into_io_error(), Some(state))
+            })
         }
         Ok(_) => Ok(()),
         Err(error) if error.kind() == ErrorKind::NotFound => Ok(()),
-        Err(error) => Err(error),
+        Err(error) => Err((error, None)),
     }
 }
-
 /// Prepares an existing entry for use as a directory destination.
 ///
 /// # Parameters
@@ -335,7 +369,13 @@ mod tests {
         std::fs::create_dir(&destination).expect("destination should be created");
         std::fs::write(destination.join("entry"), b"content").expect("child should be written");
 
-        remove_destination_directory_if_unchanged(&destination).expect("real directory should be removed");
+        remove_destination_directory_if_unchanged(
+            &destination,
+            &crate::LocalDeleteOptions::new().with_recursive(),
+            crate::LocalSymlinkPolicy::Reject,
+            std::time::Instant::now(),
+        )
+        .expect("real directory should be removed");
 
         assert!(!destination.exists());
     }

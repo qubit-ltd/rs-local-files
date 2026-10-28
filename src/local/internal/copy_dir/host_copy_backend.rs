@@ -202,7 +202,13 @@ impl CopyTreeBackend for HostCopyBackend {
                     frame.depth,
                 );
             } else {
-                super::staged_copy::copy_symlink_with_options(source_path, destination_path, self.options, stats)?;
+                super::staged_copy::copy_symlink_with_options(
+                    source_path,
+                    destination_path,
+                    self.options,
+                    stats,
+                    budget,
+                )?;
             }
         } else {
             copy_file_with_options(source_path, destination_path, self.options, stats, budget)?;

@@ -10,6 +10,7 @@
 mod copy_dir_frame;
 mod copy_dir_result;
 mod destination;
+#[cfg(feature = "test-support")]
 mod destination_removal_failure;
 mod error;
 mod facade;

@@ -17,7 +17,6 @@ use super::copy_dir_result::CopyDirResult;
 use super::destination::destination_metadata_if_exists;
 use super::destination::existing_file_destination_should_be_skipped;
 use super::destination::remove_destination_directory_if_unchanged;
-use super::destination_removal_failure::was_attempted;
 use super::error::copy_dir_error;
 use super::error::copy_dir_error_with_staging;
 use super::error::record_copied_file;
@@ -32,8 +31,8 @@ use crate::LocalCopyConflictPolicy;
 use crate::LocalCopyDirOptions;
 use crate::LocalCopyDirStage;
 use crate::LocalCopyDirStats;
-use crate::LocalCopyFailureState;
 use crate::LocalDurabilityRequirement;
+use crate::LocalSymlinkPolicy;
 use crate::local::CopyBudget;
 use crate::local::CopyDestinationAction;
 use crate::local::decide_copy_destination;
@@ -130,10 +129,14 @@ pub(crate) fn copy_file_with_options(
     if !commit_staged_copy_file(
         src,
         dst,
-        options.conflict_policy(),
-        destination_directory_requires_removal,
+        StagedCopyCommitOptions {
+            conflict: options.conflict_policy(),
+            remove_destination_directory: destination_directory_requires_removal,
+            symlink_policy: options.symlink_policy(),
+        },
         stats,
         staged_file,
+        budget,
     )? {
         return with_copy_context(
             record_skipped_file(stats),
@@ -178,6 +181,7 @@ pub(crate) fn copy_symlink_with_options(
     dst: &Path,
     options: LocalCopyDirOptions,
     stats: &mut LocalCopyDirStats,
+    budget: &CopyBudget,
 ) -> CopyDirResult<()> {
     let destination_metadata = with_copy_context(
         destination_metadata_if_exists(dst),
@@ -211,19 +215,21 @@ pub(crate) fn copy_symlink_with_options(
         );
     }
     if action == CopyDestinationAction::Replace {
+        let (delete_options, started_at) = budget.deletion_options();
         let removal = match destination_metadata.as_ref() {
-            Some(metadata) if is_real_directory(metadata) => remove_destination_directory_if_unchanged(dst),
+            Some(metadata) if is_real_directory(metadata) => {
+                remove_destination_directory_if_unchanged(dst, &delete_options, options.symlink_policy(), started_at)
+            }
             #[cfg(windows)]
             Some(metadata) if metadata.file_type().is_symlink_dir() => {
-                crate::local::internal::file_move::remove_directory_symlink(dst)
+                crate::local::internal::file_move::remove_directory_symlink(dst).map_err(|error| (error, None))
             }
-            _ => std::fs::remove_file(dst),
+            _ => std::fs::remove_file(dst).map_err(|error| (error, None)),
         };
-        removal.map_err(|source| {
-            let attempted = was_attempted(&source);
+        removal.map_err(|(source, state)| {
             let error = copy_dir_error(LocalCopyDirStage::PrepareDestination, src, dst, stats, source);
-            if attempted {
-                error.with_failure_state(LocalCopyFailureState::Indeterminate)
+            if let Some(state) = state {
+                error.with_failure_state(state)
             } else {
                 error
             }
@@ -411,19 +417,27 @@ fn sync_staged_file(staged_file: &StagedFile) -> std::io::Result<()> {
 ///
 /// Returns a structured error when destination removal, commit, or staging
 /// cleanup fails.
+struct StagedCopyCommitOptions {
+    conflict: LocalCopyConflictPolicy,
+    remove_destination_directory: bool,
+    symlink_policy: LocalSymlinkPolicy,
+}
+
 fn commit_staged_copy_file(
     src: &Path,
     dst: &Path,
-    conflict: LocalCopyConflictPolicy,
-    remove_destination_directory: bool,
+    options: StagedCopyCommitOptions,
     stats: &LocalCopyDirStats,
     mut staged_file: StagedFile,
+    budget: &CopyBudget,
 ) -> CopyDirResult<bool> {
-    if remove_destination_directory {
+    if options.remove_destination_directory {
         // Stage source bytes before deleting a conflicting directory. The
         // second type check ensures a racing file is left for file policy.
-        if let Err(source) = remove_destination_directory_if_unchanged(dst) {
-            let attempted = was_attempted(&source);
+        let (delete_options, started_at) = budget.deletion_options();
+        if let Err((source, state)) =
+            remove_destination_directory_if_unchanged(dst, &delete_options, options.symlink_policy, started_at)
+        {
             let error = copy_dir_error_with_staging(
                 LocalCopyDirStage::PrepareDestination,
                 src,
@@ -432,15 +446,15 @@ fn commit_staged_copy_file(
                 source,
                 &mut staged_file,
             );
-            return Err(if attempted {
-                error.with_failure_state(LocalCopyFailureState::Indeterminate)
+            return Err(if let Some(state) = state {
+                error.with_failure_state(state)
             } else {
                 error
             });
         }
     }
 
-    let commit_result = match conflict {
+    let commit_result = match options.conflict {
         LocalCopyConflictPolicy::Fail | LocalCopyConflictPolicy::Skip => {
             move_file_without_replacing(staged_file.path(), dst)
         }
@@ -451,7 +465,7 @@ fn commit_staged_copy_file(
             staged_file.disarm();
             Ok(true)
         }
-        Err(error) if conflict == LocalCopyConflictPolicy::Skip && error.kind() == ErrorKind::AlreadyExists => {
+        Err(error) if options.conflict == LocalCopyConflictPolicy::Skip && error.kind() == ErrorKind::AlreadyExists => {
             let temporary_path = staged_file.path().to_path_buf();
             if let Err(source) = staged_file.cleanup() {
                 return Err(
