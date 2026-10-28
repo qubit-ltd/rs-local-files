@@ -61,6 +61,24 @@ fn owner_mode(policy: &LocalOwnerAccessPolicy, directory: bool) -> io::Result<u3
     Ok(if directory { directory_mode } else { file_mode })
 }
 
+fn native_mode(mode: u32) -> io::Result<libc::mode_t> {
+    libc::mode_t::try_from(mode).map_err(|_| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "owner mode does not fit the native mode type",
+        )
+    })
+}
+
+fn openat_mode(mode: u32) -> io::Result<libc::c_uint> {
+    libc::c_uint::try_from(mode).map_err(|_| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "owner mode does not fit the openat variadic argument type",
+        )
+    })
+}
+
 pub(crate) fn verify_owner_access(file: &File, directory: bool, policy: &LocalOwnerAccessPolicy) -> io::Result<()> {
     let expected = owner_mode(policy, directory)?;
     ensure_acl_backend_supported()?;
@@ -73,7 +91,7 @@ pub(crate) fn verify_owner_access(file: &File, directory: bool, policy: &LocalOw
 }
 
 pub(crate) fn apply_owner_access(file: &File, directory: bool, policy: &LocalOwnerAccessPolicy) -> io::Result<()> {
-    let mode = owner_mode(policy, directory)?;
+    let mode = native_mode(owner_mode(policy, directory)?)?;
     ensure_acl_backend_supported()?;
     verify_owner_and_type(file, directory)?;
     verify_no_extra_acl(file, directory)?;
@@ -95,6 +113,8 @@ pub(crate) fn create_owner_entry_at(
         Ok(mode) => mode,
         Err(source) => return Err(pre_create_error(source)),
     };
+    let native_mode = native_mode(mode).map_err(pre_create_error)?;
+    let openat_mode = openat_mode(mode).map_err(pre_create_error)?;
     if let Err(source) = ensure_acl_backend_supported() {
         return Err(pre_create_error(source));
     }
@@ -107,12 +127,12 @@ pub(crate) fn create_owner_entry_at(
         Err(source) => return Err(pre_create_error(source)),
     };
     if directory {
-        if unsafe { libc::mkdirat(parent.as_raw_fd(), name.as_ptr(), mode as libc::mode_t) } < 0 {
+        if unsafe { libc::mkdirat(parent.as_raw_fd(), name.as_ptr(), native_mode) } < 0 {
             return Err(pre_create_error(io::Error::last_os_error()));
         }
     } else {
         let descriptor = unsafe {
-            libc::openat(parent.as_raw_fd(), name.as_ptr(), libc::O_RDWR | libc::O_CREAT | libc::O_EXCL | libc::O_NOFOLLOW | libc::O_CLOEXEC, mode as libc::mode_t)
+            libc::openat(parent.as_raw_fd(), name.as_ptr(), libc::O_RDWR | libc::O_CREAT | libc::O_EXCL | libc::O_NOFOLLOW | libc::O_CLOEXEC, openat_mode)
         };
         if descriptor < 0 {
             return Err(pre_create_error(io::Error::last_os_error()));
@@ -149,7 +169,7 @@ fn finish_owner_creation(
 ) -> Result<File, NativePrivateCreateError> {
     let identity = identity_for_file(&file).ok();
     let result = (|| {
-        let mode = owner_mode(policy, directory)?;
+        let mode = native_mode(owner_mode(policy, directory)?)?;
         if unsafe { libc::fchmod(file.as_raw_fd(), mode) } < 0 {
             return Err(io::Error::last_os_error());
         }
@@ -188,26 +208,30 @@ fn verify_no_extra_acl(file: &File, directory: bool) -> io::Result<()> {
                 return Err(error);
             }
         }
+        Ok(())
     }
     #[cfg(not(target_os = "linux"))]
     {
         let _ = (file, directory);
-        return Err(io::Error::new(
+        Err(io::Error::new(
             io::ErrorKind::Unsupported,
             "exact Unix owner ACL verification is not implemented on this platform",
-        ));
+        ))
     }
-    Ok(())
 }
 
 fn ensure_acl_backend_supported() -> io::Result<()> {
     #[cfg(not(target_os = "linux"))]
-    return Err(io::Error::new(
-        io::ErrorKind::Unsupported,
-        "exact Unix owner ACL verification is not implemented on this platform",
-    ));
+    {
+        Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "exact Unix owner ACL verification is not implemented on this platform",
+        ))
+    }
     #[cfg(target_os = "linux")]
-    Ok(())
+    {
+        Ok(())
+    }
 }
 
 pub(crate) fn create_private_file_at(parent: &File, name: &OsStr) -> Result<File, NativePrivateCreateError> {

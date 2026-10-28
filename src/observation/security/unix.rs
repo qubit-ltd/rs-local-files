@@ -4,11 +4,13 @@ use crate::error::{
     LocalResourceLimitError,
 };
 use crate::observation::{
-    LocalAccessObservation, LocalAclPresence, LocalFileIdentity, LocalFileSystemLocality,
-    LocalFileSystemObservation, LocalObservationRequirement, LocalSecurityObservation,
-    LocalSecurityObservationOptions, LocalUnixAccessObservation, LocalUnixFileSystemObservation,
-    LocalUnixPlatform,
+    LocalAccessObservation, LocalFileIdentity, LocalFileSystemObservation, LocalObservationRequirement,
+    LocalSecurityObservation, LocalSecurityObservationOptions,
 };
+#[cfg(target_os = "linux")]
+use crate::observation::{LocalAclPresence, LocalUnixAccessObservation};
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+use crate::observation::{LocalFileSystemLocality, LocalUnixFileSystemObservation, LocalUnixPlatform};
 use std::fs::File;
 use std::io;
 use std::os::fd::AsRawFd;
