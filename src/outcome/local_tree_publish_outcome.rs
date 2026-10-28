@@ -58,7 +58,8 @@ impl LocalTreePublishOutcome {
     pub const fn access_state(&self) -> LocalTreeAccessState {
         self.access_state
     }
-    /// Returns the exact owner policy confirmed before publication, when applied.
+    /// Returns the exact owner policy confirmed before publication, when
+    /// applied.
     pub const fn owner_access_policy(&self) -> Option<&LocalOwnerAccessPolicy> {
         self.owner_access_policy.as_ref()
     }

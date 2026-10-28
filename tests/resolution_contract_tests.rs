@@ -1,39 +1,52 @@
-use qubit_local_files::LocalFileSystem;
-use qubit_local_files::error::LocalFileErrorKind;
-use qubit_local_files::options::{LocalResolutionLimits, LocalRootOpenOptions};
-use qubit_local_files::options::{LocalDirectoryOpenOptions, LocalObservedReadOptions};
-use qubit_local_files::directory::{LocalResolutionOrigin, LocalResolutionPolicy, LocalResolutionScope};
-use qubit_local_files::error::LocalFileOperation;
-use qubit_local_files::{LocalFileError, LocalResult};
+// =============================================================================
+//    Copyright (c) 2025 - 2026 Haixing Hu.
+//
+//    SPDX-License-Identifier: Apache-2.0
+//
+//    Licensed under the Apache License, Version 2.0.
+// =============================================================================
+
 use std::ffi::OsStr;
 use std::path::Path;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+use std::sync::Mutex;
+
+use qubit_local_files::LocalFileError;
+use qubit_local_files::LocalFileSystem;
+use qubit_local_files::LocalResult;
+use qubit_local_files::directory::LocalResolutionOrigin;
+use qubit_local_files::directory::LocalResolutionPolicy;
+use qubit_local_files::directory::LocalResolutionScope;
+use qubit_local_files::error::LocalFileErrorKind;
+use qubit_local_files::error::LocalFileOperation;
+use qubit_local_files::options::LocalDirectoryOpenOptions;
+use qubit_local_files::options::LocalObservedReadOptions;
+use qubit_local_files::options::LocalResolutionLimits;
+use qubit_local_files::options::LocalRootOpenOptions;
 
 #[cfg(unix)]
 #[test]
 fn rooted_filesystem_can_open_the_native_root_directory() {
-    LocalFileSystem::rooted(Path::new("/"))
-        .expect("the native root directory should open as a Rooted filesystem");
+    LocalFileSystem::rooted(Path::new("/")).expect("the native root directory should open as a Rooted filesystem");
 }
 
 #[derive(Debug)]
 struct TargetRecorder(Arc<Mutex<Vec<(String, LocalResolutionScope)>>>);
 
 impl LocalResolutionPolicy for TargetRecorder {
-    fn validate_component(
-        &self,
-        _: &OsStr,
-        _: LocalResolutionScope,
-        _: LocalResolutionOrigin,
-    ) -> LocalResult<()> {
+    fn validate_component(&self, _: &OsStr, _: LocalResolutionScope, _: LocalResolutionOrigin) -> LocalResult<()> {
         Ok(())
     }
 
     fn validate_symlink_target(&self, target: &Path, scope: LocalResolutionScope) -> LocalResult<()> {
-        self.0.lock().expect("hook record should be available").push((
-            target.to_string_lossy().into_owned(), scope,
-        ));
-        Err(LocalFileError::new(LocalFileErrorKind::PermissionDenied, LocalFileOperation::OpenRoot))
+        self.0
+            .lock()
+            .expect("hook record should be available")
+            .push((target.to_string_lossy().into_owned(), scope));
+        Err(LocalFileError::new(
+            LocalFileErrorKind::PermissionDenied,
+            LocalFileOperation::OpenRoot,
+        ))
     }
 }
 
@@ -48,7 +61,10 @@ impl LocalResolutionPolicy for RejectComponent {
         _: LocalResolutionOrigin,
     ) -> LocalResult<()> {
         if component == OsStr::new(self.0) {
-            return Err(LocalFileError::new(LocalFileErrorKind::PermissionDenied, LocalFileOperation::List));
+            return Err(LocalFileError::new(
+                LocalFileErrorKind::PermissionDenied,
+                LocalFileOperation::List,
+            ));
         }
         Ok(())
     }
@@ -87,19 +103,16 @@ struct RejectRawNtTarget(Arc<Mutex<Option<String>>>);
 
 #[cfg(windows)]
 impl LocalResolutionPolicy for RejectRawNtTarget {
-    fn validate_component(
-        &self,
-        _: &OsStr,
-        _: LocalResolutionScope,
-        _: LocalResolutionOrigin,
-    ) -> LocalResult<()> {
+    fn validate_component(&self, _: &OsStr, _: LocalResolutionScope, _: LocalResolutionOrigin) -> LocalResult<()> {
         Ok(())
     }
 
     fn validate_symlink_target(&self, target: &Path, _: LocalResolutionScope) -> LocalResult<()> {
-        *self.0.lock().expect("raw target record should be available") =
-            Some(target.to_string_lossy().into_owned());
-        Err(LocalFileError::new(LocalFileErrorKind::PermissionDenied, LocalFileOperation::OpenRoot))
+        *self.0.lock().expect("raw target record should be available") = Some(target.to_string_lossy().into_owned());
+        Err(LocalFileError::new(
+            LocalFileErrorKind::PermissionDenied,
+            LocalFileOperation::OpenRoot,
+        ))
     }
 }
 
@@ -111,9 +124,8 @@ fn zero_hops_rejects_a_real_link_during_opening_root() {
     let tmp = tempfile::tempdir().expect("temporary directory should be created");
     std::fs::create_dir(tmp.path().join("real")).expect("target directory should be created");
     symlink("real", tmp.path().join("alias")).expect("symbolic link should be created");
-    let options = LocalRootOpenOptions::new().with_resolution_limits(
-        LocalResolutionLimits::new().with_max_symlink_hops(0),
-    );
+    let options =
+        LocalRootOpenOptions::new().with_resolution_limits(LocalResolutionLimits::new().with_max_symlink_hops(0));
 
     let error = LocalFileSystem::rooted_with_options(&tmp.path().join("alias"), &options)
         .expect_err("zero hops must reject the root symlink");
@@ -129,20 +141,21 @@ fn root_target_byte_limit_accepts_exact_limit_and_rejects_next_byte() {
     std::fs::create_dir(tmp.path().join("real")).expect("target directory should be created");
     symlink("real", tmp.path().join("alias")).expect("symbolic link should be created");
 
-    let exact = LocalRootOpenOptions::new().with_resolution_limits(
-        LocalResolutionLimits::new().with_max_symlink_target_bytes(4),
-    );
+    let exact = LocalRootOpenOptions::new()
+        .with_resolution_limits(LocalResolutionLimits::new().with_max_symlink_target_bytes(4));
     LocalFileSystem::rooted_with_options(&tmp.path().join("alias"), &exact)
         .expect("target exactly at its byte limit should open");
 
-    let too_small = LocalRootOpenOptions::new().with_resolution_limits(
-        LocalResolutionLimits::new().with_max_symlink_target_bytes(3),
-    );
+    let too_small = LocalRootOpenOptions::new()
+        .with_resolution_limits(LocalResolutionLimits::new().with_max_symlink_target_bytes(3));
     let error = LocalFileSystem::rooted_with_options(&tmp.path().join("alias"), &too_small)
         .expect_err("target above its byte limit must fail");
     assert_eq!(error.kind(), LocalFileErrorKind::ResourceLimit);
     assert_eq!(
-        error.resource_limit_error().expect("limit facts should be retained").observed(),
+        error
+            .resource_limit_error()
+            .expect("limit facts should be retained")
+            .observed(),
         Some(4),
     );
 }
@@ -198,6 +211,7 @@ fn opening_root_keeps_input_origin_on_suffix_after_symlink_expansion() {
 #[test]
 fn reject_policy_refuses_intermediate_root_symlink() {
     use std::os::unix::fs::symlink;
+
     use qubit_local_files::policy::LocalSymlinkPolicy;
 
     let tmp = tempfile::tempdir().expect("temporary directory should be created");
@@ -216,15 +230,16 @@ fn root_component_limit_counts_only_normal_components() {
     let tmp = tempfile::tempdir().expect("temporary directory should be created");
     let target = tmp.path().join("real");
     std::fs::create_dir(&target).expect("target directory should be created");
-    let component_count = target.components().filter(|component| matches!(component, std::path::Component::Normal(_))).count();
-    let exact = LocalRootOpenOptions::new().with_resolution_limits(
-        LocalResolutionLimits::new().with_max_actual_components(component_count),
-    );
+    let component_count = target
+        .components()
+        .filter(|component| matches!(component, std::path::Component::Normal(_)))
+        .count();
+    let exact = LocalRootOpenOptions::new()
+        .with_resolution_limits(LocalResolutionLimits::new().with_max_actual_components(component_count));
     LocalFileSystem::rooted_with_options(&target, &exact).expect("exact component budget should suffice");
 
-    let too_small = LocalRootOpenOptions::new().with_resolution_limits(
-        LocalResolutionLimits::new().with_max_actual_components(component_count - 1),
-    );
+    let too_small = LocalRootOpenOptions::new()
+        .with_resolution_limits(LocalResolutionLimits::new().with_max_actual_components(component_count - 1));
     let error = LocalFileSystem::rooted_with_options(&target, &too_small)
         .expect_err("one fewer component must exceed the budget");
     assert_eq!(error.kind(), LocalFileErrorKind::ResourceLimit);
@@ -253,9 +268,8 @@ fn opening_root_enforces_pending_component_budget_after_link_expansion() {
     let tmp = tempfile::tempdir().expect("fixture directory should exist");
     std::fs::create_dir_all(tmp.path().join("real/a/b")).expect("target hierarchy should exist");
     symlink("real", tmp.path().join("alias")).expect("root alias should exist");
-    let options = LocalRootOpenOptions::new().with_resolution_limits(
-        LocalResolutionLimits::new().with_max_actual_components(2),
-    );
+    let options =
+        LocalRootOpenOptions::new().with_resolution_limits(LocalResolutionLimits::new().with_max_actual_components(2));
 
     let error = LocalFileSystem::rooted_with_options(&tmp.path().join("alias/a/b"), &options)
         .expect_err("expanded target and its input suffix must fit one pending component budget");
@@ -320,7 +334,10 @@ fn opening_root_target_hook_sees_and_can_reject_raw_nt_substitute_name() {
         .expect("raw target record should be available")
         .clone()
         .expect("target hook should run");
-    assert!(raw_target.starts_with(r"\??\"), "hook received normalized target: {raw_target:?}");
+    assert!(
+        raw_target.starts_with(r"\??\"),
+        "hook received normalized target: {raw_target:?}"
+    );
 }
 
 #[cfg(unix)]
@@ -333,9 +350,8 @@ fn observed_reader_limits_tighten_the_filesystem_contract() {
     std::fs::write(tmp.path().join("real/file"), b"contents").expect("file should be created");
     symlink("real", tmp.path().join("alias")).expect("symbolic link should be created");
     let filesystem = LocalFileSystem::rooted(tmp.path()).expect("root should open");
-    let options = LocalObservedReadOptions::new().with_resolution_limits(
-        LocalResolutionLimits::new().with_max_symlink_hops(0),
-    );
+    let options =
+        LocalObservedReadOptions::new().with_resolution_limits(LocalResolutionLimits::new().with_max_symlink_hops(0));
 
     let error = filesystem
         .open_observed_reader(std::path::Path::new("alias/file"), &options)
@@ -353,17 +369,14 @@ fn child_directory_options_cannot_loosen_parent_resolution_limits() {
     std::fs::create_dir(tmp.path().join("real")).expect("target directory should be created");
     std::fs::write(tmp.path().join("real/file"), b"contents").expect("file should be created");
     symlink("../real", tmp.path().join("child/alias")).expect("symbolic link should be created");
-    let parent_options = LocalRootOpenOptions::new().with_resolution_limits(
-        LocalResolutionLimits::new().with_max_symlink_hops(0),
-    );
-    let filesystem = LocalFileSystem::rooted_with_options(tmp.path(), &parent_options)
-        .expect("root should open");
+    let parent_options =
+        LocalRootOpenOptions::new().with_resolution_limits(LocalResolutionLimits::new().with_max_symlink_hops(0));
+    let filesystem = LocalFileSystem::rooted_with_options(tmp.path(), &parent_options).expect("root should open");
     let child = filesystem
         .open_directory_with_options(
             std::path::Path::new("child"),
-            &LocalDirectoryOpenOptions::new().with_resolution_limits(
-                LocalResolutionLimits::new().with_max_symlink_hops(4),
-            ),
+            &LocalDirectoryOpenOptions::new()
+                .with_resolution_limits(LocalResolutionLimits::new().with_max_symlink_hops(4)),
         )
         .expect("child directory should open");
 
@@ -391,8 +404,9 @@ fn walker_rejects_a_discovered_entry_with_the_inherited_resolution_policy() {
         .list_with_options(Path::new("."), &LocalListOptions::new())
         .expect("walker should open before it discovers descendants");
 
-    let error = walker.next().expect("discovered entry should yield an error").expect_err(
-        "resolution policy must reject a name discovered by the walker rather than filter it",
-    );
+    let error = walker
+        .next()
+        .expect("discovered entry should yield an error")
+        .expect_err("resolution policy must reject a name discovered by the walker rather than filter it");
     assert_eq!(error.kind(), LocalFileErrorKind::PermissionDenied);
 }

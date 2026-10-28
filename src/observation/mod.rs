@@ -21,12 +21,17 @@ pub(crate) mod unix;
 #[cfg(windows)]
 pub(crate) mod windows;
 
-pub use local_security_observation::{
-    LocalAccessObservation, LocalAclPresence, LocalFileSystemLocality, LocalFileSystemObservation,
-    LocalSecurityObservation, LocalUnixAccessObservation, LocalUnixFileSystemObservation,
-    LocalUnixPlatform, LocalWindowsAccessObservation, LocalWindowsAceObservation,
-    LocalWindowsFileSystemObservation,
-};
+pub use local_security_observation::LocalAccessObservation;
+pub use local_security_observation::LocalAclPresence;
+pub use local_security_observation::LocalFileSystemLocality;
+pub use local_security_observation::LocalFileSystemObservation;
+pub use local_security_observation::LocalSecurityObservation;
+pub use local_security_observation::LocalUnixAccessObservation;
+pub use local_security_observation::LocalUnixFileSystemObservation;
+pub use local_security_observation::LocalUnixPlatform;
+pub use local_security_observation::LocalWindowsAccessObservation;
+pub use local_security_observation::LocalWindowsAceObservation;
+pub use local_security_observation::LocalWindowsFileSystemObservation;
 pub use local_security_observation_options::LocalSecurityObservationOptions;
 pub use reader::LocalObservedReader;
 pub use snapshot::LocalFileSnapshot;

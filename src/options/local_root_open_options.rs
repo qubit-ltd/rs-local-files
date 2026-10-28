@@ -1,11 +1,21 @@
+// =============================================================================
+//    Copyright (c) 2025 - 2026 Haixing Hu.
+//
+//    SPDX-License-Identifier: Apache-2.0
+//
+//    Licensed under the Apache License, Version 2.0.
+// =============================================================================
+
+use std::sync::Arc;
+
 use super::LocalResolutionLimits;
 use crate::directory::LocalResolutionPolicy;
 use crate::policy::LocalSymlinkPolicy;
-use std::sync::Arc;
 
 #[derive(Clone, Debug, Default)]
 #[must_use]
-/// Configuration for opening a rooted filesystem with additional resolution rules.
+/// Configuration for opening a rooted filesystem with additional resolution
+/// rules.
 pub struct LocalRootOpenOptions {
     limits: LocalResolutionLimits,
     symlink: Option<LocalSymlinkPolicy>,
@@ -16,12 +26,14 @@ impl LocalRootOpenOptions {
     pub fn new() -> Self {
         Self::default()
     }
-    /// Sets per-resolution limits; zero is a real limit and `None` is unlimited.
+    /// Sets per-resolution limits; zero is a real limit and `None` is
+    /// unlimited.
     pub fn with_resolution_limits(mut self, limits: LocalResolutionLimits) -> Self {
         self.limits = limits;
         self
     }
-    /// Sets symlink handling for opening the root and subsequent rooted operations.
+    /// Sets symlink handling for opening the root and subsequent rooted
+    /// operations.
     pub fn with_symlink_policy(mut self, policy: LocalSymlinkPolicy) -> Self {
         self.symlink = Some(policy);
         self

@@ -1,10 +1,22 @@
+// =============================================================================
+//    Copyright (c) 2025 - 2026 Haixing Hu.
+//
+//    SPDX-License-Identifier: Apache-2.0
+//
+//    Licensed under the Apache License, Version 2.0.
+// =============================================================================
+
+use std::ffi::OsStr;
+use std::path::Path;
+
 use super::ResolutionContract;
-use crate::{
-    LocalResult,
-    directory::{LocalResolutionOrigin, LocalResolutionScope},
-    error::{LocalFileError, LocalFileOperation, LocalResourceKind, LocalResourceLimitError},
-};
-use std::{ffi::OsStr, path::Path};
+use crate::LocalResult;
+use crate::directory::LocalResolutionOrigin;
+use crate::directory::LocalResolutionScope;
+use crate::error::LocalFileError;
+use crate::error::LocalFileOperation;
+use crate::error::LocalResourceKind;
+use crate::error::LocalResourceLimitError;
 
 /// Counters and validation policy for one path-resolution attempt.
 pub(crate) struct ResolutionSession {
@@ -66,13 +78,8 @@ impl ResolutionSession {
         )
     }
 
-    pub(crate) fn validate_component(
-        &self,
-        component: &OsStr,
-        origin: LocalResolutionOrigin,
-    ) -> LocalResult<()> {
-        self.contract
-            .validate_component(component, self.scope, origin)
+    pub(crate) fn validate_component(&self, component: &OsStr, origin: LocalResolutionOrigin) -> LocalResult<()> {
+        self.contract.validate_component(component, self.scope, origin)
     }
 
     pub(crate) fn validate_target(&self, target: &Path) -> LocalResult<()> {
@@ -86,12 +93,7 @@ impl ResolutionSession {
         self.contract.validate_target(target, self.scope)
     }
 
-    fn check(
-        &self,
-        kind: LocalResourceKind,
-        observed: usize,
-        limit: Option<usize>,
-    ) -> LocalResult<()> {
+    fn check(&self, kind: LocalResourceKind, observed: usize, limit: Option<usize>) -> LocalResult<()> {
         if let Some(limit) = limit
             && observed > limit
         {
@@ -125,14 +127,8 @@ pub(crate) fn overflow_error(kind: LocalResourceKind) -> LocalFileError {
 fn limit_error(kind: LocalResourceKind, observed: usize, overflow: bool) -> LocalFileError {
     limit_error_with_limit(kind, usize::MAX, observed, overflow)
 }
-fn limit_error_with_limit(
-    kind: LocalResourceKind,
-    limit: usize,
-    observed: usize,
-    overflow: bool,
-) -> LocalFileError {
-    let error =
-        LocalResourceLimitError::new(kind, limit, limit.saturating_sub(observed.min(limit)), 1);
+fn limit_error_with_limit(kind: LocalResourceKind, limit: usize, observed: usize, overflow: bool) -> LocalFileError {
+    let error = LocalResourceLimitError::new(kind, limit, limit.saturating_sub(observed.min(limit)), 1);
     let error = if overflow {
         error.with_overflow()
     } else {
@@ -144,17 +140,16 @@ fn limit_error_with_limit(
 #[cfg(test)]
 mod tests {
     use super::ResolutionSession;
-    use crate::{
-        directory::LocalResolutionScope,
-        error::{LocalFileErrorKind, LocalResourceKind},
-        options::LocalResolutionLimits,
-        resolution::ResolutionContract,
-    };
+    use crate::directory::LocalResolutionScope;
+    use crate::error::LocalFileErrorKind;
+    use crate::error::LocalResourceKind;
+    use crate::options::LocalResolutionLimits;
+    use crate::resolution::ResolutionContract;
 
     #[test]
     fn resolution_session_zero_forbids_following_links() {
-        let contract = ResolutionContract::unrestricted()
-            .tightened(LocalResolutionLimits::new().with_max_symlink_hops(0));
+        let contract =
+            ResolutionContract::unrestricted().tightened(LocalResolutionLimits::new().with_max_symlink_hops(0));
         let mut session = ResolutionSession::new(&contract, LocalResolutionScope::Descendant);
         let error = session.before_follow_link().unwrap_err();
         assert_eq!(error.kind(), LocalFileErrorKind::ResourceLimit);
@@ -169,8 +164,8 @@ mod tests {
 
     #[test]
     fn resolution_session_accepts_exact_hop_limit_and_rejects_next_hop() {
-        let contract = ResolutionContract::unrestricted()
-            .tightened(LocalResolutionLimits::new().with_max_symlink_hops(1));
+        let contract =
+            ResolutionContract::unrestricted().tightened(LocalResolutionLimits::new().with_max_symlink_hops(1));
         let mut session = ResolutionSession::new(&contract, LocalResolutionScope::Descendant);
         session.before_follow_link().unwrap();
         assert_eq!(
@@ -218,12 +213,12 @@ mod tests {
     #[test]
     fn resolution_session_target_byte_limit_accepts_l_and_rejects_l_plus_one() {
         use std::path::Path;
-        let contract = ResolutionContract::unrestricted()
-            .tightened(LocalResolutionLimits::new().with_max_symlink_target_bytes(3));
+        let contract =
+            ResolutionContract::unrestricted().tightened(LocalResolutionLimits::new().with_max_symlink_target_bytes(3));
         let session = ResolutionSession::new(&contract, LocalResolutionScope::Descendant);
         session.validate_target(Path::new("abc")).unwrap();
-        let smaller = ResolutionContract::unrestricted()
-            .tightened(LocalResolutionLimits::new().with_max_symlink_target_bytes(2));
+        let smaller =
+            ResolutionContract::unrestricted().tightened(LocalResolutionLimits::new().with_max_symlink_target_bytes(2));
         let error = ResolutionSession::new(&smaller, LocalResolutionScope::Descendant)
             .validate_target(Path::new("abc"))
             .unwrap_err();

@@ -1,3 +1,11 @@
+// =============================================================================
+//    Copyright (c) 2025 - 2026 Haixing Hu.
+//
+//    SPDX-License-Identifier: Apache-2.0
+//
+//    Licensed under the Apache License, Version 2.0.
+// =============================================================================
+
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 #[must_use]
 /// Exact owner permissions to apply and verify on one supported platform.
@@ -16,7 +24,8 @@ impl LocalOwnerAccessPolicy {
             windows_masks: None,
         }
     }
-    /// Sets exact Unix directory and file modes; only owner `rwx` bits are valid.
+    /// Sets exact Unix directory and file modes; only owner `rwx` bits are
+    /// valid.
     pub const fn with_unix_modes(mut self, directory_mode: u32, file_mode: u32) -> Self {
         self.unix_modes = Some((directory_mode, file_mode));
         self

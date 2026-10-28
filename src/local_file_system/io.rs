@@ -149,14 +149,16 @@ impl LocalFileSystem {
             }
             let (root, symlink_policy) = match &self.core.namespace {
                 LocalNamespace::Host => (
-                    Root::open(Path::new("/")).map_err(|source| {
-                        LocalFileError::from_io(
-                            LocalFileOperation::OpenRoot,
-                            Some(namespace_absolute.clone()),
-                            None,
-                            source,
-                        )
-                    })?.with_resolution_contract(resolution.clone()),
+                    Root::open(Path::new("/"))
+                        .map_err(|source| {
+                            LocalFileError::from_io(
+                                LocalFileOperation::OpenRoot,
+                                Some(namespace_absolute.clone()),
+                                None,
+                                source,
+                            )
+                        })?
+                        .with_resolution_contract(resolution.clone()),
                     if symlink_policy == LocalSymlinkPolicy::FollowAcrossScope {
                         LocalSymlinkPolicy::FollowWithinScope
                     } else {
@@ -174,7 +176,11 @@ impl LocalFileSystem {
                         )
                     })?;
                     (
-                        Root::from_directory_authority_with_contract(file, authority.path().to_path_buf(), resolution.clone()),
+                        Root::from_directory_authority_with_contract(
+                            file,
+                            authority.path().to_path_buf(),
+                            resolution.clone(),
+                        ),
                         symlink_policy,
                     )
                 }
@@ -232,14 +238,16 @@ impl LocalFileSystem {
             let parent_path = resolved.authority_relative().parent().unwrap_or_else(|| Path::new(""));
             let (parent_root, parent_anchors) = match &self.core.namespace {
                 LocalNamespace::Host => {
-                    let host_root = Root::open(Path::new("/")).map_err(|source| {
-                        LocalFileError::from_io(
-                            LocalFileOperation::OpenRoot,
-                            Some(parent_path.to_path_buf()),
-                            None,
-                            source,
-                        )
-                    })?.with_resolution_contract(resolution.clone());
+                    let host_root = Root::open(Path::new("/"))
+                        .map_err(|source| {
+                            LocalFileError::from_io(
+                                LocalFileOperation::OpenRoot,
+                                Some(parent_path.to_path_buf()),
+                                None,
+                                source,
+                            )
+                        })?
+                        .with_resolution_contract(resolution.clone());
                     let relative_parent = parent_path.strip_prefix("/").unwrap_or(parent_path);
                     let policy = if symlink_policy == LocalSymlinkPolicy::FollowAcrossScope {
                         LocalSymlinkPolicy::FollowWithinScope
@@ -269,9 +277,14 @@ impl LocalFileSystem {
                 LocalNamespace::Rooted(rooted) => {
                     let source_root = rooted.root_authority();
                     let working_root = Root::from_directory_authority_with_contract(
-                        source_root.try_clone_authority().map_err(|source| LocalFileError::from_io(
-                            LocalFileOperation::OpenRoot, Some(resolved.namespace_absolute().to_path_buf()), None, source,
-                        ))?,
+                        source_root.try_clone_authority().map_err(|source| {
+                            LocalFileError::from_io(
+                                LocalFileOperation::OpenRoot,
+                                Some(resolved.namespace_absolute().to_path_buf()),
+                                None,
+                                source,
+                            )
+                        })?,
                         source_root.path().to_path_buf(),
                         resolution.clone(),
                     );
@@ -590,7 +603,12 @@ impl LocalFileSystem {
         symlink_policy: crate::LocalSymlinkPolicy,
     ) -> LocalResult<LocalFileReader> {
         self.open_resolved_reader_with_policy_and_contract(
-            resolved, options, operation, current_directory, symlink_policy, None,
+            resolved,
+            options,
+            operation,
+            current_directory,
+            symlink_policy,
+            None,
         )
     }
 
@@ -614,12 +632,12 @@ impl LocalFileSystem {
             LocalNamespace::Host => {
                 HostLocalFileSystem::open_reader_with_policy(resolved.authority_relative(), options, symlink_policy)
             }
-            LocalNamespace::Rooted(rooted) => {
-                match resolution {
-                    Some(contract) => rooted.open_reader_with_contract(resolved.authority_relative(), options, symlink_policy, contract),
-                    None => rooted.open_reader(resolved.authority_relative(), options, symlink_policy),
+            LocalNamespace::Rooted(rooted) => match resolution {
+                Some(contract) => {
+                    rooted.open_reader_with_contract(resolved.authority_relative(), options, symlink_policy, contract)
                 }
-            }
+                None => rooted.open_reader(resolved.authority_relative(), options, symlink_policy),
+            },
         }
         .map_err(|error| operation_error(error, operation, resolved.namespace_absolute(), None, current_directory))
     }

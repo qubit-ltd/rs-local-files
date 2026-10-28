@@ -1,34 +1,52 @@
-use crate::{
-    LocalResult,
-    error::{
-        LocalFileError, LocalFileErrorKind, LocalFileOperation, LocalResourceKind,
-        LocalResourceLimitError,
-    },
-    observation::{
-        LocalAccessObservation, LocalFileIdentity, LocalFileSystemLocality,
-        LocalFileSystemObservation, LocalObservationRequirement, LocalSecurityObservation,
-        LocalSecurityObservationOptions, LocalWindowsAccessObservation,
-        LocalWindowsFileSystemObservation,
-    },
-};
+// =============================================================================
+//    Copyright (c) 2025 - 2026 Haixing Hu.
+//
+//    SPDX-License-Identifier: Apache-2.0
+//
+//    Licensed under the Apache License, Version 2.0.
+// =============================================================================
+
 use std::fmt;
 use std::fs::File;
 use std::io;
 use std::mem::size_of;
-use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
+use std::os::windows::io::AsRawHandle;
+use std::os::windows::io::FromRawHandle;
+use std::os::windows::io::OwnedHandle;
 use std::ptr;
 
-use windows_sys::Win32::Security::{
-    DACL_SECURITY_INFORMATION, GetTokenInformation, OWNER_SECURITY_INFORMATION, TOKEN_QUERY,
-    TOKEN_USER, TokenUser,
-};
-use windows_sys::Win32::Storage::FileSystem::{
-    FILE_ID_INFO, FILE_STANDARD_INFO, FileIdInfo, FileStandardInfo, GetFileInformationByHandleEx,
-    GetVolumeInformationByHandleW,
-};
-use windows_sys::Win32::System::Threading::{
-    GetCurrentProcess, GetCurrentThread, OpenProcessToken, OpenThreadToken,
-};
+use windows_sys::Win32::Security::DACL_SECURITY_INFORMATION;
+use windows_sys::Win32::Security::GetTokenInformation;
+use windows_sys::Win32::Security::OWNER_SECURITY_INFORMATION;
+use windows_sys::Win32::Security::TOKEN_QUERY;
+use windows_sys::Win32::Security::TOKEN_USER;
+use windows_sys::Win32::Security::TokenUser;
+use windows_sys::Win32::Storage::FileSystem::FILE_ID_INFO;
+use windows_sys::Win32::Storage::FileSystem::FILE_STANDARD_INFO;
+use windows_sys::Win32::Storage::FileSystem::FileIdInfo;
+use windows_sys::Win32::Storage::FileSystem::FileStandardInfo;
+use windows_sys::Win32::Storage::FileSystem::GetFileInformationByHandleEx;
+use windows_sys::Win32::Storage::FileSystem::GetVolumeInformationByHandleW;
+use windows_sys::Win32::System::Threading::GetCurrentProcess;
+use windows_sys::Win32::System::Threading::GetCurrentThread;
+use windows_sys::Win32::System::Threading::OpenProcessToken;
+use windows_sys::Win32::System::Threading::OpenThreadToken;
+
+use crate::LocalResult;
+use crate::error::LocalFileError;
+use crate::error::LocalFileErrorKind;
+use crate::error::LocalFileOperation;
+use crate::error::LocalResourceKind;
+use crate::error::LocalResourceLimitError;
+use crate::observation::LocalAccessObservation;
+use crate::observation::LocalFileIdentity;
+use crate::observation::LocalFileSystemLocality;
+use crate::observation::LocalFileSystemObservation;
+use crate::observation::LocalObservationRequirement;
+use crate::observation::LocalSecurityObservation;
+use crate::observation::LocalSecurityObservationOptions;
+use crate::observation::LocalWindowsAccessObservation;
+use crate::observation::LocalWindowsFileSystemObservation;
 
 const MAX_SECURITY_DESCRIPTOR_BYTES: usize = 1024 * 1024;
 const SECURITY_QUERY_ATTEMPTS: usize = 8;
@@ -58,18 +76,11 @@ pub(crate) fn query_security(
 
     let link_count = if options.link_count() == LocalObservationRequirement::Required {
         Some(u64::from(
-            required_query(query_file_info::<FILE_STANDARD_INFO>(
-                handle,
-                FileStandardInfo,
-            ))?
-            .NumberOfLinks,
+            required_query(query_file_info::<FILE_STANDARD_INFO>(handle, FileStandardInfo))?.NumberOfLinks,
         ))
     } else {
-        optional_query(query_file_info::<FILE_STANDARD_INFO>(
-            handle,
-            FileStandardInfo,
-        ))?
-        .map(|standard| u64::from(standard.NumberOfLinks))
+        optional_query(query_file_info::<FILE_STANDARD_INFO>(handle, FileStandardInfo))?
+            .map(|standard| u64::from(standard.NumberOfLinks))
     };
     let after = query_identity(handle)?;
     if before != after {
@@ -86,19 +97,12 @@ pub(crate) fn query_security(
     ))
 }
 
-fn query_identity(
-    handle: windows_sys::Win32::Foundation::HANDLE,
-) -> LocalResult<LocalFileIdentity> {
+fn query_identity(handle: windows_sys::Win32::Foundation::HANDLE) -> LocalResult<LocalFileIdentity> {
     let id = query_file_info::<FILE_ID_INFO>(handle, FileIdInfo)?;
-    Ok(LocalFileIdentity::windows(
-        id.VolumeSerialNumber,
-        id.FileId.Identifier,
-    ))
+    Ok(LocalFileIdentity::windows(id.VolumeSerialNumber, id.FileId.Identifier))
 }
 
-fn query_filesystem(
-    handle: windows_sys::Win32::Foundation::HANDLE,
-) -> LocalResult<LocalFileSystemObservation> {
+fn query_filesystem(handle: windows_sys::Win32::Foundation::HANDLE) -> LocalResult<LocalFileSystemObservation> {
     let mut name = [0u16; 64];
     let mut attributes = 0u32;
     // SAFETY: `handle` is borrowed from `file`; both output buffers have the
@@ -118,18 +122,12 @@ fn query_filesystem(
     if ok == 0 {
         return Err(native_io_error(io::Error::last_os_error()));
     }
-    let end = name
-        .iter()
-        .position(|unit| *unit == 0)
-        .unwrap_or(name.len());
+    let end = name.iter().position(|unit| *unit == 0).unwrap_or(name.len());
     let filesystem_name = String::from_utf16(&name[..end]).map_err(|_| data_corruption())?;
     Ok(LocalFileSystemObservation::new(
         LocalFileSystemLocality::Unknown,
         None,
-        Some(LocalWindowsFileSystemObservation::new(
-            filesystem_name,
-            attributes,
-        )),
+        Some(LocalWindowsFileSystemObservation::new(filesystem_name, attributes)),
     ))
 }
 
@@ -140,14 +138,11 @@ fn query_access(
     let current_sid = current_user_sid()?;
     let descriptor = query_security_descriptor(handle)?;
     check_acl_budget(&descriptor, options)?;
-    let decoded = decode_security_descriptor(&descriptor, None, None, &current_sid)
-        .ok_or_else(data_corruption)?;
+    let decoded = decode_security_descriptor(&descriptor, None, None, &current_sid).ok_or_else(data_corruption)?;
     Ok(decoded)
 }
 
-fn query_security_descriptor(
-    handle: windows_sys::Win32::Foundation::HANDLE,
-) -> LocalResult<Vec<u8>> {
+fn query_security_descriptor(handle: windows_sys::Win32::Foundation::HANDLE) -> LocalResult<Vec<u8>> {
     let information = OWNER_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION;
     let mut needed = 0u32;
     // SAFETY: the zero-length probe does not dereference the null output; the
@@ -207,11 +202,10 @@ fn query_security_descriptor(
         }
         needed = actual.max(needed);
     }
-    Err(LocalFileError::new(
-        LocalFileErrorKind::ChangedDuringRead,
-        LocalFileOperation::Metadata,
+    Err(
+        LocalFileError::new(LocalFileErrorKind::ChangedDuringRead, LocalFileOperation::Metadata)
+            .with_reason("security descriptor length changed during bounded query retries"),
     )
-    .with_reason("security descriptor length changed during bounded query retries"))
 }
 
 fn current_user_sid() -> LocalResult<String> {
@@ -235,15 +229,7 @@ fn current_user_sid() -> LocalResult<String> {
     let token = unsafe { OwnedHandle::from_raw_handle(token.cast()) };
     let mut needed = 0u32;
     // SAFETY: this zero-length call only probes the required TOKEN_USER size.
-    unsafe {
-        GetTokenInformation(
-            token.as_raw_handle().cast(),
-            TokenUser,
-            ptr::null_mut(),
-            0,
-            &mut needed,
-        )
-    };
+    unsafe { GetTokenInformation(token.as_raw_handle().cast(), TokenUser, ptr::null_mut(), 0, &mut needed) };
     if needed == 0 || needed as usize > 4096 {
         return Err(data_corruption());
     }
@@ -283,14 +269,8 @@ fn query_file_info<T: Default>(
     let mut output = T::default();
     // SAFETY: output is a correctly sized writable value for the selected
     // information class and the handle is borrowed from the retained File.
-    if unsafe {
-        GetFileInformationByHandleEx(
-            handle,
-            class,
-            ptr::from_mut(&mut output).cast(),
-            size_of::<T>() as u32,
-        )
-    } == 0
+    if unsafe { GetFileInformationByHandleEx(handle, class, ptr::from_mut(&mut output).cast(), size_of::<T>() as u32) }
+        == 0
     {
         return Err(native_io_error(io::Error::last_os_error()));
     }
@@ -335,14 +315,8 @@ fn decode_security_descriptor(
         if header_end > bytes.len() {
             return None;
         }
-        let acl_size = usize::from(u16::from_le_bytes([
-            bytes[dacl_offset + 2],
-            bytes[dacl_offset + 3],
-        ]));
-        let ace_count = usize::from(u16::from_le_bytes([
-            bytes[dacl_offset + 4],
-            bytes[dacl_offset + 5],
-        ]));
+        let acl_size = usize::from(u16::from_le_bytes([bytes[dacl_offset + 2], bytes[dacl_offset + 3]]));
+        let ace_count = usize::from(u16::from_le_bytes([bytes[dacl_offset + 4], bytes[dacl_offset + 5]]));
         if max_acl_bytes.is_some_and(|limit| acl_size > limit) {
             return None;
         }
@@ -413,30 +387,18 @@ fn check_acl_budget(bytes: &[u8], options: &LocalSecurityObservationOptions) -> 
     }
     let acl_bytes = usize::from(u16::from_le_bytes([bytes[offset + 2], bytes[offset + 3]]));
     let entries = usize::from(u16::from_le_bytes([bytes[offset + 4], bytes[offset + 5]]));
-    if acl_bytes < 8
-        || offset
-            .checked_add(acl_bytes)
-            .is_none_or(|end| end > bytes.len())
-    {
+    if acl_bytes < 8 || offset.checked_add(acl_bytes).is_none_or(|end| end > bytes.len()) {
         return Err(data_corruption());
     }
     if let Some(limit) = options.max_acl_bytes()
         && acl_bytes > limit
     {
-        return Err(resource_limit(
-            LocalResourceKind::AclBytes,
-            limit,
-            acl_bytes,
-        ));
+        return Err(resource_limit(LocalResourceKind::AclBytes, limit, acl_bytes));
     }
     if let Some(limit) = options.max_acl_entries()
         && entries > limit
     {
-        return Err(resource_limit(
-            LocalResourceKind::AclEntries,
-            limit,
-            entries,
-        ));
+        return Err(resource_limit(LocalResourceKind::AclEntries, limit, entries));
     }
     Ok(())
 }
@@ -459,27 +421,18 @@ fn required_query<T>(result: LocalResult<T>) -> LocalResult<T> {
 
 fn requirement_for_unsupported(error: LocalFileError) -> LocalFileError {
     if explicitly_unsupported(&error) {
-        LocalFileError::new(
-            LocalFileErrorKind::RequirementNotMet,
-            LocalFileOperation::Metadata,
-        )
+        LocalFileError::new(LocalFileErrorKind::RequirementNotMet, LocalFileOperation::Metadata)
     } else {
         error
     }
 }
 
 fn requirement_not_met() -> LocalFileError {
-    LocalFileError::new(
-        LocalFileErrorKind::RequirementNotMet,
-        LocalFileOperation::Metadata,
-    )
+    LocalFileError::new(LocalFileErrorKind::RequirementNotMet, LocalFileOperation::Metadata)
 }
 
 fn data_corruption() -> LocalFileError {
-    LocalFileError::new(
-        LocalFileErrorKind::DataCorruption,
-        LocalFileOperation::Metadata,
-    )
+    LocalFileError::new(LocalFileErrorKind::DataCorruption, LocalFileOperation::Metadata)
 }
 
 fn resource_limit(resource: LocalResourceKind, limit: usize, requested: usize) -> LocalFileError {
@@ -542,13 +495,17 @@ impl std::error::Error for NtStatusError {}
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        decode_acl, decode_security_descriptor, native_io_error, optional_query, required_query,
-        sid_string,
-    };
-    use crate::error::{LocalFileErrorKind, LocalResourceKind};
-    use crate::observation::LocalSecurityObservationOptions;
     use std::io;
+
+    use super::decode_acl;
+    use super::decode_security_descriptor;
+    use super::native_io_error;
+    use super::optional_query;
+    use super::required_query;
+    use super::sid_string;
+    use crate::error::LocalFileErrorKind;
+    use crate::error::LocalResourceKind;
+    use crate::observation::LocalSecurityObservationOptions;
 
     #[test]
     fn security_windows_sid_decode_validates_length_and_formats_authority() {
@@ -597,16 +554,16 @@ mod tests {
         descriptor[38..40].copy_from_slice(&8u16.to_le_bytes());
         descriptor[40..42].copy_from_slice(&0u16.to_le_bytes());
 
-        let empty = decode_security_descriptor(&descriptor, None, None, "S-1-5-32-545")
-            .expect("empty DACL should decode");
+        let empty =
+            decode_security_descriptor(&descriptor, None, None, "S-1-5-32-545").expect("empty DACL should decode");
         assert!(empty.dacl_present());
         assert!(!empty.dacl_is_null());
         assert!(empty.aces().is_empty());
 
         descriptor[2..4].copy_from_slice(&0x8004u16.to_le_bytes());
         descriptor[16..20].copy_from_slice(&0u32.to_le_bytes());
-        let null = decode_security_descriptor(&descriptor[..36], None, None, "S-1-5-32-545")
-            .expect("null DACL should decode");
+        let null =
+            decode_security_descriptor(&descriptor[..36], None, None, "S-1-5-32-545").expect("null DACL should decode");
         assert!(null.dacl_present());
         assert!(null.dacl_is_null());
 
@@ -648,9 +605,7 @@ mod tests {
         .expect_err("ACL byte budget should reject the descriptor");
         assert_eq!(bytes_limited.kind(), LocalFileErrorKind::ResourceLimit);
         assert_eq!(
-            bytes_limited
-                .resource_limit_error()
-                .map(|limit| limit.resource()),
+            bytes_limited.resource_limit_error().map(|limit| limit.resource()),
             Some(LocalResourceKind::AclBytes),
         );
 
@@ -661,9 +616,7 @@ mod tests {
         .expect_err("ACL entry budget should reject the descriptor");
         assert_eq!(entries_limited.kind(), LocalFileErrorKind::ResourceLimit);
         assert_eq!(
-            entries_limited
-                .resource_limit_error()
-                .map(|limit| limit.resource()),
+            entries_limited.resource_limit_error().map(|limit| limit.resource()),
             Some(LocalResourceKind::AclEntries),
         );
     }
@@ -787,10 +740,7 @@ fn decode_acl(
         } else {
             (None, None)
         };
-        let trustee_is_current_user = trustee
-            .as_deref()
-            .zip(current_sid)
-            .map(|(sid, current)| sid == current);
+        let trustee_is_current_user = trustee.as_deref().zip(current_sid).map(|(sid, current)| sid == current);
         output.push(crate::observation::LocalWindowsAceObservation::new(
             ace_type,
             flags,
@@ -802,9 +752,5 @@ fn decode_acl(
         ));
         offset = ace_end;
     }
-    if offset > acl_size {
-        None
-    } else {
-        Some(output)
-    }
+    if offset > acl_size { None } else { Some(output) }
 }

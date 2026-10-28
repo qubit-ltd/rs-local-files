@@ -1,10 +1,20 @@
+// =============================================================================
+//    Copyright (c) 2025 - 2026 Haixing Hu.
+//
+//    SPDX-License-Identifier: Apache-2.0
+//
+//    Licensed under the Apache License, Version 2.0.
+// =============================================================================
+
+use std::ffi::OsString;
+use std::path::Path;
+
 use super::session::ResolutionSession;
-use crate::{
-    LocalResult,
-    directory::LocalResolutionOrigin,
-    error::{LocalFileError, LocalFileOperation, LocalResourceKind},
-};
-use std::{ffi::OsString, path::Path};
+use crate::LocalResult;
+use crate::directory::LocalResolutionOrigin;
+use crate::error::LocalFileError;
+use crate::error::LocalFileOperation;
+use crate::error::LocalResourceKind;
 
 /// A lexical resolution step retaining dot and parent components.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -14,30 +24,26 @@ pub(crate) enum NativeToken {
     Parent(LocalResolutionOrigin),
 }
 
-/// Measures in constant space, checks the session budget, then builds native tokens.
+/// Measures in constant space, checks the session budget, then builds native
+/// tokens.
 pub(crate) fn tokenize(
     path: &Path,
     origin: LocalResolutionOrigin,
     session: &ResolutionSession,
 ) -> LocalResult<Vec<NativeToken>> {
-    let (components, bytes) = measure_path(path)
-        .ok_or_else(|| super::session::overflow_error(LocalResourceKind::PendingResolutionBytes))?;
+    let (components, bytes) =
+        measure_path(path).ok_or_else(|| super::session::overflow_error(LocalResourceKind::PendingResolutionBytes))?;
     session.check_pending(components, bytes)?;
     tokens_after_check(path, origin, components)
 }
 
-fn tokens_after_check(
-    path: &Path,
-    origin: LocalResolutionOrigin,
-    capacity: usize,
-) -> LocalResult<Vec<NativeToken>> {
+fn tokens_after_check(path: &Path, origin: LocalResolutionOrigin, capacity: usize) -> LocalResult<Vec<NativeToken>> {
     let mut tokens = Vec::new();
-    tokens
-        .try_reserve_exact(capacity)
-        .map_err(allocation_error)?;
+    tokens.try_reserve_exact(capacity).map_err(allocation_error)?;
     #[cfg(unix)]
     {
-        use std::os::unix::ffi::{OsStrExt, OsStringExt};
+        use std::os::unix::ffi::OsStrExt;
+        use std::os::unix::ffi::OsStringExt;
         for part in path
             .as_os_str()
             .as_bytes()
@@ -49,9 +55,7 @@ fn tokens_after_check(
                 b".." => NativeToken::Parent(origin),
                 _ => {
                     let mut component = Vec::new();
-                    component
-                        .try_reserve_exact(part.len())
-                        .map_err(allocation_error)?;
+                    component.try_reserve_exact(part.len()).map_err(allocation_error)?;
                     component.extend_from_slice(part);
                     NativeToken::Normal(OsString::from_vec(component), origin)
                 }
@@ -61,13 +65,15 @@ fn tokens_after_check(
     }
     #[cfg(windows)]
     {
-        use std::os::windows::ffi::{OsStrExt, OsStringExt};
+        use std::os::windows::ffi::OsStrExt;
+        use std::os::windows::ffi::OsStringExt;
         let mut units = path
             .as_os_str()
             .encode_wide()
-            .skip(windows_prefix_units(path).ok_or_else(|| {
-                super::session::overflow_error(LocalResourceKind::PendingResolutionBytes)
-            })?)
+            .skip(
+                windows_prefix_units(path)
+                    .ok_or_else(|| super::session::overflow_error(LocalResourceKind::PendingResolutionBytes))?,
+            )
             .peekable();
         while units.peek().is_some() {
             while matches!(units.peek(), Some(unit) if is_separator(*unit)) {
@@ -83,9 +89,7 @@ fn tokens_after_check(
             }
             let token = match component.as_slice() {
                 [dot] if *dot == b'.' as u16 => NativeToken::Current(origin),
-                [dot, dot2] if *dot == b'.' as u16 && *dot2 == b'.' as u16 => {
-                    NativeToken::Parent(origin)
-                }
+                [dot, dot2] if *dot == b'.' as u16 && *dot2 == b'.' as u16 => NativeToken::Parent(origin),
                 _ => NativeToken::Normal(OsString::from_wide(&component), origin),
             };
             tokens.push(token);
@@ -109,7 +113,8 @@ fn tokens_after_check(
     Ok(tokens)
 }
 
-/// Computes the complete pending component and byte snapshot without allocating.
+/// Computes the complete pending component and byte snapshot without
+/// allocating.
 fn measure_path(path: &Path) -> Option<(usize, usize)> {
     #[cfg(unix)]
     {
@@ -212,10 +217,7 @@ struct UncSegment {
 }
 
 #[cfg(any(windows, test))]
-fn consume_unc_segment<I>(
-    units: &mut std::iter::Peekable<I>,
-    skipped: &mut usize,
-) -> Option<UncSegment>
+fn consume_unc_segment<I>(units: &mut std::iter::Peekable<I>, skipped: &mut usize) -> Option<UncSegment>
 where
     I: Iterator<Item = u16>,
 {
@@ -295,13 +297,17 @@ fn allocation_error(error: std::collections::TryReserveError) -> LocalFileError 
 
 #[cfg(test)]
 mod tests {
-    use super::{NativeToken, measure_path, prefix_units_from_wide, tokenize};
-    use crate::{
-        directory::{LocalResolutionOrigin, LocalResolutionScope},
-        options::LocalResolutionLimits,
-        resolution::{ResolutionContract, session::ResolutionSession},
-    };
     use std::path::Path;
+
+    use super::NativeToken;
+    use super::measure_path;
+    use super::prefix_units_from_wide;
+    use super::tokenize;
+    use crate::directory::LocalResolutionOrigin;
+    use crate::directory::LocalResolutionScope;
+    use crate::options::LocalResolutionLimits;
+    use crate::resolution::ResolutionContract;
+    use crate::resolution::session::ResolutionSession;
 
     fn session(max_components: usize, max_bytes: usize) -> ResolutionSession {
         let contract = ResolutionContract::unrestricted().tightened(
@@ -334,14 +340,10 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn resolution_session_tokenizer_preserves_non_utf8_names() {
-        use std::os::unix::ffi::{OsStrExt, OsStringExt};
+        use std::os::unix::ffi::OsStrExt;
+        use std::os::unix::ffi::OsStringExt;
         let value = std::ffi::OsString::from_vec(vec![b'x', b'/', 0xff]);
-        let tokens = tokenize(
-            Path::new(&value),
-            LocalResolutionOrigin::Input,
-            &session(2, 4),
-        )
-        .unwrap();
+        let tokens = tokenize(Path::new(&value), LocalResolutionOrigin::Input, &session(2, 4)).unwrap();
         assert!(matches!(&tokens[1], NativeToken::Normal(name, _) if name.as_bytes() == [0xff]));
     }
 
@@ -350,31 +352,17 @@ mod tests {
     fn resolution_session_tokenizer_checks_exact_limit_before_building_tokens() {
         assert_eq!(measure_path(Path::new("a/b")), Some((2, 4)));
         assert_eq!(
-            tokenize(
-                Path::new("a/b"),
-                LocalResolutionOrigin::Input,
-                &session(2, 4)
-            )
-            .unwrap()
-            .len(),
+            tokenize(Path::new("a/b"), LocalResolutionOrigin::Input, &session(2, 4))
+                .unwrap()
+                .len(),
             2
         );
-        let error = tokenize(
-            Path::new("a/b"),
-            LocalResolutionOrigin::Input,
-            &session(2, 3),
-        )
-        .unwrap_err();
+        let error = tokenize(Path::new("a/b"), LocalResolutionOrigin::Input, &session(2, 3)).unwrap_err();
         assert_eq!(
             error.resource_limit_error().unwrap().resource(),
             crate::error::LocalResourceKind::PendingResolutionBytes
         );
-        let error = tokenize(
-            Path::new("a/b"),
-            LocalResolutionOrigin::Input,
-            &session(1, 4),
-        )
-        .unwrap_err();
+        let error = tokenize(Path::new("a/b"), LocalResolutionOrigin::Input, &session(1, 4)).unwrap_err();
         assert_eq!(
             error.resource_limit_error().unwrap().resource(),
             crate::error::LocalResourceKind::PendingResolutionComponents
@@ -419,10 +407,7 @@ mod tests {
             assert_eq!(measure_path(path), Some((1, 8)));
             assert_eq!(
                 tokenize(path, LocalResolutionOrigin::Input, &session(1, 8)).unwrap(),
-                vec![NativeToken::Normal(
-                    "foo".into(),
-                    LocalResolutionOrigin::Input
-                )]
+                vec![NativeToken::Normal("foo".into(), LocalResolutionOrigin::Input)]
             );
         }
     }

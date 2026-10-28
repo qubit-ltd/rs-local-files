@@ -98,9 +98,9 @@ pub(crate) fn read_rooted_link(
     let mut capacity = initial_capacity;
     loop {
         let mut bytes = Vec::new();
-        bytes.try_reserve_exact(capacity).map_err(|error| {
-            Error::new(ErrorKind::OutOfMemory, error)
-        })?;
+        bytes
+            .try_reserve_exact(capacity)
+            .map_err(|error| Error::new(ErrorKind::OutOfMemory, error))?;
         bytes.resize(capacity, 0);
         // SAFETY: `parent` is a live directory descriptor, `name` is a
         // validated NUL-terminated entry name, and `bytes` is writable for
@@ -132,9 +132,9 @@ pub(crate) fn read_rooted_link(
                 return Ok((None, read));
             }
         }
-        capacity = capacity.checked_mul(2).ok_or_else(|| {
-            Error::new(ErrorKind::InvalidData, "symbolic-link target length overflow")
-        })?;
+        capacity = capacity
+            .checked_mul(2)
+            .ok_or_else(|| Error::new(ErrorKind::InvalidData, "symbolic-link target length overflow"))?;
         if let Some(maximum) = maximum_capacity {
             capacity = capacity.min(maximum);
         }

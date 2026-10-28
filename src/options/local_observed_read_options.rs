@@ -49,6 +49,10 @@ impl LocalObservedReadOptions {
         self.path_binding = Some(options);
         self
     }
+    /// Sets limits for resolving the reader's source path.
+    ///
+    /// The limits are combined with any limits already present on the
+    /// filesystem, so they can only make resolution more restrictive.
     pub const fn with_resolution_limits(mut self, limits: LocalResolutionLimits) -> Self {
         self.resolution_limits = Some(limits);
         self

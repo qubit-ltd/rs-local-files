@@ -126,19 +126,17 @@ impl RootedLocalFileSystem {
         Self::open_with_options(path, &crate::options::LocalRootOpenOptions::new())
     }
 
-    pub(crate) fn open_with_options(
-        path: &Path,
-        options: &crate::options::LocalRootOpenOptions,
-    ) -> LocalResult<Self> {
-        let mut contract = crate::resolution::ResolutionContract::unrestricted()
-            .tightened(options.limits());
+    pub(crate) fn open_with_options(path: &Path, options: &crate::options::LocalRootOpenOptions) -> LocalResult<Self> {
+        let mut contract = crate::resolution::ResolutionContract::unrestricted().tightened(options.limits());
         if let Some(policy) = options.resolution_policy() {
             contract = contract.with_policy(policy.clone());
         }
         Self::open_with_contract(
             path,
             contract,
-            options.symlink_policy().unwrap_or(LocalSymlinkPolicy::FollowWithinScope),
+            options
+                .symlink_policy()
+                .unwrap_or(LocalSymlinkPolicy::FollowWithinScope),
         )
     }
 
@@ -148,55 +146,69 @@ impl RootedLocalFileSystem {
         policy: LocalSymlinkPolicy,
     ) -> LocalResult<Self> {
         if policy == LocalSymlinkPolicy::FollowAcrossScope {
-            return Err(LocalFileError::new(LocalFileErrorKind::InvalidOptions, LocalFileOperation::OpenRoot)
-                .with_path(path.to_path_buf()));
+            return Err(
+                LocalFileError::new(LocalFileErrorKind::InvalidOptions, LocalFileOperation::OpenRoot)
+                    .with_path(path.to_path_buf()),
+            );
         }
         #[cfg(unix)]
         let root = {
-            let absolute = std::path::absolute(path).map_err(|source| LocalFileError::from_io(
-                LocalFileOperation::OpenRoot, Some(path.to_path_buf()), None, source,
-            ))?;
+            let absolute = std::path::absolute(path).map_err(|source| {
+                LocalFileError::from_io(LocalFileOperation::OpenRoot, Some(path.to_path_buf()), None, source)
+            })?;
             let host = crate::rooted::Root::open(Path::new("/"))
-                .map_err(|source| LocalFileError::from_io(LocalFileOperation::OpenRoot, Some(path.to_path_buf()), None, source))?
+                .map_err(|source| {
+                    LocalFileError::from_io(LocalFileOperation::OpenRoot, Some(path.to_path_buf()), None, source)
+                })?
                 .with_resolution_contract(contract.clone());
             let relative = absolute.strip_prefix("/").unwrap_or(&absolute);
             let resolved = support::resolve_rooted_path_allow_root_with_scope(
-                &host, relative, policy, true, LocalFileOperation::OpenRoot,
+                &host,
+                relative,
+                policy,
+                true,
+                LocalFileOperation::OpenRoot,
                 crate::directory::LocalResolutionScope::OpeningRoot,
             )?;
-            let mut cursor = host.resolution_cursor().map_err(|source| LocalFileError::from_io(
-                LocalFileOperation::OpenRoot, Some(path.to_path_buf()), None, source,
-            ))?;
+            let mut cursor = host.resolution_cursor().map_err(|source| {
+                LocalFileError::from_io(LocalFileOperation::OpenRoot, Some(path.to_path_buf()), None, source)
+            })?;
             for component in resolved.components() {
-                cursor.descend(component.as_os_str()).map_err(|source| LocalFileError::from_io(
-                    LocalFileOperation::OpenRoot, Some(path.to_path_buf()), None, source,
-                ))?;
+                cursor.descend(component.as_os_str()).map_err(|source| {
+                    LocalFileError::from_io(LocalFileOperation::OpenRoot, Some(path.to_path_buf()), None, source)
+                })?;
             }
-            crate::rooted::Root::from_directory_authority_with_contract(
-                cursor.into_file(), absolute, contract,
-            )
+            crate::rooted::Root::from_directory_authority_with_contract(cursor.into_file(), absolute, contract)
         };
         #[cfg(windows)]
         let root = {
             use std::path::Component;
-            let absolute = std::path::absolute(path).map_err(|source| LocalFileError::from_io(
-                LocalFileOperation::OpenRoot, Some(path.to_path_buf()), None, source,
-            ))?;
+            let absolute = std::path::absolute(path).map_err(|source| {
+                LocalFileError::from_io(LocalFileOperation::OpenRoot, Some(path.to_path_buf()), None, source)
+            })?;
             let mut components = absolute.components();
             let prefix = match components.next() {
                 Some(Component::Prefix(prefix)) => prefix,
-                _ => return Err(LocalFileError::new(LocalFileErrorKind::InvalidPath, LocalFileOperation::OpenRoot)
-                    .with_path(path.to_path_buf())),
+                _ => {
+                    return Err(
+                        LocalFileError::new(LocalFileErrorKind::InvalidPath, LocalFileOperation::OpenRoot)
+                            .with_path(path.to_path_buf()),
+                    );
+                }
             };
             let mut anchor = PathBuf::new();
             anchor.push(prefix.as_os_str());
             if !matches!(components.next(), Some(Component::RootDir)) {
-                return Err(LocalFileError::new(LocalFileErrorKind::InvalidPath, LocalFileOperation::OpenRoot)
-                    .with_path(path.to_path_buf()));
+                return Err(
+                    LocalFileError::new(LocalFileErrorKind::InvalidPath, LocalFileOperation::OpenRoot)
+                        .with_path(path.to_path_buf()),
+                );
             }
             anchor.push(std::path::MAIN_SEPARATOR_STR);
             let host = crate::rooted::Root::open(&anchor)
-                .map_err(|source| LocalFileError::from_io(LocalFileOperation::OpenRoot, Some(path.to_path_buf()), None, source))?
+                .map_err(|source| {
+                    LocalFileError::from_io(LocalFileOperation::OpenRoot, Some(path.to_path_buf()), None, source)
+                })?
                 .with_resolution_contract(contract.clone());
             let relative = absolute.strip_prefix(&anchor).map_err(|_| {
                 LocalFileError::new(LocalFileErrorKind::InvalidPath, LocalFileOperation::OpenRoot)
@@ -210,13 +222,13 @@ impl RootedLocalFileSystem {
                 LocalFileOperation::OpenRoot,
                 crate::directory::LocalResolutionScope::OpeningRoot,
             )?;
-            let mut cursor = host.resolution_cursor().map_err(|source| LocalFileError::from_io(
-                LocalFileOperation::OpenRoot, Some(path.to_path_buf()), None, source,
-            ))?;
+            let mut cursor = host.resolution_cursor().map_err(|source| {
+                LocalFileError::from_io(LocalFileOperation::OpenRoot, Some(path.to_path_buf()), None, source)
+            })?;
             for component in resolved.components() {
-                cursor.descend(component.as_os_str()).map_err(|source| LocalFileError::from_io(
-                    LocalFileOperation::OpenRoot, Some(path.to_path_buf()), None, source,
-                ))?;
+                cursor.descend(component.as_os_str()).map_err(|source| {
+                    LocalFileError::from_io(LocalFileOperation::OpenRoot, Some(path.to_path_buf()), None, source)
+                })?;
             }
             crate::rooted::Root::from_directory_authority_with_contract(cursor.into_file(), absolute, contract)
         };

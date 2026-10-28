@@ -172,7 +172,10 @@ impl LocalTreeRetainedResource {
     }
     pub(crate) fn binding_matches_identity(&self) -> crate::LocalResult<bool> {
         let named = self.parent.observe_entry(&self.relative)?;
-        Ok(self.identity.as_ref().is_some_and(|identity| named.identity() == Some(identity)))
+        Ok(self
+            .identity
+            .as_ref()
+            .is_some_and(|identity| named.identity() == Some(identity)))
     }
     pub(crate) fn record_entry(&mut self, relative: &Path, identity: &LocalFileIdentity) -> crate::LocalResult<()> {
         if let Some(recorded_identity) = self.owned_entries.get(relative) {
@@ -424,7 +427,9 @@ impl LocalTreeCleanupError {
     }
     /// Returns the owner policy retained by the recovery stage, when known.
     pub fn owner_access_policy(&self) -> Option<&crate::policy::LocalOwnerAccessPolicy> {
-        self.retained.as_ref().and_then(LocalTreeRetainedResource::owner_access_policy)
+        self.retained
+            .as_ref()
+            .and_then(LocalTreeRetainedResource::owner_access_policy)
     }
     /// Reports whether cleanup had started mutating the tree before failing.
     pub const fn mutation_state(&self) -> LocalTreeMutationState {
@@ -821,7 +826,11 @@ impl LocalTreePublishError {
         self.stage
             .as_ref()
             .and_then(|stage| stage.owner_access_policy())
-            .or_else(|| self.retained.iter().find_map(LocalTreeRetainedResource::owner_access_policy))
+            .or_else(|| {
+                self.retained
+                    .iter()
+                    .find_map(LocalTreeRetainedResource::owner_access_policy)
+            })
     }
     /// Returns whether publication may have mutated the destination namespace.
     pub const fn mutation_state(&self) -> LocalTreeMutationState {

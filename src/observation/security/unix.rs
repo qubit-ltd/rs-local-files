@@ -1,19 +1,37 @@
-use crate::LocalResult;
-use crate::error::{
-    LocalFileError, LocalFileErrorKind, LocalFileOperation, LocalResourceKind,
-    LocalResourceLimitError,
-};
-use crate::observation::{
-    LocalAccessObservation, LocalFileIdentity, LocalFileSystemObservation, LocalObservationRequirement,
-    LocalSecurityObservation, LocalSecurityObservationOptions,
-};
-#[cfg(target_os = "linux")]
-use crate::observation::{LocalAclPresence, LocalUnixAccessObservation};
-#[cfg(any(target_os = "linux", target_os = "macos"))]
-use crate::observation::{LocalFileSystemLocality, LocalUnixFileSystemObservation, LocalUnixPlatform};
+// =============================================================================
+//    Copyright (c) 2025 - 2026 Haixing Hu.
+//
+//    SPDX-License-Identifier: Apache-2.0
+//
+//    Licensed under the Apache License, Version 2.0.
+// =============================================================================
+
 use std::fs::File;
 use std::io;
 use std::os::fd::AsRawFd;
+
+use crate::LocalResult;
+use crate::error::LocalFileError;
+use crate::error::LocalFileErrorKind;
+use crate::error::LocalFileOperation;
+use crate::error::LocalResourceKind;
+use crate::error::LocalResourceLimitError;
+use crate::observation::LocalAccessObservation;
+#[cfg(target_os = "linux")]
+use crate::observation::LocalAclPresence;
+use crate::observation::LocalFileIdentity;
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+use crate::observation::LocalFileSystemLocality;
+use crate::observation::LocalFileSystemObservation;
+use crate::observation::LocalObservationRequirement;
+use crate::observation::LocalSecurityObservation;
+use crate::observation::LocalSecurityObservationOptions;
+#[cfg(target_os = "linux")]
+use crate::observation::LocalUnixAccessObservation;
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+use crate::observation::LocalUnixFileSystemObservation;
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+use crate::observation::LocalUnixPlatform;
 
 const ACL_RETRIES: usize = 8;
 const LINUX_ACL_VERSION: u32 = 2;
@@ -51,9 +69,11 @@ pub(crate) fn query_security(
 }
 
 fn stat(file: &File) -> LocalResult<libc::stat> {
-    // SAFETY: `stat` is initialized by fstat on success and `file` owns a valid descriptor.
+    // SAFETY: `stat` is initialized by fstat on success and `file` owns a valid
+    // descriptor.
     let mut stat = unsafe { std::mem::zeroed::<libc::stat>() };
-    // SAFETY: the descriptor is borrowed for the duration of this call and the output is writable.
+    // SAFETY: the descriptor is borrowed for the duration of this call and the
+    // output is writable.
     if unsafe { libc::fstat(file.as_raw_fd(), &mut stat) } == -1 {
         return Err(io_error(io::Error::last_os_error()));
     }
@@ -89,7 +109,8 @@ fn query_filesystem(
 
 #[cfg(target_os = "linux")]
 fn filesystem_facts(file: &File) -> io::Result<LocalFileSystemObservation> {
-    // SAFETY: `statfs` is initialized by fstatfs on success and the descriptor is valid.
+    // SAFETY: `statfs` is initialized by fstatfs on success and the descriptor is
+    // valid.
     let mut stats = unsafe { std::mem::zeroed::<libc::statfs>() };
     // SAFETY: the descriptor and writable output are valid for this call.
     if unsafe { libc::fstatfs(file.as_raw_fd(), &mut stats) } == -1 {
@@ -99,9 +120,7 @@ fn filesystem_facts(file: &File) -> io::Result<LocalFileSystemObservation> {
     let locality = match u32::try_from(native_type).ok() {
         Some(fs_type) => match fs_type {
             0x6969 | 0x517B | 0xFF53 | 0xFE534D42 => LocalFileSystemLocality::Remote,
-            0xEF53 | 0x58465342 | 0x01021994 | 0x794C7630 | 0x9123683E => {
-                LocalFileSystemLocality::Local
-            }
+            0xEF53 | 0x58465342 | 0x01021994 | 0x794C7630 | 0x9123683E => LocalFileSystemLocality::Local,
             _ => LocalFileSystemLocality::Unknown,
         },
         None => LocalFileSystemLocality::Unknown,
@@ -122,7 +141,8 @@ fn filesystem_facts(file: &File) -> io::Result<LocalFileSystemObservation> {
 
 #[cfg(target_os = "macos")]
 fn filesystem_facts(file: &File) -> io::Result<LocalFileSystemObservation> {
-    // SAFETY: `statfs` is initialized by fstatfs on success and the descriptor is valid.
+    // SAFETY: `statfs` is initialized by fstatfs on success and the descriptor is
+    // valid.
     let mut stats = unsafe { std::mem::zeroed::<libc::statfs>() };
     // SAFETY: the descriptor and writable output are valid for this call.
     if unsafe { libc::fstatfs(file.as_raw_fd(), &mut stats) } == -1 {
@@ -192,9 +212,8 @@ fn query_linux_access(
     // SAFETY: geteuid has no preconditions.
     let owner_is_current_user = unsafe { libc::geteuid() } == stat.st_uid;
     #[allow(clippy::useless_conversion)]
-    let mode = u32::try_from(stat.st_mode & 0o7777).map_err(|_| {
-        io::Error::new(io::ErrorKind::InvalidData, "invalid native permission mode")
-    })?;
+    let mode = u32::try_from(stat.st_mode & 0o7777)
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "invalid native permission mode"))?;
     Ok(LocalUnixAccessObservation::new(
         mode,
         owner_is_current_user,
@@ -211,15 +230,9 @@ fn query_linux_acl(
 ) -> io::Result<LocalAclPresence> {
     let mut buffer = Vec::new();
     for _ in 0..ACL_RETRIES {
-        // SAFETY: xattr name is NUL-terminated; null output with size zero requests its length.
-        let length = unsafe {
-            libc::fgetxattr(
-                file.as_raw_fd(),
-                name.as_ptr().cast(),
-                std::ptr::null_mut(),
-                0,
-            )
-        };
+        // SAFETY: xattr name is NUL-terminated; null output with size zero requests its
+        // length.
+        let length = unsafe { libc::fgetxattr(file.as_raw_fd(), name.as_ptr().cast(), std::ptr::null_mut(), 0) };
         if length == -1 {
             let error = io::Error::last_os_error();
             if error.raw_os_error() == Some(libc::ENODATA) {
@@ -237,7 +250,8 @@ fn query_linux_acl(
             .try_reserve_exact(length)
             .map_err(|_| io::Error::new(io::ErrorKind::OutOfMemory, "ACL allocation failed"))?;
         buffer.resize(length, 0);
-        // SAFETY: the buffer has `length` writable bytes and the descriptor/name remain valid.
+        // SAFETY: the buffer has `length` writable bytes and the descriptor/name remain
+        // valid.
         let read = unsafe {
             libc::fgetxattr(
                 file.as_raw_fd(),
@@ -267,10 +281,7 @@ fn query_linux_acl(
 
 #[cfg(target_os = "linux")]
 fn validate_linux_acl(bytes: &[u8], max_entries: Option<usize>) -> io::Result<()> {
-    if bytes.len() < 4
-        || u32::from_le_bytes(bytes[0..4].try_into().map_err(|_| invalid_acl())?)
-            != LINUX_ACL_VERSION
-    {
+    if bytes.len() < 4 || u32::from_le_bytes(bytes[0..4].try_into().map_err(|_| invalid_acl())?) != LINUX_ACL_VERSION {
         return Err(invalid_acl());
     }
     let entries_bytes = bytes.len() - 4;
@@ -282,8 +293,7 @@ fn validate_linux_acl(bytes: &[u8], max_entries: Option<usize>) -> io::Result<()
         && entries > max
     {
         return Err(io::Error::other(
-            LocalResourceLimitError::new(LocalResourceKind::AclEntries, max, max, entries)
-                .with_observed(entries),
+            LocalResourceLimitError::new(LocalResourceKind::AclEntries, max, max, entries).with_observed(entries),
         ));
     }
     let mut user_obj = 0;
@@ -332,8 +342,7 @@ fn validate_linux_acl(bytes: &[u8], max_entries: Option<usize>) -> io::Result<()
             _ => unreachable!(),
         }
     }
-    if user_obj != 1 || group_obj != 1 || other != 1 || mask > 1 || (named_entries > 0 && mask != 1)
-    {
+    if user_obj != 1 || group_obj != 1 || other != 1 || mask > 1 || (named_entries > 0 && mask != 1) {
         return Err(invalid_acl());
     }
     Ok(())
@@ -348,16 +357,13 @@ fn invalid_acl() -> io::Error {
 }
 
 fn invalid_native_metadata() -> LocalFileError {
-    LocalFileError::new(
-        LocalFileErrorKind::DataCorruption,
-        LocalFileOperation::Metadata,
-    )
+    LocalFileError::new(LocalFileErrorKind::DataCorruption, LocalFileOperation::Metadata)
 }
 
 fn explicitly_unsupported(error: &io::Error) -> bool {
-    error.raw_os_error().is_some_and(|code| {
-        code == libc::ENOTSUP || code == libc::EOPNOTSUPP || code == libc::ENOSYS
-    })
+    error
+        .raw_os_error()
+        .is_some_and(|code| code == libc::ENOTSUP || code == libc::EOPNOTSUPP || code == libc::ENOSYS)
 }
 
 #[cfg(any(target_os = "linux", test))]
@@ -380,8 +386,7 @@ fn check_acl_size_io(length: usize, options: &LocalSecurityObservationOptions) -
         && length > max
     {
         return Err(io::Error::other(
-            LocalResourceLimitError::new(LocalResourceKind::AclBytes, max, max, length)
-                .with_observed(length),
+            LocalResourceLimitError::new(LocalResourceKind::AclBytes, max, max, length).with_observed(length),
         ));
     }
     Ok(())
@@ -398,8 +403,7 @@ fn check_acl_length(length: usize, options: &LocalSecurityObservationOptions) ->
         && entries > max
     {
         return Err(io::Error::other(
-            LocalResourceLimitError::new(LocalResourceKind::AclEntries, max, max, entries)
-                .with_observed(entries),
+            LocalResourceLimitError::new(LocalResourceKind::AclEntries, max, max, entries).with_observed(entries),
         ));
     }
     Ok(())
@@ -407,9 +411,23 @@ fn check_acl_length(length: usize, options: &LocalSecurityObservationOptions) ->
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::fs;
     use std::os::unix::fs::MetadataExt;
+
+    use super::File;
+    use super::LocalFileErrorKind;
+    use super::LocalFileIdentity;
+    use super::LocalObservationRequirement;
+    use super::LocalResourceKind;
+    use super::LocalResult;
+    use super::LocalSecurityObservationOptions;
+    use super::acl_read_requires_retry;
+    use super::check_acl_length;
+    use super::io;
+    use super::io_error;
+    use super::query_security;
+    use super::requested_value;
+    use super::validate_linux_acl;
 
     #[test]
     fn security_unix_observes_retained_file_after_path_replacement() {
@@ -423,8 +441,7 @@ mod tests {
 
         let observation = query_security(
             &retained,
-            &LocalSecurityObservationOptions::new()
-                .with_access(LocalObservationRequirement::Required),
+            &LocalSecurityObservationOptions::new().with_access(LocalObservationRequirement::Required),
         )
         .expect("observe retained object");
         assert_eq!(
@@ -441,24 +458,16 @@ mod tests {
         let alias = directory.path().join("alias");
         fs::write(&path, b"same inode").expect("create file");
         let retained = File::open(&path).expect("open file");
-        let options = LocalSecurityObservationOptions::new()
-            .with_link_count(LocalObservationRequirement::Required);
-        assert_eq!(
-            query_security(&retained, &options).unwrap().link_count(),
-            Some(1)
-        );
+        let options = LocalSecurityObservationOptions::new().with_link_count(LocalObservationRequirement::Required);
+        assert_eq!(query_security(&retained, &options).unwrap().link_count(), Some(1));
         fs::hard_link(&path, alias).expect("create hard link");
-        assert_eq!(
-            query_security(&retained, &options).unwrap().link_count(),
-            Some(2)
-        );
+        assert_eq!(query_security(&retained, &options).unwrap().link_count(), Some(2));
     }
 
     #[test]
     fn security_unix_preserves_optional_permission_errors() {
         let denied = io::Error::from_raw_os_error(libc::EACCES);
-        let result: LocalResult<Option<u8>> =
-            requested_value(LocalObservationRequirement::Optional, || Err(denied));
+        let result: LocalResult<Option<u8>> = requested_value(LocalObservationRequirement::Optional, || Err(denied));
         assert_eq!(
             result.expect_err("permission denial must propagate").kind(),
             LocalFileErrorKind::PermissionDenied
@@ -467,40 +476,30 @@ mod tests {
 
     #[test]
     fn security_unix_retries_acl_length_change_errors() {
-        assert!(acl_read_requires_retry(&io::Error::from_raw_os_error(
-            libc::ERANGE
-        )));
+        assert!(acl_read_requires_retry(&io::Error::from_raw_os_error(libc::ERANGE)));
         #[cfg(target_os = "linux")]
-        assert!(acl_read_requires_retry(&io::Error::from_raw_os_error(
-            libc::ENODATA
-        )));
-        assert!(!acl_read_requires_retry(&io::Error::from_raw_os_error(
-            libc::EACCES
-        )));
+        assert!(acl_read_requires_retry(&io::Error::from_raw_os_error(libc::ENODATA)));
+        assert!(!acl_read_requires_retry(&io::Error::from_raw_os_error(libc::EACCES)));
     }
 
     #[test]
     fn security_unix_zero_acl_byte_limit_rejects_nonempty_acl() {
         let acl = [
-            2, 0, 0, 0, 1, 0, 7, 0, 0xff, 0xff, 0xff, 0xff, 4, 0, 5, 0, 0xff, 0xff, 0xff, 0xff,
-            0x20, 0, 0, 0, 0xff, 0xff, 0xff, 0xff,
+            2, 0, 0, 0, 1, 0, 7, 0, 0xff, 0xff, 0xff, 0xff, 4, 0, 5, 0, 0xff, 0xff, 0xff, 0xff, 0x20, 0, 0, 0, 0xff,
+            0xff, 0xff, 0xff,
         ];
         assert!(validate_linux_acl(&acl, None).is_ok());
         assert!(validate_linux_acl(&acl, Some(0)).is_err());
         let options = LocalSecurityObservationOptions::new().with_max_acl_bytes(0);
         let result = io_error(check_acl_length(acl.len(), &options).unwrap_err());
         assert_eq!(result.kind(), LocalFileErrorKind::ResourceLimit);
-        let limit = result
-            .resource_limit_error()
-            .expect("structured ACL byte limit");
+        let limit = result.resource_limit_error().expect("structured ACL byte limit");
         assert_eq!(limit.resource(), LocalResourceKind::AclBytes);
         assert_eq!(limit.observed(), Some(acl.len()));
 
         let options = LocalSecurityObservationOptions::new().with_max_acl_entries(0);
         let result = io_error(check_acl_length(acl.len(), &options).unwrap_err());
-        let limit = result
-            .resource_limit_error()
-            .expect("structured ACL entry limit");
+        let limit = result.resource_limit_error().expect("structured ACL entry limit");
         assert_eq!(limit.resource(), LocalResourceKind::AclEntries);
         assert_eq!(limit.observed(), Some(3));
     }

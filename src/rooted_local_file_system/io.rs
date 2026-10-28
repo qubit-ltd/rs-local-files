@@ -65,9 +65,9 @@ impl RootedLocalFileSystem {
         contract: crate::resolution::ResolutionContract,
     ) -> LocalResult<LocalFileReader> {
         let root = crate::rooted::Root::from_directory_authority_with_contract(
-            self.root.try_clone_authority().map_err(|source| LocalFileError::from_io(
-                LocalFileOperation::OpenReader, Some(path.to_path_buf()), None, source,
-            ))?,
+            self.root.try_clone_authority().map_err(|source| {
+                LocalFileError::from_io(LocalFileOperation::OpenReader, Some(path.to_path_buf()), None, source)
+            })?,
             self.root.path().to_path_buf(),
             contract,
         );
@@ -86,8 +86,7 @@ impl RootedLocalFileSystem {
                     .with_path(path.to_path_buf()),
             );
         }
-        root
-            .open_reader(&relative, &native_options)
+        root.open_reader(&relative, &native_options)
             .and_then(LocalFileReader::from_file)
             .map_err(|error| rooted_io_error(LocalFileOperation::OpenReader, path, error))
     }

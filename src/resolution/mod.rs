@@ -1,8 +1,17 @@
-use crate::{
-    directory::{LocalResolutionOrigin, LocalResolutionPolicy, LocalResolutionScope},
-    options::LocalResolutionLimits,
-};
+// =============================================================================
+//    Copyright (c) 2025 - 2026 Haixing Hu.
+//
+//    SPDX-License-Identifier: Apache-2.0
+//
+//    Licensed under the Apache License, Version 2.0.
+// =============================================================================
+
 use std::sync::Arc;
+
+use crate::directory::LocalResolutionOrigin;
+use crate::directory::LocalResolutionPolicy;
+use crate::directory::LocalResolutionScope;
+use crate::options::LocalResolutionLimits;
 
 #[derive(Clone)]
 pub(crate) struct ResolutionContract {
@@ -61,27 +70,22 @@ impl ResolutionContract {
 
 #[cfg(test)]
 mod tests {
+    use std::ffi::OsStr;
+    use std::path::Path;
+    use std::sync::Arc;
+    use std::sync::Mutex;
+
     use super::ResolutionContract;
-    use crate::{
-        directory::{LocalResolutionOrigin, LocalResolutionPolicy, LocalResolutionScope},
-        options::LocalResolutionLimits,
-        LocalResult,
-    };
-    use std::{
-        ffi::OsStr,
-        path::Path,
-        sync::{Arc, Mutex},
-    };
+    use crate::LocalResult;
+    use crate::directory::LocalResolutionOrigin;
+    use crate::directory::LocalResolutionPolicy;
+    use crate::directory::LocalResolutionScope;
+    use crate::options::LocalResolutionLimits;
 
     #[derive(Debug)]
     struct Recorder(&'static str, Arc<Mutex<Vec<&'static str>>>);
     impl LocalResolutionPolicy for Recorder {
-        fn validate_component(
-            &self,
-            _: &OsStr,
-            _: LocalResolutionScope,
-            _: LocalResolutionOrigin,
-        ) -> LocalResult<()> {
+        fn validate_component(&self, _: &OsStr, _: LocalResolutionScope, _: LocalResolutionOrigin) -> LocalResult<()> {
             self.1.lock().unwrap().push(self.0);
             Ok(())
         }
@@ -93,8 +97,7 @@ mod tests {
     #[test]
     fn resolution_session_policy_chain_runs_parent_then_child() {
         let calls = Arc::new(Mutex::new(Vec::new()));
-        let parent = ResolutionContract::unrestricted()
-            .with_policy(Arc::new(Recorder("parent", calls.clone())));
+        let parent = ResolutionContract::unrestricted().with_policy(Arc::new(Recorder("parent", calls.clone())));
         let child = parent.with_policy(Arc::new(Recorder("child", calls.clone())));
         child
             .validate_component(
@@ -113,8 +116,7 @@ mod tests {
         let limited = unrestricted.tightened(LocalResolutionLimits::new().with_max_symlink_hops(1));
         assert!(!limited.is_unrestricted());
         let calls = Arc::new(Mutex::new(Vec::new()));
-        let policy =
-            ResolutionContract::unrestricted().with_policy(Arc::new(Recorder("policy", calls)));
+        let policy = ResolutionContract::unrestricted().with_policy(Arc::new(Recorder("policy", calls)));
         assert!(!policy.is_unrestricted());
     }
 

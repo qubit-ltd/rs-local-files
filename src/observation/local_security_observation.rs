@@ -1,3 +1,11 @@
+// =============================================================================
+//    Copyright (c) 2025 - 2026 Haixing Hu.
+//
+//    SPDX-License-Identifier: Apache-2.0
+//
+//    Licensed under the Apache License, Version 2.0.
+// =============================================================================
+
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 /// Classification of the filesystem containing an observed object.
@@ -6,7 +14,8 @@ pub enum LocalFileSystemLocality {
     Local,
     /// The filesystem is classified as remote.
     Remote,
-    /// The filesystem could not be classified; this is still a successful observation.
+    /// The filesystem could not be classified; this is still a successful
+    /// observation.
     Unknown,
 }
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -28,14 +37,15 @@ pub enum LocalAclPresence {
     Absent,
     /// An ACL is present.
     Present,
-    /// The platform or filesystem explicitly reports no support for the queried ACL kind.
+    /// The platform or filesystem explicitly reports no support for the queried
+    /// ACL kind.
     NotSupported,
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
 /// Security facts observed from one retained filesystem object.
 ///
-/// The fields may represent observations taken at different instants; this value
-/// is not an atomic snapshot and does not guarantee future permissions.
+/// The fields may represent observations taken at different instants; this
+/// value is not an atomic snapshot and does not guarantee future permissions.
 pub struct LocalSecurityObservation {
     identity: Option<super::LocalFileIdentity>,
     filesystem: Option<LocalFileSystemObservation>,
@@ -94,7 +104,8 @@ impl LocalFileSystemObservation {
             windows,
         }
     }
-    /// Returns the classification; `Unknown` is a successful but inconclusive result.
+    /// Returns the classification; `Unknown` is a successful but inconclusive
+    /// result.
     pub const fn locality(&self) -> LocalFileSystemLocality {
         self.locality
     }
@@ -117,11 +128,7 @@ pub struct LocalUnixFileSystemObservation {
 impl LocalUnixFileSystemObservation {
     #[cfg(unix)]
     #[allow(dead_code)] // Consumed when T03 connects Unix security queries.
-    pub(crate) fn new(
-        platform: LocalUnixPlatform,
-        type_id: u64,
-        type_name: Option<String>,
-    ) -> Self {
+    pub(crate) fn new(platform: LocalUnixPlatform, type_id: u64, type_name: Option<String>) -> Self {
         Self {
             platform,
             type_id,

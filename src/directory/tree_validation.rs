@@ -15,8 +15,8 @@ use crate::LocalFileOperation;
 use crate::LocalResult;
 use crate::observation::LocalFileObservation;
 use crate::options::LocalListOptions;
-use crate::policy::LocalPrivacyRequirement;
 use crate::policy::LocalOwnerAccessPolicy;
+use crate::policy::LocalPrivacyRequirement;
 
 /// One expected entry in a staged directory tree.
 #[derive(Clone, Debug, Eq, PartialEq)]

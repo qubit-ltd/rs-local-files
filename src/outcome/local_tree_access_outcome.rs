@@ -15,10 +15,16 @@ pub struct LocalTreeAccessOutcome {
 }
 impl LocalTreeAccessOutcome {
     pub(crate) const fn new(state: LocalTreeAccessState) -> Self {
-        Self { state, owner_access_policy: None }
+        Self {
+            state,
+            owner_access_policy: None,
+        }
     }
     pub(crate) const fn with_owner_policy(state: LocalTreeAccessState, policy: LocalOwnerAccessPolicy) -> Self {
-        Self { state, owner_access_policy: Some(policy) }
+        Self {
+            state,
+            owner_access_policy: Some(policy),
+        }
     }
     /// Returns the access state confirmed by the operation.
     pub const fn access_state(self) -> LocalTreeAccessState {

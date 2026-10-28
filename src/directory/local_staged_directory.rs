@@ -367,34 +367,88 @@ impl LocalStagedDirectory {
         let policy = self.owner_access_policy.as_ref().expect("owner policy checked");
         let mut path = PathBuf::new();
         for component in parent_relative.components() {
-            let std::path::Component::Normal(name) = component else { continue };
+            let std::path::Component::Normal(name) = component else {
+                continue;
+            };
             let parent_file = if path.as_os_str().is_empty() {
                 self.directory().root_authority()?.try_clone_authority()
             } else {
-                self.directory().open_directory(&path, &LocalDirectoryOpenOptions::new())?.root_authority()?.try_clone_authority()
-            }.map_err(|source| LocalFileError::from_io(LocalFileOperation::OpenRoot, Some(self.directory().diagnostic_path().join(&path)), None, source))?;
+                self.directory()
+                    .open_directory(&path, &LocalDirectoryOpenOptions::new())?
+                    .root_authority()?
+                    .try_clone_authority()
+            }
+            .map_err(|source| {
+                LocalFileError::from_io(
+                    LocalFileOperation::OpenRoot,
+                    Some(self.directory().diagnostic_path().join(&path)),
+                    None,
+                    source,
+                )
+            })?;
             path.push(name);
             let created = {
                 #[cfg(unix)]
-                { crate::temp::internal::privacy_unix::create_owner_entry_at(&parent_file, name, true, policy) }
+                {
+                    crate::temp::internal::privacy_unix::create_owner_entry_at(&parent_file, name, true, policy)
+                }
                 #[cfg(windows)]
-                { crate::temp::internal::privacy_windows::create_owner_entry_at(&parent_file, name, true, policy) }
+                {
+                    crate::temp::internal::privacy_windows::create_owner_entry_at(&parent_file, name, true, policy)
+                }
                 #[cfg(not(any(unix, windows)))]
-                { let _ = (parent_file, name, policy); Err(crate::temp::types::NativePrivateCreateError { source: std::io::Error::new(std::io::ErrorKind::Unsupported, "owner policies are unsupported"), retained: None }) }
+                {
+                    let _ = (parent_file, name, policy);
+                    Err(crate::temp::types::NativePrivateCreateError {
+                        source: std::io::Error::new(std::io::ErrorKind::Unsupported, "owner policies are unsupported"),
+                        retained: None,
+                    })
+                }
             };
             if let Err(error) = created {
                 if error.source.kind() != std::io::ErrorKind::AlreadyExists {
-                    return Err(LocalFileError::from_io(LocalFileOperation::CreateTempDirectory, Some(self.directory().diagnostic_path().join(&path)), None, error.source));
+                    return Err(LocalFileError::from_io(
+                        LocalFileOperation::CreateTempDirectory,
+                        Some(self.directory().diagnostic_path().join(&path)),
+                        None,
+                        error.source,
+                    ));
                 }
-                let existing = self.directory().open_directory(&path, &LocalDirectoryOpenOptions::new())?
-                    .root_authority()?.try_clone_authority()
-                    .map_err(|source| LocalFileError::from_io(LocalFileOperation::OpenRoot, Some(self.directory().diagnostic_path().join(&path)), None, source))?;
+                let existing = self
+                    .directory()
+                    .open_directory(&path, &LocalDirectoryOpenOptions::new())?
+                    .root_authority()?
+                    .try_clone_authority()
+                    .map_err(|source| {
+                        LocalFileError::from_io(
+                            LocalFileOperation::OpenRoot,
+                            Some(self.directory().diagnostic_path().join(&path)),
+                            None,
+                            source,
+                        )
+                    })?;
                 #[cfg(unix)]
-                crate::temp::internal::privacy_unix::verify_owner_access(&existing, true, policy)
-                    .map_err(|source| LocalFileError::from_io(LocalFileOperation::Metadata, Some(self.directory().diagnostic_path().join(&path)), None, source))?;
+                crate::temp::internal::privacy_unix::verify_owner_access(&existing, true, policy).map_err(
+                    |source| {
+                        LocalFileError::from_io(
+                            LocalFileOperation::Metadata,
+                            Some(self.directory().diagnostic_path().join(&path)),
+                            None,
+                            source,
+                        )
+                    },
+                )?;
                 #[cfg(windows)]
-                crate::temp::internal::privacy_windows::verify_owner_access(&existing, true, policy)
-                    .map_err(|source| LocalFileError::from_io(LocalFileOperation::Metadata, Some(self.directory().diagnostic_path().join(&path)), None, source))?;
+                crate::temp::internal::privacy_windows::verify_owner_access(&existing, true, policy).map_err(
+                    |source| {
+                        LocalFileError::from_io(
+                            LocalFileOperation::Metadata,
+                            Some(self.directory().diagnostic_path().join(&path)),
+                            None,
+                            source,
+                        )
+                    },
+                )?;
             }
         }
         Ok(())
@@ -569,7 +623,14 @@ impl LocalDirectoryHandle {
             Some(directory.clone()),
             LocalTempCleanupLimits::new(),
         );
-        let mut stage = LocalStagedDirectory::new(owner, directory, relative.to_path_buf(), identity, private, options.owner_access_policy().copied());
+        let mut stage = LocalStagedDirectory::new(
+            owner,
+            directory,
+            relative.to_path_buf(),
+            identity,
+            private,
+            options.owner_access_policy().copied(),
+        );
         if let Some(owner) = stage.owner.as_mut() {
             owner.set_owner_access_policy(options.owner_access_policy().copied());
         }
@@ -600,7 +661,12 @@ impl LocalDirectoryHandle {
         if let Some(policy) = options.owner_access_policy()
             && let Err(cause) = validate_owner_policy(policy)
         {
-            return Err(LocalTreeCreateError::new(cause, None, Vec::new(), LocalTreeMutationState::NotStarted));
+            return Err(LocalTreeCreateError::new(
+                cause,
+                None,
+                Vec::new(),
+                LocalTreeMutationState::NotStarted,
+            ));
         }
         let parent = self
             .root_authority()
@@ -617,7 +683,9 @@ impl LocalDirectoryHandle {
             if crate::local::take_repeated_test_support("staged-directory-collision") {
                 continue;
             }
-            if options.privacy() == crate::policy::LocalPrivacyRequirement::Required || options.owner_access_policy().is_some() {
+            if options.privacy() == crate::policy::LocalPrivacyRequirement::Required
+                || options.owner_access_policy().is_some()
+            {
                 match create_stage_directory(parent, &name, options.owner_access_policy()) {
                     Ok(file) => {
                         created_file = Some(file);
@@ -647,7 +715,8 @@ impl LocalDirectoryHandle {
                                     self.clone(),
                                     None,
                                     options.cleanup_limits(),
-                                ).with_owner_access_policy(options.owner_access_policy().copied())
+                                )
+                                .with_owner_access_policy(options.owner_access_policy().copied())
                             })
                             .into_iter()
                             .collect();
@@ -719,7 +788,8 @@ impl LocalDirectoryHandle {
                         self.clone(),
                         None,
                         options.cleanup_limits(),
-                    ).with_owner_access_policy(options.owner_access_policy().copied());
+                    )
+                    .with_owner_access_policy(options.owner_access_policy().copied());
                     return Err(LocalTreeCreateError::new(
                         cause,
                         None,
@@ -738,7 +808,8 @@ impl LocalDirectoryHandle {
                         self.clone(),
                         None,
                         options.cleanup_limits(),
-                    ).with_owner_access_policy(options.owner_access_policy().copied());
+                    )
+                    .with_owner_access_policy(options.owner_access_policy().copied());
                     return Err(LocalTreeCreateError::new(
                         LocalFileError::new(LocalFileErrorKind::Unsupported, LocalFileOperation::Metadata)
                             .with_path(path.clone()),
@@ -768,7 +839,8 @@ impl LocalDirectoryHandle {
                     self.clone(),
                     None,
                     options.cleanup_limits(),
-                ).with_owner_access_policy(options.owner_access_policy().copied());
+                )
+                .with_owner_access_policy(options.owner_access_policy().copied());
                 return Err(LocalTreeCreateError::new(
                     cause,
                     None,
@@ -797,7 +869,8 @@ impl LocalDirectoryHandle {
                     self.clone(),
                     child,
                     options.cleanup_limits(),
-                ).with_owner_access_policy(options.owner_access_policy().copied());
+                )
+                .with_owner_access_policy(options.owner_access_policy().copied());
                 return Err(LocalTreeCreateError::new(
                     cause,
                     None,
@@ -817,7 +890,8 @@ impl LocalDirectoryHandle {
                 self.clone(),
                 None,
                 options.cleanup_limits(),
-            ).with_owner_access_policy(options.owner_access_policy().copied());
+            )
+            .with_owner_access_policy(options.owner_access_policy().copied());
             return Err(LocalTreeCreateError::new(
                 LocalFileError::new(LocalFileErrorKind::ChangedDuringRead, LocalFileOperation::Metadata)
                     .with_path(path),
@@ -954,18 +1028,27 @@ fn validate_owner_policy(policy: &crate::policy::LocalOwnerAccessPolicy) -> Loca
     #[cfg(unix)]
     if let Some((directory, file)) = policy.unix_modes() {
         if directory & !0o700 != 0 || file & !0o700 != 0 {
-            return Err(LocalFileError::new(LocalFileErrorKind::InvalidOptions, LocalFileOperation::ValidateName));
+            return Err(LocalFileError::new(
+                LocalFileErrorKind::InvalidOptions,
+                LocalFileOperation::ValidateName,
+            ));
         }
         return Ok(());
     }
     #[cfg(windows)]
     if let Some((directory, file)) = policy.windows_masks() {
         if directory & !0x001f_01ff != 0 || file & !0x001f_01ff != 0 {
-            return Err(LocalFileError::new(LocalFileErrorKind::InvalidOptions, LocalFileOperation::ValidateName));
+            return Err(LocalFileError::new(
+                LocalFileErrorKind::InvalidOptions,
+                LocalFileOperation::ValidateName,
+            ));
         }
         return Ok(());
     }
-    Err(LocalFileError::new(LocalFileErrorKind::InvalidOptions, LocalFileOperation::ValidateName))
+    Err(LocalFileError::new(
+        LocalFileErrorKind::InvalidOptions,
+        LocalFileOperation::ValidateName,
+    ))
 }
 
 fn stage_name(options: &LocalTempDirectoryOptions) -> LocalResult<std::ffi::OsString> {
@@ -1044,13 +1127,25 @@ fn create_stage_directory(
     let Some(policy) = policy else {
         return create_private_directory(parent, name);
     };
-    let parent_file = parent.try_clone_authority().map_err(|source| crate::temp::types::NativePrivateCreateError { source, retained: None })?;
+    let parent_file = parent
+        .try_clone_authority()
+        .map_err(|source| crate::temp::types::NativePrivateCreateError { source, retained: None })?;
     #[cfg(unix)]
-    { crate::temp::internal::privacy_unix::create_owner_entry_at(&parent_file, name, true, policy) }
+    {
+        crate::temp::internal::privacy_unix::create_owner_entry_at(&parent_file, name, true, policy)
+    }
     #[cfg(windows)]
-    { crate::temp::internal::privacy_windows::create_owner_entry_at(&parent_file, name, true, policy) }
+    {
+        crate::temp::internal::privacy_windows::create_owner_entry_at(&parent_file, name, true, policy)
+    }
     #[cfg(not(any(unix, windows)))]
-    { let _ = policy; Err(crate::temp::types::NativePrivateCreateError { source: std::io::Error::new(std::io::ErrorKind::Unsupported, "owner policies are unsupported"), retained: None }) }
+    {
+        let _ = policy;
+        Err(crate::temp::types::NativePrivateCreateError {
+            source: std::io::Error::new(std::io::ErrorKind::Unsupported, "owner policies are unsupported"),
+            retained: None,
+        })
+    }
 }
 
 fn create_private_file(parent: &File, name: &OsStr) -> Result<File, crate::temp::types::NativePrivateCreateError> {
@@ -1072,14 +1167,28 @@ fn create_private_file(parent: &File, name: &OsStr) -> Result<File, crate::temp:
     }
 }
 
-fn create_stage_file(parent: &File, name: &OsStr, policy: Option<&crate::policy::LocalOwnerAccessPolicy>) -> Result<File, crate::temp::types::NativePrivateCreateError> {
+fn create_stage_file(
+    parent: &File,
+    name: &OsStr,
+    policy: Option<&crate::policy::LocalOwnerAccessPolicy>,
+) -> Result<File, crate::temp::types::NativePrivateCreateError> {
     if let Some(policy) = policy {
         #[cfg(unix)]
-        { crate::temp::internal::privacy_unix::create_owner_entry_at(parent, name, false, policy) }
+        {
+            crate::temp::internal::privacy_unix::create_owner_entry_at(parent, name, false, policy)
+        }
         #[cfg(windows)]
-        { crate::temp::internal::privacy_windows::create_owner_entry_at(parent, name, false, policy) }
+        {
+            crate::temp::internal::privacy_windows::create_owner_entry_at(parent, name, false, policy)
+        }
         #[cfg(not(any(unix, windows)))]
-        { let _ = policy; Err(crate::temp::types::NativePrivateCreateError { source: std::io::Error::new(std::io::ErrorKind::Unsupported, "owner policies are unsupported"), retained: None }) }
+        {
+            let _ = policy;
+            Err(crate::temp::types::NativePrivateCreateError {
+                source: std::io::Error::new(std::io::ErrorKind::Unsupported, "owner policies are unsupported"),
+                retained: None,
+            })
+        }
     } else {
         create_private_file(parent, name)
     }
@@ -1136,78 +1245,135 @@ impl LocalStagedDirectory {
     /// handles before changing access. Larger trees return `ResourceLimit`
     /// without mutation. Nonempty trees also require the target directory
     /// permissions to preserve owner read/list and traversal through each
-    /// directory whose descendants must be verified; otherwise the method returns
-    /// `RequirementNotMet` before mutation. An empty stage can use a mode or
-    /// mask that removes all access because its already-open root handle is
-    /// sufficient for final verification.
+    /// directory whose descendants must be verified; otherwise the method
+    /// returns `RequirementNotMet` before mutation. An empty stage can use
+    /// a mode or mask that removes all access because its already-open root
+    /// handle is sufficient for final verification.
     pub fn apply_owner_access_policy_with_options(
         &mut self,
         policy: &crate::policy::LocalOwnerAccessPolicy,
         limits: &LocalListOptions,
     ) -> Result<crate::outcome::LocalTreeAccessOutcome, super::tree_recovery::LocalTreeAccessError> {
         use crate::outcome::LocalTreeAccessState as State;
-        validate_owner_policy(policy).map_err(|cause| super::tree_recovery::LocalTreeAccessError::new(cause, State::Preserved))?;
+        validate_owner_policy(policy)
+            .map_err(|cause| super::tree_recovery::LocalTreeAccessError::new(cause, State::Preserved))?;
         self.owner_access_policy = Some(*policy);
         if let Some(owner) = self.owner.as_mut() {
             owner.set_owner_access_policy(Some(*policy));
         }
-        let traversal = limits.with_recursive().with_symlink_policy(crate::policy::LocalSymlinkPolicy::Reject)
+        let traversal = limits
+            .with_recursive()
+            .with_symlink_policy(crate::policy::LocalSymlinkPolicy::Reject)
             .with_error_policy(crate::options::LocalWalkErrorPolicy::FailFast);
         let mut entries = Vec::new();
         let mut seen_bytes = 0_usize;
-        for item in self.observe_tree_with_options(&traversal).map_err(|cause| super::tree_recovery::LocalTreeAccessError::new(cause, State::Preserved))? {
-            let item = item.map_err(|cause| super::tree_recovery::LocalTreeAccessError::new(cause, State::Preserved))?;
+        for item in self
+            .observe_tree_with_options(&traversal)
+            .map_err(|cause| super::tree_recovery::LocalTreeAccessError::new(cause, State::Preserved))?
+        {
+            let item =
+                item.map_err(|cause| super::tree_recovery::LocalTreeAccessError::new(cause, State::Preserved))?;
             if entries.len() >= MAX_OWNER_POLICY_ENTRY_HANDLES {
-                return Err(super::tree_recovery::LocalTreeAccessError::new(resource_limit(), State::Preserved));
+                return Err(super::tree_recovery::LocalTreeAccessError::new(
+                    resource_limit(),
+                    State::Preserved,
+                ));
             }
             if limits.max_entries().is_some_and(|maximum| entries.len() >= maximum) {
-                return Err(super::tree_recovery::LocalTreeAccessError::new(resource_limit(), State::Preserved));
+                return Err(super::tree_recovery::LocalTreeAccessError::new(
+                    resource_limit(),
+                    State::Preserved,
+                ));
             }
-            seen_bytes = seen_bytes.checked_add(item.relative_path().as_os_str().as_encoded_bytes().len()).ok_or_else(|| super::tree_recovery::LocalTreeAccessError::new(resource_limit(), State::Preserved))?;
+            seen_bytes = seen_bytes
+                .checked_add(item.relative_path().as_os_str().as_encoded_bytes().len())
+                .ok_or_else(|| super::tree_recovery::LocalTreeAccessError::new(resource_limit(), State::Preserved))?;
             if limits.max_seen_name_bytes().is_some_and(|maximum| seen_bytes > maximum) {
-                return Err(super::tree_recovery::LocalTreeAccessError::new(resource_limit(), State::Preserved));
+                return Err(super::tree_recovery::LocalTreeAccessError::new(
+                    resource_limit(),
+                    State::Preserved,
+                ));
             }
-            if limits.max_depth().is_some_and(|maximum| item.relative_path().components().count() > maximum) {
-                return Err(super::tree_recovery::LocalTreeAccessError::new(resource_limit(), State::Preserved));
+            if limits
+                .max_depth()
+                .is_some_and(|maximum| item.relative_path().components().count() > maximum)
+            {
+                return Err(super::tree_recovery::LocalTreeAccessError::new(
+                    resource_limit(),
+                    State::Preserved,
+                ));
             }
-            entries.try_reserve(1).map_err(|_| super::tree_recovery::LocalTreeAccessError::new(resource_limit(), State::Preserved))?;
-            entries.push((item.relative_path().to_path_buf(), item.observation().metadata().kind(), item.observation().identity().cloned()));
+            entries
+                .try_reserve(1)
+                .map_err(|_| super::tree_recovery::LocalTreeAccessError::new(resource_limit(), State::Preserved))?;
+            entries.push((
+                item.relative_path().to_path_buf(),
+                item.observation().metadata().kind(),
+                item.observation().identity().cloned(),
+            ));
         }
-        entries.sort_by_key(|(path, kind, _)| (
-            if *kind == crate::LocalFileKind::Directory { 1_u8 } else { 0_u8 },
-            std::cmp::Reverse(path.components().count()),
-        ));
+        entries.sort_by_key(|(path, kind, _)| {
+            (
+                if *kind == crate::LocalFileKind::Directory {
+                    1_u8
+                } else {
+                    0_u8
+                },
+                std::cmp::Reverse(path.components().count()),
+            )
+        });
         let directory_mode_restricts_traversal = {
             #[cfg(unix)]
-            { policy.unix_modes().is_some_and(|(directory_mode, _)| directory_mode & 0o500 != 0o500) }
+            {
+                policy
+                    .unix_modes()
+                    .is_some_and(|(directory_mode, _)| directory_mode & 0o500 != 0o500)
+            }
             #[cfg(windows)]
-            { policy.windows_masks().is_some_and(|(directory_mask, _)| directory_mask & 0x21 != 0x21) }
+            {
+                policy
+                    .windows_masks()
+                    .is_some_and(|(directory_mask, _)| directory_mask & 0x21 != 0x21)
+            }
             #[cfg(not(any(unix, windows)))]
-            { true }
+            {
+                true
+            }
         };
         if !entries.is_empty() && directory_mode_restricts_traversal {
             return Err(super::tree_recovery::LocalTreeAccessError::new(
-                LocalFileError::new(LocalFileErrorKind::RequirementNotMet, LocalFileOperation::Metadata), State::Preserved,
+                LocalFileError::new(LocalFileErrorKind::RequirementNotMet, LocalFileOperation::Metadata),
+                State::Preserved,
             ));
         }
-        if directory_mode_restricts_traversal && entries.iter().any(|(path, kind, _)| {
-            *kind == crate::LocalFileKind::Directory
-                && entries.iter().any(|(candidate, _, _)| candidate != path && candidate.starts_with(path))
-        }) {
+        if directory_mode_restricts_traversal
+            && entries.iter().any(|(path, kind, _)| {
+                *kind == crate::LocalFileKind::Directory
+                    && entries
+                        .iter()
+                        .any(|(candidate, _, _)| candidate != path && candidate.starts_with(path))
+            })
+        {
             return Err(super::tree_recovery::LocalTreeAccessError::new(
-                LocalFileError::new(LocalFileErrorKind::RequirementNotMet, LocalFileOperation::Metadata), State::Preserved,
+                LocalFileError::new(LocalFileErrorKind::RequirementNotMet, LocalFileOperation::Metadata),
+                State::Preserved,
             ));
         }
         if entries.len() > MAX_OWNER_POLICY_ENTRY_HANDLES {
-            return Err(super::tree_recovery::LocalTreeAccessError::new(resource_limit(), State::Preserved));
+            return Err(super::tree_recovery::LocalTreeAccessError::new(
+                resource_limit(),
+                State::Preserved,
+            ));
         }
         let mut retained = Vec::new();
-        retained.try_reserve_exact(entries.len())
+        retained
+            .try_reserve_exact(entries.len())
             .map_err(|_| super::tree_recovery::LocalTreeAccessError::new(resource_limit(), State::Preserved))?;
         for (path, kind, expected) in &entries {
             if !matches!(kind, crate::LocalFileKind::File | crate::LocalFileKind::Directory) {
                 return Err(super::tree_recovery::LocalTreeAccessError::new(
-                    LocalFileError::new(LocalFileErrorKind::RequirementNotMet, LocalFileOperation::Metadata), State::Preserved,
+                    LocalFileError::new(LocalFileErrorKind::RequirementNotMet, LocalFileOperation::Metadata),
+                    State::Preserved,
                 ));
             }
             #[cfg(feature = "test-support")]
@@ -1216,33 +1382,58 @@ impl LocalStagedDirectory {
                 let mut backup_name = native.as_os_str().to_os_string();
                 backup_name.push(".owner-policy-original");
                 let backup = PathBuf::from(backup_name);
-                std::fs::rename(&native, &backup).map_err(|source| super::tree_recovery::LocalTreeAccessError::new(
-                    LocalFileError::from_io(LocalFileOperation::Metadata, Some(native.clone()), None, source), State::Preserved,
-                ))?;
-                std::fs::write(&native, b"replacement").map_err(|source| super::tree_recovery::LocalTreeAccessError::new(
-                    LocalFileError::from_io(LocalFileOperation::Metadata, Some(native), None, source), State::Preserved,
-                ))?;
+                std::fs::rename(&native, &backup).map_err(|source| {
+                    super::tree_recovery::LocalTreeAccessError::new(
+                        LocalFileError::from_io(LocalFileOperation::Metadata, Some(native.clone()), None, source),
+                        State::Preserved,
+                    )
+                })?;
+                std::fs::write(&native, b"replacement").map_err(|source| {
+                    super::tree_recovery::LocalTreeAccessError::new(
+                        LocalFileError::from_io(LocalFileOperation::Metadata, Some(native), None, source),
+                        State::Preserved,
+                    )
+                })?;
             }
             let file = {
-                #[cfg(unix)] { open_unix_tree_entry(self, path, *kind) }
-                #[cfg(windows)] { open_windows_tree_entry(self, path, *kind) }
-                #[cfg(not(any(unix, windows)))] { Err(LocalFileError::new(LocalFileErrorKind::Unsupported, LocalFileOperation::Metadata)) }
-            }.map_err(|cause| super::tree_recovery::LocalTreeAccessError::new(cause, State::Preserved))?;
-            let current = crate::observation::query::query_observation(&file, crate::observation::LocalObservationRequirement::Required)
-                .map_err(|cause| super::tree_recovery::LocalTreeAccessError::new(cause, State::Preserved))?;
+                #[cfg(unix)]
+                {
+                    open_unix_tree_entry(self, path, *kind)
+                }
+                #[cfg(windows)]
+                {
+                    open_windows_tree_entry(self, path, *kind)
+                }
+                #[cfg(not(any(unix, windows)))]
+                {
+                    Err(LocalFileError::new(
+                        LocalFileErrorKind::Unsupported,
+                        LocalFileOperation::Metadata,
+                    ))
+                }
+            }
+            .map_err(|cause| super::tree_recovery::LocalTreeAccessError::new(cause, State::Preserved))?;
+            let current = crate::observation::query::query_observation(
+                &file,
+                crate::observation::LocalObservationRequirement::Required,
+            )
+            .map_err(|cause| super::tree_recovery::LocalTreeAccessError::new(cause, State::Preserved))?;
             if current.identity() != expected.as_ref() {
                 return Err(super::tree_recovery::LocalTreeAccessError::new(
-                    LocalFileError::new(LocalFileErrorKind::ChangedDuringRead, LocalFileOperation::Metadata), State::Preserved,
+                    LocalFileError::new(LocalFileErrorKind::ChangedDuringRead, LocalFileOperation::Metadata),
+                    State::Preserved,
                 ));
             }
             retained.push((path.clone(), *kind, expected.clone(), file));
         }
         let owner = self.owner.as_ref().expect("stage recovery owner exists");
-        let binding_matches = owner.binding_matches_identity()
+        let binding_matches = owner
+            .binding_matches_identity()
             .map_err(|cause| super::tree_recovery::LocalTreeAccessError::new(cause, State::Preserved))?;
         if !binding_matches {
             return Err(super::tree_recovery::LocalTreeAccessError::new(
-                LocalFileError::new(LocalFileErrorKind::ChangedDuringRead, LocalFileOperation::Metadata), State::Preserved,
+                LocalFileError::new(LocalFileErrorKind::ChangedDuringRead, LocalFileOperation::Metadata),
+                State::Preserved,
             ));
         }
         let mut applied = false;
@@ -1250,24 +1441,70 @@ impl LocalStagedDirectory {
             #[cfg(feature = "test-support")]
             if crate::local::take_test_support_on_nth("owner-policy-apply", 2) {
                 return Err(super::tree_recovery::LocalTreeAccessError::new(
-                    LocalFileError::from_io(LocalFileOperation::Metadata, Some(self.directory().diagnostic_path().join(path)), None, crate::local::test_fault_error()),
+                    LocalFileError::from_io(
+                        LocalFileOperation::Metadata,
+                        Some(self.directory().diagnostic_path().join(path)),
+                        None,
+                        crate::local::test_fault_error(),
+                    ),
                     if applied { State::Mixed } else { State::Preserved },
                 ));
             }
-            let current = crate::observation::query::query_observation(file, crate::observation::LocalObservationRequirement::Required)
-                .map_err(|cause| super::tree_recovery::LocalTreeAccessError::new(cause, if applied { State::Mixed } else { State::Preserved }))?;
+            let current = crate::observation::query::query_observation(
+                file,
+                crate::observation::LocalObservationRequirement::Required,
+            )
+            .map_err(|cause| {
+                super::tree_recovery::LocalTreeAccessError::new(
+                    cause,
+                    if applied { State::Mixed } else { State::Preserved },
+                )
+            })?;
             if current.identity() != expected.as_ref() {
-                return Err(super::tree_recovery::LocalTreeAccessError::new(LocalFileError::new(LocalFileErrorKind::ChangedDuringRead, LocalFileOperation::Metadata), if applied { State::Mixed } else { State::Preserved }));
+                return Err(super::tree_recovery::LocalTreeAccessError::new(
+                    LocalFileError::new(LocalFileErrorKind::ChangedDuringRead, LocalFileOperation::Metadata),
+                    if applied { State::Mixed } else { State::Preserved },
+                ));
             }
             let result = {
-                #[cfg(unix)] { crate::temp::internal::privacy_unix::apply_owner_access(file, *kind == crate::LocalFileKind::Directory, policy) }
-                #[cfg(windows)] { crate::temp::internal::privacy_windows::apply_owner_access(file, *kind == crate::LocalFileKind::Directory, policy) }
-                #[cfg(not(any(unix, windows)))] { Err(std::io::Error::new(std::io::ErrorKind::Unsupported, "owner policies are unsupported")) }
+                #[cfg(unix)]
+                {
+                    crate::temp::internal::privacy_unix::apply_owner_access(
+                        file,
+                        *kind == crate::LocalFileKind::Directory,
+                        policy,
+                    )
+                }
+                #[cfg(windows)]
+                {
+                    crate::temp::internal::privacy_windows::apply_owner_access(
+                        file,
+                        *kind == crate::LocalFileKind::Directory,
+                        policy,
+                    )
+                }
+                #[cfg(not(any(unix, windows)))]
+                {
+                    Err(std::io::Error::new(
+                        std::io::ErrorKind::Unsupported,
+                        "owner policies are unsupported",
+                    ))
+                }
             };
             if let Err(source) = result {
-                return Err(super::tree_recovery::LocalTreeAccessError::new(LocalFileError::from_io(LocalFileOperation::Metadata, Some(self.directory().diagnostic_path().join(path)), None, source), if applied { State::Mixed } else { State::Indeterminate }));
+                return Err(super::tree_recovery::LocalTreeAccessError::new(
+                    LocalFileError::from_io(
+                        LocalFileOperation::Metadata,
+                        Some(self.directory().diagnostic_path().join(path)),
+                        None,
+                        source,
+                    ),
+                    if applied { State::Mixed } else { State::Indeterminate },
+                ));
             }
-            let rebound = self.directory().observe_entry(path)
+            let rebound = self
+                .directory()
+                .observe_entry(path)
                 .map_err(|cause| super::tree_recovery::LocalTreeAccessError::new(cause, State::Indeterminate))?;
             if rebound.identity() != expected.as_ref() {
                 return Err(super::tree_recovery::LocalTreeAccessError::new(
@@ -1277,10 +1514,17 @@ impl LocalStagedDirectory {
             }
             applied = true;
         }
-        let root_observation = self.directory().observe()
-            .map_err(|cause| super::tree_recovery::LocalTreeAccessError::new(cause, if applied { State::Mixed } else { State::Indeterminate }))?;
+        let root_observation = self.directory().observe().map_err(|cause| {
+            super::tree_recovery::LocalTreeAccessError::new(
+                cause,
+                if applied { State::Mixed } else { State::Indeterminate },
+            )
+        })?;
         if root_observation.identity() != self.identity.as_ref() {
-            return Err(super::tree_recovery::LocalTreeAccessError::new(LocalFileError::new(LocalFileErrorKind::ChangedDuringRead, LocalFileOperation::Metadata), if applied { State::Mixed } else { State::Indeterminate }));
+            return Err(super::tree_recovery::LocalTreeAccessError::new(
+                LocalFileError::new(LocalFileErrorKind::ChangedDuringRead, LocalFileOperation::Metadata),
+                if applied { State::Mixed } else { State::Indeterminate },
+            ));
         }
         #[cfg(feature = "test-support")]
         if crate::local::take_test_support("owner-policy-replace-stage-before-root") {
@@ -1288,31 +1532,82 @@ impl LocalStagedDirectory {
             let mut backup_name = native.as_os_str().to_os_string();
             backup_name.push(".owner-policy-original");
             let backup = PathBuf::from(backup_name);
-            std::fs::rename(&native, &backup).map_err(|source| super::tree_recovery::LocalTreeAccessError::new(
-                LocalFileError::from_io(LocalFileOperation::Metadata, Some(native.clone()), None, source), if applied { State::Mixed } else { State::Preserved },
-            ))?;
-            std::fs::create_dir(&native).map_err(|source| super::tree_recovery::LocalTreeAccessError::new(
-                LocalFileError::from_io(LocalFileOperation::Metadata, Some(native), None, source), if applied { State::Mixed } else { State::Preserved },
-            ))?;
+            std::fs::rename(&native, &backup).map_err(|source| {
+                super::tree_recovery::LocalTreeAccessError::new(
+                    LocalFileError::from_io(LocalFileOperation::Metadata, Some(native.clone()), None, source),
+                    if applied { State::Mixed } else { State::Preserved },
+                )
+            })?;
+            std::fs::create_dir(&native).map_err(|source| {
+                super::tree_recovery::LocalTreeAccessError::new(
+                    LocalFileError::from_io(LocalFileOperation::Metadata, Some(native), None, source),
+                    if applied { State::Mixed } else { State::Preserved },
+                )
+            })?;
         }
-        let binding_matches = self.owner.as_ref().expect("stage owner exists").binding_matches_identity()
-            .map_err(|cause| super::tree_recovery::LocalTreeAccessError::new(cause, if applied { State::Mixed } else { State::Preserved }))?;
+        let binding_matches = self
+            .owner
+            .as_ref()
+            .expect("stage owner exists")
+            .binding_matches_identity()
+            .map_err(|cause| {
+                super::tree_recovery::LocalTreeAccessError::new(
+                    cause,
+                    if applied { State::Mixed } else { State::Preserved },
+                )
+            })?;
         if !binding_matches {
             return Err(super::tree_recovery::LocalTreeAccessError::new(
-                LocalFileError::new(LocalFileErrorKind::ChangedDuringRead, LocalFileOperation::Metadata), if applied { State::Mixed } else { State::Preserved },
+                LocalFileError::new(LocalFileErrorKind::ChangedDuringRead, LocalFileOperation::Metadata),
+                if applied { State::Mixed } else { State::Preserved },
             ));
         }
-        let root = self.directory().root_authority().and_then(|root| root.try_clone_authority().map_err(|source| LocalFileError::from_io(LocalFileOperation::Metadata, None, None, source)))
-            .map_err(|cause| super::tree_recovery::LocalTreeAccessError::new(cause, if applied { State::Mixed } else { State::Indeterminate }))?;
+        let root = self
+            .directory()
+            .root_authority()
+            .and_then(|root| {
+                root.try_clone_authority()
+                    .map_err(|source| LocalFileError::from_io(LocalFileOperation::Metadata, None, None, source))
+            })
+            .map_err(|cause| {
+                super::tree_recovery::LocalTreeAccessError::new(
+                    cause,
+                    if applied { State::Mixed } else { State::Indeterminate },
+                )
+            })?;
         let root_result = {
-            #[cfg(unix)] { crate::temp::internal::privacy_unix::apply_owner_access(&root, true, policy) }
-            #[cfg(windows)] { crate::temp::internal::privacy_windows::apply_owner_access(&root, true, policy) }
-            #[cfg(not(any(unix, windows)))] { Err(std::io::Error::new(std::io::ErrorKind::Unsupported, "owner policies are unsupported")) }
+            #[cfg(unix)]
+            {
+                crate::temp::internal::privacy_unix::apply_owner_access(&root, true, policy)
+            }
+            #[cfg(windows)]
+            {
+                crate::temp::internal::privacy_windows::apply_owner_access(&root, true, policy)
+            }
+            #[cfg(not(any(unix, windows)))]
+            {
+                Err(std::io::Error::new(
+                    std::io::ErrorKind::Unsupported,
+                    "owner policies are unsupported",
+                ))
+            }
         };
         if let Err(source) = root_result {
-            return Err(super::tree_recovery::LocalTreeAccessError::new(LocalFileError::from_io(LocalFileOperation::Metadata, Some(self.directory().diagnostic_path().to_path_buf()), None, source), if applied { State::Mixed } else { State::Indeterminate }));
+            return Err(super::tree_recovery::LocalTreeAccessError::new(
+                LocalFileError::from_io(
+                    LocalFileOperation::Metadata,
+                    Some(self.directory().diagnostic_path().to_path_buf()),
+                    None,
+                    source,
+                ),
+                if applied { State::Mixed } else { State::Indeterminate },
+            ));
         }
-        let binding_matches = self.owner.as_ref().expect("stage owner exists").binding_matches_identity()
+        let binding_matches = self
+            .owner
+            .as_ref()
+            .expect("stage owner exists")
+            .binding_matches_identity()
             .map_err(|cause| super::tree_recovery::LocalTreeAccessError::new(cause, State::Indeterminate))?;
         if !binding_matches {
             return Err(super::tree_recovery::LocalTreeAccessError::new(
@@ -1323,90 +1618,137 @@ impl LocalStagedDirectory {
         #[cfg(all(feature = "test-support", unix))]
         if crate::local::take_test_support("owner-policy-mutate-before-final-verify") {
             use std::os::unix::fs::PermissionsExt;
-            if let Some((path, _, _, _)) = retained.iter().find(|(_, kind, _, _)| *kind == crate::LocalFileKind::File) {
+            if let Some((path, _, _, _)) = retained
+                .iter()
+                .find(|(_, kind, _, _)| *kind == crate::LocalFileKind::File)
+            {
                 let native = self.directory().diagnostic_path().join(path);
                 let mut permissions = std::fs::metadata(&native)
-                    .map_err(|source| super::tree_recovery::LocalTreeAccessError::new(LocalFileError::from_io(LocalFileOperation::Metadata, Some(native.clone()), None, source), State::Indeterminate))?
+                    .map_err(|source| {
+                        super::tree_recovery::LocalTreeAccessError::new(
+                            LocalFileError::from_io(LocalFileOperation::Metadata, Some(native.clone()), None, source),
+                            State::Indeterminate,
+                        )
+                    })?
                     .permissions();
                 permissions.set_mode(0o600);
-                std::fs::set_permissions(&native, permissions)
-                    .map_err(|source| super::tree_recovery::LocalTreeAccessError::new(LocalFileError::from_io(LocalFileOperation::Metadata, Some(native), None, source), State::Indeterminate))?;
+                std::fs::set_permissions(&native, permissions).map_err(|source| {
+                    super::tree_recovery::LocalTreeAccessError::new(
+                        LocalFileError::from_io(LocalFileOperation::Metadata, Some(native), None, source),
+                        State::Indeterminate,
+                    )
+                })?;
             }
         }
         #[cfg(feature = "test-support")]
         if crate::local::take_test_support("owner-policy-replace-before-final-verify")
-            && let Some((path, _, _, _)) = retained.iter().find(|(_, kind, _, _)| *kind == crate::LocalFileKind::File)
+            && let Some((path, _, _, _)) = retained
+                .iter()
+                .find(|(_, kind, _, _)| *kind == crate::LocalFileKind::File)
         {
             let native = self.directory().diagnostic_path().join(path);
             let mut backup_name = native.as_os_str().to_os_string();
             backup_name.push(".owner-policy-original");
             let backup = PathBuf::from(backup_name);
-            std::fs::rename(&native, &backup).map_err(|source| super::tree_recovery::LocalTreeAccessError::new(
-                LocalFileError::from_io(LocalFileOperation::Metadata, Some(native.clone()), None, source), State::Indeterminate,
-            ))?;
-            std::fs::write(&native, b"replacement").map_err(|source| super::tree_recovery::LocalTreeAccessError::new(
-                LocalFileError::from_io(LocalFileOperation::Metadata, Some(native), None, source), State::Indeterminate,
-            ))?;
+            std::fs::rename(&native, &backup).map_err(|source| {
+                super::tree_recovery::LocalTreeAccessError::new(
+                    LocalFileError::from_io(LocalFileOperation::Metadata, Some(native.clone()), None, source),
+                    State::Indeterminate,
+                )
+            })?;
+            std::fs::write(&native, b"replacement").map_err(|source| {
+                super::tree_recovery::LocalTreeAccessError::new(
+                    LocalFileError::from_io(LocalFileOperation::Metadata, Some(native), None, source),
+                    State::Indeterminate,
+                )
+            })?;
         }
         #[cfg(feature = "test-support")]
         if crate::local::take_test_support("owner-policy-add-root-entry-before-final-verify") {
             let native = self.directory().diagnostic_path().join("added-during-conversion");
-            std::fs::write(&native, b"unexpected").map_err(|source| super::tree_recovery::LocalTreeAccessError::new(
-                LocalFileError::from_io(LocalFileOperation::Metadata, Some(native), None, source), State::Indeterminate,
-            ))?;
+            std::fs::write(&native, b"unexpected").map_err(|source| {
+                super::tree_recovery::LocalTreeAccessError::new(
+                    LocalFileError::from_io(LocalFileOperation::Metadata, Some(native), None, source),
+                    State::Indeterminate,
+                )
+            })?;
         }
         #[cfg(feature = "test-support")]
         if crate::local::take_test_support("owner-policy-add-nested-entry-before-final-verify") {
-            let native = self.directory().diagnostic_path().join("nested/added-during-conversion");
-            std::fs::write(&native, b"unexpected").map_err(|source| super::tree_recovery::LocalTreeAccessError::new(
-                LocalFileError::from_io(LocalFileOperation::Metadata, Some(native), None, source), State::Indeterminate,
-            ))?;
+            let native = self
+                .directory()
+                .diagnostic_path()
+                .join("nested/added-during-conversion");
+            std::fs::write(&native, b"unexpected").map_err(|source| {
+                super::tree_recovery::LocalTreeAccessError::new(
+                    LocalFileError::from_io(LocalFileOperation::Metadata, Some(native), None, source),
+                    State::Indeterminate,
+                )
+            })?;
         }
         // Rewalk the complete tree while the configured directory policy
         // retains the read/list and traversal rights needed for name checks.
         let mut final_entries = Vec::new();
         let mut final_name_bytes = 0_usize;
         if !entries.is_empty() || !directory_mode_restricts_traversal {
-        for item in self.observe_tree_with_options(&traversal)
-            .map_err(|cause| super::tree_recovery::LocalTreeAccessError::new(cause, State::Indeterminate))?
-        {
-            let item = item.map_err(|cause| super::tree_recovery::LocalTreeAccessError::new(cause, State::Indeterminate))?;
-            if final_entries.len() >= MAX_OWNER_POLICY_ENTRY_HANDLES
-                || limits.max_entries().is_some_and(|maximum| final_entries.len() >= maximum)
+            for item in self
+                .observe_tree_with_options(&traversal)
+                .map_err(|cause| super::tree_recovery::LocalTreeAccessError::new(cause, State::Indeterminate))?
             {
-                return Err(super::tree_recovery::LocalTreeAccessError::new(resource_limit(), State::Indeterminate));
+                let item =
+                    item.map_err(|cause| super::tree_recovery::LocalTreeAccessError::new(cause, State::Indeterminate))?;
+                if final_entries.len() >= MAX_OWNER_POLICY_ENTRY_HANDLES
+                    || limits
+                        .max_entries()
+                        .is_some_and(|maximum| final_entries.len() >= maximum)
+                {
+                    return Err(super::tree_recovery::LocalTreeAccessError::new(
+                        resource_limit(),
+                        State::Indeterminate,
+                    ));
+                }
+                final_name_bytes = final_name_bytes
+                    .checked_add(item.relative_path().as_os_str().as_encoded_bytes().len())
+                    .ok_or_else(|| {
+                        super::tree_recovery::LocalTreeAccessError::new(resource_limit(), State::Indeterminate)
+                    })?;
+                if limits
+                    .max_seen_name_bytes()
+                    .is_some_and(|maximum| final_name_bytes > maximum)
+                {
+                    return Err(super::tree_recovery::LocalTreeAccessError::new(
+                        resource_limit(),
+                        State::Indeterminate,
+                    ));
+                }
+                final_entries.try_reserve(1).map_err(|_| {
+                    super::tree_recovery::LocalTreeAccessError::new(resource_limit(), State::Indeterminate)
+                })?;
+                final_entries.push((
+                    item.relative_path().to_path_buf(),
+                    item.observation().metadata().kind(),
+                    item.observation().identity().cloned(),
+                ));
             }
-            final_name_bytes = final_name_bytes
-                .checked_add(item.relative_path().as_os_str().as_encoded_bytes().len())
-                .ok_or_else(|| super::tree_recovery::LocalTreeAccessError::new(resource_limit(), State::Indeterminate))?;
-            if limits.max_seen_name_bytes().is_some_and(|maximum| final_name_bytes > maximum) {
-                return Err(super::tree_recovery::LocalTreeAccessError::new(resource_limit(), State::Indeterminate));
-            }
-            final_entries.try_reserve(1)
-                .map_err(|_| super::tree_recovery::LocalTreeAccessError::new(resource_limit(), State::Indeterminate))?;
-            final_entries.push((
-                item.relative_path().to_path_buf(),
-                item.observation().metadata().kind(),
-                item.observation().identity().cloned(),
-            ));
-        }
-        if final_entries.len() != entries.len()
-            || final_entries.iter().any(|(path, kind, identity)| {
-                !entries.iter().any(|(expected_path, expected_kind, expected_identity)| {
-                    path == expected_path && kind == expected_kind && identity == expected_identity
+            if final_entries.len() != entries.len()
+                || final_entries.iter().any(|(path, kind, identity)| {
+                    !entries.iter().any(|(expected_path, expected_kind, expected_identity)| {
+                        path == expected_path && kind == expected_kind && identity == expected_identity
+                    })
                 })
-            })
-        {
-            return Err(super::tree_recovery::LocalTreeAccessError::new(
-                LocalFileError::new(LocalFileErrorKind::ChangedDuringRead, LocalFileOperation::Metadata),
-                State::Indeterminate,
-            ));
-        }
+            {
+                return Err(super::tree_recovery::LocalTreeAccessError::new(
+                    LocalFileError::new(LocalFileErrorKind::ChangedDuringRead, LocalFileOperation::Metadata),
+                    State::Indeterminate,
+                ));
+            }
         }
         // The complete namespace set is now checked, then every pre-opened
         // identity-bound handle is checked for exact policy facts.
         for (path, kind, expected, file) in &retained {
-            let rebound = self.directory().observe_entry(path)
+            let rebound = self
+                .directory()
+                .observe_entry(path)
                 .map_err(|cause| super::tree_recovery::LocalTreeAccessError::new(cause, State::Indeterminate))?;
             if rebound.identity() != expected.as_ref() {
                 return Err(super::tree_recovery::LocalTreeAccessError::new(
@@ -1414,30 +1756,82 @@ impl LocalStagedDirectory {
                     State::Indeterminate,
                 ));
             }
-            let current = crate::observation::query::query_observation(file, crate::observation::LocalObservationRequirement::Required)
-                .map_err(|cause| super::tree_recovery::LocalTreeAccessError::new(cause, State::Indeterminate))?;
+            let current = crate::observation::query::query_observation(
+                file,
+                crate::observation::LocalObservationRequirement::Required,
+            )
+            .map_err(|cause| super::tree_recovery::LocalTreeAccessError::new(cause, State::Indeterminate))?;
             if current.identity() != expected.as_ref() {
                 return Err(super::tree_recovery::LocalTreeAccessError::new(
-                    LocalFileError::new(LocalFileErrorKind::ChangedDuringRead, LocalFileOperation::Metadata), State::Indeterminate,
+                    LocalFileError::new(LocalFileErrorKind::ChangedDuringRead, LocalFileOperation::Metadata),
+                    State::Indeterminate,
                 ));
             }
             let result = {
-                #[cfg(unix)] { crate::temp::internal::privacy_unix::verify_owner_access(file, *kind == crate::LocalFileKind::Directory, policy) }
-                #[cfg(windows)] { crate::temp::internal::privacy_windows::verify_owner_access(file, *kind == crate::LocalFileKind::Directory, policy) }
-                #[cfg(not(any(unix, windows)))] { Err(std::io::Error::new(std::io::ErrorKind::Unsupported, "owner policies are unsupported")) }
+                #[cfg(unix)]
+                {
+                    crate::temp::internal::privacy_unix::verify_owner_access(
+                        file,
+                        *kind == crate::LocalFileKind::Directory,
+                        policy,
+                    )
+                }
+                #[cfg(windows)]
+                {
+                    crate::temp::internal::privacy_windows::verify_owner_access(
+                        file,
+                        *kind == crate::LocalFileKind::Directory,
+                        policy,
+                    )
+                }
+                #[cfg(not(any(unix, windows)))]
+                {
+                    Err(std::io::Error::new(
+                        std::io::ErrorKind::Unsupported,
+                        "owner policies are unsupported",
+                    ))
+                }
             };
-            result.map_err(|source| super::tree_recovery::LocalTreeAccessError::new(
-                LocalFileError::from_io(LocalFileOperation::Metadata, Some(self.directory().diagnostic_path().join(path)), None, source),
-                State::Indeterminate,
-            ))?;
+            result.map_err(|source| {
+                super::tree_recovery::LocalTreeAccessError::new(
+                    LocalFileError::from_io(
+                        LocalFileOperation::Metadata,
+                        Some(self.directory().diagnostic_path().join(path)),
+                        None,
+                        source,
+                    ),
+                    State::Indeterminate,
+                )
+            })?;
         }
         #[cfg(unix)]
-        crate::temp::internal::privacy_unix::verify_owner_access(&root, true, policy)
-            .map_err(|source| super::tree_recovery::LocalTreeAccessError::new(LocalFileError::from_io(LocalFileOperation::Metadata, Some(self.directory().diagnostic_path().to_path_buf()), None, source), State::Indeterminate))?;
+        crate::temp::internal::privacy_unix::verify_owner_access(&root, true, policy).map_err(|source| {
+            super::tree_recovery::LocalTreeAccessError::new(
+                LocalFileError::from_io(
+                    LocalFileOperation::Metadata,
+                    Some(self.directory().diagnostic_path().to_path_buf()),
+                    None,
+                    source,
+                ),
+                State::Indeterminate,
+            )
+        })?;
         #[cfg(windows)]
-        crate::temp::internal::privacy_windows::verify_owner_access(&root, true, policy)
-            .map_err(|source| super::tree_recovery::LocalTreeAccessError::new(LocalFileError::from_io(LocalFileOperation::Metadata, Some(self.directory().diagnostic_path().to_path_buf()), None, source), State::Indeterminate))?;
-        Ok(crate::outcome::LocalTreeAccessOutcome::with_owner_policy(State::OwnerPolicyApplied, *policy))
+        crate::temp::internal::privacy_windows::verify_owner_access(&root, true, policy).map_err(|source| {
+            super::tree_recovery::LocalTreeAccessError::new(
+                LocalFileError::from_io(
+                    LocalFileOperation::Metadata,
+                    Some(self.directory().diagnostic_path().to_path_buf()),
+                    None,
+                    source,
+                ),
+                State::Indeterminate,
+            )
+        })?;
+        Ok(crate::outcome::LocalTreeAccessOutcome::with_owner_policy(
+            State::OwnerPolicyApplied,
+            *policy,
+        ))
     }
 
     fn apply_access_policy_with_sync(
@@ -2043,16 +2437,26 @@ impl LocalStagedDirectory {
         use crate::outcome::LocalTreePublication as Publication;
         let invalid_name = || LocalFileError::new(LocalFileErrorKind::InvalidPath, LocalFileOperation::ValidateName);
         let name_path = Path::new(name);
-        if options.owner_access_policy().is_some() && options.access() != crate::policy::LocalTreeFinalAccess::Preserve {
+        if options.owner_access_policy().is_some() && options.access() != crate::policy::LocalTreeFinalAccess::Preserve
+        {
             return Err(super::tree_recovery::LocalTreePublishError::new(
                 LocalFileError::new(LocalFileErrorKind::InvalidOptions, LocalFileOperation::ValidateName),
-                Some(self), Mutation::NotStarted, Publication::NotPublished, Access::Preserved,
+                Some(self),
+                Mutation::NotStarted,
+                Publication::NotPublished,
+                Access::Preserved,
             ));
         }
         if let Some(policy) = options.owner_access_policy()
             && let Err(cause) = validate_owner_policy(policy)
         {
-            return Err(super::tree_recovery::LocalTreePublishError::new(cause, Some(self), Mutation::NotStarted, Publication::NotPublished, Access::Preserved));
+            return Err(super::tree_recovery::LocalTreePublishError::new(
+                cause,
+                Some(self),
+                Mutation::NotStarted,
+                Publication::NotPublished,
+                Access::Preserved,
+            ));
         }
         if let Some(policy) = options.owner_access_policy() {
             self.owner_access_policy = Some(*policy);
@@ -2142,13 +2546,33 @@ impl LocalStagedDirectory {
         let (access_state, file_synced) = if let Some(policy) = options.owner_access_policy() {
             let synced = match self.sync_tree_files(access_limits, options.file_sync()) {
                 Ok(synced) => synced,
-                Err(cause) => return Err(super::tree_recovery::LocalTreePublishError::new(cause, Some(self), Mutation::NotStarted, Publication::NotPublished, Access::Preserved)),
+                Err(cause) => {
+                    return Err(super::tree_recovery::LocalTreePublishError::new(
+                        cause,
+                        Some(self),
+                        Mutation::NotStarted,
+                        Publication::NotPublished,
+                        Access::Preserved,
+                    ));
+                }
             };
             match self.apply_owner_access_policy_with_options(policy, access_limits) {
                 Ok(outcome) => (outcome.access_state(), synced),
                 Err(error) => {
                     let (cause, access_state, _) = error.into_parts();
-                    return Err(super::tree_recovery::LocalTreePublishError::new(cause, Some(self), if access_state == Access::Indeterminate { Mutation::Indeterminate } else if access_state == Access::Preserved { Mutation::NotStarted } else { Mutation::Started }, Publication::NotPublished, access_state));
+                    return Err(super::tree_recovery::LocalTreePublishError::new(
+                        cause,
+                        Some(self),
+                        if access_state == Access::Indeterminate {
+                            Mutation::Indeterminate
+                        } else if access_state == Access::Preserved {
+                            Mutation::NotStarted
+                        } else {
+                            Mutation::Started
+                        },
+                        Publication::NotPublished,
+                        access_state,
+                    ));
                 }
             }
         } else if options.access() == crate::policy::LocalTreeFinalAccess::Preserve {
@@ -2201,7 +2625,10 @@ impl LocalStagedDirectory {
             if let Err(source) = std::fs::rename(&native, &backup).and_then(|()| std::fs::create_dir(&native)) {
                 return Err(super::tree_recovery::LocalTreePublishError::new(
                     LocalFileError::from_io(LocalFileOperation::Metadata, Some(native), None, source),
-                    Some(self), Mutation::Indeterminate, Publication::NotPublished, access_state,
+                    Some(self),
+                    Mutation::Indeterminate,
+                    Publication::NotPublished,
+                    access_state,
                 ));
             }
         }
@@ -2210,14 +2637,21 @@ impl LocalStagedDirectory {
             Ok(_) => false,
             Err(cause) => {
                 return Err(super::tree_recovery::LocalTreePublishError::new(
-                    cause, Some(self), Mutation::Indeterminate, Publication::NotPublished, access_state,
+                    cause,
+                    Some(self),
+                    Mutation::Indeterminate,
+                    Publication::NotPublished,
+                    access_state,
                 ));
             }
         };
         if !final_source {
             return Err(super::tree_recovery::LocalTreePublishError::new(
                 LocalFileError::new(LocalFileErrorKind::ChangedDuringRead, LocalFileOperation::Metadata),
-                Some(self), Mutation::Indeterminate, Publication::NotPublished, access_state,
+                Some(self),
+                Mutation::Indeterminate,
+                Publication::NotPublished,
+                access_state,
             ));
         }
         let rename_options = crate::options::LocalRenameOptions::new().with_durability(options.durability());

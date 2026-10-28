@@ -35,9 +35,9 @@ mod tree_validation;
 pub use component_policy::LocalComponentPolicy;
 pub use handle::LocalDirectoryHandle;
 pub(crate) use handle::retain_directory_chain;
-pub use local_resolution_policy::{
-    LocalResolutionOrigin, LocalResolutionPolicy, LocalResolutionScope,
-};
+pub use local_resolution_policy::LocalResolutionOrigin;
+pub use local_resolution_policy::LocalResolutionPolicy;
+pub use local_resolution_policy::LocalResolutionScope;
 pub use staged::LocalStagedDirectory;
 pub use tree_observer::LocalTreeObserver;
 pub use tree_recovery::LocalTreeAccessError;

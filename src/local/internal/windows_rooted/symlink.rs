@@ -73,18 +73,21 @@ pub(crate) fn read_rooted_link(root: &File, _diagnostic_root: &Path, path: &Loca
 pub(crate) enum RootedLinkTargetRead {
     /// The target fits within the requested byte limit.
     Target(RootedLinkTarget),
-    /// The target exceeds the limit; the value is its bounded observed byte length.
+    /// The target exceeds the limit; the value is its bounded observed byte
+    /// length.
     Exceeded(usize),
 }
 
-/// Bounded raw substitute target and reparse flags, before namespace normalization.
+/// Bounded raw substitute target and reparse flags, before namespace
+/// normalization.
 #[derive(Debug)]
 pub(crate) struct RootedLinkTarget {
     pub(crate) raw_path: PathBuf,
     pub(crate) flags: u32,
 }
 
-/// Reads one final symbolic-link target, constructing a `PathBuf` only when it fits.
+/// Reads one final symbolic-link target, constructing a `PathBuf` only when it
+/// fits.
 pub(crate) fn read_rooted_link_limited(
     root: &File,
     _diagnostic_root: &Path,
@@ -96,7 +99,8 @@ pub(crate) fn read_rooted_link_limited(
     parse_limited_symbolic_link_target(buffer.as_bytes(), maximum_bytes)
 }
 
-/// Normalizes a bounded target only after policy has inspected its raw spelling.
+/// Normalizes a bounded target only after policy has inspected its raw
+/// spelling.
 pub(crate) fn normalize_rooted_link_target(raw_path: &Path, flags: u32) -> Result<PathBuf> {
     use std::os::windows::ffi::OsStrExt;
 
@@ -264,7 +268,10 @@ fn read_reparse_buffer(link: &File) -> Result<ReparseBuffer> {
     if returned > MAXIMUM_REPARSE_DATA_BUFFER_SIZE as usize {
         return Err(corrupt_reparse("reparse query returned an oversized buffer"));
     }
-    Ok(ReparseBuffer { storage, length: returned })
+    Ok(ReparseBuffer {
+        storage,
+        length: returned,
+    })
 }
 
 /// Installs a complete symbolic-link reparse record on a placeholder handle.
@@ -590,11 +597,11 @@ mod tests {
     use std::io::ErrorKind;
     use std::path::Path;
 
+    use super::RootedLinkTargetRead;
     use super::SYMLINK_FLAG_RELATIVE;
     use super::build_symbolic_link_buffer;
     use super::parse_limited_symbolic_link_target;
     use super::parse_symbolic_link_target;
-    use super::RootedLinkTargetRead;
 
     fn raw_symbolic_link_buffer(substitute: &[u16], print: &[u16], flags: u32, print_first: bool) -> Vec<u8> {
         let substitute_length = (substitute.len() * 2) as u16;
@@ -644,7 +651,8 @@ mod tests {
         assert_eq!(target, parse_symbolic_link_target(&buffer).unwrap());
     }
 
-    /// Verifies target limits accept L bytes and reject L+1 bytes before path conversion.
+    /// Verifies target limits accept L bytes and reject L+1 bytes before path
+    /// conversion.
     #[test]
     fn test_limited_target_read_checks_byte_boundary_before_path_conversion() {
         assert!(matches!(
@@ -707,9 +715,7 @@ mod tests {
         buffer[8..10].copy_from_slice(&1_u16.to_le_bytes());
 
         assert_eq!(
-            parse_limited_symbolic_link_target(&buffer, Some(0))
-                .unwrap_err()
-                .kind(),
+            parse_limited_symbolic_link_target(&buffer, Some(0)).unwrap_err().kind(),
             ErrorKind::InvalidData
         );
     }

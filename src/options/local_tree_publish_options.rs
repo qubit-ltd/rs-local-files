@@ -8,8 +8,8 @@
 use crate::directory::LocalTreeValidationOptions;
 use crate::policy::LocalDurabilityRequirement;
 use crate::policy::LocalFileSyncRequirement;
-use crate::policy::LocalTreeFinalAccess;
 use crate::policy::LocalOwnerAccessPolicy;
+use crate::policy::LocalTreeFinalAccess;
 
 /// Optional verification, access, file synchronization, and durability
 /// requested before tree publication.

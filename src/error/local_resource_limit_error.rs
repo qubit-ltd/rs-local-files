@@ -122,12 +122,7 @@ impl fmt::Display for LocalResourceLimitError {
         write!(
             formatter,
             "{} resource limit exhausted: limit={}, remaining={}, requested={}, observed={:?}, overflowed={}",
-            self.resource,
-            self.limit,
-            self.remaining,
-            self.requested,
-            self.observed,
-            self.overflowed,
+            self.resource, self.limit, self.remaining, self.requested, self.observed, self.overflowed,
         )
     }
 }

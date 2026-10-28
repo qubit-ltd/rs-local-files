@@ -1,8 +1,16 @@
-use crate::{
-    LocalResult,
-    observation::{LocalSecurityObservation, LocalSecurityObservationOptions},
-};
+// =============================================================================
+//    Copyright (c) 2025 - 2026 Haixing Hu.
+//
+//    SPDX-License-Identifier: Apache-2.0
+//
+//    Licensed under the Apache License, Version 2.0.
+// =============================================================================
+
 use std::fs::File;
+
+use crate::LocalResult;
+use crate::observation::LocalSecurityObservation;
+use crate::observation::LocalSecurityObservationOptions;
 
 pub(crate) fn query_security(
     file: &File,
@@ -44,10 +52,13 @@ fn query_security_with(
 
 #[cfg(test)]
 mod tests {
-    use super::query_security_with;
-    use crate::error::{LocalFileError, LocalFileErrorKind, LocalFileOperation};
-    use crate::observation::LocalSecurityObservationOptions;
     use std::os::fd::AsRawFd;
+
+    use super::query_security_with;
+    use crate::error::LocalFileError;
+    use crate::error::LocalFileErrorKind;
+    use crate::error::LocalFileOperation;
+    use crate::observation::LocalSecurityObservationOptions;
 
     #[test]
     fn injected_security_failures_preserve_kind_on_same_file_handle() {
@@ -62,14 +73,10 @@ mod tests {
             LocalFileErrorKind::DataCorruption,
             LocalFileErrorKind::ChangedDuringRead,
         ] {
-            let error = query_security_with(
-                &file,
-                &LocalSecurityObservationOptions::new(),
-                |queried_file, _| {
-                    assert_eq!(queried_file.as_raw_fd(), handle);
-                    Err(LocalFileError::new(kind, LocalFileOperation::Metadata))
-                },
-            )
+            let error = query_security_with(&file, &LocalSecurityObservationOptions::new(), |queried_file, _| {
+                assert_eq!(queried_file.as_raw_fd(), handle);
+                Err(LocalFileError::new(kind, LocalFileOperation::Metadata))
+            })
             .expect_err("injected failure should propagate");
             assert_eq!(error.kind(), kind);
             assert_eq!(file.as_raw_fd(), handle);

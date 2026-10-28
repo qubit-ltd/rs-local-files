@@ -11,8 +11,8 @@ use std::path::Path;
 use std::path::PathBuf;
 
 use super::LocalTempCleanupLimits;
-use crate::policy::LocalPrivacyRequirement;
 use crate::policy::LocalOwnerAccessPolicy;
+use crate::policy::LocalPrivacyRequirement;
 
 /// Options for creating a temporary directory whose cleanup limits are
 /// retained.

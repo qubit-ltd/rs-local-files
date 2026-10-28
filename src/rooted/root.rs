@@ -62,7 +62,10 @@ pub struct Root {
 }
 impl std::fmt::Debug for Root {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.debug_struct("Root").field("path", &self.path).finish_non_exhaustive()
+        formatter
+            .debug_struct("Root")
+            .field("path", &self.path)
+            .finish_non_exhaustive()
     }
 }
 impl Root {
@@ -81,7 +84,11 @@ impl Root {
         diagnostic_path: PathBuf,
         contract: crate::resolution::ResolutionContract,
     ) -> Self {
-        Self { path: diagnostic_path, directory, contract }
+        Self {
+            path: diagnostic_path,
+            directory,
+            contract,
+        }
     }
 
     pub(crate) fn resolution_contract(&self) -> &crate::resolution::ResolutionContract {
@@ -111,7 +118,11 @@ impl Root {
         #[cfg(any(unix, windows))]
         {
             let directory = local::open_root_directory(&path)?;
-            Ok(Self { path, directory, contract: crate::resolution::ResolutionContract::unrestricted() })
+            Ok(Self {
+                path,
+                directory,
+                contract: crate::resolution::ResolutionContract::unrestricted(),
+            })
         }
         #[cfg(not(any(unix, windows)))]
         {
@@ -273,12 +284,14 @@ impl Root {
         #[cfg(unix)]
         {
             let (target, observed) = local::read_rooted_link(&self.directory, &self.path, path, maximum_bytes)
-                .map_err(|source| crate::LocalFileError::from_io(
-                    crate::LocalFileOperation::Metadata,
-                    Some(path.as_path().to_path_buf()),
-                    None,
-                    source,
-                ))?;
+                .map_err(|source| {
+                    crate::LocalFileError::from_io(
+                        crate::LocalFileOperation::Metadata,
+                        Some(path.as_path().to_path_buf()),
+                        None,
+                        source,
+                    )
+                })?;
             let Some(target) = target else {
                 let limit = maximum_bytes.unwrap_or(usize::MAX);
                 let facts = crate::error::LocalResourceLimitError::new(
@@ -286,7 +299,8 @@ impl Root {
                     limit,
                     0,
                     1,
-                ).with_observed(observed);
+                )
+                .with_observed(observed);
                 return Err(crate::LocalFileError::from_resource_limit(
                     crate::LocalFileOperation::Metadata,
                     Some(path.as_path().to_path_buf()),
@@ -298,14 +312,16 @@ impl Root {
         }
         #[cfg(windows)]
         {
-            match local::read_rooted_link_limited(&self.directory, &self.path, path, maximum_bytes)
-                .map_err(|source| crate::LocalFileError::from_io(
-                    crate::LocalFileOperation::Metadata,
-                    Some(path.as_path().to_path_buf()),
-                    None,
-                    source,
-                ))?
-            {
+            match local::read_rooted_link_limited(&self.directory, &self.path, path, maximum_bytes).map_err(
+                |source| {
+                    crate::LocalFileError::from_io(
+                        crate::LocalFileOperation::Metadata,
+                        Some(path.as_path().to_path_buf()),
+                        None,
+                        source,
+                    )
+                },
+            )? {
                 local::RootedLinkTargetRead::Target(target) => {
                     validate_raw_target(&target.raw_path)?;
                     local::normalize_rooted_link_target(&target.raw_path, target.flags).map_err(|source| {
@@ -324,7 +340,8 @@ impl Root {
                         limit,
                         0,
                         1,
-                    ).with_observed(observed);
+                    )
+                    .with_observed(observed);
                     Err(crate::LocalFileError::from_resource_limit(
                         crate::LocalFileOperation::Metadata,
                         Some(path.as_path().to_path_buf()),
@@ -336,7 +353,10 @@ impl Root {
         #[cfg(not(any(unix, windows)))]
         {
             let _ = (path, maximum_bytes, validate_raw_target);
-            Err(crate::LocalFileError::new(crate::LocalFileErrorKind::Unsupported, crate::LocalFileOperation::Metadata))
+            Err(crate::LocalFileError::new(
+                crate::LocalFileErrorKind::Unsupported,
+                crate::LocalFileOperation::Metadata,
+            ))
         }
     }
 

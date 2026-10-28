@@ -11,10 +11,10 @@ use std::io;
 
 use crate::LocalFileSystemCapabilities;
 use crate::LocalFileSystemLimits;
-use crate::resolution::ResolutionContract;
 #[cfg(feature = "test-support")]
 use crate::TestFaultPlan;
 use crate::local::LocalNamespace;
+use crate::resolution::ResolutionContract;
 use crate::test_support::TestFaultPoint;
 
 /// Immutable state shared by all clones of a configured filesystem.

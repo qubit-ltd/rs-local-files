@@ -5,8 +5,9 @@
 //
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
-use super::LocalResolutionLimits;
 use std::time::Duration;
+
+use super::LocalResolutionLimits;
 
 /// Resource budgets for retaining and verifying a source path binding.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -46,6 +47,10 @@ impl LocalPathBindingOptions {
         self.deadline = Some(maximum);
         self
     }
+    /// Sets limits for resolving and rechecking the bound path.
+    ///
+    /// These limits are combined with any enclosing filesystem or handle
+    /// limits, so they can only make resolution more restrictive.
     pub const fn with_resolution_limits(mut self, limits: LocalResolutionLimits) -> Self {
         self.resolution_limits = Some(limits);
         self

@@ -215,9 +215,13 @@ pub(crate) use unix_nonblocking::clear_nonblocking;
 #[cfg(unix)]
 pub(crate) use unix_nonblocking::open_with_nonblocking_retry;
 #[cfg(windows)]
+pub(crate) use windows_rooted::RootedLinkTargetRead;
+#[cfg(windows)]
 pub(crate) use windows_rooted::create_rooted_directory;
 #[cfg(windows)]
 pub(crate) use windows_rooted::create_rooted_symlink;
+#[cfg(windows)]
+pub(crate) use windows_rooted::normalize_rooted_link_target;
 #[cfg(windows)]
 pub(crate) use windows_rooted::open_root_directory;
 #[cfg(windows)]
@@ -242,10 +246,6 @@ pub(crate) use windows_rooted::read_rooted_directory;
 pub(crate) use windows_rooted::read_rooted_link;
 #[cfg(windows)]
 pub(crate) use windows_rooted::read_rooted_link_limited;
-#[cfg(windows)]
-pub(crate) use windows_rooted::normalize_rooted_link_target;
-#[cfg(windows)]
-pub(crate) use windows_rooted::RootedLinkTargetRead;
 #[cfg(windows)]
 pub(crate) use windows_rooted::read_rooted_symlink_metadata;
 #[cfg(windows)]

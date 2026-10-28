@@ -16,9 +16,9 @@ use crate::error::LocalFileErrorKind;
 use crate::error::LocalFileOperation;
 use crate::observation::LocalFileObservation;
 use crate::observation::LocalObservationRequirement;
-use crate::observation::LocalSourceVerification;
 use crate::observation::LocalSecurityObservation;
 use crate::observation::LocalSecurityObservationOptions;
+use crate::observation::LocalSourceVerification;
 
 const BLOCK_SIZE: usize = 8 * 1024;
 

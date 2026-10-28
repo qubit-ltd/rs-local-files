@@ -106,7 +106,8 @@ impl ReaderPathBinding for PathBinding {
 pub(crate) struct BindingAnchor {
     /// Diagnostic path associated with the retained identity.
     pub(crate) path: PathBuf,
-    /// Original namespace name used to reopen this identity during binding checks.
+    /// Original namespace name used to reopen this identity during binding
+    /// checks.
     pub(crate) opening_recipe: PathBuf,
     pub(crate) identity: crate::observation::LocalFileIdentity,
     pub(crate) authority: Arc<crate::rooted::Root>,
@@ -180,7 +181,9 @@ impl ReaderPathBinding for DirectoryPathBinding {
                     return Ok(LocalSourceVerification::Missing);
                 }
                 Err(error) => {
-                    return Err(error.with_operation(crate::LocalFileOperation::Metadata).with_path(anchor.path.clone()));
+                    return Err(error
+                        .with_operation(crate::LocalFileOperation::Metadata)
+                        .with_path(anchor.path.clone()));
                 }
             };
             check_verification_deadline(deadline, &anchor.path)?;

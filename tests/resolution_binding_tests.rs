@@ -1,9 +1,18 @@
+// =============================================================================
+//    Copyright (c) 2025 - 2026 Haixing Hu.
+//
+//    SPDX-License-Identifier: Apache-2.0
+//
+//    Licensed under the Apache License, Version 2.0.
+// =============================================================================
+
 use qubit_local_files::LocalFileSystem;
 use qubit_local_files::error::LocalFileErrorKind;
 use qubit_local_files::observation::LocalSourceVerification;
-use qubit_local_files::options::{
-    LocalDirectoryOpenOptions, LocalObservedReadOptions, LocalPathBindingOptions, LocalResolutionLimits,
-};
+use qubit_local_files::options::LocalDirectoryOpenOptions;
+use qubit_local_files::options::LocalObservedReadOptions;
+use qubit_local_files::options::LocalPathBindingOptions;
+use qubit_local_files::options::LocalResolutionLimits;
 
 #[cfg(unix)]
 #[test]
@@ -16,9 +25,8 @@ fn binding_reopen_replays_the_root_contract_from_its_original_name() {
     std::fs::write(tmp.path().join("dir/source"), b"source").expect("source should be created");
     std::fs::write(tmp.path().join("other/source"), b"replacement").expect("replacement should be created");
     let filesystem = LocalFileSystem::rooted(tmp.path()).expect("root should open");
-    let binding = LocalPathBindingOptions::new().with_resolution_limits(
-        LocalResolutionLimits::new().with_max_symlink_hops(0),
-    );
+    let binding =
+        LocalPathBindingOptions::new().with_resolution_limits(LocalResolutionLimits::new().with_max_symlink_hops(0));
     let reader_options = LocalObservedReadOptions::new().with_path_binding(binding);
     let reader = filesystem
         .open_observed_reader(std::path::Path::new("dir/source"), &reader_options)
@@ -73,10 +81,7 @@ fn rooted_directory_binding_reopens_the_original_symlink_recipe() {
         )
         .expect("bound alias directory should open");
     let reader = directory
-        .open_observed_reader(
-            std::path::Path::new("source"),
-            &LocalObservedReadOptions::new(),
-        )
+        .open_observed_reader(std::path::Path::new("source"), &LocalObservedReadOptions::new())
         .expect("reader should open");
 
     std::fs::remove_file(tmp.path().join("alias")).expect("old alias should be removed");

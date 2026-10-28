@@ -1,11 +1,21 @@
-use qubit_local_files::directory::{
-    LocalResolutionOrigin, LocalResolutionPolicy, LocalResolutionScope,
-};
-use qubit_local_files::error::{LocalResourceKind, LocalResourceLimitError};
-use qubit_local_files::observation::{LocalSecurityObservation, LocalSecurityObservationOptions};
-use qubit_local_files::options::{
-    LocalObservedReadOptions, LocalResolutionLimits, LocalRootOpenOptions,
-};
+// =============================================================================
+//    Copyright (c) 2025 - 2026 Haixing Hu.
+//
+//    SPDX-License-Identifier: Apache-2.0
+//
+//    Licensed under the Apache License, Version 2.0.
+// =============================================================================
+
+use qubit_local_files::directory::LocalResolutionOrigin;
+use qubit_local_files::directory::LocalResolutionPolicy;
+use qubit_local_files::directory::LocalResolutionScope;
+use qubit_local_files::error::LocalResourceKind;
+use qubit_local_files::error::LocalResourceLimitError;
+use qubit_local_files::observation::LocalSecurityObservation;
+use qubit_local_files::observation::LocalSecurityObservationOptions;
+use qubit_local_files::options::LocalObservedReadOptions;
+use qubit_local_files::options::LocalResolutionLimits;
+use qubit_local_files::options::LocalRootOpenOptions;
 use qubit_local_files::policy::LocalOwnerAccessPolicy;
 
 #[test]
@@ -27,9 +37,7 @@ fn resource_limit_error_preserves_historical_facts_through_io_conversion() {
         None,
         std::io::Error::other(facts),
     );
-    let retained = error
-        .resource_limit_error()
-        .expect("resource facts remain available");
+    let retained = error.resource_limit_error().expect("resource facts remain available");
     assert_eq!(retained.resource(), LocalResourceKind::SymlinkTargetBytes);
     assert_eq!(retained.requested(), 1);
     assert_eq!(retained.observed(), None);
@@ -66,9 +74,6 @@ fn refactor_api_types_are_constructible_and_accessible() {
         }
     }
     let _: &dyn LocalResolutionPolicy = &Policy;
-    let _ = (
-        LocalResolutionOrigin::Input,
-        LocalResolutionScope::Descendant,
-    );
+    let _ = (LocalResolutionOrigin::Input, LocalResolutionScope::Descendant);
     let _ = std::mem::size_of::<LocalSecurityObservation>();
 }

@@ -1,4 +1,13 @@
-/// Additional per-resolution budgets. `None` means no caller limit; zero is a real limit.
+// =============================================================================
+//    Copyright (c) 2025 - 2026 Haixing Hu.
+//
+//    SPDX-License-Identifier: Apache-2.0
+//
+//    Licensed under the Apache License, Version 2.0.
+// =============================================================================
+
+/// Additional per-resolution budgets. `None` means no caller limit; zero is a
+/// real limit.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 #[must_use]
 pub struct LocalResolutionLimits {
@@ -22,12 +31,14 @@ impl LocalResolutionLimits {
         self.symlink_hops = Some(n);
         self
     }
-    /// Caps native encoded bytes in each symlink target; zero permits no target bytes.
+    /// Caps native encoded bytes in each symlink target; zero permits no target
+    /// bytes.
     pub const fn with_max_symlink_target_bytes(mut self, n: usize) -> Self {
         self.symlink_target_bytes = Some(n);
         self
     }
-    /// Caps pending and resolved path components; zero permits no normal components.
+    /// Caps pending and resolved path components; zero permits no normal
+    /// components.
     pub const fn with_max_actual_components(mut self, n: usize) -> Self {
         self.actual_components = Some(n);
         self
@@ -38,7 +49,8 @@ impl LocalResolutionLimits {
         self
     }
 
-    /// Intersects this budget with a child budget, treating `None` as unlimited.
+    /// Intersects this budget with a child budget, treating `None` as
+    /// unlimited.
     pub(crate) const fn tightened(self, child: Self) -> Self {
         Self {
             symlink_hops: min_limit(self.symlink_hops, child.symlink_hops),

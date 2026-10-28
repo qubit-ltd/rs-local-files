@@ -5,12 +5,13 @@
 //
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
+use std::sync::Arc;
+
 use crate::LocalSymlinkPolicy;
 use crate::directory::LocalComponentPolicy;
 use crate::directory::LocalResolutionPolicy;
 use crate::options::LocalPathBindingOptions;
 use crate::options::LocalResolutionLimits;
-use std::sync::Arc;
 
 /// Options captured by a fixed directory handle.
 #[derive(Clone, Debug, Default)]
@@ -52,10 +53,18 @@ impl LocalDirectoryOpenOptions {
         self
     }
 
+    /// Sets limits for resolving this directory's opening path.
+    ///
+    /// When opening a child from an existing handle, the limits are combined
+    /// with the handle's limits and can only make resolution more restrictive.
     pub fn with_resolution_limits(mut self, limits: LocalResolutionLimits) -> Self {
         self.resolution_limits = Some(limits);
         self
     }
+    /// Adds a pure component and symlink-target validation policy.
+    ///
+    /// The policy is combined with policies from an enclosing handle, so all
+    /// policies must accept each component or target that is resolved.
     pub fn with_resolution_policy(mut self, policy: Arc<dyn LocalResolutionPolicy>) -> Self {
         self.resolution_policy = Some(policy);
         self

@@ -198,16 +198,20 @@ impl LocalFileSystem {
         Self::rooted_with_options(root, &crate::options::LocalRootOpenOptions::new())
     }
 
-    /// Opens a rooted filesystem using the supplied opening and descendant resolution contract.
+    /// Opens a rooted filesystem using the supplied opening and descendant
+    /// resolution contract.
     ///
     /// The host path is resolved component by component from its native root.
-    /// Limits and policies apply during opening and are retained by descendants.
+    /// Limits and policies apply during opening and are retained by
+    /// descendants.
     pub fn rooted_with_options(root: &Path, options: &crate::options::LocalRootOpenOptions) -> LocalResult<Self> {
         let rooted = RootedLocalFileSystem::open_with_options(root, options)?;
         let capabilities = rooted.capabilities();
         let limits = rooted.limits();
         let resolution = rooted.root_authority().resolution_contract().clone();
-        let symlink_policy = options.symlink_policy().unwrap_or(LocalSymlinkPolicy::FollowWithinScope);
+        let symlink_policy = options
+            .symlink_policy()
+            .unwrap_or(LocalSymlinkPolicy::FollowWithinScope);
         Ok(Self {
             core: Arc::new(LocalFileSystemCore {
                 namespace: LocalNamespace::Rooted(rooted),

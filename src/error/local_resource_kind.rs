@@ -68,9 +68,7 @@ impl fmt::Display for LocalResourceKind {
             Self::CopiedBytes => formatter.write_str("copied bytes"),
             Self::SymlinkHops => formatter.write_str("symlink hops"),
             Self::SymlinkTargetBytes => formatter.write_str("symlink target bytes"),
-            Self::PendingResolutionComponents => {
-                formatter.write_str("pending resolution components")
-            }
+            Self::PendingResolutionComponents => formatter.write_str("pending resolution components"),
             Self::ResolvedComponents => formatter.write_str("resolved components"),
             Self::PendingResolutionBytes => formatter.write_str("pending resolution bytes"),
             Self::ResolvedPathBytes => formatter.write_str("resolved path bytes"),

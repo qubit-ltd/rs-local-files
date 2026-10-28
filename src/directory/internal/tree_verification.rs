@@ -220,7 +220,9 @@ fn verify_root_privacy(stage: &LocalStagedDirectory, options: &LocalTreeValidati
             })?;
         let result = if let Some(policy) = options.owner_access_policy() {
             crate::temp::internal::privacy_unix::verify_owner_access(&file, true, policy)
-        } else { crate::temp::internal::privacy_unix::verify_current_user_access(&file, true, false) };
+        } else {
+            crate::temp::internal::privacy_unix::verify_current_user_access(&file, true, false)
+        };
         result.map_err(|source| {
             file_error(
                 LocalFileOperation::Metadata,
@@ -245,7 +247,9 @@ fn verify_root_privacy(stage: &LocalStagedDirectory, options: &LocalTreeValidati
         }
         let result = if let Some(policy) = options.owner_access_policy() {
             crate::temp::internal::privacy_windows::verify_owner_access(&root, true, policy)
-        } else { crate::temp::internal::privacy_windows::verify_current_user_access(&root, true, false) };
+        } else {
+            crate::temp::internal::privacy_windows::verify_current_user_access(&root, true, false)
+        };
         result.map_err(|source| {
             file_error(
                 LocalFileOperation::Metadata,
@@ -283,23 +287,35 @@ fn verify_entry_privacy(
         ));
     }
     #[cfg(unix)]
-    (if let Some(policy) = options.owner_access_policy() { crate::temp::internal::privacy_unix::verify_owner_access(&file, kind == LocalFileKind::Directory, policy) } else { crate::temp::internal::privacy_unix::verify_current_user_access(&file, kind == LocalFileKind::Directory, false) })
-        .map_err(|source| {
-            file_error(
-                LocalFileOperation::Metadata,
-                &stage.directory().diagnostic_path().join(path),
-                source,
-            )
-        })?;
+    (if let Some(policy) = options.owner_access_policy() {
+        crate::temp::internal::privacy_unix::verify_owner_access(&file, kind == LocalFileKind::Directory, policy)
+    } else {
+        crate::temp::internal::privacy_unix::verify_current_user_access(&file, kind == LocalFileKind::Directory, false)
+    })
+    .map_err(|source| {
+        file_error(
+            LocalFileOperation::Metadata,
+            &stage.directory().diagnostic_path().join(path),
+            source,
+        )
+    })?;
     #[cfg(windows)]
-    (if let Some(policy) = options.owner_access_policy() { crate::temp::internal::privacy_windows::verify_owner_access(&file, kind == LocalFileKind::Directory, policy) } else { crate::temp::internal::privacy_windows::verify_current_user_access(&file, kind == LocalFileKind::Directory, false) })
-        .map_err(|source| {
-            file_error(
-                LocalFileOperation::Metadata,
-                &stage.directory().diagnostic_path().join(path),
-                source,
-            )
-        })?;
+    (if let Some(policy) = options.owner_access_policy() {
+        crate::temp::internal::privacy_windows::verify_owner_access(&file, kind == LocalFileKind::Directory, policy)
+    } else {
+        crate::temp::internal::privacy_windows::verify_current_user_access(
+            &file,
+            kind == LocalFileKind::Directory,
+            false,
+        )
+    })
+    .map_err(|source| {
+        file_error(
+            LocalFileOperation::Metadata,
+            &stage.directory().diagnostic_path().join(path),
+            source,
+        )
+    })?;
     Ok(())
 }
 

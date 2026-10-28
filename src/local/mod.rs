@@ -62,6 +62,8 @@ pub(crate) use internal::LocalAtomicPublicationMode;
 pub(crate) use internal::LocalNamespace;
 #[cfg(any(unix, windows))]
 pub(crate) use internal::RootedDirectoryReader;
+#[cfg(windows)]
+pub(crate) use internal::RootedLinkTargetRead;
 pub(crate) use internal::RootedSymlinkCreateError;
 pub(crate) use internal::RootedSymlinkCreateFailureState;
 pub(crate) use internal::copy_dir_all_with_paths;
@@ -86,6 +88,8 @@ pub(crate) use internal::ensure_required_directory_durability;
 pub(crate) use internal::internal_copy_options;
 pub(crate) use internal::move_directory_without_replacing;
 pub(crate) use internal::move_file_without_replacing;
+#[cfg(windows)]
+pub(crate) use internal::normalize_rooted_link_target;
 pub(crate) use internal::open_native_reader_path;
 pub(crate) use internal::open_native_writer_path;
 #[cfg(any(unix, windows))]
@@ -112,9 +116,7 @@ pub(crate) use internal::read_rooted_directory;
 #[cfg(any(unix, windows))]
 pub(crate) use internal::read_rooted_link;
 #[cfg(windows)]
-pub(crate) use internal::{
-    normalize_rooted_link_target, read_rooted_link_limited, RootedLinkTargetRead,
-};
+pub(crate) use internal::read_rooted_link_limited;
 #[cfg(any(unix, windows))]
 pub(crate) use internal::read_rooted_symlink_metadata;
 pub(crate) use internal::remove_directory_tree;
