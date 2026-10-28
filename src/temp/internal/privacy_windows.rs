@@ -68,6 +68,7 @@ use windows_sys::Win32::Storage::FileSystem::FILE_READ_EA;
 use windows_sys::Win32::Storage::FileSystem::FILE_TRAVERSE;
 use windows_sys::Win32::Storage::FileSystem::FILE_WRITE_ATTRIBUTES;
 use windows_sys::Win32::Storage::FileSystem::FILE_WRITE_DATA;
+use windows_sys::Win32::Storage::FileSystem::FILE_WRITE_EA;
 use windows_sys::Win32::Storage::FileSystem::READ_CONTROL;
 use windows_sys::Win32::Storage::FileSystem::SYNCHRONIZE;
 use windows_sys::Win32::Storage::FileSystem::WRITE_DAC;
@@ -85,6 +86,7 @@ const FILE_INITIAL_ACCESS: u32 = FILE_READ_DATA
     | FILE_READ_ATTRIBUTES
     | FILE_READ_EA
     | FILE_WRITE_ATTRIBUTES
+    | FILE_WRITE_EA
     | READ_CONTROL
     | WRITE_DAC
     | DELETE
