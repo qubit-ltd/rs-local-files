@@ -108,7 +108,10 @@ impl RootedLocalFileSystem {
                 Ok(()) => Ok(LocalDeleteOutcome::new(true)),
                 Err(error)
                     if options.missing_ok()
-                        && error.effect_state().is_none()
+                        && matches!(
+                            error.effect_state(),
+                            None | Some(crate::error::LocalFileEffectState::Unchanged)
+                        )
                         && error.cause_kind() == Some(LocalFileErrorKind::NotFound)
                         && error.path() == Some(relative.as_path()) =>
                 {
@@ -151,6 +154,10 @@ impl DeleteBackend for RootedLocalFileSystem {
     /// Returns native inspection errors, including disappearance during
     /// traversal.
     fn metadata(&self, path: &Self::Path) -> io::Result<Self::Metadata> {
+        #[cfg(feature = "test-support")]
+        if crate::local::take_test_support_on_nth("rooted-delete-directory-root-not-found", 1) {
+            return Err(io::Error::from(io::ErrorKind::NotFound));
+        }
         #[cfg(feature = "test-support")]
         if crate::local::take_test_support_on_nth("rooted-delete-directory-child-not-found", 2) {
             return Err(io::Error::from(io::ErrorKind::NotFound));

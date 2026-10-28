@@ -12,6 +12,7 @@ use std::path::Path;
 use std::path::PathBuf;
 
 use qubit_local_files::LocalFileSystem;
+use qubit_local_files::error::LocalFileEffectState;
 use qubit_local_files::error::LocalFileErrorKind;
 use qubit_local_files::options::LocalCreateDirectoryOptions;
 use qubit_local_files::options::LocalDeleteOptions;
@@ -95,6 +96,7 @@ fn test_recursive_delete_reports_the_failed_path_after_partial_publication() {
                 .expect_err("the second recursive removal should fail");
 
             assert_eq!(LocalFileErrorKind::PublicationIncomplete, error.kind());
+            assert_eq!(Some(LocalFileEffectState::PartiallyApplied), error.effect_state());
             let failed = error.path().expect("the failed entry path should be retained");
             assert!(failed.starts_with(&target));
             assert!(tree.is_dir());
@@ -136,21 +138,45 @@ fn test_recursive_delete_missing_ok_does_not_swallow_missing_descendant() {
 /// `missing_ok` when the scheduler proves that no namespace mutation occurred.
 #[test]
 fn test_recursive_delete_missing_ok_accepts_unchanged_root_race() {
-    run_in_test_fault_process(
-        "recursive_delete_missing_root_race",
-        "host-delete-directory-root-not-found",
-        || {
+    for (backend, fault) in [
+        (Backend::Host, "host-delete-directory-root-not-found"),
+        (Backend::Rooted, "rooted-delete-directory-root-not-found"),
+    ] {
+        run_in_test_fault_process("recursive_delete_missing_root_race", fault, || {
             let directory = tempdir().expect("temporary directory should be created");
             let tree = directory.path().join("tree");
             std::fs::create_dir(&tree).expect("tree should be created");
-            let filesystem = LocalFileSystem::host().expect("Host filesystem should open");
+            let (filesystem, target, _) = filesystem_and_path(backend, directory.path(), Path::new("tree"));
 
             let outcome = filesystem
-                .delete_directory_with_options(&tree, &LocalDeleteOptions::new().with_recursive().with_missing_ok())
+                .delete_directory_with_options(&target, &LocalDeleteOptions::new().with_recursive().with_missing_ok())
                 .expect("a missing root race should be accepted");
 
             assert!(!outcome.deleted());
             assert!(tree.is_dir(), "the injected race must not remove the root");
-        },
-    );
+        });
+    }
+}
+
+#[test]
+fn test_recursive_delete_missing_root_without_missing_ok_remains_not_found() {
+    for (backend, fault) in [
+        (Backend::Host, "host-delete-directory-root-not-found"),
+        (Backend::Rooted, "rooted-delete-directory-root-not-found"),
+    ] {
+        run_in_test_fault_process("recursive_delete_missing_root_without_missing_ok", fault, || {
+            let directory = tempdir().expect("temporary directory should be created");
+            let tree = directory.path().join("tree");
+            std::fs::create_dir(&tree).expect("tree should be created");
+            let (filesystem, target, _) = filesystem_and_path(backend, directory.path(), Path::new("tree"));
+
+            let error = filesystem
+                .delete_directory_with_options(&target, &LocalDeleteOptions::new().with_recursive())
+                .expect_err("a missing root race must remain an error without missing_ok");
+
+            assert_eq!(LocalFileErrorKind::NotFound, error.kind());
+            assert_eq!(Some(LocalFileEffectState::Unchanged), error.effect_state());
+            assert!(tree.is_dir(), "the injected race must not remove the root");
+        });
+    }
 }
