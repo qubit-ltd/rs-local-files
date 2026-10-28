@@ -2645,6 +2645,27 @@ impl LocalStagedDirectory {
         Ok(synced)
     }
 
+    /// Synchronizes every regular file currently contained in this staged directory.
+    ///
+    /// The stage remains unpublished. `limits` bounds tree traversal, and a
+    /// depth limit that would truncate the tree is reported as an error. With
+    /// `Required`, a file synchronization failure is an error; with
+    /// `Preferred`, the method returns `false` when a file could not be synced.
+    /// `NotRequired` performs no file synchronization and returns `false`.
+    /// This method does not synchronize the parent namespace.
+    ///
+    /// # Errors
+    /// Returns an error when the staged tree cannot be completely traversed,
+    /// its contents change during observation, a resource limit is exceeded,
+    /// or a required file synchronization fails.
+    pub fn sync_files_with_options(
+        &self,
+        limits: &LocalListOptions,
+        requirement: LocalFileSyncRequirement,
+    ) -> LocalResult<bool> {
+        self.sync_tree_files(limits, requirement)
+    }
+
     /// Publishes this stage under a single native name without replacing an
     /// entry.
     pub fn publish_new(
