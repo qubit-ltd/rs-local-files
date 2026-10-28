@@ -7,7 +7,10 @@
 // =============================================================================
 use crate::LocalSymlinkPolicy;
 use crate::directory::LocalComponentPolicy;
+use crate::directory::LocalResolutionPolicy;
 use crate::options::LocalPathBindingOptions;
+use crate::options::LocalResolutionLimits;
+use std::sync::Arc;
 
 /// Options captured by a fixed directory handle.
 #[derive(Clone, Debug, Default)]
@@ -16,6 +19,8 @@ pub struct LocalDirectoryOpenOptions {
     symlink_policy: Option<LocalSymlinkPolicy>,
     component_policy: LocalComponentPolicy,
     path_binding: Option<LocalPathBindingOptions>,
+    resolution_limits: Option<LocalResolutionLimits>,
+    resolution_policy: Option<Arc<dyn LocalResolutionPolicy>>,
 }
 
 impl LocalDirectoryOpenOptions {
@@ -47,6 +52,15 @@ impl LocalDirectoryOpenOptions {
         self
     }
 
+    pub fn with_resolution_limits(mut self, limits: LocalResolutionLimits) -> Self {
+        self.resolution_limits = Some(limits);
+        self
+    }
+    pub fn with_resolution_policy(mut self, policy: Arc<dyn LocalResolutionPolicy>) -> Self {
+        self.resolution_policy = Some(policy);
+        self
+    }
+
     pub(crate) const fn symlink_policy(&self) -> Option<LocalSymlinkPolicy> {
         self.symlink_policy
     }
@@ -55,5 +69,11 @@ impl LocalDirectoryOpenOptions {
     }
     pub(crate) const fn path_binding(&self) -> Option<&LocalPathBindingOptions> {
         self.path_binding.as_ref()
+    }
+    pub(crate) const fn resolution_limits(&self) -> Option<LocalResolutionLimits> {
+        self.resolution_limits
+    }
+    pub(crate) fn resolution_policy(&self) -> Option<&Arc<dyn LocalResolutionPolicy>> {
+        self.resolution_policy.as_ref()
     }
 }

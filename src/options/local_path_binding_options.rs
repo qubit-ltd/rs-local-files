@@ -5,6 +5,7 @@
 //
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
+use super::LocalResolutionLimits;
 use std::time::Duration;
 
 /// Resource budgets for retaining and verifying a source path binding.
@@ -14,6 +15,7 @@ pub struct LocalPathBindingOptions {
     max_ancestors: Option<usize>,
     max_path_bytes: Option<usize>,
     deadline: Option<Duration>,
+    resolution_limits: Option<LocalResolutionLimits>,
 }
 
 impl LocalPathBindingOptions {
@@ -23,6 +25,7 @@ impl LocalPathBindingOptions {
             max_ancestors: None,
             max_path_bytes: None,
             deadline: None,
+            resolution_limits: None,
         }
     }
 
@@ -43,6 +46,10 @@ impl LocalPathBindingOptions {
         self.deadline = Some(maximum);
         self
     }
+    pub const fn with_resolution_limits(mut self, limits: LocalResolutionLimits) -> Self {
+        self.resolution_limits = Some(limits);
+        self
+    }
 
     pub(crate) const fn max_ancestors(&self) -> Option<usize> {
         self.max_ancestors
@@ -54,5 +61,8 @@ impl LocalPathBindingOptions {
 
     pub(crate) const fn deadline(&self) -> Option<Duration> {
         self.deadline
+    }
+    pub(crate) const fn resolution_limits(&self) -> Option<LocalResolutionLimits> {
+        self.resolution_limits
     }
 }

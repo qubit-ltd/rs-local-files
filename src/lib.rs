@@ -73,6 +73,7 @@ pub mod policy;
 mod read;
 #[cfg(feature = "digest")]
 pub mod recovery;
+pub(crate) mod resolution;
 mod rooted;
 mod rooted_local_file_system;
 mod temp;

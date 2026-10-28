@@ -35,6 +35,10 @@ pub struct LocalResourceLimitError {
     remaining: usize,
     /// Number of units requested by the operation.
     requested: usize,
+    /// Exact measured amount when it fits in `usize`.
+    observed: Option<usize>,
+    /// Whether measurement overflowed `usize`.
+    overflowed: bool,
 }
 
 impl LocalResourceLimitError {
@@ -57,7 +61,22 @@ impl LocalResourceLimitError {
             limit,
             remaining,
             requested,
+            observed: None,
+            overflowed: false,
         }
+    }
+
+    pub(crate) const fn with_observed(mut self, observed: usize) -> Self {
+        self.observed = Some(observed);
+        self.overflowed = false;
+        self
+    }
+
+    /// Marks a measurement failure caused by integer overflow.
+    pub(crate) const fn with_overflow(mut self) -> Self {
+        self.observed = None;
+        self.overflowed = true;
+        self
     }
 
     /// Returns the exhausted resource dimension.
@@ -87,6 +106,14 @@ impl LocalResourceLimitError {
     pub const fn requested(&self) -> usize {
         self.requested
     }
+    /// Returns the exact measured value when representable.
+    pub const fn observed(&self) -> Option<usize> {
+        self.observed
+    }
+    /// Returns whether checked arithmetic overflowed while measuring.
+    pub const fn overflowed(&self) -> bool {
+        self.overflowed
+    }
 }
 
 impl fmt::Display for LocalResourceLimitError {
@@ -94,8 +121,13 @@ impl fmt::Display for LocalResourceLimitError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             formatter,
-            "{} resource limit exhausted: limit={}, remaining={}, requested={}",
-            self.resource, self.limit, self.remaining, self.requested,
+            "{} resource limit exhausted: limit={}, remaining={}, requested={}, observed={:?}, overflowed={}",
+            self.resource,
+            self.limit,
+            self.remaining,
+            self.requested,
+            self.observed,
+            self.overflowed,
         )
     }
 }

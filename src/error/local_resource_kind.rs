@@ -37,6 +37,22 @@ pub enum LocalResourceKind {
     PathComponentBytes,
     /// Bytes copied by a tree-copy operation.
     CopiedBytes,
+    /// Symlink hops followed during one path resolution.
+    SymlinkHops,
+    /// Native bytes in one symlink target.
+    SymlinkTargetBytes,
+    /// Components awaiting resolution.
+    PendingResolutionComponents,
+    /// Components in the resolved directory prefix.
+    ResolvedComponents,
+    /// Native bytes in the pending resolution work set.
+    PendingResolutionBytes,
+    /// Native bytes in the resolved path prefix.
+    ResolvedPathBytes,
+    /// ACL entries decoded from a security descriptor.
+    AclEntries,
+    /// ACL bytes read from a security descriptor.
+    AclBytes,
 }
 
 impl fmt::Display for LocalResourceKind {
@@ -50,6 +66,16 @@ impl fmt::Display for LocalResourceKind {
             Self::SeenNameBytes => formatter.write_str("seen-name bytes"),
             Self::PathComponentBytes => formatter.write_str("path-component bytes"),
             Self::CopiedBytes => formatter.write_str("copied bytes"),
+            Self::SymlinkHops => formatter.write_str("symlink hops"),
+            Self::SymlinkTargetBytes => formatter.write_str("symlink target bytes"),
+            Self::PendingResolutionComponents => {
+                formatter.write_str("pending resolution components")
+            }
+            Self::ResolvedComponents => formatter.write_str("resolved components"),
+            Self::PendingResolutionBytes => formatter.write_str("pending resolution bytes"),
+            Self::ResolvedPathBytes => formatter.write_str("resolved path bytes"),
+            Self::AclEntries => formatter.write_str("ACL entries"),
+            Self::AclBytes => formatter.write_str("ACL bytes"),
         }
     }
 }

@@ -7,6 +7,7 @@
 // =============================================================================
 use super::LocalPathBindingOptions;
 use super::LocalReadOptions;
+use super::LocalResolutionLimits;
 use crate::observation::LocalObservationRequirement;
 
 /// Options for opening a reader with same-handle metadata observations.
@@ -16,6 +17,7 @@ pub struct LocalObservedReadOptions {
     read_options: Option<LocalReadOptions>,
     native_observation: LocalObservationRequirement,
     path_binding: Option<LocalPathBindingOptions>,
+    resolution_limits: Option<LocalResolutionLimits>,
 }
 
 impl LocalObservedReadOptions {
@@ -26,6 +28,7 @@ impl LocalObservedReadOptions {
             read_options: None,
             native_observation: LocalObservationRequirement::Optional,
             path_binding: None,
+            resolution_limits: None,
         }
     }
 
@@ -46,6 +49,10 @@ impl LocalObservedReadOptions {
         self.path_binding = Some(options);
         self
     }
+    pub const fn with_resolution_limits(mut self, limits: LocalResolutionLimits) -> Self {
+        self.resolution_limits = Some(limits);
+        self
+    }
 
     pub(crate) const fn read_options(&self) -> Option<&LocalReadOptions> {
         self.read_options.as_ref()
@@ -57,5 +64,8 @@ impl LocalObservedReadOptions {
 
     pub(crate) const fn path_binding(&self) -> Option<&LocalPathBindingOptions> {
         self.path_binding.as_ref()
+    }
+    pub(crate) const fn resolution_limits(&self) -> Option<LocalResolutionLimits> {
+        self.resolution_limits
     }
 }

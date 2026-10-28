@@ -14,6 +14,7 @@ mod conditional;
 #[path = "local_directory_handle.rs"]
 mod handle;
 mod internal;
+mod local_resolution_policy;
 #[path = "local_staged_directory.rs"]
 mod staged;
 #[cfg(all(test, unix))]
@@ -34,6 +35,9 @@ mod tree_validation;
 pub use component_policy::LocalComponentPolicy;
 pub use handle::LocalDirectoryHandle;
 pub(crate) use handle::retain_directory_chain;
+pub use local_resolution_policy::{
+    LocalResolutionOrigin, LocalResolutionPolicy, LocalResolutionScope,
+};
 pub use staged::LocalStagedDirectory;
 pub use tree_observer::LocalTreeObserver;
 pub use tree_recovery::LocalTreeAccessError;
