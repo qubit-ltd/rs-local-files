@@ -54,7 +54,6 @@ impl LocalPathResolver {
     }
 
     /// Returns the PWD snapshot used by this resolver.
-    #[must_use]
     #[inline]
     pub(crate) fn current_directory(&self) -> Option<&Path> {
         self.current_directory.as_deref()

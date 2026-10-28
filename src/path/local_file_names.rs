@@ -63,7 +63,6 @@ impl LocalFileNames {
     }
 
     /// Returns the caller-configured component-size budget.
-    #[must_use]
     pub const fn max_component_bytes(&self) -> Option<usize> {
         self.max_component_bytes
     }

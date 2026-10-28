@@ -62,7 +62,6 @@ impl LocalDirectoryEntry {
     ///
     /// Rooted walkers retain descriptor authority, so callers must use
     /// [`Self::path`] for a reusable namespace identity.
-    #[must_use]
     #[inline]
     pub fn diagnostic_path(&self) -> Option<&Path> {
         self.diagnostic_path.as_deref()

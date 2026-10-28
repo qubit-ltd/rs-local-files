@@ -56,7 +56,6 @@ impl Permissions {
 
     /// Returns exact Unix mode bits, or `None` when created from a portable
     /// read-only value without an explicit Unix mode.
-    #[must_use]
     #[inline]
     pub const fn unix_mode(self) -> Option<u32> {
         self.unix_mode

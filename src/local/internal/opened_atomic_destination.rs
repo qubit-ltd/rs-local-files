@@ -66,7 +66,6 @@ impl OpenedAtomicDestination {
 
     /// Returns the metadata-copy handle, or `None` for identity-only
     /// observation.
-    #[must_use]
     #[inline]
     pub(crate) fn file(&self) -> Option<&File> {
         self.file.as_ref()

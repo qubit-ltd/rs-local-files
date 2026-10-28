@@ -111,7 +111,6 @@ impl LocalFileWriter {
     ///
     /// Rooted writers retain descriptor authority, so this path can refer to a
     /// replacement after the opened root is renamed.
-    #[must_use]
     #[inline]
     pub fn diagnostic_path(&self) -> Option<&Path> {
         self.diagnostic_path.as_deref()
@@ -130,7 +129,6 @@ impl LocalFileWriter {
     /// means that no failure conclusion is retained; it does not prove that
     /// the destination is unchanged. Inspect commit or abort outcomes for
     /// their operation-specific conclusions.
-    #[must_use]
     #[inline]
     pub const fn failure_state(&self) -> Option<LocalWriteFailureState> {
         self.failure_state

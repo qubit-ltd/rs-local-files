@@ -138,7 +138,6 @@ impl<D: Digest> LocalConditionalWriter<D> {
     /// `None` means that no host path was captured; it does not grant
     /// permission to reopen or modify the destination. Operations use the
     /// retained namespace authority instead.
-    #[must_use]
     pub fn diagnostic_path(&self) -> Option<&Path> {
         self.diagnostic_path.as_deref()
     }

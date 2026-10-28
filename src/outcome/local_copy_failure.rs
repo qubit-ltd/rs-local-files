@@ -164,28 +164,24 @@ impl LocalCopyFailure {
     }
 
     /// Returns the source path supplied for the copy request.
-    #[must_use]
     #[inline]
     pub fn request_source_path(&self) -> Option<&Path> {
         self.details.request_source_path.as_deref()
     }
 
     /// Returns the destination path supplied for the copy request.
-    #[must_use]
     #[inline]
     pub fn request_target_path(&self) -> Option<&Path> {
         self.details.request_target_path.as_deref()
     }
 
     /// Returns the source entry being processed when the copy failed.
-    #[must_use]
     #[inline]
     pub fn failed_source_path(&self) -> Option<&Path> {
         self.details.failed_source_path.as_deref()
     }
 
     /// Returns the destination entry being processed when the copy failed.
-    #[must_use]
     #[inline]
     pub fn failed_target_path(&self) -> Option<&Path> {
         self.details.failed_target_path.as_deref()
@@ -206,14 +202,12 @@ impl LocalCopyFailure {
     }
 
     /// Returns the retained staging path when cleanup failed.
-    #[must_use]
     #[inline]
     pub fn staging_path(&self) -> Option<&Path> {
         self.details.staging_path.as_deref()
     }
 
     /// Returns the secondary rollback or cleanup error when cleanup failed.
-    #[must_use]
     #[inline]
     pub fn cleanup_error(&self) -> Option<&LocalFileError> {
         self.details.cleanup_error.as_ref()

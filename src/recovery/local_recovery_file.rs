@@ -102,7 +102,6 @@ impl LocalRecoveryFile {
     /// `None` reports that no display path was captured. It does not affect
     /// the retained read permission and must not be used as a reason to access
     /// the file by another path.
-    #[must_use]
     pub fn diagnostic_path(&self) -> Option<&Path> {
         self.diagnostic_path.as_deref()
     }

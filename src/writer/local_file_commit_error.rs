@@ -97,7 +97,6 @@ impl LocalFileCommitError {
 
     /// Returns a retryable writer, or `None` after publication may have
     /// started.
-    #[must_use]
     #[inline]
     pub fn writer(&self) -> Option<&LocalFileWriter> {
         self.writer.as_deref()

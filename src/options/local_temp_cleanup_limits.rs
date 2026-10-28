@@ -60,7 +60,6 @@ impl LocalTempCleanupLimits {
     }
     /// Returns the optional limit for entry depth, with the requested directory
     /// at depth zero.
-    #[must_use]
     pub const fn max_depth(&self) -> Option<usize> {
         self.max_depth
     }
@@ -81,7 +80,6 @@ impl LocalTempCleanupLimits {
 
     /// Returns the optional limit for discovered entries, including the
     /// requested directory.
-    #[must_use]
     pub const fn max_entries(&self) -> Option<usize> {
         self.max_entries
     }
@@ -102,7 +100,6 @@ impl LocalTempCleanupLimits {
 
     /// Returns the optional limit for encoded native bytes retained by pending
     /// paths.
-    #[must_use]
     pub const fn max_pending_path_bytes(&self) -> Option<usize> {
         self.max_pending_path_bytes
     }
@@ -121,7 +118,6 @@ impl LocalTempCleanupLimits {
 
     /// Returns the optional cooperative elapsed-time limit for recursive
     /// deletion.
-    #[must_use]
     pub const fn deadline(&self) -> Option<Duration> {
         self.deadline
     }

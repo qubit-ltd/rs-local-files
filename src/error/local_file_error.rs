@@ -289,7 +289,6 @@ impl LocalFileError {
 
     /// Returns the cleanup failure, when cleanup failed after the primary
     /// operation had already produced an error.
-    #[must_use]
     #[inline]
     pub fn cleanup_error(&self) -> Option<&LocalFileError> {
         self.cleanup_error.as_deref()
@@ -310,7 +309,6 @@ impl LocalFileError {
     /// dropping it also drops the owner and attempts cleanup silently. Use
     /// [`Self::into_temp_recovery_parts`] to keep the owner beyond the error's
     /// lifetime.
-    #[must_use]
     #[inline]
     pub fn temp_recovery(&self) -> Option<&crate::LocalTempRecovery> {
         self.temp_recovery.as_deref()
@@ -400,28 +398,24 @@ impl LocalFileError {
     ///
     /// `None` means no PWD snapshot was attached, including absolute-path
     /// calls.
-    #[must_use]
     #[inline]
     pub fn current_directory(&self) -> Option<&Path> {
         self.current_directory.as_deref().map(PathBuf::as_path)
     }
 
     /// Returns the primary path, or `None` when no path applies.
-    #[must_use]
     #[inline]
     pub fn path(&self) -> Option<&Path> {
         self.path.as_deref()
     }
 
     /// Returns the destination path, or `None` for single-path operations.
-    #[must_use]
     #[inline]
     pub fn target(&self) -> Option<&Path> {
         self.target.as_deref()
     }
 
     /// Returns the stable human-readable explanation, when one was provided.
-    #[must_use]
     #[inline]
     pub const fn reason(&self) -> Option<&str> {
         self.reason
@@ -434,14 +428,12 @@ impl LocalFileError {
     /// `Some` contains an I/O, UTF-8, path codec, resource-limit, or recovery
     /// source; `None` means this error was constructed without an originating
     /// source or retained recovery resource.
-    #[must_use]
     #[inline]
     pub const fn typed_source(&self) -> Option<&LocalFileErrorSource> {
         self.source.as_ref()
     }
 
     /// Returns the retained local resource-limit source, when present.
-    #[must_use]
     #[inline]
     pub fn resource_limit_error(&self) -> Option<&LocalResourceLimitError> {
         match self.source.as_ref() {
@@ -453,7 +445,6 @@ impl LocalFileError {
 
     /// Returns the retained native I/O source, when the failure originated in
     /// a standard-library I/O operation.
-    #[must_use]
     #[inline]
     pub fn io_error(&self) -> Option<&io::Error> {
         match self.source.as_ref() {
@@ -481,7 +472,6 @@ impl LocalFileError {
     /// [`LocalFileErrorSource::Recovery`] retains the whole error, including
     /// that cleanup responsibility. Dropping the returned source eventually
     /// drops the recovery owner and attempts cleanup silently.
-    #[must_use]
     #[inline]
     pub fn into_source(mut self) -> Option<LocalFileErrorSource> {
         if self.temp_recovery.is_some() {
