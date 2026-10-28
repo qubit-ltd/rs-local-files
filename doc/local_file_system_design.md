@@ -1841,3 +1841,36 @@ Host and Rooted tests cover their distinct authorities, structured failures are
 preserved through downstream adapters, bilingual documentation stays aligned,
 all published Rust examples compile, configured CI and coverage gates pass, and
 configured release checks pass.
+
+## 29. Refactoring Support Matrix (2026-10-28)
+
+This matrix records the accepted implementation state for the L01-L05
+refactoring and is not a claim that every native platform runtime suite has
+passed. `GateResult::Blocked` is a report state, not a public Rust type.
+
+| Area | Current state | Boundary |
+| --- | --- | --- |
+| L01 Windows Rooted `Content` conditional publication | Unsupported; `GateResult::Blocked` | Do not enable it until the native relative-publication and recovery protocol has passed the Windows gate. TxF is a candidate only, not an implemented capability. |
+| L02 resolution limits and policy hooks | Accepted implementation | `None` adds no caller limit; zero is a real limit. Child contracts take the strictest configured limit and combine policies. Unix lengths are native bytes; Windows lengths use UTF-16 code units × 2. |
+| L03 security observations | Accepted implementation with platform evidence gaps | Queries use retained objects. Darwin ACL interpretation is `BLOCKED_DESIGN`; Windows native observation runtime coverage is `BLOCKED_PLATFORM`. These are not native PASS claims. |
+| L04 exact owner access policy | Accepted implementation with native test gaps | Linux implementation coverage exists; macOS and Windows native owner-policy suites remain `BLOCKED_PLATFORM`. Exact Unix modes and Windows masks must be supplied explicitly. |
+| L05 resolution policy hooks | Accepted implementation | Hooks validate components and raw symlink targets before access; they are pure checks and are not promised a fixed invocation count. |
+| Conditional support synchronization (T11/T12) | `BLOCKED_DEPENDENCY` | Until the Windows gate clears, Windows Rooted `Content` remains `Unsupported` in capability, validation, and backend layers. |
+
+For conditional publication, Unix supports `Absent` and `Content` for Host and
+Rooted authorities, subject to valid mode, symlink, durability, and filesystem
+constraints. Windows supports `Absent` for Host and Rooted and Host `Content`
+only with `PreserveExisting`; Rooted `Content` and Host `Content` with
+`UseStaging` remain unsupported. `Append`, `Content` with `CreateNew`, and
+required namespace durability are unsupported. A `CanAttempt` response does
+not guarantee a filesystem will perform the native operation.
+
+The CI workflows run current-crate tests on Linux, macOS, and Windows. The
+`windows-recovery` job checks out `rs-json` because the sibling `rs-redact`
+manifest declares `qubit-json` as a transitive optional path dependency. Cargo
+needs that checkout to resolve the manifest and build graph. The job's test
+command still runs only `rs-local-files`; this is a current-crate test, not a
+downstream test. No downstream all-features command belongs in this crate's CI.
+Native Darwin ACL interpretation and native Windows security/owner-policy
+results remain blocked as listed above; compile-only evidence is not runtime
+evidence.

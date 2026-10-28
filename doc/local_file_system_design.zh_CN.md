@@ -2116,3 +2116,28 @@ CI 记录为准，CI 配置本身不证明本次修改通过。
 
 本文是 `qubit-local-files` 的长期设计基线。新增 API 或改变行为时，应先判断是否仍满足上述
 原则和不变量；若需要改变本设计，应同步修改本文、公开文档和 contract tests。
+
+## 29. 本轮重构支持矩阵（2026-10-28）
+
+本表记录 L01—L05 重构的已接受实现状态，不代表所有原生平台运行测试都已通过。
+`GateResult::Blocked` 是报告状态，不是公开 Rust 类型。
+
+| 项目 | 当前状态 | 边界 |
+| --- | --- | --- |
+| L01 Windows Rooted `Content` 条件发布 | 仍不支持；`GateResult::Blocked` | Windows 原生相对发布和恢复协议通过 gate 后才能开放。TxF 只是候选方案，不是已实现能力。 |
+| L02 解析额度与 policy hook | 实现已接受 | `None` 不增加调用方额度；`0` 是实际零额度。子级采用更严格的配置并组合 policy。Unix 按 native bytes 计长，Windows 按 UTF-16 code unit × 2。 |
+| L03 安全观测 | 实现已接受，但原生平台证据仍有缺口 | 查询使用已保留对象。Darwin ACL 解释为 `BLOCKED_DESIGN`；Windows 原生观测运行覆盖为 `BLOCKED_PLATFORM`，不能记作原生 PASS。 |
+| L04 精确 owner access policy | 实现已接受，但原生测试仍有缺口 | Linux 有实现覆盖；macOS、Windows 原生 owner-policy 测试仍为 `BLOCKED_PLATFORM`。必须显式提供精确 Unix mode 或 Windows mask。 |
+| L05 解析 policy hook | 实现已接受 | 在访问前校验路径组件与原始 symlink target；hook 只能做纯校验，调用次数不固定。 |
+| 条件发布支持同步（T11/T12） | `BLOCKED_DEPENDENCY` | Windows gate 解除前，Windows Rooted `Content` 在 capability、validation、backend 各层仍保持 `Unsupported`。 |
+
+条件发布方面，Unix 的 Host 与 Rooted 支持 `Absent` 和 `Content`，仍受有效 mode、symlink、耐久性及文件系统条件约束。
+Windows 的 Host 和 Rooted 支持 `Absent`；Host `Content` 仅在 `PreserveExisting` 下支持。Rooted `Content` 与
+Host `Content` 配合 `UseStaging` 仍不支持。`Append`、`Content` 配合 `CreateNew` 和 Required namespace
+durability 均不支持。`CanAttempt` 只表示实现会尝试，不保证具体文件系统一定接受原生操作。
+
+CI workflow 在 Linux、macOS、Windows 上运行当前 crate 的测试。`windows-recovery` job 需要 checkout
+`rs-json`，因为同级 `rs-redact` manifest 将 `qubit-json` 声明为传递的可选 path dependency；Cargo 解析 manifest
+和构建依赖图时需要该 checkout。该 job 的测试命令仍只运行 `rs-local-files`，所以这是当前 crate 测试，不是下游测试。
+本 crate CI 不加入 downstream all-features 命令。Darwin ACL 语义解释和 Windows 原生安全观测/owner policy 结果仍按上表阻塞；
+仅编译证据不能代替原生运行证据。

@@ -394,6 +394,16 @@ symbolic link.
 
 ## Conditional write
 
+The capability query is a preflight hint, not a promise that the underlying
+filesystem will accept the native operation. `Absent` is supported on Unix and
+Windows for Host and Rooted authorities. `Content` is supported on Unix for
+Host and Rooted. On Windows, Host `Content` is supported only with
+`PreserveExisting`; Rooted `Content` is `Unsupported`. Host `Content` with
+`UseStaging`, `Append`, `Content` with `CreateNew`, and required namespace
+durability are unsupported. Check `LocalDirectoryHandle::conditional_support`
+when the application needs to present a capability hint, and still handle
+open/commit errors.
+
 Use a conditional write when an application reads document A, prepares an edit B,
 and must avoid replacing a newer version written by someone else. Add the
 optional feature and an algorithm implementation to the application manifest:
@@ -1203,6 +1213,66 @@ inspect `effect_state()` and `cause_kind()` separately before retrying. A basic
 error whose `effect_state()` is `None` carries insufficient effect evidence and
 must not be treated as `Unchanged`.
 
+
+## Bounded resolution and security policy
+
+Use `LocalRootOpenOptions` when opening a Rooted authority needs explicit
+resolution bounds or an application-specific name policy. The limits cover
+symlink hops, raw symlink-target bytes, actual path components, and resolved
+path bytes. `None` adds no caller limit; zero is a real zero limit. On Unix
+native path lengths are bytes; on Windows they are UTF-16 code units multiplied
+by two. The pending-path and actual-prefix measurements are checked separately.
+Child directory options inherit their parent's contract and can only tighten
+limits. Supplying `None` at a child does not remove a finite parent bound.
+`LocalResolutionLimits` is `Copy` and its builders are `const`; the new root
+open options themselves are owned configuration values. Defaults add no new
+limits.
+
+`LocalResolutionPolicy` is a pure validation hook for each normal component
+and raw symlink target. It receives whether resolution is opening a root or
+descending from an established authority, and whether a component came from
+the caller or a link target. The hook runs before the corresponding metadata
+query or open; it must not perform I/O or be relied on for a fixed call count.
+The existing component deny-name policy remains a separate restriction and is
+combined with the resolution policy.
+
+Resolution preserves traversal semantics. For example, `missing/../file` is
+not simplified to `file`: the missing component must resolve before `..` can
+move to its parent. Literal `.` and `..` are counted before their resolver
+meaning is applied. Finite limits are checked before expanding or allocating
+the corresponding work; `LocalFileErrorKind::ResourceLimit` identifies the
+dimension that was exceeded.
+
+Security observation options distinguish `Optional` from `Required`. Optional
+returns no field only when the platform mechanism is explicitly unsupported;
+permission, I/O, and malformed ACL errors remain errors. Required fails when a
+complete requested fact is unavailable. ACL-entry and ACL-byte limits default
+to `None`, while zero rejects any corresponding data. Queries use the retained
+file or directory object rather than reopening its diagnostic path. The result
+is a sequence of observations, not an atomic ACL/identity snapshot, and does
+not guarantee that access remains unchanged afterward.
+
+An owner policy can set exact Unix directory/file modes or Windows
+directory/file access masks using `LocalOwnerAccessPolicy`. For example, the
+policy value is built with `with_unix_modes(directory_mode, file_mode)` on Unix
+or `with_windows_masks(directory_mask, file_mask)` on Windows; provide only the
+settings for the target platform. It has no implicit permission preset. A
+non-empty staged tree using this policy requires directory read/list and
+traverse access so the library can perform the final rewalk; if those rights
+are absent, publication is rejected before mutation. The final access state
+reports `OwnerPolicyApplied` only after applying and verifying the exact policy.
+The bounded application operation fixes at most 256 child identities and
+management handles before changing access; a larger tree returns
+`ResourceLimit` without mutation. Caller-supplied traversal limits can impose a
+smaller bound.
+This does not mean that operating-system ACL inheritance or all effective
+access behavior is identical across platforms.
+
+Platform evidence status: Darwin ACL interpretation remains `BLOCKED_DESIGN`;
+Windows native security-observation runtime coverage is `BLOCKED_PLATFORM`.
+Native owner-policy lifecycle suites on macOS and Windows are also
+`BLOCKED_PLATFORM`. The public API being present does not turn these states
+into native-platform PASS results.
 
 ## Errors and Diagnostics
 

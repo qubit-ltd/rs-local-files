@@ -328,6 +328,13 @@ assert_eq!(text, r#"{"complete":true}"#);
 
 ## 条件写入
 
+能力查询只是预检提示，不保证底层文件系统一定接受原生操作。Host 和 Rooted 在 Unix、Windows
+上都支持 `Absent`。Unix 的 Host 和 Rooted 都支持 `Content`；Windows Host 仅在
+`PreserveExisting` 下支持 `Content`，Windows Rooted `Content` 为 `Unsupported`。
+Host `Content` 配合 `UseStaging`、`Append`、`Content` 配合 `CreateNew`，以及 Required
+namespace durability 均不支持。应用需要展示能力提示时可查询
+`LocalDirectoryHandle::conditional_support`，但仍须处理打开和提交错误。
+
 当应用读取文档 A、基于它准备新内容 B，并且不能覆盖其他人后来保存的版本时，使用
 条件写入。应用清单需启用可选 feature，并加入算法实现：
 
@@ -983,6 +990,46 @@ Windows Rooted 的符号链接读取、类型判断和创建均相对于已打�
 `PublicationIncomplete`；重试前应分别检查 `effect_state()` 与 `cause_kind()`。基础错误的
 `effect_state()` 返回 `None` 表示没有足够证据推断副作用，不能当作 `Unchanged`。
 
+
+## 有界解析与安全策略
+
+打开 Rooted authority 时，如果需要限制路径解析工作量或检查应用自定义的名称规则，可配置
+`LocalRootOpenOptions`。四类限制分别控制符号链接跳转次数、原始链接目标字节数、实际路径组件数和
+解析路径字节数。`None` 表示调用方不增加限制，`0` 是实际的零上限。Unix 按 native bytes
+计长；Windows 按 UTF-16 code unit 乘 2 计长。等待处理的路径与已解析目录前缀分别计量。
+子目录选项继承父级合同，只能收紧限制；传入 `None` 不会取消父级的有限上限。
+`LocalResolutionLimits` 实现 `Copy`，其 builder 是 `const`；root open options 是拥有配置值。
+默认配置没有新增额度。
+
+`LocalResolutionPolicy` 提供纯校验回调，检查普通路径组件和原始符号链接目标。回调能区分正在打开
+Rooted、还是从既有 authority 向下解析，也能区分名称来自调用方输入还是链接目标。对应 metadata
+查询或 open 之前会调用校验；回调不得执行 I/O，也不能依赖固定调用次数。既有组件 deny-name
+策略仍单独生效，并与它组合。
+
+解析会保留真实遍历顺序。例如 `missing/../file` 不会先化简成 `file`：必须先确认
+`missing` 存在，才能沿 `..` 返回父目录。字面 `.`、`..` 也会先计入解析预算，再按解析器语义处理。
+有限额度会在展开或分配对应工作之前检查；超限通过
+`LocalFileErrorKind::ResourceLimit` 报告具体维度。
+
+安全观测选项区分 `Optional` 和 `Required`。只有机制明确不支持时，Optional 才会省略相应字段；权限拒绝、
+普通 I/O 错误和损坏 ACL 仍返回错误。Required 在无法取得完整事实时失败。ACL 条目数和字节数默认
+为 `None`，设为 0 则不允许对应数据。查询直接使用已保留的文件或目录对象，不按诊断路径重新打开。
+结果由一系列观察组成，不是 ACL 与 identity 的原子快照，也不保证返回后权限保持不变。
+
+`LocalOwnerAccessPolicy` 可精确设置 Unix 目录/文件 mode，或 Windows 目录/文件 access mask。
+Unix 使用 `with_unix_modes(directory_mode, file_mode)`，Windows 使用
+`with_windows_masks(directory_mask, file_mask)`，只填写目标平台的设置；策略没有隐含权限预设。
+非空 staged tree 若使用该策略，库必须能读取/列出目录并遍历目录，才能完成发布前的最终重走检查。
+缺少这些权限时会在 mutation 前拒绝发布。只有在策略已应用并验证后，最终 access state 才会报告
+`OwnerPolicyApplied`。修改权限前，操作最多固定 256 个子项 identity 和管理句柄；树更大时会在 mutation
+前以 `ResourceLimit` 失败。调用方设置的遍历额度可以更小。这不代表不同平台的 ACL 继承或有效访问语义完全相同。
+
+平台证据状态：Darwin ACL 语义仍为 `BLOCKED_DESIGN`；Windows 原生安全观测运行覆盖为
+`BLOCKED_PLATFORM`。macOS 和 Windows 原生 owner-policy lifecycle suite 也仍是
+`BLOCKED_PLATFORM`。API 已公开不代表这些平台已有原生 PASS 证据。
+
+Windows Rooted 条件 `Content` 发布仍为 `Unsupported`。Windows 尚未证明所需的相对目录发布和恢复协议，
+不能把 Unix 支持矩阵当成 Windows 原生证据。
 
 ## 错误与诊断
 

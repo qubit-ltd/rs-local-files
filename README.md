@@ -202,6 +202,23 @@ the handle. Recursive listing and copy can still discover and copy denied names;
 the policy does not isolate a private subtree or protect against concurrent
 renames. See the user guide for the precise boundary.
 
+Resolution can also be bounded per operation with `LocalResolutionLimits` and
+extended with a pure `LocalResolutionPolicy`; child limits only tighten their
+parent authority. Security observations query the retained object and can
+require filesystem, access-control, and link-count facts. Staged trees can
+apply an exact `LocalOwnerAccessPolicy` before publication. These APIs do not
+make the observation atomic or guarantee cross-platform ACL equivalence. See
+the [resolution and security guide](doc/user_guide.md#bounded-resolution-and-security-policy)
+and its [Chinese version](doc/user_guide.zh_CN.md#有界解析与安全策略).
+
+The conditional-publication support matrix remains platform-specific. In
+particular, Windows Rooted `Content` and Host `Content` with `UseStaging` are
+`Unsupported`; Windows Host `Content` with `PreserveExisting` and `Absent` remain
+available subject to the documented options. Unix native behavior is supported
+by the implementation, while runtime filesystem behavior may still prevent an
+attempt. See the [conditional-write guide](doc/user_guide.md#conditional-write)
+for the full matrix and recovery boundaries.
+
 Temporary-resource cleanup is ownership-aware, not a synchronization boundary.
 Call `cleanup()` when the caller must observe cleanup failures; dropping a
 resource is a silent best-effort fallback and never reports or logs failure.

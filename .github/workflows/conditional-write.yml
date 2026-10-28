@@ -63,10 +63,15 @@ jobs:
             --test conditional_recovery_tests \
             --test conditional_fault_tests \
             --test conditional_feature_gate_tests
+          run_tests --locked --test resolution_contract_tests
           run_tests --locked --features digest,test-support --lib conditional_
           case "$RUNNER_OS" in
             Linux|macOS)
+              run_tests --locked --test security_observation_contract_tests
               cargo test --locked --manifest-path fuzz/Cargo.toml --test lifecycle_model_tests
+              if [ "$RUNNER_OS" = Linux ]; then
+                run_tests --locked --test owner_policy_lifecycle_tests
+              fi
               ;;
             Windows)
               run_tests --locked --lib lf_review_stage_cleanup_

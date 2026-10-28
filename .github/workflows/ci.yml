@@ -30,7 +30,12 @@ jobs:
       verify-extra-script: |
         cargo test --locked --no-default-features --no-fail-fast
         cargo test --locked --all-features --no-fail-fast
+        cargo test --locked --test resolution_contract_tests
+        if [ "$RUNNER_OS" != Windows ]; then
+          cargo test --locked --test security_observation_contract_tests
+        fi
         if [ "$RUNNER_OS" = Linux ]; then
+          cargo test --locked --test owner_policy_lifecycle_tests
           rustup target add --toolchain 1.94 x86_64-unknown-freebsd armv7-linux-androideabi
           cargo +1.94 check --locked --target x86_64-unknown-freebsd
           cargo +1.94 check --locked --target armv7-linux-androideabi

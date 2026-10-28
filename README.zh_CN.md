@@ -170,6 +170,18 @@ Rooted 实例的同名方法只修改该实例。
 目录 handle 的组件策略只在绑定输入和解析路径时筛选名称；递归列表和复制仍可能发现并复制被拒绝名称。
 它不隔离私有子树，也不防护并发重命名。具体边界见[用户手册](doc/user_guide.zh_CN.md)。
 
+调用方可以用 `LocalResolutionLimits` 限制每次路径解析，并用纯校验回调
+`LocalResolutionPolicy` 增加规则；子 handle 只能收紧父级限制。安全观测查询已保留的文件对象，
+也可以要求文件系统、访问控制和链接数信息。staged tree 可在发布前应用精确的
+`LocalOwnerAccessPolicy`。这些 API 不提供原子快照，也不保证不同平台的 ACL 语义完全相同。
+详见[解析与安全策略指南](doc/user_guide.zh_CN.md#有界解析与安全策略)及
+[英文版](doc/user_guide.md#bounded-resolution-and-security-policy)。
+
+条件发布能力依平台而异。Windows Rooted `Content` 和 Host `Content` 配合 `UseStaging`
+仍返回 `Unsupported`；Windows Host `Content` 配合 `PreserveExisting`，以及 `Absent`，在选项满足要求时仍可尝试。
+Unix 原生实现提供相应协议，但具体文件系统仍可能拒绝操作。完整矩阵和恢复边界见
+[条件写入指南](doc/user_guide.zh_CN.md#条件写入)。
+
 临时资源清理会校验所有权，但它不是并发同步边界。调用方需要观察清理失败时应显式调用
 `cleanup()`；drop 只提供静默、尽力而为的兜底，不报告或记录失败。guard 删除前会比较创建时保存的
 文件系统标识，因此通常能拒绝误删替换条目；但标识检查与按路径删除是两个独立操作，
