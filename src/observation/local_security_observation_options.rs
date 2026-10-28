@@ -58,6 +58,7 @@ impl LocalSecurityObservationOptions {
     pub(crate) const fn access(&self) -> LocalObservationRequirement {
         self.access
     }
+    #[allow(dead_code)] // Read by target-gated Unix and Windows security backends.
     pub(crate) const fn link_count(&self) -> LocalObservationRequirement {
         self.link_count
     }
