@@ -115,9 +115,11 @@ impl LocalTempFile {
         )
         .ok()
         .and_then(|observation| observation.identity().cloned());
+        let creation_parent = sandbox_path.parent().unwrap_or_else(|| Path::new("")).to_path_buf();
         Ok(Self {
             core: LocalTempResourceCore::new(
                 path,
+                creation_parent,
                 LocalTempResourceBackend::Host(super::internal::HostTempResourceBackend { sandbox_path, identity }),
                 symlink_policy,
             ),
@@ -146,9 +148,11 @@ impl LocalTempFile {
         )
         .ok()
         .and_then(|observation| observation.identity().cloned());
+        let creation_parent = sandbox_path.parent().unwrap_or_else(|| Path::new("")).to_path_buf();
         Ok(Self {
             core: LocalTempResourceCore::new(
                 path.clone(),
+                creation_parent,
                 LocalTempResourceBackend::Rooted(RootedTempResourceBackend {
                     root,
                     relative_path: path,
@@ -172,6 +176,32 @@ impl LocalTempFile {
     #[inline]
     pub fn path(&self) -> &Path {
         &self.core.path
+    }
+
+    /// Returns the creation-time parent directory of the private sandbox.
+    ///
+    /// The path is absolute in the same namespace as [`Self::path`]. For a
+    /// Rooted filesystem it uses virtual-root coordinates and never exposes
+    /// the host path behind that root. The returned snapshot is retained for
+    /// the resource's lifetime and does not prove that the directory still
+    /// exists or is accessible. Querying it performs no I/O.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use qubit_local_files::LocalFileSystem;
+    ///
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let filesystem = LocalFileSystem::host()?;
+    /// let temporary = filesystem.create_temp_file()?;
+    /// assert!(temporary.path().starts_with(temporary.creation_parent()));
+    /// # Ok(())
+    /// # }
+    /// ```
+    #[must_use]
+    #[inline]
+    pub fn creation_parent(&self) -> &Path {
+        &self.core.creation_parent
     }
 
     /// Returns the current source authority, independently of earlier

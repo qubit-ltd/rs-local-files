@@ -36,6 +36,8 @@ use crate::path::LocalPathResolver;
 pub(crate) struct LocalTempResourceCore {
     /// Namespace-absolute diagnostic source path; Host also uses native syntax.
     pub(crate) path: PathBuf,
+    /// Namespace-absolute parent coordinate used to create the private sandbox.
+    pub(crate) creation_parent: PathBuf,
     /// Bound native authority and exactly one matching identity.
     pub(crate) backend: LocalTempResourceBackend,
     /// Current namespace authority.
@@ -48,9 +50,15 @@ pub(crate) struct LocalTempResourceCore {
 
 impl LocalTempResourceCore {
     /// Takes a successfully bound backend and its namespace path.
-    pub(crate) fn new(path: PathBuf, backend: LocalTempResourceBackend, symlink_policy: LocalSymlinkPolicy) -> Self {
+    pub(crate) fn new(
+        path: PathBuf,
+        creation_parent: PathBuf,
+        backend: LocalTempResourceBackend,
+        symlink_policy: LocalSymlinkPolicy,
+    ) -> Self {
         Self {
             path,
+            creation_parent,
             backend,
             state: LocalTempResourceState::Owned,
             symlink_policy,
@@ -195,12 +203,26 @@ impl LocalTempResourceCore {
         resolver: LocalPathResolver,
         operation: LocalFileOperation,
     ) -> LocalResult<()> {
-        let input = match &self.backend {
-            LocalTempResourceBackend::Host(_) => self.path.clone(),
-            LocalTempResourceBackend::Rooted(rooted) => virtual_rooted_path(&rooted.relative_path),
+        let (path_input, parent_input) = match &self.backend {
+            LocalTempResourceBackend::Host(_) => (self.path.clone(), self.creation_parent.clone()),
+            LocalTempResourceBackend::Rooted(_) => (
+                virtual_rooted_path(&self.path),
+                virtual_rooted_path(&self.creation_parent),
+            ),
         };
         self.path = resolver
-            .resolve(&input)
+            .resolve(&path_input)
+            .map_err(|error| {
+                let error = error.with_operation(operation);
+                match resolver.current_directory() {
+                    Some(directory) => error.with_current_directory(directory.to_path_buf()),
+                    None => error,
+                }
+            })?
+            .namespace_absolute()
+            .to_path_buf();
+        self.creation_parent = resolver
+            .resolve(&parent_input)
             .map_err(|error| {
                 let error = error.with_operation(operation);
                 match resolver.current_directory() {
