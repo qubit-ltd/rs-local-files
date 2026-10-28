@@ -130,7 +130,7 @@ fn lf_n02_depth_boundary_is_inclusive_for_both_access_policies() {
             stage
                 .apply_access_policy_with_options(policy, &LocalListOptions::new().with_max_depth(maximum))
                 .expect("entry at the configured depth is valid");
-            if policy == LocalTreeFinalAccess::ReadOnlyCurrentUser {
+            if cfg!(unix) && policy == LocalTreeFinalAccess::ReadOnlyCurrentUser {
                 stage
                     .apply_access_policy(LocalTreeFinalAccess::CurrentUserOnly)
                     .expect("restore writable permissions");
