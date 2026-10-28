@@ -1254,14 +1254,14 @@ impl LocalStagedDirectory {
                     if applied { State::Mixed } else { State::Preserved },
                 ));
             }
-            let current = crate::observation::query::query_observation(&file, crate::observation::LocalObservationRequirement::Required)
+            let current = crate::observation::query::query_observation(file, crate::observation::LocalObservationRequirement::Required)
                 .map_err(|cause| super::tree_recovery::LocalTreeAccessError::new(cause, if applied { State::Mixed } else { State::Preserved }))?;
             if current.identity() != expected.as_ref() {
                 return Err(super::tree_recovery::LocalTreeAccessError::new(LocalFileError::new(LocalFileErrorKind::ChangedDuringRead, LocalFileOperation::Metadata), if applied { State::Mixed } else { State::Preserved }));
             }
             let result = {
-                #[cfg(unix)] { crate::temp::internal::privacy_unix::apply_owner_access(&file, *kind == crate::LocalFileKind::Directory, policy) }
-                #[cfg(windows)] { crate::temp::internal::privacy_windows::apply_owner_access(&file, *kind == crate::LocalFileKind::Directory, policy) }
+                #[cfg(unix)] { crate::temp::internal::privacy_unix::apply_owner_access(file, *kind == crate::LocalFileKind::Directory, policy) }
+                #[cfg(windows)] { crate::temp::internal::privacy_windows::apply_owner_access(file, *kind == crate::LocalFileKind::Directory, policy) }
                 #[cfg(not(any(unix, windows)))] { Err(std::io::Error::new(std::io::ErrorKind::Unsupported, "owner policies are unsupported")) }
             };
             if let Err(source) = result {
@@ -2056,9 +2056,9 @@ impl LocalStagedDirectory {
         }
         if let Some(policy) = options.owner_access_policy() {
             self.owner_access_policy = Some(*policy);
-            if let Some(owner) = self.owner.as_mut() {
-                owner.set_owner_access_policy(Some(*policy));
-            }
+        }
+        if let (Some(policy), Some(owner)) = (options.owner_access_policy(), self.owner.as_mut()) {
+            owner.set_owner_access_policy(Some(*policy));
         }
         if name.is_empty()
             || name == OsStr::new(".")
