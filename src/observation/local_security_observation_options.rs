@@ -7,8 +7,6 @@
 // =============================================================================
 
 use crate::observation::LocalObservationRequirement;
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-#[must_use]
 /// Selects security facts and bounds ACL data retained by an observation.
 ///
 /// Each query defaults to `Optional`; ACL limits default to `None` (no caller
@@ -17,6 +15,25 @@ use crate::observation::LocalObservationRequirement;
 /// unsupported. Required queries fail when complete facts are unavailable;
 /// permission errors, ordinary I/O errors, and malformed ACL data remain errors
 /// for either requirement.
+///
+/// Optional requirements still attempt their native query. Only explicitly
+/// unsupported or unavailable facts become `None`; access denial, ordinary
+/// I/O failures, malformed ACLs, and changes detected during the observation
+/// return errors. On Unix, filesystem facts are implemented on Linux and
+/// macOS, while complete ACL access facts are currently queried on Linux. On
+/// Windows, the native filesystem and security descriptor queries are used.
+///
+/// ```
+/// use qubit_local_files::observation::{LocalObservationRequirement, LocalSecurityObservationOptions};
+/// let options = LocalSecurityObservationOptions::new()
+///     .with_filesystem(LocalObservationRequirement::Optional)
+///     .with_access(LocalObservationRequirement::Required)
+///     .with_max_acl_entries(128)
+///     .with_max_acl_bytes(16 * 1024);
+/// # let _ = options;
+/// ```
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[must_use]
 pub struct LocalSecurityObservationOptions {
     filesystem: LocalObservationRequirement,
     access: LocalObservationRequirement,

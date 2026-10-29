@@ -6,12 +6,17 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-#[non_exhaustive]
 /// Presence or support status of an ACL mechanism.
 ///
-/// `Unknown` means the observation could not establish presence or absence; it
-/// does not mean that access is unrestricted.
+/// `Absent` means the queried ACL kind was successfully checked and is not
+/// present. `Present` means valid ACL data was read. `NotSupported` is returned
+/// only when the platform or filesystem explicitly reports that the queried
+/// ACL kind is unsupported. Permission failures, I/O errors, malformed ACL
+/// data, and configured resource-limit violations are errors rather than
+/// presence states. These variants describe the queried ACL kind only and do
+/// not by themselves establish effective access.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub enum LocalAclPresence {
     /// The ACL is known to be absent.
     Absent,

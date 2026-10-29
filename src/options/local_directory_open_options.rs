@@ -14,6 +14,14 @@ use crate::options::LocalPathBindingOptions;
 use crate::options::LocalResolutionLimits;
 
 /// Options captured by a fixed directory handle.
+///
+/// Opening a handle performs native resolution and I/O. These builders only
+/// store the policy that the opening operation will apply. A symlink override
+/// replaces the enclosing default for operations through the new handle;
+/// component denials, resolution limits, and validation policies combine with
+/// enclosing constraints and can only restrict resolution. Optional path
+/// binding retains evidence for later verification, but does not lock the
+/// namespace or prevent concurrent changes.
 #[derive(Clone, Debug, Default)]
 #[must_use = "directory options have no effect unless used"]
 pub struct LocalDirectoryOpenOptions {

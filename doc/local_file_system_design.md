@@ -986,9 +986,11 @@ pub enum LocalCopyFailureState {
 ```
 
 `LocalCopyOutcome` reports statistics, method, atomicity, durability, and
-metadata preservation. `LocalCopyFailure` retains the underlying structured
-error plus `Unchanged`, `PartiallyPublished`, `Published`, or `Indeterminate`
-state and partial statistics.
+metadata preservation applied to copied entries. A complete skip reports no
+metadata preservation; in a mixed tree, the value describes the copied entries
+and does not claim preservation on skipped entries. `LocalCopyFailure` retains
+the underlying structured error plus `Unchanged`, `PartiallyPublished`,
+`Published`, or `Indeterminate` state and partial statistics.
 
 The failure state tracks publication facts for requested destination entries
 and content. It excludes auxiliary parent directories created by
@@ -1893,15 +1895,29 @@ passed. `GateResult::Blocked` is a report state, not a public Rust type.
 | L03 security observations | Accepted implementation with platform evidence gaps | Queries use retained objects. Darwin ACL interpretation is `BLOCKED_DESIGN`; Windows native observation runtime coverage is `BLOCKED_PLATFORM`. These are not native PASS claims. |
 | L04 exact owner access policy | Accepted implementation with native test gaps | Linux implementation coverage exists; macOS and Windows native owner-policy suites remain `BLOCKED_PLATFORM`. Exact Unix modes and Windows masks must be supplied explicitly. |
 | L05 resolution policy hooks | Accepted implementation | Hooks validate components and raw symlink targets before access; they are pure checks and are not promised a fixed invocation count. |
-| Conditional support synchronization (T11/T12) | `BLOCKED_DEPENDENCY` | Until the Windows gate clears, Windows Rooted `Content` remains `Unsupported` in capability, validation, and backend layers. |
+| Conditional support synchronization (T11/T12) | `BLOCKED_DEPENDENCY` | Until the Windows gate clears, Windows Rooted `Content` remains `Unsupported` in capability, validation, and backend layers. Required namespace durability is rejected only where the selected conditional-publication protocol cannot provide it; Linux and macOS can attempt it when configuration and runtime filesystem conditions permit. |
 
 For conditional publication, Unix supports `Absent` and `Content` for Host and
 Rooted authorities, subject to valid mode, symlink, durability, and filesystem
 constraints. Windows supports `Absent` for Host and Rooted and Host `Content`
 only with `PreserveExisting`; Rooted `Content` and Host `Content` with
-`UseStaging` remain unsupported. `Append`, `Content` with `CreateNew`, and
-required namespace durability are unsupported. A `CanAttempt` response does
-not guarantee a filesystem will perform the native operation.
+`UseStaging` remain unsupported. `Append` and `Content` with `CreateNew` are
+unsupported. Windows rejects required namespace durability for the
+corresponding conditional-publication protocol. Linux and macOS can attempt
+required namespace durability when the selected protocol, effective
+configuration, and runtime filesystem conditions permit it; a `CanAttempt`
+response does not guarantee a filesystem will perform the native operation.
+
+LF-Q01 was confirmed and corrected: `LocalCopyOutcome` metadata preservation
+describes the policy applied to copied entries. A complete skip reports `None`,
+successful copies still report the applied policy, and mixed-tree results apply
+only to copied entries. FreeBSD source analysis and kernel implementation
+indicate that separate attribute-list probing and reading could allow the list
+to grow between calls. This round did not run a private model test or verify the
+scenario on a native FreeBSD environment, so it cannot confirm that the scenario
+occurs on a supported filesystem or determine whether a production correction
+is warranted. The question remains unverified and open; the existing platform
+support level is unchanged.
 
 The CI workflows run current-crate tests on Linux, macOS, and Windows. The
 `windows-recovery` job checks out `rs-json` because the sibling `rs-redact`

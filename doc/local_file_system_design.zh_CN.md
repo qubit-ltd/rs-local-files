@@ -2155,12 +2155,19 @@ CI 记录为准，CI 配置本身不证明本次修改通过。
 | L03 安全观测 | 实现已接受，但原生平台证据仍有缺口 | 查询使用已保留对象。Darwin ACL 解释为 `BLOCKED_DESIGN`；Windows 原生观测运行覆盖为 `BLOCKED_PLATFORM`，不能记作原生 PASS。 |
 | L04 精确 owner access policy | 实现已接受，但原生测试仍有缺口 | Linux 有实现覆盖；macOS、Windows 原生 owner-policy 测试仍为 `BLOCKED_PLATFORM`。必须显式提供精确 Unix mode 或 Windows mask。 |
 | L05 解析 policy hook | 实现已接受 | 在访问前校验路径组件与原始 symlink target；hook 只能做纯校验，调用次数不固定。 |
-| 条件发布支持同步（T11/T12） | `BLOCKED_DEPENDENCY` | Windows gate 解除前，Windows Rooted `Content` 在 capability、validation、backend 各层仍保持 `Unsupported`。 |
+| 条件发布支持同步（T11/T12） | `BLOCKED_DEPENDENCY` | Windows gate 解除前，Windows Rooted `Content` 在 capability、validation、backend 各层仍保持 `Unsupported`。仅当所选条件发布协议无法提供 Required namespace durability 时才拒绝；Linux 和 macOS 在配置有效且运行时文件系统条件允许时可以尝试。 |
 
 条件发布方面，Unix 的 Host 与 Rooted 支持 `Absent` 和 `Content`，仍受有效 mode、symlink、耐久性及文件系统条件约束。
 Windows 的 Host 和 Rooted 支持 `Absent`；Host `Content` 仅在 `PreserveExisting` 下支持。Rooted `Content` 与
-Host `Content` 配合 `UseStaging` 仍不支持。`Append`、`Content` 配合 `CreateNew` 和 Required namespace
-durability 均不支持。`CanAttempt` 只表示实现会尝试，不保证具体文件系统一定接受原生操作。
+Host `Content` 配合 `UseStaging` 仍不支持。`Append` 与 `Content` 配合 `CreateNew` 不支持。Windows 对应的
+条件发布协议不支持 Required namespace durability。Linux 和 macOS 在所选协议、有效配置与运行时文件系统条件允许时可以尝试
+Required namespace durability；`CanAttempt` 只表示实现会尝试，不保证具体文件系统一定接受原生操作。
+
+LF-Q01 已确认并修正：`LocalCopyOutcome` 的 metadata preservation 表示已复制条目实际应用的策略；完全跳过时为
+`None`，成功复制仍报告应用的策略，混合树的结果只针对已复制条目。LF-Q02 有 FreeBSD 源码证据表明属性列表探测与
+读取是分开的调用，因此属性列表可能在两次调用之间增长。本轮没有运行私有模型测试，也没有在 FreeBSD 原生环境验证
+该场景，无法确认支持的文件系统上是否会出现此情况，也不能据此决定是否需要生产行为修正。该疑点仍未验证且保持开放；
+现有平台支持级别不变。
 
 CI workflow 在 Linux、macOS、Windows 上运行当前 crate 的测试。`windows-recovery` job 需要 checkout
 `rs-json`，因为同级 `rs-redact` manifest 将 `qubit-json` 声明为传递的可选 path dependency；Cargo 解析 manifest

@@ -7,7 +7,12 @@
 // =============================================================================
 use crate::LocalFileMetadata;
 
-/// Whether native identity and timestamp details are required.
+/// Whether a security observation must provide the selected native facts.
+///
+/// `Optional` still attempts the query and returns `None` for unsupported
+/// facts. `Required` turns unavailable or unsupported selected facts into
+/// `RequirementNotMet`; permission, I/O, malformed-data, and identity-change
+/// errors remain distinct failures.
 #[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub enum LocalObservationRequirement {
@@ -23,6 +28,31 @@ pub enum LocalObservationRequirement {
 /// Identity distinguishes filesystem objects when the platform supplies it;
 /// it is not a version of the object's contents. Rechecking identity alone
 /// cannot prove that file bytes remained unchanged.
+///
+/// Obtain identities through [`LocalFileObservation::identity`] or
+/// [`super::LocalSecurityObservation::identity`]. Equality compares the
+/// platform identity values; it does not promise uniqueness after object
+/// deletion and identifier reuse.
+///
+/// ```
+/// use std::path::Path;
+/// use qubit_local_files::LocalFileSystem;
+/// use qubit_local_files::options::LocalDirectoryOpenOptions;
+///
+/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+/// let fixture = tempfile::tempdir()?;
+/// std::fs::write(fixture.path().join("item"), b"data")?;
+/// let filesystem = LocalFileSystem::host()?;
+/// let directory = filesystem.open_directory_with_options(
+///     fixture.path(), &LocalDirectoryOpenOptions::new(),
+/// )?;
+/// let observation = directory.observe_entry(Path::new("item"))?;
+/// if let Some(identity) = observation.identity() {
+///     let _object_identity = identity;
+/// }
+/// # Ok(())
+/// # }
+/// ```
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct LocalFileIdentity {
     native: LocalNativeIdentity,
@@ -52,7 +82,12 @@ impl LocalFileIdentity {
     }
 }
 
-/// Platform-specific native observation details.
+/// Platform-specific identity and timestamp details gathered from a retained
+/// file handle.
+///
+/// Exactly one platform-specific accessor is expected to return `Some` when
+/// native details are supplied; the other returns `None`. Both can be `None`
+/// when the platform cannot provide these details.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LocalNativeFileDetails {
     unix: Option<LocalUnixFileDetails>,
@@ -87,7 +122,10 @@ impl LocalNativeFileDetails {
     }
 }
 
-/// Unix device, inode, and native change-time details.
+/// Unix device, inode, and native change-time details from one handle.
+///
+/// Values are available through [`LocalNativeFileDetails::unix`]. Device and
+/// inode identify an object on the native filesystem, not its content version.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LocalUnixFileDetails {
     device: u64,
@@ -194,6 +232,11 @@ impl LocalWindowsFileDetails {
 /// available, it can be compared across observations from the same fixed
 /// authority to check whether a name still refers to the same object. It does
 /// not identify a content version or make separate observations atomic.
+///
+/// Use [`crate::directory::LocalDirectoryHandle::observe_entry`] to obtain an
+/// observation. The identity and native details are optional because some
+/// targets cannot provide them; metadata remains available when the operation
+/// succeeds.
 #[derive(Clone, Debug)]
 pub struct LocalFileObservation {
     metadata: LocalFileMetadata,
@@ -231,6 +274,37 @@ impl LocalFileObservation {
 }
 
 /// Result of checking whether a pathname still names its observed object.
+///
+/// Obtain this value from
+/// [`crate::observation::LocalObservedReader::verify_path_binding`].
+/// `Unchanged`, `Changed`, and `Missing` are successful verification results;
+/// query, policy, and timeout failures are returned as errors. A successful
+/// `Unchanged` result covers only the check that just completed and does not
+/// lock the namespace against later changes.
+///
+/// ```
+/// use std::path::Path;
+/// use qubit_local_files::LocalFileSystem;
+/// use qubit_local_files::observation::LocalSourceVerification;
+/// use qubit_local_files::options::{LocalObservedReadOptions, LocalPathBindingOptions};
+///
+/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+/// let fixture = tempfile::tempdir()?;
+/// std::fs::write(fixture.path().join("item"), b"data")?;
+/// let filesystem = LocalFileSystem::host()?;
+/// let reader = filesystem.open_observed_reader(
+///     &fixture.path().join("item"),
+///     &LocalObservedReadOptions::new()
+///         .with_path_binding(LocalPathBindingOptions::new()),
+/// )?;
+/// match reader.verify_path_binding()? {
+///     LocalSourceVerification::Unchanged => {}
+///     LocalSourceVerification::Changed | LocalSourceVerification::Missing => {}
+///     _ => {},
+/// }
+/// # Ok(())
+/// # }
+/// ```
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub enum LocalSourceVerification {
