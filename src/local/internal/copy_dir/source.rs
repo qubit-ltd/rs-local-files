@@ -120,3 +120,38 @@ fn reject_destination_inside_source(src: &Path, canonical_source: &Path, destina
     }
     Ok(())
 }
+
+#[cfg(all(test, unix))]
+mod error_contract_tests {
+    use super::*;
+
+    #[test]
+    fn source_inspection_rejects_file_and_contained_destination() {
+        let fixture = tempfile::tempdir().expect("fixture");
+        let file = fixture.path().join("file");
+        fs::write(&file, b"source").expect("file");
+        let outside = fixture.path().join("outside");
+        let error = inspect_copy_source_directory(&file, LocalSymlinkPolicy::Reject, &outside)
+            .expect_err("file is not a directory");
+        assert_eq!(error.kind(), ErrorKind::InvalidInput);
+        let canonical = fs::canonicalize(fixture.path()).expect("canonical fixture");
+        for destination in [canonical.clone(), canonical.join("child")] {
+            let error = inspect_copy_source_directory(fixture.path(), LocalSymlinkPolicy::Reject, &destination)
+                .expect_err("source may not contain destination");
+            assert_eq!(error.kind(), ErrorKind::InvalidInput);
+            assert!(error.to_string().contains("destination must not be inside source"));
+        }
+    }
+
+    #[test]
+    fn source_metadata_distinguishes_rejected_and_dangling_links() {
+        let fixture = tempfile::tempdir().expect("fixture");
+        let link = fixture.path().join("link");
+        std::os::unix::fs::symlink("missing", &link).expect("dangling link");
+        let rejected = metadata_for_copy_source(&link, LocalSymlinkPolicy::Reject).expect_err("link rejected");
+        assert_eq!(rejected.kind(), ErrorKind::Unsupported);
+        let followed = metadata_for_copy_source(&link, LocalSymlinkPolicy::FollowAcrossScope)
+            .expect_err("dangling target missing");
+        assert_eq!(followed.kind(), ErrorKind::NotFound);
+    }
+}

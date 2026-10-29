@@ -189,3 +189,31 @@ fn invalid_copy_source(path: &Path) -> Error {
         format!("copy source is not a regular file: {}", path.display()),
     )
 }
+
+#[cfg(all(test, unix))]
+mod error_contract_tests {
+    use super::*;
+
+    #[test]
+    fn opened_source_normalizes_final_link_but_preserves_missing_cause() {
+        let fixture = tempfile::tempdir().expect("fixture");
+        let file = fixture.path().join("file");
+        std::fs::write(&file, b"source").expect("file");
+        let link = fixture.path().join("link");
+        std::os::unix::fs::symlink(&file, &link).expect("link");
+        let error = OpenedCopySource::open(&link, LocalSymlinkPolicy::Reject, None)
+            .err()
+            .expect("final link must not open");
+        assert_eq!(error.kind(), ErrorKind::InvalidInput);
+        assert!(error.to_string().contains("copy source is not a regular file"));
+        let error = OpenedCopySource::open(&fixture.path().join("missing"), LocalSymlinkPolicy::Reject, None)
+            .err()
+            .expect("missing source");
+        assert_eq!(error.kind(), ErrorKind::NotFound);
+        let error = OpenedCopySource::open(fixture.path(), LocalSymlinkPolicy::Reject, None)
+            .err()
+            .expect("directory is not a regular file");
+        assert_eq!(error.kind(), ErrorKind::InvalidInput);
+        assert_eq!(std::fs::read(&file).expect("source intact"), b"source");
+    }
+}

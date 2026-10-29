@@ -253,3 +253,70 @@ pub(super) fn unsupported_source_error() -> io::Error {
         "rooted copy supports only regular files, directories, and symbolic links",
     )
 }
+
+#[cfg(all(test, unix))]
+mod tests {
+    use std::fs;
+
+    use super::Options;
+    use super::Path;
+    use super::Root;
+    use super::Stage;
+    use super::Statistics;
+    use super::prepare_directory;
+    use crate::LocalCopyFailureState;
+    use crate::local::LocalCopyTypeConflictPolicy;
+
+    #[test]
+    fn test_replacement_statistics_overflow_retains_published_type_change_and_progress() {
+        for overflow_directories in [true, false] {
+            let scratch = tempfile::tempdir().expect("fixture should exist");
+            fs::create_dir(scratch.path().join("source")).expect("source directory should exist");
+            fs::write(scratch.path().join("source/payload"), b"protected source").expect("source payload should exist");
+            fs::write(scratch.path().join("target"), b"old target").expect("conflicting file should exist");
+            fs::write(scratch.path().join("user-data"), b"protected sibling").expect("user data should exist");
+            let root = Root::open(scratch.path()).expect("root authority should open");
+            let source = Path::new("source").expect("source should be a valid relative path");
+            let destination = Path::new("target").expect("target should be a valid relative path");
+            let options = Options::new().with_type_conflict(LocalCopyTypeConflictPolicy::Replace);
+            let mut statistics = Statistics {
+                directories: if overflow_directories { u64::MAX } else { 0 },
+                overwritten: if overflow_directories { 0 } else { u64::MAX },
+                ..Statistics::default()
+            };
+            let error = prepare_directory(&root, &source, &destination, &options, &mut statistics)
+                .expect_err("counter overflow after replacement must report a partial publication");
+            assert_eq!(error.stage(), Stage::UpdateStatistics);
+            assert_eq!(error.source_path(), std::path::Path::new("source"));
+            assert_eq!(error.destination_path(), std::path::Path::new("target"));
+            assert_eq!(error.failure_state(), Some(LocalCopyFailureState::PartiallyPublished));
+            assert_eq!(error.kind(), std::io::ErrorKind::Other);
+            assert_eq!(error.error().to_string(), "rooted copy statistics overflowed");
+            assert_eq!(error.stats(), &statistics);
+            assert_eq!(statistics.directories, if overflow_directories { u64::MAX } else { 1 });
+            assert_eq!(statistics.overwritten, if overflow_directories { 0 } else { u64::MAX });
+            assert!(
+                scratch.path().join("target").is_dir(),
+                "the completed type change must remain visible"
+            );
+            assert_eq!(
+                fs::read_dir(scratch.path().join("target"))
+                    .expect("prepared target should be empty")
+                    .count(),
+                0
+            );
+            assert_eq!(
+                fs::read(scratch.path().join("source/payload")).expect("counter failure must preserve source"),
+                b"protected source"
+            );
+            assert_eq!(
+                fs::read(scratch.path().join("user-data")).expect("counter failure must preserve siblings"),
+                b"protected sibling"
+            );
+            assert!(
+                prepare_directory(&root, &source, &destination, &options, &mut Statistics::default())
+                    .expect("retry should recognize the already prepared directory")
+            );
+        }
+    }
+}

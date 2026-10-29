@@ -315,3 +315,32 @@ pub enum LocalSourceVerification {
     /// The observed name no longer exists.
     Missing,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::LocalNativeFileDetails;
+    use super::LocalWindowsFileDetails;
+
+    #[test]
+    fn test_windows_native_details_preserve_full_ids_and_special_timestamps() {
+        let file_id = [0x80, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 0xff];
+        let details = LocalWindowsFileDetails {
+            volume_serial: u64::MAX,
+            file_id,
+            last_write_time: i64::MIN,
+            change_time: i64::MAX,
+        };
+        let native = LocalNativeFileDetails {
+            unix: None,
+            windows: Some(details),
+        };
+        assert!(native.unix().is_none());
+        let windows = native
+            .windows()
+            .expect("Windows details remain readable on any platform");
+        assert_eq!(windows.volume_serial(), u64::MAX);
+        assert_eq!(windows.file_id(), &file_id);
+        assert_eq!(windows.last_write_time(), i64::MIN);
+        assert_eq!(windows.change_time(), i64::MAX);
+    }
+}

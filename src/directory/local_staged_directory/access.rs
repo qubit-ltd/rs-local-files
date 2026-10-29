@@ -1418,3 +1418,1057 @@ impl LocalStagedDirectory {
         Ok((crate::outcome::LocalTreeAccessOutcome::new(state), synced))
     }
 }
+
+#[cfg(all(test, target_os = "linux"))]
+mod owner_policy_checkpoint_tests {
+    use std::fs;
+    use std::os::unix::fs::PermissionsExt;
+    use std::path::Path;
+
+    use super::LocalStagedDirectory;
+    use crate::LocalFileErrorKind;
+    use crate::LocalFileOperation;
+    use crate::LocalFileSystem;
+    use crate::options::LocalDirectoryOpenOptions;
+    use crate::options::LocalListOptions;
+    use crate::options::LocalTempDirectoryOptions;
+    use crate::outcome::LocalTreeAccessState;
+    use crate::policy::LocalFileSyncRequirement;
+    use crate::policy::LocalOwnerAccessPolicy;
+
+    fn fixture(with_file: bool) -> (tempfile::TempDir, LocalStagedDirectory, LocalOwnerAccessPolicy) {
+        let scratch = tempfile::tempdir().expect("checkpoint scratch directory");
+        let parent = LocalFileSystem::host()
+            .expect("host filesystem")
+            .open_directory_with_options(scratch.path(), &LocalDirectoryOpenOptions::new())
+            .expect("parent authority");
+        let mut stage = parent
+            .create_staged_directory(&LocalTempDirectoryOptions::new())
+            .expect("stage");
+        if with_file {
+            stage
+                .write_file_new(Path::new("payload"), &mut &b"original"[..], 8)
+                .expect("original tracked file");
+        }
+        let policy = LocalOwnerAccessPolicy::new().with_unix_modes(0o700, 0o600);
+        (scratch, stage, policy)
+    }
+
+    #[test]
+    fn test_pinning_rejects_a_removed_or_replaced_collected_entry() {
+        for replace in [false, true] {
+            let (scratch, stage, policy) = fixture(true);
+            let root = scratch.path().join(stage.relative_name());
+            let (entries, _, _, _) = stage
+                .collect_owner_policy_entries(&policy, &LocalListOptions::new())
+                .expect("collect original identities");
+            fs::rename(root.join("payload"), root.join("original"))
+                .expect("retain original fixture outside its collected name");
+            if replace {
+                fs::write(root.join("payload"), b"replacement").expect("replacement fixture");
+            }
+            let error = stage
+                .open_and_pin_owner_policy_entries(&entries, LocalFileSyncRequirement::NotRequired)
+                .expect_err("pinning cannot accept a stale collected name");
+            assert_eq!(LocalTreeAccessState::Preserved, error.access_state());
+            assert_eq!(
+                if replace {
+                    LocalFileErrorKind::ChangedDuringRead
+                } else {
+                    LocalFileErrorKind::NotFound
+                },
+                error.cause().kind()
+            );
+            assert_eq!(
+                b"original",
+                fs::read(root.join("original")).expect("original bytes").as_slice()
+            );
+            if replace {
+                assert_eq!(
+                    b"replacement",
+                    fs::read(root.join("payload")).expect("replacement bytes").as_slice()
+                );
+            }
+            let _recovery = stage.retain_in_place();
+        }
+    }
+
+    #[test]
+    fn test_pinning_rejects_a_replaced_root_binding_even_for_an_empty_tree() {
+        let (scratch, stage, policy) = fixture(false);
+        let root = scratch.path().join(stage.relative_name());
+        let (entries, _, _, _) = stage
+            .collect_owner_policy_entries(&policy, &LocalListOptions::new())
+            .expect("collect empty tree");
+        fs::rename(&root, scratch.path().join("original-stage")).expect("retain original stage");
+        fs::create_dir(&root).expect("replace stage binding");
+        fs::set_permissions(&root, fs::Permissions::from_mode(0o755)).expect("replacement mode");
+        let error = stage
+            .open_and_pin_owner_policy_entries(&entries, LocalFileSyncRequirement::NotRequired)
+            .expect_err("root binding must still name the retained stage");
+        assert_eq!(LocalFileErrorKind::ChangedDuringRead, error.cause().kind());
+        assert_eq!(LocalTreeAccessState::Preserved, error.access_state());
+        assert_eq!(
+            0o755,
+            fs::metadata(&root).expect("replacement metadata").permissions().mode() & 0o777
+        );
+        let _recovery = stage.retain_in_place();
+    }
+
+    #[test]
+    fn test_mutation_rejects_a_removed_or_replaced_pinned_name() {
+        for replace in [false, true] {
+            let (scratch, mut stage, policy) = fixture(true);
+            let root = scratch.path().join(stage.relative_name());
+            let (entries, _, _, _) = stage
+                .collect_owner_policy_entries(&policy, &LocalListOptions::new())
+                .expect("collect identities");
+            let retained = stage
+                .open_and_pin_owner_policy_entries(&entries, LocalFileSyncRequirement::NotRequired)
+                .expect("pin original handle");
+            fs::rename(root.join("payload"), root.join("original")).expect("retain original pinned entry");
+            if replace {
+                fs::write(root.join("payload"), b"replacement").expect("replacement fixture");
+                fs::set_permissions(root.join("payload"), fs::Permissions::from_mode(0o644)).expect("replacement mode");
+            }
+            let error = stage
+                .apply_owner_policy_mutations(&policy, &retained)
+                .expect_err("rebound name must match the handle just mutated");
+            assert_eq!(LocalTreeAccessState::Indeterminate, error.access_state());
+            assert_eq!(
+                if replace {
+                    LocalFileErrorKind::ChangedDuringRead
+                } else {
+                    LocalFileErrorKind::NotFound
+                },
+                error.cause().kind()
+            );
+            assert_eq!(
+                0o600,
+                fs::metadata(root.join("original"))
+                    .expect("pinned metadata")
+                    .permissions()
+                    .mode()
+                    & 0o777
+            );
+            if replace {
+                assert_eq!(
+                    0o644,
+                    fs::metadata(root.join("payload"))
+                        .expect("replacement metadata")
+                        .permissions()
+                        .mode()
+                        & 0o777
+                );
+                assert_eq!(
+                    b"replacement",
+                    fs::read(root.join("payload")).expect("replacement bytes").as_slice()
+                );
+            }
+            let _recovery = stage.retain_in_place();
+        }
+    }
+
+    #[test]
+    fn test_mutation_root_binding_failure_reports_whether_child_access_changed() {
+        for with_file in [false, true] {
+            let (scratch, mut stage, policy) = fixture(with_file);
+            let root = scratch.path().join(stage.relative_name());
+            let (entries, _, _, _) = stage
+                .collect_owner_policy_entries(&policy, &LocalListOptions::new())
+                .expect("collect identities");
+            let retained = stage
+                .open_and_pin_owner_policy_entries(&entries, LocalFileSyncRequirement::NotRequired)
+                .expect("pin handles");
+            fs::rename(&root, scratch.path().join("original-stage")).expect("retain original root");
+            fs::create_dir(&root).expect("replace root binding");
+            // The retained authority still resolves the original file. Only the
+            // root's parent binding changed before the root mutation checkpoint.
+            fs::set_permissions(&root, fs::Permissions::from_mode(0o755)).expect("replacement mode");
+            let error = stage
+                .apply_owner_policy_mutations(&policy, &retained)
+                .expect_err("root mutation cannot proceed through a replaced binding");
+            assert_eq!(LocalFileErrorKind::ChangedDuringRead, error.cause().kind());
+            assert_eq!(
+                if with_file {
+                    LocalTreeAccessState::Mixed
+                } else {
+                    LocalTreeAccessState::Preserved
+                },
+                error.access_state()
+            );
+            assert_eq!(
+                0o755,
+                fs::metadata(&root)
+                    .expect("replacement root metadata")
+                    .permissions()
+                    .mode()
+                    & 0o777
+            );
+            let _recovery = stage.retain_in_place();
+        }
+    }
+
+    #[test]
+    fn test_final_verification_detects_added_removed_and_replaced_entries() {
+        for change in ["added", "removed", "replaced"] {
+            let (scratch, mut stage, policy) = fixture(true);
+            let native = scratch.path().join(stage.relative_name());
+            let (entries, traversal, maximum_entries, restricted) = stage
+                .collect_owner_policy_entries(&policy, &LocalListOptions::new())
+                .expect("collect identities");
+            let retained = stage
+                .open_and_pin_owner_policy_entries(&entries, LocalFileSyncRequirement::NotRequired)
+                .expect("pin handles");
+            let root = stage
+                .apply_owner_policy_mutations(&policy, &retained)
+                .expect("apply policy");
+            match change {
+                "added" => fs::write(native.join("unexpected"), b"added").expect("add entry"),
+                "removed" => fs::rename(native.join("payload"), scratch.path().join("original"))
+                    .expect("retain removed entry outside stage"),
+                "replaced" => {
+                    fs::rename(native.join("payload"), scratch.path().join("original")).expect("retain original");
+                    fs::write(native.join("payload"), b"replacement").expect("replace entry");
+                }
+                _ => unreachable!("fixed fixture cases"),
+            }
+            let error = stage
+                .verify_owner_policy_entries(
+                    &policy,
+                    &LocalListOptions::new(),
+                    &entries,
+                    &retained,
+                    &traversal,
+                    maximum_entries,
+                    restricted,
+                    &root,
+                )
+                .expect_err("final namespace must exactly match the collected identities");
+            assert_eq!(LocalFileErrorKind::ChangedDuringRead, error.cause().kind());
+            assert_eq!(LocalTreeAccessState::Indeterminate, error.access_state());
+            if change == "replaced" {
+                assert_eq!(
+                    b"replacement",
+                    fs::read(native.join("payload")).expect("replacement bytes").as_slice()
+                );
+            }
+            let _recovery = stage.retain_in_place();
+        }
+    }
+
+    #[test]
+    fn test_final_verification_rechecks_file_and_root_access_after_mutations() {
+        for change_root in [false, true] {
+            let (scratch, mut stage, policy) = fixture(true);
+            let native = scratch.path().join(stage.relative_name());
+            let (entries, traversal, maximum_entries, restricted) = stage
+                .collect_owner_policy_entries(&policy, &LocalListOptions::new())
+                .expect("collect identities");
+            let retained = stage
+                .open_and_pin_owner_policy_entries(&entries, LocalFileSyncRequirement::NotRequired)
+                .expect("pin handles");
+            let root = stage
+                .apply_owner_policy_mutations(&policy, &retained)
+                .expect("apply policy");
+            let changed = if change_root {
+                native.clone()
+            } else {
+                native.join("payload")
+            };
+            fs::set_permissions(
+                &changed,
+                fs::Permissions::from_mode(if change_root { 0o755 } else { 0o644 }),
+            )
+            .expect("change applied exact mode");
+            let error = stage
+                .verify_owner_policy_entries(
+                    &policy,
+                    &LocalListOptions::new(),
+                    &entries,
+                    &retained,
+                    &traversal,
+                    maximum_entries,
+                    restricted,
+                    &root,
+                )
+                .expect_err("matching names and identities do not prove final permissions");
+            assert_eq!(LocalFileErrorKind::PermissionDenied, error.cause().kind());
+            assert_eq!(LocalFileOperation::Metadata, error.cause().operation());
+            assert_eq!(LocalTreeAccessState::Indeterminate, error.access_state());
+            fs::set_permissions(
+                &changed,
+                fs::Permissions::from_mode(if change_root { 0o700 } else { 0o600 }),
+            )
+            .expect("restore fixture policy");
+            stage.cleanup().expect("cleanup unchanged identities");
+        }
+    }
+
+    #[test]
+    fn test_owner_policy_sync_failure_scheduler_reports_final_applied_access() {
+        for requirement in [LocalFileSyncRequirement::Required, LocalFileSyncRequirement::Preferred] {
+            let (_scratch, mut stage, policy) = fixture(true);
+            let (entries, _, _, _) = stage
+                .collect_owner_policy_entries(&policy, &LocalListOptions::new())
+                .expect("collect identities");
+            let retained = stage
+                .open_and_pin_owner_policy_entries(&entries, requirement)
+                .expect("pin sync-capable handles");
+            stage
+                .apply_owner_policy_mutations(&policy, &retained)
+                .expect("apply owner access");
+            super::super::sync::fail_tree_sync_after(0);
+            let result = stage.sync_owner_policy_files(&retained, requirement, true);
+            if requirement == LocalFileSyncRequirement::Required {
+                let error = result.expect_err("required final sync fails");
+                assert_eq!(LocalFileErrorKind::Io, error.cause().kind());
+                assert_eq!(LocalFileOperation::Commit, error.cause().operation());
+                assert_eq!(LocalTreeAccessState::OwnerPolicyApplied, error.access_state());
+            } else {
+                assert!(!result.expect("preferred failure reports incomplete synchronization"));
+            }
+            assert!(
+                stage
+                    .sync_owner_policy_files(&retained, requirement, true)
+                    .expect("one-shot failure is consumed")
+            );
+            stage.cleanup().expect("cleanup after sync retry");
+        }
+    }
+
+    struct OwnerPolicyFdBudget {
+        original: libc::rlimit,
+        files: Vec<fs::File>,
+    }
+
+    impl OwnerPolicyFdBudget {
+        fn exhaust_with_slots(slots: usize) -> Self {
+            assert!(
+                std::env::var_os("QUBIT_OWNER_POLICY_FD_PHASE").is_some(),
+                "FD limits belong only to isolated children"
+            );
+            let mut original = libc::rlimit {
+                rlim_cur: 0,
+                rlim_max: 0,
+            };
+            // SAFETY: The pointer names a valid writable rlimit value.
+            assert_eq!(unsafe { libc::getrlimit(libc::RLIMIT_NOFILE, &mut original) }, 0);
+            let reduced = libc::rlimit {
+                rlim_cur: original.rlim_cur.min(128),
+                rlim_max: original.rlim_max,
+            };
+            // SAFETY: Only this isolated child's soft limit changes; the hard limit is
+            // preserved.
+            assert_eq!(unsafe { libc::setrlimit(libc::RLIMIT_NOFILE, &reduced) }, 0);
+            let mut budget = Self {
+                original,
+                files: Vec::new(),
+            };
+            loop {
+                match fs::File::open("/dev/null") {
+                    Ok(file) => budget.files.push(file),
+                    Err(error) => {
+                        assert_eq!(error.raw_os_error(), Some(libc::EMFILE));
+                        break;
+                    }
+                }
+            }
+            for _ in 0..slots {
+                drop(
+                    budget
+                        .files
+                        .pop()
+                        .expect("owned filler descriptor available to release"),
+                );
+            }
+            budget
+        }
+    }
+
+    impl Drop for OwnerPolicyFdBudget {
+        fn drop(&mut self) {
+            // SAFETY: Restore this child's original soft limit without changing its hard
+            // limit.
+            assert_eq!(unsafe { libc::setrlimit(libc::RLIMIT_NOFILE, &self.original) }, 0);
+        }
+    }
+
+    #[test]
+    fn test_owner_policy_fd_stage_failures_are_isolated_and_recoverable() {
+        let binary = std::env::current_exe().expect("current unit test executable");
+        let child = "directory::staged::access::owner_policy_checkpoint_tests::test_owner_policy_fd_stage_child";
+        for phase in ["collect", "pin", "mutate", "verify"] {
+            for slots in 0..=8 {
+                let output = std::process::Command::new(&binary)
+                    .args(["--exact", child, "--nocapture", "--test-threads=1"])
+                    .env("QUBIT_OWNER_POLICY_FD_PHASE", phase)
+                    .env("QUBIT_OWNER_POLICY_FD_SLOTS", slots.to_string())
+                    .output()
+                    .expect("run isolated FD-budget child");
+                assert!(
+                    output.status.success(),
+                    "phase={phase}, slots={slots}:\nstdout={}\nstderr={}",
+                    String::from_utf8_lossy(&output.stdout),
+                    String::from_utf8_lossy(&output.stderr)
+                );
+                assert!(
+                    String::from_utf8_lossy(&output.stdout).contains("1 passed"),
+                    "child test must actually run"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_owner_policy_fd_stage_child() {
+        let Ok(phase) = std::env::var("QUBIT_OWNER_POLICY_FD_PHASE") else {
+            return;
+        };
+        let slots: usize = std::env::var("QUBIT_OWNER_POLICY_FD_SLOTS")
+            .expect("child slot budget")
+            .parse()
+            .expect("numeric slot budget");
+        assert!(slots <= 8);
+        let (scratch, mut stage, policy) = fixture(true);
+        let native = scratch.path().join(stage.relative_name());
+        fs::create_dir(native.join("nested")).expect("nested fixture directory");
+        stage
+            .write_file_new(Path::new("nested/second"), &mut &b"second"[..], 6)
+            .expect("second tracked payload");
+        for relative in ["payload", "nested/second"] {
+            fs::set_permissions(native.join(relative), fs::Permissions::from_mode(0o644)).expect("initial file mode");
+        }
+        for path in [native.clone(), native.join("nested")] {
+            fs::set_permissions(path, fs::Permissions::from_mode(0o755)).expect("initial directory mode");
+        }
+        let limits = LocalListOptions::new();
+        let collected = if phase == "collect" {
+            None
+        } else {
+            Some(
+                stage
+                    .collect_owner_policy_entries(&policy, &limits)
+                    .expect("prepare collected identities"),
+            )
+        };
+        let pinned = if matches!(phase.as_str(), "mutate" | "verify") {
+            Some(
+                stage
+                    .open_and_pin_owner_policy_entries(
+                        &collected.as_ref().expect("collected phase").0,
+                        LocalFileSyncRequirement::NotRequired,
+                    )
+                    .expect("prepare pinned handles"),
+            )
+        } else {
+            None
+        };
+        let root = if phase == "verify" {
+            Some(
+                stage
+                    .apply_owner_policy_mutations(&policy, pinned.as_ref().expect("pinned phase"))
+                    .expect("prepare applied access"),
+            )
+        } else {
+            None
+        };
+        let budget = OwnerPolicyFdBudget::exhaust_with_slots(slots);
+        let result = match phase.as_str() {
+            "collect" => stage.collect_owner_policy_entries(&policy, &limits).map(|_| ()),
+            "pin" => stage
+                .open_and_pin_owner_policy_entries(
+                    &collected.as_ref().expect("collected phase").0,
+                    LocalFileSyncRequirement::NotRequired,
+                )
+                .map(|_| ()),
+            "mutate" => stage
+                .apply_owner_policy_mutations(&policy, pinned.as_ref().expect("pinned phase"))
+                .map(|_| ()),
+            "verify" => {
+                let (entries, traversal, maximum, restricted) = collected.as_ref().expect("collected phase");
+                stage.verify_owner_policy_entries(
+                    &policy,
+                    &limits,
+                    entries,
+                    pinned.as_ref().expect("pinned phase"),
+                    traversal,
+                    *maximum,
+                    *restricted,
+                    root.as_ref().expect("applied root"),
+                )
+            }
+            _ => unreachable!("fixed phase matrix"),
+        };
+        drop(budget);
+        if let Err(error) = result {
+            assert_eq!(
+                LocalFileErrorKind::Io,
+                error.cause().kind(),
+                "phase={phase}, slots={slots}: {error:?}"
+            );
+            let mut source: Option<&(dyn std::error::Error + 'static)> = Some(error.cause());
+            let mut native_emfile = false;
+            while let Some(current) = source {
+                if current
+                    .downcast_ref::<std::io::Error>()
+                    .is_some_and(|io| io.raw_os_error() == Some(libc::EMFILE))
+                {
+                    native_emfile = true;
+                    break;
+                }
+                source = current.source();
+            }
+            assert!(
+                native_emfile,
+                "phase={phase}, slots={slots} must preserve native EMFILE: {error:?}"
+            );
+            match phase.as_str() {
+                "collect" | "pin" => assert_eq!(LocalTreeAccessState::Preserved, error.access_state()),
+                "verify" => assert_eq!(LocalTreeAccessState::Indeterminate, error.access_state()),
+                "mutate" => assert!(
+                    matches!(
+                        error.access_state(),
+                        LocalTreeAccessState::Mixed | LocalTreeAccessState::Indeterminate
+                    ),
+                    "pinned child handles must apply access before the root FD checkpoint"
+                ),
+                _ => unreachable!("fixed phase matrix"),
+            }
+        } else if matches!(phase.as_str(), "mutate" | "verify") {
+            for path in [native.clone(), native.join("nested")] {
+                assert_eq!(
+                    0o700,
+                    fs::metadata(path)
+                        .expect("successful final directory mode")
+                        .permissions()
+                        .mode()
+                        & 0o777
+                );
+            }
+            for relative in ["payload", "nested/second"] {
+                assert_eq!(
+                    0o600,
+                    fs::metadata(native.join(relative))
+                        .expect("successful final file mode")
+                        .permissions()
+                        .mode()
+                        & 0o777
+                );
+            }
+        }
+        assert_eq!(
+            b"original",
+            fs::read(native.join("payload"))
+                .expect("original data preserved")
+                .as_slice()
+        );
+        assert_eq!(
+            b"second",
+            fs::read(native.join("nested/second"))
+                .expect("nested data preserved")
+                .as_slice()
+        );
+        for relative in ["payload", "nested/second"] {
+            let mode = fs::metadata(native.join(relative))
+                .expect("file metadata after recovery")
+                .permissions()
+                .mode()
+                & 0o777;
+            match phase.as_str() {
+                "collect" | "pin" => assert_eq!(0o644, mode, "non-mutating phase preserves file mode"),
+                "verify" => assert_eq!(0o600, mode, "verification preserves applied file mode"),
+                "mutate" => assert!(
+                    matches!(mode, 0o600 | 0o644),
+                    "partial mutation keeps a documented file mode: {mode:o}"
+                ),
+                _ => unreachable!("fixed phase matrix"),
+            }
+        }
+        stage
+            .apply_owner_access_policy_with_options(&policy, &limits)
+            .expect("complete retry after restoring descriptor capacity");
+        for relative in ["payload", "nested/second"] {
+            assert_eq!(
+                0o600,
+                fs::metadata(native.join(relative))
+                    .expect("retried file mode")
+                    .permissions()
+                    .mode()
+                    & 0o777
+            );
+        }
+        drop(root);
+        drop(pinned);
+        stage.cleanup().expect("cleanup after successful full-policy retry");
+        assert!(!native.exists());
+    }
+
+    #[test]
+    fn test_owner_policy_native_faults_at_prepared_stage_boundaries() {
+        use crate::tests::native_io_fault_tests::NativeIoFaultGuard;
+        use crate::tests::native_io_fault_tests::NativeIoPoint;
+
+        let mut reached = Vec::new();
+        for phase in ["collect", "pin", "mutate", "verify", "sync"] {
+            for point in [
+                NativeIoPoint::CloneAuthority,
+                NativeIoPoint::OpenCursor,
+                NativeIoPoint::CloneCursor,
+                NativeIoPoint::CursorMetadata,
+                NativeIoPoint::CursorDescend,
+                NativeIoPoint::Observation,
+                NativeIoPoint::RootMetadata,
+                NativeIoPoint::EntryMetadata,
+            ] {
+                for occurrence in 1..=64 {
+                    let (scratch, mut stage, policy) = fixture(true);
+                    let native = scratch.path().join(stage.relative_name());
+                    fs::set_permissions(&native, fs::Permissions::from_mode(0o755)).expect("initial root mode");
+                    fs::set_permissions(native.join("payload"), fs::Permissions::from_mode(0o644))
+                        .expect("initial file mode");
+                    let limits = LocalListOptions::new();
+                    let collected = if phase == "collect" || phase == "sync" {
+                        None
+                    } else {
+                        Some(
+                            stage
+                                .collect_owner_policy_entries(&policy, &limits)
+                                .expect("prepare collected identities"),
+                        )
+                    };
+                    let retained = if matches!(phase, "mutate" | "verify") {
+                        Some(
+                            stage
+                                .open_and_pin_owner_policy_entries(
+                                    &collected.as_ref().expect("collected phase").0,
+                                    LocalFileSyncRequirement::Required,
+                                )
+                                .expect("prepare pinned handles"),
+                        )
+                    } else {
+                        None
+                    };
+                    let root = if phase == "verify" {
+                        Some(
+                            stage
+                                .apply_owner_policy_mutations(&policy, retained.as_ref().expect("pinned phase"))
+                                .expect("prepare applied policy"),
+                        )
+                    } else {
+                        None
+                    };
+                    let guard = NativeIoFaultGuard::fail_on(point, occurrence);
+                    let result = match phase {
+                        "collect" => stage.collect_owner_policy_entries(&policy, &limits).map(|_| ()),
+                        "pin" => stage
+                            .open_and_pin_owner_policy_entries(
+                                &collected.as_ref().expect("collected phase").0,
+                                LocalFileSyncRequirement::Required,
+                            )
+                            .map(|_| ()),
+                        "mutate" => stage
+                            .apply_owner_policy_mutations(&policy, retained.as_ref().expect("pinned phase"))
+                            .map(|_| ()),
+                        "verify" => {
+                            let (entries, traversal, maximum, restricted) =
+                                collected.as_ref().expect("collected phase");
+                            stage.verify_owner_policy_entries(
+                                &policy,
+                                &limits,
+                                entries,
+                                retained.as_ref().expect("pinned phase"),
+                                traversal,
+                                *maximum,
+                                *restricted,
+                                root.as_ref().expect("applied root"),
+                            )
+                        }
+                        "sync" => stage
+                            .sync_tree_files(&limits, LocalFileSyncRequirement::Required)
+                            .map(|_| ())
+                            .map_err(|cause| {
+                                crate::directory::LocalTreeAccessError::new(cause, LocalTreeAccessState::Preserved)
+                            }),
+                        _ => unreachable!("fixed phase matrix"),
+                    };
+                    let fired = guard.fired();
+                    drop(guard);
+                    if fired {
+                        reached.push((phase, point, occurrence));
+                        let error =
+                            result.expect_err("native fault must prevent the selected stage from claiming success");
+                        assert_eq!(
+                            LocalFileErrorKind::Io,
+                            error.cause().kind(),
+                            "{phase}/{point:?}/{occurrence}: {error:?}"
+                        );
+                        let mut source: Option<&(dyn std::error::Error + 'static)> = Some(error.cause());
+                        let mut found_injected = false;
+                        while let Some(current) = source {
+                            if current.downcast_ref::<std::io::Error>().is_some_and(|io| {
+                                io.kind() == std::io::ErrorKind::Other
+                                    && io.to_string() == "injected native I/O contract failure"
+                            }) {
+                                found_injected = true;
+                                break;
+                            }
+                            source = current.source();
+                        }
+                        assert!(
+                            found_injected,
+                            "structured cause must preserve the injected native source: {error:?}"
+                        );
+                        match phase {
+                            "collect" | "pin" | "sync" => {
+                                assert_eq!(LocalTreeAccessState::Preserved, error.access_state())
+                            }
+                            "verify" => {
+                                assert_eq!(LocalTreeAccessState::Indeterminate, error.access_state())
+                            }
+                            "mutate" => {
+                                let expected_state = match (point, occurrence) {
+                                    (NativeIoPoint::Observation, 1) => LocalTreeAccessState::Preserved,
+                                    (NativeIoPoint::OpenCursor, 1 | 3) => LocalTreeAccessState::Indeterminate,
+                                    (NativeIoPoint::OpenCursor, 2)
+                                    | (NativeIoPoint::CloneAuthority, 1 | 2)
+                                    | (NativeIoPoint::Observation, 2) => LocalTreeAccessState::Mixed,
+                                    _ => panic!("unexpected mutation native checkpoint: {point:?}/{occurrence}"),
+                                };
+                                assert_eq!(expected_state, error.access_state(), "{point:?}/{occurrence}");
+                                assert_eq!(LocalFileOperation::Metadata, error.cause().operation());
+                            }
+                            _ => unreachable!("fixed phase matrix"),
+                        }
+                        let (operation, path) = match (phase, point, occurrence) {
+                            (_, NativeIoPoint::Observation, _) => (LocalFileOperation::Metadata, None),
+                            ("mutate", NativeIoPoint::CloneAuthority, 1)
+                            | ("mutate", NativeIoPoint::OpenCursor, 1)
+                            | ("collect" | "verify" | "sync", NativeIoPoint::OpenCursor, 2)
+                            | ("verify", NativeIoPoint::OpenCursor, 3) => {
+                                (LocalFileOperation::Metadata, Some(native.clone()))
+                            }
+                            ("mutate", NativeIoPoint::CloneAuthority, 2) => (LocalFileOperation::Metadata, None),
+                            ("mutate", NativeIoPoint::OpenCursor, 2 | 3) | ("pin", NativeIoPoint::OpenCursor, 1) => {
+                                (LocalFileOperation::Metadata, Some(scratch.path().to_path_buf()))
+                            }
+                            ("collect" | "verify" | "sync", NativeIoPoint::OpenCursor, 1) => {
+                                (LocalFileOperation::List, Some(std::path::PathBuf::from("/payload")))
+                            }
+                            ("collect" | "verify" | "sync", NativeIoPoint::RootMetadata, 1 | 2) => {
+                                (LocalFileOperation::List, Some(std::path::PathBuf::from("/")))
+                            }
+                            _ => panic!("unexpected native error context: {phase}/{point:?}/{occurrence}"),
+                        };
+                        assert_eq!(operation, error.cause().operation(), "{phase}/{point:?}/{occurrence}");
+                        assert_eq!(path.as_deref(), error.cause().path(), "{phase}/{point:?}/{occurrence}");
+                    } else {
+                        result.expect("a phase with no selected native occurrence must complete");
+                    }
+                    assert_eq!(
+                        b"original",
+                        fs::read(native.join("payload"))
+                            .expect("original data remains")
+                            .as_slice()
+                    );
+                    if matches!(phase, "collect" | "pin" | "sync") {
+                        assert_eq!(
+                            0o644,
+                            fs::metadata(native.join("payload"))
+                                .expect("preserved file mode")
+                                .permissions()
+                                .mode()
+                                & 0o777
+                        );
+                        assert_eq!(
+                            0o755,
+                            fs::metadata(&native).expect("preserved root mode").permissions().mode() & 0o777
+                        );
+                    }
+                    if phase == "verify" {
+                        assert_eq!(
+                            0o600,
+                            fs::metadata(native.join("payload"))
+                                .expect("applied file mode")
+                                .permissions()
+                                .mode()
+                                & 0o777
+                        );
+                        assert_eq!(
+                            0o700,
+                            fs::metadata(&native).expect("applied root mode").permissions().mode() & 0o777
+                        );
+                    }
+                    stage
+                        .apply_owner_access_policy_with_options(&policy, &limits)
+                        .expect("full policy retry after native fault guard is dropped");
+                    assert_eq!(
+                        0o600,
+                        fs::metadata(native.join("payload"))
+                            .expect("retried file mode")
+                            .permissions()
+                            .mode()
+                            & 0o777
+                    );
+                    assert_eq!(
+                        0o700,
+                        fs::metadata(&native).expect("retried root mode").permissions().mode() & 0o777
+                    );
+                    drop(root);
+                    drop(retained);
+                    stage.cleanup().expect("cleanup after recovered policy operation");
+                    assert!(!native.exists());
+                    if !fired {
+                        break;
+                    }
+                    assert!(occurrence < 64, "native occurrence sweep must reach the phase boundary");
+                }
+            }
+        }
+        // These occurrences reach the root observation, pre-root binding,
+        // root clone, post-root binding, final namespace and pinned-handle
+        // checkpoints that FD exhaustion can hide behind earlier peaks.
+        for checkpoint in [
+            ("collect", NativeIoPoint::RootMetadata, 1),
+            ("pin", NativeIoPoint::Observation, 1),
+            ("pin", NativeIoPoint::OpenCursor, 1),
+            ("mutate", NativeIoPoint::Observation, 1),
+            ("mutate", NativeIoPoint::Observation, 2),
+            ("mutate", NativeIoPoint::CloneAuthority, 2),
+            ("mutate", NativeIoPoint::OpenCursor, 2),
+            ("mutate", NativeIoPoint::OpenCursor, 3),
+            ("verify", NativeIoPoint::RootMetadata, 1),
+            ("verify", NativeIoPoint::OpenCursor, 3),
+            ("verify", NativeIoPoint::Observation, 1),
+            ("sync", NativeIoPoint::Observation, 1),
+        ] {
+            assert!(
+                reached.contains(&checkpoint),
+                "required prepared checkpoint was not reached: {checkpoint:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_remaining_owner_policy_validation_preserves_existing_state() {
+        let (scratch, mut stage, valid) = fixture(true);
+        let native = scratch.path().join(stage.relative_name());
+        stage
+            .apply_owner_access_policy_with_options(&valid, &LocalListOptions::new())
+            .expect("establish valid owner policy");
+        for invalid in [
+            LocalOwnerAccessPolicy::new(),
+            LocalOwnerAccessPolicy::new().with_windows_masks(0x001f_01ff, 0x001f_01ff),
+            LocalOwnerAccessPolicy::new().with_unix_modes(0o755, 0o600),
+            LocalOwnerAccessPolicy::new().with_unix_modes(0o700, 0o644),
+        ] {
+            let error = stage
+                .apply_owner_access_policy_with_options(&invalid, &LocalListOptions::new())
+                .expect_err("invalid platform owner policy must fail before touching stage state");
+            assert_eq!(LocalFileErrorKind::InvalidOptions, error.cause().kind());
+            assert_eq!(LocalFileOperation::ValidateName, error.cause().operation());
+            assert_eq!(LocalTreeAccessState::Preserved, error.access_state());
+            assert_eq!(Some(&valid), stage.owner_access_policy());
+            assert_eq!(
+                0o600,
+                fs::metadata(native.join("payload"))
+                    .expect("preserved file metadata")
+                    .permissions()
+                    .mode()
+                    & 0o777
+            );
+            assert_eq!(
+                0o700,
+                fs::metadata(&native)
+                    .expect("preserved root metadata")
+                    .permissions()
+                    .mode()
+                    & 0o777
+            );
+            assert_eq!(
+                b"original",
+                fs::read(native.join("payload")).expect("preserved data").as_slice()
+            );
+        }
+        stage
+            .apply_owner_access_policy_with_options(&valid, &LocalListOptions::new())
+            .expect("valid policy still succeeds");
+        stage.cleanup().expect("cleanup valid retained state");
+        assert!(!native.exists());
+    }
+
+    #[test]
+    fn test_remaining_access_name_byte_budget_exact_boundary_and_retry() {
+        use crate::policy::LocalTreeFinalAccess;
+        for owner in [false, true] {
+            let (scratch, mut stage, policy) = fixture(true);
+            let native = scratch.path().join(stage.relative_name());
+            fs::set_permissions(native.join("payload"), fs::Permissions::from_mode(0o644)).expect("initial file mode");
+            fs::set_permissions(&native, fs::Permissions::from_mode(0o755)).expect("initial root mode");
+            let limits = LocalListOptions::new().with_max_seen_name_bytes(6);
+            let result = if owner {
+                stage.apply_owner_access_policy_with_options(&policy, &limits)
+            } else {
+                stage.apply_access_policy_with_options(LocalTreeFinalAccess::CurrentUserOnly, &limits)
+            };
+            let error = result.expect_err("seven-byte payload name exceeds six-byte budget");
+            assert_eq!(LocalFileErrorKind::ResourceLimit, error.cause().kind());
+            assert_eq!(
+                if owner {
+                    LocalTreeAccessState::Preserved
+                } else {
+                    LocalTreeAccessState::Indeterminate
+                },
+                error.access_state()
+            );
+            assert_eq!(
+                0o644,
+                fs::metadata(native.join("payload"))
+                    .expect("pre-mutation file mode")
+                    .permissions()
+                    .mode()
+                    & 0o777
+            );
+            assert_eq!(
+                0o755,
+                fs::metadata(&native)
+                    .expect("pre-mutation root mode")
+                    .permissions()
+                    .mode()
+                    & 0o777
+            );
+            for budget in [7, 8] {
+                let limits = LocalListOptions::new().with_max_seen_name_bytes(budget);
+                let result = if owner {
+                    stage.apply_owner_access_policy_with_options(&policy, &limits)
+                } else {
+                    stage.apply_access_policy_with_options(LocalTreeFinalAccess::CurrentUserOnly, &limits)
+                }
+                .expect("inclusive budget permits full collection and final verification");
+                assert_eq!(
+                    if owner {
+                        LocalTreeAccessState::OwnerPolicyApplied
+                    } else {
+                        LocalTreeAccessState::CurrentUserOnly
+                    },
+                    result.access_state()
+                );
+                assert_eq!(
+                    b"original",
+                    fs::read(native.join("payload")).expect("data preserved").as_slice()
+                );
+                assert_eq!(
+                    0o600,
+                    fs::metadata(native.join("payload"))
+                        .expect("final file mode")
+                        .permissions()
+                        .mode()
+                        & 0o777
+                );
+                assert_eq!(
+                    0o700,
+                    fs::metadata(&native).expect("final root mode").permissions().mode() & 0o777
+                );
+            }
+            stage.cleanup().expect("cleanup after budget retry");
+            assert!(!native.exists());
+        }
+    }
+
+    #[test]
+    fn test_remaining_ordinary_access_root_clone_and_final_observation_failures() {
+        use crate::policy::LocalTreeFinalAccess;
+        use crate::tests::native_io_fault_tests::NativeIoFaultGuard;
+        use crate::tests::native_io_fault_tests::NativeIoPoint;
+
+        for policy in [
+            LocalTreeFinalAccess::CurrentUserOnly,
+            LocalTreeFinalAccess::ReadOnlyCurrentUser,
+        ] {
+            for (point, nth) in [(NativeIoPoint::CloneAuthority, 2), (NativeIoPoint::Observation, 3)] {
+                let (scratch, mut stage, _) = fixture(true);
+                let native = scratch.path().join(stage.relative_name());
+                fs::set_permissions(native.join("payload"), fs::Permissions::from_mode(0o644))
+                    .expect("initial file mode");
+                fs::set_permissions(&native, fs::Permissions::from_mode(0o755)).expect("initial root mode");
+                let fault = NativeIoFaultGuard::fail_on(point, nth);
+                let error = stage
+                    .apply_access_policy(policy)
+                    .expect_err("late native fault must prevent a confirmed access outcome");
+                assert!(fault.fired(), "selected root checkpoint must execute");
+                drop(fault);
+                assert_eq!(LocalFileErrorKind::Io, error.cause().kind());
+                assert_eq!(LocalFileOperation::Metadata, error.cause().operation());
+                assert_eq!(
+                    "injected native I/O contract failure",
+                    error.cause().io_error().expect("native source retained").to_string()
+                );
+                let read_only = policy == LocalTreeFinalAccess::ReadOnlyCurrentUser;
+                let expected_file_mode = if read_only { 0o400 } else { 0o600 };
+                let expected_root_mode = if read_only { 0o500 } else { 0o700 };
+                if point == NativeIoPoint::CloneAuthority {
+                    assert_eq!(LocalTreeAccessState::Mixed, error.access_state());
+                    assert_eq!(Some(native.as_path()), error.cause().path());
+                    assert_eq!(
+                        0o755,
+                        fs::metadata(&native)
+                            .expect("root not yet mutated")
+                            .permissions()
+                            .mode()
+                            & 0o777
+                    );
+                } else {
+                    assert_eq!(LocalTreeAccessState::Indeterminate, error.access_state());
+                    assert!(
+                        error.cause().path().is_none(),
+                        "same-handle observation carries no namespace path"
+                    );
+                    assert_eq!(
+                        expected_root_mode,
+                        fs::metadata(&native)
+                            .expect("root already mutated")
+                            .permissions()
+                            .mode()
+                            & 0o777
+                    );
+                }
+                assert_eq!(
+                    expected_file_mode,
+                    fs::metadata(native.join("payload"))
+                        .expect("child already mutated")
+                        .permissions()
+                        .mode()
+                        & 0o777
+                );
+                assert_eq!(
+                    b"original",
+                    fs::read(native.join("payload")).expect("original contents").as_slice()
+                );
+                let outcome = stage
+                    .apply_access_policy(policy)
+                    .expect("retry confirms requested access once native fault is dropped");
+                assert_eq!(
+                    if read_only {
+                        LocalTreeAccessState::ReadOnlyCurrentUser
+                    } else {
+                        LocalTreeAccessState::CurrentUserOnly
+                    },
+                    outcome.access_state()
+                );
+                assert_eq!(
+                    expected_root_mode,
+                    fs::metadata(&native)
+                        .expect("retried root metadata")
+                        .permissions()
+                        .mode()
+                        & 0o777
+                );
+                stage
+                    .apply_access_policy(LocalTreeFinalAccess::CurrentUserOnly)
+                    .expect("restore writable fixture before cleanup");
+                stage.cleanup().expect("cleanup retry owns original identity");
+                assert!(!native.exists());
+            }
+        }
+    }
+}

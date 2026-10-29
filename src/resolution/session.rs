@@ -227,3 +227,64 @@ mod tests {
         assert_eq!(facts.observed(), Some(3));
     }
 }
+
+#[cfg(test)]
+mod overflow_contract_tests {
+    use super::ResolutionSession;
+    use crate::directory::LocalResolutionScope;
+    use crate::error::LocalFileOperation;
+    use crate::error::LocalResourceKind;
+    use crate::resolution::ResolutionContract;
+
+    #[test]
+    fn test_hop_overflow_retains_counter_and_reports_unrepresentable_observation() {
+        let mut session = ResolutionSession::new(&ResolutionContract::unrestricted(), LocalResolutionScope::Descendant);
+        session.hops = usize::MAX;
+
+        let error = session
+            .before_follow_link()
+            .expect_err("overflow must reject another symlink hop");
+
+        assert_eq!(session.hops, usize::MAX);
+        assert_eq!(error.operation(), LocalFileOperation::Metadata);
+        let facts = error
+            .resource_limit_error()
+            .expect("hop overflow must retain budget facts");
+        assert_eq!(facts.resource(), LocalResourceKind::SymlinkHops);
+        assert_eq!(facts.limit(), usize::MAX);
+        assert_eq!(facts.remaining(), 0);
+        assert_eq!(facts.requested(), 1);
+        assert_eq!(facts.observed(), None);
+        assert!(facts.overflowed());
+    }
+}
+
+#[cfg(test)]
+mod overflow_error_contract_tests {
+    use std::path::Path;
+
+    use crate::LocalFileErrorKind;
+    use crate::LocalFileOperation;
+    use crate::LocalResourceKind;
+
+    #[test]
+    fn test_unrepresentable_resolution_snapshot_retains_facts_when_contextualized() {
+        let path = Path::new("requested/link");
+        let error = super::overflow_error(LocalResourceKind::PendingResolutionBytes)
+            .with_operation(LocalFileOperation::List)
+            .with_path(path.to_path_buf());
+
+        assert_eq!(error.kind(), LocalFileErrorKind::ResourceLimit);
+        assert_eq!(error.operation(), LocalFileOperation::List);
+        assert_eq!(error.path(), Some(path));
+        let facts = error
+            .resource_limit_error()
+            .expect("context must preserve overflow facts");
+        assert_eq!(facts.resource(), LocalResourceKind::PendingResolutionBytes);
+        assert_eq!(facts.limit(), usize::MAX);
+        assert_eq!(facts.remaining(), 0);
+        assert_eq!(facts.requested(), 1);
+        assert_eq!(facts.observed(), None);
+        assert!(facts.overflowed());
+    }
+}

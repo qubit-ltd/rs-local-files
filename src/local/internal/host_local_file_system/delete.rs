@@ -176,6 +176,8 @@ impl DeleteBackend for HostLocalFileSystem {
     /// Returns native inspection errors, including disappearance during
     /// traversal.
     fn metadata(&self, path: &Self::Path) -> io::Result<Self::Metadata> {
+        #[cfg(test)]
+        crate::tests::native_io_fault_tests::check(crate::tests::native_io_fault_tests::NativeIoPoint::DeleteMetadata)?;
         #[cfg(feature = "test-support")]
         if crate::local::take_test_support_on_nth("host-delete-directory-root-not-found", 1) {
             return Err(io::Error::from(io::ErrorKind::NotFound));
@@ -201,6 +203,10 @@ impl DeleteBackend for HostLocalFileSystem {
     /// Returns native directory-open errors without removing any entries.
     #[inline]
     fn open_directory(&self, path: &Self::Path) -> io::Result<Self::Reader> {
+        #[cfg(test)]
+        crate::tests::native_io_fault_tests::check(
+            crate::tests::native_io_fault_tests::NativeIoPoint::DeleteReadDirectory,
+        )?;
         fs::read_dir(path)
     }
 
@@ -210,6 +216,10 @@ impl DeleteBackend for HostLocalFileSystem {
     ///
     /// Returns enumeration failures.
     fn next_child(&self, _parent: &Self::Path, reader: &mut Self::Reader) -> io::Result<Option<Self::Path>> {
+        #[cfg(test)]
+        crate::tests::native_io_fault_tests::check(
+            crate::tests::native_io_fault_tests::NativeIoPoint::DeleteReadDirectory,
+        )?;
         reader.next().transpose().map(|entry| entry.map(|entry| entry.path()))
     }
 
@@ -220,6 +230,10 @@ impl DeleteBackend for HostLocalFileSystem {
     /// Returns native unlink errors; symbolic-link targets remain untouched.
     #[inline]
     fn remove_non_directory(&self, path: &Self::Path, metadata: &Self::Metadata) -> io::Result<()> {
+        #[cfg(test)]
+        crate::tests::native_io_fault_tests::check(
+            crate::tests::native_io_fault_tests::NativeIoPoint::DeleteRemoveFile,
+        )?;
         remove_host_non_directory(path, metadata)
     }
 
@@ -230,6 +244,10 @@ impl DeleteBackend for HostLocalFileSystem {
     /// Returns native removal errors, including concurrent child creation.
     #[inline]
     fn remove_empty_directory(&self, path: &Self::Path) -> io::Result<()> {
+        #[cfg(test)]
+        crate::tests::native_io_fault_tests::check(
+            crate::tests::native_io_fault_tests::NativeIoPoint::DeleteRemoveDirectory,
+        )?;
         fs::remove_dir(path)
     }
 

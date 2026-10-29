@@ -87,6 +87,7 @@ mod tests {
             Ok(())
         }
         fn validate_symlink_target(&self, _: &Path, _: LocalResolutionScope) -> LocalResult<()> {
+            self.1.lock().unwrap().push(self.0);
             Ok(())
         }
     }
@@ -104,6 +105,22 @@ mod tests {
             )
             .unwrap();
         assert_eq!(*calls.lock().unwrap(), ["parent", "child"]);
+    }
+
+    #[test]
+    fn test_symlink_target_policy_chain_retains_parent_before_child() {
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        let parent = ResolutionContract::unrestricted().with_policy(Arc::new(Recorder("parent", calls.clone())));
+        let child = parent.with_policy(Arc::new(Recorder("child", calls.clone())));
+
+        child
+            .validate_target(Path::new("../target"), LocalResolutionScope::Descendant)
+            .expect("both inherited and child target policies should accept the target");
+
+        assert_eq!(
+            *calls.lock().expect("policy calls should be readable"),
+            ["parent", "child"]
+        );
     }
 
     fn values(limits: LocalResolutionLimits) -> [Option<usize>; 4] {

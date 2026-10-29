@@ -20,3 +20,4 @@ mod copy_failure_state_tests;
 mod copy_tree_tests;
 mod host_directory_tests;
 mod local_persist_error_tests;
+mod temp_creation_tests;

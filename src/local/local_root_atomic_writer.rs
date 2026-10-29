@@ -1118,6 +1118,8 @@ impl LocalRootAtomicWriter {
     /// Writes bytes into the private rooted staging file.
     #[inline]
     fn write_once(&mut self, buffer: &[u8]) -> io::Result<usize> {
+        #[cfg(test)]
+        crate::tests::native_io_fault_tests::check(crate::tests::native_io_fault_tests::NativeIoPoint::FileWrite)?;
         #[cfg(unix)]
         {
             qubit_io::Output::write(self.staged_file.file_mut(), buffer)

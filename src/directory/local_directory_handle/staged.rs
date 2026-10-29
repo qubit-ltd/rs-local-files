@@ -94,7 +94,11 @@ impl LocalDirectoryHandle {
             #[cfg(unix)]
             {
                 use std::os::unix::fs::MetadataExt;
-                let metadata = file.metadata().map_err(|source| {
+                #[cfg(test)]
+                let metadata_result = crate::tests::native_io_fault_tests::metadata(&file);
+                #[cfg(not(test))]
+                let metadata_result = file.metadata();
+                let metadata = metadata_result.map_err(|source| {
                     LocalFileError::from_io(
                         LocalFileOperation::Metadata,
                         Some(directory.diagnostic_path().to_path_buf()),

@@ -1074,3 +1074,175 @@ fn lf3_temp_windows_partial_acl_failure_retains_cleanup_owner() {
     recovery.cleanup().expect("cleanup ACL partial");
     assert!(!path.exists());
 }
+
+#[test]
+fn lf3_temp_sealed_observation_after_cleanup_reports_closed_handle() {
+    let fixture = tempfile::tempdir().expect("fixture");
+    let filesystem = LocalFileSystem::host().expect("host filesystem");
+    let temporary = filesystem
+        .create_temp_file_with_options(&LocalTempFileOptions::new().with_parent(fixture.path()))
+        .expect("temporary file");
+    let mut sealed = temporary.seal_with_options(&LocalSealOptions::new()).expect("seal");
+    let path = sealed.path().to_path_buf();
+    sealed.cleanup().expect("cleanup sealed file");
+    let error = sealed
+        .observation()
+        .expect_err("cleanup closes the retained observation handle");
+    assert_eq!(error.operation(), crate::LocalFileOperation::Metadata);
+    assert_eq!(error.path(), Some(path.as_path()));
+    assert_eq!(error.io_error_kind(), std::io::ErrorKind::BrokenPipe);
+    assert_eq!(
+        error.io_error().expect("native closed-handle cause").to_string(),
+        "temporary file handle is closed"
+    );
+    assert!(!path.exists());
+    sealed.cleanup().expect("repeated cleanup is idempotent");
+}
+
+#[cfg(unix)]
+#[test]
+fn lf3_temp_host_directory_persist_reports_real_residual_sandbox() {
+    let fixture = tempfile::tempdir().expect("fixture");
+    let filesystem = LocalFileSystem::host().expect("host filesystem");
+    let temporary = filesystem
+        .create_temp_directory_with_options(&LocalTempDirectoryOptions::new().with_parent(fixture.path()))
+        .expect("temporary directory");
+    let source = temporary.path().to_path_buf();
+    fs::write(source.join("payload"), b"published payload").expect("write source content");
+    let sandbox = source.parent().expect("private sandbox").to_path_buf();
+    let residual = sandbox.join("unexpected-sibling");
+    fs::write(&residual, b"preserve sibling").expect("make sandbox nonempty after publication");
+    let target = fixture.path().join("published");
+
+    let outcome = temporary
+        .persist(&target)
+        .expect("publication survives sandbox cleanup failure");
+    assert_eq!(outcome.path(), target);
+    assert!(outcome.atomic());
+    assert!(!outcome.durable());
+    assert_eq!(
+        outcome.cleanup_state(),
+        crate::LocalPersistCleanupState::ResidualSandbox
+    );
+    let error = outcome.cleanup_error().expect("native cleanup failure retained");
+    assert_eq!(error.operation(), crate::LocalFileOperation::Cleanup);
+    assert_eq!(error.path(), Some(sandbox.as_path()));
+    assert_eq!(
+        error
+            .io_error()
+            .expect("native nonempty-directory error")
+            .raw_os_error(),
+        Some(libc::ENOTEMPTY)
+    );
+    assert_eq!(
+        fs::read(target.join("payload")).expect("read published payload"),
+        b"published payload"
+    );
+    assert_eq!(
+        fs::read(&residual).expect("unrelated sandbox entry survives"),
+        b"preserve sibling"
+    );
+    assert!(!source.exists());
+}
+
+#[cfg(feature = "test-support")]
+#[test]
+fn lf3_temp_default_seal_sync_policy_controls_native_sync_and_failure_diagnostics() {
+    use crate::policy::LocalFileSyncRequirement;
+
+    assert_eq!(
+        LocalSealOptions::default().file_sync(),
+        LocalFileSyncRequirement::Required
+    );
+    for requirement in [
+        LocalFileSyncRequirement::Required,
+        LocalFileSyncRequirement::NotRequired,
+    ] {
+        let fixture = tempfile::tempdir().expect("fixture");
+        let temporary = LocalFileSystem::host()
+            .expect("host")
+            .create_temp_file_with_options(&LocalTempFileOptions::new().with_parent(fixture.path()))
+            .expect("temporary file");
+        let path = temporary.path().to_path_buf();
+        let fault = crate::local::install_test_fault("temp-seal-file-sync-before").expect("sync fault");
+        let options = LocalSealOptions::default().with_file_sync(requirement);
+        let result = temporary.seal_with_options(&options);
+        if requirement == LocalFileSyncRequirement::Required {
+            let error = result.expect_err("default required synchronization propagates a native sync failure");
+            assert_eq!(error.access_state(), LocalTempAccessState::Writable);
+            assert_eq!(error.cause().operation(), crate::LocalFileOperation::Commit);
+            assert_eq!(error.cause().path(), Some(path.as_path()));
+            assert_eq!(
+                error.to_string(),
+                format!("temporary file sealing failed: {}", error.cause())
+            );
+            assert!(
+                error.to_string().contains(
+                    &error
+                        .cause()
+                        .io_error()
+                        .expect("native synchronization failure")
+                        .to_string()
+                )
+            );
+            let mut resource = error.into_resource();
+            drop(fault);
+            resource.cleanup().expect("cleanup retained failed seal owner");
+        } else {
+            let mut sealed = result.expect("not-required synchronization bypasses native sync failure");
+            assert!(
+                sealed
+                    .observation()
+                    .expect("sealed native observation")
+                    .identity()
+                    .is_some()
+            );
+            drop(fault);
+            sealed.cleanup().expect("cleanup sealed owner");
+        }
+        assert!(!path.exists());
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn lf3_temp_tree_publish_durability_options_control_namespace_sync_outcome() {
+    use std::ffi::OsStr;
+    use std::path::Path;
+
+    use crate::LocalDurabilityRequirement;
+    use crate::options::LocalDirectoryOpenOptions;
+    use crate::options::LocalTreePublishOptions;
+
+    for requirement in [
+        LocalDurabilityRequirement::NotRequired,
+        LocalDurabilityRequirement::Required,
+    ] {
+        let fixture = tempfile::tempdir().expect("fixture");
+        let parent = LocalFileSystem::host()
+            .expect("host")
+            .open_directory_with_options(fixture.path(), &LocalDirectoryOpenOptions::new())
+            .expect("parent");
+        let mut stage = parent
+            .create_staged_directory(&LocalTempDirectoryOptions::new())
+            .expect("stage");
+        stage
+            .write_file_new(Path::new("payload"), &mut &b"durable payload"[..], 32)
+            .expect("staged payload");
+        let source = fixture.path().join(stage.relative_name());
+        let outcome = stage
+            .publish_new(
+                &parent,
+                OsStr::new("published"),
+                &LocalTreePublishOptions::default().with_durability(requirement),
+            )
+            .expect("publish with selected namespace synchronization policy");
+        assert_eq!(outcome.publication(), crate::outcome::LocalTreePublication::Published);
+        assert_eq!(outcome.durable(), requirement == LocalDurabilityRequirement::Required);
+        assert!(!source.exists());
+        assert_eq!(
+            fs::read(fixture.path().join("published/payload")).expect("published contents"),
+            b"durable payload"
+        );
+    }
+}

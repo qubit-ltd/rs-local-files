@@ -811,3 +811,189 @@ mod pending_measure_tests {
         assert_eq!(None, checked_native_units(usize::MAX, 2));
     }
 }
+
+#[cfg(all(test, unix))]
+mod expanded_prefix_budget_tests {
+    use std::fs;
+    use std::os::unix::fs::symlink;
+    use std::path::Path;
+
+    use crate::LocalFileErrorKind;
+    use crate::LocalFileOperation;
+    use crate::LocalResourceKind;
+    use crate::LocalSymlinkPolicy;
+    use crate::options::LocalResolutionLimits;
+    use crate::resolution::ResolutionContract;
+    use crate::rooted::Root;
+
+    #[test]
+    fn test_symlink_expansion_accounts_for_retained_resolved_prefix() {
+        let fixture = tempfile::tempdir().expect("root fixture should exist");
+        fs::create_dir_all(fixture.path().join("a/b")).expect("target prefix should exist");
+        fs::write(fixture.path().join("a/b/ccc"), b"payload").expect("target file should exist");
+        symlink("b/ccc", fixture.path().join("a/l")).expect("relative link should exist");
+        let unrestricted = Root::open(fixture.path()).expect("root authority should open");
+        // Each input and target fits separately, but the retained `a` makes resolution
+        // exceed either limit.
+        let cases = [
+            (
+                LocalResolutionLimits::new().with_max_actual_components(2),
+                LocalResourceKind::ResolvedComponents,
+                2,
+                3,
+            ),
+            (
+                LocalResolutionLimits::new().with_max_resolved_path_bytes(7),
+                LocalResourceKind::ResolvedPathBytes,
+                7,
+                8,
+            ),
+        ];
+        for (limits, resource, limit, observed) in cases {
+            let root = Root::from_directory_authority_with_contract(
+                unrestricted.try_clone_authority().expect("authority should clone"),
+                unrestricted.path().to_path_buf(),
+                ResolutionContract::unrestricted().tightened(limits),
+            );
+            let path = Path::new("a/l");
+            let error = super::resolve_rooted_path(
+                &root,
+                path,
+                LocalSymlinkPolicy::FollowWithinScope,
+                true,
+                LocalFileOperation::List,
+            )
+            .expect_err("retained prefix and expanded target must share the resolved budget");
+            assert_eq!(error.kind(), LocalFileErrorKind::ResourceLimit);
+            assert_eq!(error.operation(), LocalFileOperation::List);
+            assert_eq!(error.path(), Some(path));
+            let facts = error
+                .resource_limit_error()
+                .expect("resolution failure must preserve budget facts");
+            assert_eq!(facts.resource(), resource);
+            assert_eq!(facts.limit(), limit);
+            assert_eq!(facts.remaining(), 0);
+            assert_eq!(facts.requested(), 1);
+            assert_eq!(facts.observed(), Some(observed));
+            assert!(!facts.overflowed());
+        }
+    }
+}
+
+#[cfg(test)]
+mod native_resolution_failure_tests {
+    use std::fs;
+    use std::path::Path;
+
+    use crate::LocalFileOperation;
+    use crate::LocalSymlinkPolicy;
+    use crate::directory::LocalResolutionScope;
+    use crate::resolution::ResolutionContract;
+    use crate::resolution::session::ResolutionSession;
+    use crate::rooted::Root;
+    use crate::tests::native_io_fault_tests::NativeIoFaultGuard;
+    use crate::tests::native_io_fault_tests::NativeIoPoint;
+
+    #[test]
+    fn test_fast_resolution_native_failures_retain_original_operation_and_path() {
+        let fixture = tempfile::tempdir().expect("root fixture should exist");
+        fs::create_dir(fixture.path().join("a")).expect("directory should exist");
+        fs::write(fixture.path().join("a/file"), b"payload").expect("file should exist");
+        let root = Root::open(fixture.path()).expect("root authority should open");
+        let path = crate::local::LocalRelativePath::new(Path::new("a/file")).expect("input should be relative");
+        let original = Path::new("original/request");
+        let session = ResolutionSession::new(&ResolutionContract::unrestricted(), LocalResolutionScope::Descendant);
+        for point in [
+            NativeIoPoint::OpenCursor,
+            NativeIoPoint::CursorMetadata,
+            NativeIoPoint::CursorDescend,
+        ] {
+            let guard = NativeIoFaultGuard::fail_on(point, 1);
+            let error = super::try_resolve_without_symlinks(
+                &root,
+                &path,
+                true,
+                None,
+                original,
+                LocalFileOperation::List,
+                &session,
+            )
+            .expect_err("native cursor failure must stop resolution");
+            assert!(guard.fired(), "the selected native boundary must be reached");
+            assert_eq!(error.operation(), LocalFileOperation::List);
+            assert_eq!(error.path(), Some(original));
+            assert_eq!(error.io_error_kind(), std::io::ErrorKind::Other);
+            assert_eq!(
+                error
+                    .io_error()
+                    .expect("native failure must remain available")
+                    .to_string(),
+                "injected native I/O contract failure"
+            );
+        }
+    }
+
+    #[test]
+    fn test_fallback_resolution_native_failures_keep_context_across_parent_upwalk() {
+        let fixture = tempfile::tempdir().expect("root fixture should exist");
+        fs::create_dir_all(fixture.path().join("a/b")).expect("directories should exist");
+        fs::write(fixture.path().join("a/file"), b"payload").expect("file should exist");
+        let root = Root::open(fixture.path()).expect("root authority should open");
+        let original = Path::new("requested/link");
+        let cases = [
+            (NativeIoPoint::OpenCursor, 1),
+            (NativeIoPoint::CursorMetadata, 1),
+            (NativeIoPoint::CursorDescend, 1),
+            (NativeIoPoint::OpenCursor, 2),
+            (NativeIoPoint::CursorMetadata, 3),
+            (NativeIoPoint::CursorDescend, 3),
+        ];
+        for (point, occurrence) in cases {
+            let guard = NativeIoFaultGuard::fail_on(point, occurrence);
+            let session = ResolutionSession::new(&ResolutionContract::unrestricted(), LocalResolutionScope::Descendant);
+            let error = super::resolve_rooted_symlinks(
+                &root,
+                Path::new("a/b/../file"),
+                LocalSymlinkPolicy::FollowWithinScope,
+                true,
+                LocalFileOperation::List,
+                original,
+                None,
+                LocalResolutionScope::Descendant,
+                None,
+                None,
+                session,
+            )
+            .expect_err("native failure must stop fallback before further traversal");
+            assert!(
+                guard.fired(),
+                "selected native boundary {point:?}/{occurrence} must be reached"
+            );
+            assert_eq!(error.operation(), LocalFileOperation::List);
+            assert_eq!(error.path(), Some(original));
+            assert_eq!(error.io_error_kind(), std::io::ErrorKind::Other);
+            assert_eq!(
+                error
+                    .io_error()
+                    .expect("native failure must remain available")
+                    .to_string(),
+                "injected native I/O contract failure"
+            );
+        }
+    }
+
+    #[test]
+    fn test_root_listing_start_native_metadata_failures_retain_input_context() {
+        let fixture = tempfile::tempdir().expect("root fixture should exist");
+        let root = Root::open(fixture.path()).expect("root authority should open");
+        for path in [Path::new(""), Path::new(".")] {
+            let guard = NativeIoFaultGuard::fail_on(NativeIoPoint::RootMetadata, 1);
+            let error = super::validate_rooted_list_start(&root, path, LocalSymlinkPolicy::FollowWithinScope, None)
+                .expect_err("root metadata failure must stop listing startup");
+            assert!(guard.fired());
+            assert_eq!(error.operation(), LocalFileOperation::List);
+            assert_eq!(error.path(), Some(Path::new("")));
+            assert_eq!(error.io_error_kind(), std::io::ErrorKind::Other);
+        }
+    }
+}

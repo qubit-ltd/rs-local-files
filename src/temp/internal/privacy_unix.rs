@@ -309,7 +309,11 @@ where
     }
     // SAFETY: openat returned a fresh descriptor owned by this function.
     let file = unsafe { File::from_raw_fd(descriptor) };
-    let metadata = match file.metadata() {
+    #[cfg(test)]
+    let metadata_result = crate::tests::native_io_fault_tests::metadata(&file);
+    #[cfg(not(test))]
+    let metadata_result = file.metadata();
+    let metadata = match metadata_result {
         Ok(metadata) => metadata,
         Err(source) => {
             let identity = identity_for_file(&file).ok();
@@ -446,7 +450,11 @@ where
     // SAFETY: openat returned a fresh descriptor owned by this function.
     let directory = unsafe { File::from_raw_fd(descriptor) };
     after_open();
-    let metadata = match directory.metadata() {
+    #[cfg(test)]
+    let metadata_result = crate::tests::native_io_fault_tests::metadata(&directory);
+    #[cfg(not(test))]
+    let metadata_result = directory.metadata();
+    let metadata = match metadata_result {
         Ok(metadata) => metadata,
         Err(source) => {
             let identity = identity_for_file(&directory).ok();

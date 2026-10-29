@@ -75,3 +75,45 @@ impl LocalWindowsAceObservation {
         self.is_decoded
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::LocalWindowsAceObservation;
+
+    #[test]
+    fn test_windows_ace_facts_are_readable_on_every_platform() {
+        let decoded = LocalWindowsAceObservation {
+            ace_type: 0,
+            flags: 0x12,
+            native_size: 24,
+            access_mask: Some(0x001f_01ff),
+            trustee_sid: Some("S-1-5-21-1000".to_owned()),
+            trustee_is_current_user: Some(false),
+            is_decoded: true,
+        };
+        assert_eq!(decoded.ace_type(), 0);
+        assert_eq!(decoded.flags(), 0x12);
+        assert_eq!(decoded.native_size(), 24);
+        assert_eq!(decoded.access_mask(), Some(0x001f_01ff));
+        assert_eq!(decoded.trustee_sid(), Some("S-1-5-21-1000"));
+        assert_eq!(decoded.trustee_is_current_user(), Some(false));
+        assert!(decoded.is_decoded());
+
+        let undecoded = LocalWindowsAceObservation {
+            ace_type: 0x7f,
+            flags: 0x80,
+            native_size: 4,
+            access_mask: None,
+            trustee_sid: None,
+            trustee_is_current_user: None,
+            is_decoded: false,
+        };
+        assert_eq!(undecoded.ace_type(), 0x7f);
+        assert_eq!(undecoded.flags(), 0x80);
+        assert_eq!(undecoded.native_size(), 4);
+        assert_eq!(undecoded.access_mask(), None);
+        assert_eq!(undecoded.trustee_sid(), None);
+        assert_eq!(undecoded.trustee_is_current_user(), None);
+        assert!(!undecoded.is_decoded());
+    }
+}

@@ -52,15 +52,14 @@ fn failed_reopen_preserves_tree(rooted: bool, options: LocalTreeValidationOption
         .expect("payload");
     let name = stage.relative_name().to_os_string();
     let native = native_stage(&scratch, &name);
-    let identity = if mismatched_identity {
+    let (identity, _identity_guard) = if mismatched_identity {
         let other = parent
             .create_staged_directory(&LocalTempDirectoryOptions::new())
             .expect("other stage");
         let result = other.identity().expect("identity").clone();
-        other.cleanup().expect("other cleanup");
-        result
+        (result, Some(other))
     } else {
-        stage.identity().expect("identity").clone()
+        (stage.identity().expect("identity").clone(), None)
     };
     stage.cleanup().expect("close and remove original stage");
 

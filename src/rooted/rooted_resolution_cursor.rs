@@ -34,6 +34,8 @@ impl RootedResolutionCursor {
     }
 
     pub(crate) fn try_clone_current(&self) -> Result<File> {
+        #[cfg(test)]
+        crate::tests::native_io_fault_tests::check(crate::tests::native_io_fault_tests::NativeIoPoint::CloneCursor)?;
         self.current.try_clone()
     }
 
@@ -45,6 +47,8 @@ impl RootedResolutionCursor {
 
     /// Reads one child without following a final symbolic link.
     pub(crate) fn metadata(&self, name: &OsStr) -> Result<Metadata> {
+        #[cfg(test)]
+        crate::tests::native_io_fault_tests::check(crate::tests::native_io_fault_tests::NativeIoPoint::CursorMetadata)?;
         #[cfg(test)]
         crate::tests::rooted::support::resolution_observation_tests::record_metadata();
         #[cfg(unix)]
@@ -131,6 +135,8 @@ impl RootedResolutionCursor {
     ///
     /// The current handle is left unchanged if opening or verification fails.
     pub(crate) fn descend(&mut self, name: &OsStr) -> Result<()> {
+        #[cfg(test)]
+        crate::tests::native_io_fault_tests::check(crate::tests::native_io_fault_tests::NativeIoPoint::CursorDescend)?;
         #[cfg(test)]
         crate::tests::rooted::support::resolution_observation_tests::record_directory_open();
         #[cfg(any(unix, windows))]

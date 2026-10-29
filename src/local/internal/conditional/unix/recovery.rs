@@ -61,7 +61,11 @@ impl RecoveryAccess for EntryAccess {
         }
         // SAFETY: openat returned a new descriptor uniquely owned here.
         let file = unsafe { File::from_raw_fd(descriptor) };
-        let metadata = file.metadata().map_err(|error| {
+        #[cfg(test)]
+        let metadata_result = crate::tests::native_io_fault_tests::metadata(&file);
+        #[cfg(not(test))]
+        let metadata_result = file.metadata();
+        let metadata = metadata_result.map_err(|error| {
             crate::LocalFileError::from_io(
                 crate::LocalFileOperation::OpenReader,
                 self.diagnostic.clone(),
@@ -121,4 +125,78 @@ pub(super) fn name(entry: &super::super::ConditionalEntry) -> io::Result<CString
         .file_name()
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "entry path has no final component"))?;
     CString::new(name.as_bytes()).map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "entry name contains NUL"))
+}
+
+#[cfg(test)]
+mod invalid_name_contract_tests {
+    use super::*;
+
+    #[test]
+    fn retained_native_reader_metadata_failures_preserve_identity_and_diagnostic_context() {
+        use crate::tests::native_io_fault_tests::NativeIoFaultGuard;
+        use crate::tests::native_io_fault_tests::NativeIoPoint;
+
+        let fixture = tempfile::tempdir().expect("fixture");
+        let path = fixture.path().join("retained");
+        std::fs::write(&path, b"retained candidate").expect("retained entry");
+        let original = std::fs::metadata(&path).expect("native identity");
+        for diagnostic in [None, Some(PathBuf::from("/display-only/retained"))] {
+            let access = EntryAccess::new(
+                File::open(fixture.path()).expect("real native parent"),
+                CString::new("retained").expect("single native component"),
+                original.dev(),
+                original.ino(),
+                diagnostic.clone(),
+            );
+            for point in [NativeIoPoint::HandleMetadata, NativeIoPoint::ReaderMetadata] {
+                let fault = NativeIoFaultGuard::fail_on(point, 1);
+                let error = access.open_reader().expect_err("native reader metadata fails");
+                assert!(fault.fired());
+                assert_eq!(error.operation(), crate::LocalFileOperation::OpenReader);
+                assert_eq!(error.path(), diagnostic.as_deref());
+                assert_eq!(error.current_directory(), None);
+                assert_eq!(error.io_error_kind(), io::ErrorKind::Other);
+                assert!(error.to_string().contains("injected native I/O contract failure"));
+                assert_eq!((access.device, access.inode), (original.dev(), original.ino()));
+                assert_eq!(
+                    std::fs::read(&path).expect("retained bytes unchanged"),
+                    b"retained candidate"
+                );
+                drop(fault);
+                let mut reader = access.open_reader().expect("retry identity-bound recovery reader");
+                let mut bytes = Vec::new();
+                qubit_io::Streams::copy_input_to_output(&mut reader, &mut bytes).expect("read recovery bytes");
+                assert_eq!(bytes, b"retained candidate");
+                access.sync_file().expect("same retained identity remains syncable");
+            }
+        }
+    }
+
+    #[test]
+    fn recovery_name_rejects_missing_component_and_nul_without_using_display_as_authority() {
+        let fixture = tempfile::tempdir().expect("fixture");
+        let path = fixture.path().join("retained");
+        std::fs::write(&path, b"retained").expect("retained entry");
+        let metadata = std::fs::metadata(&path).expect("real identity");
+        for namespace_path in [PathBuf::from("/"), PathBuf::from("bad\0name")] {
+            let entry = super::super::super::ConditionalEntry::new(
+                crate::recovery::LocalRecoveryFileRole::CandidateCopy,
+                namespace_path,
+                None,
+                Box::new(EntryAccess::new(
+                    File::open(fixture.path()).expect("real retained parent"),
+                    CString::new("retained").expect("native component"),
+                    metadata.dev(),
+                    metadata.ino(),
+                    None,
+                )),
+            );
+            assert_eq!(
+                name(&entry).expect_err("invalid namespace name").kind(),
+                io::ErrorKind::InvalidInput
+            );
+            entry.sync_file().expect("retained authority remains valid");
+            assert_eq!(entry.open_reader().expect("retained reader").metadata().len(), 8);
+        }
+    }
 }

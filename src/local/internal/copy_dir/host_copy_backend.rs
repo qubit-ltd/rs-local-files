@@ -455,3 +455,123 @@ fn symlink_target_is_directory(
         ))
     }
 }
+
+#[cfg(all(test, unix))]
+mod error_contract_tests {
+    use super::*;
+
+    #[test]
+    fn entering_a_directory_rejects_expired_deadlines_and_depth_before_mutation() {
+        let fixture = tempfile::tempdir().expect("fixture");
+        let source = fixture.path().join("source");
+        let destination = fixture.path().join("destination");
+        fs::create_dir(&source).expect("source directory");
+        fs::write(source.join("payload"), b"keep").expect("source payload");
+        for (options, depth, kind) in [
+            (
+                LocalCopyDirOptions::new().with_deadline(std::time::Duration::ZERO),
+                0,
+                ErrorKind::TimedOut,
+            ),
+            (
+                LocalCopyDirOptions::new().with_max_depth(0),
+                1,
+                ErrorKind::QuotaExceeded,
+            ),
+        ] {
+            let mut stats = LocalCopyDirStats::default();
+            let mut budget = CopyBudget::new(options);
+            let mut active_sources = HashSet::new();
+            let error = enter_copy_directory(
+                &source,
+                &destination,
+                options,
+                &destination,
+                &mut active_sources,
+                &mut stats,
+                &mut budget,
+                depth,
+            )
+            .err()
+            .expect("directory entry must obey the already active budget");
+            assert_eq!(error.stage(), LocalCopyDirStage::InspectSource);
+            assert_eq!(error.source_path(), source);
+            assert_eq!(error.destination_path(), destination);
+            assert_eq!(error.error().kind(), kind);
+            assert_eq!(stats, LocalCopyDirStats::default());
+            assert!(active_sources.is_empty());
+            assert!(!destination.exists());
+            assert_eq!(fs::read(source.join("payload")).expect("source should remain"), b"keep");
+        }
+    }
+
+    #[test]
+    fn finishing_a_removed_destination_reports_permission_stage_and_preserves_coordinates() {
+        let fixture = tempfile::tempdir().expect("fixture");
+        let source = fixture.path().join("source");
+        let destination = fixture.path().join("destination");
+        fs::create_dir(&source).expect("source");
+        let options = LocalCopyDirOptions::new().preserve_permissions();
+        let mut stats = LocalCopyDirStats::default();
+        let mut budget = CopyBudget::new(options);
+        let mut backend = HostCopyBackend {
+            options,
+            destination_root: destination.clone(),
+            scope_root: None,
+            active_sources: HashSet::new(),
+        };
+        let frame = enter_copy_directory(
+            &source,
+            &destination,
+            options,
+            &destination,
+            &mut backend.active_sources,
+            &mut stats,
+            &mut budget,
+            0,
+        )
+        .expect("real frame")
+        .expect("source entered");
+        let recorded = stats;
+        fs::remove_dir(&destination).expect("concurrent destination removal");
+        let error = backend
+            .finish_frame(frame, &mut stats)
+            .expect_err("permission restoration must fail");
+        assert_eq!(error.stage(), LocalCopyDirStage::PreservePermissions);
+        assert_eq!(error.source_path(), source);
+        assert_eq!(error.destination_path(), destination);
+        assert_eq!(error.error().kind(), ErrorKind::NotFound);
+        assert_eq!(error.stats(), &recorded);
+        assert!(backend.active_sources.is_empty());
+        assert!(source.is_dir());
+    }
+
+    #[test]
+    fn followed_link_checks_scope_target_kind_and_dangling_target() {
+        use std::os::unix::net::UnixListener;
+        let fixture = tempfile::tempdir().expect("fixture");
+        let source = fixture.path().join("link");
+        let destination = fixture.path().join("destination");
+        let boundary = fixture.path().join("boundary");
+        fs::create_dir(&boundary).expect("boundary");
+        let socket = fixture.path().join("socket");
+        let _listener = UnixListener::bind(&socket).expect("socket");
+        std::os::unix::fs::symlink(&socket, &source).expect("source link");
+        let stats = LocalCopyDirStats::default();
+        let error = symlink_target_is_directory(&source, &destination, &stats, None)
+            .expect_err("socket is not a copyable target");
+        assert_eq!(error.stage(), LocalCopyDirStage::InspectSourceEntry);
+        assert_eq!(error.error().kind(), ErrorKind::Unsupported);
+        let canonical_boundary = fs::canonicalize(&boundary).expect("canonical boundary");
+        let error = symlink_target_is_directory(&source, &destination, &stats, Some(&canonical_boundary))
+            .expect_err("link escapes boundary");
+        assert_eq!(error.error().kind(), ErrorKind::InvalidInput);
+        assert_eq!(error.stats(), &stats);
+        fs::remove_file(&source).expect("replace link fixture");
+        std::os::unix::fs::symlink("missing", &source).expect("dangling source");
+        assert!(!symlink_target_is_directory(&source, &destination, &stats, None).expect("dangling leaf"));
+        let error = symlink_target_is_directory(&source, &destination, &stats, Some(&canonical_boundary))
+            .expect_err("scoped dangling target cannot canonicalize");
+        assert_eq!(error.error().kind(), ErrorKind::NotFound);
+    }
+}

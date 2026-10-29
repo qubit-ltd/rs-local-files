@@ -418,3 +418,51 @@ mod tests {
         assert_eq!(measure_path(Path::new("a/😀")), Some((2, 10)));
     }
 }
+
+#[cfg(test)]
+mod allocation_contract_tests {
+    use std::io::ErrorKind;
+    use std::path::Path;
+
+    use crate::directory::LocalResolutionOrigin;
+    use crate::error::LocalFileOperation;
+
+    #[test]
+    fn test_unrepresentable_token_capacity_reports_allocation_failure() {
+        let error = super::tokens_after_check(Path::new("child"), LocalResolutionOrigin::Input, usize::MAX)
+            .expect_err("an unrepresentable token allocation must return an error");
+
+        assert_eq!(error.operation(), LocalFileOperation::Metadata);
+        assert_eq!(error.io_error_kind(), ErrorKind::OutOfMemory);
+        assert!(
+            error
+                .io_error()
+                .expect("allocation failure must retain its I/O source")
+                .get_ref()
+                .is_some()
+        );
+    }
+}
+
+#[cfg(test)]
+mod windows_measurement_boundary_tests {
+    #[test]
+    fn test_windows_native_measurement_handles_roots_drives_empty_and_trailing_separators() {
+        let cases = [
+            ("", (0, 0)),
+            (r"C:\", (0, 0)),
+            (r"\a\b", (2, 8)),
+            (r"a\b\", (2, 8)),
+            (r"C:\a\..\😀", (3, 16)),
+            (r"\\?\uNc\server\share\a", (1, 4)),
+        ];
+        for (path, expected) in cases {
+            let units = path.encode_utf16().collect::<Vec<_>>();
+            assert_eq!(
+                super::measure_windows_units(units.into_iter()),
+                Some(expected),
+                "native path {path:?}"
+            );
+        }
+    }
+}

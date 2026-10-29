@@ -11,6 +11,7 @@ mod metadata_tests;
 mod permissions_tests;
 mod root_tests;
 mod rooted_local_file_system_tests;
+mod temp_creation_tests;
 
 mod resolution_complexity_tests;
 pub(crate) mod support;

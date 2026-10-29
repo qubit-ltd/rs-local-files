@@ -33,3 +33,24 @@ impl LocalWindowsFileSystemObservation {
         self.volume_attributes
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::LocalWindowsFileSystemObservation;
+    use crate::observation::LocalFileSystemLocality;
+    use crate::observation::LocalFileSystemObservation;
+
+    #[test]
+    fn test_windows_filesystem_facts_preserve_name_and_unknown_attribute_bits() {
+        let windows = LocalWindowsFileSystemObservation {
+            filesystem_name: "ReFS".to_owned(),
+            volume_attributes: 0x8000_0001,
+        };
+        let facts = LocalFileSystemObservation::new(LocalFileSystemLocality::Unknown, None, Some(windows));
+        assert_eq!(facts.locality(), LocalFileSystemLocality::Unknown);
+        assert!(facts.unix().is_none());
+        let windows = facts.windows().expect("Windows filesystem facts");
+        assert_eq!(windows.filesystem_name(), "ReFS");
+        assert_eq!(windows.volume_attributes(), 0x8000_0001);
+    }
+}

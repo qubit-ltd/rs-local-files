@@ -485,3 +485,77 @@ fn commit_staged_copy_file(
         )),
     }
 }
+
+#[cfg(all(test, unix))]
+mod error_contract_tests {
+    use super::*;
+
+    #[test]
+    fn racing_destination_skip_cleans_real_staging_and_keeps_winner() {
+        let fixture = tempfile::tempdir().expect("fixture");
+        let source = fixture.path().join("source");
+        let destination = fixture.path().join("destination");
+        std::fs::write(&source, b"candidate").expect("source");
+        let options = LocalCopyDirOptions::new().with_conflict(LocalCopyConflictPolicy::Skip);
+        let stats = LocalCopyDirStats::default();
+        let mut budget = CopyBudget::new(options);
+        let (staged, copied, _) = stage_copy_file(&source, &destination, options, &stats, &mut budget)
+            .expect("source staged before competing actor");
+        assert_eq!(copied, 9);
+        let staging_path = staged.path().to_path_buf();
+        std::fs::write(&destination, b"winner").expect("racing publisher");
+        let committed = commit_staged_copy_file(
+            &source,
+            &destination,
+            StagedCopyCommitOptions {
+                conflict: LocalCopyConflictPolicy::Skip,
+                remove_destination_directory: false,
+                symlink_policy: LocalSymlinkPolicy::Reject,
+            },
+            &stats,
+            staged,
+            &budget,
+        )
+        .expect("racing winner skipped");
+        assert!(!committed);
+        assert!(!staging_path.exists());
+        assert_eq!(std::fs::read(destination).expect("winner intact"), b"winner");
+        assert_eq!(std::fs::read(source).expect("source intact"), b"candidate");
+    }
+
+    #[test]
+    fn expired_replacement_budget_keeps_destination_tree_and_cleans_staging() {
+        let fixture = tempfile::tempdir().expect("fixture");
+        let source = fixture.path().join("source");
+        let destination = fixture.path().join("destination");
+        std::fs::write(&source, b"candidate").expect("source");
+        std::fs::create_dir(&destination).expect("destination directory");
+        std::fs::write(destination.join("kept"), b"old").expect("old child");
+        let options = LocalCopyDirOptions::new();
+        let stats = LocalCopyDirStats::default();
+        let mut staging_budget = CopyBudget::new(options);
+        let (staged, _, _) = stage_copy_file(&source, &destination, options, &stats, &mut staging_budget)
+            .expect("source staged before deadline");
+        let staging_path = staged.path().to_path_buf();
+        let expired = CopyBudget::new(options.with_deadline(std::time::Duration::ZERO));
+        let error = commit_staged_copy_file(
+            &source,
+            &destination,
+            StagedCopyCommitOptions {
+                conflict: LocalCopyConflictPolicy::Overwrite,
+                remove_destination_directory: true,
+                symlink_policy: LocalSymlinkPolicy::Reject,
+            },
+            &stats,
+            staged,
+            &expired,
+        )
+        .expect_err("replacement deletion deadline expired");
+        assert_eq!(error.stage(), LocalCopyDirStage::PrepareDestination);
+        assert_eq!(error.error().kind(), ErrorKind::TimedOut);
+        assert_eq!(error.source_path(), source);
+        assert_eq!(error.destination_path(), destination);
+        assert_eq!(std::fs::read(destination.join("kept")).expect("tree preserved"), b"old");
+        assert!(!staging_path.exists());
+    }
+}

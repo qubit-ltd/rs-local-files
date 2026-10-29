@@ -114,6 +114,8 @@ impl Root {
     /// Returns an I/O error when the directory cannot be securely opened.
     #[allow(dead_code)] // Public standalone root-opening API; current crate paths use rooted options.
     pub fn open(path: &Path) -> Result<Self> {
+        #[cfg(test)]
+        crate::tests::native_io_fault_tests::check(crate::tests::native_io_fault_tests::NativeIoPoint::RootOpen)?;
         let path = std::path::absolute(path)?;
         #[cfg(any(unix, windows))]
         {
@@ -150,6 +152,8 @@ impl Root {
     #[cfg(any(unix, windows))]
     #[inline]
     pub fn try_clone_authority(&self) -> Result<File> {
+        #[cfg(test)]
+        crate::tests::native_io_fault_tests::check(crate::tests::native_io_fault_tests::NativeIoPoint::CloneAuthority)?;
         self.directory.try_clone()
     }
 
@@ -161,6 +165,8 @@ impl Root {
     /// Returns a native handle-duplication error, or `Unsupported` when rooted
     /// descriptor operations are unavailable.
     pub(crate) fn resolution_cursor(&self) -> Result<RootedResolutionCursor> {
+        #[cfg(test)]
+        crate::tests::native_io_fault_tests::check(crate::tests::native_io_fault_tests::NativeIoPoint::OpenCursor)?;
         #[cfg(any(unix, windows))]
         {
             RootedResolutionCursor::new(self.directory.try_clone()?)
@@ -183,6 +189,8 @@ impl Root {
     /// Returns an I/O error when the operating system cannot inspect the open
     /// root descriptor.
     pub fn metadata(&self) -> Result<Metadata> {
+        #[cfg(test)]
+        crate::tests::native_io_fault_tests::check(crate::tests::native_io_fault_tests::NativeIoPoint::RootMetadata)?;
         #[cfg(unix)]
         {
             self.directory
@@ -216,6 +224,8 @@ impl Root {
     /// Returns an I/O error when traversal cannot remain beneath the opened
     /// root or when the final entry cannot be inspected.
     pub fn symlink_metadata(&self, path: &path::Path) -> Result<Metadata> {
+        #[cfg(test)]
+        crate::tests::native_io_fault_tests::check(crate::tests::native_io_fault_tests::NativeIoPoint::EntryMetadata)?;
         #[cfg(feature = "test-support")]
         if local::take_test_support_on_nth("rooted-copy-destination-metadata-native", 2) {
             return Err(crate::local::test_fault_error());
@@ -1007,5 +1017,106 @@ impl Root {
                 "rooted directory durability is unsupported on this platform",
             ))
         }
+    }
+}
+
+#[cfg(test)]
+mod authority_and_native_failure_tests {
+    use std::fs;
+    use std::path::Path;
+
+    use super::Root;
+    use crate::LocalFileOperation;
+    use crate::local::LocalRelativePath;
+
+    #[test]
+    fn test_root_from_existing_authority_uses_descriptor_and_reports_diagnostic_path() {
+        let fixture = tempfile::tempdir().expect("root fixture should exist");
+        fs::write(fixture.path().join("payload"), b"descriptor authority").expect("file should exist");
+        let opened = Root::open(fixture.path()).expect("root should open");
+        let diagnostic = fixture.path().join("diagnostic-only");
+        let root = Root::from_directory_authority(
+            opened.try_clone_authority().expect("authority should clone"),
+            diagnostic.clone(),
+        );
+        let path = LocalRelativePath::new(Path::new("payload")).expect("path should be relative");
+
+        let metadata = root
+            .symlink_metadata(&path)
+            .expect("lookup must use the retained descriptor, even when diagnostic path does not exist");
+
+        assert_eq!(metadata.size(), b"descriptor authority".len() as u64);
+        assert_eq!(root.path(), diagnostic);
+        assert_eq!(
+            root.resolution_contract().limits(),
+            crate::options::LocalResolutionLimits::new()
+        );
+        let debug = format!("{root:?}");
+        assert!(debug.contains("Root"));
+        assert!(debug.contains("diagnostic-only"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_root_native_errors_retain_read_link_and_recursive_delete_context() {
+        let fixture = tempfile::tempdir().expect("root fixture should exist");
+        fs::write(fixture.path().join("ordinary"), b"unchanged").expect("ordinary file should exist");
+        let root = Root::open(fixture.path()).expect("root should open");
+        let file = LocalRelativePath::new(Path::new("ordinary")).expect("path should be relative");
+
+        let mut validations = 0;
+        let mut validate = |_: &Path| {
+            validations += 1;
+            Ok(())
+        };
+        let error = root
+            .read_link_limited(&file, None, &mut validate)
+            .expect_err("an ordinary file cannot be read as a symlink");
+        assert_eq!(error.operation(), LocalFileOperation::Metadata);
+        assert_eq!(error.path(), Some(file.as_path()));
+        assert!(error.io_error().is_some());
+        std::os::unix::fs::symlink("ordinary", fixture.path().join("link")).expect("real link should exist");
+        let link = LocalRelativePath::new(Path::new("link")).expect("link path should be relative");
+        assert_eq!(
+            root.read_link_limited(&link, None, &mut validate)
+                .expect("link target should be validated"),
+            Path::new("ordinary")
+        );
+        assert_eq!(validations, 1, "only the successful read may validate a raw target");
+
+        let missing = LocalRelativePath::new(Path::new("missing")).expect("path should be relative");
+        let error = root
+            .remove_tree_typed(&missing)
+            .expect_err("recursive removal must report a missing target");
+        assert_eq!(error.operation(), LocalFileOperation::DeleteDirectory);
+        assert_eq!(error.path(), Some(missing.as_path()));
+        assert_eq!(error.io_error_kind(), std::io::ErrorKind::NotFound);
+        assert_eq!(
+            fs::read(fixture.path().join("ordinary")).expect("unrelated file should remain"),
+            b"unchanged"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_root_copy_symlink_collision_reports_unchanged_destination() {
+        let fixture = tempfile::tempdir().expect("root fixture should exist");
+        let destination = fixture.path().join("occupied");
+        fs::write(&destination, b"original").expect("destination should exist");
+        let root = Root::open(fixture.path()).expect("root should open");
+        let path = LocalRelativePath::new(Path::new("occupied")).expect("path should be relative");
+
+        let error = root
+            .create_symlink_for_copy(Path::new("target"), &path, false)
+            .expect_err("symlink publication must not replace an occupied destination");
+
+        let (state, primary, cleanup) = error.into_parts();
+        assert_eq!(state, crate::local::RootedSymlinkCreateFailureState::Unchanged);
+        assert_eq!(primary.kind(), std::io::ErrorKind::AlreadyExists);
+        assert!(cleanup.is_none());
+        assert_eq!(
+            fs::read(destination).expect("original destination should remain"),
+            b"original"
+        );
     }
 }

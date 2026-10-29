@@ -59,6 +59,8 @@ impl LocalFileReader {
     /// Takes ownership and captures metadata from the retained handle.
     /// Propagates metadata errors, closing the supplied handle on failure.
     pub(crate) fn from_file(file: File) -> io::Result<Self> {
+        #[cfg(test)]
+        crate::tests::native_io_fault_tests::check(crate::tests::native_io_fault_tests::NativeIoPoint::ReaderMetadata)?;
         let metadata = LocalFileMetadata::from_native(&file.metadata()?);
         Ok(Self { file, metadata })
     }
@@ -98,6 +100,8 @@ impl qubit_io::Input for LocalFileReader {
         if buffers.iter().all(|buffer| buffer.is_empty()) {
             return Ok(0);
         }
+        #[cfg(test)]
+        crate::tests::native_io_fault_tests::check(crate::tests::native_io_fault_tests::NativeIoPoint::Read)?;
         #[cfg(windows)]
         {
             let mut slices = crate::vectored::io_slices_mut(buffers)?;
@@ -108,6 +112,8 @@ impl qubit_io::Input for LocalFileReader {
     }
 
     unsafe fn read_unchecked(&mut self, output: &mut [u8], index: usize, count: usize) -> io::Result<usize> {
+        #[cfg(test)]
+        crate::tests::native_io_fault_tests::check(crate::tests::native_io_fault_tests::NativeIoPoint::Read)?;
         qubit_io::Input::read(&mut self.file, &mut output[index..index + count])
     }
 }

@@ -503,3 +503,51 @@ mod tests {
         assert_eq!(1, facts.requested());
     }
 }
+
+#[cfg(test)]
+mod deletion_projection_tests {
+    use std::time::Duration;
+    use std::time::Instant;
+
+    use super::CopyBudget;
+    use crate::local::LocalCopyDirOptions;
+
+    #[test]
+    fn test_target_deletion_keeps_copy_deadline_without_source_resource_limits() {
+        let started = Instant::now();
+        let duration = Duration::from_secs(10);
+        let budget = CopyBudget::new(
+            LocalCopyDirOptions::new()
+                .with_started_at(started)
+                .with_deadline(duration)
+                .with_max_depth(1)
+                .with_max_entries(2)
+                .with_max_bytes(3)
+                .with_max_open_directories(4),
+        );
+
+        let (options, deletion_started) = budget.deletion_options();
+
+        assert_eq!(deletion_started, started);
+        assert_eq!(options.deadline(), Some(duration));
+        assert!(options.recursive());
+        assert_eq!(options.max_depth(), None);
+        assert_eq!(options.max_entries(), None);
+        assert_eq!(options.max_pending_path_bytes(), None);
+    }
+
+    #[test]
+    fn test_implicit_copy_start_is_preserved_for_target_deletion() {
+        let before = Instant::now();
+        let duration = Duration::from_secs(10);
+        let budget = CopyBudget::new(LocalCopyDirOptions::new().with_deadline(duration));
+        let after = Instant::now();
+
+        let (options, started) = budget.deletion_options();
+
+        assert!(started >= before && started <= after);
+        assert_eq!(options.deadline(), Some(duration));
+        let (_, projected_again) = budget.deletion_options();
+        assert_eq!(projected_again, started);
+    }
+}

@@ -20,6 +20,31 @@ use crate::LocalWalkErrorPolicy;
 use crate::rooted_local_file_system::RootedLocalFileSystem;
 
 #[test]
+fn test_rooted_listing_rejects_an_unrepresentable_backend_deadline() {
+    let fixture = tempdir().expect("fixture should exist");
+    let filesystem = RootedLocalFileSystem::open(fixture.path()).expect("rooted authority should open");
+    let error = filesystem
+        .list(
+            Path::new(""),
+            Path::new("/"),
+            &LocalListOptions::new().with_deadline(std::time::Duration::MAX),
+            LocalSymlinkPolicy::FollowWithinScope,
+            std::time::Instant::now(),
+        )
+        .expect_err("an unrepresentable backend deadline must fail before opening a walker");
+    assert_eq!(error.kind(), crate::error::LocalFileErrorKind::InvalidOptions);
+    assert_eq!(error.operation(), crate::error::LocalFileOperation::List);
+    assert_eq!(error.path(), Some(Path::new("")));
+    assert_eq!(error.reason(), Some("listing deadline is not representable"));
+    assert_eq!(
+        fs::read_dir(fixture.path())
+            .expect("root should remain unchanged")
+            .count(),
+        0
+    );
+}
+
+#[test]
 fn test_rooted_recursive_directory_creation_and_root_metadata() {
     let directory = tempdir().expect("temporary directory should be created");
     let filesystem = RootedLocalFileSystem::open(directory.path()).expect("rooted filesystem should open");

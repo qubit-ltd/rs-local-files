@@ -274,3 +274,31 @@ fn open_at(parent: &File, name: &CString, flags: libc::c_int, mode: libc::mode_t
 fn invalid_name(_: std::ffi::NulError) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidInput, "path component contains NUL")
 }
+
+#[cfg(test)]
+mod invalid_operand_contract_tests {
+    use super::*;
+
+    #[test]
+    fn native_namespace_rejects_root_nul_and_invalid_relative_operands() {
+        let fixture = tempfile::tempdir().expect("fixture");
+        let options = LocalWriteOptions::default();
+        let error = Namespace::open_host(Path::new("/"), &options).expect_err("root has no target name");
+        assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
+        let error =
+            Namespace::open_host(&fixture.path().join("bad\0name"), &options).expect_err("native name contains nul");
+        assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
+        for relative in [Path::new("../escape"), Path::new("/absolute")] {
+            let error = Namespace::open_rooted(
+                File::open(fixture.path()).expect("real root authority"),
+                relative,
+                Path::new("/target"),
+                None,
+                &options,
+            )
+            .expect_err("relative authority operand must be valid");
+            assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
+        }
+        assert_eq!(std::fs::read_dir(fixture.path()).expect("fixture readable").count(), 0);
+    }
+}

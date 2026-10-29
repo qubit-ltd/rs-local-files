@@ -525,4 +525,153 @@ mod tests {
         assert_eq!(limit.resource(), LocalResourceKind::AclEntries);
         assert_eq!(limit.observed(), Some(3));
     }
+
+    #[test]
+    fn security_unix_requested_values_keep_success_and_distinguish_unsupported() {
+        for requirement in [
+            LocalObservationRequirement::Optional,
+            LocalObservationRequirement::Required,
+        ] {
+            assert_eq!(
+                requested_value(requirement, || Ok(17)).expect("available fact"),
+                Some(17)
+            );
+            for code in [libc::ENOTSUP, libc::EOPNOTSUPP, libc::ENOSYS] {
+                let result: LocalResult<Option<u8>> =
+                    requested_value(requirement, || Err(io::Error::from_raw_os_error(code)));
+                match requirement {
+                    LocalObservationRequirement::Optional => {
+                        assert_eq!(result.expect("optional unsupported fact"), None)
+                    }
+                    LocalObservationRequirement::Required => {
+                        let error = result.expect_err("required unsupported fact");
+                        assert_eq!(error.kind(), LocalFileErrorKind::RequirementNotMet);
+                        assert_eq!(error.operation(), super::LocalFileOperation::Metadata);
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn security_unix_requested_values_preserve_real_io_failures() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let missing = directory.path().join("missing");
+        for requirement in [
+            LocalObservationRequirement::Optional,
+            LocalObservationRequirement::Required,
+        ] {
+            let native = File::open(&missing).expect_err("missing file");
+            let code = native.raw_os_error();
+            let result: LocalResult<Option<File>> = requested_value(requirement, || Err(native));
+            let error = result.expect_err("ordinary I/O failure must propagate");
+            assert_eq!(error.kind(), LocalFileErrorKind::NotFound);
+            assert_eq!(error.operation(), super::LocalFileOperation::Metadata);
+            assert_eq!(error.io_error().expect("retained native error").raw_os_error(), code);
+
+            let result: LocalResult<Option<u8>> = requested_value(requirement, || {
+                Err(io::Error::new(
+                    io::ErrorKind::Unsupported,
+                    "no explicit native unsupported status",
+                ))
+            });
+            let error = result.expect_err("only native unsupported statuses may suppress a fact");
+            assert_eq!(error.kind(), LocalFileErrorKind::Unsupported);
+            assert_eq!(error.io_error_kind(), io::ErrorKind::Unsupported);
+        }
+        assert!(!acl_read_requires_retry(&io::Error::other("ordinary read failure")));
+        let error = super::invalid_native_metadata();
+        assert_eq!(error.kind(), LocalFileErrorKind::DataCorruption);
+        assert_eq!(error.operation(), super::LocalFileOperation::Metadata);
+    }
+
+    #[cfg(target_os = "linux")]
+    fn acl_bytes(entries: &[(u16, u16, u32)]) -> Vec<u8> {
+        let mut bytes = 2_u32.to_le_bytes().to_vec();
+        for (tag, permissions, id) in entries {
+            bytes.extend(tag.to_le_bytes());
+            bytes.extend(permissions.to_le_bytes());
+            bytes.extend(id.to_le_bytes());
+        }
+        bytes
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn security_unix_acl_accepts_base_mask_and_named_principals() {
+        let base = [(0x01, 7, u32::MAX), (0x04, 5, u32::MAX), (0x20, 0, u32::MAX)];
+        for extra in [
+            vec![],
+            vec![(0x10, 5, u32::MAX)],
+            vec![(0x02, 6, 1000), (0x08, 4, 2000), (0x10, 7, u32::MAX)],
+        ] {
+            let mut entries = base.to_vec();
+            entries.extend(extra);
+            let bytes = acl_bytes(&entries);
+            validate_linux_acl(&bytes, Some(entries.len())).expect("valid complete ACL");
+            let options = LocalSecurityObservationOptions::new()
+                .with_max_acl_bytes(bytes.len())
+                .with_max_acl_entries(entries.len());
+            check_acl_length(bytes.len(), &options).expect("exact limits are inclusive");
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn security_unix_acl_rejects_malformed_headers_and_entries() {
+        let base = vec![(0x01, 7, u32::MAX), (0x04, 5, u32::MAX), (0x20, 0, u32::MAX)];
+        let mut malformed = vec![vec![], vec![2, 0, 0], 1_u32.to_le_bytes().to_vec(), vec![2, 0, 0, 0, 1]];
+        malformed.push(acl_bytes(&[]));
+        for index in 0..base.len() {
+            let mut entries = base.clone();
+            entries.remove(index);
+            malformed.push(acl_bytes(&entries));
+            let mut entries = base.clone();
+            entries.push(base[index]);
+            malformed.push(acl_bytes(&entries));
+            let mut entries = base.clone();
+            entries[index].2 = 42;
+            malformed.push(acl_bytes(&entries));
+        }
+        for extra in [
+            vec![(0x40, 7, u32::MAX)],
+            vec![(0x10, 8, u32::MAX)],
+            vec![(0x10, 7, 42)],
+            vec![(0x10, 7, u32::MAX), (0x10, 5, u32::MAX)],
+            vec![(0x02, 7, u32::MAX), (0x10, 7, u32::MAX)],
+            vec![(0x08, 7, u32::MAX), (0x10, 7, u32::MAX)],
+            vec![(0x02, 7, 1000)],
+            vec![(0x08, 7, 2000)],
+        ] {
+            let mut entries = base.clone();
+            entries.extend(extra);
+            malformed.push(acl_bytes(&entries));
+        }
+        for bytes in malformed {
+            let error = validate_linux_acl(&bytes, None).expect_err("malformed ACL must fail");
+            assert_eq!(error.kind(), io::ErrorKind::InvalidData, "ACL bytes: {bytes:?}");
+            assert_eq!(error.to_string(), "malformed POSIX ACL");
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn security_unix_acl_length_and_decoding_keep_structured_limits() {
+        let options = LocalSecurityObservationOptions::new();
+        for length in [0, 1, 2, 3, 5, 11, 13] {
+            assert_eq!(
+                check_acl_length(length, &options)
+                    .expect_err("invalid ACL framing")
+                    .kind(),
+                io::ErrorKind::InvalidData
+            );
+        }
+        check_acl_length(4, &options).expect("header size is valid framing, even without semantic entries");
+        let bytes = acl_bytes(&[(0x01, 7, u32::MAX), (0x04, 5, u32::MAX), (0x20, 0, u32::MAX)]);
+        let error = io_error(validate_linux_acl(&bytes, Some(2)).expect_err("entry limit"));
+        assert_eq!(error.kind(), LocalFileErrorKind::ResourceLimit);
+        let limit = error.resource_limit_error().expect("structured limit");
+        assert_eq!(limit.resource(), LocalResourceKind::AclEntries);
+        assert_eq!(limit.observed(), Some(3));
+    }
 }

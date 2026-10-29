@@ -40,6 +40,8 @@ impl DeleteBackend for TempDirectoryDeleteBackend<'_> {
 
     /// Reads no-follow metadata; traversal and disappearance errors propagate.
     fn metadata(&self, path: &Self::Path) -> io::Result<Self::Metadata> {
+        #[cfg(test)]
+        crate::tests::native_io_fault_tests::check(crate::tests::native_io_fault_tests::NativeIoPoint::DeleteMetadata)?;
         #[cfg(feature = "test-support")]
         crate::test_support::temp_cleanup_metadata()?;
         self.root.symlink_metadata(path)
@@ -53,11 +55,19 @@ impl DeleteBackend for TempDirectoryDeleteBackend<'_> {
     /// Opens an unsorted lazy reader through the retained Root authority.
     /// Native traversal and enumeration-open failures propagate.
     fn open_directory(&self, path: &Self::Path) -> io::Result<Self::Reader> {
+        #[cfg(test)]
+        crate::tests::native_io_fault_tests::check(
+            crate::tests::native_io_fault_tests::NativeIoPoint::DeleteReadDirectory,
+        )?;
         self.root.open_dir_reader(path)
     }
 
     /// Returns the next validated child; native enumeration errors propagate.
     fn next_child(&self, parent: &Self::Path, reader: &mut Self::Reader) -> io::Result<Option<Self::Path>> {
+        #[cfg(test)]
+        crate::tests::native_io_fault_tests::check(
+            crate::tests::native_io_fault_tests::NativeIoPoint::DeleteReadDirectory,
+        )?;
         reader
             .next_entry()
             .and_then(|entry| entry.map_or(Ok(None), |entry| parent.join_component(entry.name()).map(Some)))
@@ -66,12 +76,20 @@ impl DeleteBackend for TempDirectoryDeleteBackend<'_> {
     /// Removes the leaf itself without following its target; native errors
     /// propagate.
     fn remove_non_directory(&self, path: &Self::Path, _metadata: &Self::Metadata) -> io::Result<()> {
+        #[cfg(test)]
+        crate::tests::native_io_fault_tests::check(
+            crate::tests::native_io_fault_tests::NativeIoPoint::DeleteRemoveFile,
+        )?;
         self.root.remove_observed_non_directory(path)
     }
 
     /// Removes one empty directory; concurrent additions fail without
     /// rescanning.
     fn remove_empty_directory(&self, path: &Self::Path) -> io::Result<()> {
+        #[cfg(test)]
+        crate::tests::native_io_fault_tests::check(
+            crate::tests::native_io_fault_tests::NativeIoPoint::DeleteRemoveDirectory,
+        )?;
         #[cfg(feature = "test-support")]
         if crate::test_support::temp_cleanup_add_child() {
             self.root
@@ -103,6 +121,8 @@ impl DeleteBackend for HostTempResourceBackend {
 
     /// Inspects a final entry without following links; native errors propagate.
     fn metadata(&self, path: &Self::Path) -> io::Result<Self::Metadata> {
+        #[cfg(test)]
+        crate::tests::native_io_fault_tests::check(crate::tests::native_io_fault_tests::NativeIoPoint::DeleteMetadata)?;
         #[cfg(feature = "test-support")]
         crate::test_support::temp_cleanup_metadata()?;
         fs::symlink_metadata(path)
@@ -115,23 +135,39 @@ impl DeleteBackend for HostTempResourceBackend {
 
     /// Opens an unsorted lazy native reader, propagating native open errors.
     fn open_directory(&self, path: &Self::Path) -> io::Result<Self::Reader> {
+        #[cfg(test)]
+        crate::tests::native_io_fault_tests::check(
+            crate::tests::native_io_fault_tests::NativeIoPoint::DeleteReadDirectory,
+        )?;
         fs::read_dir(path)
     }
 
     /// Produces one child path or propagates an enumeration error.
     fn next_child(&self, _parent: &Self::Path, reader: &mut Self::Reader) -> io::Result<Option<Self::Path>> {
+        #[cfg(test)]
+        crate::tests::native_io_fault_tests::check(
+            crate::tests::native_io_fault_tests::NativeIoPoint::DeleteReadDirectory,
+        )?;
         reader.next().transpose().map(|entry| entry.map(|entry| entry.path()))
     }
 
     /// Removes the leaf itself, including Windows directory links, without
     /// traversing its target. Native unlink errors propagate.
     fn remove_non_directory(&self, path: &Self::Path, metadata: &Self::Metadata) -> io::Result<()> {
+        #[cfg(test)]
+        crate::tests::native_io_fault_tests::check(
+            crate::tests::native_io_fault_tests::NativeIoPoint::DeleteRemoveFile,
+        )?;
         crate::local::remove_host_non_directory(path, metadata)
     }
 
     /// Removes one empty directory; concurrent additions fail without
     /// rescanning.
     fn remove_empty_directory(&self, path: &Self::Path) -> io::Result<()> {
+        #[cfg(test)]
+        crate::tests::native_io_fault_tests::check(
+            crate::tests::native_io_fault_tests::NativeIoPoint::DeleteRemoveDirectory,
+        )?;
         #[cfg(feature = "test-support")]
         if crate::test_support::temp_cleanup_add_child() {
             fs::create_dir(path.join("late-child"))?;

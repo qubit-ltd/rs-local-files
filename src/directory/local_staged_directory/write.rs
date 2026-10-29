@@ -215,7 +215,14 @@ impl LocalStagedDirectory {
                     &path,
                 ));
             }
-            if let Err(source) = std::io::Write::write_all(&mut file, &block[..count]) {
+            #[cfg(test)]
+            let write_result = crate::tests::native_io_fault_tests::check(
+                crate::tests::native_io_fault_tests::NativeIoPoint::FileWrite,
+            )
+            .and_then(|()| std::io::Write::write_all(&mut file, &block[..count]));
+            #[cfg(not(test))]
+            let write_result = std::io::Write::write_all(&mut file, &block[..count]);
+            if let Err(source) = write_result {
                 let cause = LocalFileError::from_io(LocalFileOperation::Commit, Some(path.clone()), None, source);
                 return Err(cleanup_partial_private_file(
                     cause,
@@ -319,5 +326,232 @@ impl LocalStagedDirectory {
             }
         }
         Ok(())
+    }
+}
+
+#[cfg(all(test, unix))]
+mod native_write_failure_tests {
+    use std::path::Path;
+
+    use crate::LocalFileErrorKind;
+    use crate::LocalFileOperation;
+    use crate::LocalFileSystem;
+    use crate::options::LocalDirectoryOpenOptions;
+    use crate::options::LocalTempDirectoryOptions;
+    use crate::policy::LocalPrivacyRequirement;
+    use crate::tests::native_io_fault_tests::NativeIoFaultGuard;
+    use crate::tests::native_io_fault_tests::NativeIoPoint;
+
+    #[test]
+    fn test_private_write_initial_observation_failure_preserves_unknown_identity_owner() {
+        let fixture = tempfile::tempdir().expect("fixture");
+        let parent = LocalFileSystem::host()
+            .expect("host")
+            .open_directory_with_options(fixture.path(), &LocalDirectoryOpenOptions::new())
+            .expect("parent");
+        let stage = parent
+            .create_staged_directory(&LocalTempDirectoryOptions::new().with_privacy(LocalPrivacyRequirement::Required))
+            .expect("private stage");
+        let path = stage.directory().diagnostic_path().join("payload");
+        let guard = NativeIoFaultGuard::fail_on(NativeIoPoint::Observation, 1);
+        let error = stage
+            .write_private_file_new(Path::new("payload"), &mut &b"payload"[..], 32)
+            .expect_err("initial observation fails before consuming input");
+        assert!(guard.fired());
+        assert_eq!(error.kind(), LocalFileErrorKind::Io);
+        assert_eq!(error.operation(), LocalFileOperation::Metadata);
+        assert_eq!(
+            error.io_error().expect("native cause").to_string(),
+            "injected native I/O contract failure"
+        );
+        let (_, mut recovery) = error.into_temp_recovery_parts();
+        let recovery = recovery
+            .as_mut()
+            .expect("unknown identity requires an explicit recovery owner");
+        assert_eq!(recovery.path(), path);
+        assert!(recovery.identity().is_none());
+        assert_eq!(
+            recovery
+                .cleanup()
+                .expect_err("unknown identity must never delete by name")
+                .kind(),
+            LocalFileErrorKind::RequirementNotMet
+        );
+        assert_eq!(std::fs::metadata(&path).expect("partial file remains").len(), 0);
+        drop(guard);
+        stage
+            .cleanup()
+            .expect("stage owner can observe and remove its partial child");
+        assert!(!path.exists());
+    }
+
+    #[test]
+    fn test_private_write_final_observation_failure_keeps_stage_cleanup_responsibility() {
+        let fixture = tempfile::tempdir().expect("fixture");
+        let parent = LocalFileSystem::host()
+            .expect("host")
+            .open_directory_with_options(fixture.path(), &LocalDirectoryOpenOptions::new())
+            .expect("parent");
+        let stage = parent
+            .create_staged_directory(&LocalTempDirectoryOptions::new().with_privacy(LocalPrivacyRequirement::Required))
+            .expect("private stage");
+        let path = stage.directory().diagnostic_path().join("payload");
+        let guard = NativeIoFaultGuard::fail_on(NativeIoPoint::Observation, 2);
+        let error = stage
+            .write_private_file_new(Path::new("payload"), &mut &b"payload"[..], 32)
+            .expect_err("final observation fails after writing");
+        assert!(guard.fired());
+        assert_eq!(error.kind(), LocalFileErrorKind::Io);
+        assert_eq!(error.operation(), LocalFileOperation::Metadata);
+        assert!(error.temp_recovery().is_none());
+        assert_eq!(
+            std::fs::read(&path).expect("complete partial child remains stage-owned"),
+            b"payload"
+        );
+        drop(guard);
+        stage
+            .cleanup()
+            .expect("stage retains cleanup responsibility after post-write failure");
+        assert!(!path.exists());
+    }
+
+    #[test]
+    fn test_private_write_parent_clone_failure_precedes_file_creation() {
+        let fixture = tempfile::tempdir().expect("fixture");
+        let parent = LocalFileSystem::host()
+            .expect("host")
+            .open_directory_with_options(fixture.path(), &LocalDirectoryOpenOptions::new())
+            .expect("parent");
+        let stage = parent
+            .create_staged_directory(&LocalTempDirectoryOptions::new())
+            .expect("stage");
+        let path = stage.directory().diagnostic_path().join("payload");
+        let guard = NativeIoFaultGuard::fail_on(NativeIoPoint::CloneAuthority, 1);
+        let error = stage
+            .write_private_file_new(Path::new("payload"), &mut &b"payload"[..], 32)
+            .expect_err("cannot create a child without a retained parent authority");
+        assert!(guard.fired());
+        assert_eq!(error.kind(), LocalFileErrorKind::Io);
+        assert_eq!(error.operation(), LocalFileOperation::OpenWriter);
+        assert_eq!(error.path(), Some(stage.directory().diagnostic_path()));
+        assert!(!path.exists());
+        drop(guard);
+        stage.cleanup().expect("unmodified stage remains cleanup-owned");
+    }
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn test_owner_parent_clone_failure_does_not_create_intermediate_directories() {
+        let fixture = tempfile::tempdir().expect("fixture");
+        let parent = LocalFileSystem::host()
+            .expect("host")
+            .open_directory_with_options(fixture.path(), &LocalDirectoryOpenOptions::new())
+            .expect("parent");
+        let policy = crate::policy::LocalOwnerAccessPolicy::new().with_unix_modes(0o700, 0o600);
+        let stage = parent
+            .create_staged_directory(&LocalTempDirectoryOptions::new().with_owner_access_policy(policy))
+            .expect("owner-policy stage");
+        let guard = NativeIoFaultGuard::fail_on(NativeIoPoint::CloneAuthority, 1);
+        let error = stage
+            .ensure_owner_parent_directories(Path::new("nested"))
+            .expect_err("parent authority cloning precedes intermediate mkdir");
+        assert!(guard.fired());
+        assert_eq!(error.kind(), LocalFileErrorKind::Io);
+        assert_eq!(error.operation(), LocalFileOperation::OpenRoot);
+        assert!(!stage.directory().diagnostic_path().join("nested").exists());
+        drop(guard);
+        stage
+            .ensure_owner_parent_directories(Path::new("nested"))
+            .expect("retry creates owner-only directory");
+        stage.cleanup().expect("owner-policy stage cleanup");
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn test_existing_owner_directory_open_failure_preserves_existing_directory() {
+        let fixture = tempfile::tempdir().expect("fixture");
+        let parent = LocalFileSystem::host()
+            .expect("host")
+            .open_directory_with_options(fixture.path(), &LocalDirectoryOpenOptions::new())
+            .expect("parent");
+        let policy = crate::policy::LocalOwnerAccessPolicy::new().with_unix_modes(0o700, 0o600);
+        let stage = parent
+            .create_staged_directory(&LocalTempDirectoryOptions::new().with_owner_access_policy(policy))
+            .expect("owner-policy stage");
+        stage
+            .ensure_owner_parent_directories(Path::new("nested"))
+            .expect("existing owner directory");
+        let path = stage.directory().diagnostic_path().join("nested");
+        let before = std::fs::metadata(&path).expect("existing metadata");
+        // The second authority clone opens the already-existing child directory.
+        let guard = NativeIoFaultGuard::fail_on(NativeIoPoint::CloneAuthority, 2);
+        let error = stage
+            .ensure_owner_parent_directories(Path::new("nested"))
+            .expect_err("existing directory verification requires its own authority handle");
+        assert!(guard.fired());
+        assert_eq!(error.kind(), LocalFileErrorKind::Io);
+        assert_eq!(error.operation(), LocalFileOperation::OpenRoot);
+        assert_eq!(error.path(), Some(Path::new("nested")));
+        use std::os::unix::fs::MetadataExt;
+        assert_eq!(
+            std::fs::metadata(&path).expect("unchanged directory").ino(),
+            before.ino()
+        );
+        drop(guard);
+        stage
+            .ensure_owner_parent_directories(Path::new("nested"))
+            .expect("retry verifies existing owner directory");
+        stage.cleanup().expect("cleanup existing owner directory");
+    }
+    #[test]
+    fn test_stage_write_native_failure_cleans_candidates_and_keeps_stage_retryable() {
+        for private in [false, true] {
+            let fixture = tempfile::tempdir().expect("fixture");
+            let parent = LocalFileSystem::host()
+                .expect("host")
+                .open_directory_with_options(fixture.path(), &LocalDirectoryOpenOptions::new())
+                .expect("parent");
+            let options = if private {
+                LocalTempDirectoryOptions::new().with_privacy(LocalPrivacyRequirement::Required)
+            } else {
+                LocalTempDirectoryOptions::new()
+            };
+            let mut stage = parent.create_staged_directory(&options).expect("stage");
+            let directory = stage.directory().diagnostic_path().to_path_buf();
+            let path = directory.join("payload");
+            let guard = NativeIoFaultGuard::fail_on(NativeIoPoint::FileWrite, 1);
+            let error = stage
+                .write_file_new(Path::new("payload"), &mut &b"payload"[..], 32)
+                .expect_err("native write must fail before file publication");
+            assert!(guard.fired());
+            assert_eq!(error.kind(), LocalFileErrorKind::Io);
+            assert_eq!(error.operation(), LocalFileOperation::Commit);
+            assert_eq!(
+                error.path(),
+                Some(if private { path.as_path() } else { Path::new("/payload") })
+            );
+            assert!(
+                error
+                    .io_error()
+                    .expect("native cause")
+                    .to_string()
+                    .contains("injected native I/O contract failure")
+            );
+            assert!(
+                error.temp_recovery().is_none(),
+                "identity-aware candidate cleanup completed"
+            );
+            assert!(!path.exists());
+            assert_eq!(
+                std::fs::read_dir(&directory).expect("inspect stage").count(),
+                0,
+                "failed candidate must be removed"
+            );
+            drop(guard);
+            stage
+                .write_file_new(Path::new("payload"), &mut &b"retry"[..], 32)
+                .expect("same destination is reusable after write failure");
+            assert_eq!(std::fs::read(&path).expect("retry contents"), b"retry");
+            stage.cleanup().expect("stage still owns successful retry");
+        }
     }
 }

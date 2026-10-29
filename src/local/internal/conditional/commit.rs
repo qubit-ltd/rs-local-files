@@ -609,3 +609,339 @@ where
         current_directory,
     ))
 }
+
+#[cfg(all(test, feature = "digest"))]
+mod backend_phase_error_contract_tests {
+    use qubit_io::Output as ByteOutput;
+    use sha2::Sha256;
+
+    use super::super::ConditionalEntry;
+    use super::super::ConditionalHooks;
+    use super::super::NativeAttempt;
+    use super::super::RecoveryAccess;
+    use super::super::fake_backend::FakeBackend;
+    use super::*;
+
+    #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+    enum FailurePhase {
+        Never,
+        CandidateRead,
+        TargetRead,
+        Metadata,
+        Verify,
+        BeginPublication,
+    }
+
+    #[derive(Debug)]
+    struct FailedReadAccess {
+        path: PathBuf,
+    }
+
+    impl RecoveryAccess for FailedReadAccess {
+        fn open_reader(&self) -> crate::LocalResult<crate::LocalFileReader> {
+            Err(LocalFileError::from_io(
+                LocalFileOperation::OpenReader,
+                Some(self.path.clone()),
+                None,
+                io::Error::new(io::ErrorKind::PermissionDenied, "model backend denied retained read"),
+            ))
+        }
+        fn sync_file(&self) -> io::Result<()> {
+            std::fs::File::open(&self.path)?.sync_all()
+        }
+    }
+
+    struct ModelBackend {
+        inner: FakeBackend,
+        phase: FailurePhase,
+        failed_candidate: ConditionalEntry,
+    }
+
+    impl ByteOutput for ModelBackend {
+        type Item = u8;
+        unsafe fn write_unchecked(&mut self, bytes: &[u8], index: usize, count: usize) -> io::Result<usize> {
+            ByteOutput::write(&mut self.inner, &bytes[index..index + count])
+        }
+        fn flush(&mut self) -> io::Result<()> {
+            ByteOutput::flush(&mut self.inner)
+        }
+    }
+
+    impl ConditionalBackend for ModelBackend {
+        fn candidate(&self) -> &ConditionalEntry {
+            if self.phase == FailurePhase::CandidateRead {
+                &self.failed_candidate
+            } else {
+                self.inner.candidate()
+            }
+        }
+        fn create_candidate_copy(&mut self) -> io::Result<ConditionalEntry> {
+            self.inner.create_candidate_copy()
+        }
+        fn open_target(&self) -> io::Result<ConditionalEntry> {
+            let target = self.inner.open_target()?;
+            if self.phase == FailurePhase::TargetRead {
+                let path = target.namespace_path().to_path_buf();
+                Ok(ConditionalEntry::new(
+                    target.role(),
+                    path.clone(),
+                    Some(path.clone()),
+                    Box::new(FailedReadAccess { path }),
+                ))
+            } else {
+                Ok(target)
+            }
+        }
+        fn preserve_metadata(&mut self, entry: &ConditionalEntry) -> io::Result<()> {
+            if self.phase == FailurePhase::Metadata {
+                Err(io::Error::new(
+                    io::ErrorKind::PermissionDenied,
+                    "model metadata preservation failure",
+                ))
+            } else {
+                self.inner.preserve_metadata(entry)
+            }
+        }
+        fn sync_candidate(&self) -> io::Result<()> {
+            self.inner.sync_candidate()
+        }
+        fn sync_entry(&self, entry: &ConditionalEntry) -> io::Result<()> {
+            self.inner.sync_entry(entry)
+        }
+        fn sync_namespace(&self) -> io::Result<()> {
+            self.inner.sync_namespace()
+        }
+        fn is_candidate(&self, entry: &ConditionalEntry) -> io::Result<bool> {
+            self.inner.is_candidate(entry)
+        }
+        fn verify_entry(&self, entry: &ConditionalEntry) -> io::Result<()> {
+            if self.phase == FailurePhase::Verify {
+                Err(io::Error::new(
+                    io::ErrorKind::PermissionDenied,
+                    "model candidate verification failure",
+                ))
+            } else {
+                self.inner.verify_entry(entry)
+            }
+        }
+        fn begin_publication(&mut self) -> io::Result<()> {
+            if self.phase == FailurePhase::BeginPublication {
+                Err(io::Error::new(
+                    io::ErrorKind::PermissionDenied,
+                    "model publication setup failure",
+                ))
+            } else {
+                self.inner.begin_publication()
+            }
+        }
+        fn publish_absent(&mut self) -> NativeAttempt {
+            self.inner.publish_absent()
+        }
+        fn publish_content(&mut self) -> NativeAttempt {
+            self.inner.publish_content()
+        }
+        fn rollback(&mut self, displaced: &ConditionalEntry) -> NativeAttempt {
+            self.inner.rollback(displaced)
+        }
+        fn remove_observed(&mut self, entry: &ConditionalEntry) -> io::Result<()> {
+            self.inner.remove_observed(entry)
+        }
+        fn abort(&mut self) -> io::Result<()> {
+            self.inner.abort()
+        }
+        fn take_recovery_entries(&mut self) -> Vec<ConditionalEntry> {
+            self.inner.take_recovery_entries()
+        }
+        fn set_hooks(&mut self, hooks: ConditionalHooks) {
+            self.inner.set_hooks(hooks);
+        }
+        fn checkpoint(&mut self, point: ConditionalPoint) -> io::Result<()> {
+            self.inner.checkpoint(point)
+        }
+    }
+
+    #[test]
+    fn model_backend_errors_preserve_stage_recovery_and_unpublished_destination() {
+        use super::super::fake_backend::required_options;
+        use crate::options::LocalWriteMetadataPolicy;
+
+        for (phase, expected_stage) in [
+            (FailurePhase::CandidateRead, LocalConditionalWriteStage::VerifyCandidate),
+            (FailurePhase::TargetRead, LocalConditionalWriteStage::Precheck),
+            (FailurePhase::Metadata, LocalConditionalWriteStage::Precheck),
+            (FailurePhase::Verify, LocalConditionalWriteStage::Precheck),
+            (FailurePhase::BeginPublication, LocalConditionalWriteStage::Publish),
+        ] {
+            let inner = FakeBackend::new(b"old", b"candidate");
+            let (_lease, target) = inner.target_observer();
+            let path = inner.candidate().namespace_path().to_path_buf();
+            let failed_candidate = ConditionalEntry::new(
+                LocalRecoveryFileRole::StagedCandidate,
+                path.clone(),
+                Some(path.clone()),
+                Box::new(FailedReadAccess { path }),
+            );
+            let backend = ModelBackend {
+                inner,
+                phase,
+                failed_candidate,
+            };
+            let options = required_options().with_metadata_policy(LocalWriteMetadataPolicy::PreserveExisting);
+            let error = commit_conditional::<Sha256, _>(
+                backend,
+                LocalWritePrecondition::Content(Sha256::digest(b"old")),
+                options,
+                9,
+            )
+            .expect_err("backend phase failure must propagate");
+            assert_eq!(error.stage(), expected_stage, "{phase:?}");
+            assert_eq!(error.reason(), LocalConditionalFailureReason::Io, "{phase:?}");
+            assert_eq!(
+                error.error().io_error_kind(),
+                if matches!(phase, FailurePhase::CandidateRead | FailurePhase::TargetRead) {
+                    io::ErrorKind::Other
+                } else {
+                    io::ErrorKind::PermissionDenied
+                },
+                "{phase:?}"
+            );
+            assert_eq!(
+                error.publication(),
+                LocalConditionalPublicationState::NotPublished,
+                "{phase:?}"
+            );
+            assert_eq!(std::fs::read(&target).expect("target remains old"), b"old");
+            if phase == FailurePhase::CandidateRead {
+                assert!(error.candidate().is_none());
+            } else {
+                let candidate_copy = error.candidate().expect("independent candidate copy retained");
+                let mut reader = candidate_copy.open_reader().expect("recovery copy opens");
+                let mut bytes = Vec::new();
+                qubit_io::Streams::copy_input_to_output(&mut reader, &mut bytes).expect("recovery copy reads");
+                assert_eq!(bytes, b"candidate");
+            }
+        }
+    }
+
+    #[test]
+    fn transparent_model_adapter_preserves_successful_publication_sync_and_cleanup() {
+        use super::super::ConditionalHookAction;
+        use super::super::fake_backend::Event;
+        use super::super::fake_backend::required_options;
+        use crate::options::LocalWriteMetadataPolicy;
+
+        for absent in [false, true] {
+            let inner = FakeBackend::new(b"old", b"candidate");
+            if absent {
+                inner.remove_target();
+            }
+            let (lease, target) = inner.target_observer();
+            let events = inner.events();
+            let namespace_syncs = inner.namespace_sync_observer();
+            let candidate = inner.candidate().namespace_path().to_path_buf();
+            let failed_candidate = ConditionalEntry::new(
+                LocalRecoveryFileRole::StagedCandidate,
+                candidate.clone(),
+                Some(candidate.clone()),
+                Box::new(FailedReadAccess {
+                    path: candidate.clone(),
+                }),
+            );
+            let mut backend = ModelBackend {
+                inner,
+                phase: FailurePhase::Never,
+                failed_candidate,
+            };
+            let hooks = ConditionalHooks::sequence(vec![(
+                ConditionalPoint::BeforeRequiredFileSync,
+                ConditionalHookAction::Noop,
+            )]);
+            backend.set_hooks(hooks.clone());
+            ByteOutput::write_fully(&mut backend, b" appended").expect("adapter forwards candidate writes");
+            let precondition = if absent {
+                LocalWritePrecondition::Absent
+            } else {
+                LocalWritePrecondition::Content(Sha256::digest(b"old"))
+            };
+            let outcome = commit_conditional::<Sha256, _>(
+                backend,
+                precondition,
+                required_options().with_metadata_policy(LocalWriteMetadataPolicy::PreserveExisting),
+                18,
+            )
+            .expect("transparent adapter preserves successful commit");
+            assert_eq!(
+                std::fs::read(&target).expect("published candidate"),
+                b"candidate appended"
+            );
+            assert_eq!(outcome.digest(), &Sha256::digest(b"candidate appended"));
+            assert!(outcome.write_outcome().durable());
+            assert!(outcome.write_outcome().file_synced());
+            assert!(outcome.cleanup_errors().is_empty());
+            assert!(outcome.retained_files().is_empty());
+            assert!(!candidate.exists(), "candidate name was published");
+            assert!(
+                hooks.take(ConditionalPoint::BeforeRequiredFileSync).is_none(),
+                "configured sync checkpoint consumed"
+            );
+            assert_eq!(
+                namespace_syncs.get(),
+                3,
+                "prepublication, publication and cleanup namespace syncs"
+            );
+            assert_eq!(
+                events
+                    .borrow()
+                    .iter()
+                    .filter(|event| **event == Event::RequiredSync)
+                    .count(),
+                if absent { 3 } else { 4 },
+                "candidate, copy, installed and optional preserved metadata synchronization"
+            );
+            assert_eq!(
+                std::fs::read_dir(lease.path()).expect("final namespace").count(),
+                1,
+                "successful commit leaves exactly the published target"
+            );
+        }
+    }
+
+    #[test]
+    fn transparent_model_adapter_abort_preserves_unpublished_data_and_releases_ownership() {
+        let inner = FakeBackend::new(b"old", b"candidate");
+        let (lease, target) = inner.target_observer();
+        let root = lease.path().to_path_buf();
+        let candidate = inner.candidate().namespace_path().to_path_buf();
+        let failed_candidate = ConditionalEntry::new(
+            LocalRecoveryFileRole::StagedCandidate,
+            candidate.clone(),
+            Some(candidate.clone()),
+            Box::new(FailedReadAccess {
+                path: candidate.clone(),
+            }),
+        );
+        let mut backend = ModelBackend {
+            inner,
+            phase: FailurePhase::Never,
+            failed_candidate,
+        };
+        ByteOutput::write_fully(&mut backend, b" pending").expect("unpublished candidate write");
+        backend.abort().expect("adapter forwards fake backend abort");
+        assert_eq!(std::fs::read(&target).expect("target untouched"), b"old");
+        assert_eq!(
+            std::fs::read(&candidate).expect("fake backend retains its candidate until ownership ends"),
+            b"candidate pending"
+        );
+        drop(backend);
+        assert_eq!(
+            std::fs::read(&target).expect("external lease still retains namespace"),
+            b"old"
+        );
+        assert!(candidate.exists());
+        drop(lease);
+        assert!(
+            !root.exists(),
+            "adapter must not retain a hidden native namespace lease"
+        );
+    }
+}

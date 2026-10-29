@@ -159,3 +159,357 @@ fn lf3_privacy_unix_fifo_is_not_followed_by_private_file_creation() {
     assert!(privacy_unix::create_private_file_at(&parent, OsStr::new("fifo")).is_err());
     assert!(fs::symlink_metadata(&fifo).expect("restat FIFO").file_type().is_fifo());
 }
+
+#[test]
+fn lf3_privacy_unix_missing_name_after_open_retains_original_identity() {
+    let fixture = tempfile::tempdir().expect("create fixture");
+    let parent = File::open(fixture.path()).expect("open parent");
+    let original = fixture.path().join("created");
+    let moved = fixture.path().join("moved");
+
+    let error = privacy_unix::create_private_directory_at_with_hook(&parent, OsStr::new("created"), || {
+        fs::rename(&original, &moved).expect("move directory after handle acquisition");
+    })
+    .expect_err("missing original name must fail identity verification");
+
+    assert_eq!(error.source.kind(), std::io::ErrorKind::NotFound);
+    assert_eq!(error.source.raw_os_error(), Some(libc::ENOENT));
+    let retained = error.retained.expect("preserve partially created directory");
+    assert!(retained.directory);
+    assert_eq!(retained.name, OsStr::new("created"));
+    let opened = retained.file.as_ref().expect("retain original opened handle");
+    let metadata = opened.metadata().expect("stat retained directory");
+    let expected = crate::observation::LocalFileIdentity::unix(metadata.dev(), metadata.ino());
+    assert_eq!(retained.identity.as_ref(), Some(&expected));
+    assert_eq!(
+        metadata.ino(),
+        fs::metadata(&moved).expect("stat moved directory").ino()
+    );
+    assert_eq!(
+        retained.parent.metadata().expect("retained parent").ino(),
+        parent.metadata().expect("parent").ino()
+    );
+    assert!(!original.exists());
+    assert!(moved.is_dir());
+}
+
+#[test]
+fn lf3_privacy_unix_invalid_mode_after_open_preserves_partial_directory() {
+    for mode in [0o770, 0o600] {
+        let fixture = tempfile::tempdir().expect("create fixture");
+        let parent = File::open(fixture.path()).expect("open parent");
+        let path = fixture.path().join("created");
+        let error = privacy_unix::create_private_directory_at_with_hook(&parent, OsStr::new("created"), || {
+            fs::set_permissions(&path, fs::Permissions::from_mode(mode)).expect("alter directory mode after opening");
+        })
+        .expect_err("excess group access and missing owner execute must both be rejected");
+
+        assert_eq!(error.source.kind(), std::io::ErrorKind::PermissionDenied);
+        assert_eq!(
+            error.source.to_string(),
+            "umask prevented required private directory mode 0700"
+        );
+        let retained = error.retained.expect("preserve directory for identity-aware recovery");
+        assert!(retained.directory);
+        assert_eq!(retained.name, OsStr::new("created"));
+        let opened = retained.file.as_ref().expect("retain opened directory");
+        let metadata = opened.metadata().expect("retained metadata");
+        assert_eq!(metadata.mode() & 0o777, mode);
+        let expected = crate::observation::LocalFileIdentity::unix(metadata.dev(), metadata.ino());
+        assert_eq!(retained.identity.as_ref(), Some(&expected));
+        assert_eq!(
+            metadata.ino(),
+            fs::metadata(&path).expect("original name remains").ino()
+        );
+        privacy_unix::apply_current_user_access(opened, true, false).expect("repair access through retained handle");
+        privacy_unix::verify_current_user_access(opened, true, false).expect("verify repaired directory");
+    }
+}
+
+#[test]
+fn lf3_privacy_unix_missing_name_before_open_keeps_identity_unproven() {
+    let fixture = tempfile::tempdir().expect("create fixture");
+    let parent = File::open(fixture.path()).expect("open parent");
+    let original = fixture.path().join("created");
+    let moved = fixture.path().join("moved");
+    let error =
+        privacy_unix::create_private_directory_at_with_open_failure_hook(&parent, OsStr::new("created"), || {
+            fs::rename(&original, &moved)
+        })
+        .expect_err("native open must fail after original name disappears");
+
+    assert_eq!(error.source.kind(), std::io::ErrorKind::NotFound);
+    assert_eq!(error.source.raw_os_error(), Some(libc::ENOENT));
+    let retained = error.retained.expect("preserve partial creation context");
+    assert!(retained.directory);
+    assert_eq!(retained.name, OsStr::new("created"));
+    assert!(retained.file.is_none(), "no handle was acquired");
+    assert!(retained.identity.is_none(), "no identity was proven");
+    assert!(!original.exists());
+    assert!(moved.is_dir());
+}
+
+#[test]
+fn lf3_privacy_unix_nul_names_fail_before_creation() {
+    use std::os::unix::ffi::OsStrExt;
+
+    let fixture = tempfile::tempdir().expect("create fixture");
+    let parent = File::open(fixture.path()).expect("open parent");
+    let name = OsStr::from_bytes(b"invalid\0name");
+    for directory in [false, true] {
+        let result = if directory {
+            privacy_unix::create_private_directory_at(&parent, name)
+        } else {
+            privacy_unix::create_private_file_at(&parent, name)
+        };
+        let error = result.expect_err("native component containing NUL is rejected");
+        assert_eq!(error.source.kind(), std::io::ErrorKind::InvalidInput);
+        assert_eq!(error.source.to_string(), "name contains a nul byte");
+        assert!(error.retained.is_none());
+        assert_eq!(fs::read_dir(fixture.path()).expect("inspect parent").count(), 0);
+    }
+}
+
+#[test]
+fn lf3_privacy_unix_sandbox_metadata_failure_retains_verified_recovery_owner() {
+    verify_private_creation_metadata_failure(1);
+}
+
+#[test]
+fn lf3_privacy_unix_resource_metadata_failure_retains_child_and_sandbox_owners() {
+    verify_private_creation_metadata_failure(2);
+}
+
+fn verify_private_creation_metadata_failure(occurrence: usize) {
+    use std::path::Path;
+
+    use crate::LocalFileErrorKind;
+    use crate::LocalFileOperation;
+    use crate::LocalFileSystem;
+    use crate::options::LocalTempDirectoryOptions;
+    use crate::options::LocalTempFileOptions;
+    use crate::policy::LocalPrivacyRequirement;
+    use crate::tests::native_io_fault_tests::NativeIoFaultGuard;
+    use crate::tests::native_io_fault_tests::NativeIoPoint;
+
+    for rooted in [false, true] {
+        for directory in [false, true] {
+            let fixture = tempfile::tempdir().expect("private creation fixture");
+            let filesystem = if rooted {
+                LocalFileSystem::rooted(fixture.path()).expect("rooted authority")
+            } else {
+                LocalFileSystem::host().expect("host authority")
+            };
+            let parent = if rooted { Path::new("/") } else { fixture.path() };
+            let guard = NativeIoFaultGuard::fail_on(NativeIoPoint::HandleMetadata, occurrence);
+            let error = if directory {
+                filesystem
+                    .create_temp_directory_with_options(
+                        &LocalTempDirectoryOptions::new()
+                            .with_parent(parent)
+                            .with_privacy(LocalPrivacyRequirement::Required),
+                    )
+                    .expect_err("private directory metadata failure")
+            } else {
+                filesystem
+                    .create_temp_file_with_options(
+                        &LocalTempFileOptions::new()
+                            .with_parent(parent)
+                            .with_privacy(LocalPrivacyRequirement::Required),
+                    )
+                    .expect_err("private file metadata failure")
+            };
+            assert!(guard.fired());
+            assert_eq!(error.kind(), LocalFileErrorKind::Io);
+            assert_eq!(
+                error.operation(),
+                if directory {
+                    LocalFileOperation::CreateTempDirectory
+                } else {
+                    LocalFileOperation::CreateTempFile
+                }
+            );
+            assert_eq!(
+                error.io_error().expect("native metadata failure").to_string(),
+                "injected native I/O contract failure"
+            );
+            let (_, recovery) = error.into_temp_recovery_parts();
+            let mut recovery = recovery.expect("partial private creation transfers cleanup ownership");
+            let sandbox = fs::read_dir(fixture.path())
+                .expect("retained sandbox listing")
+                .next()
+                .expect("one retained sandbox")
+                .expect("sandbox entry")
+                .path();
+            let target = if occurrence == 1 {
+                assert_eq!(fs::read_dir(&sandbox).expect("sandbox children").count(), 0);
+                sandbox.clone()
+            } else {
+                fs::read_dir(&sandbox)
+                    .expect("retained child listing")
+                    .next()
+                    .expect("retained resource child")
+                    .expect("resource entry")
+                    .path()
+            };
+            let metadata = fs::metadata(&target).expect("retained native resource");
+            assert_eq!(metadata.is_dir(), occurrence == 1 || directory);
+            let identity = crate::observation::LocalFileIdentity::unix(metadata.dev(), metadata.ino());
+            assert_eq!(
+                recovery.identity(),
+                Some(&identity),
+                "identity comes from the still-valid retained handle"
+            );
+            drop(guard);
+            recovery
+                .cleanup()
+                .expect("retry observes valid retained handle and removes child plus sandbox");
+            assert!(!target.exists());
+            assert!(!sandbox.exists());
+            assert_eq!(fs::read_dir(fixture.path()).expect("parent after cleanup").count(), 0);
+            recovery.cleanup().expect("completed recovery cleanup is idempotent");
+        }
+    }
+}
+
+#[test]
+fn lf3_privacy_unix_sandbox_random_name_failure_precedes_private_mutation() {
+    verify_private_random_name_failure(1);
+}
+
+#[test]
+fn lf3_privacy_unix_resource_random_name_failure_retains_empty_sandbox_owner() {
+    verify_private_random_name_failure(2);
+}
+
+fn verify_private_random_name_failure(occurrence: usize) {
+    use std::path::Path;
+
+    use crate::LocalFileErrorKind;
+    use crate::LocalFileOperation;
+    use crate::LocalFileSystem;
+    use crate::options::LocalTempDirectoryOptions;
+    use crate::options::LocalTempFileOptions;
+    use crate::policy::LocalPrivacyRequirement;
+    use crate::tests::native_io_fault_tests::NativeIoFaultGuard;
+    use crate::tests::native_io_fault_tests::NativeIoPoint;
+
+    for rooted in [false, true] {
+        for directory in [false, true] {
+            let fixture = tempfile::tempdir().expect("private random-name fixture");
+            let filesystem = if rooted {
+                LocalFileSystem::rooted(fixture.path()).expect("rooted authority")
+            } else {
+                LocalFileSystem::host().expect("host authority")
+            };
+            let parent = if rooted { Path::new("/") } else { fixture.path() };
+            let guard = NativeIoFaultGuard::fail_on(NativeIoPoint::RandomName, occurrence);
+            let error = if directory {
+                filesystem
+                    .create_temp_directory_with_options(
+                        &LocalTempDirectoryOptions::new()
+                            .with_parent(parent)
+                            .with_privacy(LocalPrivacyRequirement::Required),
+                    )
+                    .expect_err("private directory random-name failure")
+            } else {
+                filesystem
+                    .create_temp_file_with_options(
+                        &LocalTempFileOptions::new()
+                            .with_parent(parent)
+                            .with_privacy(LocalPrivacyRequirement::Required),
+                    )
+                    .expect_err("private file random-name failure")
+            };
+            assert!(guard.fired());
+            assert_eq!(error.kind(), LocalFileErrorKind::Io);
+            assert_eq!(
+                error.operation(),
+                if directory {
+                    LocalFileOperation::CreateTempDirectory
+                } else {
+                    LocalFileOperation::CreateTempFile
+                }
+            );
+            let native = error.io_error().expect("native random generation error");
+            assert_eq!(native.kind(), std::io::ErrorKind::Other);
+            assert_eq!(
+                native
+                    .get_ref()
+                    .expect("getrandom error")
+                    .downcast_ref::<getrandom::Error>(),
+                Some(&getrandom::Error::UNSUPPORTED)
+            );
+            let error_path = error.path().expect("creation diagnostic path").to_path_buf();
+            let (_, recovery) = error.into_temp_recovery_parts();
+            if occurrence == 1 {
+                assert_eq!(error_path, parent);
+                assert!(recovery.is_none(), "nothing was created before sandbox name generation");
+                assert_eq!(fs::read_dir(fixture.path()).expect("unchanged parent").count(), 0);
+            } else {
+                let mut recovery = recovery.expect("created sandbox retains cleanup ownership");
+                let sandbox = fs::read_dir(fixture.path())
+                    .expect("sandbox listing")
+                    .next()
+                    .expect("retained sandbox")
+                    .expect("sandbox entry")
+                    .path();
+                assert_eq!(
+                    error_path, parent,
+                    "public diagnostics retain the requested creation parent"
+                );
+                let recovery_path = if rooted {
+                    Path::new(sandbox.file_name().expect("sandbox name")).to_path_buf()
+                } else {
+                    sandbox.clone()
+                };
+                assert_eq!(recovery.path(), recovery_path);
+                assert_eq!(fs::read_dir(&sandbox).expect("empty sandbox").count(), 0);
+                let metadata = fs::metadata(&sandbox).expect("sandbox metadata");
+                let identity = crate::observation::LocalFileIdentity::unix(metadata.dev(), metadata.ino());
+                assert_eq!(recovery.identity(), Some(&identity));
+                drop(guard);
+                recovery.cleanup().expect("cleanup valid retained empty sandbox");
+                assert!(!sandbox.exists());
+                assert_eq!(fs::read_dir(fixture.path()).expect("parent after recovery").count(), 0);
+                continue;
+            }
+            drop(guard);
+        }
+    }
+}
+
+#[test]
+fn lf3_privacy_unix_public_filename_generation_preserves_entropy_failure() {
+    use crate::LocalFileErrorKind;
+    use crate::LocalFileOperation;
+    use crate::path::LocalFileNames;
+    use crate::tests::native_io_fault_tests::NativeIoFaultGuard;
+    use crate::tests::native_io_fault_tests::NativeIoPoint;
+
+    let names = LocalFileNames::portable();
+    let guard = NativeIoFaultGuard::fail_on(NativeIoPoint::RandomName, 1);
+    let error = names
+        .random_name_with(Some(OsStr::new("report-")), Some(OsStr::new(".csv")))
+        .expect_err("native randomness failure prevents generating a public filename");
+    assert!(guard.fired());
+    assert_eq!(error.kind(), LocalFileErrorKind::Io);
+    assert_eq!(error.operation(), LocalFileOperation::GenerateName);
+    assert!(error.path().is_none());
+    assert_eq!(
+        error
+            .io_error()
+            .expect("entropy source")
+            .get_ref()
+            .expect("getrandom failure")
+            .downcast_ref::<getrandom::Error>(),
+        Some(&getrandom::Error::UNSUPPORTED)
+    );
+    drop(guard);
+    let generated = names
+        .random_name_with(Some(OsStr::new("report-")), Some(OsStr::new(".csv")))
+        .expect("filename generation retries normally after transient entropy failure");
+    let generated = generated.to_str().expect("portable ASCII filename");
+    assert!(generated.starts_with("report-"));
+    assert!(generated.ends_with(".csv"));
+}

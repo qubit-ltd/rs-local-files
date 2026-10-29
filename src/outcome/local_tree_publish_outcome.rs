@@ -123,3 +123,71 @@ impl LocalTreePublishOutcome {
         std::mem::take(&mut self.retained)
     }
 }
+
+#[cfg(test)]
+mod recovery_ownership_tests {
+    use std::ffi::OsStr;
+    use std::path::Path;
+
+    use crate::LocalFileErrorKind;
+    use crate::LocalFileSystem;
+    use crate::options::LocalDirectoryOpenOptions;
+    use crate::options::LocalTempCleanupLimits;
+    use crate::options::LocalTempDirectoryOptions;
+    use crate::options::LocalTreePublishOptions;
+    use crate::outcome::LocalTreePublication;
+
+    #[test]
+    fn test_published_outcome_transfers_secondary_cleanup_recovery_without_retracting_publication() {
+        let scratch = tempfile::tempdir().expect("scratch");
+        let parent = LocalFileSystem::host()
+            .expect("host filesystem")
+            .open_directory_with_options(scratch.path(), &LocalDirectoryOpenOptions::new())
+            .expect("parent authority");
+        let mut stage = parent
+            .create_staged_directory(&LocalTempDirectoryOptions::new())
+            .expect("publish stage");
+        stage
+            .write_file_new(Path::new("payload"), &mut &b"published"[..], 9)
+            .expect("published contents");
+        let mut outcome = stage
+            .publish_new(&parent, OsStr::new("published"), &LocalTreePublishOptions::new())
+            .expect("real successful publication");
+        let mut leftover = parent
+            .create_staged_directory(&LocalTempDirectoryOptions::new())
+            .expect("secondary recovery fixture");
+        leftover
+            .write_file_new(Path::new("temporary"), &mut &b"leftover"[..], 8)
+            .expect("tracked leftover");
+        let leftover_path = scratch.path().join(leftover.relative_name());
+        leftover.set_cleanup_limits(LocalTempCleanupLimits::new().with_max_entries(0));
+        let error = leftover.cleanup().expect_err("secondary cleanup exceeds its budget");
+        let (cause, owners) = error.into_parts();
+        outcome.cleanup_errors.push(cause);
+        outcome.retained.extend(owners);
+
+        assert_eq!(LocalTreePublication::Published, outcome.publication());
+        assert!(
+            !outcome.durable(),
+            "default publication does not request parent durability"
+        );
+        assert_eq!(1, outcome.cleanup_errors().len());
+        assert_eq!(LocalFileErrorKind::ResourceLimit, outcome.cleanup_errors()[0].kind());
+        assert_eq!(1, outcome.retained_resources().len());
+        let mut owners = outcome.into_retained_resources();
+        assert!(
+            leftover_path.exists(),
+            "extraction preserves the secondary recovery tree"
+        );
+        let mut owner = owners.pop().expect("secondary owner");
+        owner.set_cleanup_limits(LocalTempCleanupLimits::new());
+        owner.cleanup().expect("retry secondary cleanup");
+        assert!(!leftover_path.exists());
+        assert_eq!(
+            b"published",
+            std::fs::read(scratch.path().join("published/payload"))
+                .expect("published file remains")
+                .as_slice()
+        );
+    }
+}

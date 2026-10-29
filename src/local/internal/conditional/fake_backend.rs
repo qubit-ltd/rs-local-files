@@ -6,6 +6,150 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 
+#[cfg(test)]
+mod backend_error_contract_tests {
+    use qubit_io::Output;
+
+    #[test]
+    fn recovery_reader_metadata_failure_keeps_candidate_and_allows_retry() {
+        use crate::tests::native_io_fault_tests::NativeIoFaultGuard;
+        use crate::tests::native_io_fault_tests::NativeIoPoint;
+
+        let backend = FakeBackend::new(b"old", b"candidate");
+        let path = backend.candidate().namespace_path().to_path_buf();
+        let fault = NativeIoFaultGuard::fail_on(NativeIoPoint::ReaderMetadata, 1);
+        let error = backend
+            .candidate()
+            .open_reader()
+            .expect_err("opened recovery reader metadata fails");
+        assert!(fault.fired());
+        assert_eq!(error.operation(), crate::LocalFileOperation::OpenReader);
+        assert_eq!(error.path(), Some(path.as_path()));
+        assert_eq!(error.current_directory(), None);
+        assert_eq!(error.io_error_kind(), io::ErrorKind::Other);
+        assert!(error.to_string().contains("injected native I/O contract failure"));
+        assert_eq!(fs::read(&path).expect("candidate retained"), b"candidate");
+        assert_eq!(fs::read(&backend.target).expect("target preserved"), b"old");
+        drop(fault);
+        let mut reader = backend.candidate().open_reader().expect("retry retained candidate");
+        let mut bytes = Vec::new();
+        qubit_io::Streams::copy_input_to_output(&mut reader, &mut bytes).expect("read retained candidate");
+        assert_eq!(bytes, b"candidate");
+    }
+
+    use super::*;
+
+    #[test]
+    fn fake_output_and_retained_access_report_missing_files_without_mutating_target() {
+        let mut backend = FakeBackend::new(b"old", b"candidate");
+        Output::write_fully(&mut backend, b"+").expect("candidate append");
+        assert_eq!(fs::read(&backend.candidate).expect("candidate"), b"candidate+");
+        backend.candidate().sync_file().expect("sync retained candidate");
+        backend.abort().expect("fake abort is a successful no-op");
+        assert_eq!(fs::read(&backend.target).expect("target unchanged"), b"old");
+        fs::remove_file(&backend.candidate).expect("model external candidate removal");
+        let error = Output::write_fully(&mut backend, b"x").expect_err("removed candidate cannot accept data");
+        assert_eq!(error.kind(), io::ErrorKind::NotFound);
+        assert_eq!(
+            backend
+                .candidate()
+                .sync_file()
+                .expect_err("removed candidate cannot sync")
+                .kind(),
+            io::ErrorKind::NotFound
+        );
+        assert_eq!(
+            backend
+                .candidate()
+                .open_reader()
+                .expect_err("removed candidate cannot read")
+                .io_error_kind(),
+            io::ErrorKind::NotFound
+        );
+    }
+
+    #[test]
+    fn failed_publication_receipts_report_only_entries_that_really_remain() {
+        let mut before_first_rename = FakeBackend::new(b"old", b"candidate");
+        fs::create_dir(before_first_rename.root.path().join("old")).expect("incompatible displacement destination");
+        let receipt = before_first_rename.publish_content();
+        assert!(receipt.error.is_some());
+        assert_eq!(receipt.publication, LocalConditionalPublicationState::Indeterminate);
+        let installed = receipt.installed.expect("old target still exists");
+        assert_eq!(installed.namespace_path(), before_first_rename.target);
+        assert!(receipt.displaced.is_empty());
+        assert_eq!(
+            fs::read(&before_first_rename.target).expect("old target intact"),
+            b"old"
+        );
+
+        let mut after_first_rename = FakeBackend::new(b"old", b"candidate");
+        fs::remove_file(&after_first_rename.candidate).expect("candidate disappeared before native publish");
+        let receipt = after_first_rename.publish_content();
+        assert_eq!(receipt.error.expect("rename failed").kind(), io::ErrorKind::NotFound);
+        assert_eq!(receipt.publication, LocalConditionalPublicationState::Indeterminate);
+        assert!(receipt.installed.is_none());
+        assert_eq!(receipt.displaced.len(), 1);
+        assert_eq!(
+            fs::read(receipt.displaced[0].namespace_path()).expect("displaced old target retained"),
+            b"old"
+        );
+    }
+
+    #[cfg(feature = "digest")]
+    #[test]
+    fn commit_reports_candidate_digest_and_last_verification_failures_before_publication() {
+        use sha2::Digest;
+        use sha2::Sha256;
+
+        use crate::error::LocalConditionalWriteStage;
+        use crate::options::LocalWritePrecondition;
+
+        for at_final_verification in [false, true] {
+            let backend = FakeBackend::new(b"old", b"candidate");
+            let (_lease, target) = backend.target_observer();
+            let candidate = backend.candidate.clone();
+            #[cfg(feature = "test-support")]
+            let backend = if at_final_verification {
+                backend.with_hooks(ConditionalHooks::from_test(
+                    crate::test_support::TestConditionalHooks::once(
+                        crate::test_support::TestConditionalPoint::AfterPrecheck,
+                        move || fs::remove_file(candidate),
+                    ),
+                ))
+            } else {
+                fs::remove_file(candidate).expect("candidate disappeared before digest");
+                backend
+            };
+            #[cfg(not(feature = "test-support"))]
+            let backend = {
+                if at_final_verification {
+                    continue;
+                }
+                fs::remove_file(candidate).expect("candidate disappeared before digest");
+                backend
+            };
+            let error = super::super::commit_conditional::<Sha256, _>(
+                backend,
+                LocalWritePrecondition::Content(Sha256::digest(b"old")),
+                required_options(),
+                9,
+            )
+            .expect_err("missing candidate must stop publication");
+            assert_eq!(
+                error.stage(),
+                if at_final_verification {
+                    LocalConditionalWriteStage::Precheck
+                } else {
+                    LocalConditionalWriteStage::VerifyCandidate
+                }
+            );
+            assert_eq!(error.publication(), LocalConditionalPublicationState::NotPublished);
+            assert_eq!(fs::read(target).expect("target intact"), b"old");
+        }
+    }
+}
+
 use std::cell::Cell;
 use std::cell::RefCell;
 use std::fs;

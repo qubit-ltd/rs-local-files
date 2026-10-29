@@ -227,4 +227,42 @@ mod tests {
             .expect("required durability should synchronize a regular file")
         );
     }
+
+    #[cfg(feature = "test-support")]
+    #[test]
+    fn test_required_staging_sync_maps_failure_while_preferred_reports_incomplete_sync() {
+        let fixture = tempfile::NamedTempFile::new().expect("real staging file should exist");
+        let fault = crate::local::install_test_fault("writer-staged-file-sync").expect("sync failure should install");
+        assert!(
+            !synchronize_staging_file(
+                fixture.as_file(),
+                LocalDurabilityRequirement::Preferred,
+                LocalFileSyncRequirement::NotRequired,
+                None,
+                map_required_sync
+            )
+            .expect("preferred sync failure should remain retryable")
+        );
+        let error = synchronize_staging_file(
+            fixture.as_file(),
+            LocalDurabilityRequirement::NotRequired,
+            LocalFileSyncRequirement::Required,
+            None,
+            map_required_sync,
+        )
+        .expect_err("required synchronization must preserve the mapped failure");
+        assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
+        assert_eq!(error.destination_state(), LocalAtomicDestinationState::Unchanged);
+        drop(fault);
+        assert!(
+            synchronize_staging_file(
+                fixture.as_file(),
+                LocalDurabilityRequirement::NotRequired,
+                LocalFileSyncRequirement::Required,
+                None,
+                map_required_sync
+            )
+            .expect("same staging handle should synchronize once the fault is cleared")
+        );
+    }
 }

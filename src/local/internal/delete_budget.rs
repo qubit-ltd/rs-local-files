@@ -139,3 +139,103 @@ impl DeleteBudget {
 fn resource_error(error: LocalResourceLimitError) -> io::Error {
     io::Error::new(io::ErrorKind::QuotaExceeded, error)
 }
+
+#[cfg(test)]
+mod tests {
+    use std::io;
+    use std::path::Path;
+    use std::time::Instant;
+
+    use super::DeleteBudget;
+    use crate::LocalDeleteOptions;
+    use crate::LocalResourceKind;
+    use crate::LocalResourceLimitError;
+
+    #[test]
+    fn test_rejected_pending_path_reservation_does_not_consume_reusable_capacity() {
+        let mut budget = DeleteBudget::new(LocalDeleteOptions::new().with_max_pending_path_bytes(5), Instant::now());
+        let first = Path::new("abc");
+        budget.reserve_path(first).expect("first pending path should fit");
+
+        let error = budget
+            .reserve_path(Path::new("xyz"))
+            .expect_err("second path must exceed remaining capacity");
+        assert_eq!(error.kind(), io::ErrorKind::QuotaExceeded);
+        let facts = error
+            .get_ref()
+            .and_then(|source| source.downcast_ref::<LocalResourceLimitError>())
+            .expect("pending-path exhaustion must retain resource facts");
+        assert_eq!(facts.resource(), LocalResourceKind::PendingPathBytes);
+        assert_eq!(facts.limit(), 5);
+        assert_eq!(facts.remaining(), 2);
+        assert_eq!(facts.requested(), 3);
+        assert_eq!(budget.pending_bytes, 3);
+
+        budget
+            .reserve_path(Path::new("de"))
+            .expect("a rejected reservation must leave exact remaining capacity available");
+        budget.release_path(first);
+        budget
+            .reserve_path(Path::new("xyz"))
+            .expect("popping a path must return its capacity");
+        assert_eq!(budget.pending_bytes, 5);
+    }
+
+    #[test]
+    fn test_unbounded_pending_paths_reject_accounting_overflow_without_wrapping() {
+        let mut budget = DeleteBudget::new(LocalDeleteOptions::new(), Instant::now());
+        // Exercise a representable accumulated queue size without allocating an
+        // enormous queue.
+        budget.pending_bytes = usize::MAX;
+
+        let error = budget
+            .reserve_path(Path::new("x"))
+            .expect_err("unbounded queues must reject counter overflow");
+        assert_eq!(error.kind(), io::ErrorKind::QuotaExceeded);
+        let facts = error
+            .get_ref()
+            .and_then(|source| source.downcast_ref::<LocalResourceLimitError>())
+            .expect("overflow rejection must retain pending-path facts");
+        assert_eq!(facts.resource(), LocalResourceKind::PendingPathBytes);
+        assert_eq!(facts.limit(), usize::MAX);
+        assert_eq!(facts.remaining(), 0);
+        assert_eq!(facts.requested(), 1);
+        assert_eq!(budget.pending_bytes, usize::MAX);
+        budget
+            .reserve_path(Path::new(""))
+            .expect("an empty pending path must remain admissible at exact capacity");
+    }
+
+    #[test]
+    fn test_depth_rejection_does_not_charge_entry_capacity() {
+        let options = LocalDeleteOptions::new().with_max_depth(1).with_max_entries(1);
+        let mut budget = DeleteBudget::new(options, Instant::now());
+
+        let error = budget
+            .discover(2)
+            .expect_err("out-of-depth work must be rejected before charging an entry");
+        let facts = error
+            .get_ref()
+            .and_then(|source| source.downcast_ref::<LocalResourceLimitError>())
+            .expect("depth rejection must retain resource facts");
+        assert_eq!(facts.resource(), LocalResourceKind::Depth);
+        assert_eq!(facts.limit(), 1);
+        assert_eq!(facts.remaining(), 0);
+        assert_eq!(facts.requested(), 2);
+
+        budget
+            .discover(1)
+            .expect("depth rejection must leave the entry budget intact");
+        let error = budget
+            .discover(0)
+            .expect_err("the successful discovery must consume the sole entry");
+        let facts = error
+            .get_ref()
+            .and_then(|source| source.downcast_ref::<LocalResourceLimitError>())
+            .expect("entry rejection must retain resource facts");
+        assert_eq!(facts.resource(), LocalResourceKind::Entry);
+        assert_eq!(facts.limit(), 1);
+        assert_eq!(facts.remaining(), 0);
+        assert_eq!(facts.requested(), 1);
+    }
+}

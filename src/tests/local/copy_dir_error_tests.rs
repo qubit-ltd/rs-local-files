@@ -43,3 +43,31 @@ fn test_local_copy_dir_error_exposes_parts_and_formats_cleanup_context() {
     assert!(cleanup.is_some());
     assert_eq!(native.kind(), io::ErrorKind::Other);
 }
+
+#[test]
+fn test_cleanup_failure_without_staging_preserves_the_primary_copy_error() {
+    let error = LocalCopyDirError::new(
+        LocalCopyDirStage::CopyFileContents,
+        "source".into(),
+        "destination".into(),
+        LocalCopyDirStats::default(),
+        io::Error::new(io::ErrorKind::PermissionDenied, "primary copy failure"),
+    )
+    .with_cleanup_error(io::Error::other("destination cleanup failure"));
+    assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
+    assert!(error.temporary_path().is_none());
+    assert_eq!(
+        error.source().expect("primary source should remain").to_string(),
+        "primary copy failure"
+    );
+    assert!(error.to_string().contains("destination cleanup failure"));
+    let (_, source, target, _, staging, cleanup, primary) = error.into_parts();
+    assert_eq!(source, Path::new("source"));
+    assert_eq!(target, Path::new("destination"));
+    assert!(staging.is_none());
+    assert_eq!(
+        cleanup.expect("secondary cleanup failure should remain").to_string(),
+        "destination cleanup failure"
+    );
+    assert_eq!(primary.kind(), io::ErrorKind::PermissionDenied);
+}

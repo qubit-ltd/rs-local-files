@@ -73,3 +73,34 @@ impl LocalWindowsAccessObservation {
         &self.aces
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::LocalWindowsAccessObservation;
+
+    #[test]
+    fn test_windows_dacl_states_are_readable_on_every_platform() {
+        for (present, null, protected, valid, current_owner) in [
+            (false, false, false, false, false),
+            (true, true, false, true, true),
+            (true, false, true, true, false),
+        ] {
+            let observation = LocalWindowsAccessObservation {
+                owner_sid: "S-1-5-18".to_owned(),
+                owner_is_current_user: current_owner,
+                dacl_present: present,
+                dacl_is_null: null,
+                dacl_protected: protected,
+                acl_valid: valid,
+                aces: Vec::new(),
+            };
+            assert_eq!(observation.owner_sid(), "S-1-5-18");
+            assert_eq!(observation.owner_is_current_user(), current_owner);
+            assert_eq!(observation.dacl_present(), present);
+            assert_eq!(observation.dacl_is_null(), null);
+            assert_eq!(observation.dacl_protected(), protected);
+            assert_eq!(observation.acl_valid(), valid);
+            assert!(observation.aces().is_empty());
+        }
+    }
+}

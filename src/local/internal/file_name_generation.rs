@@ -85,7 +85,11 @@ fn try_random_hex() -> Result<String> {
 /// source cannot provide bytes.
 #[inline]
 fn fill_random_bytes(bytes: &mut [u8]) -> Result<()> {
-    getrandom::fill(bytes).map_err(Error::other)
+    #[cfg(test)]
+    let random_result = crate::tests::native_io_fault_tests::random_fill(bytes);
+    #[cfg(not(test))]
+    let random_result = getrandom::fill(bytes);
+    random_result.map_err(Error::other)
 }
 
 /// Encodes bytes as lowercase hexadecimal.

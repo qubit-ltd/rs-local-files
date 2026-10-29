@@ -150,7 +150,11 @@ impl LocalFileNames {
     /// violates this policy.
     pub fn random_name_with(&self, prefix: Option<&OsStr>, suffix: Option<&OsStr>) -> LocalResult<OsString> {
         let mut random = [0_u8; RANDOM_NAME_BYTES];
-        getrandom::fill(&mut random).map_err(|source| {
+        #[cfg(test)]
+        let random_result = crate::tests::native_io_fault_tests::random_fill(&mut random);
+        #[cfg(not(test))]
+        let random_result = getrandom::fill(&mut random);
+        random_result.map_err(|source| {
             LocalFileError::from_io(
                 LocalFileOperation::GenerateName,
                 None,

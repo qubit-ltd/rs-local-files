@@ -591,6 +591,8 @@ impl qubit_io::Output for LocalAtomicWriter {
     }
 
     unsafe fn write_unchecked(&mut self, input: &[u8], index: usize, count: usize) -> io::Result<usize> {
+        #[cfg(test)]
+        crate::tests::native_io_fault_tests::check(crate::tests::native_io_fault_tests::NativeIoPoint::FileWrite)?;
         qubit_io::Output::write(self.staged_file.file_mut(), &input[index..index + count])
     }
 

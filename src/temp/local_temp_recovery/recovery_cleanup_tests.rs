@@ -131,3 +131,33 @@ fn test_review_recovery_complete_cleanup_is_idempotent() {
     recovery.cleanup().expect("cleanup all entries");
     recovery.cleanup().expect("cleanup after completion is idempotent");
 }
+
+#[test]
+fn test_recovery_nul_name_refuses_cleanup_without_losing_owned_file() {
+    let fixture = tempfile::tempdir().expect("temporary directory");
+    let parent = File::open(fixture.path()).expect("open parent directory");
+    let path = fixture.path().join("retained");
+    std::fs::write(&path, b"retained contents").expect("create original file");
+    let file = File::open(&path).expect("retain original handle");
+    let expected = identity(&file);
+    let native = entry(&parent, "retained\0invalid", Some(file), Some(expected.clone()));
+    let mut recovery = LocalTempRecovery::from_native(path.clone(), native);
+
+    for _ in 0..2 {
+        let error = recovery
+            .cleanup()
+            .expect_err("native NUL name cannot identify a cleanup target");
+        assert_eq!(error.kind(), LocalFileErrorKind::InvalidPath);
+        assert_eq!(error.operation(), crate::LocalFileOperation::Cleanup);
+        assert_eq!(recovery.identity(), Some(&expected));
+        assert_eq!(
+            std::fs::read(&path).expect("original remains owned"),
+            b"retained contents"
+        );
+    }
+    drop(recovery);
+    assert_eq!(
+        std::fs::read(&path).expect("best-effort drop must also refuse invalid name"),
+        b"retained contents"
+    );
+}

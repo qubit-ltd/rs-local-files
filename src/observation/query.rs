@@ -17,6 +17,17 @@ pub(crate) fn query_observation(
     file: &File,
     requirement: LocalObservationRequirement,
 ) -> LocalResult<LocalFileObservation> {
+    #[cfg(test)]
+    if let Err(source) =
+        crate::tests::native_io_fault_tests::check(crate::tests::native_io_fault_tests::NativeIoPoint::Observation)
+    {
+        return Err(crate::error::LocalFileError::from_io(
+            crate::error::LocalFileOperation::Metadata,
+            None,
+            None,
+            source,
+        ));
+    }
     #[cfg(unix)]
     {
         crate::observation::unix::query_native(file, requirement)

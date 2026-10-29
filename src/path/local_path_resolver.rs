@@ -321,3 +321,34 @@ fn has_trailing_separator_or_dot(path: &Path) -> bool {
 const fn has_trailing_separator_or_dot(_path: &Path) -> bool {
     false
 }
+
+#[cfg(test)]
+mod missing_host_snapshot_tests {
+    use std::path::Path;
+
+    use super::bind_host_operand;
+    use crate::error::LocalFileErrorKind;
+    use crate::error::LocalFileOperation;
+
+    #[test]
+    fn test_relative_host_operand_requires_a_snapshot_but_absolute_input_does_not() {
+        let relative = Path::new("parent/child");
+        let error = bind_host_operand(relative, None).expect_err("relative input needs a captured current directory");
+        assert_eq!(error.kind(), LocalFileErrorKind::InvalidState);
+        assert_eq!(error.operation(), LocalFileOperation::BindPath);
+        assert_eq!(error.path(), Some(relative));
+        assert_eq!(
+            error.reason(),
+            Some("a relative Host path requires a process current directory snapshot")
+        );
+        let absolute = if cfg!(windows) {
+            Path::new(r"C:\parent\child")
+        } else {
+            Path::new("/parent/child")
+        };
+        assert_eq!(
+            bind_host_operand(absolute, None).expect("absolute input needs no current directory"),
+            absolute
+        );
+    }
+}
