@@ -46,6 +46,7 @@ use crate::observation::LocalSecurityObservationOptions;
 use crate::options::LocalDirectoryOpenOptions;
 use crate::options::LocalObservedReadOptions;
 use crate::options::LocalPathBindingOptions;
+use crate::options::LocalWriteMode;
 use crate::rooted::Root;
 
 #[path = "local_directory_handle/staged.rs"]
@@ -871,8 +872,9 @@ impl LocalDirectoryHandle {
         relative: &Path,
         options: &LocalWriteOptions,
     ) -> LocalResult<LocalFileWriter> {
+        let follow_final = options.mode() != LocalWriteMode::CreateNew;
         self.filesystem
-            .open_writer_with_options(&self.checked(relative, true)?, options)
+            .open_writer_with_options(&self.checked(relative, follow_final)?, options)
     }
 
     /// Creates a directory beneath this authority.
@@ -885,7 +887,7 @@ impl LocalDirectoryHandle {
         options: &LocalCreateDirectoryOptions,
     ) -> LocalResult<LocalCreateDirectoryOutcome> {
         self.filesystem
-            .create_directory_with_options(&self.checked(relative, true)?, options)
+            .create_directory_with_options(&self.checked(relative, false)?, options)
     }
 
     /// Copies between two relative paths beneath this authority.

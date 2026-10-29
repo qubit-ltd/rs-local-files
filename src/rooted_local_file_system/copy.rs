@@ -129,7 +129,7 @@ impl RootedLocalFileSystem {
                 },
                 false,
                 false,
-                options.preserve_metadata(),
+                crate::LocalMetadataPreservePolicy::None,
             ));
         }
         if crate::local::copy_file_replace_requires_atomicity(
@@ -186,7 +186,11 @@ impl RootedLocalFileSystem {
             },
             !directory && stats.atomic_publication(),
             durable,
-            options.preserve_metadata(),
+            if stats.files > 0 || stats.directories > 0 || stats.overwritten > 0 {
+                options.preserve_metadata()
+            } else {
+                crate::LocalMetadataPreservePolicy::None
+            },
         ))
     }
 }

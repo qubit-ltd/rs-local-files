@@ -16,6 +16,11 @@
 /// These limits are enforced by Rooted resolution. Host observed reads return
 /// `Unsupported` when their effective resolution limits are finite; unbounded
 /// Host observed reads retain their existing behavior.
+/// Each limit measures work during resolution, not the size of the final file
+/// contents. Limits are combined by taking the tighter finite value, and
+/// `Some(0)` remains a real cap. An operation that exceeds an effective cap
+/// returns a resource-limit error; a finite cap on Host observed reads is
+/// rejected as unsupported rather than silently ignored.
 ///
 /// # Examples
 ///

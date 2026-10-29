@@ -942,7 +942,7 @@ mod tests {
             LocalFileOperation::Metadata,
             Some(Path::new("native-path").to_path_buf()),
             None,
-            std::io::Error::from_raw_os_error(libc::EIO),
+            std::io::Error::other("observation-source-sentinel"),
         );
 
         let wrapped = operation_error(
@@ -959,7 +959,9 @@ mod tests {
         assert_eq!(wrapped.current_directory(), Some(Path::new("/sub")));
         assert!(matches!(
             wrapped.typed_source(),
-            Some(LocalFileErrorSource::Io(source)) if source.raw_os_error() == Some(libc::EIO)
+            Some(LocalFileErrorSource::Io(source))
+                if source.kind() == std::io::ErrorKind::Other
+                    && source.to_string() == "observation-source-sentinel"
         ));
     }
 }

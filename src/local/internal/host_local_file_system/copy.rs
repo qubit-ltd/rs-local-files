@@ -234,7 +234,11 @@ impl HostLocalFileSystem {
                 LocalCopyMethod::Recursive,
                 false,
                 false,
-                options.preserve_metadata(),
+                if stats.files > 0 || stats.directories > 0 || stats.overwritten > 0 {
+                    options.preserve_metadata()
+                } else {
+                    crate::LocalMetadataPreservePolicy::None
+                },
             ));
         }
         let target_is_directory = match destination_is_directory(target) {
@@ -279,12 +283,17 @@ impl HostLocalFileSystem {
         )
         .map_err(|error| copy_failure_published(error, LocalCopyStats::from_internal(stats)))?;
         let durable = stats.files_durable() && parent_durable;
+        let public_stats = LocalCopyStats::from_internal(stats);
         Ok(LocalCopyOutcome::new(
-            LocalCopyStats::from_internal(stats),
+            public_stats,
             LocalCopyMethod::StagedFile,
             stats.atomic_publication(),
             durable,
-            options.preserve_metadata(),
+            if public_stats.files() == 0 {
+                crate::LocalMetadataPreservePolicy::None
+            } else {
+                options.preserve_metadata()
+            },
         ))
     }
 }
@@ -349,7 +358,7 @@ fn copy_symlink_entry(
             LocalCopyMethod::StagedFile,
             false,
             false,
-            options.preserve_metadata(),
+            crate::LocalMetadataPreservePolicy::None,
         ));
     }
     debug_assert!(matches!(

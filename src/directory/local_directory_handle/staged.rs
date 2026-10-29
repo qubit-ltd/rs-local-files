@@ -102,7 +102,8 @@ impl LocalDirectoryHandle {
                         source,
                     )
                 })?;
-                if metadata.mode() & 0o077 != 0 || metadata.uid() != unsafe { libc::getuid() } {
+                // SAFETY: `geteuid` is a side-effect-free process identity query.
+                if metadata.mode() & 0o077 != 0 || metadata.uid() != unsafe { libc::geteuid() } {
                     return Err(LocalFileError::new(
                         LocalFileErrorKind::RequirementNotMet,
                         LocalFileOperation::Metadata,

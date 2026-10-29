@@ -41,7 +41,8 @@ pub struct LocalCopyOutcome {
     atomic: bool,
     /// Whether required durability synchronization completed.
     durable: bool,
-    /// Metadata preservation actually applied by the copy pipeline.
+    /// Metadata preservation applied to copied entries; skipped entries are
+    /// not covered by this policy.
     metadata_preservation: LocalMetadataPreservePolicy,
 }
 
@@ -105,7 +106,10 @@ impl LocalCopyOutcome {
         self.durable
     }
 
-    /// Returns metadata preservation applied by the copy pipeline.
+    /// Returns metadata preservation applied to copied entries.
+    ///
+    /// Returns [`LocalMetadataPreservePolicy::None`] when no entries were
+    /// copied. Skipped entries are not covered by the reported policy.
     #[must_use = "the applied metadata policy should be inspected"]
     #[inline]
     pub const fn metadata_preservation(&self) -> LocalMetadataPreservePolicy {
