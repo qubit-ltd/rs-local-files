@@ -189,7 +189,7 @@ fn test_commit_cleanup_failure_is_not_converted_to_skip() {
         )
         .expect_err("a commit conflict with failed cleanup must remain an error");
 
-    assert_eq!(LocalCopyFailureState::Indeterminate, failure.state());
+    assert_eq!(LocalCopyFailureState::Unchanged, failure.state());
     assert_eq!(LocalFileErrorKind::AlreadyExists, failure.error().kind());
     assert!(failure.cleanup_error().is_some());
     assert_eq!(0, failure.partial_stats().files());

@@ -561,22 +561,11 @@ fn rooted_commit_error(
 ) -> Error {
     let installed_before_sync_failure = source_error.stage() == crate::LocalAtomicWriteStage::SyncParent
         && source_error.destination_state() == crate::LocalAtomicDestinationState::Replaced;
-    let prepublication_metadata_failure = source_error.stage()
-        == crate::LocalAtomicWriteStage::ApplyDestinationMetadata
-        && source_error.destination_state() == crate::LocalAtomicDestinationState::Unchanged;
-    let prepublication_destination_conflict = source_error.stage() == crate::LocalAtomicWriteStage::ReplaceDestination
-        && source_error.kind() == ErrorKind::AlreadyExists
-        && source_error.destination_state() == crate::LocalAtomicDestinationState::Unchanged
-        && source_error.cleanup_error().is_none()
-        && source_error.parent_sync_error().is_none();
+    let atomic_destination_state = source_error.destination_state();
     let (temporary_path, cleanup_error, source_error) = source_error.into_staging_parts();
     let source_kind = source_error.kind();
     let copy_error = error(
-        if prepublication_metadata_failure || prepublication_destination_conflict {
-            Stage::PrepareDestination
-        } else {
-            Stage::CommitFile
-        },
+        Stage::CommitFile,
         source,
         destination,
         if installed_before_sync_failure {
@@ -593,6 +582,7 @@ fn rooted_commit_error(
         (None, Some(cleanup_error)) => copy_error.with_cleanup_error(cleanup_error),
         _ => copy_error,
     };
+    let copy_error = copy_error.with_atomic_destination_state(atomic_destination_state);
     if installed_before_sync_failure {
         copy_error.with_failure_state(crate::LocalCopyFailureState::Published)
     } else {
@@ -679,8 +669,12 @@ mod tests {
             )
             .with_cleanup_error(Some(io::Error::from(io::ErrorKind::Other))),
         );
-        assert_eq!(super::super::Stage::PrepareDestination, metadata_error.stage());
+        assert_eq!(super::super::Stage::CommitFile, metadata_error.stage());
         assert_eq!(None, metadata_error.failure_state());
+        assert_eq!(
+            Some(crate::LocalAtomicDestinationState::Unchanged),
+            metadata_error.atomic_destination_state()
+        );
         assert_eq!(Some(Path::new("staging")), metadata_error.temporary_path());
         assert_eq!(
             Some(io::ErrorKind::Other),

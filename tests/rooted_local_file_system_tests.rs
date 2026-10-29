@@ -756,7 +756,7 @@ fn test_rooted_copy_failure_retains_cleanup_staging_context() {
             )
             .expect_err("rooted install and cleanup faults must fail");
 
-        assert_eq!(LocalCopyFailureState::Indeterminate, failure.state());
+        assert_eq!(LocalCopyFailureState::Unchanged, failure.state());
         assert!(failure.staging_path().is_some());
         assert!(failure.cleanup_error().is_some());
         assert!(

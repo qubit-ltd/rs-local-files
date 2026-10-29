@@ -120,7 +120,7 @@ fn test_rooted_preinstall_and_install_failures_do_not_claim_publication() {
         ),
         (
             "rooted-copy-file-commit-native",
-            LocalCopyFailureState::Indeterminate,
+            LocalCopyFailureState::Unchanged,
             LocalFileErrorKind::Io,
             None,
             Some(libc::EIO),
@@ -157,4 +157,30 @@ fn test_rooted_preinstall_and_install_failures_do_not_claim_publication() {
                 .as_slice()
         );
     }
+}
+
+#[test]
+fn test_rooted_removed_conflict_keeps_partial_state_after_commit_failure() {
+    let directory = tempdir().expect("temporary root should be created");
+    fs::write(directory.path().join("source"), b"payload").expect("source should be written");
+    fs::create_dir_all(directory.path().join("target/child")).expect("conflicting tree should be created");
+    fs::write(directory.path().join("target/child/old"), b"old").expect("target child should be written");
+    let filesystem = LocalFileSystem::rooted(directory.path()).expect("rooted filesystem should open");
+    let _fault = install_test_fault("rooted-copy-file-commit-native").expect("writer fault should install");
+
+    let failure = filesystem
+        .copy_with_options(
+            Path::new("source"),
+            Path::new("target"),
+            &LocalCopyOptions::default()
+                .with_conflict(LocalCopyConflictPolicy::Overwrite)
+                .with_type_conflict(LocalCopyTypeConflictPolicy::Replace)
+                .with_durability(LocalDurabilityRequirement::Required),
+        )
+        .expect_err("the failed commit follows removal of the conflicting tree");
+
+    assert_eq!(LocalCopyFailureState::PartiallyPublished, failure.state());
+    assert!(!directory.path().join("target").exists());
+    assert_eq!(Some(Path::new("/source")), failure.failed_source_path());
+    assert_eq!(Some(Path::new("/target")), failure.failed_target_path());
 }

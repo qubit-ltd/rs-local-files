@@ -113,9 +113,19 @@ impl LocalCopyFailure {
     #[must_use]
     pub(crate) fn from_copy_dir_error(source: &Path, target: &Path, error: LocalCopyDirError) -> Self {
         let failure_hint = error.failure_state();
+        let atomic_destination_state = error.atomic_destination_state();
         let (stage, failed_source, failed_target, stats, staging_path, cleanup_error, primary) = error.into_parts();
         let partial_stats = LocalCopyStats::from_internal(stats);
-        let state = merge_copy_failure_state(copy_failure_state(stage, partial_stats), failure_hint);
+        let inferred_state = if atomic_destination_state == Some(crate::LocalAtomicDestinationState::Unchanged) {
+            if partial_stats.files() > 0 || partial_stats.directories() > 0 {
+                LocalCopyFailureState::PartiallyPublished
+            } else {
+                LocalCopyFailureState::Unchanged
+            }
+        } else {
+            copy_failure_state(stage, partial_stats)
+        };
+        let state = merge_copy_failure_state(inferred_state, failure_hint);
         let resource_limit = primary
             .get_ref()
             .and_then(|source| source.downcast_ref::<LocalResourceLimitError>())

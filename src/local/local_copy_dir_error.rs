@@ -15,6 +15,7 @@ use std::io;
 use std::path::Path;
 use std::path::PathBuf;
 
+use crate::LocalAtomicDestinationState;
 use crate::LocalCopyDirStage;
 use crate::LocalCopyDirStats;
 use crate::outcome::LocalCopyFailureState;
@@ -48,6 +49,8 @@ pub struct LocalCopyDirError {
     error: io::Error,
     /// Strongest destination effect proven before this error was created.
     failure_state: Option<LocalCopyFailureState>,
+    /// Native state of the atomic destination entry being committed.
+    atomic_destination_state: Option<LocalAtomicDestinationState>,
 }
 #[allow(dead_code)]
 impl LocalCopyDirError {
@@ -79,6 +82,7 @@ impl LocalCopyDirError {
             cleanup_error: None,
             error,
             failure_state: None,
+            atomic_destination_state: None,
         }
     }
 
@@ -229,6 +233,20 @@ impl LocalCopyDirError {
     #[inline]
     pub(crate) const fn failure_state(&self) -> Option<LocalCopyFailureState> {
         self.failure_state
+    }
+
+    /// Records the native state of the current atomic destination entry.
+    #[must_use]
+    #[inline]
+    pub(crate) fn with_atomic_destination_state(mut self, state: LocalAtomicDestinationState) -> Self {
+        self.atomic_destination_state = Some(state);
+        self
+    }
+
+    /// Returns native destination evidence before public error decomposition.
+    #[inline]
+    pub(crate) const fn atomic_destination_state(&self) -> Option<LocalAtomicDestinationState> {
+        self.atomic_destination_state
     }
 }
 
