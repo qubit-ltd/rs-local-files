@@ -13,9 +13,13 @@ use super::LocalResolutionLimits;
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 #[must_use = "path binding options have no effect unless they are used"]
 pub struct LocalPathBindingOptions {
+    /// Maximum retained ancestor handles; `None` means unbounded.
     max_ancestors: Option<usize>,
+    /// Maximum cumulative native path bytes; `None` means unbounded.
     max_path_bytes: Option<usize>,
+    /// Cooperative duration limit; `None` means no configured deadline.
     deadline: Option<Duration>,
+    /// Additional resolution constraints; `None` adds no constraints.
     resolution_limits: Option<LocalResolutionLimits>,
 }
 
@@ -56,17 +60,21 @@ impl LocalPathBindingOptions {
         self
     }
 
+    /// Returns the optional ancestor-handle limit without performing I/O.
     pub(crate) const fn max_ancestors(&self) -> Option<usize> {
         self.max_ancestors
     }
 
+    /// Returns the optional path-byte limit without performing I/O.
     pub(crate) const fn max_path_bytes(&self) -> Option<usize> {
         self.max_path_bytes
     }
 
+    /// Returns the optional deadline without performing I/O.
     pub(crate) const fn deadline(&self) -> Option<Duration> {
         self.deadline
     }
+    /// Returns additional resolution constraints without performing I/O.
     pub(crate) const fn resolution_limits(&self) -> Option<LocalResolutionLimits> {
         self.resolution_limits
     }

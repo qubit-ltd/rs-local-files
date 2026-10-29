@@ -134,12 +134,60 @@ pub(crate) trait ReaderPathBinding: std::fmt::Debug + Send + Sync {
 
 /// A byte reader whose initial and refreshed observations share its open
 /// handle.
-#[derive(Debug)]
+///
+/// A path binding can additionally check whether the source name still refers
+/// to the same native object. Object identity does not identify a content
+/// version; use a content digest or another application-level check when that
+/// distinction matters.
+///
+/// # Examples
+///
+/// ```
+/// use std::path::Path;
+///
+/// use qubit_local_files::LocalFileSystem;
+/// use qubit_local_files::observation::LocalSourceVerification;
+/// use qubit_local_files::options::{LocalObservedReadOptions, LocalPathBindingOptions};
+///
+/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+/// let directory = tempfile::tempdir()?;
+/// std::fs::write(directory.path().join("source"), b"contents")?;
+/// let filesystem = LocalFileSystem::rooted(directory.path())?;
+/// let binding = LocalPathBindingOptions::new().with_max_ancestors(8);
+/// let options = LocalObservedReadOptions::new().with_path_binding(binding);
+/// let mut reader = filesystem.open_observed_reader(Path::new("source"), &options)?;
+/// let bytes = reader.read_to_end_limited(1024)?;
+/// assert_eq!(bytes, b"contents");
+/// match reader.verify_path_binding()? {
+///     LocalSourceVerification::Unchanged => {}
+///     LocalSourceVerification::Changed | LocalSourceVerification::Missing => {}
+///     _ => {}
+/// }
+/// // Identity checks the native object, not whether its bytes changed in place.
+/// # Ok(())
+/// # }
+/// ```
 pub struct LocalObservedReader {
+    /// Open file handle used for reads and same-handle observations.
     reader: LocalFileReader,
+    /// Observation captured when this reader was created.
     observation: LocalFileObservation,
+    /// Requirement used for subsequent observations.
     requirement: LocalObservationRequirement,
+    /// Optional pathname binding used by `verify_path_binding`.
     binding: Option<Box<dyn ReaderPathBinding>>,
+}
+
+impl std::fmt::Debug for LocalObservedReader {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("LocalObservedReader")
+            .field("observation", &self.observation)
+            .field("requirement", &self.requirement)
+            .field("binding_enabled", &self.binding.is_some())
+            .field("binding", &self.binding)
+            .finish()
+    }
 }
 
 impl LocalObservedReader {
@@ -199,6 +247,10 @@ impl LocalObservedReader {
     /// Returns `InvalidState` when no binding was requested. Native query
     /// failures are propagated; changed or missing names are reported as a
     /// successful [`LocalSourceVerification`] value.
+    ///
+    /// # Errors
+    /// Returns `InvalidState` if this reader has no path binding and propagates
+    /// resolution, policy, timeout, or native query errors from verification.
     pub fn verify_path_binding(&self) -> LocalResult<LocalSourceVerification> {
         self.binding
             .as_ref()
@@ -210,6 +262,16 @@ impl LocalObservedReader {
     ///
     /// At exactly the limit, one extra byte may be consumed to distinguish
     /// EOF from growth. Read and allocation errors do not return partial data.
+    ///
+    /// # Parameters
+    /// - `maximum`: Maximum number of bytes to return.
+    ///
+    /// # Returns
+    /// The complete byte vector when EOF occurs within the limit.
+    ///
+    /// # Errors
+    /// Returns `ResourceLimit` when input exceeds the limit, or a read error;
+    /// partial bytes are discarded although consumed input cannot be restored.
     pub fn read_to_end_limited(&mut self, maximum: u64) -> LocalResult<Vec<u8>> {
         collect_limited(self, Some(maximum))
     }

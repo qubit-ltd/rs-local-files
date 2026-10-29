@@ -17,10 +17,15 @@ use crate::options::LocalResolutionLimits;
 #[derive(Clone, Debug, Default)]
 #[must_use = "directory options have no effect unless used"]
 pub struct LocalDirectoryOpenOptions {
+    /// Optional policy override; `None` inherits the filesystem policy.
     symlink_policy: Option<LocalSymlinkPolicy>,
+    /// Additional denied components applied while resolving paths.
     component_policy: LocalComponentPolicy,
+    /// Optional binding limits for the directory's opening name.
     path_binding: Option<LocalPathBindingOptions>,
+    /// Optional limits combined with enclosing resolution limits.
     resolution_limits: Option<LocalResolutionLimits>,
+    /// Optional pure validation policy combined with enclosing policies.
     resolution_policy: Option<Arc<dyn LocalResolutionPolicy>>,
 }
 
@@ -70,18 +75,23 @@ impl LocalDirectoryOpenOptions {
         self
     }
 
+    /// Returns the optional symlink override without performing I/O.
     pub(crate) const fn symlink_policy(&self) -> Option<LocalSymlinkPolicy> {
         self.symlink_policy
     }
+    /// Returns component restrictions without performing I/O.
     pub(crate) fn component_policy(&self) -> &LocalComponentPolicy {
         &self.component_policy
     }
+    /// Returns optional path-binding limits without performing I/O.
     pub(crate) const fn path_binding(&self) -> Option<&LocalPathBindingOptions> {
         self.path_binding.as_ref()
     }
+    /// Returns optional resolution limits without performing I/O.
     pub(crate) const fn resolution_limits(&self) -> Option<LocalResolutionLimits> {
         self.resolution_limits
     }
+    /// Returns the optional policy handle without performing I/O.
     pub(crate) fn resolution_policy(&self) -> Option<&Arc<dyn LocalResolutionPolicy>> {
         self.resolution_policy.as_ref()
     }

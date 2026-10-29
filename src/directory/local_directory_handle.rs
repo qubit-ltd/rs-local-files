@@ -57,14 +57,66 @@ type ComponentPolicyCheckpoint = (PathBuf, PathBuf, PathBuf, Arc<Barrier>);
 static COMPONENT_POLICY_CHECKPOINT: OnceLock<Mutex<Option<ComponentPolicyCheckpoint>>> = OnceLock::new();
 
 /// Cloneable fixed directory capability with independent operation policy.
-#[derive(Clone, Debug)]
+///
+/// Operations are resolved relative to the retained directory authority, so a
+/// later rename of its diagnostic path does not redirect the handle. Relative
+/// paths and component policies constrain resolution; they do not lock the
+/// namespace or filter names merely discovered during recursive traversal.
+///
+/// # Examples
+///
+/// ```
+/// use std::path::Path;
+///
+/// use qubit_local_files::LocalFileSystem;
+/// use qubit_local_files::options::LocalDirectoryOpenOptions;
+///
+/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+/// let fixture = tempfile::tempdir()?;
+/// std::fs::write(fixture.path().join("source"), b"data")?;
+/// let filesystem = LocalFileSystem::rooted(fixture.path())?;
+/// let directory = filesystem.open_directory_with_options(
+///     Path::new("/"),
+///     &LocalDirectoryOpenOptions::new(),
+/// )?;
+/// let observation = directory.observe_entry(Path::new("source"))?;
+/// assert_eq!(observation.metadata().len(), 4);
+/// // Native identity is optional and identifies the object, not its contents.
+/// let _identity = observation.identity();
+/// # Ok(())
+/// # }
+/// ```
+#[derive(Clone)]
 pub struct LocalDirectoryHandle {
+    /// Filesystem namespace and authority used for operations.
     filesystem: LocalFileSystem,
+    /// Additional deny-name rules applied during path resolution.
     component_policy: LocalComponentPolicy,
+    /// Best-effort diagnostic location; it does not grant access.
     diagnostic_path: PathBuf,
+    /// Initial observations retained for optional opening-path verification.
     binding_observations: Option<Vec<LocalFileObservation>>,
+    /// Retained identities and authorities used for optional path binding.
     binding_anchors: Option<Vec<BindingAnchor>>,
+    /// Cooperative time budget for binding work, when configured.
     binding_deadline: Option<Duration>,
+}
+
+impl std::fmt::Debug for LocalDirectoryHandle {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("LocalDirectoryHandle")
+            .field("filesystem", &self.filesystem)
+            .field("component_policy", &self.component_policy)
+            .field(
+                "diagnostic_path",
+                &crate::local_file_system::redacted_path(&self.diagnostic_path),
+            )
+            .field("binding_observations", &self.binding_observations)
+            .field("binding_enabled", &self.binding_anchors.is_some())
+            .field("binding_deadline", &self.binding_deadline)
+            .finish()
+    }
 }
 
 impl LocalDirectoryHandle {
@@ -118,6 +170,9 @@ impl LocalDirectoryHandle {
             .resolution
             .clone()
             .tightened(options.resolution_limits().unwrap_or_default());
+        if let Some(limits) = options.path_binding().and_then(|binding| binding.resolution_limits()) {
+            resolution = resolution.tightened(limits);
+        }
         if let Some(policy) = options.resolution_policy() {
             resolution = resolution.with_policy(policy.clone());
         }
@@ -455,6 +510,9 @@ impl LocalDirectoryHandle {
             .resolution
             .clone()
             .tightened(options.resolution_limits().unwrap_or_default());
+        if let Some(limits) = options.path_binding().and_then(|binding| binding.resolution_limits()) {
+            resolution = resolution.tightened(limits);
+        }
         if let Some(policy) = options.resolution_policy() {
             resolution = resolution.with_policy(policy.clone());
         }
@@ -659,6 +717,17 @@ impl LocalDirectoryHandle {
     /// observation through this same fixed directory authority. That
     /// comparison identifies the native object; it does not guarantee
     /// unchanged contents.
+    ///
+    /// # Parameters
+    /// - `relative`: Entry path resolved beneath this directory authority.
+    ///
+    /// # Returns
+    /// Metadata and optional native identity for the entry observed without
+    /// following its final link.
+    ///
+    /// # Errors
+    /// Returns path, resolution-policy, resource-limit, and native query
+    /// errors.
     pub fn observe_entry(&self, relative: &Path) -> LocalResult<LocalFileObservation> {
         self.observe_entry_with_link_count(relative)
             .map(|(observation, _)| observation)

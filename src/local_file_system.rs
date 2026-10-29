@@ -204,6 +204,18 @@ impl LocalFileSystem {
     /// The host path is resolved component by component from its native root.
     /// Limits and policies apply during opening and are retained by
     /// descendants.
+    ///
+    /// # Parameters
+    /// - `root`: Existing native directory to bind as the virtual root.
+    /// - `options`: Resolution limits, symlink behavior, and optional pure
+    ///   validation policy for opening the root and resolving descendants.
+    ///
+    /// # Returns
+    /// A Rooted filesystem whose authority is the opened directory.
+    ///
+    /// # Errors
+    /// Returns root resolution, policy validation, native open, and authority
+    /// errors. A rejected component fails before it is opened.
     pub fn rooted_with_options(root: &Path, options: &crate::options::LocalRootOpenOptions) -> LocalResult<Self> {
         let rooted = RootedLocalFileSystem::open_with_options(root, options)?;
         let capabilities = rooted.capabilities();
@@ -369,7 +381,7 @@ fn with_current_directory(error: LocalFileError, current_directory: Option<&Path
 
 /// Masks one diagnostic filesystem path without consulting mutable process
 /// policy.
-fn redacted_path(path: &Path) -> RedactedText {
+pub(crate) fn redacted_path(path: &Path) -> RedactedText {
     Redactor::strict()
         .redact_field("filesystem_path", &path.display())
         .into_text_or_marker("<redaction incomplete>")

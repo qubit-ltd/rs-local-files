@@ -10,6 +10,7 @@ use std::io;
 
 use crate::error::LocalFileErrorKind;
 use crate::error::LocalFileErrorSource;
+use crate::error::LocalFileOperation;
 use crate::observation::LocalObservationRequirement::Optional;
 use crate::observation::LocalObservationRequirement::Required;
 use crate::observation::unix::query_native;
@@ -74,6 +75,31 @@ fn lf3_native_unix_rejects_out_of_range_nanoseconds_when_required() {
     .expect_err("invalid native nanoseconds should fail a required observation");
 
     assert_eq!(error.kind(), LocalFileErrorKind::RequirementNotMet);
+}
+
+#[test]
+fn lf3_snapshot_changed_during_read_keeps_rooted_pwd_context() {
+    use crate::options::LocalSnapshotOptions;
+
+    let directory = tempfile::tempdir().expect("temporary directory should be created");
+    std::fs::create_dir(directory.path().join("sub")).expect("subdirectory should be created");
+    std::fs::write(directory.path().join("sub/file"), b"before").expect("fixture should be written");
+    let mut filesystem = crate::LocalFileSystem::rooted(directory.path()).expect("Rooted should open");
+    filesystem
+        .set_current_directory(std::path::Path::new("/sub"))
+        .expect("PWD should be set");
+    let changed_path = directory.path().join("sub/file");
+    let _hook = crate::observation::snapshot::install_read_hook(move || {
+        std::fs::write(changed_path, b"changed during read").expect("fixture should be changed");
+    });
+
+    let error = filesystem
+        .read_consistent_with_options(std::path::Path::new("file"), &LocalSnapshotOptions::builder(64).build())
+        .expect_err("snapshot should detect mutation");
+    assert_eq!(error.kind(), LocalFileErrorKind::ChangedDuringRead);
+    assert_eq!(error.operation(), LocalFileOperation::Read);
+    assert_eq!(error.path(), Some(std::path::Path::new("/sub/file")));
+    assert_eq!(error.current_directory(), Some(std::path::Path::new("/sub")));
 }
 
 #[cfg(target_os = "macos")]

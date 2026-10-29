@@ -46,6 +46,10 @@ impl LocalFileSystem {
     /// Opens a reader with same-handle observations and optional name binding.
     /// Windows Host scope rejects path binding because drive-root ancestor
     /// traversal is not available for that namespace.
+    ///
+    /// # Errors
+    /// Returns path resolution, native open, observation, and binding-limit
+    /// errors. A finite effective resolution budget on Host is unsupported.
     pub fn open_observed_reader(
         &self,
         path: &Path,
@@ -236,14 +240,6 @@ impl LocalFileSystem {
                 observed.observation().identity().cloned().ok_or_else(|| {
                     LocalFileError::new(LocalFileErrorKind::Unsupported, LocalFileOperation::Metadata)
                 })?;
-            let name = resolved
-                .authority_relative()
-                .file_name()
-                .ok_or_else(|| {
-                    LocalFileError::new(LocalFileErrorKind::InvalidPath, LocalFileOperation::OpenReader)
-                        .with_path(resolved.namespace_absolute().to_path_buf())
-                })?
-                .to_os_string();
             let parent_path = resolved.authority_relative().parent().unwrap_or_else(|| Path::new(""));
             let (parent_root, parent_anchors) = match &self.core.namespace {
                 LocalNamespace::Host => {
@@ -321,14 +317,15 @@ impl LocalFileSystem {
                     (root, anchors.unwrap_or_default())
                 }
             };
-            let binding_policy = if symlink_policy == LocalSymlinkPolicy::FollowAcrossScope {
-                LocalSymlinkPolicy::FollowWithinScope
-            } else {
-                symlink_policy
-            };
-            let parent_fs = LocalFileSystem::from_root_authority(parent_root, binding_policy)?;
+            drop(parent_root);
             check_binding_deadline(binding_deadline, resolved.namespace_absolute())?;
-            observed = observed.with_binding(Box::new(PathBinding::new(parent_fs, name, identity, binding_options)));
+            observed = observed.with_binding(Box::new(PathBinding::new(
+                self.clone(),
+                resolved.namespace_absolute().to_path_buf(),
+                identity,
+                *options,
+                binding_options,
+            )));
             observed = observed.with_binding(Box::new(DirectoryPathBinding::new(
                 parent_anchors,
                 binding_options.deadline(),
@@ -535,15 +532,25 @@ impl LocalFileSystem {
         )?;
         let maximum = options.max_bytes();
         if maximum.is_some_and(|limit| reader.metadata().len() > limit) {
-            return Err(
-                LocalFileError::new(LocalFileErrorKind::ResourceLimit, LocalFileOperation::Read)
-                    .with_path(resolved.namespace_absolute().to_path_buf()),
-            );
+            return Err(operation_error(
+                LocalFileError::new(LocalFileErrorKind::ResourceLimit, LocalFileOperation::Read),
+                LocalFileOperation::Read,
+                resolved.namespace_absolute(),
+                None,
+                resolver.current_directory(),
+            ));
         }
         #[cfg(test)]
         crate::observation::snapshot::run_read_hook();
-        let bytes = crate::observation::reader::collect_limited(&mut reader, maximum)
-            .map_err(|error| error.with_path(resolved.namespace_absolute().to_path_buf()))?;
+        let bytes = crate::observation::reader::collect_limited(&mut reader, maximum).map_err(|error| {
+            operation_error(
+                error,
+                LocalFileOperation::Read,
+                resolved.namespace_absolute(),
+                None,
+                resolver.current_directory(),
+            )
+        })?;
         finish(bytes, resolved.namespace_absolute(), resolver.current_directory())
     }
 
@@ -588,28 +595,54 @@ impl LocalFileSystem {
             resolver.current_directory(),
             symlink_policy,
         )?;
-        let mut observed = LocalObservedReader::from_reader(reader, LocalObservationRequirement::Required)
-            .map_err(|error| error.with_path(resolved.namespace_absolute().to_path_buf()))?;
+        let mut observed =
+            LocalObservedReader::from_reader(reader, LocalObservationRequirement::Required).map_err(|error| {
+                operation_error(
+                    error,
+                    LocalFileOperation::Read,
+                    resolved.namespace_absolute(),
+                    None,
+                    resolver.current_directory(),
+                )
+            })?;
         let before = observed.observation().clone();
         if before.metadata().len() > options.max_bytes() {
-            return Err(
-                LocalFileError::new(LocalFileErrorKind::ResourceLimit, LocalFileOperation::Read)
-                    .with_path(resolved.namespace_absolute().to_path_buf()),
-            );
+            return Err(operation_error(
+                LocalFileError::new(LocalFileErrorKind::ResourceLimit, LocalFileOperation::Read),
+                LocalFileOperation::Read,
+                resolved.namespace_absolute(),
+                None,
+                resolver.current_directory(),
+            ));
         }
-        let bytes = observed
-            .read_to_end_limited(options.max_bytes())
-            .map_err(|error| error.with_path(resolved.namespace_absolute().to_path_buf()))?;
+        let bytes = observed.read_to_end_limited(options.max_bytes()).map_err(|error| {
+            operation_error(
+                error,
+                LocalFileOperation::Read,
+                resolved.namespace_absolute(),
+                None,
+                resolver.current_directory(),
+            )
+        })?;
         #[cfg(test)]
         crate::observation::snapshot::run_read_hook();
-        let after = observed
-            .observe_now()
-            .map_err(|error| error.with_path(resolved.namespace_absolute().to_path_buf()))?;
+        let after = observed.observe_now().map_err(|error| {
+            operation_error(
+                error,
+                LocalFileOperation::Read,
+                resolved.namespace_absolute(),
+                None,
+                resolver.current_directory(),
+            )
+        })?;
         if !crate::observation::snapshot::observations_match(&before, &after, bytes.len() as u64) {
-            return Err(
-                LocalFileError::new(LocalFileErrorKind::ChangedDuringRead, LocalFileOperation::Read)
-                    .with_path(resolved.namespace_absolute().to_path_buf()),
-            );
+            return Err(operation_error(
+                LocalFileError::new(LocalFileErrorKind::ChangedDuringRead, LocalFileOperation::Read),
+                LocalFileOperation::Read,
+                resolved.namespace_absolute(),
+                None,
+                resolver.current_directory(),
+            ));
         }
         Ok(crate::LocalFileSnapshot::new(bytes, before, after))
     }
@@ -891,4 +924,42 @@ fn check_binding_deadline(deadline: Option<std::time::Instant>, path: &Path) -> 
         ));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+
+    use super::operation_error;
+    use crate::error::LocalFileError;
+    use crate::error::LocalFileErrorKind;
+    use crate::error::LocalFileErrorSource;
+    use crate::error::LocalFileOperation;
+
+    #[test]
+    fn read_operation_context_preserves_typed_observation_source() {
+        let error = LocalFileError::from_io(
+            LocalFileOperation::Metadata,
+            Some(Path::new("native-path").to_path_buf()),
+            None,
+            std::io::Error::from_raw_os_error(libc::EIO),
+        );
+
+        let wrapped = operation_error(
+            error,
+            LocalFileOperation::Read,
+            Path::new("/sub/file"),
+            None,
+            Some(Path::new("/sub")),
+        );
+
+        assert_eq!(wrapped.kind(), LocalFileErrorKind::Io);
+        assert_eq!(wrapped.operation(), LocalFileOperation::Read);
+        assert_eq!(wrapped.path(), Some(Path::new("/sub/file")));
+        assert_eq!(wrapped.current_directory(), Some(Path::new("/sub")));
+        assert!(matches!(
+            wrapped.typed_source(),
+            Some(LocalFileErrorSource::Io(source)) if source.raw_os_error() == Some(libc::EIO)
+        ));
+    }
 }

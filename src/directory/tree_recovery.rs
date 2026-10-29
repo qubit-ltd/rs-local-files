@@ -43,7 +43,6 @@ use crate::outcome::LocalTreeMutationState;
 ///     resource.diagnostic_path()
 /// }
 /// ```
-#[derive(Debug)]
 pub struct LocalTreeRetainedResource {
     path: PathBuf,
     relative: PathBuf,
@@ -55,6 +54,24 @@ pub struct LocalTreeRetainedResource {
     owned_entries: HashMap<PathBuf, LocalFileIdentity>,
     mutation_state: LocalTreeMutationState,
     owner_access_policy: Option<crate::policy::LocalOwnerAccessPolicy>,
+}
+
+impl std::fmt::Debug for LocalTreeRetainedResource {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("LocalTreeRetainedResource")
+            .field("path", &crate::local_file_system::redacted_path(&self.path))
+            .field("relative", &crate::local_file_system::redacted_path(&self.relative))
+            .field("identity", &self.identity)
+            .field("parent", &self.parent)
+            .field("child", &self.child)
+            .field("cleanup_armed", &self.cleanup_armed)
+            .field("cleanup_limits", &self.cleanup_limits)
+            .field("owned_entries", &self.owned_entries.len())
+            .field("mutation_state", &self.mutation_state)
+            .field("owner_access_policy", &self.owner_access_policy)
+            .finish()
+    }
 }
 
 impl LocalTreeRetainedResource {

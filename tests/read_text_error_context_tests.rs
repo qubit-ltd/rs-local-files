@@ -22,8 +22,10 @@ use std::process::Command;
 
 use qubit_local_files::LocalFileSystem;
 use qubit_local_files::error::LocalFileErrorKind;
+use qubit_local_files::error::LocalFileOperation;
 use qubit_local_files::options::LocalReadAllOptions;
 use qubit_local_files::options::LocalReadOptions;
+use qubit_local_files::options::LocalSnapshotOptions;
 use qubit_local_files::policy::LocalSymlinkPolicy;
 use tempfile::tempdir;
 
@@ -45,6 +47,33 @@ fn test_rooted_invalid_utf8_keeps_bound_path_and_pwd() {
 }
 
 #[test]
+fn test_rooted_read_limits_keep_bound_path_and_pwd() {
+    let scratch = tempdir().expect("scratch");
+    fs::create_dir(scratch.path().join("sub")).expect("sub");
+    fs::write(scratch.path().join("sub/local"), b"hello").expect("content");
+    let mut filesystem = LocalFileSystem::rooted(scratch.path()).expect("rooted");
+    filesystem.set_current_directory(Path::new("/sub")).expect("pwd");
+
+    let errors = [
+        filesystem
+            .read_all_with_options(Path::new("local"), &LocalReadAllOptions::new().with_max_bytes(1))
+            .expect_err("read-all should exceed one byte"),
+        filesystem
+            .read_text_with_options(Path::new("local"), &LocalReadAllOptions::new().with_max_bytes(1))
+            .expect_err("read-text should exceed one byte"),
+        filesystem
+            .read_consistent_with_options(Path::new("local"), &LocalSnapshotOptions::builder(1).build())
+            .expect_err("snapshot should exceed one byte"),
+    ];
+    for error in errors {
+        assert_eq!(error.kind(), LocalFileErrorKind::ResourceLimit);
+        assert_eq!(error.operation(), LocalFileOperation::Read);
+        assert_eq!(error.path(), Some(Path::new("/sub/local")));
+        assert_eq!(error.current_directory(), Some(Path::new("/sub")));
+    }
+}
+
+#[test]
 fn test_host_relative_invalid_utf8_keeps_first_pwd_in_subprocess() {
     if let Some(fixture) = std::env::var_os(HOST_CHILD_FIXTURE) {
         let fixture = std::path::PathBuf::from(fixture);
@@ -55,6 +84,23 @@ fn test_host_relative_invalid_utf8_keeps_first_pwd_in_subprocess() {
         assert_eq!(error.path(), Some(expected_path.as_path()));
         assert_eq!(error.current_directory(), Some(fixture.as_path()));
         assert!(Error::source(&error).is_some());
+        let filesystem = LocalFileSystem::host().expect("Host");
+        let errors = [
+            filesystem
+                .read_all_with_options(Path::new("bad.txt"), &LocalReadAllOptions::new().with_max_bytes(0))
+                .expect_err("read-all should exceed zero bytes"),
+            filesystem
+                .read_text_with_options(Path::new("bad.txt"), &LocalReadAllOptions::new().with_max_bytes(0))
+                .expect_err("read-text should exceed zero bytes"),
+            filesystem
+                .read_consistent_with_options(Path::new("bad.txt"), &LocalSnapshotOptions::builder(0).build())
+                .expect_err("snapshot should exceed zero bytes"),
+        ];
+        for error in errors {
+            assert_eq!(error.kind(), LocalFileErrorKind::ResourceLimit);
+            assert_eq!(error.path(), Some(expected_path.as_path()));
+            assert_eq!(error.current_directory(), Some(fixture.as_path()));
+        }
         println!("READ_TEXT_HOST_CONTEXT_COMPLETE");
         return;
     }
@@ -89,6 +135,27 @@ fn test_absolute_host_invalid_utf8_does_not_require_pwd() {
     assert_eq!(error.path(), Some(path.as_path()));
     assert_eq!(error.current_directory(), None);
     assert!(Error::source(&error).is_some());
+
+    let limited = filesystem
+        .read_all_with_options(&path, &LocalReadAllOptions::new().with_max_bytes(0))
+        .expect_err("read-all limit");
+    assert_eq!(limited.operation(), LocalFileOperation::Read);
+    assert_eq!(limited.path(), Some(path.as_path()));
+    assert_eq!(limited.current_directory(), None);
+
+    let limited = filesystem
+        .read_text_with_options(&path, &LocalReadAllOptions::new().with_max_bytes(0))
+        .expect_err("read-text limit");
+    assert_eq!(limited.operation(), LocalFileOperation::Read);
+    assert_eq!(limited.path(), Some(path.as_path()));
+    assert_eq!(limited.current_directory(), None);
+
+    let limited = filesystem
+        .read_consistent_with_options(&path, &LocalSnapshotOptions::builder(0).build())
+        .expect_err("snapshot limit");
+    assert_eq!(limited.operation(), LocalFileOperation::Read);
+    assert_eq!(limited.path(), Some(path.as_path()));
+    assert_eq!(limited.current_directory(), None);
 }
 
 #[test]
