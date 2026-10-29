@@ -14,6 +14,10 @@ thread_local! {
     static METADATA: Cell<usize> = const { Cell::new(0) };
     static DIRECTORY_OPEN: Cell<usize> = const { Cell::new(0) };
     static FALLBACK: Cell<usize> = const { Cell::new(0) };
+    #[cfg(unix)]
+    static NATIVE_METADATA: Cell<usize> = const { Cell::new(0) };
+    #[cfg(unix)]
+    static NATIVE_DIRECTORY_OPEN: Cell<usize> = const { Cell::new(0) };
     static DEADLINE_CHECKS: Cell<usize> = const { Cell::new(0) };
     static EXPIRE_AFTER: Cell<Option<usize>> = const { Cell::new(None) };
 }
@@ -75,14 +79,35 @@ pub(crate) fn record_directory_open() {
 pub(crate) fn record_fallback() {
     FALLBACK.set(FALLBACK.get() + 1);
 }
+/// Records an actual Unix no-follow metadata syscall.
+#[cfg(unix)]
+pub(crate) fn record_native_metadata() {
+    NATIVE_METADATA.set(NATIVE_METADATA.get() + 1);
+}
+/// Records an actual Unix rooted directory-open syscall.
+#[cfg(unix)]
+pub(crate) fn record_native_directory_open() {
+    NATIVE_DIRECTORY_OPEN.set(NATIVE_DIRECTORY_OPEN.get() + 1);
+}
 /// Clears only this test thread's observations before a complete resolver call.
 pub(crate) fn reset() {
     METADATA.set(0);
     DIRECTORY_OPEN.set(0);
     FALLBACK.set(0);
+    #[cfg(unix)]
+    {
+        NATIVE_METADATA.set(0);
+        NATIVE_DIRECTORY_OPEN.set(0);
+    }
 }
 /// Returns metadata, directory-open, and fallback observations in that order.
 #[must_use]
 pub(crate) fn snapshot() -> (usize, usize, usize) {
     (METADATA.get(), DIRECTORY_OPEN.get(), FALLBACK.get())
+}
+/// Returns actual Unix metadata and directory-open syscall counts.
+#[cfg(unix)]
+#[must_use]
+pub(crate) fn native_snapshot() -> (usize, usize) {
+    (NATIVE_METADATA.get(), NATIVE_DIRECTORY_OPEN.get())
 }

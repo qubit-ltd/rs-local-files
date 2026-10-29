@@ -95,6 +95,8 @@ pub(crate) fn read_rooted_symlink_metadata(
     diagnostic_root: &Path,
     path: &LocalRelativePath,
 ) -> Result<libc::stat> {
+    #[cfg(test)]
+    crate::tests::rooted::support::resolution_observation_tests::record_native_metadata();
     let diagnostic_path = diagnostic_root.join(path.as_path());
     let (parent, name, _parent_dirs_to_sync) =
         open_rooted_parent(root, &diagnostic_path, path, RootedParentMode::OpenExisting)?.into_parts();
@@ -130,6 +132,8 @@ pub(crate) fn read_rooted_symlink_metadata(
 /// Returns native no-follow metadata errors; an interior NUL violates the
 /// caller invariant and panics during conversion.
 pub(crate) fn read_rooted_component_metadata(root: &File, name: &OsStr) -> Result<libc::stat> {
+    #[cfg(test)]
+    crate::tests::rooted::support::resolution_observation_tests::record_native_metadata();
     let name = component_c_string(name);
     let mut status = std::mem::MaybeUninit::<libc::stat>::uninit();
     // SAFETY: `status` is writable storage and the descriptor/name remain live
@@ -358,6 +362,8 @@ pub(in crate::local) fn open_rooted_parent(
 /// an interior NUL.
 #[inline]
 fn open_directory_at(parent: &File, name: &OsStr) -> Result<File> {
+    #[cfg(test)]
+    crate::tests::rooted::support::resolution_observation_tests::record_native_directory_open();
     let name = component_c_string(name);
     open_file_at(
         parent,

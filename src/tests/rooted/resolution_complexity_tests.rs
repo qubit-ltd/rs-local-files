@@ -169,6 +169,47 @@ fn test_complete_resolver_runs_component_policy_before_cursor_io() {
     assert_eq!((0, 0, 0), resolution_observation_tests::snapshot());
 }
 
+#[cfg(unix)]
+#[test]
+fn test_complete_resolver_keeps_link_followed_suffix_native_work_linear() {
+    use std::os::unix::fs::symlink;
+
+    let temporary = tempfile::tempdir().expect("fixture should exist");
+    let root = Root::open(temporary.path()).expect("authority should open");
+    fs::create_dir(temporary.path().join("target")).expect("target directory should exist");
+    symlink("target", temporary.path().join("link")).expect("directory symlink should exist");
+
+    let mut counts = Vec::new();
+    for depth in [16, 32, 64] {
+        let mut suffix = PathBuf::new();
+        for _ in 0..depth {
+            suffix.push("d");
+        }
+        fs::create_dir_all(temporary.path().join("target").join(&suffix)).expect("deep target should exist");
+        suffix.push("payload");
+        fs::write(temporary.path().join("target").join(&suffix), b"payload").expect("payload should exist");
+        let path = PathBuf::from("link").join(&suffix);
+
+        resolution_observation_tests::reset();
+        let resolved = resolve_rooted_path(
+            &root,
+            &path,
+            LocalSymlinkPolicy::FollowWithinScope,
+            true,
+            LocalFileOperation::Metadata,
+        )
+        .expect("link followed by an ordinary deep suffix should resolve");
+        assert_eq!(PathBuf::from("target").join(&suffix), resolved.as_path());
+        let (metadata, opens) = resolution_observation_tests::native_snapshot();
+        counts.push(metadata + opens);
+    }
+
+    assert!(
+        counts[2] <= counts[1] * 3,
+        "native metadata/open work should grow linearly after one link: {counts:?}"
+    );
+}
+
 #[test]
 fn test_complete_resolver_contextualizes_pending_budget_errors() {
     let temporary = tempfile::tempdir().expect("fixture should exist");

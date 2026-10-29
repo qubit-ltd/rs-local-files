@@ -397,12 +397,26 @@ fn resolve_rooted_symlinks(
             .with_path(original.to_path_buf()));
     }
     let mut pending = steps_from_path(path, LocalResolutionOrigin::Input, &session, operation, original)?;
+    let mut pending_actions = pending.iter().filter(|step| !is_end_symlink_step(step)).count();
     let mut resolved = Vec::<std::ffi::OsString>::new();
+    let mut resolved_component_bytes = Vec::<usize>::new();
+    let mut resolved_bytes = 0usize;
+    let mut cursor: Option<crate::rooted::RootedResolutionCursor> = None;
     let mut active_symlinks = HashSet::<SymlinkIdentity>::new();
     while let Some(step) = pending.pop_front() {
         check_resolution_deadline(deadline, original, operation)?;
+        if !is_end_symlink_step(&step) {
+            pending_actions = pending_actions.checked_sub(1).ok_or_else(|| {
+                LocalFileError::new(LocalFileErrorKind::ResourceLimit, operation).with_path(original.to_path_buf())
+            })?;
+        }
         match step {
-            ResolutionStep::ResetRoot => resolved.clear(),
+            ResolutionStep::ResetRoot => {
+                resolved.clear();
+                resolved_component_bytes.clear();
+                resolved_bytes = 0;
+                cursor = None;
+            }
             ResolutionStep::Current => ensure_resolved_prefix_is_directory(root, &resolved, original, operation)?,
             ResolutionStep::Parent => {
                 ensure_resolved_prefix_is_directory(root, &resolved, original, operation)?;
@@ -411,22 +425,28 @@ fn resolve_rooted_symlinks(
                         .with_reason("symbolic-link target escaped the Rooted virtual root")
                         .with_path(original.to_path_buf()));
                 }
-                let (components, bytes) = resolved_measure(&resolved).ok_or_else(|| {
-                    crate::resolution::session::overflow_error(crate::error::LocalResourceKind::ResolvedPathBytes)
-                        .with_operation(operation)
-                        .with_path(original.to_path_buf())
+                let removed_bytes = resolved_component_bytes.pop().ok_or_else(|| {
+                    LocalFileError::new(LocalFileErrorKind::ResourceLimit, operation).with_path(original.to_path_buf())
+                })?;
+                resolved_bytes = resolved_bytes.checked_sub(removed_bytes).ok_or_else(|| {
+                    LocalFileError::new(LocalFileErrorKind::ResourceLimit, operation).with_path(original.to_path_buf())
                 })?;
                 session
-                    .check_resolved(components, bytes)
+                    .check_resolved(resolved.len(), resolved_bytes)
                     .map_err(|error| error.with_operation(operation).with_path(original.to_path_buf()))?;
+                cursor = None;
             }
             ResolutionStep::EndSymlink(identity) => {
                 active_symlinks.remove(&identity);
             }
             ResolutionStep::Normal(component, origin) => {
-                let component_bytes = component.len().checked_add(1).ok_or_else(|| {
-                    LocalFileError::new(LocalFileErrorKind::ResourceLimit, operation).with_path(original.to_path_buf())
-                })?;
+                let component_bytes = native_path_bytes(Path::new(&component))
+                    .and_then(|bytes| bytes.checked_add(native_unit_bytes()))
+                    .ok_or_else(|| {
+                        crate::resolution::session::overflow_error(crate::error::LocalResourceKind::ResolvedPathBytes)
+                            .with_operation(operation)
+                            .with_path(original.to_path_buf())
+                    })?;
                 if let Some(budget) = budget.as_deref_mut() {
                     budget.debit(component_bytes, operation, original)?;
                 }
@@ -438,38 +458,78 @@ fn resolve_rooted_symlinks(
                 session
                     .validate_component(&component, origin)
                     .map_err(|error| error.with_operation(operation).with_path(original.to_path_buf()))?;
-                let candidate =
-                    relative_from_components(resolved.iter().chain(std::iter::once(&component)), original, operation)?;
-                let mut prospective = resolved.clone();
-                prospective.push(component.clone());
-                let (resolved_count, resolved_bytes) = resolved_measure(&prospective).ok_or_else(|| {
+                let next_resolved_bytes = resolved_bytes.checked_add(component_bytes).ok_or_else(|| {
                     crate::resolution::session::overflow_error(crate::error::LocalResourceKind::ResolvedPathBytes)
                         .with_operation(operation)
                         .with_path(original.to_path_buf())
                 })?;
                 session
-                    .check_resolved(resolved_count, resolved_bytes)
+                    .check_resolved(
+                        resolved.len().checked_add(1).ok_or_else(|| {
+                            crate::resolution::session::overflow_error(
+                                crate::error::LocalResourceKind::ResolvedComponents,
+                            )
+                            .with_operation(operation)
+                            .with_path(original.to_path_buf())
+                        })?,
+                        next_resolved_bytes,
+                    )
                     .map_err(|error| error.with_operation(operation).with_path(original.to_path_buf()))?;
-                let is_final = pending.iter().all(is_end_symlink_step);
+                let is_final = pending_actions == 0;
                 if is_final && !follow_final {
                     resolved.push(component);
+                    resolved_component_bytes.push(component_bytes);
+                    resolved_bytes = next_resolved_bytes;
+                    cursor = None;
                     continue;
                 }
                 check_resolution_deadline(deadline, original, operation)?;
-                let metadata_result = root.symlink_metadata(&candidate);
+                if cursor.is_none() {
+                    cursor = open_resolved_cursor(root, &resolved, deadline, original, operation)?;
+                }
+                let metadata_result = match cursor.as_ref() {
+                    Some(cursor) => cursor.metadata(&component),
+                    None => {
+                        let candidate = relative_from_components(
+                            resolved.iter().chain(std::iter::once(&component)),
+                            original,
+                            operation,
+                        )?;
+                        root.symlink_metadata(&candidate)
+                    }
+                };
                 check_resolution_deadline(deadline, original, operation)?;
                 let metadata = match metadata_result {
                     Ok(metadata) => metadata,
                     Err(error) if error.kind() == io::ErrorKind::NotFound => {
                         resolved.push(component);
+                        resolved_component_bytes.push(component_bytes);
+                        resolved_bytes = next_resolved_bytes;
+                        cursor = None;
                         continue;
                     }
                     Err(error) => return Err(rooted_io_error(operation, original, error)),
                 };
                 if metadata.kind() != crate::rooted::EntryKind::Symlink {
+                    if !is_final && metadata.kind() == crate::rooted::EntryKind::Directory {
+                        let descend_result = cursor.as_mut().map(|cursor| cursor.descend(&component));
+                        check_resolution_deadline(deadline, original, operation)?;
+                        match descend_result {
+                            Some(Ok(())) | None => {}
+                            Some(Err(error)) if error.kind() == io::ErrorKind::NotFound => cursor = None,
+                            Some(Err(error)) => return Err(rooted_io_error(operation, original, error)),
+                        }
+                    } else {
+                        cursor = None;
+                    }
                     resolved.push(component);
+                    resolved_component_bytes.push(component_bytes);
+                    resolved_bytes = next_resolved_bytes;
                     continue;
                 }
+                cursor = None;
+                let candidate =
+                    relative_from_components(resolved.iter().chain(std::iter::once(&component)), original, operation)?;
                 if symlink_policy == LocalSymlinkPolicy::Reject {
                     return Err(LocalFileError::new(LocalFileErrorKind::Unsupported, operation)
                         .with_reason("symbolic-link traversal is rejected by policy")
@@ -524,6 +584,7 @@ fn resolve_rooted_symlinks(
                 session
                     .check_pending(pending_count, pending_bytes)
                     .map_err(|error| error.with_operation(operation).with_path(original.to_path_buf()))?;
+                pending_actions = replacement.iter().filter(|step| !is_end_symlink_step(step)).count();
                 pending = replacement;
             }
         }
@@ -577,15 +638,37 @@ fn ensure_resolved_prefix_is_directory(
     Ok(())
 }
 
-fn resolved_measure(components: &[std::ffi::OsString]) -> Option<(usize, usize)> {
-    let mut bytes = 0usize;
-    for component in components {
-        let native = native_path_bytes(Path::new(component))?;
-        bytes = bytes
-            .checked_add(native)?
-            .checked_add(if cfg!(windows) { 2 } else { 1 })?;
+fn open_resolved_cursor(
+    root: &crate::rooted::Root,
+    resolved: &[std::ffi::OsString],
+    deadline: Option<Instant>,
+    original: &Path,
+    operation: LocalFileOperation,
+) -> LocalResult<Option<crate::rooted::RootedResolutionCursor>> {
+    let mut cursor = root
+        .resolution_cursor()
+        .map_err(|error| rooted_io_error(operation, original, error))?;
+    for component in resolved {
+        check_resolution_deadline(deadline, original, operation)?;
+        let metadata_result = cursor.metadata(component);
+        check_resolution_deadline(deadline, original, operation)?;
+        let metadata = match metadata_result {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+            Err(error) => return Err(rooted_io_error(operation, original, error)),
+        };
+        if metadata.kind() != crate::rooted::EntryKind::Directory {
+            return Ok(None);
+        }
+        let descend_result = cursor.descend(component);
+        check_resolution_deadline(deadline, original, operation)?;
+        match descend_result {
+            Ok(()) => {}
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+            Err(error) => return Err(rooted_io_error(operation, original, error)),
+        }
     }
-    Some((components.len(), bytes))
+    Ok(Some(cursor))
 }
 
 fn native_path_bytes(path: &Path) -> Option<usize> {
@@ -608,23 +691,34 @@ fn native_path_bytes(path: &Path) -> Option<usize> {
 fn pending_measure(steps: &std::collections::VecDeque<ResolutionStep>) -> Option<(usize, usize)> {
     let mut components = 0usize;
     let mut bytes = 0usize;
+    let unit_bytes = native_unit_bytes();
     for step in steps {
         match step {
             ResolutionStep::ResetRoot | ResolutionStep::EndSymlink(_) => {}
-            ResolutionStep::Current | ResolutionStep::Parent => {
+            ResolutionStep::Current => {
                 components = components.checked_add(1)?;
-                bytes = bytes.checked_add(if cfg!(windows) { 2 } else { 1 })?;
+                bytes = bytes.checked_add(checked_native_units(2, unit_bytes)?)?;
+            }
+            ResolutionStep::Parent => {
+                components = components.checked_add(1)?;
+                bytes = bytes.checked_add(checked_native_units(3, unit_bytes)?)?;
             }
             ResolutionStep::Normal(name, _) => {
                 components = components.checked_add(1)?;
                 let native = native_path_bytes(Path::new(name))?;
-                bytes = bytes
-                    .checked_add(native)?
-                    .checked_add(if cfg!(windows) { 2 } else { 1 })?;
+                bytes = bytes.checked_add(native.checked_add(unit_bytes)?)?;
             }
         }
     }
     Some((components, bytes))
+}
+
+const fn native_unit_bytes() -> usize {
+    if cfg!(windows) { 2 } else { 1 }
+}
+
+fn checked_native_units(units: usize, unit_bytes: usize) -> Option<usize> {
+    units.checked_mul(unit_bytes)
 }
 
 /// Reports whether a pending resolution step only closes an expanded link.
@@ -706,4 +800,14 @@ pub(crate) fn sync_rooted_copy_parent_chain(
         parent = path.as_path().parent().map(Path::to_path_buf);
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod pending_measure_tests {
+    use super::checked_native_units;
+
+    #[test]
+    fn native_unit_measurement_reports_overflow() {
+        assert_eq!(None, checked_native_units(usize::MAX, 2));
+    }
 }
