@@ -432,55 +432,44 @@ pub(crate) fn sync_parent_dir(path: &Path) -> Result<()> {
 /// Returns an I/O error when opening or syncing the parent directory fails.
 #[cfg(windows)]
 pub(crate) fn sync_parent_dir(path: &Path) -> Result<()> {
-    let parent = wide_path(parent_dir_for(path))?;
-    // SAFETY: `parent` is a live NUL-terminated UTF-16 buffer without interior
-    // NULs; the remaining constants are documented CreateFileW access, share,
-    // disposition, and directory flags. Null optional pointers are permitted.
-    let handle = unsafe {
-        CreateFileW(
-            parent.as_ptr(),
-            GENERIC_READ,
-            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-            std::ptr::null(),
-            OPEN_EXISTING,
-            FILE_FLAG_BACKUP_SEMANTICS,
-            std::ptr::null_mut(),
-        )
-    };
-    if handle == INVALID_HANDLE_VALUE {
-        let error = std::io::Error::last_os_error();
-        return if is_ignorable_windows_parent_sync_error(&error) {
-            Ok(())
-        } else {
-            Err(error)
-        };
-    }
-    // SAFETY: the handle was checked against INVALID_HANDLE_VALUE and is a
-    // uniquely owned CreateFileW result. Transferring it to File ensures it is
-    // closed exactly once when `directory` is dropped.
-    let directory = unsafe { File::from_raw_handle(handle) };
-    match directory.sync_all() {
-        Ok(()) => Ok(()),
-        Err(error) if is_ignorable_windows_parent_sync_error(&error) => Ok(()),
-        Err(error) => Err(error),
-    }
+    sync_parent_directory_with(
+        path,
+        |parent_dir| {
+            let parent = wide_path(parent_dir)?;
+            // SAFETY: `parent` is a live NUL-terminated UTF-16 buffer without interior
+            // NULs; the remaining constants are documented CreateFileW access, share,
+            // disposition, and directory flags. Null optional pointers are permitted.
+            let handle = unsafe {
+                CreateFileW(
+                    parent.as_ptr(),
+                    GENERIC_READ,
+                    FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                    std::ptr::null(),
+                    OPEN_EXISTING,
+                    FILE_FLAG_BACKUP_SEMANTICS,
+                    std::ptr::null_mut(),
+                )
+            };
+            if handle == INVALID_HANDLE_VALUE {
+                return Err(std::io::Error::last_os_error());
+            }
+            // SAFETY: the handle was checked against INVALID_HANDLE_VALUE and is a
+            // uniquely owned CreateFileW result. Transferring it to File ensures it is
+            // closed exactly once when `directory` is dropped.
+            Ok(unsafe { File::from_raw_handle(handle) })
+        },
+        |directory| directory.sync_all(),
+    )
 }
 
-/// Tests whether a Windows parent-directory sync error should be ignored.
-///
-/// # Parameters
-/// - `error`: Error reported while opening or syncing the parent directory.
-///
-/// # Returns
-/// `true` when the error only means the best-effort parent directory sync is
-/// unavailable on Windows.
-#[cfg(windows)]
-#[must_use]
-#[inline]
-fn is_ignorable_windows_parent_sync_error(error: &Error) -> bool {
-    const ERROR_SHARING_VIOLATION: i32 = 32;
-
-    error.kind() == ErrorKind::PermissionDenied || error.raw_os_error() == Some(ERROR_SHARING_VIOLATION)
+#[cfg(any(windows, test))]
+fn sync_parent_directory_with(
+    path: &Path,
+    open_directory: impl FnOnce(&Path) -> Result<File>,
+    sync_directory: impl FnOnce(File) -> Result<()>,
+) -> Result<()> {
+    let directory = open_directory(parent_dir_for(path))?;
+    sync_directory(directory)
 }
 
 /// Gets the parent directory that should be synced for `path`.
@@ -496,6 +485,51 @@ pub(crate) fn parent_dir_for(path: &Path) -> &Path {
     path.parent()
         .filter(|parent| !parent.as_os_str().is_empty())
         .unwrap_or(Path::new("."))
+}
+
+#[cfg(test)]
+mod tests {
+    use std::io::Error;
+    use std::io::ErrorKind;
+    use std::path::Path;
+
+    use super::sync_parent_directory_with;
+
+    #[test]
+    fn parent_directory_open_errors_are_preserved() {
+        for error in [
+            Error::new(ErrorKind::PermissionDenied, "denied"),
+            Error::from_raw_os_error(32),
+            Error::other("other open error"),
+        ] {
+            let expected_kind = error.kind();
+            let expected_raw = error.raw_os_error();
+            let result = sync_parent_directory_with(Path::new("parent/file"), |_| Err(error), |_| Ok(()));
+            let actual = result.expect_err("directory open error must propagate");
+            assert_eq!(actual.kind(), expected_kind);
+            assert_eq!(actual.raw_os_error(), expected_raw);
+        }
+    }
+
+    #[test]
+    fn parent_directory_sync_errors_are_preserved() {
+        for error in [
+            Error::new(ErrorKind::PermissionDenied, "denied"),
+            Error::from_raw_os_error(32),
+            Error::other("other sync error"),
+        ] {
+            let expected_kind = error.kind();
+            let expected_raw = error.raw_os_error();
+            let result = sync_parent_directory_with(
+                Path::new("parent/file"),
+                |_| Ok(std::fs::File::open("Cargo.toml").expect("crate manifest opens")),
+                |_| Err(error),
+            );
+            let actual = result.expect_err("directory sync error must propagate");
+            assert_eq!(actual.kind(), expected_kind);
+            assert_eq!(actual.raw_os_error(), expected_raw);
+        }
+    }
 }
 
 /// Converts a path into a null-terminated Windows wide string.
