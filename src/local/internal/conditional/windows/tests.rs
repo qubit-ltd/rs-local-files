@@ -52,6 +52,24 @@ fn digest(bytes: &[u8]) -> Output<Sha256> {
     Sha256::digest(bytes)
 }
 
+fn symlink_fixture_may_skip(required: bool, kind: io::ErrorKind) -> bool {
+    !required && kind == io::ErrorKind::PermissionDenied
+}
+
+#[test]
+fn conditional_windows_symlink_fixture_skip_policy() {
+    for (required, kind, expected_skip) in [
+        (false, io::ErrorKind::PermissionDenied, true),
+        (true, io::ErrorKind::PermissionDenied, false),
+        (false, io::ErrorKind::Other, false),
+        (true, io::ErrorKind::Other, false),
+        (false, io::ErrorKind::NotFound, false),
+        (true, io::ErrorKind::NotFound, false),
+    ] {
+        assert_eq!(expected_skip, symlink_fixture_may_skip(required, kind));
+    }
+}
+
 #[test]
 fn conditional_windows_candidate_reopen_rejects_replaced_name() {
     let directory = tempfile::tempdir().expect("fixture directory should be created");
@@ -590,9 +608,13 @@ fn conditional_windows_reparse_target_is_rejected() {
     let actual = directory.path().join("actual");
     let target = directory.path().join("target");
     fs::write(&actual, b"A").expect("referent should be written");
-    if symlink_file(&actual, &target).is_err() {
-        eprintln!("skipped: creating a Windows symbolic link is not permitted");
-        return;
+    if let Err(error) = symlink_file(&actual, &target) {
+        let required = std::env::var("QUBIT_LOCAL_FILES_REQUIRE_SYMLINKS").as_deref() == Ok("1");
+        if symlink_fixture_may_skip(required, error.kind()) {
+            eprintln!("skipping optional Windows symlink fixture: {error}");
+            return;
+        }
+        panic!("Windows symlink fixture failed: {error}");
     }
     let result = WindowsConditionalBackend::open_host(&target, &options(LocalWriteMode::CreateOrReplace));
     assert!(

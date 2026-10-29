@@ -323,7 +323,7 @@ mod tests {
         let tokens = tokenize(
             Path::new("a/./../b"),
             LocalResolutionOrigin::SymlinkTarget,
-            &session(4, 9),
+            &session(4, 64),
         )
         .unwrap();
         assert_eq!(
@@ -335,6 +335,25 @@ mod tests {
                 NativeToken::Normal("b".into(), LocalResolutionOrigin::SymlinkTarget),
             ]
         );
+    }
+
+    #[cfg(any(unix, windows))]
+    #[test]
+    fn test_tokenizer_path_budget_matches_native_units() {
+        let path = Path::new("a/./../b");
+        #[cfg(unix)]
+        let expected_bytes = 9;
+        #[cfg(windows)]
+        let expected_bytes = 18;
+        assert_eq!(Some((4, expected_bytes)), measure_path(path));
+        assert!(tokenize(path, LocalResolutionOrigin::SymlinkTarget, &session(4, expected_bytes)).is_ok());
+        let error = tokenize(
+            path,
+            LocalResolutionOrigin::SymlinkTarget,
+            &session(4, expected_bytes - 1),
+        )
+        .unwrap_err();
+        assert_eq!(crate::LocalFileErrorKind::ResourceLimit, error.kind());
     }
 
     #[cfg(unix)]

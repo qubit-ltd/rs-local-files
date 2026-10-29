@@ -57,6 +57,34 @@ fn test_unix_owner_policy_is_unsupported_before_stage_creation() {
     assert_eq!(0, fs::read_dir(scratch.path()).expect("parent contents").count());
 }
 
+#[cfg(target_os = "macos")]
+#[test]
+fn test_macos_owner_policy_on_existing_stage_is_unsupported_without_permission_mutation() {
+    use std::os::unix::fs::PermissionsExt;
+    let scratch = tempfile::tempdir().expect("scratch parent");
+    let authority = parent(&scratch);
+    let mut stage = authority
+        .create_staged_directory(&LocalTempDirectoryOptions::new())
+        .expect("ordinary stage");
+    let root = scratch.path().join(stage.relative_name());
+    let file = root.join("payload");
+    fs::write(&file, b"unchanged").expect("payload");
+    let before_root = fs::metadata(&root).unwrap().permissions().mode();
+    let before_file = fs::metadata(&file).unwrap().permissions().mode();
+    let policy = LocalOwnerAccessPolicy::new().with_unix_modes(0o700, 0o600);
+    let error = stage
+        .apply_owner_access_policy_with_options(&policy, &qubit_local_files::options::LocalListOptions::new())
+        .unwrap_err();
+    assert_eq!(
+        qubit_local_files::error::LocalFileErrorKind::Unsupported,
+        error.cause().kind()
+    );
+    assert_eq!(before_root, fs::metadata(&root).unwrap().permissions().mode());
+    assert_eq!(before_file, fs::metadata(&file).unwrap().permissions().mode());
+    assert_eq!(b"unchanged", fs::read(&file).unwrap().as_slice());
+    stage.cleanup().expect("cleanup retained stage");
+}
+
 #[cfg(windows)]
 #[test]
 fn test_unix_only_owner_policy_is_invalid_before_stage_creation() {

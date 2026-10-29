@@ -10,6 +10,8 @@
 #[cfg(unix)]
 mod unix {
     use std::fs;
+    #[cfg(target_os = "linux")]
+    use std::os::unix::fs::MetadataExt;
     use std::os::unix::fs::PermissionsExt;
     #[cfg(target_os = "linux")]
     use std::path::Path;
@@ -141,8 +143,12 @@ mod unix {
     fn run_effective_uid_child() {
         let marker = std::env::var_os(CHILD_MARKER).expect("child marker path");
         let scratch = tempfile::tempdir().expect("child scratch parent");
-        fs::set_permissions(scratch.path(), fs::Permissions::from_mode(0o711))
-            .expect("make fixture parent traversable after UID switch");
+        std::os::unix::fs::chown(scratch.path(), Some(65_534), None).expect("effective UID should own fixture parent");
+        fs::set_permissions(scratch.path(), fs::Permissions::from_mode(0o700))
+            .expect("fixture parent should be private and writable");
+        let metadata = fs::metadata(scratch.path()).expect("fixture metadata");
+        assert_eq!(65_534, metadata.uid());
+        assert_eq!(0o700, metadata.mode() & 0o7777);
 
         // Keep saved UID 0 so the isolated child can restore its original identity for
         // cleanup.

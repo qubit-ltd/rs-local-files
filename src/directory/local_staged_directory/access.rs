@@ -891,7 +891,7 @@ impl LocalStagedDirectory {
                 }
                 continue;
             }
-            #[cfg(all(test, unix))]
+            #[cfg(test)]
             let sync_result = fail_tree_sync_if_scheduled().and_then(|()| file.sync_all());
             #[cfg(not(test))]
             let sync_result = file.sync_all();

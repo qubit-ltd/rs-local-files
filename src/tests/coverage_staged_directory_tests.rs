@@ -81,7 +81,7 @@ fn staged_owner_policy_limits_fail_before_mutation_and_keep_the_stage() {
     stage.cleanup().expect("stage should clean up");
 }
 
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 #[test]
 fn staged_owner_policy_applies_to_nested_files_and_directories() {
     let fixture = tempfile::tempdir().expect("fixture should be created");

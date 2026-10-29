@@ -29,6 +29,10 @@ use qubit_local_files::policy::LocalAtomicityRequirement;
 use qubit_local_files::policy::LocalDurabilityRequirement;
 use tempfile::tempdir;
 
+#[cfg(windows)]
+#[allow(dead_code)]
+mod support;
+
 /// Environment switch used by the file-size-limit subprocess regression.
 #[cfg(unix)]
 const FAILED_APPEND_CASE: &str = "QUBIT_LOCAL_FILES_FAILED_APPEND_CASE";
@@ -118,18 +122,12 @@ fn test_local_file_writer_append_follows_target_symlink() {
 #[cfg(windows)]
 #[test]
 fn test_local_file_writer_append_follows_target_symlink_on_windows() {
-    use std::io::ErrorKind;
-    use std::os::windows::fs::symlink_file;
-
     let directory = tempdir().expect("temporary directory should be created");
     let referent = directory.path().join("referent");
     let target = directory.path().join("target");
     fs::write(&referent, b"original").expect("referent should be written");
-    if let Err(error) = symlink_file(&referent, &target) {
-        if error.kind() == ErrorKind::PermissionDenied {
-            return;
-        }
-        panic!("file symlink should be created: {error}");
+    if !support::windows_symlink::create_file_link(&referent, &target) {
+        return;
     }
 
     let mut writer = LocalFileSystem::host()
