@@ -15,6 +15,7 @@ use crate::LocalResult;
 use crate::LocalSymlinkPolicy;
 use crate::LocalWriteOptions;
 use crate::capability::LocalConditionalKind;
+use crate::local_file_system_validation::conditional_protocol_compiled;
 use crate::local_file_system_validation::validate_write_options;
 
 /// Validates conditional writer configuration before resolving its path.
@@ -48,13 +49,9 @@ pub(crate) fn validate_conditional_open(
             .with_reason("Windows Rooted conditional writes do not support required namespace durability"));
     }
     validate_write_options(options, capabilities, operation)?;
-    #[cfg(windows)]
-    if kind == LocalConditionalKind::Content
-        && (scope == LocalFileSystemScope::Rooted
-            || options.metadata_policy() != crate::options::LocalWriteMetadataPolicy::PreserveExisting)
-    {
+    if !conditional_protocol_compiled(scope, kind, options) {
         return Err(LocalFileError::new(LocalFileErrorKind::Unsupported, operation)
-            .with_reason("this Windows conditional Content configuration is unsupported"));
+            .with_reason("this conditional publication protocol is unsupported on this platform"));
     }
     Ok(())
 }

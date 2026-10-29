@@ -14,6 +14,7 @@ use crate::LocalWriteOptions;
 use crate::capability::LocalCapabilitySupport;
 use crate::capability::LocalConditionalKind;
 use crate::directory::LocalDirectoryHandle;
+use crate::local_file_system_validation::conditional_protocol_compiled;
 #[cfg(feature = "digest")]
 use crate::local_file_system_validation::validate_conditional_open;
 
@@ -32,16 +33,9 @@ impl LocalDirectoryHandle {
         if kind == LocalConditionalKind::Content && options.mode() == crate::LocalWriteMode::CreateNew {
             return LocalCapabilitySupport::Unsupported;
         }
-        #[cfg(windows)]
-        if kind == LocalConditionalKind::Content
-            || options.durability() == crate::policy::LocalDurabilityRequirement::Required
-        {
+        if !conditional_protocol_compiled(self.filesystem().scope(), kind, options) {
             return LocalCapabilitySupport::Unsupported;
         }
-        #[cfg(unix)]
-        let _ = kind;
-        #[cfg(not(any(unix, windows)))]
-        return LocalCapabilitySupport::Unsupported;
         LocalCapabilitySupport::CanAttempt
     }
 

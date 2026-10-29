@@ -27,9 +27,11 @@ use crate::LocalSymlinkPolicy;
 use crate::LocalWriteMode;
 use crate::LocalWriteOptions;
 
+mod conditional_capability;
 #[cfg(feature = "digest")]
 mod conditional_open;
 
+pub(crate) use conditional_capability::conditional_protocol_compiled;
 #[cfg(feature = "digest")]
 pub(crate) use conditional_open::validate_conditional_open;
 

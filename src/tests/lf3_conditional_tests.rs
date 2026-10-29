@@ -118,6 +118,49 @@ fn lf3_conditional_fixed_parent_content_conflict_keeps_original() {
     assert_eq!(fs::read(root.join("target")).expect("read original"), b"current");
 }
 
+#[cfg(any(target_os = "android", target_os = "freebsd"))]
+#[test]
+fn lf3_conditional_content_is_rejected_before_path_work_on_unsupported_unix() {
+    let fixture = tempfile::tempdir().expect("fixture directory");
+    let root = fixture_root(&fixture);
+    let fsys = LocalFileSystem::host().expect("host filesystem");
+    let parent = fsys
+        .open_directory_with_options(&root, &LocalDirectoryOpenOptions::new())
+        .expect("open fixed parent");
+    let options = LocalWriteOptions::new(LocalWriteMode::CreateOrReplace);
+    assert_eq!(
+        parent.conditional_support(LocalConditionalKind::Content, &options),
+        LocalCapabilitySupport::Unsupported
+    );
+    assert_eq!(
+        parent.conditional_support(
+            LocalConditionalKind::Absent,
+            &LocalWriteOptions::new(LocalWriteMode::CreateNew),
+        ),
+        LocalCapabilitySupport::CanAttempt
+    );
+
+    let invalid_options = LocalWriteOptions::new(LocalWriteMode::Append);
+    let error = parent
+        .open_conditional_writer::<Sha256>(
+            Path::new("bad\0path"),
+            LocalWritePrecondition::Content(Sha256::digest(b"before")),
+            &invalid_options,
+        )
+        .expect_err("invalid options retain priority");
+    assert_eq!(error.kind(), crate::error::LocalFileErrorKind::InvalidOptions);
+
+    let error = parent
+        .open_conditional_writer::<Sha256>(
+            Path::new("bad\0path"),
+            LocalWritePrecondition::Content(Sha256::digest(b"before")),
+            &options,
+        )
+        .expect_err("unsupported protocol is rejected before path parsing");
+    assert_eq!(error.kind(), crate::error::LocalFileErrorKind::Unsupported);
+    assert_eq!(fs::read_dir(&root).expect("enumerate unchanged parent").count(), 0);
+}
+
 #[cfg(feature = "test-support")]
 #[test]
 fn lf3_conditional_required_file_sync_failure_prevents_publication() {
