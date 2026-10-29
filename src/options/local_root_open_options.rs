@@ -12,10 +12,45 @@ use super::LocalResolutionLimits;
 use crate::directory::LocalResolutionPolicy;
 use crate::policy::LocalSymlinkPolicy;
 
+/// Configuration for opening a Rooted filesystem with additional resolution
+/// rules.
+///
+/// `with_resolution_limits` replaces the complete limit set stored in these
+/// options. At open time, those limits are combined with the Rooted
+/// filesystem's other ceilings by taking the tighter value in each dimension;
+/// they cannot loosen an existing limit. `None` means no limit from that set,
+/// while zero is enforced as a real limit. The Host path is consumed while
+/// opening and its budgets do not make the resulting filesystem a containment
+/// boundary.
+///
+/// # Examples
+///
+/// ```
+/// use std::fs;
+/// use std::path::Path;
+/// use qubit_local_files::options::{LocalResolutionLimits, LocalRootOpenOptions};
+/// use qubit_local_files::LocalFileSystem;
+///
+/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+/// let directory = tempfile::tempdir()?;
+/// fs::write(directory.path().join("item"), b"rooted")?;
+/// let options = LocalRootOpenOptions::new().with_resolution_limits(
+///     LocalResolutionLimits::new().with_max_actual_components(8),
+/// );
+/// let filesystem = LocalFileSystem::rooted_with_options(directory.path(), &options)?;
+/// let reader = filesystem.open_reader(Path::new("item"))?;
+/// assert_eq!(reader.metadata().len(), 6);
+/// # Ok(())
+/// # }
+/// ```
+///
+/// # Errors
+///
+/// [`LocalFileSystem::rooted_with_options`](crate::LocalFileSystem::rooted_with_options)
+/// returns an error when opening the root or resolving it exceeds a configured
+/// limit, violates a policy, or fails at the native filesystem boundary.
 #[derive(Clone, Debug, Default)]
 #[must_use]
-/// Configuration for opening a rooted filesystem with additional resolution
-/// rules.
 pub struct LocalRootOpenOptions {
     limits: LocalResolutionLimits,
     symlink: Option<LocalSymlinkPolicy>,

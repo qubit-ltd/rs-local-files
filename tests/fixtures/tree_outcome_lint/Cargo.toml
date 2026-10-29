@@ -1,0 +1,10 @@
+[package]
+name = "tree-outcome-lint-consumer"
+version = "0.0.0"
+edition = "2024"
+
+[features]
+drop-result = []
+
+[dependencies]
+qubit-local-files = { path = "../../.." }

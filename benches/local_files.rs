@@ -265,7 +265,7 @@ fn bench_tree_validation_index(c: &mut Criterion) {
                         let result = stage.publish_new(&parent, OsStr::new("published"), &options);
                         elapsed += started.elapsed();
                         let outcome = result.expect("benchmark validation and publication should succeed");
-                        black_box(outcome);
+                        let _ = black_box(outcome);
                         drop(parent);
                         drop(fixture);
                     }
@@ -345,7 +345,7 @@ fn bench_tree_validation_index(c: &mut Criterion) {
                         let result = stage.publish_new(&parent, OsStr::new("published"), &options);
                         elapsed += started.elapsed();
                         let outcome = result.expect("deep validation and publication should succeed");
-                        black_box(outcome);
+                        let _ = black_box(outcome);
                         drop(parent);
                         drop(fixture);
                     }

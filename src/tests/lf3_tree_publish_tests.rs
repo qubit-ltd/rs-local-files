@@ -178,7 +178,7 @@ fn lf_review_tree_special_allowed_with_only_limits() {
     let source = root.join(stage.relative_name()).join("socket");
     drop(UnixListener::bind(&source).expect("socket"));
     let validation = LocalTreeValidationOptions::new().with_limits(LocalListOptions::new().with_max_entries(4));
-    stage
+    let _ = stage
         .publish_new(
             &parent,
             OsStr::new("destination"),
@@ -270,7 +270,7 @@ fn lf_review_tree_hardlinks_reject_only_external_links() {
                 .cleanup()
                 .expect("stage cleanup");
         } else {
-            result.expect("in-tree links are allowed");
+            let _ = result.expect("in-tree links are allowed");
             assert_eq!(
                 std::fs::read(fixture.path().join("destination/file")).expect("published file"),
                 b"payload"

@@ -6,8 +6,36 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 
-/// Additional per-resolution budgets. `None` means no caller limit; zero is a
-/// real limit.
+/// Additional per-resolution budgets for Rooted path resolution.
+///
+/// Each `None` leaves that dimension uncapped by this value; `Some(0)` is a
+/// real limit and permits no work in that dimension. When combined with
+/// filesystem or parent limits, finite values can only tighten the effective
+/// budget.
+///
+/// These limits are enforced by Rooted resolution. Host observed reads return
+/// `Unsupported` when their effective resolution limits are finite; unbounded
+/// Host observed reads retain their existing behavior.
+///
+/// # Examples
+///
+/// ```
+/// use std::fs;
+/// use std::path::Path;
+/// use qubit_local_files::options::{LocalResolutionLimits, LocalRootOpenOptions};
+/// use qubit_local_files::LocalFileSystem;
+///
+/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+/// let directory = tempfile::tempdir()?;
+/// fs::write(directory.path().join("item"), b"value")?;
+/// let limits = LocalResolutionLimits::new().with_max_symlink_hops(4);
+/// let options = LocalRootOpenOptions::new().with_resolution_limits(limits);
+/// let filesystem = LocalFileSystem::rooted_with_options(directory.path(), &options)?;
+/// let reader = filesystem.open_reader(Path::new("item"))?;
+/// assert_eq!(reader.metadata().len(), 5);
+/// # Ok(())
+/// # }
+/// ```
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 #[must_use]
 pub struct LocalResolutionLimits {

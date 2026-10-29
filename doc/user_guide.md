@@ -1320,13 +1320,15 @@ non-empty staged tree using this policy requires directory read/list and
 traverse access so the library can perform the final rewalk; if those rights
 are absent, publication is rejected before mutation. The final access state
 reports `OwnerPolicyApplied` only after applying and verifying the exact policy.
-The bounded application operation fixes at most 256 child identities and
-management handles before changing access; a larger tree returns
-`ResourceLimit` without mutation. Caller-supplied traversal limits can impose a
-smaller bound. When file synchronization is requested, regular files are
-synchronized again through their retained handles after the access policy is
-applied and verified. `file_synced()` is true only when all requested file
-syncs succeed. `NotRequired` adds no post-policy file sync; `Preferred` may
+When `LocalListOptions::max_entries` is unset, the bounded application
+operation fixes at most 256 child identities and management handles before
+changing access; a larger tree returns `ResourceLimit` without mutation. An
+explicit `max_entries` replaces that default and may raise or lower the bound.
+Raising it can retain more identity and management handles at once. When file
+synchronization is requested, regular files are synchronized again through
+their retained handles after the access policy is applied and verified.
+`file_synced()` is true only when all requested file syncs succeed.
+`NotRequired` adds no post-policy file sync; `Preferred` may
 publish with `file_synced() == false`, while `Required` prevents publication
 and retains the stage if a final sync cannot complete. The access state
 reflects policy changes already applied.

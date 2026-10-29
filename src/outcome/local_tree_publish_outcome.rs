@@ -11,8 +11,55 @@ use crate::outcome::LocalTreeAccessState;
 use crate::outcome::LocalTreePublication;
 use crate::policy::LocalOwnerAccessPolicy;
 
-/// Reports publication and synchronization facts for a staged tree.
+/// Reports independent publication, synchronization, and access facts for a
+/// staged tree.
+///
+/// `publication` says whether the name was installed. `durable` reports the
+/// requested parent namespace durability; `file_synced` reports requested
+/// regular-file synchronization. A preferred sync can fail while publication
+/// succeeds, so inspect these facts separately. `access_state` reports the
+/// final access state confirmed by the publish operation. None of these fields
+/// implies the values of the others.
+///
+/// # Errors
+///
+/// [`LocalStagedDirectory::publish_new`](crate::directory::LocalStagedDirectory::publish_new)
+/// returns an error with publication and access state when validation,
+/// synchronization required by policy, or native publication fails.
+///
+/// # Examples
+///
+/// ```
+/// use std::ffi::OsStr;
+/// use qubit_local_files::directory::LocalDirectoryHandle;
+/// use qubit_local_files::options::{LocalDirectoryOpenOptions, LocalTempDirectoryOptions, LocalTreePublishOptions};
+/// use qubit_local_files::policy::{LocalDurabilityRequirement, LocalFileSyncRequirement};
+/// use qubit_local_files::outcome::LocalTreePublication;
+/// use qubit_local_files::LocalFileSystem;
+///
+/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+/// let temporary = tempfile::tempdir()?;
+/// let filesystem = LocalFileSystem::host()?;
+/// let parent = filesystem.open_directory_with_options(
+///     temporary.path(), &LocalDirectoryOpenOptions::new(),
+/// )?;
+/// let stage = parent.create_staged_directory(&LocalTempDirectoryOptions::new())?;
+/// let outcome = stage.publish_new(
+///     &parent,
+///     OsStr::new("published"),
+///     &LocalTreePublishOptions::new()
+///         .with_durability(LocalDurabilityRequirement::Preferred)
+///         .with_file_sync(LocalFileSyncRequirement::Preferred),
+/// )?;
+/// assert_eq!(outcome.publication(), LocalTreePublication::Published);
+/// let _namespace_durable = outcome.durable();
+/// let _regular_files_synced = outcome.file_synced();
+/// let _access_state = outcome.access_state();
+/// # Ok(())
+/// # }
+/// ```
 #[derive(Debug)]
+#[must_use = "inspect publication, synchronization, and access outcomes"]
 pub struct LocalTreePublishOutcome {
     publication: LocalTreePublication,
     durable: bool,

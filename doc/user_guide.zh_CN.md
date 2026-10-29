@@ -1051,8 +1051,9 @@ Unix 使用 `with_unix_modes(directory_mode, file_mode)`，Windows 使用
 `with_windows_masks(directory_mask, file_mask)`，只填写目标平台的设置；策略没有隐含权限预设。
 非空 staged tree 若使用该策略，库必须能读取/列出目录并遍历目录，才能完成发布前的最终重走检查。
 缺少这些权限时会在 mutation 前拒绝发布。只有在策略已应用并验证后，最终 access state 才会报告
-`OwnerPolicyApplied`。修改权限前，操作最多固定 256 个子项 identity 和管理句柄；树更大时会在 mutation
-前以 `ResourceLimit` 失败。调用方设置的遍历额度可以更小。这不代表不同平台的 ACL 继承或有效访问语义完全相同。
+`OwnerPolicyApplied`。未设置 `LocalListOptions::max_entries` 时，修改权限前最多固定 256 个子项 identity
+和管理句柄；树更大时会在 mutation 前以 `ResourceLimit` 失败。显式设置 `max_entries` 会替换该默认值，
+可以调高或调低；调高可能同时保留更多 identity 和管理句柄。这不代表不同平台的 ACL 继承或有效访问语义完全相同。
 
 请求文件同步时，权限策略应用并验证后，库还会通过保留的句柄再次同步普通文件。
 只有所有请求的文件同步成功，`file_synced()` 才为 true。`NotRequired` 不增加权限变更后的文件同步；
