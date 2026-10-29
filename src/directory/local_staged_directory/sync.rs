@@ -192,24 +192,32 @@ impl LocalStagedDirectory {
                     source,
                 )
             })?;
-            let opened = root
-                .open_writer(
-                    &relative,
-                    &crate::write::OpenOptions::new(crate::write::Mode::OpenExistingAtStart),
+            #[cfg(unix)]
+            let opened = root.open_reader(&relative, &crate::read::OpenOptions::default());
+            #[cfg(windows)]
+            let opened = root.open_writer(
+                &relative,
+                &crate::write::OpenOptions::new(crate::write::Mode::OpenExistingAtStart),
+            );
+            #[cfg(not(any(unix, windows)))]
+            let opened = root.open_writer(
+                &relative,
+                &crate::write::OpenOptions::new(crate::write::Mode::OpenExistingAtStart),
+            );
+            let opened = opened.map_err(|source| {
+                LocalFileError::from_io(
+                    LocalFileOperation::Commit,
+                    Some(self.directory().diagnostic_path().join(item.relative_path())),
+                    None,
+                    source,
                 )
-                .map_err(|source| {
-                    LocalFileError::from_io(
-                        LocalFileOperation::Commit,
-                        Some(self.directory().diagnostic_path().join(item.relative_path())),
-                        None,
-                        source,
-                    )
-                })?;
+            })?;
             let observation = crate::observation::query::query_observation(
                 &opened,
                 crate::observation::LocalObservationRequirement::Required,
             )?;
-            if observation.identity() != Some(&expected) {
+            if observation.identity() != Some(&expected) || observation.metadata().kind() != crate::LocalFileKind::File
+            {
                 return Err(
                     LocalFileError::new(LocalFileErrorKind::ChangedDuringRead, LocalFileOperation::Metadata)
                         .with_path(self.directory().diagnostic_path().join(item.relative_path())),
