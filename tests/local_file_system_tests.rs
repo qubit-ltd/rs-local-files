@@ -21,6 +21,8 @@ use qubit_local_files::options::LocalCreateDirectoryOptions;
 use qubit_local_files::options::LocalDeleteOptions;
 use qubit_local_files::options::LocalReadOptions;
 use qubit_local_files::options::LocalRenameOptions;
+use qubit_local_files::options::LocalTempDirectoryOptions;
+use qubit_local_files::options::LocalTempFileOptions;
 #[cfg(all(unix, feature = "test-support"))]
 use qubit_local_files::outcome::LocalRenameFailureState;
 #[cfg(unix)]
@@ -65,6 +67,57 @@ fn test_local_file_system_debug_redacts_root_paths() {
     assert!(diagnostic.contains("Rooted"));
     assert!(diagnostic.contains("<redacted>"));
     assert!(!diagnostic.contains("customer-secret-root-8f921d"));
+}
+
+#[test]
+fn test_local_file_system_debug_redacts_default_temp_parents() {
+    const SENSITIVE_COMPONENT: &str = "customer-secret-parent-39e02c97";
+    let directory = tempdir().expect("temporary directory should be created");
+    let rooted_authority = directory.path().join("rooted");
+    fs::create_dir(&rooted_authority).expect("Rooted authority should be created");
+
+    for rooted in [false, true] {
+        let mut filesystem = if rooted {
+            LocalFileSystem::rooted(&rooted_authority).expect("Rooted filesystem should open")
+        } else {
+            LocalFileSystem::host().expect("Host filesystem should open")
+        };
+        let sensitive_parent = if rooted {
+            std::path::PathBuf::from(format!("/{SENSITIVE_COMPONENT}"))
+        } else {
+            directory.path().join(SENSITIVE_COMPONENT)
+        };
+
+        let file_options = LocalTempFileOptions::new().with_parent(&sensitive_parent);
+        filesystem
+            .set_default_temp_file_options(file_options)
+            .expect("default temp-file parent should be valid");
+        let diagnostic = format!("{filesystem:?}");
+        assert!(!diagnostic.contains(SENSITIVE_COMPONENT));
+        assert!(diagnostic.contains("LocalFileSystem"));
+        assert!(diagnostic.contains(if rooted { "Rooted" } else { "Host" }));
+        assert!(diagnostic.contains("LocalTempFileOptions"));
+        assert!(diagnostic.contains("PlatformDefault"));
+        assert_eq!(
+            Some(sensitive_parent.as_path()),
+            filesystem.default_temp_file_options().parent()
+        );
+
+        let directory_options = LocalTempDirectoryOptions::new().with_parent(&sensitive_parent);
+        filesystem
+            .set_default_temp_directory_options(directory_options)
+            .expect("default temp-directory parent should be valid");
+        let diagnostic = format!("{filesystem:?}");
+        assert!(!diagnostic.contains(SENSITIVE_COMPONENT));
+        assert!(diagnostic.contains("LocalFileSystem"));
+        assert!(diagnostic.contains(if rooted { "Rooted" } else { "Host" }));
+        assert!(diagnostic.contains("LocalTempDirectoryOptions"));
+        assert!(diagnostic.contains("PlatformDefault"));
+        assert_eq!(
+            Some(sensitive_parent.as_path()),
+            filesystem.default_temp_directory_options().parent()
+        );
+    }
 }
 
 /// Verifies default host copy and rename avoid durability synchronization.

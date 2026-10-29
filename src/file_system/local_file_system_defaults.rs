@@ -21,7 +21,7 @@ use crate::LocalWriteOptions;
 ///
 /// Explicit per-operation Options replace these values completely.
 /// Options copied independently by [`crate::LocalFileSystem::clone`].
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Default)]
 pub(crate) struct LocalFileSystemDefaults {
     /// Defaults used by reader-opening convenience methods.
     pub(crate) read: LocalReadOptions,
@@ -41,4 +41,54 @@ pub(crate) struct LocalFileSystemDefaults {
     pub(crate) temp_file: LocalTempFileOptions,
     /// Defaults used by temporary-directory convenience methods.
     pub(crate) temp_directory: LocalTempDirectoryOptions,
+}
+
+/// Formats temporary-file defaults without exposing their parent path.
+struct TempFileDebug<'a>(&'a LocalTempFileOptions);
+
+impl std::fmt::Debug for TempFileDebug<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LocalTempFileOptions")
+            .field("parent", &self.0.parent().map(crate::local_file_system::redacted_path))
+            .field("prefix", &self.0.prefix())
+            .field("suffix", &self.0.suffix())
+            .field("max_attempts", &self.0.max_attempts())
+            .field("create_parent", &self.0.creates_parent())
+            .field("privacy", &self.0.privacy())
+            .finish()
+    }
+}
+
+/// Formats temporary-directory defaults without exposing their parent path.
+struct TempDirectoryDebug<'a>(&'a LocalTempDirectoryOptions);
+
+impl std::fmt::Debug for TempDirectoryDebug<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LocalTempDirectoryOptions")
+            .field("parent", &self.0.parent().map(crate::local_file_system::redacted_path))
+            .field("prefix", &self.0.prefix())
+            .field("suffix", &self.0.suffix())
+            .field("max_attempts", &self.0.max_attempts())
+            .field("create_parent", &self.0.creates_parent())
+            .field("privacy", &self.0.privacy())
+            .field("cleanup_limits", &self.0.cleanup_limits())
+            .field("owner_access_policy", &self.0.owner_access_policy())
+            .finish()
+    }
+}
+
+impl std::fmt::Debug for LocalFileSystemDefaults {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LocalFileSystemDefaults")
+            .field("read", &self.read)
+            .field("write", &self.write)
+            .field("list", &self.list)
+            .field("copy", &self.copy)
+            .field("create_directory", &self.create_directory)
+            .field("delete", &self.delete)
+            .field("rename", &self.rename)
+            .field("temp_file", &TempFileDebug(&self.temp_file))
+            .field("temp_directory", &TempDirectoryDebug(&self.temp_directory))
+            .finish()
+    }
 }
