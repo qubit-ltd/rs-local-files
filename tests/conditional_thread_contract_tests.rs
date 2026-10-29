@@ -73,7 +73,28 @@ fn conditional_commit_failure_can_move_across_threads_and_keeps_recovery_file() 
     let failure = boxed_failure
         .downcast::<qubit_local_files::error::LocalConditionalCommitError>()
         .expect("boxed failure retains its concrete type");
-    let recovery_paths = thread::spawn(move || {
+    let target_bytes = std::fs::read(&target).expect("read preexisting target");
+    assert_eq!(target_bytes, b"preexisting");
+    let before_transfer: Vec<_> = failure
+        .recovery_files()
+        .iter()
+        .map(|file| {
+            let namespace_path = file.namespace_path().to_path_buf();
+            let role = file.role();
+            let bytes =
+                std::fs::read(&namespace_path).expect("read Host recovery file before moving it to another thread");
+            (namespace_path, role, bytes)
+        })
+        .collect();
+    let candidate = before_transfer
+        .iter()
+        .find(|(_, role, _)| *role == qubit_local_files::recovery::LocalRecoveryFileRole::CandidateCopy)
+        .expect("candidate copy is retained");
+    assert_ne!(candidate.0, target, "candidate must use a distinct path");
+    assert_ne!(candidate.2, target_bytes, "candidate must contain different bytes");
+
+    let recovery_file_count = before_transfer.len();
+    let recovery_entries = thread::spawn(move || {
         let failure = *failure;
         assert_eq!(
             failure.publication(),
@@ -86,21 +107,28 @@ fn conditional_commit_failure_can_move_across_threads_and_keeps_recovery_file() 
 
         let recovery_files = failure.into_recovery_files();
         assert!(!recovery_files.is_empty(), "candidate should transfer to caller");
-        let paths: Vec<_> = recovery_files
+        assert_eq!(recovery_files.len(), recovery_file_count);
+        let transferred: Vec<_> = recovery_files
             .iter()
-            .map(|file| {
-                file.diagnostic_path()
-                    .expect("Host recovery file has a diagnostic path")
-                    .to_path_buf()
-            })
+            .map(|file| (file.namespace_path().to_path_buf(), file.role()))
             .collect();
         drop(recovery_files);
-        paths
+        transferred
     })
     .join()
     .expect("recovery result should move across thread");
 
-    for path in recovery_paths {
-        assert!(path.exists(), "dropping recovery handles keeps {path:?}");
+    let transferred = recovery_entries;
+    for (namespace_path, role, bytes) in before_transfer {
+        assert!(transferred.contains(&(namespace_path.clone(), role)));
+        assert_eq!(
+            std::fs::read(&namespace_path).expect("read recovery file after handles are dropped"),
+            bytes,
+            "Drop must preserve the {role:?} file at {namespace_path:?}"
+        );
     }
+    assert_eq!(
+        std::fs::read(&target).expect("read target after recovery Drop"),
+        target_bytes
+    );
 }

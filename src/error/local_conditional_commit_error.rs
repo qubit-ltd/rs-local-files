@@ -43,6 +43,7 @@ use crate::recovery::LocalRecoveryFileRole;
 /// let directory = tempdir()?;
 /// let target = directory.path().canonicalize()?.join("model");
 /// std::fs::write(&target, b"existing")?;
+/// let target_bytes = std::fs::read(&target)?;
 /// let mut filesystem = LocalFileSystem::host()?;
 /// filesystem.set_symlink_policy(qubit_local_files::policy::LocalSymlinkPolicy::Reject)?;
 /// let mut writer = filesystem.open_conditional_writer::<Sha256>(
@@ -62,7 +63,11 @@ use crate::recovery::LocalRecoveryFileRole;
 /// assert_eq!(bytes, b"candidate bytes");
 /// drop(reader);
 /// let role = candidate.role();
-/// let retained_path = candidate.diagnostic_path().expect("host diagnostic path").to_path_buf();
+/// let namespace_path = candidate.namespace_path().to_path_buf();
+/// assert_ne!(namespace_path, target);
+/// assert_ne!(bytes, target_bytes);
+/// // diagnostic_path may describe the original operation context; namespace_path
+/// // identifies the actual retained Host file used for this filesystem check.
 /// let recovery_files = error.into_recovery_files();
 /// let transferred = recovery_files.iter().find(|file| file.role() == role)
 ///     .expect("candidate ownership transferred");
@@ -72,7 +77,8 @@ use crate::recovery::LocalRecoveryFileRole;
 /// assert_eq!(bytes, b"candidate bytes");
 /// drop(reader);
 /// drop(recovery_files);
-/// assert!(retained_path.exists(), "dropping recovery handles preserves files");
+/// assert_eq!(std::fs::read(&namespace_path)?, b"candidate bytes");
+/// assert_eq!(std::fs::read(&target)?, target_bytes);
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
 ///
