@@ -59,6 +59,9 @@ jobs:
         if [ "$RUNNER_OS" != Windows ]; then
           cargo test --locked --test security_observation_contract_tests
         fi
+        if [ "$RUNNER_OS" = Linux ] || [ "$RUNNER_OS" = macOS ]; then
+          cargo test --locked --manifest-path fuzz/Cargo.toml --test lifecycle_model_tests
+        fi
         if [ "$RUNNER_OS" = Linux ]; then
           cargo test --locked --test owner_policy_lifecycle_tests
           rustup target add --toolchain 1.94 x86_64-unknown-freebsd armv7-linux-androideabi
