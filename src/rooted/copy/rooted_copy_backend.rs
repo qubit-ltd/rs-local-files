@@ -200,6 +200,17 @@ impl CopyTreeBackend for RootedCopyBackend<'_> {
                         crate::LocalFileOperation::Copy,
                     ) {
                         Ok(resolved) => resolved,
+                        Err(copy_error) if copy_error.kind() == crate::LocalFileErrorKind::NotFound => {
+                            *stats = copy_symlink(
+                                self.root,
+                                &source_child,
+                                &destination_child,
+                                self.options,
+                                *stats,
+                                budget,
+                            )?;
+                            return Ok(None);
+                        }
                         Err(copy_error) => {
                             return Err(error(
                                 Stage::InspectSourceEntry,
@@ -212,6 +223,17 @@ impl CopyTreeBackend for RootedCopyBackend<'_> {
                     };
                     let resolved_metadata = match self.root.symlink_metadata(&resolved) {
                         Ok(metadata) => metadata,
+                        Err(source_error) if source_error.kind() == ErrorKind::NotFound => {
+                            *stats = copy_symlink(
+                                self.root,
+                                &source_child,
+                                &destination_child,
+                                self.options,
+                                *stats,
+                                budget,
+                            )?;
+                            return Ok(None);
+                        }
                         Err(source_error) => {
                             return Err(error(
                                 Stage::InspectSourceEntry,

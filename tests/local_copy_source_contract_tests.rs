@@ -18,6 +18,8 @@ use qubit_local_files::options::LocalCopyConflictPolicy;
 use qubit_local_files::options::LocalCopyOptions;
 use qubit_local_files::options::LocalCopySourceMode;
 use qubit_local_files::outcome::LocalCopyFailureState;
+#[cfg(any(unix, windows))]
+use qubit_local_files::policy::LocalSymlinkPolicy;
 use tempfile::tempdir;
 
 /// Socket sources must fail before creating a requested destination parent.
@@ -220,6 +222,54 @@ fn test_final_link_source_modes_do_not_follow_targets() {
     }
 }
 
+/// Following a dangling tree link copies the link entry when target lookup
+/// reports that the referent is absent.
+#[cfg(unix)]
+#[test]
+fn test_tree_copy_preserves_dangling_links_for_host_and_rooted() {
+    for rooted in [false, true] {
+        for policy in [
+            None,
+            Some(LocalSymlinkPolicy::Reject),
+            Some(LocalSymlinkPolicy::FollowWithinScope),
+        ] {
+            let directory = tempdir().expect("fixture should exist");
+            fs::create_dir(directory.path().join("source")).expect("source directory should exist");
+            std::os::unix::fs::symlink("missing", directory.path().join("source/link"))
+                .expect("dangling link should exist");
+            let filesystem = if rooted {
+                LocalFileSystem::rooted(directory.path())
+            } else {
+                LocalFileSystem::host()
+            }
+            .expect("filesystem should open");
+            let source = if rooted {
+                PathBuf::from("source")
+            } else {
+                directory.path().join("source")
+            };
+            let target = if rooted {
+                PathBuf::from("target")
+            } else {
+                directory.path().join("target")
+            };
+            let mut options = LocalCopyOptions::new().with_tree_source();
+            if let Some(policy) = policy {
+                options = options.with_symlink_policy(policy);
+            }
+            let outcome = filesystem
+                .copy_with_options(&source, &target, &options)
+                .expect("dangling link should be copied");
+            assert_eq!(1, outcome.stats().files());
+            assert_eq!(0, outcome.stats().bytes());
+            assert_eq!(
+                PathBuf::from("missing"),
+                fs::read_link(directory.path().join("target/link")).expect("copied link should be readable")
+            );
+        }
+    }
+}
+
 /// Tree copying must preserve the Windows directory-link flag without targets.
 #[cfg(windows)]
 #[test]
@@ -249,26 +299,38 @@ fn test_tree_copy_preserves_dangling_directory_link_kind() {
         } else {
             directory.path().join("target")
         };
-        let _ = filesystem
-            .copy_with_options(
-                &source,
-                &target,
-                &LocalCopyOptions::new()
-                    .with_tree_source()
-                    .with_symlink_policy(LocalSymlinkPolicy::Reject),
-            )
-            .expect("tree should copy dangling link as an entry");
-        let link = directory.path().join("target/link");
-        assert!(
-            fs::symlink_metadata(&link)
-                .expect("link should exist")
-                .file_type()
-                .is_symlink_dir()
-        );
-        assert_eq!(
-            PathBuf::from("missing"),
-            fs::read_link(link).expect("target must remain a link")
-        );
+        for policy in [
+            None,
+            Some(LocalSymlinkPolicy::Reject),
+            Some(LocalSymlinkPolicy::FollowWithinScope),
+        ] {
+            let target = if rooted {
+                PathBuf::from("target")
+            } else {
+                directory.path().join("target")
+            };
+            let mut options = LocalCopyOptions::new().with_tree_source();
+            if let Some(policy) = policy {
+                options = options.with_symlink_policy(policy);
+            }
+            let outcome = filesystem
+                .copy_with_options(&source, &target, &options)
+                .expect("tree should copy dangling link as an entry");
+            assert_eq!(1, outcome.stats().files());
+            assert_eq!(0, outcome.stats().bytes());
+            let link = directory.path().join("target/link");
+            assert!(
+                fs::symlink_metadata(&link)
+                    .expect("link should exist")
+                    .file_type()
+                    .is_symlink_dir()
+            );
+            assert_eq!(
+                PathBuf::from("missing"),
+                fs::read_link(link).expect("target must remain a link")
+            );
+            fs::remove_dir_all(directory.path().join("target")).expect("copied tree should be removed");
+        }
     }
 }
 
