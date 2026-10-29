@@ -214,6 +214,13 @@ pub(crate) fn copy_symlink_with_options(
             stats,
         );
     }
+    let link_target = with_copy_context(
+        std::fs::read_link(src),
+        LocalCopyDirStage::CopyFileContents,
+        src,
+        dst,
+        stats,
+    )?;
     if action == CopyDestinationAction::Replace {
         let (delete_options, started_at) = budget.deletion_options();
         let removal = match destination_metadata.as_ref() {
@@ -235,13 +242,6 @@ pub(crate) fn copy_symlink_with_options(
             }
         })?;
     }
-    let link_target = with_copy_context(
-        std::fs::read_link(src),
-        LocalCopyDirStage::CopyFileContents,
-        src,
-        dst,
-        stats,
-    )?;
     with_copy_context(
         create_symlink_entry(&link_target, src, dst),
         LocalCopyDirStage::CommitFile,
@@ -268,6 +268,91 @@ pub(crate) fn copy_symlink_with_options(
     stats.non_atomic_publication = true;
     stats.files_durable = false;
     Ok(())
+}
+
+#[cfg(test)]
+mod symlink_source_read_tests {
+    use super::CopyBudget;
+    use super::LocalCopyConflictPolicy;
+    use super::LocalCopyDirOptions;
+    use super::LocalCopyDirStage;
+    use super::LocalCopyDirStats;
+    use super::copy_symlink_with_options;
+    use crate::LocalCopyTypeConflictPolicy;
+
+    #[test]
+    fn test_symlink_source_read_failure_keeps_destination() {
+        let fixture = tempfile::tempdir().expect("fixture");
+        let source = fixture.path().join("ordinary-file");
+        std::fs::write(&source, b"not a link").expect("ordinary source file");
+        let options = LocalCopyDirOptions::new()
+            .with_conflict(LocalCopyConflictPolicy::Overwrite)
+            .with_type_conflict(LocalCopyTypeConflictPolicy::Replace);
+
+        for directory_destination in [false, true] {
+            let destination = fixture
+                .path()
+                .join(if directory_destination { "old-dir" } else { "old-file" });
+            if directory_destination {
+                std::fs::create_dir(&destination).expect("old destination directory");
+                std::fs::write(destination.join("old"), b"old child").expect("old child");
+            } else {
+                std::fs::write(&destination, b"old").expect("old destination file");
+            }
+            let mut stats = LocalCopyDirStats::default();
+            let before = stats;
+            let budget = CopyBudget::new(options);
+            let failure = copy_symlink_with_options(&source, &destination, options, &mut stats, &budget)
+                .expect_err("ordinary source is not a link");
+
+            assert_eq!(LocalCopyDirStage::CopyFileContents, failure.stage());
+            assert_eq!(before, stats);
+            if directory_destination {
+                assert_eq!(
+                    b"old child",
+                    std::fs::read(destination.join("old"))
+                        .expect("old child retained")
+                        .as_slice()
+                );
+            } else {
+                assert_eq!(
+                    b"old",
+                    std::fs::read(&destination).expect("old file retained").as_slice()
+                );
+            }
+        }
+
+        for (conflict, expected_stage) in [
+            (
+                LocalCopyConflictPolicy::Fail,
+                Some(LocalCopyDirStage::PrepareDestination),
+            ),
+            (LocalCopyConflictPolicy::Skip, None),
+        ] {
+            let destination = fixture.path().join("existing");
+            std::fs::write(&destination, b"old").expect("existing destination");
+            let options = LocalCopyDirOptions::new().with_conflict(conflict);
+            let mut stats = LocalCopyDirStats::default();
+            let budget = CopyBudget::new(options);
+            match expected_stage {
+                Some(stage) => {
+                    let failure = copy_symlink_with_options(&source, &destination, options, &mut stats, &budget)
+                        .expect_err("Fail policy rejects existing destination");
+                    assert_eq!(stage, failure.stage());
+                    assert_eq!(0, stats.skipped());
+                }
+                None => {
+                    copy_symlink_with_options(&source, &destination, options, &mut stats, &budget)
+                        .expect("Skip policy does not inspect source link");
+                    assert_eq!(1, stats.skipped());
+                }
+            }
+            assert_eq!(
+                b"old",
+                std::fs::read(&destination).expect("destination retained").as_slice()
+            );
+        }
+    }
 }
 
 /// Creates a symbolic link at `target` using the source entry type where the
