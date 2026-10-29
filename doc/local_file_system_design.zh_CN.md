@@ -946,7 +946,9 @@ Path 泄漏。
 `LocalObservedReader::verify_path_binding()` 返回 `Unchanged`、`Changed` 或 `Missing`。
 这些都是成功验证结果；未启用绑定时调用该方法返回 `InvalidState`。Windows Host 无法提供
 此绑定，会返回 `Unsupported`。检查只代表当时的路径观察，不会锁定名称，也不保证内容不变；
-对象 identity 不定义内容版本。祖先数量、保留路径字节数和协作式 deadline 限制绑定开销。
+对象 identity 不定义内容版本。复核会在保留的 authority 和解析合同下重新解析原名称。路径绑定的解析预算
+会与外层 filesystem 或 directory handle 的限制取较严格值，不能放宽外层限制。祖先数量、保留路径字节数、
+解析预算和协作式 deadline 限制绑定开销。
 
 打开重试只在 `LocalReadOptions` 明确提供窗口时发生。重试不得吞掉不可重试错误，也不得在
 deadline 后继续。
@@ -1599,6 +1601,8 @@ reason: "path escapes the virtual root"
 
 Conditional writer 错误在可用时保留创建时的 PWD context。commit、abort 和 cleanup 诊断使用
 该快照，不再查询之后变化的进程 PWD；Rooted namespace path 不会被当作物理 Host 路径公开。
+读取 helper 即使在打开 reader 阶段失败，也保留公开的 `Read` operation；完整读取的结构化错误还会保留
+解析后的命名空间路径和本次请求捕获的 PWD。
 
 ### 19.3 Error kind
 

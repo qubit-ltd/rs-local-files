@@ -16,6 +16,8 @@
 `LocalFileSystem` 会在解析路径或修改文件系统前校验静态选项组合。复制失败会报告已证明的
 最强目标状态：`Unchanged` 表示本次操作没有修改任何目标条目，`Indeterminate` 表示无法确定
 最终目标状态。即使打开读取器失败，`read_prefix` 错误仍保留外层的 `Read` 操作。
+`read_all`、`read_text` 和一致性读取的结构化错误会保留解析后的命名空间路径；相对路径还会保留
+本次请求使用的 PWD 快照。
 
 ## 概念模型
 
@@ -616,10 +618,11 @@ match reader.verify_path_binding()? {
 # Ok::<(), Box<dyn std::error::Error>>(())
 ```
 
-`Changed` 和 `Missing` 是普通验证结果，不是错误。检查通过后并不会锁住路径；对象 identity
-也不等于文件内容版本。若业务约束的是内容，需比较内容或使用快照。未启用绑定时调用
-`verify_path_binding()` 会返回 `InvalidState`；Windows Host 无法提供绑定，会返回
-`Unsupported`。祖先数、路径字节数和期限限制绑定过程的资源使用；期限是协作式的，不能中断阻塞的原生调用。
+`Changed` 和 `Missing` 是普通验证结果，不是错误。复核会在保留的 authority 和解析合同下重新解析原名称。
+路径绑定的解析限制会与外层 filesystem 或 directory handle 的限制取较严格值，因此不能放宽外层限制。
+检查通过后并不会锁住路径；对象 identity 也不等于文件内容版本。若业务约束的是内容，需比较内容或使用快照。
+未启用绑定时调用 `verify_path_binding()` 会返回 `InvalidState`；Windows Host 无法提供绑定，会返回
+`Unsupported`。祖先数、路径字节数、解析预算和期限限制绑定过程的资源使用；期限是协作式的，不能中断阻塞的原生调用。
 
 ## 临时资源发布与失败恢复
 

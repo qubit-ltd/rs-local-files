@@ -20,6 +20,8 @@ mutating paths. Copy failures report the strongest proven destination state;
 `Unchanged` means this operation did not modify any destination entry, while `Indeterminate`
 means the final destination state could not be established. A `read_prefix` error
 keeps the outer `Read` operation even when opening the reader failed.
+`read_all`, `read_text`, and consistent reads retain the bound namespace path
+and the PWD snapshot used for a relative request in structured read errors.
 
 ## Conceptual Model
 
@@ -778,13 +780,17 @@ match reader.verify_path_binding()? {
 ```
 
 `Changed` and `Missing` are ordinary verification results, not errors. The
-check does not lock the path after it returns, and object identity does not
-prove that file contents are unchanged or represent a particular content
-version. Compare content or use a snapshot when the application needs that
-stronger rule. Calling `verify_path_binding()` without enabling binding
-returns `InvalidState`; Windows Host cannot provide this binding and returns
-`Unsupported`. The ancestor, path-byte, and deadline budgets limit binding
-work; deadlines are cooperative and cannot interrupt a blocked native call.
+check resolves the original name under the retained authority and resolution
+contract. Binding resolution limits combine with enclosing filesystem or
+directory-handle limits by taking the stricter configured bound; they cannot
+loosen those limits. The check does not lock the path after it returns, and
+object identity does not prove that file contents are unchanged or represent a
+particular content version. Compare content or use a snapshot when the
+application needs that stronger rule. Calling `verify_path_binding()` without
+enabling binding returns `InvalidState`; Windows Host cannot provide this
+binding and returns `Unsupported`. The ancestor, path-byte, deadline, and
+resolution budgets limit binding work; deadlines are cooperative and cannot
+interrupt a blocked native call.
 
 ## Temporary publication and recovery
 

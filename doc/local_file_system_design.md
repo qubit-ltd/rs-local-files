@@ -689,8 +689,12 @@ authority chain so `LocalObservedReader::verify_path_binding()` can report
 calling the method without binding returns `InvalidState`. Windows Host does
 not support this binding and returns `Unsupported`. A check is an observation
 at that time, not a lock on the name or a guarantee about file contents;
-identity does not define a content version. Ancestor count, retained path
-bytes, and a cooperative deadline bound the work.
+identity does not define a content version. Rechecking resolves the original
+name under its retained authority and resolution contract. Resolution limits
+from path binding combine with enclosing filesystem or directory-handle limits
+by taking the stricter configured bound; they cannot loosen an enclosing
+limit. Ancestor count, retained path bytes, resolution budgets, and a
+cooperative deadline bound the work.
 
 ### 13.3 Filesystem limits and space
 
@@ -1408,6 +1412,9 @@ objects; callers branch on their typed state.
 Lexical failures retain the requested spelling and relevant PWD snapshot.
 Failures after successful binding report namespace-absolute paths reusable with
 the owning filesystem; diagnostic Host paths remain optional context only.
+Read helpers retain the public `Read` operation even when opening a reader
+fails; complete reads also preserve their resolved namespace path and captured
+PWD in structured errors.
 
 ```text
 kind: InvalidPath
