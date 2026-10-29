@@ -6,7 +6,6 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 use std::path::Path;
-#[cfg(feature = "test-support")]
 use std::path::PathBuf;
 
 use super::super::tree_observer::LocalTreeObserver;
@@ -37,6 +36,19 @@ use crate::error::LocalResult;
 use crate::observation::LocalFileObservation;
 use crate::options::LocalListOptions;
 use crate::policy::LocalFileSyncRequirement;
+
+type OwnerPolicyEntry = (
+    PathBuf,
+    crate::LocalFileKind,
+    Option<crate::observation::LocalFileIdentity>,
+);
+type RetainedOwnerPolicyEntry = (
+    PathBuf,
+    crate::LocalFileKind,
+    Option<crate::observation::LocalFileIdentity>,
+    std::fs::File,
+    bool,
+);
 
 impl LocalStagedDirectory {
     /// Observes the stage directory through its retained handle.
@@ -153,11 +165,41 @@ impl LocalStagedDirectory {
         use crate::outcome::LocalTreeAccessState as State;
         validate_owner_policy(policy)
             .map_err(|cause| super::super::tree_recovery::LocalTreeAccessError::new(cause, State::Preserved))?;
-        let mut file_synced = sync_requirement != LocalFileSyncRequirement::NotRequired && pre_synced;
+        let file_synced = sync_requirement != LocalFileSyncRequirement::NotRequired && pre_synced;
         self.owner_access_policy = Some(*policy);
         if let Some(owner) = self.owner.as_mut() {
             owner.set_owner_access_policy(Some(*policy));
         }
+        let (entries, traversal, maximum_entries, directory_mode_restricts_traversal) =
+            self.collect_owner_policy_entries(policy, limits)?;
+        let retained = self.open_and_pin_owner_policy_entries(&entries, sync_requirement)?;
+        let root = self.apply_owner_policy_mutations(policy, &retained)?;
+        self.verify_owner_policy_entries(
+            policy,
+            limits,
+            &entries,
+            &retained,
+            &traversal,
+            maximum_entries,
+            directory_mode_restricts_traversal,
+            &root,
+        )?;
+        let file_synced = self.sync_owner_policy_files(&retained, sync_requirement, file_synced)?;
+        Ok((
+            crate::outcome::LocalTreeAccessOutcome::with_owner_policy(State::OwnerPolicyApplied, *policy),
+            file_synced,
+        ))
+    }
+
+    /// Scans the staged namespace and enforces the existing pre-mutation
+    /// budgets.
+    fn collect_owner_policy_entries(
+        &self,
+        policy: &crate::policy::LocalOwnerAccessPolicy,
+        limits: &LocalListOptions,
+    ) -> Result<(Vec<OwnerPolicyEntry>, LocalListOptions, usize, bool), super::super::tree_recovery::LocalTreeAccessError>
+    {
+        use crate::outcome::LocalTreeAccessState as State;
         let traversal = limits
             .with_recursive()
             .without_max_depth()
@@ -241,30 +283,30 @@ impl LocalStagedDirectory {
                 State::Preserved,
             ));
         }
-        if directory_mode_restricts_traversal
-            && entries.iter().any(|(path, kind, _)| {
-                *kind == crate::LocalFileKind::Directory
-                    && entries
-                        .iter()
-                        .any(|(candidate, _, _)| candidate != path && candidate.starts_with(path))
-            })
-        {
-            return Err(super::super::tree_recovery::LocalTreeAccessError::new(
-                LocalFileError::new(LocalFileErrorKind::RequirementNotMet, LocalFileOperation::Metadata),
-                State::Preserved,
-            ));
-        }
+        // Any nested-directory match implies a nonempty tree, already rejected above
+        // when traversal is restricted.
         if entries.len() > maximum_entries {
             return Err(super::super::tree_recovery::LocalTreeAccessError::new(
                 resource_limit(),
                 State::Preserved,
             ));
         }
+        Ok((entries, traversal, maximum_entries, directory_mode_restricts_traversal))
+    }
+
+    /// Opens each observed entry and pins the identity before the first
+    /// mutation.
+    fn open_and_pin_owner_policy_entries(
+        &self,
+        entries: &[OwnerPolicyEntry],
+        sync_requirement: LocalFileSyncRequirement,
+    ) -> Result<Vec<RetainedOwnerPolicyEntry>, super::super::tree_recovery::LocalTreeAccessError> {
+        use crate::outcome::LocalTreeAccessState as State;
         let mut retained = Vec::new();
         retained
             .try_reserve_exact(entries.len())
             .map_err(|_| super::super::tree_recovery::LocalTreeAccessError::new(resource_limit(), State::Preserved))?;
-        for (path, kind, expected) in &entries {
+        for (path, kind, expected) in entries {
             if !matches!(kind, crate::LocalFileKind::File | crate::LocalFileKind::Directory) {
                 return Err(super::super::tree_recovery::LocalTreeAccessError::new(
                     LocalFileError::new(LocalFileErrorKind::RequirementNotMet, LocalFileOperation::Metadata),
@@ -390,8 +432,19 @@ impl LocalStagedDirectory {
                 State::Preserved,
             ));
         }
+        Ok(retained)
+    }
+
+    /// Applies entry and root permissions, preserving the original mutation
+    /// order.
+    fn apply_owner_policy_mutations(
+        &mut self,
+        policy: &crate::policy::LocalOwnerAccessPolicy,
+        retained: &[RetainedOwnerPolicyEntry],
+    ) -> Result<std::fs::File, super::super::tree_recovery::LocalTreeAccessError> {
+        use crate::outcome::LocalTreeAccessState as State;
         let mut applied = false;
-        for (path, kind, expected, file, _) in &retained {
+        for (path, kind, expected, file, _) in retained {
             #[cfg(feature = "test-support")]
             if crate::local::take_test_support_on_nth("owner-policy-apply", 2) {
                 return Err(super::super::tree_recovery::LocalTreeAccessError::new(
@@ -569,6 +622,24 @@ impl LocalStagedDirectory {
                 State::Indeterminate,
             ));
         }
+        Ok(root)
+    }
+
+    /// Rewalks names and rechecks identities and final policy facts before
+    /// syncing.
+    #[allow(clippy::too_many_arguments)]
+    fn verify_owner_policy_entries(
+        &mut self,
+        policy: &crate::policy::LocalOwnerAccessPolicy,
+        limits: &LocalListOptions,
+        entries: &[OwnerPolicyEntry],
+        retained: &[RetainedOwnerPolicyEntry],
+        traversal: &LocalListOptions,
+        maximum_entries: usize,
+        directory_mode_restricts_traversal: bool,
+        root: &std::fs::File,
+    ) -> Result<(), super::super::tree_recovery::LocalTreeAccessError> {
+        use crate::outcome::LocalTreeAccessState as State;
         #[cfg(all(feature = "test-support", unix))]
         if crate::local::take_test_support("owner-policy-mutate-before-final-verify") {
             use std::os::unix::fs::PermissionsExt;
@@ -646,7 +717,7 @@ impl LocalStagedDirectory {
         let mut final_name_bytes = 0_usize;
         if !entries.is_empty() || !directory_mode_restricts_traversal {
             for item in self
-                .observe_tree_with_options(&traversal)
+                .observe_tree_with_options(traversal)
                 .map_err(|cause| super::super::tree_recovery::LocalTreeAccessError::new(cause, State::Indeterminate))?
             {
                 let item = item.map_err(|cause| {
@@ -705,7 +776,7 @@ impl LocalStagedDirectory {
         }
         // The complete namespace set is now checked, then every pre-opened
         // identity-bound handle is checked for exact policy facts.
-        for (path, kind, expected, file, _) in &retained {
+        for (path, kind, expected, file, _) in retained {
             let rebound = self
                 .directory()
                 .observe_entry(path)
@@ -771,7 +842,7 @@ impl LocalStagedDirectory {
             }
         }
         #[cfg(unix)]
-        crate::temp::internal::privacy_unix::verify_owner_access(&root, true, policy).map_err(|source| {
+        crate::temp::internal::privacy_unix::verify_owner_access(root, true, policy).map_err(|source| {
             super::super::tree_recovery::LocalTreeAccessError::new(
                 LocalFileError::from_io(
                     LocalFileOperation::Metadata,
@@ -794,7 +865,18 @@ impl LocalStagedDirectory {
                 State::Indeterminate,
             )
         })?;
-        for (path, kind, _expected, file, sync_capable) in &retained {
+        Ok(())
+    }
+
+    /// Synchronizes pinned regular files after successful policy verification.
+    fn sync_owner_policy_files(
+        &self,
+        retained: &[RetainedOwnerPolicyEntry],
+        sync_requirement: LocalFileSyncRequirement,
+        mut file_synced: bool,
+    ) -> Result<bool, super::super::tree_recovery::LocalTreeAccessError> {
+        use crate::outcome::LocalTreeAccessState as State;
+        for (path, kind, _expected, file, sync_capable) in retained {
             if *kind != crate::LocalFileKind::File || sync_requirement == LocalFileSyncRequirement::NotRequired {
                 continue;
             }
@@ -839,12 +921,8 @@ impl LocalStagedDirectory {
                 }
             }
         }
-        Ok((
-            crate::outcome::LocalTreeAccessOutcome::with_owner_policy(State::OwnerPolicyApplied, *policy),
-            file_synced,
-        ))
+        Ok(file_synced)
     }
-
     pub(in crate::directory) fn apply_access_policy_with_sync(
         &mut self,
         policy: crate::policy::LocalTreeFinalAccess,

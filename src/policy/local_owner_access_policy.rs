@@ -6,12 +6,48 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-#[must_use]
 /// Exact owner permissions to apply and verify on one supported platform.
 ///
-/// A new policy has no platform configuration and cannot be used until the
-/// consuming operation supplies valid settings for its platform.
+/// Unix modes and Windows access masks are separate platform configurations;
+/// there are no implicit permission presets. The builder stores values and
+/// validation is delayed until a consuming owner-policy operation. Invalid
+/// values are rejected as `InvalidOptions` before native objects are mutated.
+/// Exact owner-policy operations are supported on Linux and Windows; macOS
+/// reports `Unsupported` because it cannot provide the required verification
+/// contract.
+///
+/// ```
+/// use qubit_local_files::LocalFileSystem;
+/// use qubit_local_files::options::{LocalDirectoryOpenOptions, LocalListOptions, LocalTempDirectoryOptions};
+/// use qubit_local_files::policy::LocalOwnerAccessPolicy;
+///
+/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+/// let fixture = tempfile::tempdir()?;
+/// let filesystem = LocalFileSystem::host()?;
+/// let parent = filesystem.open_directory_with_options(
+///     fixture.path(), &LocalDirectoryOpenOptions::new(),
+/// )?;
+/// #[cfg(target_os = "linux")]
+/// let policy = LocalOwnerAccessPolicy::new().with_unix_modes(0o700, 0o600);
+/// #[cfg(windows)]
+/// let policy = LocalOwnerAccessPolicy::new()
+///     .with_windows_masks(0x0013_019f, 0x0012_0089);
+/// #[cfg(any(target_os = "linux", windows))]
+/// {
+///     let options = LocalTempDirectoryOptions::new().with_owner_access_policy(policy);
+///     let mut stage = parent.create_staged_directory(&options)?;
+///     stage.apply_owner_access_policy_with_options(&policy, &LocalListOptions::new())?;
+/// }
+/// #[cfg(target_os = "macos")]
+/// {
+///     // Exact owner-policy application is unsupported on macOS.
+///     let _ = LocalOwnerAccessPolicy::new();
+/// }
+/// # Ok(())
+/// # }
+/// ```
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[must_use]
 pub struct LocalOwnerAccessPolicy {
     unix_modes: Option<(u32, u32)>,
     windows_masks: Option<(u32, u32)>,
@@ -51,7 +87,6 @@ impl LocalOwnerAccessPolicy {
         self.unix_modes
     }
     #[cfg(windows)]
-    #[allow(dead_code)] // Consumed by the Windows owner-policy backend in T06.
     pub(crate) const fn windows_masks(&self) -> Option<(u32, u32)> {
         self.windows_masks
     }

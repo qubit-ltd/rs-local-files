@@ -223,6 +223,13 @@ fn query_linux_access(
 }
 
 #[cfg(target_os = "linux")]
+/// Queries one Linux POSIX ACL xattr through the retained object descriptor.
+///
+/// `Absent` and `NotSupported` are only returned for their corresponding
+/// native statuses. Permission and ordinary I/O failures, malformed data,
+/// allocation failures, and ACL resource-limit violations remain errors. The
+/// bounded retry handles a size change between the length probe and read; it
+/// never accepts a truncated prefix as a complete ACL.
 fn query_linux_acl(
     file: &File,
     name: &'static [u8],

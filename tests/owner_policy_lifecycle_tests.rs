@@ -13,19 +13,22 @@
 // =============================================================================
 //! Owner access policies must be applied and retained throughout stage use.
 
-#![cfg(unix)]
-
 use std::fs;
+#[cfg(target_os = "linux")]
 use std::os::unix::fs::MetadataExt;
 use std::path::Path;
 
 use qubit_local_files::LocalFileSystem;
+#[cfg(target_os = "linux")]
 use qubit_local_files::directory::LocalTreeValidationOptions;
+#[cfg(target_os = "linux")]
 use qubit_local_files::observation::LocalObservationRequirement;
+#[cfg(target_os = "linux")]
 use qubit_local_files::observation::LocalSecurityObservationOptions;
 use qubit_local_files::options::LocalDirectoryOpenOptions;
 use qubit_local_files::options::LocalTempDirectoryOptions;
 use qubit_local_files::policy::LocalOwnerAccessPolicy;
+#[cfg(target_os = "linux")]
 use qubit_local_files::policy::LocalPrivacyRequirement;
 use tempfile::TempDir;
 
@@ -36,6 +39,43 @@ fn parent(scratch: &TempDir) -> qubit_local_files::directory::LocalDirectoryHand
         .expect("parent authority")
 }
 
+#[cfg(target_os = "macos")]
+#[test]
+fn test_unix_owner_policy_is_unsupported_before_stage_creation() {
+    let scratch = tempfile::tempdir().expect("scratch directory");
+    let parent = parent(&scratch);
+    let policy = LocalOwnerAccessPolicy::new().with_unix_modes(0o700, 0o600);
+
+    let error = parent
+        .create_staged_directory(&LocalTempDirectoryOptions::new().with_owner_access_policy(policy))
+        .expect_err("macOS does not provide the exact Unix owner ACL backend");
+
+    assert_eq!(
+        qubit_local_files::error::LocalFileErrorKind::Unsupported,
+        error.cause().kind()
+    );
+    assert_eq!(0, fs::read_dir(scratch.path()).expect("parent contents").count());
+}
+
+#[cfg(windows)]
+#[test]
+fn test_unix_only_owner_policy_is_invalid_before_stage_creation() {
+    let scratch = tempfile::tempdir().expect("scratch directory");
+    let parent = parent(&scratch);
+    let policy = LocalOwnerAccessPolicy::new().with_unix_modes(0o700, 0o600);
+
+    let error = parent
+        .create_staged_directory(&LocalTempDirectoryOptions::new().with_owner_access_policy(policy))
+        .expect_err("Windows owner policies require native masks");
+
+    assert_eq!(
+        qubit_local_files::error::LocalFileErrorKind::InvalidOptions,
+        error.cause().kind()
+    );
+    assert_eq!(0, fs::read_dir(scratch.path()).expect("parent contents").count());
+}
+
+#[cfg(target_os = "linux")]
 #[test]
 fn test_custom_owner_policies_create_exact_directory_and_file_modes() {
     for (directory_mode, file_mode) in [(0o700, 0o600), (0o700, 0o400)] {
@@ -81,6 +121,7 @@ fn test_custom_owner_policies_create_exact_directory_and_file_modes() {
     }
 }
 
+#[cfg(target_os = "linux")]
 #[test]
 fn test_custom_read_only_policy_reopens_with_required_privacy() {
     let scratch = tempfile::tempdir().expect("scratch directory");
@@ -106,6 +147,7 @@ fn test_custom_read_only_policy_reopens_with_required_privacy() {
     );
 }
 
+#[cfg(target_os = "linux")]
 #[test]
 fn test_owner_policy_transition_reports_policy_and_exact_modes() {
     let scratch = tempfile::tempdir().expect("scratch directory");
@@ -143,6 +185,7 @@ fn test_owner_policy_transition_reports_policy_and_exact_modes() {
     stage.cleanup().expect("cleanup");
 }
 
+#[cfg(target_os = "linux")]
 #[test]
 fn test_invalid_owner_policy_is_rejected_before_stage_creation() {
     let scratch = tempfile::tempdir().expect("scratch directory");
@@ -162,7 +205,7 @@ fn test_invalid_owner_policy_is_rejected_before_stage_creation() {
     assert_eq!(0, fs::read_dir(scratch.path()).expect("parent contents").count());
 }
 
-#[cfg(feature = "test-support")]
+#[cfg(all(feature = "test-support", target_os = "linux"))]
 #[test]
 fn test_owner_policy_failure_on_second_child_reports_mixed_and_retains_policy() {
     use qubit_local_files::test_support::install_test_fault;
@@ -195,7 +238,7 @@ fn test_owner_policy_failure_on_second_child_reports_mixed_and_retains_policy() 
     stage.cleanup().expect("cleanup after explicit retry");
 }
 
-#[cfg(feature = "test-support")]
+#[cfg(all(feature = "test-support", target_os = "linux"))]
 #[test]
 fn test_owner_policy_identity_replacement_prevents_chmod() {
     use qubit_local_files::test_support::install_test_fault;
@@ -234,7 +277,7 @@ fn test_owner_policy_identity_replacement_prevents_chmod() {
     stage.cleanup().expect("cleanup");
 }
 
-#[cfg(feature = "test-support")]
+#[cfg(all(feature = "test-support", target_os = "linux"))]
 #[test]
 fn test_stage_identity_replacement_prevents_root_policy_mutation() {
     use qubit_local_files::test_support::install_test_fault;
@@ -270,7 +313,7 @@ fn test_stage_identity_replacement_prevents_root_policy_mutation() {
     stage.cleanup().expect("cleanup restored stage");
 }
 
-#[cfg(feature = "test-support")]
+#[cfg(all(feature = "test-support", target_os = "linux"))]
 #[test]
 fn test_owner_policy_final_handle_check_detects_earlier_mode_change() {
     use qubit_local_files::test_support::install_test_fault;
@@ -307,7 +350,7 @@ fn test_owner_policy_final_handle_check_detects_earlier_mode_change() {
     stage.cleanup().expect("cleanup after retry");
 }
 
-#[cfg(feature = "test-support")]
+#[cfg(all(feature = "test-support", target_os = "linux"))]
 #[test]
 fn test_owner_policy_final_check_detects_replaced_processed_entry() {
     use qubit_local_files::test_support::install_test_fault;
@@ -343,7 +386,7 @@ fn test_owner_policy_final_check_detects_replaced_processed_entry() {
     stage.cleanup().expect("cleanup");
 }
 
-#[cfg(feature = "test-support")]
+#[cfg(all(feature = "test-support", target_os = "linux"))]
 #[test]
 fn test_owner_policy_final_enumeration_detects_new_root_entry() {
     use qubit_local_files::test_support::install_test_fault;
@@ -382,7 +425,7 @@ fn test_owner_policy_final_enumeration_detects_new_root_entry() {
     stage.cleanup().expect("cleanup recovered tree");
 }
 
-#[cfg(feature = "test-support")]
+#[cfg(all(feature = "test-support", target_os = "linux"))]
 #[test]
 fn test_owner_policy_final_enumeration_detects_new_nested_entry() {
     use qubit_local_files::test_support::install_test_fault;
@@ -424,6 +467,7 @@ fn test_owner_policy_final_enumeration_detects_new_nested_entry() {
     stage.cleanup().expect("cleanup recovered tree");
 }
 
+#[cfg(target_os = "linux")]
 #[test]
 fn test_publish_conflict_retains_stage_with_owner_policy() {
     use std::ffi::OsStr;
@@ -465,7 +509,7 @@ fn test_publish_conflict_retains_stage_with_owner_policy() {
     stage.cleanup().expect("cleanup retained stage");
 }
 
-#[cfg(feature = "test-support")]
+#[cfg(all(feature = "test-support", target_os = "linux"))]
 #[test]
 fn test_required_sync_failure_retains_stage_and_policy_before_conversion() {
     use std::ffi::OsStr;
@@ -732,7 +776,7 @@ fn test_required_owner_policy_sync_accepts_empty_tree() {
         .expect("restore fixture root mode");
 }
 
-#[cfg(feature = "test-support")]
+#[cfg(all(feature = "test-support", target_os = "linux"))]
 #[test]
 fn test_publish_rechecks_source_identity_after_policy_conversion() {
     use std::ffi::OsStr;
@@ -779,6 +823,7 @@ fn test_publish_rechecks_source_identity_after_policy_conversion() {
     stage.cleanup().expect("cleanup original stage");
 }
 
+#[cfg(target_os = "linux")]
 #[test]
 fn test_cleanup_failure_retains_owner_policy_for_recovery() {
     use qubit_local_files::options::LocalTempCleanupLimits;
@@ -807,6 +852,7 @@ fn test_cleanup_failure_retains_owner_policy_for_recovery() {
     resource.cleanup().expect("unbounded retry cleans the stage");
 }
 
+#[cfg(target_os = "linux")]
 #[test]
 fn test_empty_stage_accepts_zero_mode_root_policy() {
     let scratch = tempfile::tempdir().expect("scratch directory");
@@ -825,6 +871,7 @@ fn test_empty_stage_accepts_zero_mode_root_policy() {
     fs::remove_dir(native).expect("empty mode-zero root can be removed from its parent");
 }
 
+#[cfg(target_os = "linux")]
 #[test]
 fn test_nonempty_stage_rejects_unsearchable_root_policy_before_mutation() {
     let scratch = tempfile::tempdir().expect("scratch directory");
@@ -994,6 +1041,7 @@ fn test_owner_policy_depth_one_rejects_nested_leaf_before_permission_changes() {
     stage.cleanup().expect("cleanup");
 }
 
+#[cfg(target_os = "linux")]
 #[test]
 fn test_owner_policy_handle_budget_rejects_before_any_mutation() {
     let scratch = tempfile::tempdir().expect("scratch directory");
@@ -1031,6 +1079,7 @@ fn test_owner_policy_handle_budget_rejects_before_any_mutation() {
     stage.cleanup().expect("cleanup unchanged tree");
 }
 
+#[cfg(target_os = "linux")]
 #[test]
 fn test_publish_success_reports_applied_owner_policy() {
     use std::ffi::OsStr;
@@ -1067,6 +1116,7 @@ fn test_publish_success_reports_applied_owner_policy() {
     );
 }
 
+#[cfg(target_os = "linux")]
 #[test]
 fn test_publish_owner_policy_conflict_is_rejected_before_mutation() {
     use std::ffi::OsStr;

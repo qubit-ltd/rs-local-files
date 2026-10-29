@@ -31,6 +31,14 @@ impl ReaderPathBinding for DirectoryPathBinding {
         self.deadline
     }
 
+    /// Reopens each anchored pathname and compares its identity with the
+    /// retained object. A missing name is a successful `Missing` result;
+    /// non-NotFound resolution/query failures and deadline expiration are
+    /// errors. This check describes the verification pass only and does not
+    /// reserve a name or prevent a subsequent namespace change.
+    // Each retained anchor proves only that the path resolved to the same
+    // identity during this verification pass. Reopening and checking a path
+    // does not pin its namespace entry against changes after this method ends.
     fn verify_until(&self, deadline: Option<Instant>) -> LocalResult<LocalSourceVerification> {
         for anchor in &self.anchors {
             if deadline.is_some_and(|deadline| Instant::now() >= deadline) {

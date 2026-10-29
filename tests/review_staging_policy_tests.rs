@@ -13,6 +13,7 @@ use qubit_local_files::LocalFileSystem;
 use qubit_local_files::directory::LocalComponentPolicy;
 use qubit_local_files::options::LocalDirectoryOpenOptions;
 use qubit_local_files::options::LocalTempDirectoryOptions;
+#[cfg(target_os = "linux")]
 use qubit_local_files::policy::LocalOwnerAccessPolicy;
 use tempfile::tempdir;
 
@@ -28,16 +29,10 @@ fn denied_handle(root: &Path) -> qubit_local_files::directory::LocalDirectoryHan
         .expect("policy handle")
 }
 
-#[test]
-fn private_staging_rejects_denied_component_before_creating_parent_or_reading_input() {
+fn assert_private_staging_rejects_denied_component(options: LocalTempDirectoryOptions) {
     let scratch = tempdir().expect("scratch directory");
     let parent = denied_handle(scratch.path());
-    let mut stage = parent
-        .create_staged_directory(
-            &LocalTempDirectoryOptions::new()
-                .with_owner_access_policy(LocalOwnerAccessPolicy::new().with_unix_modes(0o700, 0o600)),
-        )
-        .expect("stage");
+    let mut stage = parent.create_staged_directory(&options).expect("stage");
     let mut input = &b"payload"[..];
 
     let error = stage
@@ -48,6 +43,20 @@ fn private_staging_rejects_denied_component_before_creating_parent_or_reading_in
     assert!(input.len() == b"payload".len(), "validation must precede input reads");
     assert!(!scratch.path().join(stage.relative_name()).join("blocked").exists());
     assert!(!scratch.path().join(stage.relative_name()).join("payload").exists());
+}
+
+#[test]
+fn private_staging_rejects_denied_component_before_creating_parent_or_reading_input() {
+    assert_private_staging_rejects_denied_component(LocalTempDirectoryOptions::new());
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn private_staging_with_exact_owner_policy_rejects_denied_component_before_side_effects() {
+    assert_private_staging_rejects_denied_component(
+        LocalTempDirectoryOptions::new()
+            .with_owner_access_policy(LocalOwnerAccessPolicy::new().with_unix_modes(0o700, 0o600)),
+    );
 }
 
 #[test]
