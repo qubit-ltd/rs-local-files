@@ -15,23 +15,30 @@ use qubit_local_files::LocalResult;
 use qubit_local_files::directory::LocalResolutionOrigin;
 use qubit_local_files::directory::LocalResolutionPolicy;
 use qubit_local_files::directory::LocalResolutionScope;
+#[cfg(target_os = "linux")]
 use qubit_local_files::directory::LocalTreeValidationOptions;
 use qubit_local_files::error::LocalFileError;
 use qubit_local_files::error::LocalFileErrorKind;
 use qubit_local_files::error::LocalFileOperation;
 use qubit_local_files::error::LocalResourceKind;
+#[cfg(target_os = "linux")]
 use qubit_local_files::observation::LocalObservationRequirement;
 use qubit_local_files::observation::LocalSecurityObservationOptions;
 use qubit_local_files::observation::LocalSourceVerification;
 use qubit_local_files::options::LocalDirectoryOpenOptions;
+#[cfg(target_os = "linux")]
 use qubit_local_files::options::LocalListOptions;
 use qubit_local_files::options::LocalObservedReadOptions;
 use qubit_local_files::options::LocalPathBindingOptions;
 use qubit_local_files::options::LocalResolutionLimits;
 use qubit_local_files::options::LocalRootOpenOptions;
+#[cfg(target_os = "linux")]
 use qubit_local_files::options::LocalTempDirectoryOptions;
+#[cfg(target_os = "linux")]
 use qubit_local_files::options::LocalTreePublishOptions;
+#[cfg(target_os = "linux")]
 use qubit_local_files::policy::LocalOwnerAccessPolicy;
+#[cfg(target_os = "linux")]
 use qubit_local_files::policy::LocalPrivacyRequirement;
 
 #[derive(Debug)]
@@ -140,7 +147,7 @@ fn root_policy_survives_child_symlink_reader_and_final_binding() {
     );
 }
 
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 #[test]
 fn custom_stage_observation_tightening_reopen_and_publish_preserve_owner_policy() {
     let tmp = tempfile::tempdir().expect("fixture directory");
@@ -260,7 +267,7 @@ fn custom_stage_observation_tightening_reopen_and_publish_preserve_owner_policy(
     assert_unix_owner_mode(&published_payload, 0o400);
 }
 
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 fn assert_unix_owner_mode(observation: &qubit_local_files::observation::LocalSecurityObservation, mode: u32) {
     let access = observation
         .access()
