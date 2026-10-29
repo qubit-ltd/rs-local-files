@@ -423,8 +423,10 @@ mod tests {
     use super::LocalResult;
     use super::LocalSecurityObservationOptions;
     use super::acl_read_requires_retry;
+    #[cfg(target_os = "linux")]
     use super::check_acl_length;
     use super::io;
+    #[cfg(target_os = "linux")]
     use super::io_error;
     use super::query_security;
     use super::requested_value;
