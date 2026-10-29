@@ -57,9 +57,21 @@ with caller configuration.
 ### 2.2 Callers own policy
 
 Callers choose depth, entry, byte, open-handle, deadline, retry, and name-attempt
-budgets through options. The initial budget is unbounded. The crate validates
+budgets through options. Initial budgets for general operations are unbounded. The crate validates
 explicit options, reports structured limit failures, prevents internal cycles,
 and maps operating-system resource errors without inventing business limits.
+The staged-directory owner-access policy is a local safety exception: when its
+`LocalListOptions::max_entries` is `None`, collection is capped at 256 child
+entries before any permission mutation; the root is not counted. An explicit
+`max_entries` replaces that default and may raise or lower it. Raising the limit
+can retain more identities and management handles at once. For example:
+
+```rust
+let limits = qubit_local_files::options::LocalListOptions::new().with_max_entries(512);
+```
+
+See the [owner access policy guide](user_guide.md#bounded-resolution-and-security-policy)
+for the operation contract.
 
 ### 2.3 One filesystem, one coordinate system
 
@@ -371,9 +383,15 @@ PWD parent, default naming, and no parent creation for temporary resources.
 
 ### 7.3 Resource-budget defaults
 
-All resource limits use `Option` and initially equal `None`: depth, entries,
+General resource limits use `Option` and initially equal `None`: depth, entries,
 seen-name bytes, copied bytes, open directories, deadlines, and temporary-name
-attempts. `None` always means that the caller set no budget. A reopen policy
+attempts. `None` means that the caller set no budget, except during staged
+owner-access policy collection: there, `max_entries=None` selects a 256-child
+default, excluding the root. The explicit value replaces that default rather
+than taking the minimum with it. Collection completes before permission
+mutation, so an over-limit tree returns `ResourceLimit` without changing
+permissions. Raising the explicit limit can retain more identities and
+management handles. No other operation budget changes here. A reopen policy
 matters only when an open-directory budget exists; the crate must not substitute
 a hidden fixed handle threshold. `open_retry_timeout` explicitly authorizes
 library retries: `None` and zero perform only the first attempt, while a positive
@@ -1877,10 +1895,11 @@ temporary entries and add higher-level policy where those limits matter.
 ## 28. Design Completion Conditions
 
 The design is complete only while public APIs and defaults match this document,
-Host and Rooted tests cover their distinct authorities, structured failures are
-preserved through downstream adapters, bilingual documentation stays aligned,
-all published Rust examples compile, configured CI and coverage gates pass, and
-configured release checks pass.
+including the documented 256-child pre-mutation safety default for staged
+owner-access policy; Host and Rooted tests cover their distinct authorities,
+structured failures are preserved through downstream adapters, bilingual
+documentation stays aligned, all published Rust examples compile, configured
+CI and coverage gates pass, and configured release checks pass.
 
 ## 29. Refactoring Support Matrix (2026-10-28)
 
@@ -1918,6 +1937,15 @@ scenario on a native FreeBSD environment, so it cannot confirm that the scenario
 occurs on a supported filesystem or determine whether a production correction
 is warranted. The question remains unverified and open; the existing platform
 support level is unchanged.
+
+Implementation check on 2026-10-30: the available host was Linux
+(`Linux starfish-personal-os 7.0.0-38-generic`, x86_64); `freebsd-version` and a
+native FreeBSD runner were unavailable. An all-features
+`x86_64-unknown-freebsd` cross-target check compiled successfully, but it does
+not establish `extattr_list_fd` runtime behavior. No FreeBSD kernel version,
+filesystem type, user-xattr support, or native probe/read result was collected.
+LF-Q02 therefore remains `BLOCKED_PLATFORM`; no production xattr algorithm
+change was made.
 
 The CI workflows run current-crate tests on Linux, macOS, and Windows. The
 `windows-recovery` job checks out `rs-json` because the sibling `rs-redact`

@@ -57,7 +57,16 @@
 ### 2.2 调用方拥有策略决定权
 
 资源安全策略属于调用方。深度、条目数、字节数、打开句柄数、deadline 和重试次数等预算
-由调用方通过操作 Options 提供。库的初始资源预算为不限制，不以隐藏上限缩小调用方能力。
+由调用方通过操作 Options 提供，一般操作的初始资源预算不限制。唯一局部例外是 staged-directory
+owner-access policy 收集：`LocalListOptions::max_entries` 为 `None` 时，默认最多收集 256 个子项，root
+不计入子项；超限会在权限 mutation 前以 `ResourceLimit` 失败。显式额度会替换 256 默认值，可以调高或调低，
+不会与 256 取较小值。调高额度可能同时保留更多 identity 和管理句柄。最小配置示例：
+
+```rust
+let limits = qubit_local_files::options::LocalListOptions::new().with_max_entries(512);
+```
+
+详见[owner access policy 指南](user_guide.zh_CN.md#有界解析与安全策略)。
 
 库仍负责：
 
@@ -482,7 +491,7 @@ filesystem.copy_with_options(source, target, &options)?;
 
 ### 7.3 资源预算默认值
 
-下列预算统一使用 `Option` 表达，初始值为 `None`：
+一般操作的下列预算使用 `Option` 表达，初始值为 `None`：
 
 - walk/copy 最大深度；
 - 最大条目数；
@@ -492,8 +501,11 @@ filesystem.copy_with_options(source, target, &options)?;
 - 操作 deadline；
 - temp 名称最大尝试次数。
 
-`None` 的含义固定为“调用方未设置该预算”，不得在不同入口中解释为“继承另一个隐藏
-值”。若操作系统自身返回句柄、路径或空间上限错误，仍映射成相应结构化错误。
+`None` 表示调用方未设置该预算。唯一局部例外是 staged-directory owner-access policy 收集：
+此时 `max_entries=None` 使用最多 256 个子项的安全默认值，root 不计数；显式额度替换该默认值，而不是
+与 256 取较小值。收集会在任何权限 mutation 前完成，超限返回 `ResourceLimit` 且不改变权限。调高额度
+可能同时保留更多 identity 和管理句柄。此例外不改变其他操作的默认预算。若操作系统自身返回句柄、路径或
+空间上限错误，仍映射成相应结构化错误。
 
 `LocalDirectoryReopenPolicy` 只有在调用方设置 `max_open_directories` 时才决定达到预算后的
 行为；没有显式预算时，库不使用固定的 64-handle 阈值改变遍历策略。
@@ -2136,7 +2148,8 @@ CI 记录为准，CI 配置本身不证明本次修改通过。
 5. Rooted 只有一个 authority；
 6. 所有公开资源身份路径使用虚拟绝对坐标；
 7. copy、rename、writer、temp 的结构化状态无损；
-8. 无调用方未设置的业务资源上限；
+8. 无调用方未设置的业务资源上限；staged-directory owner-access policy 的 256 个子项、mutation 前
+   安全默认是本文明确记录的局部例外；
 9. `qubit-fs-local` 不重复 path/authority/default-option 逻辑；
 10. 第 26 节验证矩阵在声明支持的平台通过。
 
@@ -2168,6 +2181,11 @@ LF-Q01 已确认并修正：`LocalCopyOutcome` 的 metadata preservation 表示�
 读取是分开的调用，因此属性列表可能在两次调用之间增长。本轮没有运行私有模型测试，也没有在 FreeBSD 原生环境验证
 该场景，无法确认支持的文件系统上是否会出现此情况，也不能据此决定是否需要生产行为修正。该疑点仍未验证且保持开放；
 现有平台支持级别不变。
+
+2026-10-30 实施核查：当前主机为 Linux（`Linux starfish-personal-os 7.0.0-38-generic`，x86_64），没有
+`freebsd-version` 或原生 FreeBSD runner。`x86_64-unknown-freebsd` 全特性 cross-target check 编译成功，但不能证明
+`extattr_list_fd` 的运行时行为。本轮没有收集 FreeBSD 内核版本、文件系统类型、user xattr 支持或原生 probe/read 结果。
+因此 LF-Q02 保持 `BLOCKED_PLATFORM`，没有修改生产 xattr 算法。
 
 CI workflow 在 Linux、macOS、Windows 上运行当前 crate 的测试。`windows-recovery` job 需要 checkout
 `rs-json`，因为同级 `rs-redact` manifest 将 `qubit-json` 声明为传递的可选 path dependency；Cargo 解析 manifest
