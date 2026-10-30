@@ -31,7 +31,7 @@
 /// let policy = LocalOwnerAccessPolicy::new().with_unix_modes(0o700, 0o600);
 /// #[cfg(windows)]
 /// let policy = LocalOwnerAccessPolicy::new()
-///     .with_windows_masks(0x0016_0189, 0x0016_0089);
+///     .with_windows_masks(0x0016_01ef, 0x0016_019f);
 /// #[cfg(any(target_os = "linux", windows))]
 /// {
 ///     let options = LocalTempDirectoryOptions::new().with_owner_access_policy(policy);
