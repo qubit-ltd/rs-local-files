@@ -12,6 +12,7 @@ use std::cell::RefCell;
 use std::path::Path;
 #[cfg(all(test, unix))]
 use std::path::PathBuf;
+use std::time::Instant;
 
 use super::LocalStagedDirectory;
 use super::resource_limit;
@@ -30,6 +31,11 @@ pub(super) enum OwnerPolicySyncEvent {
 #[cfg(test)]
 thread_local! {
     static TREE_SYNC_FAILURE_AFTER: Cell<Option<usize>> = const { Cell::new(None) };
+    static TREE_SYNC_TEST_EXPIRED: Cell<bool> = const { Cell::new(false) };
+    static TREE_SYNC_EXPIRE_AFTER_FILE: Cell<bool> = const { Cell::new(false) };
+    static TREE_SYNC_EXPIRE_AFTER_DIRECTORY: Cell<bool> = const { Cell::new(false) };
+    static TREE_SYNC_EXPIRE_AFTER_ROOT: Cell<bool> = const { Cell::new(false) };
+    static TREE_SYNC_EXPIRE_AFTER_COLLECTION: Cell<bool> = const { Cell::new(false) };
     pub(super) static OWNER_POLICY_SYNC_EVENTS: RefCell<Option<Vec<OwnerPolicySyncEvent>>> = const { RefCell::new(None) };
 }
 
@@ -86,6 +92,112 @@ use crate::error::LocalResult;
 use crate::observation::LocalFileIdentity;
 use crate::options::LocalListOptions;
 use crate::policy::LocalFileSyncRequirement;
+
+#[derive(Debug)]
+struct TreeSyncBudget(Option<Instant>);
+
+impl TreeSyncBudget {
+    fn new(started_at: Instant, limits: &LocalListOptions) -> LocalResult<Self> {
+        let deadline = limits
+            .deadline()
+            .map(|duration| {
+                started_at
+                    .checked_add(duration)
+                    .ok_or_else(|| LocalFileError::new(LocalFileErrorKind::InvalidOptions, LocalFileOperation::Commit))
+            })
+            .transpose()?;
+        Ok(Self(deadline))
+    }
+
+    fn check(&self, path: &Path) -> LocalResult<()> {
+        #[cfg(test)]
+        let test_expired = TREE_SYNC_TEST_EXPIRED.with(Cell::get);
+        #[cfg(not(test))]
+        let test_expired = false;
+        if test_expired || self.0.is_some_and(|deadline| Instant::now() >= deadline) {
+            return Err(LocalFileError::from_io(
+                LocalFileOperation::Commit,
+                Some(path.to_path_buf()),
+                None,
+                std::io::Error::new(std::io::ErrorKind::TimedOut, "tree synchronization deadline exceeded"),
+            ));
+        }
+        Ok(())
+    }
+}
+
+#[cfg(all(test, unix))]
+#[test]
+fn tree_sync_deadline_stops_after_file_sync() {
+    sync_order_tests::test_tree_sync_deadline_stops_after_file_sync();
+}
+
+#[cfg(all(test, unix))]
+#[test]
+fn tree_sync_deadline_stops_before_parent_sync() {
+    sync_order_tests::test_tree_sync_deadline_stops_before_parent_sync();
+}
+
+#[cfg(all(test, unix))]
+#[test]
+fn tree_sync_deadline_zero_rejects_at_entry() {
+    sync_order_tests::test_tree_sync_deadline_zero_rejects_at_entry();
+}
+
+#[cfg(test)]
+#[test]
+fn tree_sync_deadline_rejects_checked_add_overflow() {
+    let limits = LocalListOptions::new().with_deadline(std::time::Duration::MAX);
+    let error = TreeSyncBudget::new(Instant::now(), &limits).expect_err("deadline overflow is invalid");
+    assert_eq!(error.kind(), LocalFileErrorKind::InvalidOptions);
+}
+
+#[cfg(test)]
+fn expire_tree_sync_after_collection_if_scheduled() {
+    let expire = TREE_SYNC_EXPIRE_AFTER_COLLECTION.with(|slot| {
+        if slot.get() {
+            slot.set(false);
+            true
+        } else {
+            false
+        }
+    });
+    if expire {
+        TREE_SYNC_TEST_EXPIRED.with(|slot| slot.set(true));
+    }
+}
+
+#[cfg(all(test, unix))]
+#[test]
+fn tree_sync_deadline_expires_after_collection_before_directory_sync() {
+    sync_order_tests::test_tree_sync_deadline_expires_after_collection_before_directory_sync();
+}
+
+#[cfg(all(test, unix))]
+#[test]
+fn tree_sync_deadline_stops_after_directory_sync() {
+    sync_order_tests::test_tree_sync_deadline_stops_after_directory_sync();
+}
+
+#[test]
+fn tree_sync_not_required_does_not_traverse_under_expired_deadline() {
+    let fixture = tempfile::tempdir().expect("fixture");
+    let filesystem = crate::LocalFileSystem::host().expect("host filesystem");
+    let parent = filesystem
+        .open_directory_with_options(fixture.path(), &crate::options::LocalDirectoryOpenOptions::new())
+        .expect("parent authority");
+    let stage = parent
+        .create_staged_directory(&crate::options::LocalTempDirectoryOptions::new())
+        .expect("stage");
+    let result = stage
+        .sync_tree_files(
+            &LocalListOptions::new().with_deadline(std::time::Duration::ZERO),
+            LocalFileSyncRequirement::NotRequired,
+        )
+        .expect("NotRequired must not traverse or check a deadline");
+    assert!(!result);
+    stage.cleanup().expect("cleanup stage");
+}
 
 #[cfg(all(test, target_os = "linux"))]
 mod owner_policy_sync_order_tests {
@@ -163,6 +275,20 @@ impl LocalStagedDirectory {
         limits: &LocalListOptions,
         requirement: LocalFileSyncRequirement,
     ) -> LocalResult<bool> {
+        self.sync_tree_files_started_at(limits, requirement, Instant::now())
+    }
+
+    fn sync_tree_files_started_at(
+        &self,
+        limits: &LocalListOptions,
+        requirement: LocalFileSyncRequirement,
+        started_at: Instant,
+    ) -> LocalResult<bool> {
+        if requirement == LocalFileSyncRequirement::NotRequired {
+            return Ok(false);
+        }
+        let budget = TreeSyncBudget::new(started_at, limits)?;
+        budget.check(self.directory().diagnostic_path())?;
         if requirement == LocalFileSyncRequirement::NotRequired {
             return Ok(false);
         }
@@ -171,8 +297,10 @@ impl LocalStagedDirectory {
         let traversal = limits
             .without_max_depth()
             .with_error_policy(crate::options::LocalWalkErrorPolicy::FailFast);
-        for item in self.observe_tree_with_options(&traversal)? {
+        for item in self.observe_tree_with_options_started_at(&traversal, started_at)? {
+            budget.check(self.directory().diagnostic_path())?;
             let item = item?;
+            budget.check(&self.directory().diagnostic_path().join(item.relative_path()))?;
             let depth = item.relative_path().components().count();
             if limits.max_depth().is_some_and(|maximum| depth > maximum) {
                 return Err(resource_limit());
@@ -223,6 +351,7 @@ impl LocalStagedDirectory {
                         .with_path(self.directory().diagnostic_path().join(item.relative_path())),
                 );
             }
+            budget.check(&self.directory().diagnostic_path().join(item.relative_path()))?;
             #[cfg(test)]
             if let Err(source) = fail_tree_sync_if_scheduled() {
                 if requirement == LocalFileSyncRequirement::Required {
@@ -276,7 +405,9 @@ impl LocalStagedDirectory {
                 #[cfg(test)]
                 record_owner_policy_sync_event(OwnerPolicySyncEvent::PreSync(expected));
             }
+            budget.check(&self.directory().diagnostic_path().join(item.relative_path()))?;
         }
+        budget.check(self.directory().diagnostic_path())?;
         Ok(synced)
     }
 
@@ -289,6 +420,9 @@ impl LocalStagedDirectory {
     /// `Preferred`, the method returns `false` when a file could not be synced.
     /// `NotRequired` performs no file synchronization and returns `false`.
     /// This method does not synchronize the parent namespace.
+    /// A deadline is measured from this call's entry. Use
+    /// [`Self::sync_tree_with_options`] to synchronize descendant directories,
+    /// the stage root, and its creating parent under one shared deadline.
     ///
     /// # Errors
     /// Returns an error when the staged tree cannot be completely traversed,
@@ -309,6 +443,10 @@ impl LocalStagedDirectory {
     /// remains unpublished. `limits` bounds every tree traversal; a depth
     /// limit that would truncate the tree is an error. This operation requires
     /// all requested handle synchronizations to succeed.
+    /// One cooperative deadline, when configured, starts at this call's entry
+    /// and covers both tree traversals and every file, directory, root, and
+    /// parent synchronization. It cannot cancel an operating-system call
+    /// already in progress.
     ///
     /// # Errors
     /// Returns an error when the parent no longer names this stage, the staged
@@ -316,6 +454,9 @@ impl LocalStagedDirectory {
     /// operation, a resource limit is exceeded, or any file/directory sync
     /// fails.
     pub fn sync_tree_with_options(&self, parent: &LocalDirectoryHandle, limits: &LocalListOptions) -> LocalResult<()> {
+        let started_at = Instant::now();
+        let budget = TreeSyncBudget::new(started_at, limits)?;
+        budget.check(self.directory().diagnostic_path())?;
         let expected_stage_identity = self
             .identity
             .as_ref()
@@ -329,7 +470,10 @@ impl LocalStagedDirectory {
             );
         }
 
-        self.sync_tree_files(limits, LocalFileSyncRequirement::Required)?;
+        budget.check(parent.diagnostic_path())?;
+
+        self.sync_tree_files_started_at(limits, LocalFileSyncRequirement::Required, started_at)?;
+        budget.check(self.directory().diagnostic_path())?;
 
         let traversal = limits
             .with_recursive()
@@ -338,7 +482,8 @@ impl LocalStagedDirectory {
             .with_error_policy(crate::options::LocalWalkErrorPolicy::FailFast);
         let mut directories = Vec::new();
         let mut seen_bytes = 0_usize;
-        for item in self.observe_tree_with_options(&traversal)? {
+        for item in self.observe_tree_with_options_started_at(&traversal, started_at)? {
+            budget.check(self.directory().diagnostic_path())?;
             let item = item?;
             let relative = item.relative_path();
             let depth = relative.components().count();
@@ -359,9 +504,14 @@ impl LocalStagedDirectory {
                 directories.push((relative.to_path_buf(), identity));
             }
         }
+        #[cfg(test)]
+        expire_tree_sync_after_collection_if_scheduled();
+        budget.check(self.directory().diagnostic_path())?;
         directories.sort_by_key(|(path, _)| std::cmp::Reverse(path.components().count()));
+        budget.check(self.directory().diagnostic_path())?;
 
         for (relative, expected_identity) in directories {
+            budget.check(&self.directory().diagnostic_path().join(&relative))?;
             let directory = self
                 .directory()
                 .open_directory(&relative, &crate::options::LocalDirectoryOpenOptions::new())?;
@@ -371,6 +521,7 @@ impl LocalStagedDirectory {
                         .with_path(self.directory().diagnostic_path().join(&relative)),
                 );
             }
+            budget.check(&self.directory().diagnostic_path().join(&relative))?;
             #[cfg(all(test, unix))]
             sync_order_tests::record_sync_event(sync_order_tests::SyncEvent {
                 kind: sync_order_tests::SyncKind::Directory,
@@ -401,8 +552,10 @@ impl LocalStagedDirectory {
                     source,
                 )
             })?;
+            budget.check(&self.directory().diagnostic_path().join(&relative))?;
         }
 
+        budget.check(self.directory().diagnostic_path())?;
         #[cfg(all(test, unix))]
         sync_order_tests::record_sync_event(sync_order_tests::SyncEvent {
             kind: sync_order_tests::SyncKind::Root,
@@ -433,6 +586,8 @@ impl LocalStagedDirectory {
                 source,
             )
         })?;
+        budget.check(self.directory().diagnostic_path())?;
+        budget.check(parent.diagnostic_path())?;
         #[cfg(all(test, unix))]
         sync_order_tests::record_sync_event(sync_order_tests::SyncEvent {
             kind: sync_order_tests::SyncKind::Parent,
@@ -467,6 +622,7 @@ impl LocalStagedDirectory {
                 source,
             )
         })?;
+        budget.check(parent.diagnostic_path())?;
         Ok(())
     }
 }

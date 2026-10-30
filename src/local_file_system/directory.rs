@@ -59,7 +59,7 @@ impl LocalFileSystem {
     ///
     /// The instant is captured by the public facade before path binding so a
     /// configured deadline includes validation and resolution work.
-    fn list_with_options_started_at(
+    pub(crate) fn list_with_options_started_at(
         &self,
         path: &Path,
         options: &LocalListOptions,

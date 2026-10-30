@@ -65,10 +65,20 @@ impl LocalStagedDirectory {
     /// resource ceilings, error policy, and listing depth still control
     /// this display-oriented observer.
     pub fn observe_tree_with_options(&self, options: &LocalListOptions) -> LocalResult<LocalTreeObserver> {
+        self.observe_tree_with_options_started_at(options, std::time::Instant::now())
+    }
+
+    pub(crate) fn observe_tree_with_options_started_at(
+        &self,
+        options: &LocalListOptions,
+        started_at: std::time::Instant,
+    ) -> LocalResult<LocalTreeObserver> {
         let recursive = (*options)
             .with_recursive()
             .with_symlink_policy(crate::policy::LocalSymlinkPolicy::Reject);
-        let walker = self.directory().list_with_options(Path::new("."), &recursive)?;
+        let walker = self
+            .directory()
+            .list_with_options_started_at(Path::new("."), &recursive, started_at)?;
         Ok(LocalTreeObserver::new(self.directory().clone(), walker))
     }
 

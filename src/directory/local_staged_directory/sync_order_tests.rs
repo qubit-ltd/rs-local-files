@@ -63,6 +63,39 @@ pub(super) fn record_sync_event(event: SyncEvent) -> std::io::Result<()> {
             events.push(event.clone());
         }
     });
+    let expire_after_file = super::TREE_SYNC_EXPIRE_AFTER_FILE.with(|expire| {
+        if event.kind == SyncKind::File && expire.get() {
+            expire.set(false);
+            true
+        } else {
+            false
+        }
+    });
+    if expire_after_file {
+        super::TREE_SYNC_TEST_EXPIRED.with(|expired| expired.set(true));
+    }
+    let expire_after_root = super::TREE_SYNC_EXPIRE_AFTER_ROOT.with(|expire| {
+        if event.kind == SyncKind::Root && expire.get() {
+            expire.set(false);
+            true
+        } else {
+            false
+        }
+    });
+    if expire_after_root {
+        super::TREE_SYNC_TEST_EXPIRED.with(|expired| expired.set(true));
+    }
+    let expire_after_directory = super::TREE_SYNC_EXPIRE_AFTER_DIRECTORY.with(|expire| {
+        if event.kind == SyncKind::Directory && expire.get() {
+            expire.set(false);
+            true
+        } else {
+            false
+        }
+    });
+    if expire_after_directory {
+        super::TREE_SYNC_TEST_EXPIRED.with(|expired| expired.set(true));
+    }
     let should_fail = SYNC_FAILURE_PATH.with(|slot| slot.borrow().as_deref() == Some(event.path.as_path()));
     if should_fail {
         SYNC_FAILURE_PATH.with(|slot| slot.borrow_mut().take());
@@ -155,6 +188,182 @@ pub(super) fn test_review_tree_sync_stops_after_nested_directory_failure() {
             .iter()
             .any(|event| matches!(event.kind, SyncKind::Root | SyncKind::Parent))
     );
+}
+
+pub(super) fn test_tree_sync_deadline_stops_after_file_sync() {
+    let fixture = tempfile::tempdir().expect("fixture");
+    let filesystem = LocalFileSystem::host().expect("host filesystem");
+    let parent = filesystem
+        .open_directory_with_options(fixture.path(), &LocalDirectoryOpenOptions::new())
+        .expect("parent authority");
+    let mut stage = parent
+        .create_staged_directory(
+            &LocalTempDirectoryOptions::new()
+                .with_owner_access_policy(LocalOwnerAccessPolicy::new().with_unix_modes(0o700, 0o600)),
+        )
+        .expect("stage");
+    stage
+        .write_file_new(Path::new("nested/payload"), &mut &b"payload"[..], 32)
+        .expect("payload");
+
+    super::TREE_SYNC_TEST_EXPIRED.with(|expired| expired.set(false));
+    super::TREE_SYNC_EXPIRE_AFTER_FILE.with(|expire| expire.set(true));
+    let _observer = SyncOrderObserverGuard::install(None);
+    let error = stage
+        .sync_tree_with_options(&parent, &LocalListOptions::new())
+        .expect_err("the deterministic file-phase timeout must stop the tree sync");
+    assert_eq!(error.io_error_kind(), std::io::ErrorKind::TimedOut);
+    let events = SYNC_EVENTS.with(|events| events.borrow().clone().expect("observer"));
+    assert!(events.iter().any(|event| event.kind == SyncKind::File));
+    assert!(
+        !events
+            .iter()
+            .any(|event| matches!(event.kind, SyncKind::Directory | SyncKind::Root | SyncKind::Parent))
+    );
+    drop(_observer);
+    super::TREE_SYNC_TEST_EXPIRED.with(|expired| expired.set(false));
+    super::TREE_SYNC_EXPIRE_AFTER_FILE.with(|expire| expire.set(false));
+    stage
+        .sync_tree_with_options(&parent, &LocalListOptions::new())
+        .expect("a new invocation receives a fresh budget");
+    stage.cleanup().expect("cleanup retry stage");
+}
+
+pub(super) fn test_tree_sync_deadline_zero_rejects_at_entry() {
+    let fixture = tempfile::tempdir().expect("fixture");
+    let filesystem = LocalFileSystem::host().expect("host filesystem");
+    let parent = filesystem
+        .open_directory_with_options(fixture.path(), &LocalDirectoryOpenOptions::new())
+        .expect("parent authority");
+    let mut stage = parent
+        .create_staged_directory(&LocalTempDirectoryOptions::new())
+        .expect("stage");
+    stage
+        .write_file_new(Path::new("payload"), &mut &b"payload"[..], 32)
+        .expect("payload");
+
+    let _observer = SyncOrderObserverGuard::install(None);
+    let error = stage
+        .sync_tree_with_options(
+            &parent,
+            &LocalListOptions::new().with_deadline(std::time::Duration::ZERO),
+        )
+        .expect_err("zero deadline must expire before synchronization begins");
+    assert_eq!(error.io_error_kind(), std::io::ErrorKind::TimedOut);
+    let events = SYNC_EVENTS.with(|events| events.borrow().clone().expect("observer"));
+    assert!(events.is_empty(), "no sync event may follow an expired entry budget");
+    drop(_observer);
+    stage.cleanup().expect("cleanup retained stage");
+}
+
+pub(super) fn test_tree_sync_deadline_stops_before_parent_sync() {
+    let fixture = tempfile::tempdir().expect("fixture");
+    let filesystem = LocalFileSystem::host().expect("host filesystem");
+    let parent = filesystem
+        .open_directory_with_options(fixture.path(), &LocalDirectoryOpenOptions::new())
+        .expect("parent authority");
+    let mut stage = parent
+        .create_staged_directory(&LocalTempDirectoryOptions::new())
+        .expect("stage");
+    stage
+        .write_file_new(Path::new("payload"), &mut &b"payload"[..], 32)
+        .expect("payload");
+
+    super::TREE_SYNC_TEST_EXPIRED.with(|expired| expired.set(false));
+    super::TREE_SYNC_EXPIRE_AFTER_ROOT.with(|expire| expire.set(true));
+    let _observer = SyncOrderObserverGuard::install(None);
+    let error = stage
+        .sync_tree_with_options(&parent, &LocalListOptions::new())
+        .expect_err("expiry after root sync must stop before parent sync");
+    assert_eq!(error.io_error_kind(), std::io::ErrorKind::TimedOut);
+    let events = SYNC_EVENTS.with(|events| events.borrow().clone().expect("observer"));
+    assert!(events.iter().any(|event| event.kind == SyncKind::Root));
+    assert!(!events.iter().any(|event| event.kind == SyncKind::Parent));
+    drop(_observer);
+    super::TREE_SYNC_TEST_EXPIRED.with(|expired| expired.set(false));
+    super::TREE_SYNC_EXPIRE_AFTER_ROOT.with(|expire| expire.set(false));
+    stage
+        .sync_tree_with_options(&parent, &LocalListOptions::new())
+        .expect("a new invocation receives a fresh budget");
+    stage.cleanup().expect("cleanup retry stage");
+}
+
+pub(super) fn test_tree_sync_deadline_expires_after_collection_before_directory_sync() {
+    let fixture = tempfile::tempdir().expect("fixture");
+    let filesystem = LocalFileSystem::host().expect("host filesystem");
+    let parent = filesystem
+        .open_directory_with_options(fixture.path(), &LocalDirectoryOpenOptions::new())
+        .expect("parent authority");
+    let mut stage = parent
+        .create_staged_directory(
+            &LocalTempDirectoryOptions::new()
+                .with_owner_access_policy(LocalOwnerAccessPolicy::new().with_unix_modes(0o700, 0o600)),
+        )
+        .expect("stage");
+    stage
+        .write_file_new(Path::new("nested/payload"), &mut &b"payload"[..], 32)
+        .expect("payload");
+
+    super::TREE_SYNC_TEST_EXPIRED.with(|expired| expired.set(false));
+    super::TREE_SYNC_EXPIRE_AFTER_COLLECTION.with(|expire| expire.set(true));
+    let _observer = SyncOrderObserverGuard::install(None);
+    let error = stage
+        .sync_tree_with_options(&parent, &LocalListOptions::new())
+        .expect_err("expiry after collection must stop before directory sync");
+    assert_eq!(error.io_error_kind(), std::io::ErrorKind::TimedOut);
+    let events = SYNC_EVENTS.with(|events| events.borrow().clone().expect("observer"));
+    assert!(events.iter().any(|event| event.kind == SyncKind::File));
+    assert!(
+        !events
+            .iter()
+            .any(|event| matches!(event.kind, SyncKind::Directory | SyncKind::Root | SyncKind::Parent))
+    );
+    drop(_observer);
+    super::TREE_SYNC_TEST_EXPIRED.with(|expired| expired.set(false));
+    super::TREE_SYNC_EXPIRE_AFTER_COLLECTION.with(|expire| expire.set(false));
+    stage
+        .sync_tree_with_options(&parent, &LocalListOptions::new())
+        .expect("a new invocation receives a fresh budget");
+    stage.cleanup().expect("cleanup retry stage");
+}
+
+pub(super) fn test_tree_sync_deadline_stops_after_directory_sync() {
+    let fixture = tempfile::tempdir().expect("fixture");
+    let filesystem = LocalFileSystem::host().expect("host filesystem");
+    let parent = filesystem
+        .open_directory_with_options(fixture.path(), &LocalDirectoryOpenOptions::new())
+        .expect("parent authority");
+    let mut stage = parent
+        .create_staged_directory(
+            &LocalTempDirectoryOptions::new()
+                .with_owner_access_policy(LocalOwnerAccessPolicy::new().with_unix_modes(0o700, 0o600)),
+        )
+        .expect("stage");
+    stage
+        .write_file_new(Path::new("nested/payload"), &mut &b"payload"[..], 32)
+        .expect("payload");
+
+    super::TREE_SYNC_TEST_EXPIRED.with(|expired| expired.set(false));
+    super::TREE_SYNC_EXPIRE_AFTER_DIRECTORY.with(|expire| expire.set(true));
+    let _observer = SyncOrderObserverGuard::install(None);
+    let error = stage
+        .sync_tree_with_options(&parent, &LocalListOptions::new())
+        .expect_err("expiry after directory sync must stop before root sync");
+    assert_eq!(error.io_error_kind(), std::io::ErrorKind::TimedOut);
+    let events = SYNC_EVENTS.with(|events| events.borrow().clone().expect("observer"));
+    assert!(events.iter().any(|event| event.kind == SyncKind::Directory));
+    assert!(
+        !events
+            .iter()
+            .any(|event| matches!(event.kind, SyncKind::Root | SyncKind::Parent))
+    );
+    drop(_observer);
+    super::TREE_SYNC_TEST_EXPIRED.with(|expired| expired.set(false));
+    super::TREE_SYNC_EXPIRE_AFTER_DIRECTORY.with(|expire| expire.set(false));
+    stage
+        .sync_tree_with_options(&parent, &LocalListOptions::new())
+        .expect("a new invocation receives a fresh budget");
+    stage.cleanup().expect("cleanup retry stage");
 }
 
 fn assert_sync_order(

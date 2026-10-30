@@ -874,9 +874,21 @@ impl LocalDirectoryHandle {
     /// # Errors
     /// Returns path, policy, option, type, or native opening errors.
     pub fn list_with_options(&self, relative: &Path, options: &LocalListOptions) -> LocalResult<LocalDirectoryWalker> {
+        self.list_with_options_started_at(relative, options, std::time::Instant::now())
+    }
+
+    pub(crate) fn list_with_options_started_at(
+        &self,
+        relative: &Path,
+        options: &LocalListOptions,
+        started_at: std::time::Instant,
+    ) -> LocalResult<LocalDirectoryWalker> {
         let policy = options.symlink_policy().unwrap_or(self.filesystem.symlink_policy());
-        self.filesystem
-            .list_with_options(&self.validate_with_policy(relative, true, policy)?, options)
+        self.filesystem.list_with_options_started_at(
+            &self.validate_with_policy(relative, true, policy)?,
+            options,
+            started_at,
+        )
     }
 
     /// Opens a writer under this authority using the supplied write options.
