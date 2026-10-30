@@ -291,9 +291,9 @@ impl LocalFileObservation {
 /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// let fixture = tempfile::tempdir()?;
 /// std::fs::write(fixture.path().join("item"), b"data")?;
-/// let filesystem = LocalFileSystem::host()?;
+/// let filesystem = LocalFileSystem::rooted(fixture.path())?;
 /// let reader = filesystem.open_observed_reader(
-///     &fixture.path().join("item"),
+///     Path::new("item"),
 ///     &LocalObservedReadOptions::new()
 ///         .with_path_binding(LocalPathBindingOptions::new()),
 /// )?;

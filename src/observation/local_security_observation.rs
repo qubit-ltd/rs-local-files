@@ -37,7 +37,14 @@ use super::LocalFileSystemObservation;
 /// let options = LocalSecurityObservationOptions::new()
 ///     .with_filesystem(LocalObservationRequirement::Optional)
 ///     .with_access(LocalObservationRequirement::Optional);
-/// let facts = directory.security_observation(&options)?;
+/// let facts = match directory.security_observation(&options) {
+///     Ok(facts) => facts,
+///     Err(error) if error.kind() == qubit_local_files::error::LocalFileErrorKind::PermissionDenied => {
+///         // Optional queries can still report access denial on the current object.
+///         return Ok(());
+///     }
+///     Err(error) => return Err(error.into()),
+/// };
 /// if let Some(identity) = facts.identity() {
 ///     // Identity refers to the object, not a version of its contents.
 ///     let _ = identity;
