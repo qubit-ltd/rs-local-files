@@ -103,11 +103,7 @@ impl LocalStagedDirectory {
                 }
             }
             if let Err(error) = writer.commit() {
-                let (cause, _, retry) = error.into_parts();
-                return Err(match retry {
-                    Some(mut retry) => abort_failed_stage_write(&mut retry, cause),
-                    None => cause,
-                });
+                return Err(abort_failed_stage_commit(error));
             }
             self.directory().observe_entry(relative)?
         };
@@ -354,6 +350,103 @@ fn abort_failed_stage_write(writer: &mut crate::writer::LocalFileWriter, cause: 
     match writer.abort() {
         Ok(_) => cause,
         Err(cleanup) => cause.with_additional_cleanup_error(cleanup),
+    }
+}
+
+fn abort_failed_stage_commit(error: crate::writer::LocalFileCommitError) -> LocalFileError {
+    let (cause, _, retry) = error.into_parts();
+    match retry {
+        Some(mut retry) => abort_failed_stage_write(&mut retry, cause),
+        None => cause,
+    }
+}
+
+#[cfg(all(test, feature = "test-support", unix))]
+mod commit_cleanup_tests {
+    use std::fs;
+    use std::path::Path;
+
+    use qubit_io::Output;
+    use tempfile::tempdir;
+
+    use super::abort_failed_stage_commit;
+    use crate::LocalFileSystem;
+    use crate::options::LocalDirectoryOpenOptions;
+    use crate::options::LocalTempDirectoryOptions;
+    use crate::options::LocalWriteMode;
+    use crate::options::LocalWriteOptions;
+    use crate::policy::LocalFileSyncRequirement;
+    use crate::test_support::install_test_fault;
+
+    #[test]
+    fn test_failed_commit_aborts_retry_writer_and_preserves_both_errors() {
+        let directory = tempdir().expect("fixture should be created");
+        let parent = LocalFileSystem::host()
+            .expect("host filesystem should open")
+            .open_directory_with_options(directory.path(), &LocalDirectoryOpenOptions::new())
+            .expect("parent directory should open");
+        let stage = parent
+            .create_staged_directory(&LocalTempDirectoryOptions::new())
+            .expect("stage should be created");
+        let stage_path = stage.directory().diagnostic_path().to_path_buf();
+        let target = stage_path.join("payload");
+        fs::write(&target, b"existing").expect("existing destination should be written");
+        let mut writer = stage
+            .directory()
+            .open_writer_with_options(
+                Path::new("payload"),
+                &LocalWriteOptions::new(LocalWriteMode::CreateOrReplace)
+                    .with_file_sync(LocalFileSyncRequirement::Required),
+            )
+            .expect("writer should stage target");
+        Output::write_fully(&mut writer, b"staged").expect("staged write should succeed");
+
+        let commit_error = {
+            let _fault = install_test_fault("writer-staged-file-sync").expect("sync failure should install");
+            writer
+                .commit()
+                .expect_err("pre-install sync failure should be retryable")
+        };
+        assert!(commit_error.writer().is_some(), "commit should return Some(retry)");
+        let primary_message = commit_error.error().io_error().unwrap().to_string();
+        let error = {
+            let _fault = install_test_fault("atomic-install-unlink-persistent")
+                .expect("retry abort cleanup fault should install");
+            abort_failed_stage_commit(commit_error)
+        };
+
+        assert_eq!(primary_message, error.io_error().unwrap().to_string());
+        assert_eq!(crate::LocalFileOperation::Commit, error.operation());
+        assert_eq!(
+            Some(crate::LocalFileOperation::Abort),
+            error.cleanup_error().map(crate::LocalFileError::operation),
+            "abort failure should be attached structurally",
+        );
+        assert_eq!(
+            b"existing",
+            fs::read(&target).expect("original target should remain").as_slice()
+        );
+        let entries: Vec<_> = fs::read_dir(&stage_path)
+            .expect("directory should be readable")
+            .map(|entry| entry.expect("directory entry should be readable").path())
+            .collect();
+        assert_eq!(
+            2,
+            entries.len(),
+            "failed abort should retain staging beside the original target"
+        );
+        let staging = entries
+            .into_iter()
+            .find(|path| path != &target)
+            .expect("retry abort should retain its staging entry");
+        assert!(
+            staging.exists(),
+            "retained staging should remain available to the owner"
+        );
+        stage
+            .cleanup()
+            .expect("stage owner should recover and remove retained staging");
+        assert!(!stage_path.exists(), "owner cleanup should remove the complete stage");
     }
 }
 
