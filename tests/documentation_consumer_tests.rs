@@ -12,6 +12,11 @@ use std::process::Command;
 
 use tempfile::tempdir;
 
+mod support {
+    pub(crate) mod consumer_lock;
+}
+use support::consumer_lock;
+
 const GUIDES: [(&str, &str); 2] = [
     ("English", include_str!("../doc/user_guide.md")),
     ("中文", include_str!("../doc/user_guide.zh_CN.md")),
@@ -33,7 +38,7 @@ fn documented_conditional_write_runs_as_a_consumer_without_a_digest_feature() {
     let workspace = tempdir().expect("consumer workspace is created");
     let target = workspace.path().join("target");
     let parent_lock = fs::read_to_string(crate_path.join("Cargo.lock")).expect("the tested crate has a lockfile");
-    let consumer_lock = lock_with_parent_sources(CONSUMER_LOCK, &parent_lock);
+    let consumer_lock = consumer_lock::lock_with_parent_sources(CONSUMER_LOCK, &parent_lock);
     for (index, (language, guide)) in GUIDES.into_iter().enumerate() {
         let dependencies = extract_marked(guide, MANIFEST_START, MANIFEST_END, language);
         let dependency_line = dependencies
@@ -112,55 +117,6 @@ fn documented_conditional_write_runs_as_a_consumer_without_a_digest_feature() {
             b"conditional example completed"
         );
     }
-}
-
-// Packaging replaces path dependencies with their registry counterparts. Adopt
-// only their source/checksum from the parent lock for the same pinned version;
-// keep the consumer's dependency closure and the tested crate itself unchanged.
-fn lock_with_parent_sources(consumer: &str, parent: &str) -> String {
-    const PACKAGE: &str = "\n[[package]]\n";
-    let mut result = consumer.to_owned();
-    for entry in consumer.split(PACKAGE).skip(1) {
-        let identity = entry.lines().take(2).collect::<Vec<_>>().join("\n");
-        if entry.lines().any(|line| line.starts_with("source = "))
-            || identity.starts_with("name = \"documentation-consumer\"\n")
-            || identity.starts_with("name = \"qubit-local-files\"\n")
-        {
-            continue;
-        }
-        let header = format!("{identity}\n");
-        let Some(parent_entry) = parent.split(PACKAGE).skip(1).find(|entry| entry.starts_with(&header)) else {
-            continue;
-        };
-        let source = parent_entry
-            .lines()
-            .filter(|line| line.starts_with("source = ") || line.starts_with("checksum = "))
-            .collect::<Vec<_>>();
-        if !source.is_empty() {
-            result = result.replacen(&header, &format!("{header}{}\n", source.join("\n")), 1);
-        }
-    }
-    result
-}
-
-#[test]
-fn consumer_lock_adopts_packaged_sources_without_changing_versions_or_dependencies() {
-    let consumer = "version = 4\n\n[[package]]\nname = \"qubit-local-files\"\nversion = \"0.5.0\"\ndependencies = [\"qubit-redact\"]\n\n[[package]]\nname = \"qubit-redact\"\nversion = \"0.10.0\"\ndependencies = [\"qubit-budget\"]\n";
-    let source =
-        "source = \"registry+https://github.com/rust-lang/crates.io-index\"\nchecksum = \"reviewed-checksum\"\n";
-    let packaged = format!(
-        "version = 4\n\n[[package]]\nname = \"qubit-local-files\"\nversion = \"0.5.0\"\n{source}\ndependencies = [\"criterion\"]\n\n[[package]]\nname = \"qubit-redact\"\nversion = \"0.10.0\"\n{source}\ndependencies = [\"qubit-budget\", \"other-feature\"]\n"
-    );
-    let expected = consumer.replace(
-        "name = \"qubit-redact\"\nversion = \"0.10.0\"\n",
-        &format!("name = \"qubit-redact\"\nversion = \"0.10.0\"\n{source}"),
-    );
-    assert_eq!(lock_with_parent_sources(consumer, &packaged), expected);
-    assert_eq!(lock_with_parent_sources(consumer, consumer), consumer);
-    let different_version = packaged.replace("version = \"0.10.0\"", "version = \"0.11.0\"");
-    assert_eq!(lock_with_parent_sources(consumer, &different_version), consumer);
-    let different_source = packaged.replace("github.com/rust-lang/crates.io-index", "example.invalid/index");
-    assert_eq!(lock_with_parent_sources(&expected, &different_source), expected);
 }
 
 fn extract_marked<'a>(text: &'a str, start: &str, end: &str, language: &str) -> &'a str {

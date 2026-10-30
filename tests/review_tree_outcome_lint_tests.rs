@@ -12,6 +12,11 @@ use std::process::Command;
 
 use tempfile::tempdir;
 
+mod support {
+    pub(crate) mod consumer_lock;
+}
+use support::consumer_lock;
+
 fn copy_fixture(source: &Path, destination: &Path) {
     fs::create_dir_all(destination).expect("consumer directory should be created");
     for entry in fs::read_dir(source).expect("fixture should be readable") {
@@ -46,16 +51,24 @@ fn test_tree_publish_outcome_must_use_in_external_consumer() {
     assert!(!normalized_crate_path.contains('\\'));
     fs::write(&manifest, manifest_text.replace("../../..", &normalized_crate_path))
         .expect("consumer manifest should point at this crate");
+    let lock = consumer.join("Cargo.lock");
+    let parent_lock = fs::read_to_string(crate_path.join("Cargo.lock")).expect("crate lockfile should be readable");
+    let reviewed_lock =
+        consumer_lock::lock_with_parent_sources(include_str!("fixtures/tree_outcome_lint/Cargo.lock"), &parent_lock);
+    fs::write(&lock, &reviewed_lock).expect("reviewed consumer lock should be written");
     let target = temporary.path().join("target");
 
     let accepted = Command::new("cargo")
         .arg("check")
+        .arg("--frozen")
         .arg("--manifest-path")
         .arg(&manifest)
         .arg("--no-default-features")
         .env("CARGO_TARGET_DIR", &target)
+        .env_remove("CARGO_ENCODED_RUSTFLAGS")
         .env_remove("RUSTFLAGS")
         .env_remove("RUSTDOCFLAGS")
+        .env_remove("CARGO_BUILD_TARGET")
         .output()
         .expect("positive consumer check should start");
     assert!(
@@ -64,17 +77,24 @@ fn test_tree_publish_outcome_must_use_in_external_consumer() {
         String::from_utf8_lossy(&accepted.stdout),
         String::from_utf8_lossy(&accepted.stderr)
     );
+    assert_eq!(
+        fs::read_to_string(&lock).expect("consumer lock remains readable"),
+        reviewed_lock
+    );
 
     let rejected = Command::new("cargo")
         .arg("check")
+        .arg("--frozen")
         .arg("--manifest-path")
         .arg(&manifest)
         .arg("--no-default-features")
         .arg("--features")
         .arg("drop-result")
         .env("CARGO_TARGET_DIR", &target)
+        .env_remove("CARGO_ENCODED_RUSTFLAGS")
         .env_remove("RUSTFLAGS")
         .env_remove("RUSTDOCFLAGS")
+        .env_remove("CARGO_BUILD_TARGET")
         .output()
         .expect("negative consumer check should start");
     let diagnostic = String::from_utf8_lossy(&rejected.stderr);
@@ -83,5 +103,9 @@ fn test_tree_publish_outcome_must_use_in_external_consumer() {
         "discarding the outcome should fail specifically for unused_must_use:\n{}\n{}",
         String::from_utf8_lossy(&rejected.stdout),
         diagnostic
+    );
+    assert_eq!(
+        fs::read_to_string(&lock).expect("consumer lock remains readable"),
+        reviewed_lock
     );
 }
