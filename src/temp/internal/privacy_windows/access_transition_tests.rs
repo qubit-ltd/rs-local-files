@@ -12,6 +12,8 @@ use std::fs::OpenOptions;
 use std::os::windows::fs::OpenOptionsExt;
 use std::os::windows::io::AsRawHandle;
 
+use windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_ARCHIVE;
+use windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_HIDDEN;
 use windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_READONLY;
 use windows_sys::Win32::Storage::FileSystem::FILE_BASIC_INFO;
 use windows_sys::Win32::Storage::FileSystem::FileBasicInfo;
@@ -63,9 +65,27 @@ fn test_review_windows_access_transition_preserves_readonly_attribute_and_acl() 
         .expect("initial file permits a write handle");
 
     let before = basic_info(&file);
+    let retained = FILE_ATTRIBUTE_HIDDEN | FILE_ATTRIBUTE_ARCHIVE;
+    let mut marked = before;
+    marked.FileAttributes |= retained;
+    assert_ne!(
+        unsafe {
+            windows_sys::Win32::Storage::FileSystem::SetFileInformationByHandle(
+                file.as_raw_handle().cast(),
+                FileBasicInfo,
+                (&marked as *const FILE_BASIC_INFO).cast(),
+                std::mem::size_of::<FILE_BASIC_INFO>() as u32,
+            )
+        },
+        0,
+        "set HIDDEN and ARCHIVE attributes",
+    );
+    let before = basic_info(&file);
+    assert_eq!(before.FileAttributes & retained, retained);
     apply_current_user_access(&file, false, true).expect("apply read-only current-user policy");
     verify_current_user_access(&file, false, true).expect("read-only current-user DACL");
     let read_only = basic_info(&file);
+    assert_eq!(read_only.FileAttributes & retained, retained);
     assert_ne!(read_only.FileAttributes & FILE_ATTRIBUTE_READONLY, 0);
     assert_eq!(read_only.CreationTime, before.CreationTime);
     assert_eq!(read_only.LastAccessTime, before.LastAccessTime);

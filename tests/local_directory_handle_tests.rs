@@ -31,6 +31,16 @@ fn rooted_handle(path: &Path, policy: LocalComponentPolicy) -> qubit_local_files
         .expect("Rooted authority handle should open")
 }
 
+#[cfg(windows)]
+#[allow(clippy::permissions_set_readonly_false)]
+fn clear_readonly_attribute(path: &Path) {
+    let mut permissions = fs::metadata(path)
+        .expect("read-only payload metadata should be available")
+        .permissions();
+    permissions.set_readonly(false);
+    fs::set_permissions(path, permissions).expect("clear read-only attribute before cleanup");
+}
+
 #[test]
 fn test_child_directory_retains_parent_denied_names() {
     let fixture = tempdir().expect("fixture directory should exist");
@@ -126,6 +136,90 @@ fn test_allowed_child_directory_opens_and_retains_authority() {
             .expect("child metadata should resolve")
             .is_some()
     );
+}
+
+#[cfg(windows)]
+#[test]
+fn test_readonly_stage_preserves_file_attributes() {
+    use std::fs::OpenOptions;
+    use std::os::windows::io::AsRawHandle;
+
+    use qubit_local_files::options::LocalTempDirectoryOptions;
+    use qubit_local_files::policy::LocalTreeFinalAccess;
+    use windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_ARCHIVE;
+    use windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_HIDDEN;
+    use windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_READONLY;
+    use windows_sys::Win32::Storage::FileSystem::FILE_BASIC_INFO;
+    use windows_sys::Win32::Storage::FileSystem::FileBasicInfo;
+
+    let fixture = tempdir().expect("fixture directory should exist");
+    let parent = LocalFileSystem::host()
+        .expect("host filesystem should open")
+        .open_directory_with_options(fixture.path(), &LocalDirectoryOpenOptions::new())
+        .expect("parent handle should open");
+    let mut stage = parent
+        .create_staged_directory(&LocalTempDirectoryOptions::new())
+        .expect("stage should be created");
+    stage
+        .write_file_new(Path::new("payload"), &mut &b"attributes"[..], 64)
+        .expect("payload should be written");
+    let payload = fixture.path().join(stage.relative_name()).join("payload");
+    let file = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(&payload)
+        .expect("open payload");
+    let mut information = unsafe { std::mem::zeroed::<FILE_BASIC_INFO>() };
+    assert_ne!(
+        unsafe {
+            windows_sys::Win32::Storage::FileSystem::GetFileInformationByHandleEx(
+                file.as_raw_handle().cast(),
+                FileBasicInfo,
+                (&mut information as *mut FILE_BASIC_INFO).cast(),
+                std::mem::size_of::<FILE_BASIC_INFO>() as u32,
+            )
+        },
+        0,
+        "query payload attributes",
+    );
+    let retained = FILE_ATTRIBUTE_HIDDEN | FILE_ATTRIBUTE_ARCHIVE;
+    information.FileAttributes |= retained;
+    assert_ne!(
+        unsafe {
+            windows_sys::Win32::Storage::FileSystem::SetFileInformationByHandle(
+                file.as_raw_handle().cast(),
+                FileBasicInfo,
+                (&information as *const FILE_BASIC_INFO).cast(),
+                std::mem::size_of::<FILE_BASIC_INFO>() as u32,
+            )
+        },
+        0,
+        "set payload HIDDEN and ARCHIVE attributes",
+    );
+
+    stage
+        .apply_access_policy(LocalTreeFinalAccess::ReadOnlyCurrentUser)
+        .expect("apply read-only access policy");
+
+    let mut after = unsafe { std::mem::zeroed::<FILE_BASIC_INFO>() };
+    assert_ne!(
+        unsafe {
+            windows_sys::Win32::Storage::FileSystem::GetFileInformationByHandleEx(
+                file.as_raw_handle().cast(),
+                FileBasicInfo,
+                (&mut after as *mut FILE_BASIC_INFO).cast(),
+                std::mem::size_of::<FILE_BASIC_INFO>() as u32,
+            )
+        },
+        0,
+        "query transitioned payload attributes",
+    );
+    assert_eq!(after.FileAttributes & retained, retained);
+    assert_ne!(after.FileAttributes & FILE_ATTRIBUTE_READONLY, 0);
+
+    drop(file);
+    clear_readonly_attribute(&payload);
+    stage.cleanup().expect("clean up staged fixture");
 }
 
 #[test]

@@ -663,7 +663,9 @@ pub(crate) fn apply_current_user_access(file: &File, directory: bool, read_only:
         {
             return Err(last_os_error());
         }
-        information.FileAttributes = windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_READONLY;
+        information.FileAttributes = (information.FileAttributes
+            & !windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_NORMAL)
+            | windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_READONLY;
         if unsafe {
             windows_sys::Win32::Storage::FileSystem::SetFileInformationByHandle(
                 file.as_raw_handle().cast(),
