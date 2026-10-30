@@ -896,7 +896,8 @@ Backend scope currently established by the implementation:
 | Linux/macOS Host and Rooted | Native no-replace install | Supported | Rooted operations use retained directory descriptors; `Required` depends on file and namespace sync support. |
 | Windows Host | Native no-replace install | `PreserveExisting` only | Content with another metadata policy and `Required` writer durability are unsupported. |
 | Windows Rooted | Native no-replace install | Unsupported | Rooted `Absent` is handle-relative; `Required` writer durability is unsupported. |
-| Android and FreeBSD | Not claimed | Not claimed | Do not infer support from other Unix targets. |
+| Android | Not claimed | Not claimed | Compile checks are configured; do not infer support from other Unix targets. |
+| FreeBSD 14.3 | Not claimed | Not claimed | Native tests with `--no-default-features` and `--all-features` are configured, but results were not verified in this review; do not infer support from other Unix targets. |
 
 Windows Rooted `Content` and Host `Content` with `UseStaging` return
 `Unsupported` while opening the writer, before path resolution, parent access,
@@ -1839,8 +1840,10 @@ Verification follows contracts rather than line count:
   lifecycle invariants; lifecycle targets use unique per-process sandboxes,
   bounded collision retries, and RAII cleanup, and never rely on ambient
   machine paths;
-- CI is configured for Linux, Windows, and macOS behavioral tests; FreeBSD and Android are
-  compile-checked;
+- CI is configured for Linux, Windows, and macOS behavioral tests; FreeBSD 14.3
+  has native tests with `--no-default-features` and `--all-features` configured, but this
+  configuration does not establish a successful run and native results were
+  not verified in this review; Android remains configured for compile checks;
 - Windows-specific T3/T4 recovery and conditional-open cases, plus LF-09
   private-resource and LF-10 sealed-cleanup behavior, remain unverified unless
   native Windows runner results are available. Linux filters execute zero tests

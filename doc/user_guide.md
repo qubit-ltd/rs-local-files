@@ -413,7 +413,8 @@ filesystem will accept the native operation. Conditional-write support is:
 | --- | --- | --- |
 | Linux / macOS | `Absent`, `Content` | `Absent`, `Content` |
 | Windows | `Absent`; `Content` with `PreserveExisting` metadata | `Absent`; `Content` unsupported |
-| Android / FreeBSD | Compile-checked only; protocol support not declared | Compile-checked only; protocol support not declared |
+| Android | Compile-checked only; protocol support not declared | Compile-checked only; protocol support not declared |
+| FreeBSD 14.3 | Native tests with `--no-default-features` and `--all-features` are configured; results unverified, protocol support not declared | Native tests with `--no-default-features` and `--all-features` are configured; results unverified, protocol support not declared |
 
 Across platforms, `Append`, `Content` with `CreateNew`, and symlink-following
 policies are rejected as invalid conditional-write configurations. On Windows,
@@ -423,8 +424,10 @@ before path resolution or staging creation. Linux and macOS can attempt valid
 `Required` durability and `UseStaging` configurations, subject to the selected
 filesystem and runtime operation. Check `LocalDirectoryHandle::conditional_support`
 when the application needs to present a capability hint, and still handle
-open/commit errors. Android and FreeBSD remain compile-checked only; protocol
-support is not declared.
+open/commit errors. Android remains configured for compile checks. FreeBSD 14.3
+has native tests with `--no-default-features` and `--all-features` configured in CI, but native
+results have not been verified in this review. Protocol support remains
+undeclared on both targets.
 
 Use a conditional write when an application reads document A, prepares an edit B,
 and must avoid replacing a newer version written by someone else. Add the
@@ -1406,9 +1409,12 @@ rely on the same path and error contracts in either case.
 ## Limitations and Best Practices
 
 CI is configured for Linux, Windows, and macOS behavioral tests; actual CI
-results establish validation for a particular change. FreeBSD and Android are
-compile-checked only. T3/T4 Windows cleanup and conditional-open behavior, and
-LF-09 private-resource and LF-10 sealed-cleanup behavior, remain unverified
+results establish validation for a particular change. FreeBSD 14.3 has native
+tests with `--no-default-features` and `--all-features` configured, but this configuration does
+not establish a successful run and native results have not been verified in
+this review. Android remains configured for compile checks. T3/T4 Windows
+cleanup and conditional-open behavior, and LF-09 private-resource and LF-10
+sealed-cleanup behavior, remain unverified
 without native Windows runner results: Linux filters execute zero tests for
 these cases, and Windows GNU `cargo check --lib` is compile evidence only.
 `capabilities()` reports the selected authority's build

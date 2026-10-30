@@ -337,14 +337,15 @@ assert_eq!(text, r#"{"complete":true}"#);
 | --- | --- | --- |
 | Linux / macOS | `Absent`、`Content` | `Absent`、`Content` |
 | Windows | `Absent`；`Content` 需使用 `PreserveExisting` 元数据策略 | `Absent`；`Content` 不支持 |
-| Android / FreeBSD | 仅编译检查；未声明协议支持 | 仅编译检查；未声明协议支持 |
+| Android | 仅编译检查；未声明协议支持 | 仅编译检查；未声明协议支持 |
+| FreeBSD 14.3 | 已配置原生 `--no-default-features` 与 `--all-features` 测试；结果未核实，未声明协议支持 | 已配置原生 `--no-default-features` 与 `--all-features` 测试；结果未核实，未声明协议支持 |
 跨平台都会拒绝 `Append`、`Content` 配合 `CreateNew`，以及跟随符号链接策略等无效条件写入配置。
 Windows 不支持 Rooted `Content` 和 Host `Content` 配合 `UseStaging`。Host 与 Rooted
 使用 `Required` writer durability 时，都会在路径解析或创建 staging 前返回
 `RequirementNotMet`。Linux 和 macOS 可尝试有效配置下的 `Required` 耐久性与 `UseStaging`，
 但仍受所选文件系统和实际运行操作约束。应用需要展示能力提示时可查询
-`LocalDirectoryHandle::conditional_support`，但仍须处理打开和提交错误。Android 与 FreeBSD
-仍仅做编译检查，未声明条件写入协议支持。
+`LocalDirectoryHandle::conditional_support`，但仍须处理打开和提交错误。Android 仍配置为编译检查；
+FreeBSD 14.3 已配置原生 `--no-default-features` 与 `--all-features` 测试，但本轮未核实原生运行结果。两者均未声明条件写入协议支持。
 
 当应用读取文档 A、基于它准备新内容 B，并且不能覆盖其他人后来保存的版本时，使用
 条件写入。应用清单需启用可选 feature，并加入算法实现：
@@ -1123,7 +1124,8 @@ Rooted metadata 等操作对不含链接的普通路径使用私有的一次顺�
 ## 限制与最佳实践
 
 CI 配置了 Linux、Windows 和 macOS 运行时测试；具体修改的验证状态以实际 CI 结果为准。
-FreeBSD 与 Android 仅做编译检查。T3/T4 的 Windows 清理与条件写入行为，以及 LF-09 私有资源和
+FreeBSD 14.3 已配置原生 `--no-default-features` 与 `--all-features` 测试，但配置本身不表示通过，本轮未核实原生运行结果；
+Android 仍配置为编译检查。T3/T4 的 Windows 清理与条件写入行为，以及 LF-09 私有资源和
 LF-10 sealed 清理，尚无原生 Windows runner 证据时必须视为待验证：Linux 对应筛选为 0 tests，Windows
 GNU `cargo check --lib` 只能证明可编译，不能证明运行行为。
 本 crate CI 仅验证本 crate；下游 adapter 的兼容性和集成由 adapter 仓库或独立集成负责。

@@ -310,9 +310,11 @@ walk.
 ## Platform Scope
 
 CI is configured to run behavioral tests on Linux, Windows, and macOS; consult
-the matching CI results for validation of a particular change. FreeBSD and Android
-configuration paths are compile-checked only. T3/T4 Windows cleanup and
-conditional-open behavior, and LF-09 private-resource and LF-10 sealed-cleanup
+the matching CI results for validation of a particular change. FreeBSD 14.3 has
+native tests with `--no-default-features` and `--all-features` configured in CI, but that
+configuration does not establish a successful run; native results have not been
+verified in this review. Android remains configured for compile checks. T3/T4
+Windows cleanup and conditional-open behavior, and LF-09 private-resource and LF-10 sealed-cleanup
 behavior, remain unverified without native Windows runner results. Linux filters
 execute zero tests for these Windows-only cases; Windows GNU `cargo check --lib`
 is compile evidence only. This crate's CI validates this
@@ -327,7 +329,8 @@ Conditional-write support is operation- and authority-specific:
 | --- | --- | --- |
 | Linux / macOS | `Absent`, `Content` | `Absent`, `Content` |
 | Windows | `Absent`, `Content` with `PreserveExisting` metadata | `Absent`; `Content` unsupported |
-| Android / FreeBSD | Compile check only; no protocol claimed | Compile check only; no protocol claimed |
+| Android | Compile check only; no protocol claimed | Compile check only; no protocol claimed |
+| FreeBSD 14.3 | Native tests with `--no-default-features` and `--all-features` configured; results unverified, no protocol claimed | Native tests with `--no-default-features` and `--all-features` configured; results unverified, no protocol claimed |
 
 Required atomicity or durability is rejected before namespace changes when the
 selected operation protocol cannot be met.

@@ -1143,7 +1143,8 @@ Windows 会在创建时为条件候选 B 及其独立恢复副本设置受保护
 | Linux/macOS Host 和 Rooted | 原生 no-replace 安装 | 支持 | Rooted 使用保留的目录描述符；`Required` 取决于文件及命名空间同步能力。 |
 | Windows Host | 原生 no-replace 安装 | 仅 `PreserveExisting` | Content 配合其他元数据策略及 `Required` writer durability 不受支持。 |
 | Windows Rooted | 原生 no-replace 安装 | 不支持 | Rooted `Absent` 使用相对已打开句柄的安装；不支持 `Required` writer durability。 |
-| Android 和 FreeBSD | 未声明支持 | 未声明支持 | 不应从其他 Unix 目标推断支持。 |
+| Android | 未声明支持 | 未声明支持 | CI 配置为编译检查；不应从其他 Unix 目标推断支持。 |
+| FreeBSD 14.3 | 未声明支持 | 未声明支持 | CI 已配置原生 `--no-default-features` 与 `--all-features` 测试，但本轮未核实原生运行结果；不应从其他 Unix 目标推断支持。 |
 
 Windows Rooted `Content`，以及 Host `Content` 配合 `UseStaging`，在打开 writer 阶段返回
 `Unsupported`，早于路径解析、父目录操作或 candidate/staging 创建。Host `Content` 配合
@@ -2084,7 +2085,8 @@ namespace-absolute、不含 `.`/`..`，再次规范化保持不变。Host 绑定
 - T3/T4 的 Windows 清理与条件写入用例，以及 LF-09 私有资源和 LF-10 sealed cleanup，尚无原生
   Windows runner 证据时必须标为待验证；Linux 对应测试为 0 tests，Windows GNU `cargo check --lib`
   仅证明可编译，不证明运行行为；
-- Android、FreeBSD 等只有 compile-check 时文档不得宣称 runtime guarantee；
+- FreeBSD 14.3 已配置原生 `--no-default-features` 与 `--all-features` 测试，但配置本身不代表运行通过；本轮未核实原生结果。
+  Android 仍配置为 compile-check；这些配置不能据以宣称 runtime guarantee；
 - `cargo test --all-features`；
 - `cargo clippy --all-targets --all-features -- -D warnings`；
 - README 和用户指南示例作为编译测试。
