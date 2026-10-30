@@ -42,8 +42,10 @@ use crate::rooted::Metadata;
 ///
 /// # Errors
 ///
-/// Returns an I/O error when an independent enumeration handle cannot be
-/// reopened from the retained root authority.
+/// Reopens an independent enumeration handle when the access policy permits;
+/// otherwise reuses the already-authorized root handle.
+///
+/// Returns an I/O error when reopening or duplicating the root handle fails.
 pub(crate) fn open_root_directory_reader(root: &File, _diagnostic_root: &Path) -> Result<RootedDirectoryReader> {
     // SAFETY: `root` owns a live CreateFileW handle and ReOpenFile does not
     // retain the handle value. The returned handle is uniquely owned here.
@@ -55,11 +57,17 @@ pub(crate) fn open_root_directory_reader(root: &File, _diagnostic_root: &Path) -
             FILE_FLAG_BACKUP_SEMANTICS,
         )
     };
-    if handle == INVALID_HANDLE_VALUE {
-        return Err(std::io::Error::last_os_error());
-    }
-    // SAFETY: ReOpenFile succeeded and returned a uniquely owned handle.
-    let directory = unsafe { File::from_raw_handle(handle) };
+    let directory = if handle == INVALID_HANDLE_VALUE {
+        let error = std::io::Error::last_os_error();
+        if error.kind() == ErrorKind::PermissionDenied {
+            root.try_clone()?
+        } else {
+            return Err(error);
+        }
+    } else {
+        // SAFETY: ReOpenFile succeeded and returned a uniquely owned handle.
+        unsafe { File::from_raw_handle(handle) }
+    };
     verify_real_directory(&directory)?;
     Ok(RootedDirectoryReader::new(directory))
 }
