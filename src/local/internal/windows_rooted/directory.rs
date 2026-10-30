@@ -9,23 +9,31 @@
 
 use std::ffi::OsString;
 use std::fs::File;
+use std::io::Error;
 use std::io::ErrorKind;
 use std::io::Result;
 use std::os::windows::io::AsRawHandle;
 use std::os::windows::io::FromRawHandle;
 use std::path::Path;
+use std::ptr::null;
+use std::ptr::null_mut;
 
 use windows_sys::Wdk::Storage::FileSystem::FILE_CREATE;
 use windows_sys::Wdk::Storage::FileSystem::FILE_DIRECTORY_FILE;
 use windows_sys::Wdk::Storage::FileSystem::FILE_OPEN;
 use windows_sys::Wdk::Storage::FileSystem::FILE_OPEN_IF;
 use windows_sys::Win32::Foundation::INVALID_HANDLE_VALUE;
+use windows_sys::Win32::Storage::FileSystem::CreateFileW;
 use windows_sys::Win32::Storage::FileSystem::DELETE;
 use windows_sys::Win32::Storage::FileSystem::FILE_FLAG_BACKUP_SEMANTICS;
 use windows_sys::Win32::Storage::FileSystem::FILE_LIST_DIRECTORY;
+use windows_sys::Win32::Storage::FileSystem::FILE_NAME_NORMALIZED;
 use windows_sys::Win32::Storage::FileSystem::FILE_READ_ATTRIBUTES;
-use windows_sys::Win32::Storage::FileSystem::ReOpenFile;
+use windows_sys::Win32::Storage::FileSystem::FILE_TRAVERSE;
+use windows_sys::Win32::Storage::FileSystem::GetFinalPathNameByHandleW;
+use windows_sys::Win32::Storage::FileSystem::OPEN_EXISTING;
 use windows_sys::Win32::Storage::FileSystem::SYNCHRONIZE;
+use windows_sys::Win32::Storage::FileSystem::VOLUME_NAME_DOS;
 
 use super::handle::open_entry;
 use super::handle::open_entry_no_follow;
@@ -42,34 +50,87 @@ use crate::rooted::Metadata;
 ///
 /// # Errors
 ///
-/// Reopens an independent enumeration handle when the access policy permits;
-/// otherwise reuses the already-authorized root handle.
+/// Reopens an independent enumeration handle when the path and access policy
+/// permit; otherwise reuses the already-authorized root handle.
 ///
-/// Returns an I/O error when reopening or duplicating the root handle fails.
+/// Returns an I/O error when final-path inspection, metadata validation, or
+/// handle duplication fails unexpectedly.
 pub(crate) fn open_root_directory_reader(root: &File, _diagnostic_root: &Path) -> Result<RootedDirectoryReader> {
-    // SAFETY: `root` owns a live CreateFileW handle and ReOpenFile does not
-    // retain the handle value. The returned handle is uniquely owned here.
-    let handle = unsafe {
-        ReOpenFile(
-            root.as_raw_handle(),
-            FILE_LIST_DIRECTORY | FILE_READ_ATTRIBUTES | SYNCHRONIZE,
-            super::native::ROOTED_SHARE_MODE,
-            FILE_FLAG_BACKUP_SEMANTICS,
-        )
-    };
-    let directory = if handle == INVALID_HANDLE_VALUE {
-        let error = std::io::Error::last_os_error();
-        if error.kind() == ErrorKind::PermissionDenied {
-            root.try_clone()?
-        } else {
-            return Err(error);
-        }
-    } else {
-        // SAFETY: ReOpenFile succeeded and returned a uniquely owned handle.
-        unsafe { File::from_raw_handle(handle) }
+    let directory = match open_independent_root_directory(root)? {
+        Some(directory) => directory,
+        None => root.try_clone()?,
     };
     verify_real_directory(&directory)?;
     Ok(RootedDirectoryReader::new(directory))
+}
+
+/// Opens the root's normalized final path as a new file object.
+///
+/// Returns `None` when the path cannot be used because it disappeared, changed
+/// identity, or access was denied. Propagates other native and metadata errors.
+fn open_independent_root_directory(root: &File) -> Result<Option<File>> {
+    let mut path = vec![0_u16; 256];
+    loop {
+        let capacity = u32::try_from(path.len())
+            .map_err(|_| Error::new(ErrorKind::InvalidInput, "rooted directory path is too long"))?;
+        // SAFETY: `root` is a live handle and `path` is writable for
+        // `capacity` UTF-16 units, including the required NUL terminator.
+        let length = unsafe {
+            GetFinalPathNameByHandleW(
+                root.as_raw_handle(),
+                path.as_mut_ptr(),
+                capacity,
+                FILE_NAME_NORMALIZED | VOLUME_NAME_DOS,
+            )
+        };
+        if length == 0 {
+            let error = Error::last_os_error();
+            return if matches!(error.kind(), ErrorKind::NotFound | ErrorKind::PermissionDenied) {
+                Ok(None)
+            } else {
+                Err(error)
+            };
+        }
+        let length = length as usize;
+        if length < path.len() {
+            path.truncate(length + 1);
+            break;
+        }
+        let required = length
+            .checked_add(1)
+            .ok_or_else(|| Error::new(ErrorKind::InvalidInput, "rooted directory path length overflow"))?;
+        path.try_reserve_exact(required - path.len())
+            .map_err(|error| Error::new(ErrorKind::OutOfMemory, error))?;
+        path.resize(required, 0);
+    }
+
+    // SAFETY: `path` is a live NUL-terminated UTF-16 path obtained from the
+    // retained handle. The returned handle is validated before ownership.
+    let handle = unsafe {
+        CreateFileW(
+            path.as_ptr(),
+            FILE_LIST_DIRECTORY | FILE_READ_ATTRIBUTES | FILE_TRAVERSE | SYNCHRONIZE,
+            super::native::ROOTED_SHARE_MODE,
+            null(),
+            OPEN_EXISTING,
+            FILE_FLAG_BACKUP_SEMANTICS,
+            null_mut(),
+        )
+    };
+    if handle == INVALID_HANDLE_VALUE {
+        let error = Error::last_os_error();
+        return if matches!(error.kind(), ErrorKind::NotFound | ErrorKind::PermissionDenied) {
+            Ok(None)
+        } else {
+            Err(error)
+        };
+    }
+    // SAFETY: CreateFileW succeeded and returned a uniquely owned handle.
+    let directory = unsafe { File::from_raw_handle(handle) };
+    if !Metadata::from_open_file(root)?.is_same_file(&Metadata::from_open_file(&directory)?) {
+        return Ok(None);
+    }
+    Ok(Some(directory))
 }
 
 /// Lists immediate children of a rooted descendant directory.
