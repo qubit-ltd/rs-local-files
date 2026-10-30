@@ -35,8 +35,21 @@
 /// #[cfg(any(target_os = "linux", windows))]
 /// {
 ///     let options = LocalTempDirectoryOptions::new().with_owner_access_policy(policy);
-///     let mut stage = parent.create_staged_directory(&options)?;
-///     stage.apply_owner_access_policy_with_options(&policy, &LocalListOptions::new())?;
+///     let mut stage = match parent.create_staged_directory(&options) {
+///         Ok(stage) => stage,
+///         Err(error)
+///             if error.cause().kind() == qubit_local_files::error::LocalFileErrorKind::PermissionDenied =>
+///         {
+///             return Ok(());
+///         }
+///         Err(error) => return Err(error.into()),
+///     };
+///     if let Err(error) = stage.apply_owner_access_policy_with_options(&policy, &LocalListOptions::new()) {
+///         if error.cause().kind() == qubit_local_files::error::LocalFileErrorKind::PermissionDenied {
+///             return Ok(());
+///         }
+///         return Err(error.into());
+///     }
 /// }
 /// #[cfg(target_os = "macos")]
 /// {
