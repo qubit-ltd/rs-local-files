@@ -271,6 +271,11 @@ impl LocalDirectoryHandle {
                                 .with_reason("Windows Host directory opening cannot validate legacy component-policy target expansions"),
                         );
                     }
+                    let policy = if policy == LocalSymlinkPolicy::FollowAcrossScope {
+                        LocalSymlinkPolicy::FollowWithinScope
+                    } else {
+                        policy
+                    };
                     let opened = crate::rooted_local_file_system::RootedLocalFileSystem::open_with_contract(
                         path,
                         resolution.clone(),

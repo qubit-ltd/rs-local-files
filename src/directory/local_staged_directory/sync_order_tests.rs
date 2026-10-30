@@ -12,6 +12,7 @@ use std::path::PathBuf;
 use super::super::LocalStagedDirectory;
 use crate::LocalFileSystem;
 use crate::observation::LocalFileIdentity;
+use crate::options::LocalCreateDirectoryOptions;
 use crate::options::LocalDirectoryOpenOptions;
 use crate::options::LocalListOptions;
 use crate::options::LocalTempDirectoryOptions;
@@ -28,6 +29,13 @@ fn sync_test_temp_options() -> LocalTempDirectoryOptions {
     {
         LocalTempDirectoryOptions::new()
     }
+}
+
+fn create_sync_test_directory(stage: &LocalStagedDirectory, path: &Path) {
+    let _ = stage
+        .directory()
+        .create_directory_with_options(path, &LocalCreateDirectoryOptions::new())
+        .expect("nested stage directory should be created");
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -127,6 +135,9 @@ pub(super) fn test_review_tree_sync_orders_files_directories_root_and_parent() {
     let mut stage = parent
         .create_staged_directory(&sync_test_temp_options())
         .expect("stage should be created");
+    create_sync_test_directory(&stage, Path::new("a"));
+    create_sync_test_directory(&stage, Path::new("a/b"));
+    create_sync_test_directory(&stage, Path::new("c"));
     stage
         .write_file_new(Path::new("a/b/file"), &mut &b"nested"[..], 16)
         .expect("nested file should be written");
@@ -169,6 +180,9 @@ pub(super) fn test_review_tree_sync_stops_after_nested_directory_failure() {
     let mut stage = parent
         .create_staged_directory(&sync_test_temp_options())
         .expect("stage should be created");
+    create_sync_test_directory(&stage, Path::new("a"));
+    create_sync_test_directory(&stage, Path::new("a/b"));
+    create_sync_test_directory(&stage, Path::new("c"));
     stage
         .write_file_new(Path::new("a/b/file"), &mut &b"nested"[..], 16)
         .expect("nested file should be written");
@@ -206,6 +220,7 @@ pub(super) fn test_tree_sync_deadline_stops_after_file_sync() {
     let mut stage = parent
         .create_staged_directory(&sync_test_temp_options())
         .expect("stage");
+    create_sync_test_directory(&stage, Path::new("nested"));
     stage
         .write_file_new(Path::new("nested/payload"), &mut &b"payload"[..], 32)
         .expect("payload");
@@ -301,6 +316,7 @@ pub(super) fn test_tree_sync_deadline_expires_after_collection_before_directory_
     let mut stage = parent
         .create_staged_directory(&sync_test_temp_options())
         .expect("stage");
+    create_sync_test_directory(&stage, Path::new("nested"));
     stage
         .write_file_new(Path::new("nested/payload"), &mut &b"payload"[..], 32)
         .expect("payload");
@@ -337,6 +353,7 @@ pub(super) fn test_tree_sync_deadline_stops_after_directory_sync() {
     let mut stage = parent
         .create_staged_directory(&sync_test_temp_options())
         .expect("stage");
+    create_sync_test_directory(&stage, Path::new("nested"));
     stage
         .write_file_new(Path::new("nested/payload"), &mut &b"payload"[..], 32)
         .expect("payload");

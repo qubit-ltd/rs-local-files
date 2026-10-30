@@ -9,6 +9,7 @@
 use std::path::Path;
 
 use crate::LocalFileSystem;
+use crate::options::LocalCreateDirectoryOptions;
 use crate::options::LocalDirectoryOpenOptions;
 use crate::options::LocalListOptions;
 use crate::options::LocalTempDirectoryOptions;
@@ -59,6 +60,10 @@ fn staged_tree_syncs_nested_directories_before_its_root_and_parent() {
     let mut stage = parent
         .create_staged_directory(&options)
         .expect("stage should be created");
+    let _ = stage
+        .directory()
+        .create_directory_with_options(Path::new("nested"), &LocalCreateDirectoryOptions::new())
+        .expect("nested stage directory should be created");
     stage
         .write_file_new(Path::new("nested/entry"), &mut &b"payload"[..], 16)
         .expect("nested file should be written");

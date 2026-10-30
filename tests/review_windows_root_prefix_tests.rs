@@ -34,7 +34,10 @@ fn with_verbatim_prefix(path: &Path) -> PathBuf {
 fn with_disk_prefix(path: &Path) -> PathBuf {
     let wide: Vec<u16> = path.as_os_str().encode_wide().collect();
     let verbatim_prefix: Vec<u16> = r"\\?\".encode_utf16().collect();
-    let disk_path = wide.strip_prefix(&verbatim_prefix).unwrap_or(&wide);
+    let disk_path = wide
+        .as_slice()
+        .strip_prefix(verbatim_prefix.as_slice())
+        .unwrap_or(&wide);
     PathBuf::from(OsString::from_wide(disk_path))
 }
 
@@ -115,7 +118,7 @@ fn test_root_open_rejects_different_drive_prefix() {
         return;
     }
     let error = read_root_payload(&link).expect_err("a different drive anchor must be rejected");
-    assert_eq!(qubit_local_files::LocalFileErrorKind::InvalidPath, error.kind());
+    assert_eq!(qubit_local_files::error::LocalFileErrorKind::InvalidPath, error.kind());
     assert_eq!(
         Some("absolute symbolic-link target uses a different native root"),
         error.reason()

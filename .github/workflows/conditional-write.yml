@@ -42,6 +42,10 @@ jobs:
       - name: Run shared conditional suites
         working-directory: ci-root/rs-local-files
         run: |
+          if [ "$RUNNER_OS" = Windows ]; then
+            export TEMP="$RUNNER_TEMP"
+            export TMP="$RUNNER_TEMP"
+          fi
           export QUBIT_LOCAL_FILES_REQUIRE_SYMLINKS=1
           test_status=0
           run_named_test() {
@@ -148,4 +152,7 @@ jobs:
         run: rustup toolchain install 1.94 --profile minimal
       - name: Run rollback recovery contracts
         working-directory: ci-root/rs-local-files
-        run: cargo test --locked --features digest,test-support --test conditional_recovery_tests windows_cleanup_
+        run: |
+          export TEMP="$RUNNER_TEMP"
+          export TMP="$RUNNER_TEMP"
+          cargo test --locked --features digest,test-support --test conditional_recovery_tests windows_cleanup_

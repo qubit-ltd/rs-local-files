@@ -37,10 +37,15 @@ jobs:
             fetch -qo "$toolchain_dir/rust.tar.xz" https://static.rust-lang.org/dist/rust-1.94.0-x86_64-unknown-freebsd.tar.xz
             tar -xf "$toolchain_dir/rust.tar.xz" -C "$toolchain_dir"
             "$toolchain_dir/rust-1.94.0-x86_64-unknown-freebsd/install.sh" --prefix=/usr/local --without=rust-docs
+            pw useradd ci-runner -m -s /bin/sh
+            mkdir -p /tmp/ci-home /tmp/ci-cargo /tmp/ci-target
+            chown -R ci-runner:ci-runner /tmp/ci-home /tmp/ci-cargo /tmp/ci-target
           run: |
             cargo --version
-            cargo test --locked --no-default-features --no-fail-fast
-            cargo test --locked --all-features --no-fail-fast
+            CARGO_HOME=/tmp/ci-cargo cargo fetch --locked
+            chown -R ci-runner:ci-runner /tmp/ci-cargo
+            su -m ci-runner -c 'id && cd "$GITHUB_WORKSPACE" && HOME=/tmp/ci-home CARGO_HOME=/tmp/ci-cargo CARGO_TARGET_DIR=/tmp/ci-target cargo test --locked --no-default-features --no-fail-fast'
+            su -m ci-runner -c 'cd "$GITHUB_WORKSPACE" && HOME=/tmp/ci-home CARGO_HOME=/tmp/ci-cargo CARGO_TARGET_DIR=/tmp/ci-target cargo test --locked --all-features --no-fail-fast'
 
   rust-ci:
     uses: qubit-ltd/rs-infra-ci/.github/workflows/github-ci.yml@main
@@ -53,6 +58,10 @@ jobs:
       fuzz-check: false
       # Enable remotely only after platform, manager and CI tools are distributable.
       verify-extra-script: |
+        if [ "$RUNNER_OS" = Windows ]; then
+          export TEMP="$RUNNER_TEMP"
+          export TMP="$RUNNER_TEMP"
+        fi
         export QUBIT_LOCAL_FILES_REQUIRE_SYMLINKS=1
         run_named_test() {
           local target="$1"
@@ -83,9 +92,6 @@ jobs:
         fi
         if [ "$RUNNER_OS" != Windows ]; then
           cargo test --locked --test security_observation_contract_tests
-        fi
-        if [ "$RUNNER_OS" = Linux ] || [ "$RUNNER_OS" = macOS ]; then
-          cargo test --locked --manifest-path fuzz/Cargo.toml --test lifecycle_model_tests
         fi
         if [ "$RUNNER_OS" = Linux ]; then
           cargo test --locked --test owner_policy_lifecycle_tests

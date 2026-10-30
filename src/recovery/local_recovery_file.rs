@@ -151,7 +151,11 @@ mod conditional_types_tests {
         }
 
         fn sync_file(&self) -> std::io::Result<()> {
-            File::open(&self.path)?.sync_all()
+            std::fs::OpenOptions::new()
+                .read(true)
+                .write(true)
+                .open(&self.path)?
+                .sync_all()
         }
     }
 
