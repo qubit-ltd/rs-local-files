@@ -53,11 +53,12 @@ fn test_review_symlink_target_budget_keeps_open_reader_context() {
         .prefix("r")
         .tempdir_in("/tmp")
         .expect("fixture should exist in a short temporary path");
+    let root = fixture.path().canonicalize().expect("fixture root should resolve");
     std::fs::create_dir_all(fixture.path().join("a/b/c/d")).expect("target directories should exist");
     std::fs::write(fixture.path().join("a/b/c/d/file"), b"payload").expect("target file should exist");
     symlink("a/b/c/d/file", fixture.path().join("link")).expect("link should exist");
     let filesystem = LocalFileSystem::rooted_with_options(
-        fixture.path(),
+        &root,
         &LocalRootOpenOptions::new().with_resolution_limits(LocalResolutionLimits::new().with_max_actual_components(2)),
     )
     .expect("root authority should open");
