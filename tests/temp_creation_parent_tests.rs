@@ -27,22 +27,23 @@ fn rooted_host_path(root: &Path, virtual_path: &Path) -> PathBuf {
 #[test]
 fn test_creation_parent_tracks_host_and_rooted_creation_coordinates() {
     let host_parent = tempdir().expect("Host parent should be created");
+    let host_parent_path = fs::canonicalize(host_parent.path()).expect("Host parent should resolve");
     let host = LocalFileSystem::host().expect("Host filesystem should open");
     let mut host_file = host
-        .create_temp_file_with_options(&LocalTempFileOptions::new().with_parent(host_parent.path()))
+        .create_temp_file_with_options(&LocalTempFileOptions::new().with_parent(&host_parent_path))
         .expect("Host temporary file should be created");
     let host_file_parent = host_file.creation_parent().to_path_buf();
     assert!(host_file_parent.is_absolute());
-    assert_eq!(host_file_parent, host_parent.path());
+    assert_eq!(host_file_parent, host_parent_path);
     assert!(host_file.path().starts_with(&host_file_parent));
     host_file.cleanup().expect("Host temporary file should clean up");
     assert_eq!(host_file.creation_parent(), host_file_parent);
 
     let mut host_directory = host
-        .create_temp_directory_with_options(&LocalTempDirectoryOptions::new().with_parent(host_parent.path()))
+        .create_temp_directory_with_options(&LocalTempDirectoryOptions::new().with_parent(&host_parent_path))
         .expect("Host temporary directory should be created");
     let host_directory_parent = host_directory.creation_parent().to_path_buf();
-    assert_eq!(host_directory_parent, host_parent.path());
+    assert_eq!(host_directory_parent, host_parent_path);
     assert!(host_directory.path().starts_with(&host_directory_parent));
     host_directory
         .cleanup()
@@ -165,25 +166,26 @@ fn test_creation_parent_uses_the_active_namespace_for_alias_parents() {
 #[cfg(any(unix, windows))]
 fn test_creation_parent_tracks_required_privacy_resources() {
     let host_parent = tempdir().expect("Host parent should be created");
+    let host_parent_path = fs::canonicalize(host_parent.path()).expect("Host parent should resolve");
     let host = LocalFileSystem::host().expect("Host filesystem should open");
     let mut host_file = host
         .create_temp_file_with_options(
             &LocalTempFileOptions::new()
-                .with_parent(host_parent.path())
+                .with_parent(&host_parent_path)
                 .with_privacy(LocalPrivacyRequirement::Required),
         )
         .expect("Host Required temporary file should be created on supported platforms");
-    assert_eq!(host_file.creation_parent(), host_parent.path());
+    assert_eq!(host_file.creation_parent(), host_parent_path);
     host_file.cleanup().expect("Host Required file should clean up");
 
     let mut host_directory = host
         .create_temp_directory_with_options(
             &LocalTempDirectoryOptions::new()
-                .with_parent(host_parent.path())
+                .with_parent(&host_parent_path)
                 .with_privacy(LocalPrivacyRequirement::Required),
         )
         .expect("Host Required temporary directory should be created on supported platforms");
-    assert_eq!(host_directory.creation_parent(), host_parent.path());
+    assert_eq!(host_directory.creation_parent(), host_parent_path);
     host_directory
         .cleanup()
         .expect("Host Required directory should clean up");
