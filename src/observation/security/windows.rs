@@ -625,7 +625,8 @@ mod tests {
     use crate::error::LocalResourceKind;
     use crate::observation::LocalSecurityObservationOptions;
 
-    #[path = "../windows/acl_budget_tests.rs"]
+    #[cfg_attr(windows, path = "../acl_budget_tests.rs")]
+    #[cfg_attr(not(windows), path = "../windows/acl_budget_tests.rs")]
     mod acl_budget_tests;
 
     #[test]
