@@ -150,10 +150,11 @@ fn test_direct_and_binding_resolution_limits_have_the_same_effect() {
 #[test]
 fn test_directory_binding_limits_cannot_relax_parent_budget() {
     let scratch = tempdir().expect("fixture should exist");
-    fs::create_dir(scratch.path().join("real")).expect("target should exist");
-    std::os::unix::fs::symlink("real", scratch.path().join("alias")).expect("alias should exist");
+    let root = fs::canonicalize(scratch.path()).expect("fixture root should resolve");
+    fs::create_dir(root.join("real")).expect("target should exist");
+    std::os::unix::fs::symlink("real", root.join("alias")).expect("alias should exist");
     let filesystem = LocalFileSystem::rooted_with_options(
-        scratch.path(),
+        &root,
         &LocalRootOpenOptions::new().with_resolution_limits(LocalResolutionLimits::new().with_max_symlink_hops(0)),
     )
     .expect("root should open");

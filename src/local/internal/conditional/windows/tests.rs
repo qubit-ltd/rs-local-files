@@ -247,7 +247,7 @@ fn dacl_bytes(path: &Path) -> Vec<u8> {
     descriptor[dacl_offset..dacl_offset + dacl_size].to_vec()
 }
 
-fn dacl_entries(dacl: &[u8]) -> Vec<Vec<u8>> {
+fn dacl_explicit_entries(dacl: &[u8]) -> Vec<Vec<u8>> {
     assert!(dacl.len() >= 8, "DACL should include its header");
     let ace_count = u16::from_le_bytes([dacl[4], dacl[5]]) as usize;
     let mut entries = Vec::with_capacity(ace_count);
@@ -257,7 +257,9 @@ fn dacl_entries(dacl: &[u8]) -> Vec<Vec<u8>> {
         assert!(size >= 4, "ACE should include its header");
         let end = offset.checked_add(size).expect("ACE size should not overflow");
         let entry = dacl.get(offset..end).expect("ACE should fit within the DACL");
-        entries.push(entry.to_vec());
+        if entry[1] & 0x10 == 0 {
+            entries.push(entry.to_vec());
+        }
         offset = end;
     }
     entries
@@ -270,7 +272,7 @@ fn assert_private_file(path: &Path) {
 }
 
 #[allow(clippy::field_reassign_with_default)]
-fn add_inheritable_everyone_read(path: &Path) {
+fn add_everyone_read(path: &Path, inheritance: u32) {
     use windows_sys::Win32::Foundation::LocalFree;
     use windows_sys::Win32::Security::Authorization::EXPLICIT_ACCESS_W;
     use windows_sys::Win32::Security::Authorization::GRANT_ACCESS;
@@ -282,7 +284,6 @@ fn add_inheritable_everyone_read(path: &Path) {
     use windows_sys::Win32::Security::Authorization::TRUSTEE_IS_WELL_KNOWN_GROUP;
     use windows_sys::Win32::Security::CreateWellKnownSid;
     use windows_sys::Win32::Security::DACL_SECURITY_INFORMATION;
-    use windows_sys::Win32::Security::OBJECT_INHERIT_ACE;
     use windows_sys::Win32::Security::WinWorldSid;
     use windows_sys::Win32::Storage::FileSystem::FILE_GENERIC_READ;
 
@@ -319,7 +320,7 @@ fn add_inheritable_everyone_read(path: &Path) {
     let mut everyone_read = EXPLICIT_ACCESS_W::default();
     everyone_read.grfAccessPermissions = FILE_GENERIC_READ;
     everyone_read.grfAccessMode = GRANT_ACCESS;
-    everyone_read.grfInheritance = OBJECT_INHERIT_ACE | windows_sys::Win32::Security::CONTAINER_INHERIT_ACE;
+    everyone_read.grfInheritance = inheritance;
     everyone_read.Trustee.TrusteeForm = TRUSTEE_IS_SID;
     everyone_read.Trustee.TrusteeType = TRUSTEE_IS_WELL_KNOWN_GROUP;
     everyone_read.Trustee.ptstrName = world_sid.cast();
@@ -347,6 +348,17 @@ fn add_inheritable_everyone_read(path: &Path) {
         LocalFree(descriptor.cast());
     }
     assert_eq!(status, 0, "parent should receive the inheritable Everyone read ACE");
+}
+
+fn add_inheritable_everyone_read(path: &Path) {
+    add_everyone_read(
+        path,
+        windows_sys::Win32::Security::OBJECT_INHERIT_ACE | windows_sys::Win32::Security::CONTAINER_INHERIT_ACE,
+    );
+}
+
+fn add_explicit_everyone_read(path: &Path) {
+    add_everyone_read(path, 0);
 }
 
 #[test]
@@ -448,6 +460,7 @@ fn conditional_windows_host_content_preserves_destination_acl() {
     let directory = tempfile::tempdir().expect("fixture directory should be created");
     let target = directory.path().join("target");
     fs::write(&target, b"A").expect("old target should be written");
+    add_explicit_everyone_read(&target);
     let dacl_before = dacl_bytes(&target);
     let mut backend = WindowsConditionalBackend::open_host(&target, &options(LocalWriteMode::CreateOrReplace))
         .expect("Host candidate should open");
@@ -465,9 +478,9 @@ fn conditional_windows_host_content_preserves_destination_acl() {
         "successful cleanup should have no errors"
     );
     let dacl_after = dacl_bytes(&target);
-    let mut remaining_entries = dacl_entries(&dacl_after);
+    let mut remaining_entries = dacl_explicit_entries(&dacl_after);
     assert!(
-        dacl_entries(&dacl_before).into_iter().all(|entry| {
+        dacl_explicit_entries(&dacl_before).into_iter().all(|entry| {
             let Some(index) = remaining_entries.iter().position(|current| current == &entry) else {
                 return false;
             };
