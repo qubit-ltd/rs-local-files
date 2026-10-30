@@ -67,7 +67,11 @@ fn test_stage_cleanup_depth_zero_returns_typed_limit_and_can_retry() {
     assert_eq!(0, limit.limit());
     assert_eq!(1, limit.requested());
     assert_eq!(Some(1), limit.observed());
-    assert_eq!(Some(native.as_path()), error.cause().path());
+    let error_path = error.cause().path().expect("cleanup path");
+    assert_eq!(
+        std::fs::canonicalize(error_path).expect("reported cleanup path should resolve"),
+        std::fs::canonicalize(&native).expect("native cleanup path should resolve"),
+    );
     assert!(native.exists());
 
     for mut owner in error.into_retained_resources() {
