@@ -988,6 +988,9 @@ fn recovery_fifo_child(child_env: &str, mode_env: &str, sentinel_env: &str, expe
     .cloned();
     fs::remove_file(&path).expect("remove original namespace entry");
     let name = std::ffi::CString::new(path.file_name().expect("name").as_bytes()).expect("CString");
+    #[cfg(target_os = "android")]
+    rustix::fs::mkfifoat(&parent, &name, rustix::fs::Mode::from_raw_mode(0o600)).expect("create replacement FIFO");
+    #[cfg(not(target_os = "android"))]
     assert_eq!(
         unsafe { libc::mkfifoat(parent.as_raw_fd(), name.as_ptr(), 0o600) },
         0,

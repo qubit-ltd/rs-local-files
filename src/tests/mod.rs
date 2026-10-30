@@ -23,7 +23,7 @@ mod lf3_observation_tests;
 mod lf3_observation_unix_tests;
 #[cfg(windows)]
 mod lf3_observation_windows_tests;
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 mod lf3_owner_policy_limit_tests;
 #[cfg(unix)]
 mod lf3_privacy_unix_tests;

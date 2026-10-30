@@ -927,18 +927,19 @@ fn test_review_stage_creation_identity_rejects_replaced_name_for_all_policies() 
     use std::sync::Arc;
     use std::sync::Mutex;
 
-    let cases = [
+    let mut cases = vec![
         ("default", LocalTempDirectoryOptions::new()),
         (
             "required-privacy",
             LocalTempDirectoryOptions::new().with_privacy(LocalPrivacyRequirement::Required),
         ),
-        (
-            "owner-policy",
-            LocalTempDirectoryOptions::new()
-                .with_owner_access_policy(crate::policy::LocalOwnerAccessPolicy::new().with_unix_modes(0o700, 0o600)),
-        ),
     ];
+    #[cfg(target_os = "linux")]
+    cases.push((
+        "owner-policy",
+        LocalTempDirectoryOptions::new()
+            .with_owner_access_policy(crate::policy::LocalOwnerAccessPolicy::new().with_unix_modes(0o700, 0o600)),
+    ));
 
     for (label, options) in cases {
         let fixture = tempfile::tempdir().expect("fixture should exist");

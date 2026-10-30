@@ -29,7 +29,7 @@ jobs:
         with:
           release: "14.3"
           prepare: |
-            pkg install -y git
+            pkg install -y bash git
             git clone --depth 1 --branch main https://github.com/qubit-ltd/rs-redact.git ../rs-redact
             git clone --depth 1 --branch main https://github.com/qubit-ltd/rs-json.git ../rs-json
             toolchain_dir=$(mktemp -d)

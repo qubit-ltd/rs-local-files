@@ -15,7 +15,22 @@ use crate::observation::LocalFileIdentity;
 use crate::options::LocalDirectoryOpenOptions;
 use crate::options::LocalListOptions;
 use crate::options::LocalTempDirectoryOptions;
+#[cfg(target_os = "linux")]
 use crate::policy::LocalOwnerAccessPolicy;
+#[cfg(not(target_os = "linux"))]
+use crate::policy::LocalPrivacyRequirement;
+
+fn sync_test_temp_options() -> LocalTempDirectoryOptions {
+    #[cfg(target_os = "linux")]
+    {
+        LocalTempDirectoryOptions::new()
+            .with_owner_access_policy(LocalOwnerAccessPolicy::new().with_unix_modes(0o700, 0o600))
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        LocalTempDirectoryOptions::new().with_privacy(LocalPrivacyRequirement::Required)
+    }
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum SyncKind {
@@ -112,10 +127,7 @@ pub(super) fn test_review_tree_sync_orders_files_directories_root_and_parent() {
         .open_directory_with_options(fixture.path(), &LocalDirectoryOpenOptions::new())
         .expect("parent authority should open");
     let mut stage = parent
-        .create_staged_directory(
-            &LocalTempDirectoryOptions::new()
-                .with_owner_access_policy(LocalOwnerAccessPolicy::new().with_unix_modes(0o700, 0o600)),
-        )
+        .create_staged_directory(&sync_test_temp_options())
         .expect("stage should be created");
     stage
         .write_file_new(Path::new("a/b/file"), &mut &b"nested"[..], 16)
@@ -157,10 +169,7 @@ pub(super) fn test_review_tree_sync_stops_after_nested_directory_failure() {
         .open_directory_with_options(fixture.path(), &LocalDirectoryOpenOptions::new())
         .expect("parent authority should open");
     let mut stage = parent
-        .create_staged_directory(
-            &LocalTempDirectoryOptions::new()
-                .with_owner_access_policy(LocalOwnerAccessPolicy::new().with_unix_modes(0o700, 0o600)),
-        )
+        .create_staged_directory(&sync_test_temp_options())
         .expect("stage should be created");
     stage
         .write_file_new(Path::new("a/b/file"), &mut &b"nested"[..], 16)
@@ -197,10 +206,7 @@ pub(super) fn test_tree_sync_deadline_stops_after_file_sync() {
         .open_directory_with_options(fixture.path(), &LocalDirectoryOpenOptions::new())
         .expect("parent authority");
     let mut stage = parent
-        .create_staged_directory(
-            &LocalTempDirectoryOptions::new()
-                .with_owner_access_policy(LocalOwnerAccessPolicy::new().with_unix_modes(0o700, 0o600)),
-        )
+        .create_staged_directory(&sync_test_temp_options())
         .expect("stage");
     stage
         .write_file_new(Path::new("nested/payload"), &mut &b"payload"[..], 32)
@@ -295,10 +301,7 @@ pub(super) fn test_tree_sync_deadline_expires_after_collection_before_directory_
         .open_directory_with_options(fixture.path(), &LocalDirectoryOpenOptions::new())
         .expect("parent authority");
     let mut stage = parent
-        .create_staged_directory(
-            &LocalTempDirectoryOptions::new()
-                .with_owner_access_policy(LocalOwnerAccessPolicy::new().with_unix_modes(0o700, 0o600)),
-        )
+        .create_staged_directory(&sync_test_temp_options())
         .expect("stage");
     stage
         .write_file_new(Path::new("nested/payload"), &mut &b"payload"[..], 32)
@@ -334,10 +337,7 @@ pub(super) fn test_tree_sync_deadline_stops_after_directory_sync() {
         .open_directory_with_options(fixture.path(), &LocalDirectoryOpenOptions::new())
         .expect("parent authority");
     let mut stage = parent
-        .create_staged_directory(
-            &LocalTempDirectoryOptions::new()
-                .with_owner_access_policy(LocalOwnerAccessPolicy::new().with_unix_modes(0o700, 0o600)),
-        )
+        .create_staged_directory(&sync_test_temp_options())
         .expect("stage");
     stage
         .write_file_new(Path::new("nested/payload"), &mut &b"payload"[..], 32)

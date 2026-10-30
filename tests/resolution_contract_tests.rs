@@ -147,12 +147,13 @@ fn zero_hops_rejects_a_real_link_during_opening_root() {
     use std::os::unix::fs::symlink;
 
     let tmp = tempfile::tempdir().expect("temporary directory should be created");
-    std::fs::create_dir(tmp.path().join("real")).expect("target directory should be created");
-    symlink("real", tmp.path().join("alias")).expect("symbolic link should be created");
+    let root = std::fs::canonicalize(tmp.path()).expect("temporary directory should canonicalize");
+    std::fs::create_dir(root.join("real")).expect("target directory should be created");
+    symlink("real", root.join("alias")).expect("symbolic link should be created");
     let options =
         LocalRootOpenOptions::new().with_resolution_limits(LocalResolutionLimits::new().with_max_symlink_hops(0));
 
-    let error = LocalFileSystem::rooted_with_options(&tmp.path().join("alias"), &options)
+    let error = LocalFileSystem::rooted_with_options(&root.join("alias"), &options)
         .expect_err("zero hops must reject the root symlink");
     assert_eq!(error.kind(), LocalFileErrorKind::ResourceLimit);
 }
@@ -163,17 +164,18 @@ fn root_target_byte_limit_accepts_exact_limit_and_rejects_next_byte() {
     use std::os::unix::fs::symlink;
 
     let tmp = tempfile::tempdir().expect("temporary directory should be created");
-    std::fs::create_dir(tmp.path().join("real")).expect("target directory should be created");
-    symlink("real", tmp.path().join("alias")).expect("symbolic link should be created");
+    let root = std::fs::canonicalize(tmp.path()).expect("temporary directory should canonicalize");
+    std::fs::create_dir(root.join("real")).expect("target directory should be created");
+    symlink("real", root.join("alias")).expect("symbolic link should be created");
 
     let exact = LocalRootOpenOptions::new()
         .with_resolution_limits(LocalResolutionLimits::new().with_max_symlink_target_bytes(4));
-    LocalFileSystem::rooted_with_options(&tmp.path().join("alias"), &exact)
+    LocalFileSystem::rooted_with_options(&root.join("alias"), &exact)
         .expect("target exactly at its byte limit should open");
 
     let too_small = LocalRootOpenOptions::new()
         .with_resolution_limits(LocalResolutionLimits::new().with_max_symlink_target_bytes(3));
-    let error = LocalFileSystem::rooted_with_options(&tmp.path().join("alias"), &too_small)
+    let error = LocalFileSystem::rooted_with_options(&root.join("alias"), &too_small)
         .expect_err("target above its byte limit must fail");
     assert_eq!(error.kind(), LocalFileErrorKind::ResourceLimit);
     assert_eq!(
@@ -191,12 +193,13 @@ fn root_target_hook_receives_raw_target_before_follow_and_keeps_its_error() {
     use std::os::unix::fs::symlink;
 
     let tmp = tempfile::tempdir().expect("temporary directory should be created");
-    std::fs::create_dir(tmp.path().join("real")).expect("target directory should be created");
-    symlink("real//./", tmp.path().join("alias")).expect("symbolic link should be created");
+    let root = std::fs::canonicalize(tmp.path()).expect("temporary directory should canonicalize");
+    std::fs::create_dir(root.join("real")).expect("target directory should be created");
+    symlink("real//./", root.join("alias")).expect("symbolic link should be created");
     let recorded = Arc::new(Mutex::new(Vec::new()));
     let options = LocalRootOpenOptions::new().with_resolution_policy(Arc::new(TargetRecorder(recorded.clone())));
 
-    let error = LocalFileSystem::rooted_with_options(&tmp.path().join("alias"), &options)
+    let error = LocalFileSystem::rooted_with_options(&root.join("alias"), &options)
         .expect_err("target hook should reject before target access");
     assert_eq!(error.kind(), LocalFileErrorKind::PermissionDenied);
     assert_eq!(
@@ -253,7 +256,8 @@ fn reject_policy_refuses_intermediate_root_symlink() {
 #[test]
 fn root_component_limit_counts_only_normal_components() {
     let tmp = tempfile::tempdir().expect("temporary directory should be created");
-    let target = tmp.path().join("real");
+    let root = std::fs::canonicalize(tmp.path()).expect("temporary directory should canonicalize");
+    let target = root.join("real");
     std::fs::create_dir(&target).expect("target directory should be created");
     let component_count = target
         .components()
@@ -431,13 +435,14 @@ fn child_directory_options_cannot_loosen_parent_resolution_limits() {
     use std::os::unix::fs::symlink;
 
     let tmp = tempfile::tempdir().expect("temporary directory should be created");
-    std::fs::create_dir(tmp.path().join("child")).expect("child should be created");
-    std::fs::create_dir(tmp.path().join("real")).expect("target directory should be created");
-    std::fs::write(tmp.path().join("real/file"), b"contents").expect("file should be created");
-    symlink("../real", tmp.path().join("child/alias")).expect("symbolic link should be created");
+    let root = std::fs::canonicalize(tmp.path()).expect("temporary directory should canonicalize");
+    std::fs::create_dir(root.join("child")).expect("child should be created");
+    std::fs::create_dir(root.join("real")).expect("target directory should be created");
+    std::fs::write(root.join("real/file"), b"contents").expect("file should be created");
+    symlink("../real", root.join("child/alias")).expect("symbolic link should be created");
     let parent_options =
         LocalRootOpenOptions::new().with_resolution_limits(LocalResolutionLimits::new().with_max_symlink_hops(0));
-    let filesystem = LocalFileSystem::rooted_with_options(tmp.path(), &parent_options).expect("root should open");
+    let filesystem = LocalFileSystem::rooted_with_options(&root, &parent_options).expect("root should open");
     let child = filesystem
         .open_directory_with_options(
             std::path::Path::new("child"),

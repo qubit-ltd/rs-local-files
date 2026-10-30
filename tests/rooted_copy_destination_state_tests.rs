@@ -20,11 +20,12 @@ use qubit_local_files::test_support::install_test_fault;
 use tempfile::tempdir;
 
 fn copy_file_over_replaced_tree(directory: &Path, fault: &str) -> qubit_local_files::outcome::LocalCopyFailure {
+    let directory = fs::canonicalize(directory).expect("temporary root should canonicalize");
     fs::write(directory.join("source"), b"replacement").expect("source file should be written");
     fs::create_dir_all(directory.join("target/first")).expect("target subtree should be created");
     fs::write(directory.join("target/first/entry"), b"first").expect("first target should be written");
     fs::write(directory.join("target/second"), b"second").expect("second target should be written");
-    let rooted = LocalFileSystem::rooted(directory).expect("root authority should open");
+    let rooted = LocalFileSystem::rooted(&directory).expect("root authority should open");
     let _fault = install_test_fault(fault).expect("copy fault should install");
 
     rooted

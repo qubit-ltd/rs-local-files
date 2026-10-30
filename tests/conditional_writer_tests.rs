@@ -280,7 +280,7 @@ fn windows_open_rejects_rooted_content_without_artifacts() {
         assert_eq!(LocalFileOperation::OpenWriter, error.operation());
         assert_eq!(Some(target.as_path()), error.path());
         assert_eq!(
-            Some("this Windows conditional Content configuration is unsupported"),
+            Some("this conditional publication protocol is unsupported on this platform"),
             error.reason()
         );
         assert!(!dir.path().join(parent).exists(), "the parent must not be created");
@@ -322,7 +322,7 @@ fn windows_open_rejects_host_content_use_staging_without_artifacts() {
         assert_eq!(LocalFileOperation::OpenWriter, error.operation());
         assert_eq!(Some(target.as_path()), error.path());
         assert_eq!(
-            Some("this Windows conditional Content configuration is unsupported"),
+            Some("this conditional publication protocol is unsupported on this platform"),
             error.reason()
         );
         assert!(!missing_parent.exists(), "the parent must not be created");

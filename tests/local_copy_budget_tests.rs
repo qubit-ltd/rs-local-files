@@ -43,20 +43,21 @@ struct CopyFixture {
 
 fn copy_fixture(backend: Backend) -> CopyFixture {
     let directory = tempdir().expect("temporary directory should be created");
-    let source = directory.path().join("source");
+    let root = fs::canonicalize(directory.path()).expect("temporary root should canonicalize");
+    let source = root.join("source");
     fs::create_dir(&source).expect("source directory should be created");
     fs::write(source.join("child"), b"payload").expect("source payload should be written");
     match backend {
         Backend::Host => CopyFixture {
             source,
-            target: directory.path().join("target"),
+            target: root.join("target"),
             filesystem: LocalFileSystem::host().expect("Host filesystem should open"),
             _directory: directory,
         },
         Backend::Rooted => CopyFixture {
             source: PathBuf::from("source"),
             target: PathBuf::from("target"),
-            filesystem: LocalFileSystem::rooted(directory.path()).expect("root authority should open"),
+            filesystem: LocalFileSystem::rooted(&root).expect("root authority should open"),
             _directory: directory,
         },
     }
@@ -159,11 +160,12 @@ fn test_copy_budget_matrix_enforces_max_bytes() {
 #[test]
 fn test_rooted_replacement_tree_survives_copy_byte_budget_failure() {
     let directory = tempdir().expect("temporary directory should be created");
-    fs::write(directory.path().join("source"), b"replacement payload").expect("source should be written");
-    fs::create_dir_all(directory.path().join("target/first")).expect("target tree should be created");
-    fs::write(directory.path().join("target/first/entry"), b"original entry").expect("entry should be written");
-    fs::write(directory.path().join("target/second"), b"original second").expect("second should be written");
-    let rooted = LocalFileSystem::rooted(directory.path()).expect("root authority should open");
+    let root = fs::canonicalize(directory.path()).expect("temporary root should canonicalize");
+    fs::write(root.join("source"), b"replacement payload").expect("source should be written");
+    fs::create_dir_all(root.join("target/first")).expect("target tree should be created");
+    fs::write(root.join("target/first/entry"), b"original entry").expect("entry should be written");
+    fs::write(root.join("target/second"), b"original second").expect("second should be written");
+    let rooted = LocalFileSystem::rooted(&root).expect("root authority should open");
 
     let failure = rooted
         .copy_with_options(

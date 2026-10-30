@@ -402,13 +402,17 @@ fn verify_private_random_name_failure(occurrence: usize) {
             } else {
                 LocalFileSystem::host().expect("host authority")
             };
-            let parent = if rooted { Path::new("/") } else { fixture.path() };
+            let parent = if rooted {
+                Path::new("/").to_path_buf()
+            } else {
+                fs::canonicalize(fixture.path()).expect("fixture path should canonicalize")
+            };
             let guard = NativeIoFaultGuard::fail_on(NativeIoPoint::RandomName, occurrence);
             let error = if directory {
                 filesystem
                     .create_temp_directory_with_options(
                         &LocalTempDirectoryOptions::new()
-                            .with_parent(parent)
+                            .with_parent(&parent)
                             .with_privacy(LocalPrivacyRequirement::Required),
                     )
                     .expect_err("private directory random-name failure")
@@ -416,7 +420,7 @@ fn verify_private_random_name_failure(occurrence: usize) {
                 filesystem
                     .create_temp_file_with_options(
                         &LocalTempFileOptions::new()
-                            .with_parent(parent)
+                            .with_parent(&parent)
                             .with_privacy(LocalPrivacyRequirement::Required),
                     )
                     .expect_err("private file random-name failure")
