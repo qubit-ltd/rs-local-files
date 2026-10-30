@@ -17,8 +17,6 @@ use crate::options::LocalListOptions;
 use crate::options::LocalTempDirectoryOptions;
 #[cfg(target_os = "linux")]
 use crate::policy::LocalOwnerAccessPolicy;
-#[cfg(not(target_os = "linux"))]
-use crate::policy::LocalPrivacyRequirement;
 
 fn sync_test_temp_options() -> LocalTempDirectoryOptions {
     #[cfg(target_os = "linux")]
@@ -28,7 +26,7 @@ fn sync_test_temp_options() -> LocalTempDirectoryOptions {
     }
     #[cfg(not(target_os = "linux"))]
     {
-        LocalTempDirectoryOptions::new().with_privacy(LocalPrivacyRequirement::Required)
+        LocalTempDirectoryOptions::new()
     }
 }
 

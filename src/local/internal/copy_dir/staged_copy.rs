@@ -588,8 +588,9 @@ mod error_contract_tests {
     #[test]
     fn racing_destination_skip_cleans_real_staging_and_keeps_winner() {
         let fixture = tempfile::tempdir().expect("fixture");
-        let source = fixture.path().join("source");
-        let destination = fixture.path().join("destination");
+        let root = std::fs::canonicalize(fixture.path()).expect("fixture path should canonicalize");
+        let source = root.join("source");
+        let destination = root.join("destination");
         std::fs::write(&source, b"candidate").expect("source");
         let options = LocalCopyDirOptions::new().with_conflict(LocalCopyConflictPolicy::Skip);
         let stats = LocalCopyDirStats::default();

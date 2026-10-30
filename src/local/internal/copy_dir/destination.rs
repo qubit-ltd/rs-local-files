@@ -352,7 +352,8 @@ mod tests {
     #[test]
     fn unchanged_real_directory_destination_can_be_removed() {
         let parent = tempfile::tempdir().expect("parent directory should be created");
-        let absent = parent.path().join("absent");
+        let parent_path = std::fs::canonicalize(parent.path()).expect("parent path should canonicalize");
+        let absent = parent_path.join("absent");
         let mut destination_removed = false;
         assert_eq!(
             prepare_existing_directory_destination(
@@ -365,7 +366,7 @@ mod tests {
             CopyDestinationAction::Create
         );
         assert!(!destination_removed);
-        let destination = parent.path().join("destination");
+        let destination = parent_path.join("destination");
         std::fs::create_dir(&destination).expect("destination should be created");
         std::fs::write(destination.join("entry"), b"content").expect("child should be written");
 

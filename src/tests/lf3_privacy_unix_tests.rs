@@ -458,6 +458,7 @@ fn verify_private_random_name_failure(occurrence: usize) {
                     .expect("retained sandbox")
                     .expect("sandbox entry")
                     .path();
+                let sandbox = fs::canonicalize(sandbox).expect("sandbox path should canonicalize");
                 assert_eq!(
                     error_path, parent,
                     "public diagnostics retain the requested creation parent"
