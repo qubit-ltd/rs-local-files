@@ -41,7 +41,7 @@ const COPY_BUFFER_SIZE: usize = 64 * 1024;
 
 #[cfg(test)]
 pub(super) mod test_support {
-    use std::cell::Cell;
+    use std::cell::RefCell;
     use std::io;
 
     #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -51,20 +51,26 @@ pub(super) mod test_support {
         EntryIdentity,
         EntryParentClone,
         CandidateCopyRegistration,
+        ExchangeEioBeforeSuccess,
+        ExchangeEioAfterSuccess,
+        CandidateIdentityAfterExchange,
+        InstalledIdentityAfterExchange,
+        StagedIdentityAfterExchange,
     }
 
     thread_local! {
-        static FAILURE_POINT: Cell<Option<FailurePoint>> = const { Cell::new(None) };
+        static FAILURE_POINTS: RefCell<Vec<FailurePoint>> = const { RefCell::new(Vec::new()) };
     }
 
     pub(super) fn fail_next(point: FailurePoint) {
-        FAILURE_POINT.with(|slot| slot.set(Some(point)));
+        FAILURE_POINTS.with(|slot| slot.borrow_mut().push(point));
     }
 
     pub(super) fn fail_if_requested(point: FailurePoint) -> io::Result<()> {
-        let should_fail = FAILURE_POINT.with(|slot| {
-            if slot.get() == Some(point) {
-                slot.set(None);
+        let should_fail = FAILURE_POINTS.with(|slot| {
+            let mut points = slot.borrow_mut();
+            if let Some(index) = points.iter().position(|pending| *pending == point) {
+                points.remove(index);
                 true
             } else {
                 false
@@ -75,6 +81,15 @@ pub(super) mod test_support {
         } else {
             Ok(())
         }
+    }
+
+    pub(super) fn assert_no_pending_failures() {
+        FAILURE_POINTS.with(|slot| {
+            assert!(
+                slot.borrow().is_empty(),
+                "unconsumed Unix conditional fault points remain"
+            );
+        });
     }
 }
 
@@ -160,7 +175,16 @@ impl UnixConditionalBackend {
     }
 
     fn exchange(&self, left: &CString, right: &CString) -> io::Result<()> {
-        install::exchange(&self.namespace, left, right)
+        #[cfg(test)]
+        if test_support::fail_if_requested(test_support::FailurePoint::ExchangeEioBeforeSuccess).is_err() {
+            return Err(io::Error::from_raw_os_error(libc::EIO));
+        }
+        install::exchange(&self.namespace, left, right)?;
+        #[cfg(test)]
+        if test_support::fail_if_requested(test_support::FailurePoint::ExchangeEioAfterSuccess).is_err() {
+            return Err(io::Error::from_raw_os_error(libc::EIO));
+        }
+        Ok(())
     }
 
     fn attempt_after_exchange(&self, error: Option<io::Error>) -> NativeAttempt {
@@ -173,24 +197,58 @@ impl UnixConditionalBackend {
         let displaced = self
             .entry(LocalRecoveryFileRole::Displaced, self.candidate_name.clone())
             .ok();
+        #[cfg(test)]
+        let candidate_identity =
+            test_support::fail_if_requested(test_support::FailurePoint::CandidateIdentityAfterExchange)
+                .ok()
+                .and_then(|()| self.candidate.metadata().ok())
+                .map(|metadata| (metadata.dev(), metadata.ino()));
+        #[cfg(not(test))]
         let candidate_identity = self
             .candidate
             .metadata()
             .ok()
             .map(|metadata| (metadata.dev(), metadata.ino()));
+        #[cfg(test)]
+        let installed_identity =
+            test_support::fail_if_requested(test_support::FailurePoint::InstalledIdentityAfterExchange)
+                .ok()
+                .and_then(|()| {
+                    installed
+                        .as_ref()
+                        .and_then(|entry| entry.open_reader().ok())
+                        .and_then(|reader| reader.as_file().metadata().ok())
+                        .map(|metadata| (metadata.dev(), metadata.ino()))
+                });
+        #[cfg(test)]
+        let installed_is_candidate = candidate_identity.is_some_and(|expected| installed_identity == Some(expected));
+        #[cfg(not(test))]
         let installed_is_candidate = installed
             .as_ref()
             .and_then(|entry| entry.open_reader().ok())
             .and_then(|reader| reader.as_file().metadata().ok())
             .map(|metadata| (metadata.dev(), metadata.ino()))
-            == candidate_identity;
+            .is_some_and(|observed| candidate_identity.is_some_and(|expected| observed == expected));
+        #[cfg(test)]
+        let staged_identity = test_support::fail_if_requested(test_support::FailurePoint::StagedIdentityAfterExchange)
+            .ok()
+            .and_then(|()| {
+                self.entry(LocalRecoveryFileRole::StagedCandidate, self.candidate_name.clone())
+                    .ok()
+                    .and_then(|entry| entry.open_reader().ok())
+                    .and_then(|reader| reader.as_file().metadata().ok())
+                    .map(|metadata| (metadata.dev(), metadata.ino()))
+            });
+        #[cfg(test)]
+        let staged_is_candidate = candidate_identity.is_some_and(|expected| staged_identity == Some(expected));
+        #[cfg(not(test))]
         let staged_is_candidate = self
             .entry(LocalRecoveryFileRole::StagedCandidate, self.candidate_name.clone())
             .ok()
             .and_then(|entry| entry.open_reader().ok())
             .and_then(|reader| reader.as_file().metadata().ok())
             .map(|metadata| (metadata.dev(), metadata.ino()))
-            == candidate_identity;
+            .is_some_and(|observed| candidate_identity.is_some_and(|expected| observed == expected));
         let publication = match (error.is_some(), installed_is_candidate, staged_is_candidate, &displaced) {
             (false, true, _, Some(_)) => LocalConditionalPublicationState::Published,
             (true, _, true, _) => LocalConditionalPublicationState::NotPublished,

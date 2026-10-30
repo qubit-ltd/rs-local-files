@@ -38,6 +38,26 @@ fn private_entries(directory: &Path, marker: &str) -> Vec<std::path::PathBuf> {
         .collect()
 }
 
+fn exchange_backend() -> (tempfile::TempDir, UnixConditionalBackend) {
+    let directory = tempfile::tempdir().expect("fixture directory should be created");
+    let target = directory.path().join("target");
+    fs::write(&target, b"original").expect("initial target should be written");
+    let mut backend =
+        UnixConditionalBackend::open_host(&target, &LocalWriteOptions::default()).expect("backend should open");
+    backend
+        .candidate
+        .write_fully(b"candidate")
+        .expect("candidate should be written");
+    (directory, backend)
+}
+
+fn recovery_entry_bytes(entry: &super::super::ConditionalEntry) -> Vec<u8> {
+    let mut reader = entry.open_reader().expect("recovery entry should remain readable");
+    let mut bytes = Vec::new();
+    Streams::copy_input_to_output(&mut reader, &mut bytes).expect("recovery entry bytes should be readable");
+    bytes
+}
+
 #[test]
 fn conditional_unix_candidate_setup_failures_cleanup_or_report_the_candidate() {
     for (point, expected_residue) in [
@@ -115,6 +135,217 @@ fn conditional_unix_content_exchange_publishes_candidate_and_returns_old_bytes()
     );
     assert!(result.is_ok(), "commit should succeed: {result:?}");
     assert_eq!(fs::read(&target).expect("published target should be readable"), b"B");
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[test]
+fn test_conditional_unknown_identity_remains_indeterminate() {
+    let directory = tempfile::tempdir().expect("fixture directory should be created");
+    let target = directory.path().join("target");
+    fs::write(&target, b"original").expect("initial target should be written");
+    let mut backend =
+        UnixConditionalBackend::open_host(&target, &LocalWriteOptions::default()).expect("backend should open");
+    backend
+        .candidate
+        .write_fully(b"candidate")
+        .expect("candidate should be written");
+
+    for point in [
+        test_support::FailurePoint::ExchangeEioAfterSuccess,
+        test_support::FailurePoint::CandidateIdentityAfterExchange,
+        test_support::FailurePoint::InstalledIdentityAfterExchange,
+        test_support::FailurePoint::StagedIdentityAfterExchange,
+    ] {
+        test_support::fail_next(point);
+    }
+    let error = commit_conditional::<Sha256, _>(
+        backend,
+        LocalWritePrecondition::Content(Sha256::digest(b"original")),
+        LocalWriteOptions::new(LocalWriteMode::CreateOrReplace),
+        1,
+    )
+    .expect_err("injected exchange error should be reported");
+
+    assert_eq!(
+        error.error().io_error().and_then(std::io::Error::raw_os_error),
+        Some(libc::EIO)
+    );
+    assert_eq!(
+        error.publication(),
+        crate::outcome::LocalConditionalPublicationState::Indeterminate
+    );
+    assert_eq!(
+        fs::read(&target).expect("installed target should remain readable"),
+        b"candidate"
+    );
+    assert!(
+        error
+            .recovery_files()
+            .iter()
+            .any(|entry| { entry.role() == crate::recovery::LocalRecoveryFileRole::StagedCandidate }),
+        "uncertain staged candidate should remain available for recovery"
+    );
+    test_support::assert_no_pending_failures();
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[test]
+fn test_conditional_unknown_candidate_does_not_authorize_not_published() {
+    let directory = tempfile::tempdir().expect("fixture directory should be created");
+    let target = directory.path().join("target");
+    fs::write(&target, b"original").expect("initial target should be written");
+    let mut backend =
+        UnixConditionalBackend::open_host(&target, &LocalWriteOptions::default()).expect("backend should open");
+    backend
+        .candidate
+        .write_fully(b"candidate")
+        .expect("candidate should be written");
+    test_support::fail_next(test_support::FailurePoint::ExchangeEioBeforeSuccess);
+    test_support::fail_next(test_support::FailurePoint::CandidateIdentityAfterExchange);
+
+    let error = commit_conditional::<Sha256, _>(
+        backend,
+        LocalWritePrecondition::Content(Sha256::digest(b"original")),
+        LocalWriteOptions::new(LocalWriteMode::CreateOrReplace),
+        1,
+    )
+    .expect_err("injected exchange error should be reported");
+
+    assert_eq!(
+        error.error().io_error().and_then(std::io::Error::raw_os_error),
+        Some(libc::EIO)
+    );
+    assert_eq!(
+        error.publication(),
+        crate::outcome::LocalConditionalPublicationState::Indeterminate
+    );
+    assert_eq!(
+        fs::read(&target).expect("original target should remain readable"),
+        b"original"
+    );
+    assert!(
+        error
+            .recovery_files()
+            .iter()
+            .any(|entry| { entry.role() == crate::recovery::LocalRecoveryFileRole::StagedCandidate }),
+        "unknown candidate identity must retain the staged recovery entry"
+    );
+    test_support::assert_no_pending_failures();
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[test]
+fn conditional_unix_exchange_identity_state_matrix_preserves_error_and_receipts() {
+    use crate::outcome::LocalConditionalPublicationState;
+    use crate::recovery::LocalRecoveryFileRole;
+
+    let target = |directory: &tempfile::TempDir| directory.path().join("target");
+
+    // Candidate identity equals the installed identity after a real exchange.
+    let (directory, mut backend) = exchange_backend();
+    backend.begin_publication().expect("publication should begin");
+    test_support::fail_next(test_support::FailurePoint::ExchangeEioAfterSuccess);
+    let attempt = backend.publish_content();
+    assert_eq!(attempt.publication, LocalConditionalPublicationState::Published);
+    assert_eq!(
+        attempt.error.as_ref().and_then(std::io::Error::raw_os_error),
+        Some(libc::EIO)
+    );
+    let installed = attempt
+        .installed
+        .as_ref()
+        .expect("installed candidate receipt should be retained");
+    assert_eq!(installed.role(), LocalRecoveryFileRole::StagedCandidate);
+    assert_eq!(recovery_entry_bytes(installed), b"candidate");
+    assert_eq!(
+        attempt.displaced.len(),
+        1,
+        "displaced target receipt should be retained"
+    );
+    assert_eq!(attempt.displaced[0].role(), LocalRecoveryFileRole::Displaced);
+    assert_eq!(recovery_entry_bytes(&attempt.displaced[0]), b"original");
+    assert_eq!(
+        fs::read(target(&directory)).expect("target should remain readable"),
+        b"candidate"
+    );
+    test_support::assert_no_pending_failures();
+
+    // The installed identity is known but different from the candidate; an
+    // unknown staged identity cannot turn that mismatch into equality.
+    let (directory, mut backend) = exchange_backend();
+    backend.begin_publication().expect("publication should begin");
+    test_support::fail_next(test_support::FailurePoint::ExchangeEioBeforeSuccess);
+    test_support::fail_next(test_support::FailurePoint::StagedIdentityAfterExchange);
+    let attempt = backend.publish_content();
+    assert_eq!(attempt.publication, LocalConditionalPublicationState::Indeterminate);
+    assert_eq!(
+        attempt.error.as_ref().and_then(std::io::Error::raw_os_error),
+        Some(libc::EIO)
+    );
+    let installed = attempt
+        .installed
+        .as_ref()
+        .expect("observed target receipt should be retained");
+    assert_eq!(recovery_entry_bytes(installed), b"original");
+    assert_eq!(attempt.displaced.len(), 1, "candidate receipt should be retained");
+    assert_eq!(recovery_entry_bytes(&attempt.displaced[0]), b"candidate");
+    assert_eq!(
+        fs::read(target(&directory)).expect("target should remain readable"),
+        b"original"
+    );
+    test_support::assert_no_pending_failures();
+
+    // A single unknown installed identity remains indeterminate when the
+    // staged entry is known to contain the displaced original.
+    let (directory, mut backend) = exchange_backend();
+    backend.begin_publication().expect("publication should begin");
+    test_support::fail_next(test_support::FailurePoint::ExchangeEioAfterSuccess);
+    test_support::fail_next(test_support::FailurePoint::InstalledIdentityAfterExchange);
+    let attempt = backend.publish_content();
+    assert_eq!(attempt.publication, LocalConditionalPublicationState::Indeterminate);
+    assert_eq!(
+        attempt.error.as_ref().and_then(std::io::Error::raw_os_error),
+        Some(libc::EIO)
+    );
+    let installed = attempt
+        .installed
+        .as_ref()
+        .expect("installed receipt should be retained");
+    assert_eq!(recovery_entry_bytes(installed), b"candidate");
+    assert_eq!(attempt.displaced.len(), 1, "displaced receipt should be retained");
+    assert_eq!(recovery_entry_bytes(&attempt.displaced[0]), b"original");
+    assert_eq!(
+        fs::read(target(&directory)).expect("target should remain readable"),
+        b"candidate"
+    );
+    test_support::assert_no_pending_failures();
+
+    // On EIO before the exchange, the staged candidate's known identity is a
+    // positive NotPublished receipt; the backend still owns the candidate.
+    let (directory, mut backend) = exchange_backend();
+    backend.begin_publication().expect("publication should begin");
+    test_support::fail_next(test_support::FailurePoint::ExchangeEioBeforeSuccess);
+    let attempt = backend.publish_content();
+    assert_eq!(attempt.publication, LocalConditionalPublicationState::NotPublished);
+    assert_eq!(
+        attempt.error.as_ref().and_then(std::io::Error::raw_os_error),
+        Some(libc::EIO)
+    );
+    assert!(
+        attempt.installed.is_none(),
+        "NotPublished must not transfer an installed receipt"
+    );
+    assert!(
+        attempt.displaced.is_empty(),
+        "NotPublished must not transfer displaced receipts"
+    );
+    assert_eq!(backend.candidate_entry.role(), LocalRecoveryFileRole::StagedCandidate);
+    assert_eq!(recovery_entry_bytes(&backend.candidate_entry), b"candidate");
+    assert_eq!(
+        fs::read(target(&directory)).expect("original target should remain readable"),
+        b"original"
+    );
+    test_support::assert_no_pending_failures();
 }
 
 #[test]
