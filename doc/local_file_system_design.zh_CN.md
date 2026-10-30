@@ -2202,3 +2202,28 @@ CI workflow 在 Linux、macOS、Windows 上运行当前 crate 的测试。`windo
 完整树同步先处理普通文件，再按目录深度从深到浅同步子目录，最后同步 stage 根目录和创建它的 parent。操作期间会复核条目和目录 identity，但遍历无法对抗并发命名空间修改，也不构成原子快照。调用方应在同步前完成内容与权限修改；之后任何内容、名称或权限变更都要求重新同步受影响部分。
 
 树发布将文件同步与命名空间耐久性作为独立选项。先前的 `sync_tree_with_options()` 不会记录到后续发布结果的 `file_synced` 字段。Required 命名空间耐久性会在修改 stage 前按静态 rename 能力校验，但仍可能遇到运行时文件系统错误。成功的耐久性结果描述操作系统同步协议，不证明存储硬件已物理持久化数据。
+
+
+### 目录树发布访问选项契约
+
+`LocalTreePublishOptions::with_access()` 与
+`with_owner_access_policy()` 分别设置独立字段。任何一个 builder 都不会清除另一个字段，因此调用顺序无法消除冲突。
+
+| `owner_access_policy` | `access` | `publish_new()` 结果 |
+| --- | --- | --- |
+| `None` | 任意受支持的值 | 保持现有访问策略行为 |
+| `Some(policy)` | `Preserve` | 应用精确 owner policy，仍受平台能力和值校验约束 |
+| `Some(policy)` | 非 `Preserve` | 修改前返回 `InvalidOptions`；保留 stage，mutation 为 `NotStarted`，publication 为 `NotPublished` |
+
+该组合由 `LocalStagedDirectory::publish_new()` 检查，不在构造 options 时校验。调用方可先读取
+`LocalTreePublishError` 的 `cause()`、`mutation_state()` 和 `publication()`，再通过
+`into_parts()` 接管可选 stage 与保留资源。取回的 stage 必须显式清理或调用 `retain_in_place()` 保留。
+此契约不引入 fallible builder，也不改变发布方法签名。
+
+### 访问观测的获取契约
+
+公开访问事实的调用链为
+`LocalFileSystem::open_observed_reader()` →
+`LocalObservedReader::security_observation()` →
+`LocalSecurityObservation::access()` →
+`LocalAccessObservation::unix()` / `windows()`。调用方必须检查每一层 `Option`。access 为 `None` 表示没有可用访问事实；平台 accessor 返回 `None` 表示该平台事实不可用。`Optional` 仍会尝试查询，不会屏蔽权限拒绝、I/O、格式错误或身份变化错误。不同字段分别查询，因此结果只是观察事实，不是授权结论或原子快照，也不保证未来仍可访问。

@@ -82,6 +82,91 @@ and directories. If an item fails after earlier entries changed, inspect the
 error's `access_state()`; `Mixed` reports partial conversion and the stage
 remains with the caller. The library does not claim to roll back a whole tree.
 
+### Select one final access policy for publication
+
+`LocalTreePublishOptions` keeps the ordinary final access policy and an exact
+`LocalOwnerAccessPolicy` as separate values. The builder stores each value and
+never clears the other one. Use one of these combinations:
+
+| Owner policy | `access` | Result |
+| --- | --- | --- |
+| None | Any supported value | Apply the selected access behavior |
+| Some(policy) | `Preserve` | Apply the exact owner policy, subject to platform and value validation |
+| Some(policy) | Any non-`Preserve` value | `InvalidOptions` before mutation; publication does not occur and the stage is returned |
+
+The conflict is checked by `publish_new`, not by either builder. The following
+routine demonstrates the failure and an explicit cleanup path. It can be
+called after opening `parent` as in the backup example above:
+
+```rust
+use std::ffi::OsStr;
+use qubit_local_files::directory::LocalDirectoryHandle;
+use qubit_local_files::error::LocalFileErrorKind;
+use qubit_local_files::options::{LocalTempDirectoryOptions, LocalTreePublishOptions};
+use qubit_local_files::outcome::{LocalTreeMutationState, LocalTreePublication};
+use qubit_local_files::policy::{LocalOwnerAccessPolicy, LocalTreeFinalAccess};
+
+fn reject_conflicting_publish(parent: &LocalDirectoryHandle) -> Result<(), Box<dyn std::error::Error>> {
+    let stage = parent.create_staged_directory(&LocalTempDirectoryOptions::new())?;
+    let options = LocalTreePublishOptions::new()
+        .with_owner_access_policy(LocalOwnerAccessPolicy::new())
+        .with_access(LocalTreeFinalAccess::CurrentUserOnly);
+    let failure = stage.publish_new(parent, OsStr::new("backup-conflict"), &options)
+        .expect_err("the two requested access policies are incompatible");
+    assert_eq!(failure.cause().kind(), LocalFileErrorKind::InvalidOptions);
+    assert_eq!(failure.mutation_state(), LocalTreeMutationState::NotStarted);
+    assert_eq!(failure.publication(), LocalTreePublication::NotPublished);
+    let (_, stage, retained) = failure.into_parts();
+    assert!(retained.is_empty());
+    stage.expect("the unpublished stage is returned").cleanup()?;
+    Ok(())
+}
+```
+
+For normal publication, keep `LocalTreeFinalAccess::Preserve` (the default) and
+omit the owner policy unless exact ownership or access settings are required.
+On conflict, inspect the states before consuming the error, then explicitly
+clean the returned stage or transfer responsibility with `retain_in_place()`.
+
+### Read platform access facts from the opened object
+
+When a diagnostic or audit needs native access facts, open the file through the
+same `LocalFileSystem` authority and request them from the retained reader:
+
+```rust
+use std::path::Path;
+use qubit_local_files::LocalFileSystem;
+use qubit_local_files::observation::{LocalObservationRequirement, LocalSecurityObservationOptions};
+use qubit_local_files::options::LocalObservedReadOptions;
+
+fn inspect_access(root: &std::path::Path) -> Result<(), Box<dyn std::error::Error>> {
+    let filesystem = LocalFileSystem::rooted(root)?;
+    let reader = filesystem.open_observed_reader(
+        Path::new("artifact.bin"), &LocalObservedReadOptions::new(),
+    )?;
+    let facts = reader.security_observation(
+        &LocalSecurityObservationOptions::new()
+            .with_access(LocalObservationRequirement::Optional),
+    )?;
+    if let Some(access) = facts.access() {
+        if let Some(unix) = access.unix() {
+            let _observed_unix = unix;
+        }
+        if let Some(windows) = access.windows() {
+            let _observed_windows = windows;
+        }
+    }
+    Ok(())
+}
+```
+
+`None` means the requested platform-specific facts are unavailable; check both
+accessors rather than assuming the host platform from serialized data. An
+`Optional` request still performs the query and can return permission, I/O,
+malformed-data, or identity-change errors. The values are descriptive facts,
+not a decision that a later operation will be authorized. Native fields are
+queried independently, so they do not form an atomic snapshot.
+
 Stage creation captures the new directory's identity and checks it again before
 adopting the staged owner. Linux/Unix race tests confirm that replacing the
 generated name during creation is rejected rather than adopted. This does not

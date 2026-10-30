@@ -1984,3 +1984,37 @@ checked against static rename capabilities before stage mutation, while
 runtime filesystem errors remain possible. A successful durability outcome
 describes the operating-system synchronization protocol and does not prove
 physical persistence by storage hardware.
+
+
+### Tree publication access-option contract
+
+`LocalTreePublishOptions::with_access()` and
+`with_owner_access_policy()` set independent fields. Neither builder clears the
+other field, so call order cannot resolve a conflict.
+
+| `owner_access_policy` | `access` | `publish_new()` result |
+| --- | --- | --- |
+| `None` | Any supported value | Existing access-policy behavior |
+| `Some(policy)` | `Preserve` | Apply exact owner policy, subject to platform and value validation |
+| `Some(policy)` | Non-`Preserve` | `InvalidOptions` before mutation; stage retained, mutation `NotStarted`, publication `NotPublished` |
+
+The check belongs to `LocalStagedDirectory::publish_new()`, not option
+construction. Its `LocalTreePublishError` exposes `cause()`, `mutation_state()`,
+and `publication()` before `into_parts()` transfers the optional stage and
+retained resources. The caller must explicitly clean the returned stage or
+retain it in place. This contract does not add a fallible builder or change the
+publication signature.
+
+### Access observation retrieval contract
+
+The public access-fact path is
+`LocalFileSystem::open_observed_reader()` →
+`LocalObservedReader::security_observation()` →
+`LocalSecurityObservation::access()` →
+`LocalAccessObservation::unix()` / `windows()`. Each optional layer must be
+checked. An absent access value means no access facts were made available; a
+platform accessor returning `None` means that platform-specific facts are
+unavailable. `Optional` still attempts the selected query and does not suppress
+permission, I/O, malformed-data, or identity-change errors. Observations are
+facts from separately queried fields, not an authorization decision or an
+atomic snapshot, and do not guarantee future access.

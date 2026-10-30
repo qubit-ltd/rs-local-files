@@ -57,6 +57,79 @@ opaque identity，不含权限句柄；重新操作前须通过同一个 parent 
 只修改经过 identity 复核的文件和目录。如果前面的条目已修改、后续某项失败，应检查错误中的
 `access_state()`；`Mixed` 表示权限只转换了一部分，stage 仍由调用方持有。库不会声称整棵树可回滚。
 
+### 为发布选择一种最终访问策略
+
+`LocalTreePublishOptions` 分别保存常规访问策略和精确的
+`LocalOwnerAccessPolicy`。两个 builder 只记录各自的值，不会替你清除另一个字段。可用组合如下：
+
+| Owner policy | `access` | 结果 |
+| --- | --- | --- |
+| None | 任意受支持的值 | 按所选访问策略处理 |
+| Some(policy) | `Preserve` | 应用精确 owner policy，仍受平台能力和值校验约束 |
+| Some(policy) | 非 `Preserve` | 在开始修改前返回 `InvalidOptions`；不发布并交还 stage |
+
+冲突由 `publish_new` 检查，构造 options 时不会报错。下面的函数展示如何读取失败状态并显式清理 stage；调用时传入像前面的目录备份示例那样打开的 `parent`：
+
+```rust
+use std::ffi::OsStr;
+use qubit_local_files::directory::LocalDirectoryHandle;
+use qubit_local_files::error::LocalFileErrorKind;
+use qubit_local_files::options::{LocalTempDirectoryOptions, LocalTreePublishOptions};
+use qubit_local_files::outcome::{LocalTreeMutationState, LocalTreePublication};
+use qubit_local_files::policy::{LocalOwnerAccessPolicy, LocalTreeFinalAccess};
+
+fn reject_conflicting_publish(parent: &LocalDirectoryHandle) -> Result<(), Box<dyn std::error::Error>> {
+    let stage = parent.create_staged_directory(&LocalTempDirectoryOptions::new())?;
+    let options = LocalTreePublishOptions::new()
+        .with_owner_access_policy(LocalOwnerAccessPolicy::new())
+        .with_access(LocalTreeFinalAccess::CurrentUserOnly);
+    let failure = stage.publish_new(parent, OsStr::new("backup-conflict"), &options)
+        .expect_err("两种访问策略不能同时指定");
+    assert_eq!(failure.cause().kind(), LocalFileErrorKind::InvalidOptions);
+    assert_eq!(failure.mutation_state(), LocalTreeMutationState::NotStarted);
+    assert_eq!(failure.publication(), LocalTreePublication::NotPublished);
+    let (_, stage, retained) = failure.into_parts();
+    assert!(retained.is_empty());
+    stage.expect("未发布的 stage 会交还给调用方").cleanup()?;
+    Ok(())
+}
+```
+
+普通发布通常保留默认的 `LocalTreeFinalAccess::Preserve`，只有确实需要精确所有者或访问设置时才配置 owner policy。遇到冲突时，应先查看状态，再消费错误；取回的 stage 可以显式清理，也可以用 `retain_in_place()` 转移后续处理责任。
+
+### 从已打开对象读取平台访问事实
+
+诊断或审计需要原生访问控制事实时，应通过同一个 `LocalFileSystem` authority 打开文件，并从保留句柄的 reader 发起查询：
+
+```rust
+use std::path::Path;
+use qubit_local_files::LocalFileSystem;
+use qubit_local_files::observation::{LocalObservationRequirement, LocalSecurityObservationOptions};
+use qubit_local_files::options::LocalObservedReadOptions;
+
+fn inspect_access(root: &std::path::Path) -> Result<(), Box<dyn std::error::Error>> {
+    let filesystem = LocalFileSystem::rooted(root)?;
+    let reader = filesystem.open_observed_reader(
+        Path::new("artifact.bin"), &LocalObservedReadOptions::new(),
+    )?;
+    let facts = reader.security_observation(
+        &LocalSecurityObservationOptions::new()
+            .with_access(LocalObservationRequirement::Optional),
+    )?;
+    if let Some(access) = facts.access() {
+        if let Some(unix) = access.unix() {
+            let _observed_unix = unix;
+        }
+        if let Some(windows) = access.windows() {
+            let _observed_windows = windows;
+        }
+    }
+    Ok(())
+}
+```
+
+`None` 表示当前平台无法提供所请求的事实；分别检查两个 accessor，不要根据序列化数据猜测主机平台。`Optional` 仍会实际查询，因此权限拒绝、I/O、数据格式错误或身份变化仍可能作为错误返回。这些值只是观察到的事实，不能证明后续操作一定获得授权。多个原生字段分开查询，也不构成原子快照。
+
 创建 stage 时会记录新目录的 identity，并在接管前再次核对。Linux/Unix 竞态测试确认：若创建期间随机名称被替换，操作会拒绝接管替换目录。若其他参与者仍能修改父目录，后续按名称操作依然可能发生竞态。
 
 `verify_entries()` 会把观测到的条目与 expected 集合精确比较；expected 集合应包含链接条目本身，
