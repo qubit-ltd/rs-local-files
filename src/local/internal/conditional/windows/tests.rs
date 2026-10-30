@@ -247,6 +247,22 @@ fn dacl_bytes(path: &Path) -> Vec<u8> {
     descriptor[dacl_offset..dacl_offset + dacl_size].to_vec()
 }
 
+fn dacl_entries(dacl: &[u8]) -> Vec<Vec<u8>> {
+    assert!(dacl.len() >= 8, "DACL should include its header");
+    let ace_count = u16::from_le_bytes([dacl[4], dacl[5]]) as usize;
+    let mut entries = Vec::with_capacity(ace_count);
+    let mut offset = 8;
+    for _ in 0..ace_count {
+        let size = u16::from_le_bytes([dacl[offset + 2], dacl[offset + 3]]) as usize;
+        assert!(size >= 4, "ACE should include its header");
+        let end = offset.checked_add(size).expect("ACE size should not overflow");
+        let entry = dacl.get(offset..end).expect("ACE should fit within the DACL");
+        entries.push(entry.to_vec());
+        offset = end;
+    }
+    entries
+}
+
 fn assert_private_file(path: &Path) {
     let file = fs::File::open(path).expect("private file should open for ACL inspection");
     crate::temp::internal::privacy_windows::verify_current_user_access(&file, false, false)
@@ -449,10 +465,15 @@ fn conditional_windows_host_content_preserves_destination_acl() {
         "successful cleanup should have no errors"
     );
     let dacl_after = dacl_bytes(&target);
+    let mut remaining_entries = dacl_entries(&dacl_after);
     assert!(
-        dacl_after[8..]
-            .windows(dacl_before.len() - 8)
-            .any(|entries| entries == &dacl_before[8..]),
+        dacl_entries(&dacl_before).into_iter().all(|entry| {
+            let Some(index) = remaining_entries.iter().position(|current| current == &entry) else {
+                return false;
+            };
+            remaining_entries.remove(index);
+            true
+        }),
         "ReplaceFileW should retain the target DACL while merging inherited ACEs",
     );
 }

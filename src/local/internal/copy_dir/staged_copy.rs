@@ -622,8 +622,9 @@ mod error_contract_tests {
     #[test]
     fn expired_replacement_budget_keeps_destination_tree_and_cleans_staging() {
         let fixture = tempfile::tempdir().expect("fixture");
-        let source = fixture.path().join("source");
-        let destination = fixture.path().join("destination");
+        let root = std::fs::canonicalize(fixture.path()).expect("fixture path should canonicalize");
+        let source = root.join("source");
+        let destination = root.join("destination");
         std::fs::write(&source, b"candidate").expect("source");
         std::fs::create_dir(&destination).expect("destination directory");
         std::fs::write(destination.join("kept"), b"old").expect("old child");
