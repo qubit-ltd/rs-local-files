@@ -39,6 +39,8 @@ fn reader_security_observation_stays_with_open_file_after_rename() {
 #[cfg(unix)]
 #[test]
 fn directory_security_observation_stays_with_retained_authority_after_rename() {
+    use std::os::unix::fs::MetadataExt;
+
     let parent = tempfile::tempdir().expect("temporary directory");
     let original = parent.path().join("original");
     let moved = parent.path().join("moved");
@@ -55,8 +57,12 @@ fn directory_security_observation_stays_with_retained_authority_after_rename() {
     let after = handle
         .security_observation(&LocalSecurityObservationOptions::new())
         .expect("observe retained directory after replacement");
+    let expected_links = std::fs::metadata(&moved)
+        .expect("retained directory metadata should remain readable")
+        .nlink();
     assert_eq!(after.identity(), initial.identity());
-    assert_eq!(after.link_count(), Some(2));
+    assert_eq!(after.link_count(), initial.link_count());
+    assert_eq!(after.link_count(), Some(expected_links));
 }
 
 #[cfg(unix)]
