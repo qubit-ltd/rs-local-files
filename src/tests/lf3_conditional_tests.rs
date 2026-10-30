@@ -86,7 +86,7 @@ fn lf3_conditional_fixed_parent_absent_conflict_keeps_target() {
 }
 
 #[test]
-#[cfg(unix)]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 fn lf3_conditional_fixed_parent_content_conflict_keeps_original() {
     let fixture = tempfile::tempdir().expect("fixture directory");
     let root = fixture_root(&fixture);
@@ -305,7 +305,7 @@ fn lf3_conditional_windows_rooted_required_durability_preflight_is_unchanged() {
     assert_eq!(before, after);
 }
 
-#[cfg(feature = "test-support")]
+#[cfg(all(feature = "test-support", any(target_os = "linux", target_os = "macos", windows)))]
 #[test]
 fn lf3_conditional_installed_sync_failure_is_published() {
     use crate::test_support::TestConditionalHooks;
@@ -391,7 +391,7 @@ fn lf3_conditional_replaced_installed_entry_is_not_reported_synced() {
     );
 }
 
-#[cfg(windows)]
+#[cfg(all(feature = "test-support", any(target_os = "linux", target_os = "macos", windows)))]
 #[test]
 #[allow(clippy::useless_conversion)]
 fn lf3_conditional_windows_host_content_syncs_installed_object() {

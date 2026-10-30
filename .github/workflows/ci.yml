@@ -49,6 +49,26 @@ jobs:
             su -m ci-runner -c 'cd "$GITHUB_WORKSPACE" && HOME=/tmp/ci-home CARGO_HOME=/tmp/ci-cargo CARGO_TARGET_DIR=/tmp/ci-target cargo test --locked --no-default-features --lib test_attribute_read'
             su -m ci-runner -c 'cd "$GITHUB_WORKSPACE" && HOME=/tmp/ci-home CARGO_HOME=/tmp/ci-cargo CARGO_TARGET_DIR=/tmp/ci-target cargo test --locked --all-features --lib test_attribute_read'
             su -m ci-runner -c 'cd "$GITHUB_WORKSPACE" && HOME=/tmp/ci-home CARGO_HOME=/tmp/ci-cargo CARGO_TARGET_DIR=/tmp/ci-target cargo test --locked --all-features --test host_fault_and_guarantee_tests test_freebsd_xattr_short_read_and_atomic_preservation'
+            if conditional_output=$(su -m ci-runner -c 'cd "$GITHUB_WORKSPACE" && HOME=/tmp/ci-home CARGO_HOME=/tmp/ci-cargo CARGO_TARGET_DIR=/tmp/ci-target cargo test --locked --features digest --lib lf3_conditional_ -- --nocapture' 2>&1); then
+              printf '%s\n' "$conditional_output"
+            else
+              printf '%s\n' "$conditional_output"
+              exit 1
+            fi
+            if ! printf '%s\n' "$conditional_output" | grep -Fq 'test tests::lf3_conditional_tests::lf3_conditional_content_is_rejected_before_path_work_on_unsupported_unix ... ok'; then
+              echo 'FreeBSD Unsupported conditional contract test did not run successfully with digest' >&2
+              exit 1
+            fi
+            if conditional_output=$(su -m ci-runner -c 'cd "$GITHUB_WORKSPACE" && HOME=/tmp/ci-home CARGO_HOME=/tmp/ci-cargo CARGO_TARGET_DIR=/tmp/ci-target cargo test --locked --all-features --lib lf3_conditional_ -- --nocapture' 2>&1); then
+              printf '%s\n' "$conditional_output"
+            else
+              printf '%s\n' "$conditional_output"
+              exit 1
+            fi
+            if ! printf '%s\n' "$conditional_output" | grep -Fq 'test tests::lf3_conditional_tests::lf3_conditional_content_is_rejected_before_path_work_on_unsupported_unix ... ok'; then
+              echo 'FreeBSD Unsupported conditional contract test did not run successfully with all features' >&2
+              exit 1
+            fi
 
   rust-ci:
     uses: qubit-ltd/rs-infra-ci/.github/workflows/github-ci.yml@main
