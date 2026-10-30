@@ -13,10 +13,8 @@ use std::ptr;
 
 use windows_sys::Win32::Storage::FileSystem::FILE_BASIC_INFO;
 use windows_sys::Win32::Storage::FileSystem::FILE_ID_INFO;
-use windows_sys::Win32::Storage::FileSystem::FILE_STANDARD_INFO;
 use windows_sys::Win32::Storage::FileSystem::FileBasicInfo;
 use windows_sys::Win32::Storage::FileSystem::FileIdInfo;
-use windows_sys::Win32::Storage::FileSystem::FileStandardInfo;
 use windows_sys::Win32::Storage::FileSystem::GetFileInformationByHandleEx;
 
 use crate::LocalFileError;
@@ -55,20 +53,17 @@ pub(crate) fn query_native_with(
     let native = (|| -> io::Result<_> {
         let mut id = FILE_ID_INFO::default();
         query_info(query, handle, FileIdInfo, &mut id)?;
-        let mut standard = FILE_STANDARD_INFO::default();
-        query_info(query, handle, FileStandardInfo, &mut standard)?;
         let mut basic = FILE_BASIC_INFO::default();
         query_info(query, handle, FileBasicInfo, &mut basic)?;
-        Ok((id, standard, basic))
+        Ok((id, basic))
     })();
 
     match native {
-        Ok((id, standard, basic)) => {
+        Ok((id, basic)) => {
             let file_id = id.FileId.Identifier;
             let identity = LocalFileIdentity::windows(id.VolumeSerialNumber, file_id);
             let details =
                 LocalWindowsFileDetails::new(id.VolumeSerialNumber, file_id, basic.LastWriteTime, basic.ChangeTime);
-            let _standard_length = standard.EndOfFile;
             Ok(LocalFileObservation::from_parts(
                 normalized,
                 Some(identity),

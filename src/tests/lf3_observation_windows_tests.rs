@@ -115,3 +115,63 @@ fn lf3_native_windows_optional_query_failure_keeps_metadata_and_required_keeps_s
         assert!(required.source().is_some(), "native I/O source is retained");
     }
 }
+
+#[cfg(windows)]
+#[test]
+fn test_windows_observation_does_not_require_file_standard_info() {
+    use std::cell::RefCell;
+
+    use windows_sys::Win32::Foundation::ERROR_ACCESS_DENIED;
+    use windows_sys::Win32::Foundation::SetLastError;
+    use windows_sys::Win32::Storage::FileSystem::FILE_INFO_BY_HANDLE_CLASS;
+    use windows_sys::Win32::Storage::FileSystem::FileBasicInfo;
+    use windows_sys::Win32::Storage::FileSystem::FileIdInfo;
+    use windows_sys::Win32::Storage::FileSystem::FileStandardInfo;
+    use windows_sys::Win32::Storage::FileSystem::GetFileInformationByHandleEx;
+
+    use crate::observation::windows::NativeQuery;
+    use crate::observation::windows::query_native_with;
+
+    thread_local! {
+        static QUERIED_CLASSES: RefCell<Vec<FILE_INFO_BY_HANDLE_CLASS>> = const { RefCell::new(Vec::new()) };
+    }
+
+    unsafe extern "system" fn reject_file_standard_info(
+        handle: windows_sys::Win32::Foundation::HANDLE,
+        class: FILE_INFO_BY_HANDLE_CLASS,
+        output: *mut std::ffi::c_void,
+        size: u32,
+    ) -> i32 {
+        QUERIED_CLASSES.with(|classes| classes.borrow_mut().push(class));
+        if class == FileStandardInfo {
+            // SAFETY: SetLastError records the error on this test thread.
+            unsafe { SetLastError(ERROR_ACCESS_DENIED) };
+            0
+        } else {
+            // SAFETY: forwards the live handle and output buffer from query_info.
+            unsafe { GetFileInformationByHandleEx(handle, class, output, size) }
+        }
+    }
+
+    let file = tempfile::NamedTempFile::new().expect("create fixture");
+    let query = reject_file_standard_info as NativeQuery;
+
+    for requirement in [
+        LocalObservationRequirement::Required,
+        LocalObservationRequirement::Optional,
+    ] {
+        QUERIED_CLASSES.with(|classes| classes.borrow_mut().clear());
+        let observation = query_native_with(file.as_file(), requirement, query)
+            .expect("observation must not require FileStandardInfo");
+        assert!(observation.identity().is_some());
+        assert!(observation.native_details().is_some());
+
+        QUERIED_CLASSES.with(|classes| {
+            let mut classes = classes.borrow_mut().clone();
+            classes.sort_unstable();
+            let mut expected = vec![FileBasicInfo, FileIdInfo];
+            expected.sort_unstable();
+            assert_eq!(classes, expected, "only required information classes are queried");
+        });
+    }
+}
