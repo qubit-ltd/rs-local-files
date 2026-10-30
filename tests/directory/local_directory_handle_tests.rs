@@ -8,17 +8,20 @@
 
 use std::path::Path;
 
-use crate::LocalCopyOptions;
-use crate::LocalCreateDirectoryOptions;
-use crate::LocalFileSystem;
-use crate::LocalListOptions;
-use crate::LocalWriteMode;
-use crate::directory::LocalDirectoryHandle;
-use crate::observation::LocalSecurityObservationOptions;
-use crate::options::LocalDirectoryOpenOptions;
-use crate::options::LocalObservedReadOptions;
-use crate::options::LocalPathBindingOptions;
-use crate::options::LocalWriteOptions;
+use qubit_local_files::LocalFileSystem;
+use qubit_local_files::directory::LocalDirectoryHandle;
+use qubit_local_files::error::LocalFileErrorKind;
+use qubit_local_files::error::LocalResult;
+use qubit_local_files::observation::LocalSecurityObservationOptions;
+use qubit_local_files::options::LocalCopyOptions;
+use qubit_local_files::options::LocalCreateDirectoryOptions;
+use qubit_local_files::options::LocalDirectoryOpenOptions;
+use qubit_local_files::options::LocalListOptions;
+use qubit_local_files::options::LocalObservedReadOptions;
+use qubit_local_files::options::LocalPathBindingOptions;
+use qubit_local_files::options::LocalWriteMode;
+use qubit_local_files::options::LocalWriteOptions;
+use qubit_local_files::outcome::LocalFileKind;
 
 fn populated_directory() -> (tempfile::TempDir, LocalDirectoryHandle) {
     let fixture = tempfile::tempdir().expect("fixture should be created");
@@ -42,7 +45,7 @@ fn directory_handle_observes_entries_and_opens_bound_readers() {
             .expect("directory should be observed")
             .metadata()
             .kind(),
-        crate::LocalFileKind::Directory
+        LocalFileKind::Directory
     );
     assert_eq!(
         directory
@@ -61,7 +64,7 @@ fn directory_handle_observes_entries_and_opens_bound_readers() {
     let security = directory.security_observation(&LocalSecurityObservationOptions::new());
     #[cfg(windows)]
     if let Err(error) = &security {
-        assert_eq!(error.kind(), crate::LocalFileErrorKind::PermissionDenied);
+        assert_eq!(error.kind(), LocalFileErrorKind::PermissionDenied);
     }
     #[cfg(not(windows))]
     security.expect("optional security facts should be queried");
@@ -109,13 +112,13 @@ fn directory_handle_observes_entries_and_opens_bound_readers() {
             .ancestor_observations(&LocalListOptions::new().with_max_depth(1))
             .expect_err("ancestor depth limit should be enforced")
             .kind(),
-        crate::LocalFileErrorKind::ResourceLimit,
+        LocalFileErrorKind::ResourceLimit,
     );
     assert!(reader.verify_path_binding().is_ok());
     let listed = directory
         .list_with_options(Path::new("."), &LocalListOptions::new().with_recursive())
         .expect("recursive listing should start")
-        .collect::<crate::LocalResult<Vec<_>>>()
+        .collect::<LocalResult<Vec<_>>>()
         .expect("all entries should be listed");
     assert!(
         listed

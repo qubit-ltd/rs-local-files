@@ -9,12 +9,12 @@
 use std::path::Path;
 use std::time::Duration;
 
-use crate::LocalFileSystem;
-use crate::LocalListOptions;
-use crate::error::LocalFileErrorKind;
-use crate::options::LocalDirectoryOpenOptions;
-use crate::options::LocalObservedReadOptions;
-use crate::options::LocalPathBindingOptions;
+use qubit_local_files::LocalFileSystem;
+use qubit_local_files::error::LocalFileErrorKind;
+use qubit_local_files::options::LocalDirectoryOpenOptions;
+use qubit_local_files::options::LocalListOptions;
+use qubit_local_files::options::LocalObservedReadOptions;
+use qubit_local_files::options::LocalPathBindingOptions;
 
 #[test]
 fn observed_reader_binding_checks_deadline_and_retains_ancestors() {

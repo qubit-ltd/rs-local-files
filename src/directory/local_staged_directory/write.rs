@@ -40,11 +40,12 @@ impl LocalStagedDirectory {
         input: &mut S,
         maximum: u64,
     ) -> LocalResult<LocalFileObservation> {
+        let relative = self.directory().checked(relative, false)?;
         let observation = if self.private || self.owner_access_policy.is_some() {
-            self.write_private_file_new(relative, input, maximum)?
+            self.write_private_file_new(&relative, input, maximum)?
         } else {
             let mut writer = self.directory().open_writer_with_options(
-                relative,
+                &relative,
                 &LocalWriteOptions::new(LocalWriteMode::CreateNew)
                     .with_atomicity(crate::LocalAtomicityRequirement::Required)
                     .with_file_sync(LocalFileSyncRequirement::NotRequired),
@@ -105,7 +106,7 @@ impl LocalStagedDirectory {
             if let Err(error) = writer.commit() {
                 return Err(abort_failed_stage_commit(error));
             }
-            self.directory().observe_entry(relative)?
+            self.directory().observe_entry(&relative)?
         };
         let identity = observation
             .identity()
@@ -113,7 +114,7 @@ impl LocalStagedDirectory {
         self.owner
             .as_mut()
             .expect("stage cleanup owner is present")
-            .record_entry(relative, identity)?;
+            .record_entry(&relative, identity)?;
         Ok(observation)
     }
 

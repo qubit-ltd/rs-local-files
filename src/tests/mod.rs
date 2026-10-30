@@ -6,8 +6,6 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 
-mod coverage_binding_tests;
-mod coverage_directory_handle_tests;
 mod coverage_staged_directory_tests;
 mod deletion_native_failure_tests;
 mod directory_native_failure_tests;
