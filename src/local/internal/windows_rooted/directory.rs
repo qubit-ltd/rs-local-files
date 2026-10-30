@@ -7,6 +7,7 @@
 // =============================================================================
 //! Windows handle-relative rooted directory operations.
 
+use std::ffi::OsStr;
 use std::ffi::OsString;
 use std::fs::File;
 use std::io::ErrorKind;
@@ -37,9 +38,18 @@ use crate::rooted::Metadata;
 ///
 /// # Errors
 ///
-/// Returns an I/O error when the root handle cannot be duplicated.
+/// Returns an I/O error when an independent enumeration handle cannot be
+/// opened relative to the retained root authority.
 pub(crate) fn open_root_directory_reader(root: &File, _diagnostic_root: &Path) -> Result<RootedDirectoryReader> {
-    root.try_clone().map(RootedDirectoryReader::new)
+    let directory = nt_open_at(
+        root,
+        OsStr::new("."),
+        FILE_LIST_DIRECTORY | FILE_READ_ATTRIBUTES | SYNCHRONIZE,
+        FILE_OPEN,
+        FILE_DIRECTORY_FILE,
+    )?;
+    verify_real_directory(&directory)?;
+    Ok(RootedDirectoryReader::new(directory))
 }
 
 /// Lists immediate children of a rooted descendant directory.
