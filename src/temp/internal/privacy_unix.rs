@@ -665,10 +665,13 @@ mod recovery_open_failure_unix_tests {
 #[cfg(test)]
 mod owner_policy_unix_tests {
     use std::fs::File;
+    #[cfg(target_os = "linux")]
     use std::os::unix::fs::MetadataExt;
 
+    #[cfg(target_os = "linux")]
     use super::apply_owner_access;
     use super::create_owner_entry_at;
+    #[cfg(target_os = "linux")]
     use super::verify_owner_access;
     use crate::policy::LocalOwnerAccessPolicy;
 

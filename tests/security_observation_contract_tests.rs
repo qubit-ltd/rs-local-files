@@ -7,6 +7,7 @@
 // =============================================================================
 
 use qubit_local_files::LocalFileSystem;
+#[cfg(target_os = "linux")]
 use qubit_local_files::observation::LocalObservationRequirement;
 use qubit_local_files::observation::LocalSecurityObservationOptions;
 use qubit_local_files::options::LocalDirectoryOpenOptions;

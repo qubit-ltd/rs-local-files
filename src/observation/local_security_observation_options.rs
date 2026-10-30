@@ -87,9 +87,11 @@ impl LocalSecurityObservationOptions {
     pub(crate) const fn link_count(&self) -> LocalObservationRequirement {
         self.link_count
     }
+    #[cfg(any(target_os = "linux", windows))]
     pub(crate) const fn max_acl_entries(&self) -> Option<usize> {
         self.max_acl_entries
     }
+    #[cfg(any(target_os = "linux", windows))]
     pub(crate) const fn max_acl_bytes(&self) -> Option<usize> {
         self.max_acl_bytes
     }

@@ -14,7 +14,9 @@ use crate::LocalResult;
 use crate::error::LocalFileError;
 use crate::error::LocalFileErrorKind;
 use crate::error::LocalFileOperation;
+#[cfg(target_os = "linux")]
 use crate::error::LocalResourceKind;
+#[cfg(target_os = "linux")]
 use crate::error::LocalResourceLimitError;
 use crate::observation::LocalAccessObservation;
 #[cfg(target_os = "linux")]
@@ -33,8 +35,11 @@ use crate::observation::LocalUnixFileSystemObservation;
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 use crate::observation::LocalUnixPlatform;
 
+#[cfg(target_os = "linux")]
 const ACL_RETRIES: usize = 8;
+#[cfg(target_os = "linux")]
 const LINUX_ACL_VERSION: u32 = 2;
+#[cfg(target_os = "linux")]
 const LINUX_ACL_ENTRY_SIZE: usize = 8;
 
 pub(crate) fn query_security(
@@ -47,6 +52,7 @@ pub(crate) fn query_security(
     #[allow(clippy::useless_conversion)]
     let inode = u64::try_from(before.st_ino).map_err(|_| invalid_native_metadata())?;
     let identity = LocalFileIdentity::unix(device, inode);
+    #[allow(clippy::unnecessary_fallible_conversions)]
     #[allow(clippy::useless_conversion)]
     let link_count = u64::try_from(before.st_nlink)
         .map(Some)
@@ -359,6 +365,7 @@ fn io_error(error: io::Error) -> LocalFileError {
     LocalFileError::from_io(LocalFileOperation::Metadata, None, None, error)
 }
 
+#[cfg(target_os = "linux")]
 fn invalid_acl() -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, "malformed POSIX ACL")
 }
@@ -388,6 +395,7 @@ fn acl_read_requires_retry(error: &io::Error) -> bool {
     false
 }
 
+#[cfg(target_os = "linux")]
 fn check_acl_size_io(length: usize, options: &LocalSecurityObservationOptions) -> io::Result<()> {
     if let Some(max) = options.max_acl_bytes()
         && length > max
