@@ -106,13 +106,14 @@ fn test_host_relative_invalid_utf8_keeps_first_pwd_in_subprocess() {
     }
 
     let scratch = tempdir().expect("scratch");
-    fs::write(scratch.path().join("bad.txt"), [0xff]).expect("bytes");
+    let root = fs::canonicalize(scratch.path()).expect("scratch root should resolve");
+    fs::write(root.join("bad.txt"), [0xff]).expect("bytes");
     let output = Command::new(std::env::current_exe().expect("test executable"))
         .arg("--exact")
         .arg("test_host_relative_invalid_utf8_keeps_first_pwd_in_subprocess")
         .arg("--nocapture")
-        .current_dir(scratch.path())
-        .env(HOST_CHILD_FIXTURE, scratch.path())
+        .current_dir(&root)
+        .env(HOST_CHILD_FIXTURE, &root)
         .output()
         .expect("child test should start");
     assert!(

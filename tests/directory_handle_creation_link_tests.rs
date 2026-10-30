@@ -60,18 +60,23 @@ fn handles(root: &Path) -> (LocalDirectoryHandle, LocalDirectoryHandle) {
     (host, rooted)
 }
 
-fn denied_link_handles(root: &Path) -> (LocalDirectoryHandle, LocalDirectoryHandle) {
+fn denied_link_handles(root: &Path) -> Vec<LocalDirectoryHandle> {
     let options = LocalDirectoryOpenOptions::new()
         .with_component_policy(LocalComponentPolicy::deny_names(vec!["link".into()]).expect("policy should be valid"));
-    let host = LocalFileSystem::host()
-        .expect("host filesystem should open")
-        .open_directory_with_options(root, &options)
-        .expect("host directory authority should open");
+    let mut handles = Vec::new();
+    #[cfg(not(windows))]
+    handles.push(
+        LocalFileSystem::host()
+            .expect("host filesystem should open")
+            .open_directory_with_options(root, &options)
+            .expect("host directory authority should open"),
+    );
     let rooted = LocalFileSystem::rooted(root)
         .expect("rooted filesystem should open")
         .open_directory_with_options(Path::new("/"), &options)
         .expect("rooted directory authority should open");
-    (host, rooted)
+    handles.push(rooted);
+    handles
 }
 
 fn assert_create_new_rejects(handle: &LocalDirectoryHandle, root: &Path) -> LocalFileErrorKind {
@@ -285,23 +290,31 @@ fn test_intermediate_directory_link_obeys_policy() {
 
     let denied = LocalDirectoryOpenOptions::new()
         .with_component_policy(LocalComponentPolicy::deny_names(vec!["jump".into()]).expect("policy should be valid"));
-    let denied_host = LocalFileSystem::host()
+    #[cfg(not(windows))]
+    let denied_handles = [LocalFileSystem::host()
         .expect("host filesystem should open")
         .open_directory_with_options(root, &denied)
-        .expect("host authority should open");
-    let error = denied_host
-        .open_writer_with_options(
-            Path::new("jump/file"),
-            &LocalWriteOptions::new(LocalWriteMode::CreateNew),
-        )
-        .expect_err("denied intermediate component must remain denied");
-    assert_eq!(LocalFileErrorKind::InvalidPath, error.kind());
-    assert_eq!(
-        b"new",
-        fs::read(root.join("target/file"))
-            .expect("denied operation must not alter target")
-            .as_slice()
-    );
+        .expect("host authority should open")];
+    #[cfg(windows)]
+    let denied_handles = [LocalFileSystem::rooted(root)
+        .expect("rooted filesystem should open")
+        .open_directory_with_options(Path::new("/"), &denied)
+        .expect("rooted authority should open")];
+    for denied_handle in &denied_handles {
+        let error = denied_handle
+            .open_writer_with_options(
+                Path::new("jump/file"),
+                &LocalWriteOptions::new(LocalWriteMode::CreateNew),
+            )
+            .expect_err("denied intermediate component must remain denied");
+        assert_eq!(LocalFileErrorKind::InvalidPath, error.kind());
+        assert_eq!(
+            b"new",
+            fs::read(root.join("target/file"))
+                .expect("denied operation must not alter target")
+                .as_slice()
+        );
+    }
 }
 
 #[test]
@@ -311,8 +324,7 @@ fn test_denied_final_component_cannot_be_bypassed_by_create_new() {
     if !symlink_file(Path::new("missing"), &root.join("link")) {
         return;
     }
-    let (host, rooted) = denied_link_handles(root);
-    for handle in [&host, &rooted] {
+    for handle in denied_link_handles(root) {
         let error = handle
             .open_writer_with_options(Path::new("link"), &LocalWriteOptions::new(LocalWriteMode::CreateNew))
             .expect_err("denied name must remain rejected with CreateNew");
