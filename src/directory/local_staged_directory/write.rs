@@ -30,7 +30,10 @@ impl LocalStagedDirectory {
     ///
     /// The destination is never replaced. Input bytes consumed before an I/O or
     /// limit error cannot be restored; a successful result carries the
-    /// created file's observation.
+    /// created file's observation. On failure, the stage remains owned by the
+    /// caller. Any `cleanup_error` reports a failed attempt to remove this
+    /// write's staging file; it is distinct from private temporary recovery.
+    /// Cleaning the whole stage may remove other files already created there.
     pub fn write_file_new<S: ByteInput + ?Sized>(
         &mut self,
         relative: &Path,
@@ -49,45 +52,62 @@ impl LocalStagedDirectory {
             let mut total = 0_u64;
             let mut block = [0_u8; 8192];
             loop {
-                let count = qubit_io::Input::read(input, &mut block).map_err(|source| {
-                    LocalFileError::from_io(
-                        LocalFileOperation::Read,
-                        Some(writer.path().to_path_buf()),
-                        None,
-                        source,
-                    )
-                })?;
-                if count == 0 {
-                    break;
-                }
-                total = total.checked_add(count as u64).ok_or_else(resource_limit)?;
-                if total > maximum {
-                    let _ = writer.abort();
-                    return Err(resource_limit());
-                }
-                let mut offset = 0;
-                while offset < count {
-                    let written = qubit_io::Output::write(&mut writer, &block[offset..count]).map_err(|source| {
-                        LocalFileError::from_io(
-                            LocalFileOperation::Commit,
+                let count = match qubit_io::Input::read(input, &mut block) {
+                    Ok(count) => count,
+                    Err(source) if source.kind() == std::io::ErrorKind::Interrupted => continue,
+                    Err(source) => {
+                        let cause = LocalFileError::from_io(
+                            LocalFileOperation::Read,
                             Some(writer.path().to_path_buf()),
                             None,
                             source,
-                        )
-                    })?;
+                        );
+                        return Err(abort_failed_stage_write(&mut writer, cause));
+                    }
+                };
+                if count == 0 {
+                    break;
+                }
+                total = match total.checked_add(count as u64) {
+                    Some(total) => total,
+                    None => {
+                        let cause = resource_limit().with_path(writer.path().to_path_buf());
+                        return Err(abort_failed_stage_write(&mut writer, cause));
+                    }
+                };
+                if total > maximum {
+                    let cause = resource_limit().with_path(writer.path().to_path_buf());
+                    return Err(abort_failed_stage_write(&mut writer, cause));
+                }
+                let mut offset = 0;
+                while offset < count {
+                    let written = match qubit_io::Output::write(&mut writer, &block[offset..count]) {
+                        Ok(written) => written,
+                        Err(source) if source.kind() == std::io::ErrorKind::Interrupted => continue,
+                        Err(source) => {
+                            let cause = LocalFileError::from_io(
+                                LocalFileOperation::Commit,
+                                Some(writer.path().to_path_buf()),
+                                None,
+                                source,
+                            );
+                            return Err(abort_failed_stage_write(&mut writer, cause));
+                        }
+                    };
                     if written == 0 {
-                        return Err(LocalFileError::new(
-                            LocalFileErrorKind::DataCorruption,
-                            LocalFileOperation::Commit,
-                        ));
+                        let cause = LocalFileError::new(LocalFileErrorKind::DataCorruption, LocalFileOperation::Commit)
+                            .with_path(writer.path().to_path_buf());
+                        return Err(abort_failed_stage_write(&mut writer, cause));
                     }
                     offset += written;
                 }
             }
             if let Err(error) = writer.commit() {
                 let (cause, _, retry) = error.into_parts();
-                drop(retry);
-                return Err(cause);
+                return Err(match retry {
+                    Some(mut retry) => abort_failed_stage_write(&mut retry, cause),
+                    None => cause,
+                });
             }
             self.directory().observe_entry(relative)?
         };
@@ -177,6 +197,7 @@ impl LocalStagedDirectory {
         loop {
             let count = match qubit_io::Input::read(input, &mut block) {
                 Ok(count) => count,
+                Err(source) if source.kind() == std::io::ErrorKind::Interrupted => continue,
                 Err(source) => {
                     let cause = LocalFileError::from_io(LocalFileOperation::Read, Some(path.clone()), None, source);
                     return Err(cleanup_partial_private_file(
@@ -326,6 +347,13 @@ impl LocalStagedDirectory {
             }
         }
         Ok(())
+    }
+}
+
+fn abort_failed_stage_write(writer: &mut crate::writer::LocalFileWriter, cause: LocalFileError) -> LocalFileError {
+    match writer.abort() {
+        Ok(_) => cause,
+        Err(cleanup) => cause.with_additional_cleanup_error(cleanup),
     }
 }
 

@@ -287,6 +287,15 @@ impl LocalFileError {
         self
     }
 
+    pub(crate) fn with_additional_cleanup_error(mut self, cleanup: LocalFileError) -> Self {
+        let mut slot = &mut self.cleanup_error;
+        while let Some(existing) = slot {
+            slot = &mut existing.cleanup_error;
+        }
+        *slot = Some(Box::new(cleanup));
+        self
+    }
+
     /// Returns the cleanup failure, when cleanup failed after the primary
     /// operation had already produced an error.
     #[inline]
@@ -635,5 +644,46 @@ mod tests {
         assert!(error.typed_source().is_some());
         assert!(error.io_error().is_none());
         assert!(error.to_string().contains("caused by"));
+    }
+
+    #[test]
+    fn test_additional_cleanup_error_appends_without_replacing_existing_chain() {
+        let primary = LocalFileError::from_io(
+            LocalFileOperation::Read,
+            Some("primary".into()),
+            None,
+            io::Error::other("primary failure"),
+        );
+        let first_cleanup = LocalFileError::from_io(
+            LocalFileOperation::Abort,
+            Some("first cleanup".into()),
+            None,
+            io::Error::other("first cleanup failure"),
+        );
+        let second_cleanup = LocalFileError::from_io(
+            LocalFileOperation::Abort,
+            Some("second cleanup".into()),
+            None,
+            io::Error::other("second cleanup failure"),
+        );
+
+        let error = primary
+            .with_cleanup_error(first_cleanup)
+            .with_additional_cleanup_error(second_cleanup);
+
+        assert_eq!(
+            Some("primary failure"),
+            error.io_error().map(ToString::to_string).as_deref()
+        );
+        let first = error.cleanup_error().expect("first cleanup remains");
+        assert_eq!(
+            Some("first cleanup failure"),
+            first.io_error().map(ToString::to_string).as_deref()
+        );
+        let second = first.cleanup_error().expect("second cleanup is appended");
+        assert_eq!(
+            Some("second cleanup failure"),
+            second.io_error().map(ToString::to_string).as_deref()
+        );
     }
 }
