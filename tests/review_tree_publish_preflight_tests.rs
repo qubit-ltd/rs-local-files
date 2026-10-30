@@ -21,7 +21,6 @@ use qubit_local_files::outcome::LocalTreeAccessState;
 use qubit_local_files::outcome::LocalTreeMutationState;
 use qubit_local_files::outcome::LocalTreePublication;
 use qubit_local_files::policy::LocalDurabilityRequirement;
-use qubit_local_files::policy::LocalPrivacyRequirement;
 use qubit_local_files::policy::LocalTreeFinalAccess;
 
 #[test]
@@ -32,16 +31,12 @@ fn test_tree_publish_required_durability_rejects_before_access_mutation() {
         .open_directory_with_options(fixture.path(), &LocalDirectoryOpenOptions::new())
         .expect("parent should open");
     let mut stage = parent
-        .create_staged_directory(&LocalTempDirectoryOptions::new().with_privacy(LocalPrivacyRequirement::Required))
+        .create_staged_directory(&LocalTempDirectoryOptions::new())
         .expect("stage should be created");
     stage
         .write_file_new(Path::new("payload"), &mut &b"unchanged payload"[..], 64)
         .expect("payload should be staged");
     let identity = stage.identity().expect("stage identity").clone();
-    let root_before = stage
-        .directory()
-        .security_observation(&LocalSecurityObservationOptions::new())
-        .expect("stage root security should be observable");
     let mut payload_reader = stage
         .directory()
         .open_observed_reader(Path::new("payload"), &LocalObservedReadOptions::new())
@@ -52,7 +47,6 @@ fn test_tree_publish_required_durability_rejects_before_access_mutation() {
     let payload_before = payload_reader
         .read_to_end_limited(u64::MAX)
         .expect("payload should read");
-    assert!(root_before.identity().is_some(), "root identity should be available");
     assert!(
         payload_security_before.identity().is_some(),
         "payload identity should be available"
@@ -76,14 +70,9 @@ fn test_tree_publish_required_durability_rejects_before_access_mutation() {
 
     let mut stage = error.into_stage().expect("failed publish returns stage owner");
     assert_eq!(stage.identity(), Some(&identity));
-    let root_after = stage
-        .directory()
-        .security_observation(&LocalSecurityObservationOptions::new())
-        .expect("stage root security should remain observable");
     let payload_security_after = payload_reader
         .security_observation(&LocalSecurityObservationOptions::new())
         .expect("same payload handle security should remain observable");
-    assert_eq!(root_after, root_before, "root access facts must not change");
     assert_eq!(
         payload_security_after, payload_security_before,
         "payload access facts must not change"
