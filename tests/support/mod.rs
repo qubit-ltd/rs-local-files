@@ -8,4 +8,5 @@
 
 pub(crate) mod conditional_temp_directory;
 #[cfg(windows)]
+#[allow(dead_code)]
 pub(crate) mod windows_symlink;
