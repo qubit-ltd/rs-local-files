@@ -6,7 +6,7 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 
-#![cfg(unix)]
+#![cfg(target_os = "linux")]
 
 use std::ffi::OsStr;
 use std::os::unix::fs::PermissionsExt;
