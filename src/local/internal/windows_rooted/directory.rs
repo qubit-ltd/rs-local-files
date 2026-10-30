@@ -7,20 +7,24 @@
 // =============================================================================
 //! Windows handle-relative rooted directory operations.
 
-use std::ffi::OsStr;
 use std::ffi::OsString;
 use std::fs::File;
 use std::io::ErrorKind;
 use std::io::Result;
+use std::os::windows::io::AsRawHandle;
+use std::os::windows::io::FromRawHandle;
 use std::path::Path;
 
 use windows_sys::Wdk::Storage::FileSystem::FILE_CREATE;
 use windows_sys::Wdk::Storage::FileSystem::FILE_DIRECTORY_FILE;
 use windows_sys::Wdk::Storage::FileSystem::FILE_OPEN;
 use windows_sys::Wdk::Storage::FileSystem::FILE_OPEN_IF;
+use windows_sys::Win32::Foundation::INVALID_HANDLE_VALUE;
 use windows_sys::Win32::Storage::FileSystem::DELETE;
+use windows_sys::Win32::Storage::FileSystem::FILE_FLAG_BACKUP_SEMANTICS;
 use windows_sys::Win32::Storage::FileSystem::FILE_LIST_DIRECTORY;
 use windows_sys::Win32::Storage::FileSystem::FILE_READ_ATTRIBUTES;
+use windows_sys::Win32::Storage::FileSystem::ReOpenFile;
 use windows_sys::Win32::Storage::FileSystem::SYNCHRONIZE;
 
 use super::handle::open_entry;
@@ -39,15 +43,23 @@ use crate::rooted::Metadata;
 /// # Errors
 ///
 /// Returns an I/O error when an independent enumeration handle cannot be
-/// opened relative to the retained root authority.
+/// reopened from the retained root authority.
 pub(crate) fn open_root_directory_reader(root: &File, _diagnostic_root: &Path) -> Result<RootedDirectoryReader> {
-    let directory = nt_open_at(
-        root,
-        OsStr::new("."),
-        FILE_LIST_DIRECTORY | FILE_READ_ATTRIBUTES | SYNCHRONIZE,
-        FILE_OPEN,
-        FILE_DIRECTORY_FILE,
-    )?;
+    // SAFETY: `root` owns a live CreateFileW handle and ReOpenFile does not
+    // retain the handle value. The returned handle is uniquely owned here.
+    let handle = unsafe {
+        ReOpenFile(
+            root.as_raw_handle(),
+            FILE_LIST_DIRECTORY | FILE_READ_ATTRIBUTES | SYNCHRONIZE,
+            super::native::ROOTED_SHARE_MODE,
+            FILE_FLAG_BACKUP_SEMANTICS,
+        )
+    };
+    if handle == INVALID_HANDLE_VALUE {
+        return Err(std::io::Error::last_os_error());
+    }
+    // SAFETY: ReOpenFile succeeded and returned a uniquely owned handle.
+    let directory = unsafe { File::from_raw_handle(handle) };
     verify_real_directory(&directory)?;
     Ok(RootedDirectoryReader::new(directory))
 }
