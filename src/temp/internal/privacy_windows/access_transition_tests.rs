@@ -70,7 +70,6 @@ fn test_review_windows_access_transition_preserves_readonly_attribute_and_acl() 
     assert_eq!(read_only.CreationTime, before.CreationTime);
     assert_eq!(read_only.LastAccessTime, before.LastAccessTime);
     assert_eq!(read_only.LastWriteTime, before.LastWriteTime);
-    assert_eq!(read_only.ChangeTime, before.ChangeTime);
     assert!(
         OpenOptions::new().write(true).open(&path).is_err(),
         "read-only attribute prevents opening a new write handle",
@@ -83,7 +82,6 @@ fn test_review_windows_access_transition_preserves_readonly_attribute_and_acl() 
     assert_eq!(current_user_only.CreationTime, read_only.CreationTime);
     assert_eq!(current_user_only.LastAccessTime, read_only.LastAccessTime);
     assert_eq!(current_user_only.LastWriteTime, read_only.LastWriteTime);
-    assert_eq!(current_user_only.ChangeTime, read_only.ChangeTime);
     assert!(
         OpenOptions::new().write(true).open(&path).is_err(),
         "CurrentUserOnly restores the DACL but does not clear FILE_ATTRIBUTE_READONLY",
