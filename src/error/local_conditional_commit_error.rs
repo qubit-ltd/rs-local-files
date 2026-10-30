@@ -165,7 +165,6 @@ impl LocalConditionalCommitError {
     }
 
     /// Returns the independently verified candidate copy, if retained.
-    #[must_use]
     pub fn candidate(&self) -> Option<&LocalRecoveryFile> {
         self.recovery_files
             .iter()
