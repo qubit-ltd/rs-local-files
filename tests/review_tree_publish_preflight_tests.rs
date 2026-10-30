@@ -86,5 +86,7 @@ fn test_tree_publish_required_durability_rejects_before_access_mutation() {
         .read_to_end_limited(u64::MAX)
         .expect("payload should remain readable");
     assert_eq!(payload_after, payload_before);
+    drop(payload_reader);
+    drop(payload_after_reader);
     stage.cleanup().expect("returned stage can be explicitly cleaned up");
 }
