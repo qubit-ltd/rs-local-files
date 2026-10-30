@@ -40,7 +40,6 @@ fn observed_reader_binding_checks_deadline_and_retains_ancestors() {
             )
             .expect_err("Windows Host path binding is unsupported");
         assert_eq!(unsupported.kind(), LocalFileErrorKind::Unsupported);
-        return;
     }
 
     #[cfg(not(windows))]

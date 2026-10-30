@@ -27,6 +27,7 @@ pub(crate) enum NativeIoPoint {
     Read,
     FileWrite,
     SyncAll,
+    #[cfg(unix)]
     HandleMetadata,
     RandomName,
     DeleteMetadata,
@@ -94,6 +95,7 @@ pub(crate) fn check(point: NativeIoPoint) -> io::Result<()> {
     })
 }
 
+#[cfg(unix)]
 pub(crate) fn metadata(file: &std::fs::File) -> io::Result<std::fs::Metadata> {
     check(NativeIoPoint::HandleMetadata)?;
     file.metadata()

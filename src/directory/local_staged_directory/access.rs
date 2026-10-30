@@ -864,7 +864,7 @@ impl LocalStagedDirectory {
             )
         })?;
         #[cfg(windows)]
-        crate::temp::internal::privacy_windows::verify_owner_access(&root, true, policy).map_err(|source| {
+        crate::temp::internal::privacy_windows::verify_owner_access(root, true, policy).map_err(|source| {
             super::super::tree_recovery::LocalTreeAccessError::new(
                 LocalFileError::from_io(
                     LocalFileOperation::Metadata,

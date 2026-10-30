@@ -96,6 +96,7 @@ impl LocalOwnerAccessPolicy {
         self.windows_masks = Some((directory_mask, file_mask));
         self
     }
+    #[cfg(unix)]
     pub(crate) const fn unix_modes(&self) -> Option<(u32, u32)> {
         self.unix_modes
     }

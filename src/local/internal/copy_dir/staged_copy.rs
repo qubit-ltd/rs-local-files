@@ -8,6 +8,8 @@
 //! Regular-file staging and commit for recursive directory copies.
 // Private behavior is covered through public integration tests.
 
+#![allow(clippy::items_after_test_module)]
+
 use std::io::ErrorKind;
 #[cfg(windows)]
 use std::os::windows::fs::FileTypeExt;

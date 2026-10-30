@@ -12,6 +12,8 @@
 //! Ordinary long paths receive native absolute normalization and an extended
 //! prefix before direct Win32 calls, matching std filesystem path handling.
 
+#![allow(clippy::items_after_test_module)]
+
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 use std::ffi::CString;
 #[cfg(not(windows))]

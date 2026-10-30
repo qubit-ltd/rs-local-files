@@ -9,6 +9,7 @@
 use std::path::Path;
 
 use crate::LocalFileSystem;
+#[cfg(unix)]
 use crate::options::LocalCreateDirectoryOptions;
 use crate::options::LocalDirectoryOpenOptions;
 use crate::options::LocalListOptions;

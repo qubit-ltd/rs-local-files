@@ -1026,6 +1026,7 @@ mod authority_and_native_failure_tests {
     use std::path::Path;
 
     use super::Root;
+    #[cfg(not(windows))]
     use crate::LocalFileOperation;
     use crate::local::LocalRelativePath;
 

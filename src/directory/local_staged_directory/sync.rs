@@ -24,6 +24,7 @@ mod sync_order_tests;
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(super) enum OwnerPolicySyncEvent {
     PreSync(LocalFileIdentity),
+    #[cfg(unix)]
     AccessApplied(LocalFileIdentity),
     FinalSync(LocalFileIdentity),
 }

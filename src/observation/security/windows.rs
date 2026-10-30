@@ -6,6 +6,8 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 
+#![allow(clippy::items_after_test_module)]
+
 use std::fmt;
 use std::fs::File;
 use std::io;
@@ -591,7 +593,7 @@ fn ntstatus_error(status: i32) -> LocalFileError {
         LocalFileOperation::Metadata,
         None,
         None,
-        io::Error::new(io::ErrorKind::Other, NtStatusError(status)),
+        io::Error::other(NtStatusError(status)),
     )
     .with_kind(kind)
 }
