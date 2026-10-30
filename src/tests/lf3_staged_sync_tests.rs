@@ -39,9 +39,18 @@ fn staged_directory_exposes_bounded_file_synchronization() {
             .sync_files_with_options(&LocalListOptions::new(), LocalFileSyncRequirement::NotRequired)
             .expect("not-required synchronization should succeed")
     );
+    #[cfg(unix)]
     stage
         .sync_tree_with_options(&parent, &LocalListOptions::new())
         .expect("the staged tree, root, and parent should synchronize");
+    #[cfg(windows)]
+    assert!(matches!(
+        stage
+            .sync_tree_with_options(&parent, &LocalListOptions::new())
+            .expect_err("Windows directory synchronization may be denied")
+            .kind(),
+        crate::LocalFileErrorKind::Unsupported | crate::LocalFileErrorKind::PermissionDenied
+    ));
 }
 
 #[cfg(unix)]

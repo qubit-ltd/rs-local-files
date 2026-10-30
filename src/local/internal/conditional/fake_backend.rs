@@ -219,7 +219,8 @@ impl super::RecoveryAccess for Access {
     }
 
     fn sync_file(&self) -> io::Result<()> {
-        fs::File::open(&self.path)?.sync_all()
+        let file = fs::OpenOptions::new().read(true).write(true).open(&self.path)?;
+        file.sync_all()
     }
 }
 

@@ -355,7 +355,7 @@ fn test_freebsd_xattr_short_read_and_atomic_preservation() {
     Output::write_fully(&mut writer, b"replacement").expect("staging writer should accept replacement bytes");
     let outcome = match writer.commit() {
         Ok(outcome) => outcome,
-        Err(error) if error.cause().kind() == LocalFileErrorKind::Unsupported => {
+        Err(error) if error.error().kind() == LocalFileErrorKind::Unsupported => {
             eprintln!("skipping FreeBSD xattr replacement: metadata preservation is unsupported on this filesystem");
             return;
         }

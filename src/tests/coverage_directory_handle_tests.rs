@@ -58,9 +58,13 @@ fn directory_handle_observes_entries_and_opens_bound_readers() {
             .expect("missing metadata should be represented as absence")
             .is_none()
     );
-    directory
-        .security_observation(&LocalSecurityObservationOptions::new())
-        .expect("optional security facts should be queried");
+    let security = directory.security_observation(&LocalSecurityObservationOptions::new());
+    #[cfg(windows)]
+    if let Err(error) = &security {
+        assert_eq!(error.kind(), crate::LocalFileErrorKind::PermissionDenied);
+    }
+    #[cfg(not(windows))]
+    security.expect("optional security facts should be queried");
     assert_eq!(
         directory
             .observe_entry(Path::new("payload"))

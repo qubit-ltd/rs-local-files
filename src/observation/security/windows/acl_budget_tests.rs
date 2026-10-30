@@ -31,6 +31,8 @@ fn test_review_acl_budget_zero_accepts_null_dacl_without_acl_payload() {
         }
         // SAFETY: the buffer has the exact capacity reported to this callable.
         unsafe { std::ptr::copy_nonoverlapping(descriptor.as_ptr(), output.cast(), descriptor.len()) };
+        // SAFETY: `needed` points to writable storage supplied by the caller.
+        unsafe { *needed = descriptor.len() as u32 };
         0
     })
     .expect("null DACL descriptor fits its fixed header budget");
@@ -81,6 +83,8 @@ fn test_review_acl_budget_exact_limit_allows_payload_and_bounded_growth_retry() 
         assert_eq!(capacity, 28);
         // SAFETY: the buffer has the exact capacity reported to this callable.
         unsafe { std::ptr::copy_nonoverlapping(descriptor.as_ptr(), output.cast(), descriptor.len()) };
+        // SAFETY: `needed` points to writable storage supplied by the caller.
+        unsafe { *needed = descriptor.len() as u32 };
         0
     })
     .expect("descriptor at the exact ACL budget should succeed");

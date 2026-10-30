@@ -30,35 +30,54 @@ fn observed_reader_binding_checks_deadline_and_retains_ancestors() {
                 .with_path_binding(LocalPathBindingOptions::new().with_deadline(Duration::ZERO)),
         )
         .expect_err("zero-duration binding should expire before resolution");
-    assert_eq!(expired.kind(), LocalFileErrorKind::Io);
-    assert_eq!(std::io::ErrorKind::TimedOut, expired.io_error_kind());
-
-    let reader = filesystem
-        .open_observed_reader(
-            &path,
-            &LocalObservedReadOptions::new().with_path_binding(
-                LocalPathBindingOptions::new()
-                    .with_max_ancestors(64)
-                    .with_deadline(Duration::from_secs(10)),
-            ),
-        )
-        .expect("unexpired binding should retain and verify its ancestor chain");
-    assert_eq!(reader.observation().metadata().len(), 8);
-    assert!(reader.verify_path_binding().is_ok());
-
-    let rooted = LocalFileSystem::rooted(fixture.path()).expect("rooted filesystem should open");
-    assert_eq!(
-        rooted
+    #[cfg(windows)]
+    {
+        assert_eq!(expired.kind(), LocalFileErrorKind::Unsupported);
+        let unsupported = filesystem
             .open_observed_reader(
-                Path::new("payload"),
+                &path,
                 &LocalObservedReadOptions::new().with_path_binding(LocalPathBindingOptions::new()),
             )
-            .expect("rooted binding should open")
-            .observation()
-            .metadata()
-            .len(),
-        8
-    );
+            .expect_err("Windows Host path binding is unsupported");
+        assert_eq!(unsupported.kind(), LocalFileErrorKind::Unsupported);
+        return;
+    }
+
+    #[cfg(not(windows))]
+    {
+        assert_eq!(expired.kind(), LocalFileErrorKind::Io);
+        assert_eq!(std::io::ErrorKind::TimedOut, expired.io_error_kind());
+    }
+
+    #[cfg(not(windows))]
+    {
+        let reader = filesystem
+            .open_observed_reader(
+                &path,
+                &LocalObservedReadOptions::new().with_path_binding(
+                    LocalPathBindingOptions::new()
+                        .with_max_ancestors(64)
+                        .with_deadline(Duration::from_secs(10)),
+                ),
+            )
+            .expect("unexpired binding should retain and verify its ancestor chain");
+        assert_eq!(reader.observation().metadata().len(), 8);
+        assert!(reader.verify_path_binding().is_ok());
+
+        let rooted = LocalFileSystem::rooted(fixture.path()).expect("rooted filesystem should open");
+        assert_eq!(
+            rooted
+                .open_observed_reader(
+                    Path::new("payload"),
+                    &LocalObservedReadOptions::new().with_path_binding(LocalPathBindingOptions::new()),
+                )
+                .expect("rooted binding should open")
+                .observation()
+                .metadata()
+                .len(),
+            8
+        );
+    }
 }
 
 #[test]

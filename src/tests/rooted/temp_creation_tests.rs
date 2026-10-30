@@ -61,7 +61,10 @@ fn test_rooted_temp_backend_retains_parent_errors_without_mutation() {
     for (parent, create_parent, expected) in [
         ("missing", false, LocalFileErrorKind::NotFound),
         ("file", false, LocalFileErrorKind::NotDirectory),
+        #[cfg(not(windows))]
         ("file/child", true, LocalFileErrorKind::InvalidPath),
+        #[cfg(windows)]
+        ("file/child", true, LocalFileErrorKind::NotDirectory),
         ("../escape", false, LocalFileErrorKind::InvalidPath),
     ] {
         let mut file_options = LocalTempFileOptions::new().with_parent(Path::new(parent));

@@ -234,11 +234,11 @@ fn test_tree_copy_preserves_dangling_links_for_host_and_rooted() {
             Some(LocalSymlinkPolicy::FollowWithinScope),
         ] {
             let directory = tempdir().expect("fixture should exist");
-            fs::create_dir(directory.path().join("source")).expect("source directory should exist");
-            std::os::unix::fs::symlink("missing", directory.path().join("source/link"))
-                .expect("dangling link should exist");
+            let root = fs::canonicalize(directory.path()).expect("fixture root should resolve");
+            fs::create_dir(root.join("source")).expect("source directory should exist");
+            std::os::unix::fs::symlink("missing", root.join("source/link")).expect("dangling link should exist");
             let filesystem = if rooted {
-                LocalFileSystem::rooted(directory.path())
+                LocalFileSystem::rooted(&root)
             } else {
                 LocalFileSystem::host()
             }
@@ -246,12 +246,12 @@ fn test_tree_copy_preserves_dangling_links_for_host_and_rooted() {
             let source = if rooted {
                 PathBuf::from("source")
             } else {
-                directory.path().join("source")
+                root.join("source")
             };
             let target = if rooted {
                 PathBuf::from("target")
             } else {
-                directory.path().join("target")
+                root.join("target")
             };
             let mut options = LocalCopyOptions::new().with_tree_source();
             if let Some(policy) = policy {
@@ -264,7 +264,7 @@ fn test_tree_copy_preserves_dangling_links_for_host_and_rooted() {
             assert_eq!(0, outcome.stats().bytes());
             assert_eq!(
                 PathBuf::from("missing"),
-                fs::read_link(directory.path().join("target/link")).expect("copied link should be readable")
+                fs::read_link(root.join("target/link")).expect("copied link should be readable")
             );
         }
     }
