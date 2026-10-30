@@ -46,7 +46,7 @@ impl LocalResolutionPolicy for PrivateRecorder {
             scope,
             origin,
         ));
-        if component == OsStr::new("private") {
+        if component == OsStr::new("private") && scope == LocalResolutionScope::Descendant {
             return Err(LocalFileError::new(
                 LocalFileErrorKind::PermissionDenied,
                 LocalFileOperation::BindPath,
