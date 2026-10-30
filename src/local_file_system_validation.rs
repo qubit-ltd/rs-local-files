@@ -214,7 +214,7 @@ pub(super) fn validate_write_options(
 /// Returns `RequirementNotMet` with `operation` if native rename or requested
 /// durability is unavailable. Runtime mount restrictions remain operation
 /// errors.
-pub(super) fn validate_rename_options(
+pub(crate) fn validate_rename_options(
     options: &LocalRenameOptions,
     capabilities: LocalFileSystemCapabilities,
     operation: LocalFileOperation,
@@ -243,4 +243,51 @@ pub(super) fn validate_temp_options(
     crate::local::validate_temp_affixes(prefix, suffix).map_err(|error| {
         LocalFileError::from_io(operation, None, None, error).with_kind(LocalFileErrorKind::InvalidOptions)
     })
+}
+
+#[cfg(test)]
+mod rename_options_tests {
+    use super::validate_rename_options;
+    use crate::LocalDurabilityRequirement;
+    use crate::LocalFileOperation;
+    use crate::LocalFileSystemCapabilities;
+    use crate::LocalRenameOptions;
+
+    #[test]
+    fn rename_options_validate_atomicity_and_durability_requirements() {
+        let capabilities = LocalFileSystemCapabilities::detect_host();
+        let atomicity = validate_rename_options(&LocalRenameOptions::new(), capabilities, LocalFileOperation::Rename);
+        if capabilities.supports_atomic_rename() {
+            assert!(atomicity.is_ok());
+        } else {
+            assert_eq!(
+                atomicity.expect_err("atomic rename must be required").kind(),
+                crate::LocalFileErrorKind::RequirementNotMet,
+            );
+        }
+
+        let required = validate_rename_options(
+            &LocalRenameOptions::new().with_durability(LocalDurabilityRequirement::Required),
+            capabilities,
+            LocalFileOperation::Rename,
+        );
+        if capabilities.supports_atomic_rename() && capabilities.supports_durable_rename() {
+            assert!(required.is_ok());
+        } else {
+            assert_eq!(
+                required
+                    .expect_err("unsupported durable rename must be rejected")
+                    .kind(),
+                crate::LocalFileErrorKind::RequirementNotMet,
+            );
+        }
+    }
+
+    #[test]
+    fn rename_options_reject_unavailable_atomic_rename() {
+        let capabilities = LocalFileSystemCapabilities::detect_host().with_rename_capabilities_for_test(false, true);
+        let error = validate_rename_options(&LocalRenameOptions::new(), capabilities, LocalFileOperation::Rename)
+            .expect_err("atomic rename must be rejected when unavailable");
+        assert_eq!(error.kind(), crate::LocalFileErrorKind::RequirementNotMet);
+    }
 }

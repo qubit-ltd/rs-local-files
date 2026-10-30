@@ -44,6 +44,13 @@ pub struct LocalFileSystemCapabilities {
 }
 
 impl LocalFileSystemCapabilities {
+    #[cfg(test)]
+    pub(crate) const fn with_rename_capabilities_for_test(mut self, atomic_rename: bool, durable_rename: bool) -> Self {
+        self.atomic_rename = atomic_rename;
+        self.durable_rename = durable_rename;
+        self
+    }
+
     /// Detects capabilities compiled for the current target platform.
     pub(crate) const fn detect_host() -> Self {
         Self {

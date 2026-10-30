@@ -27,6 +27,11 @@ impl LocalStagedDirectory {
     /// The published name can therefore briefly expose a writable root. If the
     /// final permission change fails, the error reports that publication
     /// occurred.
+    /// Use [`Self::sync_tree_with_options`] beforehand when the complete tree
+    /// must be synchronized. That call has its own deadline, and its work is
+    /// not reflected by this method's `file_synced` outcome. Required rename
+    /// durability is rejected against static capabilities before stage
+    /// mutation; runtime filesystem errors can still occur.
     pub fn publish_new(
         mut self,
         parent: &LocalDirectoryHandle,
@@ -116,6 +121,20 @@ impl LocalStagedDirectory {
         }
         let source = PathBuf::from(self.relative_name());
         let target = PathBuf::from(name);
+        let rename_options = crate::options::LocalRenameOptions::new().with_durability(options.durability());
+        if let Err(cause) = crate::local_file_system_validation::validate_rename_options(
+            &rename_options,
+            parent.filesystem().capabilities(),
+            LocalFileOperation::Rename,
+        ) {
+            return Err(super::super::tree_recovery::LocalTreePublishError::new(
+                cause.with_path(source.clone()).with_target(target.clone()),
+                Some(self),
+                Mutation::NotStarted,
+                Publication::NotPublished,
+                Access::Preserved,
+            ));
+        }
         let observed = match parent.observe_entry(&source) {
             Ok(observed) => observed,
             Err(cause) => {
@@ -306,7 +325,6 @@ impl LocalStagedDirectory {
         } else {
             None
         };
-        let rename_options = crate::options::LocalRenameOptions::new().with_durability(options.durability());
         let rename_result = parent
             .filesystem()
             .rename_with_options(&source, &target, &rename_options);
