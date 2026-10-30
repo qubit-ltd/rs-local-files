@@ -18,10 +18,18 @@ use qubit_local_files::policy::LocalOwnerAccessPolicy;
 use tempfile::tempdir;
 
 fn denied_handle(root: &Path) -> qubit_local_files::directory::LocalDirectoryHandle {
-    LocalFileSystem::host()
-        .expect("host filesystem")
+    #[cfg(windows)]
+    let filesystem = LocalFileSystem::rooted(root).expect("rooted filesystem");
+    #[cfg(not(windows))]
+    let filesystem = LocalFileSystem::host().expect("host filesystem");
+    #[cfg(windows)]
+    let path = Path::new("/");
+    #[cfg(not(windows))]
+    let path = root;
+
+    filesystem
         .open_directory_with_options(
-            root,
+            path,
             &LocalDirectoryOpenOptions::new().with_component_policy(
                 LocalComponentPolicy::deny_names(vec![OsString::from("blocked")]).expect("policy"),
             ),
