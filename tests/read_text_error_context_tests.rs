@@ -77,6 +77,18 @@ fn test_rooted_read_limits_keep_bound_path_and_pwd() {
 fn test_host_relative_invalid_utf8_keeps_first_pwd_in_subprocess() {
     if let Some(fixture) = std::env::var_os(HOST_CHILD_FIXTURE) {
         let fixture = std::path::PathBuf::from(fixture);
+        #[cfg(windows)]
+        let fixture = {
+            use std::os::windows::ffi::OsStrExt;
+            use std::os::windows::ffi::OsStringExt;
+
+            let path = fixture.as_os_str().encode_wide().collect::<Vec<_>>();
+            if path.starts_with(&[92, 92, 63, 92]) {
+                std::path::PathBuf::from(std::ffi::OsString::from_wide(&path[4..]))
+            } else {
+                fixture
+            }
+        };
         let expected_path = fixture.join("bad.txt");
         let filesystem = LocalFileSystem::host().expect("Host");
         let error = filesystem.read_text(Path::new("bad.txt")).expect_err("UTF8");
