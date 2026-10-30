@@ -104,6 +104,98 @@ only actual entries (including a link itself), never alias descendants. Keep
 ordinary regular-file readers and temporary-resource calls unchanged; no new
 tree-validation option is required for those paths.
 
+### Sync a complete tree before durable publication
+
+Finish writing the stage and applying its final permissions before syncing it.
+`sync_tree_with_options` synchronizes regular files, then child directories from
+deepest to shallowest, the stage root, and the creating parent. Its deadline is
+cooperative: it checks between operations but cannot cancel a kernel call that
+is already blocked. The walk observes entries as it proceeds; it is not an
+atomic snapshot against concurrent changes.
+
+After a successful tree sync, avoid changing file contents, names, or
+permissions before publication. Any such change requires the affected files or
+directories to be synchronized again. The following Unix example creates an
+isolated backup, syncs it, and then asks publication to durably rename it:
+
+```rust
+#[cfg(unix)]
+{
+use std::ffi::OsStr;
+use std::path::Path;
+
+use qubit_local_files::LocalFileSystem;
+use qubit_local_files::directory::LocalDirectoryHandle;
+use qubit_local_files::options::{
+    LocalDirectoryOpenOptions, LocalListOptions, LocalTempDirectoryOptions,
+    LocalTreePublishOptions,
+};
+use qubit_local_files::outcome::LocalTreePublication;
+use qubit_local_files::policy::LocalDurabilityRequirement;
+
+fn publish_backup(parent: &LocalDirectoryHandle) -> Result<(), Box<dyn std::error::Error>> {
+    let mut stage = parent.create_staged_directory(&LocalTempDirectoryOptions::new())?;
+    let mut manifest = &b"backup version 1\n"[..];
+    stage.write_file_new(Path::new("manifest.txt"), &mut manifest, 1024)?;
+
+    if let Err(error) = stage.sync_tree_with_options(parent, &LocalListOptions::new()) {
+        stage.cleanup()?;
+        return Err(error.into());
+    }
+
+    let options = LocalTreePublishOptions::new()
+        .with_durability(LocalDurabilityRequirement::Required);
+    match stage.publish_new(parent, OsStr::new("backup-current"), &options) {
+        Ok(outcome) => {
+            assert_eq!(outcome.publication(), LocalTreePublication::Published);
+            assert!(outcome.durable());
+        }
+        Err(error) => {
+            let publication = error.publication();
+            let (cause, stage, retained) = error.into_parts();
+            if publication == LocalTreePublication::NotPublished {
+                if let Some(stage) = stage {
+                    stage.cleanup()?;
+                }
+                for resource in retained {
+                    resource.cleanup()?;
+                }
+            } else {
+                if let Some(stage) = stage {
+                    drop(stage.retain_in_place());
+                }
+                for resource in retained {
+                    drop(resource.retain_in_place());
+                }
+            }
+            return Err(cause.into());
+        }
+    }
+    Ok(())
+}
+
+let result = (|| -> Result<(), Box<dyn std::error::Error>> {
+    let fixture = tempfile::tempdir()?;
+    let filesystem = LocalFileSystem::host()?;
+    let parent = filesystem.open_directory_with_options(
+        fixture.path(), &LocalDirectoryOpenOptions::new(),
+    )?;
+    publish_backup(&parent)?;
+    Ok(())
+})();
+result.unwrap();
+}
+```
+
+The example's `outcome.file_synced()` would describe only synchronization
+performed by `publish_new`; it does not record the preceding `sync_tree` call.
+The default publish `file_sync` is `NotRequired`, so this example makes no
+claim about that outcome field. Required rename durability depends on platform
+and filesystem support; for example, Windows rejects this static requirement
+before changing stage permissions. Namespace durability reports the operating
+system's synchronization protocol, not physical persistence by storage
+hardware.
+
 This staged backup example captures the generated name and identity before
 publishing. If the destination already exists, the returned stage is explicitly
 retained and reopened beneath the same parent; cleanup only proceeds after the

@@ -2194,3 +2194,11 @@ CI workflow 在 Linux、macOS、Windows 上运行当前 crate 的测试。`windo
 和构建依赖图时需要该 checkout。该 job 的测试命令仍只运行 `rs-local-files`，所以这是当前 crate 测试，不是下游测试。
 本 crate CI 不加入 downstream all-features 命令。Darwin ACL 语义解释和 Windows 原生安全观测/owner policy 结果仍按上表阻塞；
 仅编译证据不能代替原生运行证据。
+
+## 30. 暂存目录树同步与发布
+
+`sync_tree_with_options()` 在公开入口捕获一次 `Instant`，并在文件同步、递归观察、目录同步、stage 根目录和创建它的 parent 之间共用同一个期限。内部阶段不得重启预算。期限检查采用协作式方式，无法取消已经进入执行的操作系统调用。超时会阻止后续同步操作，但不会撤销已经完成的同步。`NotRequired` 文件同步不会遍历目录树。
+
+完整树同步先处理普通文件，再按目录深度从深到浅同步子目录，最后同步 stage 根目录和创建它的 parent。操作期间会复核条目和目录 identity，但遍历无法对抗并发命名空间修改，也不构成原子快照。调用方应在同步前完成内容与权限修改；之后任何内容、名称或权限变更都要求重新同步受影响部分。
+
+树发布将文件同步与命名空间耐久性作为独立选项。先前的 `sync_tree_with_options()` 不会记录到后续发布结果的 `file_synced` 字段。Required 命名空间耐久性会在修改 stage 前按静态 rename 能力校验，但仍可能遇到运行时文件系统错误。成功的耐久性结果描述操作系统同步协议，不证明存储硬件已物理持久化数据。

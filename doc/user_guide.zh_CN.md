@@ -67,6 +67,83 @@ opaque identity，不含权限句柄；重新操作前须通过同一个 parent 
 迁移时，精确 expected 集合只列实际条目（链接本身也算一个条目），不要列出通过链接 alias 才能到达的后代。
 正确使用普通文件 reader 和临时资源的代码无需调整，也不需要新增树验证选项。
 
+### 完整树同步后再耐久发布
+
+先完成 stage 写入和最终权限设置，再执行同步。`sync_tree_with_options` 依次同步普通文件、从深到浅的子目录、stage 根目录和创建它的 parent。期限采用协作式检查：每个操作间会检查期限，但无法取消已经进入阻塞状态的内核调用。遍历会逐步观察条目，不构成抵抗并发修改的原子快照。
+
+树同步成功后，发布前不要再修改文件内容、名称或权限。任何此类修改都需要重新同步受影响的文件或目录。下面的 Unix 示例在独立临时目录中创建备份、同步整棵树，然后请求以耐久 rename 发布：
+
+```rust
+#[cfg(unix)]
+{
+use std::ffi::OsStr;
+use std::path::Path;
+
+use qubit_local_files::LocalFileSystem;
+use qubit_local_files::directory::LocalDirectoryHandle;
+use qubit_local_files::options::{
+    LocalDirectoryOpenOptions, LocalListOptions, LocalTempDirectoryOptions,
+    LocalTreePublishOptions,
+};
+use qubit_local_files::outcome::LocalTreePublication;
+use qubit_local_files::policy::LocalDurabilityRequirement;
+
+fn publish_backup(parent: &LocalDirectoryHandle) -> Result<(), Box<dyn std::error::Error>> {
+    let mut stage = parent.create_staged_directory(&LocalTempDirectoryOptions::new())?;
+    let mut manifest = &b"backup version 1\n"[..];
+    stage.write_file_new(Path::new("manifest.txt"), &mut manifest, 1024)?;
+
+    if let Err(error) = stage.sync_tree_with_options(parent, &LocalListOptions::new()) {
+        stage.cleanup()?;
+        return Err(error.into());
+    }
+
+    let options = LocalTreePublishOptions::new()
+        .with_durability(LocalDurabilityRequirement::Required);
+    match stage.publish_new(parent, OsStr::new("backup-current"), &options) {
+        Ok(outcome) => {
+            assert_eq!(outcome.publication(), LocalTreePublication::Published);
+            assert!(outcome.durable());
+        }
+        Err(error) => {
+            let publication = error.publication();
+            let (cause, stage, retained) = error.into_parts();
+            if publication == LocalTreePublication::NotPublished {
+                if let Some(stage) = stage {
+                    stage.cleanup()?;
+                }
+                for resource in retained {
+                    resource.cleanup()?;
+                }
+            } else {
+                if let Some(stage) = stage {
+                    drop(stage.retain_in_place());
+                }
+                for resource in retained {
+                    drop(resource.retain_in_place());
+                }
+            }
+            return Err(cause.into());
+        }
+    }
+    Ok(())
+}
+
+let result = (|| -> Result<(), Box<dyn std::error::Error>> {
+    let fixture = tempfile::tempdir()?;
+    let filesystem = LocalFileSystem::host()?;
+    let parent = filesystem.open_directory_with_options(
+        fixture.path(), &LocalDirectoryOpenOptions::new(),
+    )?;
+    publish_backup(&parent)?;
+    Ok(())
+})();
+result.unwrap();
+}
+```
+
+示例中的 `outcome.file_synced()` 只表示 `publish_new` 本身执行的文件同步，不会记录之前的 `sync_tree` 调用。默认发布选项的 `file_sync` 为 `NotRequired`，因此示例不对该字段作出断言。Required rename 耐久性取决于平台和文件系统能力；例如 Windows 会在修改 stage 权限前拒绝这一静态要求。命名空间耐久性表示操作系统同步协议的结果，不代表存储硬件已物理持久化数据。
+
 下面的目录备份示例会在发布前保存随机名称和 identity。若目标已存在，错误会把 stage 交还给
 调用方；示例先显式保留，再通过同一个 parent 按身份重新打开，确认后才清理：
 

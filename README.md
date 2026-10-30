@@ -350,6 +350,7 @@ path conversion intentionally does not support UNC paths.
 ## Learn More
 
 - [User guide](doc/user_guide.md)
+- [Synchronize and publish a complete staged tree](doc/user_guide.md#sync-a-complete-tree-before-durable-publication)
 - [用户手册](doc/user_guide.zh_CN.md)
 - [API reference](https://docs.rs/qubit-local-files)
 - [Design document](doc/local_file_system_design.md)

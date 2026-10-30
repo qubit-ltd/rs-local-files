@@ -1959,3 +1959,28 @@ downstream test. No downstream all-features command belongs in this crate's CI.
 Native Darwin ACL interpretation and native Windows security/owner-policy
 results remain blocked as listed above; compile-only evidence is not runtime
 evidence.
+
+## 30. Staged Tree Synchronization and Publication
+
+`sync_tree_with_options()` captures one `Instant` at its public entry and uses
+the resulting deadline across file synchronization, recursive observation,
+directory synchronization, the stage root, and the creating parent. Internal
+stages must not restart the budget. The deadline is cooperative and cannot
+cancel an operating-system call already in progress. A timeout prevents later
+sync operations but does not undo completed synchronization. `NotRequired`
+file synchronization does not traverse the tree.
+
+Successful tree synchronization orders regular files first, then child
+directories deepest-first, then the stage root and creating parent. Entry and
+directory identities are checked during the operation, but the walk is not an
+atomic snapshot against concurrent namespace mutation. Callers must finish
+content and permission changes before syncing; subsequent content, name, or
+permission changes require the affected synchronization to be repeated.
+
+Tree publication keeps file synchronization and namespace durability as
+separate options. A prior `sync_tree_with_options()` call is not recorded in a
+later publish outcome's `file_synced` field. Required namespace durability is
+checked against static rename capabilities before stage mutation, while
+runtime filesystem errors remain possible. A successful durability outcome
+describes the operating-system synchronization protocol and does not prove
+physical persistence by storage hardware.

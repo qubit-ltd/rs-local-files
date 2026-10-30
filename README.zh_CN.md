@@ -268,6 +268,7 @@ adapter 兼容性由 adapter 仓库或独立集成 job 负责。FreeBSD 14.3 已
 ## 延伸阅读
 
 - [User guide](doc/user_guide.md)
+- [同步并发布完整暂存目录树](doc/user_guide.zh_CN.md#完整树同步后再耐久发布)
 - [用户手册](doc/user_guide.zh_CN.md)
 - [API 文档](https://docs.rs/qubit-local-files)
 - [English design document](doc/local_file_system_design.md)
