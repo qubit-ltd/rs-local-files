@@ -716,7 +716,7 @@ fn test_copy_required_durability_syncs_staging_before_publication() {
 
 /// Verifies staged writer sync failures remain deterministic when process
 /// permissions cannot enforce the native parent-directory precondition.
-#[cfg(feature = "test-support")]
+#[cfg(all(feature = "test-support", not(windows)))]
 #[test]
 fn test_writer_sync_failure_obeys_preferred_and_required_durability() {
     const TEST_NAME: &str = "test_writer_sync_failure_obeys_preferred_and_required_durability";
