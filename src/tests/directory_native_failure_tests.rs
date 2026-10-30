@@ -49,11 +49,12 @@ fn assert_native_failure(error: &LocalFileError, operation: LocalFileOperation, 
     let mut source: Option<&(dyn std::error::Error + 'static)> = Some(error);
     let mut found = false;
     while let Some(current) = source {
-        if let Some(io) = current.downcast_ref::<std::io::Error>() {
-            if io.kind() == std::io::ErrorKind::Other && io.to_string() == "injected native I/O contract failure" {
-                found = true;
-                break;
-            }
+        if let Some(io) = current.downcast_ref::<std::io::Error>()
+            && io.kind() == std::io::ErrorKind::Other
+            && io.to_string() == "injected native I/O contract failure"
+        {
+            found = true;
+            break;
         }
         source = current.source();
     }

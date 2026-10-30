@@ -9,8 +9,8 @@
 mod coverage_binding_tests;
 mod coverage_directory_handle_tests;
 mod coverage_staged_directory_tests;
-mod directory_native_failure_tests;
 mod deletion_native_failure_tests;
+mod directory_native_failure_tests;
 mod error;
 mod file_system;
 mod filesystem_native_failure_tests;

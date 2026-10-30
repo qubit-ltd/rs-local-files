@@ -123,7 +123,12 @@ fn reject_destination_inside_source(src: &Path, canonical_source: &Path, destina
 
 #[cfg(all(test, unix))]
 mod error_contract_tests {
-    use super::*;
+    use std::fs;
+    use std::io::ErrorKind;
+
+    use super::inspect_copy_source_directory;
+    use super::metadata_for_copy_source;
+    use crate::LocalSymlinkPolicy;
 
     #[test]
     fn source_inspection_rejects_file_and_contained_destination() {

@@ -440,7 +440,8 @@ mod deleted_cwd_constructor_tests {
     #[test]
     fn test_native_root_constructor_cursor_failure_retains_requested_root() {
         let path = Path::new("/");
-        // Opening the native root has no relative components, so the first cursor is constructor-owned.
+        // Opening the native root has no relative components, so the first cursor is
+        // constructor-owned.
         let guard = NativeIoFaultGuard::fail_on(NativeIoPoint::OpenCursor, 1);
         let error = RootedLocalFileSystem::open_with_contract(
             path,

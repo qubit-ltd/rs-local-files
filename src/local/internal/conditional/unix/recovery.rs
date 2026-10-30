@@ -129,7 +129,15 @@ pub(super) fn name(entry: &super::super::ConditionalEntry) -> io::Result<CString
 
 #[cfg(test)]
 mod invalid_name_contract_tests {
-    use super::*;
+    use std::ffi::CString;
+    use std::fs::File;
+    use std::io;
+    use std::os::unix::fs::MetadataExt;
+    use std::path::PathBuf;
+
+    use super::EntryAccess;
+    use super::RecoveryAccess;
+    use super::name;
 
     #[test]
     fn retained_native_reader_metadata_failures_preserve_identity_and_diagnostic_context() {

@@ -573,7 +573,17 @@ fn commit_staged_copy_file(
 
 #[cfg(all(test, unix))]
 mod error_contract_tests {
-    use super::*;
+    use std::io::ErrorKind;
+
+    use super::StagedCopyCommitOptions;
+    use super::commit_staged_copy_file;
+    use super::stage_copy_file;
+    use crate::LocalCopyConflictPolicy;
+    use crate::LocalCopyDirOptions;
+    use crate::LocalCopyDirStage;
+    use crate::LocalCopyDirStats;
+    use crate::LocalSymlinkPolicy;
+    use crate::local::CopyBudget;
 
     #[test]
     fn racing_destination_skip_cleans_real_staging_and_keeps_winner() {

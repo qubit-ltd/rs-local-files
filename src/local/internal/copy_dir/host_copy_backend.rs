@@ -458,7 +458,18 @@ fn symlink_target_is_directory(
 
 #[cfg(all(test, unix))]
 mod error_contract_tests {
-    use super::*;
+    use std::collections::HashSet;
+    use std::fs;
+    use std::io::ErrorKind;
+
+    use super::HostCopyBackend;
+    use super::enter_copy_directory;
+    use super::symlink_target_is_directory;
+    use crate::LocalCopyDirOptions;
+    use crate::LocalCopyDirStage;
+    use crate::LocalCopyDirStats;
+    use crate::local::CopyBudget;
+    use crate::local::internal::CopyTreeBackend;
 
     #[test]
     fn entering_a_directory_rejects_expired_deadlines_and_depth_before_mutation() {

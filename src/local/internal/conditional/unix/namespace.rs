@@ -277,7 +277,12 @@ fn invalid_name(_: std::ffi::NulError) -> io::Error {
 
 #[cfg(test)]
 mod invalid_operand_contract_tests {
-    use super::*;
+    use std::fs::File;
+    use std::io;
+    use std::path::Path;
+
+    use super::Namespace;
+    use crate::options::LocalWriteOptions;
 
     #[test]
     fn native_namespace_rejects_root_nul_and_invalid_relative_operands() {

@@ -37,7 +37,14 @@ mod backend_error_contract_tests {
         assert_eq!(bytes, b"candidate");
     }
 
-    use super::*;
+    use std::fs;
+    use std::io;
+
+    use super::ConditionalBackend;
+    use super::FakeBackend;
+    use super::required_options;
+    use crate::local::internal::conditional::ConditionalHooks;
+    use crate::outcome::LocalConditionalPublicationState;
 
     #[test]
     fn fake_output_and_retained_access_report_missing_files_without_mutating_target() {

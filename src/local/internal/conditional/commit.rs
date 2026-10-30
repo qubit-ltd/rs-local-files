@@ -612,7 +612,10 @@ where
 
 #[cfg(all(test, feature = "digest"))]
 mod backend_phase_error_contract_tests {
+    use std::path::PathBuf;
+
     use qubit_io::Output as ByteOutput;
+    use sha2::Digest;
     use sha2::Sha256;
 
     use super::super::ConditionalEntry;
@@ -620,7 +623,17 @@ mod backend_phase_error_contract_tests {
     use super::super::NativeAttempt;
     use super::super::RecoveryAccess;
     use super::super::fake_backend::FakeBackend;
-    use super::*;
+    use super::ConditionalBackend;
+    use super::ConditionalPoint;
+    use super::commit_conditional;
+    use super::io;
+    use crate::LocalFileError;
+    use crate::LocalFileOperation;
+    use crate::error::LocalConditionalFailureReason;
+    use crate::error::LocalConditionalWriteStage;
+    use crate::options::LocalWritePrecondition;
+    use crate::outcome::LocalConditionalPublicationState;
+    use crate::recovery::LocalRecoveryFileRole;
 
     #[derive(Clone, Copy, Debug, Eq, PartialEq)]
     enum FailurePhase {

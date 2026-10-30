@@ -602,10 +602,9 @@ fn test_directory_resource_scan_child() {
             }
         }
         "owner-policy" => {
-            assert!(
-                cfg!(target_os = "linux"),
-                "complete owner ACL verification is Linux-specific here"
-            );
+            if !cfg!(target_os = "linux") {
+                panic!("complete owner ACL verification is Linux-specific here");
+            }
             match stage.apply_owner_access_policy_with_options(&policy, &LocalListOptions::new()) {
                 Ok(outcome) => {
                     assert_eq!(outcome.access_state(), LocalTreeAccessState::OwnerPolicyApplied);

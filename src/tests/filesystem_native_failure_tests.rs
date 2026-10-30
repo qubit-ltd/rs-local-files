@@ -402,12 +402,13 @@ fn rooted_copy_metadata_failure_matrix_preserves_sources_and_proven_destination_
 #[cfg(all(feature = "digest", any(target_os = "linux", target_os = "macos")))]
 #[test]
 fn conditional_authority_failure_keeps_writer_context_and_creates_no_staging() {
+    use sha2::Digest;
+    use sha2::Sha256;
+
     use crate::options::LocalWriteMode;
     use crate::options::LocalWriteOptions;
     use crate::options::LocalWritePrecondition;
     use crate::policy::LocalSymlinkPolicy;
-    use sha2::Digest;
-    use sha2::Sha256;
 
     let (fixture, mut filesystem) = rooted_fixture();
     filesystem

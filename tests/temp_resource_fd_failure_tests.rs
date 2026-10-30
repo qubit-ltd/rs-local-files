@@ -289,6 +289,9 @@ fn test_filesystem_descriptor_budget_child() {
     } else {
         native_path.as_path()
     };
+    // Keep the structured error intact below so the test can inspect its native
+    // source.
+    #[allow(clippy::result_large_err)]
     let invoke = || -> Result<(), LocalFileError> {
         match operation {
             "observed" => filesystem

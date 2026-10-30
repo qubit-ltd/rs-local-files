@@ -192,7 +192,10 @@ fn invalid_copy_source(path: &Path) -> Error {
 
 #[cfg(all(test, unix))]
 mod error_contract_tests {
-    use super::*;
+    use std::io::ErrorKind;
+
+    use super::OpenedCopySource;
+    use crate::LocalSymlinkPolicy;
 
     #[test]
     fn opened_source_normalizes_final_link_but_preserves_missing_cause() {

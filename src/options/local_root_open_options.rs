@@ -35,7 +35,7 @@ use crate::policy::LocalSymlinkPolicy;
 /// let directory = tempfile::tempdir()?;
 /// fs::write(directory.path().join("item"), b"rooted")?;
 /// let options = LocalRootOpenOptions::new().with_resolution_limits(
-///     LocalResolutionLimits::new().with_max_actual_components(8),
+///     LocalResolutionLimits::new().with_max_actual_components(64),
 /// );
 /// let filesystem = LocalFileSystem::rooted_with_options(directory.path(), &options)?;
 /// let reader = filesystem.open_reader(Path::new("item"))?;
