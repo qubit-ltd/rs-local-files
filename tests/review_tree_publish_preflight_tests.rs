@@ -21,6 +21,7 @@ use qubit_local_files::outcome::LocalTreeAccessState;
 use qubit_local_files::outcome::LocalTreeMutationState;
 use qubit_local_files::outcome::LocalTreePublication;
 use qubit_local_files::policy::LocalDurabilityRequirement;
+use qubit_local_files::policy::LocalPrivacyRequirement;
 use qubit_local_files::policy::LocalTreeFinalAccess;
 
 #[test]
@@ -31,7 +32,7 @@ fn test_tree_publish_required_durability_rejects_before_access_mutation() {
         .open_directory_with_options(fixture.path(), &LocalDirectoryOpenOptions::new())
         .expect("parent should open");
     let mut stage = parent
-        .create_staged_directory(&LocalTempDirectoryOptions::new())
+        .create_staged_directory(&LocalTempDirectoryOptions::new().with_privacy(LocalPrivacyRequirement::Required))
         .expect("stage should be created");
     stage
         .write_file_new(Path::new("payload"), &mut &b"unchanged payload"[..], 64)

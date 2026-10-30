@@ -16,6 +16,7 @@
 use std::fs;
 #[cfg(target_os = "linux")]
 use std::os::unix::fs::MetadataExt;
+#[cfg(any(target_os = "linux", windows))]
 use std::path::Path;
 
 use qubit_local_files::LocalFileSystem;
