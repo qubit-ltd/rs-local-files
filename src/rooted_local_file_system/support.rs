@@ -596,21 +596,30 @@ fn opening_root_target_matches_anchor(root: &crate::rooted::Root, target: &Path)
     #[cfg(windows)]
     {
         use std::path::Component;
+        use std::path::Prefix;
         let Some(target_prefix) = target.components().find_map(|component| match component {
-            Component::Prefix(prefix) => Some(prefix.as_os_str()),
+            Component::Prefix(prefix) => Some((prefix.kind(), prefix.as_os_str())),
             _ => None,
         }) else {
             return true;
         };
         let Some(root_prefix) = root.path().components().find_map(|component| match component {
-            Component::Prefix(prefix) => Some(prefix.as_os_str()),
+            Component::Prefix(prefix) => Some((prefix.kind(), prefix.as_os_str())),
             _ => None,
         }) else {
             return false;
         };
-        target_prefix
-            .to_string_lossy()
-            .eq_ignore_ascii_case(&root_prefix.to_string_lossy())
+        match (target_prefix, root_prefix) {
+            ((Prefix::Disk(target_drive), _), (Prefix::Disk(root_drive), _))
+            | ((Prefix::Disk(target_drive), _), (Prefix::VerbatimDisk(root_drive), _))
+            | ((Prefix::VerbatimDisk(target_drive), _), (Prefix::Disk(root_drive), _))
+            | ((Prefix::VerbatimDisk(target_drive), _), (Prefix::VerbatimDisk(root_drive), _)) => {
+                target_drive.eq_ignore_ascii_case(&root_drive)
+            }
+            ((_, target_prefix), (_, root_prefix)) => target_prefix
+                .to_string_lossy()
+                .eq_ignore_ascii_case(&root_prefix.to_string_lossy()),
+        }
     }
     #[cfg(not(windows))]
     {
