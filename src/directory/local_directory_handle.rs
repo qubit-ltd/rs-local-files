@@ -578,59 +578,75 @@ impl LocalDirectoryHandle {
         )?;
         let mut binding_anchors = None;
         let binding_deadline = options.path_binding().and_then(|limits| limits.deadline());
-        let binding_observations =
-            if let (Some(limits), Some(mut child_observations)) = (options.path_binding(), child_observations) {
-                let (mut observations, mut anchors) =
-                    if let (Some(observations), Some(anchors)) = (&self.binding_observations, &self.binding_anchors) {
-                        (observations.clone(), anchors.clone())
-                    } else {
-                        let observation = self.observe()?;
-                        let identity = observation.identity().cloned().ok_or_else(|| {
-                            LocalFileError::new(LocalFileErrorKind::Unsupported, LocalFileOperation::Metadata)
-                        })?;
-                        let mut observations = Vec::new();
-                        observations.try_reserve_exact(1).map_err(|_| {
-                            LocalFileError::new(LocalFileErrorKind::ResourceLimit, LocalFileOperation::OpenRoot)
-                        })?;
-                        observations.push(observation);
-                        let mut anchors = Vec::new();
-                        anchors.try_reserve_exact(1).map_err(|_| {
-                            LocalFileError::new(LocalFileErrorKind::ResourceLimit, LocalFileOperation::OpenRoot)
-                        })?;
-                        let root = self.root_authority()?;
-                        anchors.push(binding_anchor(
-                            root,
-                            root.path().to_path_buf(),
-                            identity,
-                            self.filesystem.symlink_policy(),
-                        )?);
-                        (observations, anchors)
-                    };
-                let additional = child_observations.len().saturating_sub(1);
-                let ancestor_count = observations.len().saturating_sub(1).saturating_add(additional);
-                if limits.max_ancestors().is_some_and(|maximum| ancestor_count > maximum) {
-                    return Err(
-                        LocalFileError::new(LocalFileErrorKind::ResourceLimit, LocalFileOperation::OpenRoot)
-                            .with_path(diagnostic),
-                    );
-                }
-                child_observations.drain(..1);
-                observations.try_reserve(additional).map_err(|_| {
-                    LocalFileError::new(LocalFileErrorKind::ResourceLimit, LocalFileOperation::OpenRoot)
-                })?;
-                observations.extend(child_observations);
-                if let Some(mut child_anchors) = child_anchors {
-                    child_anchors.drain(..1);
-                    anchors.try_reserve(child_anchors.len()).map_err(|_| {
+        let binding_observations = if let (Some(limits), Some(mut child_observations)) =
+            (options.path_binding(), child_observations)
+        {
+            let (mut observations, mut anchors) =
+                if let (Some(observations), Some(anchors)) = (&self.binding_observations, &self.binding_anchors) {
+                    if let Some(budget) = path_budget.as_mut() {
+                        for anchor in anchors {
+                            budget.debit(anchor.path.as_os_str().len(), LocalFileOperation::OpenRoot, &diagnostic)?;
+                            budget.debit(
+                                anchor.opening_recipe.as_os_str().len(),
+                                LocalFileOperation::OpenRoot,
+                                &diagnostic,
+                            )?;
+                        }
+                    }
+                    (observations.clone(), anchors.clone())
+                } else {
+                    let observation = self.observe()?;
+                    let identity = observation.identity().cloned().ok_or_else(|| {
+                        LocalFileError::new(LocalFileErrorKind::Unsupported, LocalFileOperation::Metadata)
+                    })?;
+                    let mut observations = Vec::new();
+                    observations.try_reserve_exact(1).map_err(|_| {
                         LocalFileError::new(LocalFileErrorKind::ResourceLimit, LocalFileOperation::OpenRoot)
                     })?;
-                    anchors.extend(child_anchors);
-                }
-                binding_anchors = Some(anchors);
-                Some(observations)
-            } else {
-                None
-            };
+                    observations.push(observation);
+                    let mut anchors = Vec::new();
+                    anchors.try_reserve_exact(1).map_err(|_| {
+                        LocalFileError::new(LocalFileErrorKind::ResourceLimit, LocalFileOperation::OpenRoot)
+                    })?;
+                    let root = self.root_authority()?;
+                    if let Some(budget) = path_budget.as_mut() {
+                        let path_bytes = root.path().as_os_str().len();
+                        budget.debit(path_bytes, LocalFileOperation::OpenRoot, &diagnostic)?;
+                        budget.debit(path_bytes, LocalFileOperation::OpenRoot, &diagnostic)?;
+                    }
+                    anchors.push(binding_anchor(
+                        root,
+                        root.path().to_path_buf(),
+                        identity,
+                        self.filesystem.symlink_policy(),
+                    )?);
+                    (observations, anchors)
+                };
+            let additional = child_observations.len().saturating_sub(1);
+            let ancestor_count = observations.len().saturating_sub(1).saturating_add(additional);
+            if limits.max_ancestors().is_some_and(|maximum| ancestor_count > maximum) {
+                return Err(
+                    LocalFileError::new(LocalFileErrorKind::ResourceLimit, LocalFileOperation::OpenRoot)
+                        .with_path(diagnostic),
+                );
+            }
+            child_observations.drain(..1);
+            observations
+                .try_reserve(additional)
+                .map_err(|_| LocalFileError::new(LocalFileErrorKind::ResourceLimit, LocalFileOperation::OpenRoot))?;
+            observations.extend(child_observations);
+            if let Some(mut child_anchors) = child_anchors {
+                child_anchors.drain(..1);
+                anchors.try_reserve(child_anchors.len()).map_err(|_| {
+                    LocalFileError::new(LocalFileErrorKind::ResourceLimit, LocalFileOperation::OpenRoot)
+                })?;
+                anchors.extend(child_anchors);
+            }
+            binding_anchors = Some(anchors);
+            Some(observations)
+        } else {
+            None
+        };
         Ok(Self {
             filesystem,
             component_policy,

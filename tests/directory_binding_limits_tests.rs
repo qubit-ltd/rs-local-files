@@ -10,12 +10,86 @@ use std::path::Path;
 
 use qubit_local_files::LocalFileSystem;
 use qubit_local_files::error::LocalFileErrorKind;
+use qubit_local_files::error::LocalFileOperation;
+use qubit_local_files::observation::LocalSourceVerification;
 use qubit_local_files::options::LocalDirectoryOpenOptions;
 use qubit_local_files::options::LocalObservedReadOptions;
 use qubit_local_files::options::LocalPathBindingOptions;
 use qubit_local_files::options::LocalResolutionLimits;
 use qubit_local_files::options::LocalRootOpenOptions;
 use tempfile::tempdir;
+
+#[test]
+fn test_child_binding_charges_inherited_anchor_paths() {
+    let scratch = tempdir().expect("fixture should exist");
+    let relative = std::iter::repeat_n("d", 32).collect::<Vec<_>>().join("/");
+    fs::create_dir_all(scratch.path().join(&relative)).expect("deep directory should exist");
+    fs::write(scratch.path().join(&relative).join("payload"), b"data").expect("payload should exist");
+    let path_bytes = scratch.path().join(&relative).as_os_str().len();
+    let cap = path_bytes
+        .checked_mul(4)
+        .and_then(|bytes| bytes.checked_add(64))
+        .expect("fixture budget should be representable");
+    let filesystem = LocalFileSystem::rooted(scratch.path()).expect("root should open");
+    let parent = filesystem
+        .open_directory_with_options(
+            Path::new(&relative),
+            &LocalDirectoryOpenOptions::new().with_path_binding(LocalPathBindingOptions::new()),
+        )
+        .expect("unbounded parent binding should open");
+
+    let error = parent
+        .open_directory(
+            Path::new("."),
+            &LocalDirectoryOpenOptions::new()
+                .with_path_binding(LocalPathBindingOptions::new().with_max_path_bytes(cap)),
+        )
+        .expect_err("the inherited anchor paths should exceed the cap");
+
+    assert_eq!(error.kind(), LocalFileErrorKind::ResourceLimit);
+    assert_eq!(error.operation(), LocalFileOperation::OpenRoot);
+    assert!(error.path().is_some());
+    parent
+        .observe()
+        .expect("failed child binding must leave the parent usable");
+
+    let unbounded_child = parent
+        .open_directory(
+            Path::new("."),
+            &LocalDirectoryOpenOptions::new()
+                .with_path_binding(LocalPathBindingOptions::new().with_max_path_bytes(usize::MAX)),
+        )
+        .expect("a sufficient cap should retain inherited evidence");
+    let reader = unbounded_child
+        .open_observed_reader(Path::new("payload"), &LocalObservedReadOptions::new())
+        .expect("child binding should open its payload");
+    assert_eq!(
+        LocalSourceVerification::Unchanged,
+        reader
+            .verify_path_binding()
+            .expect("inherited path evidence should verify")
+    );
+}
+
+#[test]
+fn test_unbound_parent_fallback_paths_are_charged() {
+    let scratch = tempdir().expect("fixture should exist");
+    let filesystem = LocalFileSystem::rooted(scratch.path()).expect("root should open");
+    let parent = filesystem
+        .open_directory_with_options(Path::new("."), &LocalDirectoryOpenOptions::new())
+        .expect("unbound parent should open");
+    let error = parent
+        .open_directory(
+            Path::new("."),
+            &LocalDirectoryOpenOptions::new().with_path_binding(LocalPathBindingOptions::new().with_max_path_bytes(0)),
+        )
+        .expect_err("fallback anchor paths exceed a zero byte cap");
+
+    assert_eq!(LocalFileErrorKind::ResourceLimit, error.kind());
+    assert_eq!(LocalFileOperation::OpenRoot, error.operation());
+    assert!(error.path().is_some());
+    parent.observe().expect("failed fallback binding leaves parent usable");
+}
 
 #[cfg(windows)]
 mod support;
