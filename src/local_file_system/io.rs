@@ -821,43 +821,18 @@ impl LocalFileSystem {
         if max_bytes == 0 {
             return Ok(Vec::new());
         }
-        let mut result = Vec::with_capacity(max_bytes.min(8192));
-        let mut buffer = [0_u8; 8192];
-        while result.len() < max_bytes {
-            let read_len = (max_bytes - result.len()).min(buffer.len());
-            #[cfg(feature = "test-support")]
-            if take_test_support("local-fs-read-prefix-read") {
-                let error = LocalFileError::from_io(
-                    LocalFileOperation::Read,
-                    Some(error_path),
-                    None,
-                    std::io::Error::other("injected prefix read failure"),
-                );
-                return Err(with_current_directory(error, resolver.current_directory()));
-            }
-            #[cfg(feature = "test-support")]
-            let read_result = if take_test_support("local-prefix-interrupted") {
-                Err(std::io::Error::from(std::io::ErrorKind::Interrupted))
-            } else {
-                Input::read(&mut reader, &mut buffer[..read_len])
-            };
-            #[cfg(not(feature = "test-support"))]
-            let read_result = Input::read(&mut reader, &mut buffer[..read_len]);
-            if matches!(&read_result, Err(error) if error.kind() == std::io::ErrorKind::Interrupted) {
-                continue;
-            }
-            let count = read_result.map_err(|source| {
-                with_current_directory(
-                    LocalFileError::from_io(LocalFileOperation::Read, Some(error_path.clone()), None, source),
-                    resolver.current_directory(),
-                )
-            })?;
-            if count == 0 {
-                break;
-            }
-            result.extend_from_slice(&buffer[..count]);
-        }
-        Ok(result)
+        collect_prefix_with_reserver(&mut reader, max_bytes, |output, additional| {
+            try_reserve_prefix(output, additional)
+        })
+        .map_err(|error| {
+            operation_error(
+                error,
+                LocalFileOperation::Read,
+                &error_path,
+                None,
+                resolver.current_directory(),
+            )
+        })
     }
 
     /// Opens a writer using this instance's default writer options.
@@ -914,6 +889,55 @@ impl LocalFileSystem {
     }
 }
 
+fn try_reserve_prefix(output: &mut Vec<u8>, additional: usize) -> std::io::Result<()> {
+    #[cfg(test)]
+    if tests::should_fail_prefix_reserve() {
+        return Err(std::io::Error::other("injected prefix reserve failure"));
+    }
+    output.try_reserve(additional).map_err(std::io::Error::other)
+}
+
+fn collect_prefix_with_reserver<S, F>(input: &mut S, maximum: usize, mut reserve: F) -> LocalResult<Vec<u8>>
+where
+    S: qubit_io::ByteInput + ?Sized,
+    F: FnMut(&mut Vec<u8>, usize) -> std::io::Result<()>,
+{
+    let mut result = Vec::new();
+    let mut buffer = [0_u8; 8192];
+    while result.len() < maximum {
+        let read_len = (maximum - result.len()).min(buffer.len());
+        #[cfg(feature = "test-support")]
+        if take_test_support("local-fs-read-prefix-read") {
+            return Err(LocalFileError::from_io(
+                LocalFileOperation::Read,
+                None,
+                None,
+                std::io::Error::other("injected prefix read failure"),
+            ));
+        }
+        #[cfg(feature = "test-support")]
+        let read_result = if take_test_support("local-prefix-interrupted") {
+            Err(std::io::Error::from(std::io::ErrorKind::Interrupted))
+        } else {
+            Input::read(input, &mut buffer[..read_len])
+        };
+        #[cfg(not(feature = "test-support"))]
+        let read_result = Input::read(input, &mut buffer[..read_len]);
+        if matches!(&read_result, Err(error) if error.kind() == std::io::ErrorKind::Interrupted) {
+            continue;
+        }
+        let count =
+            read_result.map_err(|source| LocalFileError::from_io(LocalFileOperation::Read, None, None, source))?;
+        if count == 0 {
+            break;
+        }
+        reserve(&mut result, count)
+            .map_err(|_| LocalFileError::new(LocalFileErrorKind::ResourceLimit, LocalFileOperation::Read))?;
+        result.extend_from_slice(&buffer[..count]);
+    }
+    Ok(result)
+}
+
 fn check_binding_deadline(deadline: Option<std::time::Instant>, path: &Path) -> LocalResult<()> {
     if deadline.is_some_and(|deadline| std::time::Instant::now() >= deadline) {
         return Err(LocalFileError::from_io(
@@ -928,13 +952,178 @@ fn check_binding_deadline(deadline: Option<std::time::Instant>, path: &Path) -> 
 
 #[cfg(test)]
 mod tests {
+    use std::cell::Cell;
+    use std::io::Cursor;
     use std::path::Path;
 
+    use super::LocalFileSystem;
+    use super::collect_prefix_with_reserver;
     use super::operation_error;
     use crate::error::LocalFileError;
     use crate::error::LocalFileErrorKind;
     use crate::error::LocalFileErrorSource;
     use crate::error::LocalFileOperation;
+
+    thread_local! {
+        static PREFIX_RESERVE_FAILURE_AFTER: Cell<Option<usize>> = const { Cell::new(None) };
+    }
+
+    pub(super) fn should_fail_prefix_reserve() -> bool {
+        PREFIX_RESERVE_FAILURE_AFTER.with(|failure_after| match failure_after.get() {
+            Some(0) => {
+                failure_after.set(None);
+                true
+            }
+            Some(remaining) => {
+                failure_after.set(Some(remaining - 1));
+                false
+            }
+            None => false,
+        })
+    }
+
+    fn fail_prefix_reserve_after(successful_reserves: usize) {
+        PREFIX_RESERVE_FAILURE_AFTER.with(|failure_after| failure_after.set(Some(successful_reserves)));
+    }
+
+    fn assert_prefix_allocation_context(
+        filesystem: &LocalFileSystem,
+        path: &Path,
+        expected_path: &Path,
+        expected_current_directory: Option<&Path>,
+    ) {
+        fail_prefix_reserve_after(0);
+        let error = filesystem
+            .read_prefix(path, 8)
+            .expect_err("injected reserve failure should fail the facade read");
+        assert_eq!(error.kind(), LocalFileErrorKind::ResourceLimit);
+        assert_eq!(error.operation(), LocalFileOperation::Read);
+        assert_eq!(error.path(), Some(expected_path));
+        assert_eq!(error.current_directory(), expected_current_directory);
+    }
+
+    #[test]
+    fn prefix_allocation_failure_keeps_host_absolute_context() {
+        let directory = tempfile::tempdir().expect("fixture should exist");
+        let path = directory.path().join("file");
+        std::fs::write(&path, b"payload").expect("file should exist");
+        let filesystem = LocalFileSystem::host().expect("Host should open");
+        assert_prefix_allocation_context(&filesystem, &path, &path, None);
+    }
+
+    #[test]
+    fn prefix_allocation_failure_keeps_host_relative_context() {
+        if std::env::var_os("QUBIT_PREFIX_RELATIVE_CHILD").is_some() {
+            let filesystem = LocalFileSystem::host().expect("Host should open");
+            let directory = std::env::current_dir().expect("child PWD should be readable");
+            assert_prefix_allocation_context(
+                &filesystem,
+                Path::new("file"),
+                &directory.join("file"),
+                Some(&directory),
+            );
+            return;
+        }
+
+        let directory = tempfile::tempdir().expect("fixture should exist");
+        std::fs::write(directory.path().join("file"), b"payload").expect("file should exist");
+        let output = std::process::Command::new(std::env::current_exe().expect("test executable should exist"))
+            .current_dir(directory.path())
+            .env("QUBIT_PREFIX_RELATIVE_CHILD", "1")
+            .args([
+                "--exact",
+                "local_file_system::io::tests::prefix_allocation_failure_keeps_host_relative_context",
+                "--nocapture",
+            ])
+            .output()
+            .expect("isolated relative-path test process should run");
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(
+            output.status.success()
+                && stdout.contains("running 1 test")
+                && stdout.contains("prefix_allocation_failure_keeps_host_relative_context ... ok"),
+            "isolated relative-path test must execute and pass; status: {}; stdout: {}; stderr: {}",
+            output.status,
+            stdout,
+            String::from_utf8_lossy(&output.stderr),
+        );
+    }
+
+    #[test]
+    fn prefix_allocation_failure_keeps_rooted_virtual_context() {
+        let directory = tempfile::tempdir().expect("fixture should exist");
+        std::fs::write(directory.path().join("file"), b"payload").expect("file should exist");
+        let filesystem = LocalFileSystem::rooted(directory.path()).expect("Rooted should open");
+        assert_prefix_allocation_context(
+            &filesystem,
+            Path::new("/file"),
+            Path::new("/file"),
+            Some(Path::new("/")),
+        );
+    }
+
+    #[test]
+    fn prefix_allocation_failure_before_first_chunk_is_resource_limit() {
+        let mut input = Cursor::new(b"payload");
+        let error = collect_prefix_with_reserver(&mut input, 8, |_, _| Err(std::io::Error::other("reserve failure")))
+            .expect_err("first reserve should fail");
+        assert_eq!(error.kind(), LocalFileErrorKind::ResourceLimit);
+        assert_eq!(error.operation(), LocalFileOperation::Read);
+        let error = operation_error(
+            error,
+            LocalFileOperation::Read,
+            Path::new("/resolved/file"),
+            None,
+            Some(Path::new("/captured/pwd")),
+        );
+        assert_eq!(error.path(), Some(Path::new("/resolved/file")));
+        assert_eq!(error.current_directory(), Some(Path::new("/captured/pwd")));
+    }
+
+    #[test]
+    fn prefix_allocation_failure_after_chunk_discards_partial_bytes() {
+        let mut input = Cursor::new(vec![b'x'; 8193]);
+        let mut reserves = 0;
+        let error = collect_prefix_with_reserver(&mut input, 8193, |output, additional| {
+            reserves += 1;
+            if reserves == 1 {
+                output.try_reserve(additional).map_err(std::io::Error::other)
+            } else {
+                Err(std::io::Error::other("reserve failure"))
+            }
+        })
+        .expect_err("later reserve should fail");
+        assert_eq!(error.kind(), LocalFileErrorKind::ResourceLimit);
+    }
+
+    #[test]
+    fn prefix_collection_preserves_eof_limit_short_read_and_interrupted_behavior() {
+        struct ShortReader {
+            input: Cursor<&'static [u8]>,
+            interrupt_next: bool,
+        }
+
+        impl std::io::Read for ShortReader {
+            fn read(&mut self, output: &mut [u8]) -> std::io::Result<usize> {
+                if self.interrupt_next {
+                    self.interrupt_next = false;
+                    return Err(std::io::ErrorKind::Interrupted.into());
+                }
+                let limit = output.len().min(2);
+                std::io::Read::read(&mut self.input, &mut output[..limit])
+            }
+        }
+
+        let mut input = ShortReader {
+            input: Cursor::new(b"payload"),
+            interrupt_next: true,
+        };
+        let result = collect_prefix_with_reserver(&mut input, 7, |output, additional| {
+            output.try_reserve(additional).map_err(std::io::Error::other)
+        })
+        .expect("prefix should collect");
+        assert_eq!(result, b"payload");
+    }
 
     #[test]
     fn read_operation_context_preserves_typed_observation_source() {

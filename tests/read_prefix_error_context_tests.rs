@@ -43,6 +43,26 @@ fn test_read_prefix_preserves_outer_operation_and_error_context() {
     }
 }
 
+#[test]
+fn test_read_prefix_keeps_eof_and_exact_limit_semantics() {
+    let directory = tempdir().expect("fixture should exist");
+    let path = directory.path().join("file");
+    fs::write(&path, b"payload").expect("file should exist");
+    let filesystem = LocalFileSystem::host().expect("Host should open");
+
+    assert_eq!(filesystem.read_prefix(&path, 3).expect("prefix should read"), b"pay");
+    assert_eq!(
+        filesystem.read_prefix(&path, 20).expect("EOF should stop read"),
+        b"payload"
+    );
+    assert!(
+        filesystem
+            .read_prefix(&path, 0)
+            .expect("zero limit should open then return")
+            .is_empty()
+    );
+}
+
 /// Preserves typed native diagnostics for injected opening and read failures.
 #[cfg(feature = "test-support")]
 #[test]
@@ -66,4 +86,21 @@ fn test_read_prefix_fault_context() {
         assert_eq!(error.path(), Some(path.as_path()));
         assert!(error.typed_source().is_some());
     }
+}
+
+#[cfg(feature = "test-support")]
+#[test]
+fn test_read_prefix_retries_interrupted_reads() {
+    use qubit_local_files::test_support::install_test_fault;
+
+    let directory = tempdir().expect("fixture should exist");
+    let path = directory.path().join("file");
+    fs::write(&path, b"payload").expect("file should exist");
+    let filesystem = LocalFileSystem::host().expect("Host should open");
+    let _fault = install_test_fault("local-prefix-interrupted").expect("fault should install");
+
+    assert_eq!(
+        filesystem.read_prefix(&path, 4).expect("interrupted read should retry"),
+        b"payl"
+    );
 }
