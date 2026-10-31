@@ -10,10 +10,13 @@ use qubit_local_files::LocalFileSystem;
 #[cfg(unix)]
 use qubit_local_files::error::LocalFileErrorKind;
 use qubit_local_files::observation::LocalSourceVerification;
+#[cfg(unix)]
 use qubit_local_files::options::LocalDirectoryOpenOptions;
 use qubit_local_files::options::LocalObservedReadOptions;
 use qubit_local_files::options::LocalPathBindingOptions;
+#[cfg(unix)]
 use qubit_local_files::options::LocalReadOptions;
+#[cfg(unix)]
 use qubit_local_files::options::LocalResolutionLimits;
 
 #[cfg(windows)]
