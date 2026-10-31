@@ -86,7 +86,6 @@ use crate::policy::LocalFileSyncRequirement;
 /// require_write::<qubit_local_files::LocalTempFile>();
 /// ```
 #[must_use = "use explicit cleanup to observe errors; drop only attempts cleanup"]
-#[derive(Debug)]
 pub struct LocalTempFile {
     /// Bound authority and shared source lifecycle.
     core: LocalTempResourceCore,
@@ -94,6 +93,17 @@ pub struct LocalTempFile {
     file: Option<File>,
     access_state: LocalTempAccessState,
     file_identity: Option<crate::observation::LocalFileIdentity>,
+}
+
+impl std::fmt::Debug for LocalTempFile {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LocalTempFile")
+            .field("path", &crate::local_file_system::redacted_path(self.path()))
+            .field("source_state", &self.source_state())
+            .field("access_state", &self.access_state)
+            .field("handle_open", &self.file.is_some())
+            .finish()
+    }
 }
 
 impl LocalTempFile {

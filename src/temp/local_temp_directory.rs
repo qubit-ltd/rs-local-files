@@ -73,13 +73,22 @@ use crate::path::LocalPathResolver;
 /// # }
 /// ```
 #[must_use = "use explicit cleanup to observe errors; drop only attempts cleanup"]
-#[derive(Debug)]
 pub struct LocalTempDirectory {
     /// Bound authority and shared source lifecycle.
     core: LocalTempResourceCore,
     /// Limits reused by explicit cleanup and Drop, with a fresh budget per
     /// call.
     cleanup_limits: LocalTempCleanupLimits,
+}
+
+impl std::fmt::Debug for LocalTempDirectory {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LocalTempDirectory")
+            .field("path", &crate::local_file_system::redacted_path(&self.core.path))
+            .field("source_state", &self.core.source_state())
+            .field("cleanup_limits", &self.cleanup_limits)
+            .finish()
+    }
 }
 
 impl LocalTempDirectory {

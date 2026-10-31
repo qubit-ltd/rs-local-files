@@ -41,12 +41,19 @@ use crate::LocalFileMetadata;
 /// # Ok(())
 /// # }
 /// ```
-#[derive(Debug)]
 pub struct LocalFileReader {
     /// Open native file handle.
     file: File,
     /// Metadata observed from the same handle after it was opened.
     metadata: LocalFileMetadata,
+}
+
+impl std::fmt::Debug for LocalFileReader {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LocalFileReader")
+            .field("metadata", &self.metadata)
+            .finish()
+    }
 }
 
 impl LocalFileReader {

@@ -7,11 +7,110 @@
 // =============================================================================
 use std::path::Path;
 
+use qubit_io::Output;
 use qubit_local_files::LocalFileSystem;
 use qubit_local_files::options::LocalDirectoryOpenOptions;
 use qubit_local_files::options::LocalObservedReadOptions;
 use qubit_local_files::options::LocalPathBindingOptions;
+use qubit_local_files::options::LocalSealOptions;
 use qubit_local_files::options::LocalTempDirectoryOptions;
+use qubit_local_files::options::LocalWriteMode;
+use qubit_local_files::options::LocalWriteOptions;
+
+fn assert_resource_debug_redacted(resource: &impl std::fmt::Debug, expected_type: &str) {
+    for output in [format!("{resource:?}"), format!("{resource:#?}")] {
+        assert!(!output.contains("customer-secret-root-8f921d"), "{output}");
+        assert!(!output.contains("private-leaf-65b3a0"), "{output}");
+        assert!(output.contains(expected_type), "{output}");
+    }
+}
+
+fn assert_debug_hides_marker(resource: &impl std::fmt::Debug, expected_type: &str, marker: &str) {
+    for output in [format!("{resource:?}"), format!("{resource:#?}")] {
+        assert!(!output.contains(marker), "{output}");
+        assert!(output.contains(expected_type), "{output}");
+    }
+}
+
+fn assert_debug_contains(resource: &impl std::fmt::Debug, expected: &str) {
+    for output in [format!("{resource:?}"), format!("{resource:#?}")] {
+        assert!(output.contains(expected), "{output}");
+    }
+}
+
+#[test]
+fn test_file_resource_debug_redacts_paths_without_formatting_backends() {
+    for rooted in [false, true] {
+        let scratch = tempfile::tempdir().expect("fixture should exist");
+        let root = scratch.path().join("customer-secret-root-8f921d");
+        std::fs::create_dir_all(&root).expect("root should exist");
+        let leaf = root.join("private-leaf-65b3a0");
+        std::fs::write(&leaf, b"existing").expect("leaf should exist");
+        let filesystem = if rooted {
+            LocalFileSystem::rooted(&root)
+        } else {
+            LocalFileSystem::host()
+        }
+        .expect("filesystem should open");
+        let target = if rooted {
+            Path::new("private-leaf-65b3a0")
+        } else {
+            leaf.as_path()
+        };
+        let staged_target = if rooted {
+            std::path::PathBuf::from("private-leaf-65b3a0-staged")
+        } else {
+            root.join("private-leaf-65b3a0-staged")
+        };
+
+        let reader = filesystem.open_reader(target).expect("reader should open");
+        assert_resource_debug_redacted(&reader, "LocalFileReader");
+
+        let staged = filesystem
+            .open_writer(&staged_target)
+            .expect("staged writer should open");
+        assert_resource_debug_redacted(&staged, "LocalFileWriter");
+        assert_debug_contains(&staged, "state: Open");
+        drop(staged);
+
+        let append = filesystem
+            .open_writer_with_options(target, &LocalWriteOptions::new(LocalWriteMode::Append))
+            .expect("append writer should open");
+        assert_resource_debug_redacted(&append, "LocalFileWriter");
+        assert_debug_contains(&append, "state: Open");
+        drop(append);
+
+        let mut temporary = filesystem.create_temp_file().expect("temporary file should open");
+        assert_resource_debug_redacted(&temporary, "LocalTempFile");
+        assert_debug_contains(&temporary, "handle_open: true");
+        let temporary_name = temporary.path().file_name().expect("generated name").to_string_lossy();
+        assert_debug_hides_marker(&temporary, "LocalTempFile", &temporary_name);
+
+        let mut temporary_directory = filesystem
+            .create_temp_directory()
+            .expect("temporary directory should open");
+        assert_resource_debug_redacted(&temporary_directory, "LocalTempDirectory");
+        let directory_name = temporary_directory
+            .path()
+            .file_name()
+            .expect("generated name")
+            .to_string_lossy();
+        assert_debug_hides_marker(&temporary_directory, "LocalTempDirectory", &directory_name);
+
+        let mut seal_source = filesystem.create_temp_file().expect("seal source should open");
+        Output::write_fully(&mut seal_source, b"sealed").expect("seal payload should write");
+        let mut sealed = seal_source
+            .seal_with_options(&LocalSealOptions::default())
+            .expect("temporary file should seal");
+        assert_resource_debug_redacted(&sealed, "LocalSealedTempFile");
+
+        temporary.cleanup().expect("temporary file should clean up");
+        temporary_directory
+            .cleanup()
+            .expect("temporary directory should clean up");
+        sealed.cleanup().expect("sealed file should clean up");
+    }
+}
 
 fn assert_redacted(debug: &str) {
     assert!(

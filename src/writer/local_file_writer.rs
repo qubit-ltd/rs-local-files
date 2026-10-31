@@ -56,7 +56,6 @@ use crate::policy::LocalFileSyncRequirement;
 /// # }
 /// ```
 #[must_use = "commit or abort the writer to observe its terminal outcome"]
-#[derive(Debug)]
 pub struct LocalFileWriter {
     /// Reusable namespace-absolute destination path.
     path: PathBuf,
@@ -76,6 +75,38 @@ pub struct LocalFileWriter {
     failure_state: Option<LocalWriteFailureState>,
     /// Per-writer synchronization observer used by focused crate tests.
     sync_observer: Option<Arc<LocalCommitSyncObserver>>,
+}
+
+impl std::fmt::Debug for LocalFileWriter {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let backend = self.backend.as_ref().map(|backend| match backend {
+            LocalFileWriterBackend::Staged(_) => "Staged",
+            LocalFileWriterBackend::Rooted(_) => "Rooted",
+            LocalFileWriterBackend::Append(_) => "Append",
+        });
+        f.debug_struct("LocalFileWriter")
+            .field("path", &crate::local_file_system::redacted_path(&self.path))
+            .field(
+                "diagnostic_path",
+                &self
+                    .diagnostic_path
+                    .as_deref()
+                    .map(crate::local_file_system::redacted_path),
+            )
+            .field(
+                "current_directory",
+                &self
+                    .current_directory
+                    .as_deref()
+                    .map(crate::local_file_system::redacted_path),
+            )
+            .field("backend", &backend)
+            .field("options", &self.options)
+            .field("state", &self.state)
+            .field("bytes_written", &self.bytes_written)
+            .field("failure_state", &self.failure_state)
+            .finish()
+    }
 }
 
 impl LocalFileWriter {
