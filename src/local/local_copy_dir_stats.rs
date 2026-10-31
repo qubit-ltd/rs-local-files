@@ -112,4 +112,10 @@ impl LocalCopyDirStats {
     pub const fn files_durable(&self) -> bool {
         self.files_durable
     }
+
+    /// Reports a successful copy that skipped every entry without publishing.
+    #[inline]
+    pub(crate) const fn was_fully_skipped(&self) -> bool {
+        self.skipped > 0 && self.files == 0 && self.directories == 0 && self.overwritten == 0
+    }
 }

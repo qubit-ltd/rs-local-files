@@ -229,6 +229,15 @@ impl HostLocalFileSystem {
                 Ok(stats) => stats,
                 Err(error) => return Err(copy_pipeline_failure(source, target, error)),
             };
+            if stats.was_fully_skipped() {
+                return Ok(LocalCopyOutcome::new(
+                    LocalCopyStats::from_internal(stats),
+                    LocalCopyMethod::Recursive,
+                    false,
+                    false,
+                    crate::LocalMetadataPreservePolicy::None,
+                ));
+            }
             return Ok(LocalCopyOutcome::new(
                 LocalCopyStats::from_internal(stats),
                 LocalCopyMethod::Recursive,
@@ -273,6 +282,15 @@ impl HostLocalFileSystem {
             crate::local::copy_file_with_options(source, target, internal_options, &mut stats, &mut budget)
         {
             return Err(copy_pipeline_failure(source, target, error));
+        }
+        if stats.was_fully_skipped() {
+            return Ok(LocalCopyOutcome::new(
+                LocalCopyStats::from_internal(stats),
+                LocalCopyMethod::StagedFile,
+                false,
+                false,
+                crate::LocalMetadataPreservePolicy::None,
+            ));
         }
         let parent_durable = published_durability(
             options.durability(),

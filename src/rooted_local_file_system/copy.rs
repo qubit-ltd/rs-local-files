@@ -161,6 +161,19 @@ impl RootedLocalFileSystem {
             .root
             .copy_with_durability(&source_path, &target_path, internal_options, options.durability())
             .map_err(|error| copy_failure_from_dir_error(source, target, error, directory))?;
+        if stats.was_fully_skipped() {
+            return Ok(LocalCopyOutcome::new(
+                LocalCopyStats::from_internal(stats),
+                if directory {
+                    LocalCopyMethod::Recursive
+                } else {
+                    LocalCopyMethod::StagedFile
+                },
+                false,
+                false,
+                crate::LocalMetadataPreservePolicy::None,
+            ));
+        }
         let parent_durable = published_durability(
             options.durability(),
             || {
