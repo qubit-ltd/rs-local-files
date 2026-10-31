@@ -104,7 +104,11 @@ fn test_host_temp_identity_failure_reports_sandbox_cleanup_failure() {
         assert!(cleanup.to_string().contains("injected sandbox cleanup failure"));
         let (_cause, recovery) = error.into_temp_recovery_parts();
         let mut recovery = recovery.expect("retained owner");
-        assert!(recovery.path().starts_with(parent.path()));
+        assert!(
+            fs::canonicalize(recovery.path())
+                .expect("recovery path should exist")
+                .starts_with(&fs::canonicalize(parent.path()).expect("parent should exist"))
+        );
         assert!(recovery.identity().is_some(), "created entry identity must be retained");
         drop(fault_guard);
         recovery.cleanup().expect("retry after removing injected cleanup fault");
