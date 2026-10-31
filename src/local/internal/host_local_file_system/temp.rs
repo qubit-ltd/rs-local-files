@@ -8,9 +8,7 @@
 
 // Host temp operations.
 
-use std::error::Error;
 use std::ffi::OsStr;
-use std::fmt;
 use std::fs::File;
 use std::path::PathBuf;
 use std::time::Instant;
@@ -85,17 +83,36 @@ impl HostLocalFileSystem {
                 })?;
         let created =
             crate::local::create_temp_file_in_dir(&sandbox, options.prefix(), options.suffix(), options.max_attempts());
-        let result = created.and_then(|(path, file)| LocalTempFile::host(path, sandbox.clone(), file, symlink_policy));
-        let result = result.map_err(|error| cleanup_failed_temp_sandbox(&sandbox, error));
-        result.map_err(|error| {
-            let invalid_options = error.kind() == io::ErrorKind::InvalidInput;
-            let error = LocalFileError::from_io(LocalFileOperation::CreateTempFile, Some(parent), None, error);
-            if invalid_options {
-                error.with_kind(LocalFileErrorKind::InvalidOptions)
-            } else {
-                error
+        match created {
+            Ok((path, file)) => {
+                let (recovery_path, recovery_entries) = host_temp_recovery_entries(
+                    &parent,
+                    &sandbox,
+                    Some((
+                        &path,
+                        file.try_clone().map_err(|error| {
+                            LocalFileError::from_io(LocalFileOperation::CreateTempFile, Some(path.clone()), None, error)
+                        })?,
+                    )),
+                    false,
+                )?;
+                match LocalTempFile::host(path.clone(), sandbox.clone(), file, symlink_policy) {
+                    Ok(resource) => Ok(resource),
+                    Err(error) => Err(cleanup_failed_temp_owner(
+                        LocalFileError::from_io(LocalFileOperation::CreateTempFile, Some(path), None, error),
+                        crate::LocalTempRecovery::from_native_entries(recovery_path, recovery_entries),
+                        &sandbox,
+                    )),
+                }
             }
-        })
+            Err(error) => {
+                let primary =
+                    LocalFileError::from_io(LocalFileOperation::CreateTempFile, Some(sandbox.clone()), None, error);
+                let (recovery_path, recovery_entries) = host_temp_recovery_entries(&parent, &sandbox, None, false)?;
+                let recovery = crate::LocalTempRecovery::from_native_entries(recovery_path, recovery_entries);
+                Err(cleanup_failed_temp_owner(primary, recovery, &sandbox))
+            }
+        }
     }
 
     /// Creates a Host cleanup-owned temporary directory.
@@ -159,42 +176,140 @@ impl HostLocalFileSystem {
             options.suffix(),
             options.max_attempts(),
         );
-        let result = created
-            .and_then(|path| LocalTempDirectory::host(path, sandbox.clone(), symlink_policy, options.cleanup_limits()));
-        let result = result.map_err(|error| cleanup_failed_temp_sandbox(&sandbox, error));
-        result.map_err(|error| {
-            let invalid_options = error.kind() == io::ErrorKind::InvalidInput;
-            let error = LocalFileError::from_io(LocalFileOperation::CreateTempDirectory, Some(parent), None, error);
-            if invalid_options {
-                error.with_kind(LocalFileErrorKind::InvalidOptions)
-            } else {
-                error
+        match created {
+            Ok(path) => {
+                let child = open_temp_directory(&path).map_err(|error| {
+                    LocalFileError::from_io(LocalFileOperation::CreateTempDirectory, Some(path.clone()), None, error)
+                })?;
+                let (recovery_path, recovery_entries) =
+                    host_temp_recovery_entries(&parent, &sandbox, Some((&path, child)), true)?;
+                match LocalTempDirectory::host(path.clone(), sandbox.clone(), symlink_policy, options.cleanup_limits())
+                {
+                    Ok(resource) => Ok(resource),
+                    Err(error) => Err(cleanup_failed_temp_owner(
+                        LocalFileError::from_io(LocalFileOperation::CreateTempDirectory, Some(path), None, error),
+                        crate::LocalTempRecovery::from_native_entries(recovery_path, recovery_entries),
+                        &sandbox,
+                    )),
+                }
             }
-        })
+            Err(error) => {
+                let primary = LocalFileError::from_io(
+                    LocalFileOperation::CreateTempDirectory,
+                    Some(sandbox.clone()),
+                    None,
+                    error,
+                );
+                let (recovery_path, recovery_entries) = host_temp_recovery_entries(&parent, &sandbox, None, true)?;
+                let recovery = crate::LocalTempRecovery::from_native_entries(recovery_path, recovery_entries);
+                Err(cleanup_failed_temp_owner(primary, recovery, &sandbox))
+            }
+        }
     }
 }
 
-/// Removes only the sandbox created by this failed temporary-resource build.
-fn cleanup_failed_temp_sandbox(sandbox: &Path, primary: io::Error) -> io::Error {
+fn host_temp_recovery_entries(
+    parent: &Path,
+    sandbox: &Path,
+    child: Option<(&Path, File)>,
+    child_is_directory: bool,
+) -> LocalResult<(PathBuf, Vec<crate::temp::internal::NativePrivateEntry>)> {
+    let parent_handle = File::open(parent).map_err(|error| {
+        LocalFileError::from_io(LocalFileOperation::Cleanup, Some(parent.to_path_buf()), None, error)
+    })?;
+    let sandbox_handle = open_temp_directory(sandbox).map_err(|error| {
+        LocalFileError::from_io(LocalFileOperation::Cleanup, Some(sandbox.to_path_buf()), None, error)
+    })?;
+    let sandbox_identity = temp_recovery_identity(&sandbox_handle, sandbox)?;
+    let mut entries = Vec::with_capacity(2);
+    let recovery_path = if let Some((child_path, child_handle)) = child {
+        let child_parent = open_temp_directory(sandbox).map_err(|error| {
+            LocalFileError::from_io(LocalFileOperation::Cleanup, Some(sandbox.to_path_buf()), None, error)
+        })?;
+        let identity = temp_recovery_identity(&child_handle, child_path)?;
+        let name = child_path.file_name().ok_or_else(|| {
+            LocalFileError::new(LocalFileErrorKind::InvalidPath, LocalFileOperation::Cleanup)
+                .with_path(child_path.to_path_buf())
+        })?;
+        entries.push(crate::temp::internal::NativePrivateEntry {
+            parent: child_parent,
+            name: name.to_os_string(),
+            file: Some(child_handle),
+            identity: Some(identity),
+            directory: child_is_directory,
+        });
+        child_path.to_path_buf()
+    } else {
+        sandbox.to_path_buf()
+    };
+    let sandbox_name = sandbox.file_name().ok_or_else(|| {
+        LocalFileError::new(LocalFileErrorKind::InvalidPath, LocalFileOperation::Cleanup)
+            .with_path(sandbox.to_path_buf())
+    })?;
+    entries.push(crate::temp::internal::NativePrivateEntry {
+        parent: parent_handle,
+        name: sandbox_name.to_os_string(),
+        file: Some(sandbox_handle),
+        identity: Some(sandbox_identity),
+        directory: true,
+    });
+    Ok((recovery_path, entries))
+}
+
+fn temp_recovery_identity(file: &File, path: &Path) -> LocalResult<crate::observation::LocalFileIdentity> {
+    crate::observation::query::query_observation(file, crate::observation::LocalObservationRequirement::Required)
+        .map_err(|error| error.with_path(path.to_path_buf()))?
+        .identity()
+        .cloned()
+        .ok_or_else(|| {
+            LocalFileError::new(LocalFileErrorKind::RequirementNotMet, LocalFileOperation::Cleanup)
+                .with_path(path.to_path_buf())
+        })
+}
+
+#[cfg(unix)]
+fn open_temp_directory(path: &Path) -> io::Result<File> {
+    File::open(path)
+}
+
+#[cfg(windows)]
+fn open_temp_directory(path: &Path) -> io::Result<File> {
+    use std::os::windows::fs::OpenOptionsExt;
+    use windows_sys::Win32::Storage::FileSystem::FILE_FLAG_BACKUP_SEMANTICS;
+    use windows_sys::Win32::Storage::FileSystem::FILE_FLAG_OPEN_REPARSE_POINT;
+    fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT)
+        .open(path)
+}
+
+#[cfg(not(any(unix, windows)))]
+fn open_temp_directory(path: &Path) -> io::Result<File> {
+    File::open(path)
+}
+
+fn cleanup_failed_temp_owner(
+    primary: LocalFileError,
+    mut owner: crate::LocalTempRecovery,
+    sandbox: &Path,
+) -> LocalFileError {
     #[cfg(feature = "test-support")]
     let cleanup = if crate::local::test_support_enabled("temp-identity-file-cleanup") {
-        Err(io::Error::other("injected sandbox cleanup failure"))
+        Err(LocalFileError::from_io(
+            LocalFileOperation::Cleanup,
+            Some(sandbox.to_path_buf()),
+            None,
+            io::Error::other("injected sandbox cleanup failure"),
+        ))
     } else {
-        fs::remove_dir_all(sandbox)
+        owner.cleanup()
     };
     #[cfg(not(feature = "test-support"))]
-    let cleanup = fs::remove_dir_all(sandbox);
+    let cleanup = owner.cleanup();
 
     match cleanup {
         Ok(()) => primary,
-        Err(cleanup_error) => io::Error::new(
-            primary.kind(),
-            TempSandboxCleanupError {
-                primary,
-                sandbox: sandbox.to_path_buf(),
-                cleanup: cleanup_error,
-            },
-        ),
+        Err(cleanup_error) => primary.with_cleanup_error(cleanup_error).with_temp_recovery(owner),
     }
 }
 
@@ -741,33 +856,6 @@ fn cleanup_private_sandbox(path: &Path, entry: crate::temp::types::NativePrivate
     match owner.cleanup() {
         Ok(()) => Ok(()),
         Err(error) => Err(error.with_temp_recovery(owner)),
-    }
-}
-
-/// Retains the owner-construction error while describing failed sandbox
-/// cleanup.
-#[derive(Debug)]
-struct TempSandboxCleanupError {
-    primary: io::Error,
-    sandbox: std::path::PathBuf,
-    cleanup: io::Error,
-}
-
-impl fmt::Display for TempSandboxCleanupError {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            formatter,
-            "{}; failed to remove temporary sandbox {}: {}",
-            self.primary,
-            self.sandbox.display(),
-            self.cleanup
-        )
-    }
-}
-
-impl Error for TempSandboxCleanupError {
-    fn source(&self) -> Option<&(dyn Error + 'static)> {
-        Some(&self.primary)
     }
 }
 

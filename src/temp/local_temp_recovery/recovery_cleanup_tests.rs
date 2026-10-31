@@ -55,6 +55,8 @@ fn test_review_recovery_open_failure_retains_cleanup_responsibility() {
         recovery.cleanup().expect_err("responsibility remains retained").kind(),
         LocalFileErrorKind::RequirementNotMet
     );
+    drop(recovery);
+    assert!(path.is_dir(), "drop must not delete an entry with unknown identity");
 }
 
 #[test]
@@ -114,6 +116,11 @@ fn test_review_recovery_refuses_replaced_object_and_retries_remaining_entries() 
         b"replacement"
     );
     assert!(recovery.cleanup().is_err(), "failed entry remains owned for retry");
+    drop(recovery);
+    assert_eq!(
+        std::fs::read(&replacement).expect("replacement survives owner drop"),
+        b"replacement"
+    );
 }
 
 #[test]
