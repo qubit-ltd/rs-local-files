@@ -199,7 +199,7 @@ fn create_host_temp_sandbox(
     max_attempts: Option<usize>,
 ) -> LocalResult<(PathBuf, crate::temp::internal::NativePrivateEntry)> {
     let parent_handle = Arc::new(
-        File::open(parent)
+        open_host_temp_parent_directory(parent)
             .map_err(|error| LocalFileError::from_io(operation, Some(parent.to_path_buf()), None, error))?,
     );
     let (sandbox, sandbox_handle) = match create_host_temp_directory_entry(
@@ -230,6 +230,24 @@ fn create_host_temp_sandbox(
         directory: true,
     };
     Ok((sandbox, entry))
+}
+
+#[cfg(windows)]
+fn open_host_temp_parent_directory(path: &Path) -> io::Result<File> {
+    use std::os::windows::fs::OpenOptionsExt;
+
+    use windows_sys::Win32::Storage::FileSystem::FILE_FLAG_BACKUP_SEMANTICS;
+    use windows_sys::Win32::Storage::FileSystem::FILE_READ_ATTRIBUTES;
+
+    fs::OpenOptions::new()
+        .access_mode(FILE_READ_ATTRIBUTES)
+        .custom_flags(FILE_FLAG_BACKUP_SEMANTICS)
+        .open(path)
+}
+
+#[cfg(not(windows))]
+fn open_host_temp_parent_directory(path: &Path) -> io::Result<File> {
+    File::open(path)
 }
 
 fn create_host_temp_directory_entry(
