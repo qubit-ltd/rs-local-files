@@ -839,6 +839,14 @@ publication, and `LocalCopyFailureState::Unchanged` can still be correct when
 the requested target was not changed. The library leaves them in place because
 another operation may already be using them.
 
+A configured copy deadline starts when the public copy call begins. For a
+fixed directory handle, it also bounds source and destination path resolution
+and any parent-directory preflight before the copy backend starts. Resolution
+uses the tighter of the copy deadline and the handle's binding deadline. A
+timeout before namespace changes reports an unchanged failure; later failures
+retain the backend's partial-publication state. Deadlines are cooperative and
+cannot interrupt a native operation already in progress.
+
 ### Copy source modes
 
 In both Host and Rooted, `files()` includes copied links, `directories()` counts
@@ -1694,6 +1702,10 @@ cleanup and conditional-open behavior, and LF-09 private-resource and LF-10
 sealed-cleanup behavior, remain unverified
 without native Windows runner results: Linux filters execute zero tests for
 these cases, and Windows GNU `cargo check --lib` is compile evidence only.
+Sibling path-dependency revisions are fixed in
+`.infra/ci/local-path-dependencies.tsv` and repeated by the conditional-write
+and FreeBSD preparation steps. Update those references together and verify the
+prepared repository `HEAD` values when changing the baseline.
 `capabilities()` reports the selected authority's build
 capability snapshot; a Rooted instance caches it when opening the authority.
 `scope()` lets integration code distinguish the two namespaces, and

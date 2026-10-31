@@ -252,6 +252,7 @@ T3/T4 的 Windows 清理和条件写入行为，以及 LF-09 私有资源和 LF-
 adapter 兼容性由 adapter 仓库或独立集成 job 负责。FreeBSD 暂不支持：当前原生检查只覆盖编译和少量兼容性合同，
 不再运行完整行为测试套件。各 API 失败用例及原因见 [FreeBSD 兼容性说明](doc/freebsd-compatibility.zh_CN.md)。
 Android 仍配置为编译检查。RLF2-Q02 已证实并修复；RLF2-Q01 与 RLF2-Q03 缺少 Windows 原生环境，仍未验证。详见[用户指南中的观测要求与累计计数](doc/user_guide.zh_CN.md#观测要求与累计计数)。
+RLF3-Q01 延续 RLF2-Q03 的枚举问题；Linux 筛选不会执行 Windows fallback 测试，仍需等待 Windows 原生运行证据。
 本 crate 不承诺这些目标上的运行时保证。`capabilities()` 只报告当前 build 是否实现了
 对应的完整操作协议，不会探测具体的运行时文件系统，也不声称证明底层硬件已经持久化数据；无法满足要求的原子性或耐久性时，
 会在命名空间变更前拒绝操作。条件写入支持范围取决于平台和 authority：

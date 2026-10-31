@@ -674,6 +674,10 @@ match filesystem.copy_with_options(
 重命名也会通过类型化失败状态报告 `Unchanged`、`Renamed` 或 `Indeterminate`；出错并不等于
 “什么都没发生”。
 
+配置的复制 deadline 从公开复制调用开始计时。对于固定目录句柄，它也约束复制后端启动前的源、目标路径解析和父目录预检。
+路径解析使用复制 deadline 与句柄 binding deadline 中较紧的期限。命名空间尚未改变时超时会报告目标未改变；进入后端后的失败保留后端记录的部分发布状态。
+deadline 是协作式的，不能中断已经开始的原生操作。
+
 目录树复制可能先删除与源类型冲突的目标，再开始复制替代内容。后续步骤失败时，应同时检查
 `LocalCopyFailure::state()` 与 `partial_stats()`；即使尚未计入已复制文件，
 `PartiallyPublished` 也会保留目标已被删除的事实。不能只凭 `Err` 推断目标未改变。
@@ -1353,6 +1357,8 @@ Android 仍配置为编译检查。T3/T4 的 Windows 清理与条件写入行为
 LF-10 sealed 清理，尚无原生 Windows runner 证据时必须视为待验证：Linux 对应筛选为 0 tests，Windows
 GNU `cargo check --lib` 只能证明可编译，不能证明运行行为。
 本 crate CI 仅验证本 crate；下游 adapter 的兼容性和集成由 adapter 仓库或独立集成负责。
+同级 path dependency 的源码提交固定在 `.infra/ci/local-path-dependencies.tsv`，并由 conditional-write
+和 FreeBSD 准备步骤重复引用。更新基线时须同步修改这些位置，并核对准备后的仓库 `HEAD`。
 `capabilities()` 返回所选 authority 的 build capability 快照；Rooted 实例在打开
 authority 时缓存该快照。`scope()` 供集成层区分两种命名空间；Rooted 实例的诊断锚点通过
 `diagnostic_root()` 单独读取。Host 命名空间的 `limits()` 返回 `SizeLimit::VariesByPath`；使用

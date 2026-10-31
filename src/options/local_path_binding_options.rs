@@ -12,9 +12,10 @@ use super::LocalResolutionLimits;
 /// Resource budgets for retaining and verifying a source path binding.
 ///
 /// `None` leaves a budget unbounded or, for `deadline`, configures no time
-/// limit. A configured zero is a real zero budget and can make binding
-/// acquisition or verification fail with a resource-limit error. These
-/// limits do not create an atomic lock: verification reports whether the name
+/// limit. A zero ancestor or path-byte limit is a real zero budget and can
+/// make acquisition or verification fail with a resource-limit error. A zero
+/// deadline can make time-limited work return a timeout error. These limits do
+/// not create an atomic lock: verification reports whether the name
 /// still resolves to the same native object, not whether that object's
 /// contents have the same version. Use a digest or another content-level
 /// check when content identity matters.

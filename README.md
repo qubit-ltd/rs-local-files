@@ -355,6 +355,8 @@ not a promise for arbitrary source and target paths; the operation outcome
 reports what actually happened. RLF2-Q02 was confirmed and fixed; RLF2-Q01
 and RLF2-Q03 remain unverified without a native Windows environment. See the
 [user guide's observation requirements and counters](doc/user_guide.md#observation-requirements-and-counters).
+RLF3-Q01 continues the RLF2-Q03 enumeration question; Linux filters execute zero
+Windows fallback tests, so it remains open pending a native Windows run.
 Path-limit observations always include a unit: Unix reports bytes and Windows
 reports UTF-16 code units. Windows whole-path limits remain `Unknown` when the
 handle-relative namespace has no defensible fixed bound. `space_at()` and

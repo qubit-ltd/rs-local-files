@@ -561,6 +561,8 @@ wall clock。Walker 的计时从 `list()` 创建 walker 时开始，而不是第
 
 复制 deadline 是合作式的分块边界：实现会在每个 bounded read/write chunk 前后检查 monotonic
 clock，因此可限制继续推进 I/O，但不会把已进入内核的单次系统调用误写成可强制取消。
+对固定目录句柄，复制 deadline 还覆盖源、目标路径解析和父目录预检；解析采用复制 deadline 与句柄 binding deadline
+中较紧的期限。命名空间尚未改变时返回 `Unchanged`，进入后端后的错误保留其部分发布事实。
 
 所有 `Option` 预算都必须同时提供清除方法，例如 `without_max_entries()`；调用方因此可以从
 实例默认 Options clone 后，显式恢复为无限制。`with_*` 不执行 I/O；依赖 scope、目标 mount
@@ -2253,3 +2255,5 @@ CI workflow 在 Linux、macOS、Windows 上运行当前 crate 的测试。`windo
 Snapshot builder 从 `LocalReadOptions::new()` 开始，不继承 filesystem defaults；调用方可显式复制默认配置。超过 snapshot 字节上限会返回 resource-limit 错误，前后括界观测不保证并发内容变化下的原子性。固定目录句柄 observed read 保留原始逐组件路径配方。累计写入字节使用 `u64`，单次 I/O 长度仍为 `usize`。
 
 RLF2-Q02 已证实并修复：通过保留父目录执行 no-follow identity 验证。RLF2-Q01（Windows sealed cleanup）和 RLF2-Q03（Windows 枚举 fallback）未验证，因缺少 Windows 原生环境。既有 FreeBSD 暂不支持及 Windows Rooted Content 不支持状态保持不变。
+
+RLF3-001 将同一个复制开始时间贯穿固定句柄路径验证与复制后端；源、目标解析使用复制 deadline 与 binding deadline 中较紧的期限。RLF3-002 保留本地 path dependency，并在依赖表、conditional-write checkout 和 FreeBSD 准备步骤固定相同的完整源码提交；更新基线时须同步修改三个准备入口并核对准备后的 `HEAD`。RLF3-003 为指定的三个 options 类型补充可执行类型级示例。RLF3-Q01 延续 RLF2-Q03；当前 Linux 环境状态为 `BLOCKED_NATIVE`，详见[Windows fallback 证据](review-rlf3-windows-evidence.md)。没有 Windows 原生复现时，不修改 fallback 生产实现。

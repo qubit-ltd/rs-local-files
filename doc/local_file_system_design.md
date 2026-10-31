@@ -419,7 +419,12 @@ semantics where `new()` takes no necessary parameter. Options neither retain a
 filesystem nor read global configuration. A `deadline: Duration` starts at
 operation entry, uses a monotonic clock, and starts a walker at `list()` rather
 than its first `next()`. Copy deadlines are cooperative chunk boundaries, not
-claims to cancel a system call already in the kernel. `LocalPersistOptions`
+claims to cancel a system call already in the kernel. For fixed directory
+handles, the copy deadline also covers source and destination resolution and
+parent-directory preflight; resolution uses the tighter of the copy deadline
+and the handle binding deadline. A timeout before namespace changes reports
+`Unchanged`; later errors retain the backend's partial-publication facts.
+`LocalPersistOptions`
 belongs to an existing temporary resource, not filesystem defaults, and
 controls overwrite, parent creation, and durability. Durable temporary-file
 persistence synchronizes file contents before publication and the destination
@@ -2061,3 +2066,5 @@ is distinct from a supported query that fails with an I/O error.
 Snapshot builders start from `LocalReadOptions::new()` rather than filesystem defaults; callers copy defaults explicitly. Snapshot byte limits report resource-limit errors, and bracketing observations do not make concurrent content changes atomic. Fixed-handle observed reads retain the original component-by-component path recipe. Accumulated writer bytes use `u64`; per-call I/O lengths remain `usize`.
 
 RLF2-Q02 was confirmed and fixed using no-follow identity validation through the retained parent. RLF2-Q01 (Windows sealed cleanup) and RLF2-Q03 (Windows enumeration fallback) remain unverified because no native Windows environment was available. The existing FreeBSD temporary unsupported status and Windows Rooted Content unsupported status remain unchanged.
+
+RLF3-001 carries one copy start time through fixed-handle path validation and the copy backend; source and destination resolution use the tighter copy or binding deadline. RLF3-002 keeps local path dependencies and pins the same full source commits in the dependency table, conditional-write checkouts, and FreeBSD preparation. When refreshing these baselines, update all three preparation points together and verify the prepared `HEAD` values. RLF3-003 adds executable type-level examples to the three named options types. RLF3-Q01 continues RLF2-Q03 and remains `BLOCKED_NATIVE` in the current Linux environment; see [Windows fallback evidence](review-rlf3-windows-evidence.md). No fallback production change is supported without a native Windows reproduction.
