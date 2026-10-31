@@ -7,6 +7,7 @@
 // =============================================================================
 
 use qubit_local_files::LocalFileSystem;
+#[cfg(unix)]
 use qubit_local_files::error::LocalFileErrorKind;
 use qubit_local_files::observation::LocalSourceVerification;
 use qubit_local_files::options::LocalDirectoryOpenOptions;
