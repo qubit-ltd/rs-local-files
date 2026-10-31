@@ -163,7 +163,7 @@ fn directory_handle_creates_writes_and_copies_with_options() {
 }
 
 #[test]
-fn directory_handle_copy_zero_deadline_preserves_destination_and_parent() {
+fn directory_handle_copy_deadline_zero_preserves_destination_and_parent() {
     let (fixture, directory) = populated_directory();
     std::fs::write(fixture.path().join("existing"), b"original")
         .expect("existing destination should be written");
