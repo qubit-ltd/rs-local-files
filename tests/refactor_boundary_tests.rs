@@ -8,29 +8,44 @@
 
 use std::ffi::OsStr;
 use std::path::Path;
+#[cfg(unix)]
 use std::sync::Arc;
 
 use qubit_local_files::LocalFileSystem;
+#[cfg(unix)]
 use qubit_local_files::LocalResult;
+#[cfg(unix)]
 use qubit_local_files::directory::LocalResolutionOrigin;
+#[cfg(unix)]
 use qubit_local_files::directory::LocalResolutionPolicy;
+#[cfg(unix)]
 use qubit_local_files::directory::LocalResolutionScope;
 #[cfg(target_os = "linux")]
 use qubit_local_files::directory::LocalTreeValidationOptions;
+#[cfg(unix)]
 use qubit_local_files::error::LocalFileError;
 use qubit_local_files::error::LocalFileErrorKind;
+#[cfg(unix)]
 use qubit_local_files::error::LocalFileOperation;
+#[cfg(unix)]
 use qubit_local_files::error::LocalResourceKind;
 #[cfg(target_os = "linux")]
 use qubit_local_files::observation::LocalObservationRequirement;
+#[cfg(unix)]
 use qubit_local_files::observation::LocalSecurityObservationOptions;
+#[cfg(unix)]
 use qubit_local_files::observation::LocalSourceVerification;
+#[cfg(unix)]
 use qubit_local_files::options::LocalDirectoryOpenOptions;
 #[cfg(target_os = "linux")]
 use qubit_local_files::options::LocalListOptions;
+#[cfg(unix)]
 use qubit_local_files::options::LocalObservedReadOptions;
+#[cfg(unix)]
 use qubit_local_files::options::LocalPathBindingOptions;
+#[cfg(unix)]
 use qubit_local_files::options::LocalResolutionLimits;
+#[cfg(unix)]
 use qubit_local_files::options::LocalRootOpenOptions;
 #[cfg(target_os = "linux")]
 use qubit_local_files::options::LocalTempDirectoryOptions;
@@ -42,8 +57,10 @@ use qubit_local_files::policy::LocalOwnerAccessPolicy;
 use qubit_local_files::policy::LocalPrivacyRequirement;
 
 #[derive(Debug)]
+#[cfg(unix)]
 struct RejectBlockedTarget;
 
+#[cfg(unix)]
 impl LocalResolutionPolicy for RejectBlockedTarget {
     fn validate_component(&self, _: &OsStr, _: LocalResolutionScope, _: LocalResolutionOrigin) -> LocalResult<()> {
         Ok(())
@@ -61,8 +78,10 @@ impl LocalResolutionPolicy for RejectBlockedTarget {
 }
 
 #[derive(Debug)]
+#[cfg(unix)]
 struct RejectBlockedComponent;
 
+#[cfg(unix)]
 impl LocalResolutionPolicy for RejectBlockedComponent {
     fn validate_component(
         &self,
