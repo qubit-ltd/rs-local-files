@@ -36,6 +36,7 @@ mod lf3_tree_publish_tests;
 mod local;
 mod local_file_metadata_tests;
 pub(crate) mod native_io_fault_tests;
+mod observed_reader_context_tests;
 mod outcome;
 mod path;
 pub(crate) mod rooted;

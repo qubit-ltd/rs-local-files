@@ -5,8 +5,6 @@
 //
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
-#[cfg(unix)]
-use std::fs::File;
 use std::io;
 use std::path::Path;
 use std::path::PathBuf;
@@ -75,6 +73,11 @@ pub struct LocalTempRecovery {
 }
 
 impl LocalTempRecovery {
+    /// Transfers a live temporary file's cleanup owner into recovery.
+    ///
+    /// The path remains diagnostic; cleanup uses the file owner's retained
+    /// authority and identity. The returned recovery value retries cleanup on
+    /// explicit calls and makes one best-effort attempt when dropped.
     pub(crate) fn from_file(resource: super::LocalTempFile) -> Self {
         let path = resource.path().to_path_buf();
         let identity = resource.current_identity();
@@ -85,6 +88,10 @@ impl LocalTempRecovery {
         }
     }
 
+    /// Creates recovery ownership for one native entry.
+    ///
+    /// `path` is stored for diagnostics and error context. Deletion still
+    /// requires the retained parent/name, open object, and matching identity.
     pub(crate) fn from_native(path: PathBuf, entry: NativePrivateEntry) -> Self {
         let entry_path = path.clone();
         Self {
@@ -94,6 +101,11 @@ impl LocalTempRecovery {
         }
     }
 
+    /// Creates recovery ownership for entries reported under one diagnostic
+    /// path.
+    ///
+    /// Entry order is cleanup order. Successfully removed entries are released
+    /// even if a later entry fails; the owner then retains only the remainder.
     pub(crate) fn from_native_entries(path: PathBuf, entries: Vec<NativePrivateEntry>) -> Self {
         let identity = entries.first().and_then(|entry| entry.identity.clone());
         let entries = entries.into_iter().map(|entry| (path.clone(), entry)).collect();
@@ -104,6 +116,10 @@ impl LocalTempRecovery {
         }
     }
 
+    /// Creates recovery ownership while retaining a diagnostic path per entry.
+    ///
+    /// The entry paths do not grant access; each native entry's retained parent
+    /// handle and identity determine whether cleanup may remove it.
     pub(crate) fn from_native_entries_with_paths(path: PathBuf, entries: Vec<(PathBuf, NativePrivateEntry)>) -> Self {
         let identity = entries.first().and_then(|(_, entry)| entry.identity.clone());
         Self {
@@ -113,6 +129,10 @@ impl LocalTempRecovery {
         }
     }
 
+    /// Combines two native recovery owners, preserving their cleanup order.
+    ///
+    /// Returns both original owners unchanged if either contains a live-file
+    /// resource, since only native entry lists can be combined.
     pub(crate) fn append_native_owner(mut self, mut other: Self) -> Result<Self, (Self, Self)> {
         let Some(RecoveryResource::Native(mut other_entries)) = other.resource.take() else {
             return Err((self, other));
@@ -125,6 +145,10 @@ impl LocalTempRecovery {
         Ok(self)
     }
 
+    /// Returns the live file resource, if this owner contains one.
+    ///
+    /// Taking the resource transfers cleanup responsibility to the caller;
+    /// native-entry recovery cannot be converted into a `LocalTempFile`.
     pub(crate) fn into_file(mut self) -> Option<super::LocalTempFile> {
         match self.resource.take()? {
             RecoveryResource::LiveFile(file) => Some(*file),
@@ -168,7 +192,11 @@ impl LocalTempRecovery {
                 let mut completed = 0;
                 let mut failure = None;
                 for (path, entry) in entries.iter_mut() {
-                    match cleanup_native_entry(entry, path) {
+                    match cleanup_native_entry(entry, path).map_err(|error| {
+                        error
+                            .with_operation(crate::LocalFileOperation::Cleanup)
+                            .with_path(path.to_path_buf())
+                    }) {
                         Ok(()) => completed += 1,
                         Err(error) => {
                             failure = Some(error);
@@ -189,6 +217,13 @@ impl LocalTempRecovery {
     }
 }
 
+/// Removes one retained native entry only after validating both retained-handle
+/// identity and the no-follow identity/type currently named by its parent.
+///
+/// `path` is diagnostic context only. A missing identity, replaced name,
+/// mismatched type, or failed observation prevents deletion; on success the
+/// retained handle is released. Unix uses parent-relative `fstatat` and
+/// `unlinkat`, so owner-read permission is not an extra prerequisite.
 fn cleanup_native_entry(entry: &mut NativePrivateEntry, path: &Path) -> crate::LocalResult<()> {
     use crate::LocalFileError;
     use crate::LocalFileErrorKind;
@@ -224,18 +259,19 @@ fn cleanup_native_entry(entry: &mut NativePrivateEntry, path: &Path) -> crate::L
     #[cfg(unix)]
     {
         use std::os::fd::AsRawFd;
-        use std::os::fd::FromRawFd;
         use std::os::unix::ffi::OsStrExt;
         let name = std::ffi::CString::new(entry.name.as_bytes())
             .map_err(|_| LocalFileError::new(LocalFileErrorKind::InvalidPath, LocalFileOperation::Cleanup))?;
-        let named = unsafe {
-            libc::openat(
+        let mut named_metadata = std::mem::MaybeUninit::<libc::stat>::uninit();
+        if unsafe {
+            libc::fstatat(
                 entry.parent.as_raw_fd(),
                 name.as_ptr(),
-                libc::O_RDONLY | libc::O_NOFOLLOW | libc::O_CLOEXEC | libc::O_NONBLOCK,
+                named_metadata.as_mut_ptr(),
+                libc::AT_SYMLINK_NOFOLLOW,
             )
-        };
-        if named < 0 {
+        } != 0
+        {
             return Err(LocalFileError::from_io(
                 LocalFileOperation::Cleanup,
                 Some(path.to_path_buf()),
@@ -243,13 +279,14 @@ fn cleanup_native_entry(entry: &mut NativePrivateEntry, path: &Path) -> crate::L
                 io::Error::last_os_error(),
             ));
         }
-        // SAFETY: openat returned a fresh descriptor owned here.
-        let named_file = unsafe { File::from_raw_fd(named) };
-        let named_identity = crate::observation::query::query_observation(
-            &named_file,
-            crate::observation::LocalObservationRequirement::Required,
-        )?;
-        if named_identity.identity() != Some(expected) {
+        // SAFETY: fstatat succeeded and initialized the metadata value.
+        let named_metadata = unsafe { named_metadata.assume_init() };
+        // `dev_t` and `ino_t` are not u64 on every Unix target.
+        #[allow(clippy::unnecessary_cast)]
+        let named_identity = LocalFileIdentity::unix(named_metadata.st_dev as u64, named_metadata.st_ino as u64);
+        let named_type = named_metadata.st_mode & libc::S_IFMT;
+        let expected_type = if entry.directory { libc::S_IFDIR } else { libc::S_IFREG };
+        if &named_identity != expected || named_type != expected_type {
             return Err(LocalFileError::new(
                 LocalFileErrorKind::RequirementNotMet,
                 LocalFileOperation::Cleanup,

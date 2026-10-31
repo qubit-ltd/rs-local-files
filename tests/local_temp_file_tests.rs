@@ -336,8 +336,125 @@ fn test_required_private_windows_host_io_contract() {
         "sealed Host file should retain a native identity"
     );
     let mut sealed = sealed;
+    let sandbox = path
+        .parent()
+        .expect("Host temporary file should have a sandbox")
+        .to_path_buf();
+    assert!(
+        fs::metadata(&path)
+            .expect("sealed Host file metadata should be available")
+            .permissions()
+            .readonly(),
+        "Required-private seal should expose the native read-only bit"
+    );
     sealed.cleanup().expect("sealed Host file should clean up");
     assert!(!path.exists());
+    assert!(!sandbox.exists());
+}
+
+/// Verifies PlatformDefault Host cleanup removes its sealed read-only file and
+/// sandbox.
+#[cfg(windows)]
+#[test]
+fn windows_sealed_cleanup_platform_default_host() {
+    let parent = tempdir().expect("Host fixture should be created");
+    let mut temporary = LocalFileSystem::host()
+        .expect("Host filesystem should open")
+        .create_temp_file_with_options(
+            &LocalTempFileOptions::new()
+                .with_parent(parent.path())
+                .with_privacy(LocalPrivacyRequirement::PlatformDefault),
+        )
+        .expect("PlatformDefault Host temporary file should be created");
+    let path = temporary.path().to_path_buf();
+    Output::write_fully(&mut temporary, b"sealed payload").expect("Host temporary file should accept bytes");
+
+    let mut sealed = temporary
+        .seal_with_options(&LocalSealOptions::new())
+        .expect("PlatformDefault Host temporary file should seal");
+    let sandbox = path.parent().expect("Host file should have a sandbox").to_path_buf();
+    assert!(
+        fs::metadata(&path)
+            .expect("sealed Host file metadata should be available")
+            .permissions()
+            .readonly(),
+        "sealed Host file should expose the native read-only bit"
+    );
+
+    sealed
+        .cleanup()
+        .expect("PlatformDefault Host sealed cleanup should succeed");
+
+    assert!(!path.exists(), "sealed Host file should be removed");
+    assert!(!sandbox.exists(), "sealed Host file sandbox should be removed");
+}
+
+/// Verifies dropping a PlatformDefault Host owner removes its sealed read-only
+/// file and sandbox.
+#[cfg(windows)]
+#[test]
+fn windows_sealed_cleanup_drop_removes_host_entry() {
+    let parent = tempdir().expect("Host fixture should be created");
+    let mut temporary = LocalFileSystem::host()
+        .expect("Host filesystem should open")
+        .create_temp_file_with_options(
+            &LocalTempFileOptions::new()
+                .with_parent(parent.path())
+                .with_privacy(LocalPrivacyRequirement::PlatformDefault),
+        )
+        .expect("PlatformDefault Host temporary file should be created");
+    let path = temporary.path().to_path_buf();
+    Output::write_fully(&mut temporary, b"sealed payload").expect("Host temporary file should accept bytes");
+    let sandbox = path.parent().expect("Host file should have a sandbox").to_path_buf();
+    let sealed = temporary
+        .seal_with_options(&LocalSealOptions::new())
+        .expect("PlatformDefault Host temporary file should seal");
+    assert!(
+        fs::metadata(&path)
+            .expect("sealed Host file metadata should be available")
+            .permissions()
+            .readonly(),
+        "sealed Host file should expose the native read-only bit"
+    );
+
+    drop(sealed);
+
+    assert!(!path.exists(), "drop should remove the Host entry");
+    assert!(!sandbox.exists(), "drop should remove the Host sandbox");
+}
+
+/// Verifies Host cleanup preserves a replacement entry at the temporary path.
+#[cfg(windows)]
+#[test]
+fn windows_sealed_cleanup_host_rejects_replacement() {
+    let parent = tempdir().expect("Host fixture should be created");
+    let mut temporary = LocalFileSystem::host()
+        .expect("Host filesystem should open")
+        .create_temp_file_with_options(
+            &LocalTempFileOptions::new()
+                .with_parent(parent.path())
+                .with_privacy(LocalPrivacyRequirement::PlatformDefault),
+        )
+        .expect("PlatformDefault Host temporary file should be created");
+    let path = temporary.path().to_path_buf();
+    Output::write_fully(&mut temporary, b"owned payload").expect("Host temporary file should accept bytes");
+    let mut sealed = temporary
+        .seal_with_options(&LocalSealOptions::new())
+        .expect("Host temporary file should seal");
+    let displaced = path.with_extension("displaced");
+    fs::rename(&path, &displaced).expect("owned Host file should be moved aside");
+    fs::write(&path, b"replacement").expect("replacement should occupy the original path");
+
+    let error = sealed
+        .cleanup()
+        .expect_err("Host cleanup must reject a replacement entry");
+
+    assert_eq!(LocalFileErrorKind::InvalidPath, error.kind());
+    assert_eq!(
+        b"replacement",
+        fs::read(&path).expect("replacement should remain").as_slice()
+    );
+    assert!(displaced.exists(), "the displaced owned file should remain");
 }
 
 /// Verifies Required-private Rooted temporary files support synchronous I/O

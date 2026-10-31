@@ -51,7 +51,7 @@ pub(crate) fn commit_conditional<D, B>(
     backend: B,
     precondition: LocalWritePrecondition<Output<D>>,
     options: LocalWriteOptions,
-    bytes_written: usize,
+    bytes_written: u64,
 ) -> Result<LocalConditionalWriteOutcome<D>, LocalConditionalCommitError>
 where
     D: Digest,
@@ -67,7 +67,7 @@ pub(crate) fn commit_conditional_with_directory<D, B>(
     mut backend: B,
     precondition: LocalWritePrecondition<Output<D>>,
     options: LocalWriteOptions,
-    bytes_written: usize,
+    bytes_written: u64,
     current_directory: Option<PathBuf>,
 ) -> Result<LocalConditionalWriteOutcome<D>, LocalConditionalCommitError>
 where

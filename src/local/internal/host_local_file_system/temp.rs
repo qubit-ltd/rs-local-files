@@ -197,6 +197,11 @@ impl HostLocalFileSystem {
     }
 }
 
+/// Creates a sandbox and returns its retained cleanup entry.
+///
+/// The returned entry owns the parent authority, opened sandbox handle, and
+/// best-effort identity snapshot. Its joined path is diagnostic; recovery
+/// deletes only while the retained name still identifies that object.
 fn create_host_temp_sandbox(
     parent: &Path,
     operation: LocalFileOperation,
@@ -236,6 +241,10 @@ fn create_host_temp_sandbox(
     Ok((sandbox, entry))
 }
 
+/// Opens a Host temporary parent with rights needed to retain its authority.
+///
+/// Windows requests directory backup semantics and attribute access; other
+/// platforms use their native directory-open behavior.
 #[cfg(windows)]
 fn open_host_temp_parent_directory(path: &Path) -> io::Result<File> {
     use std::os::windows::fs::OpenOptionsExt;
@@ -254,6 +263,11 @@ fn open_host_temp_parent_directory(path: &Path) -> io::Result<File> {
     File::open(path)
 }
 
+/// Creates a temporary directory entry and opens it for retained operations.
+///
+/// If opening fails after creation, the returned error carries recovery
+/// ownership with the parent handle and name, but without claiming an object
+/// identity that could not be observed.
 fn create_host_temp_directory_entry(
     parent: &Path,
     parent_handle: Arc<File>,
@@ -273,6 +287,12 @@ fn create_host_temp_directory_entry(
     )
 }
 
+/// Creates an entry and binds its opened directory handle.
+///
+/// The opener runs after creation. If it fails, ownership is transferred into
+/// the error for a later cleanup attempt; the supplied path is retained only
+/// as diagnostic context. `open_directory` is an internal seam for exercising
+/// this failure boundary.
 fn create_host_temp_directory_entry_with_opener(
     parent: &Path,
     parent_handle: Arc<File>,
@@ -314,6 +334,12 @@ fn create_host_temp_directory_entry_with_opener(
     Ok((path, handle))
 }
 
+/// Builds ordered recovery entries for an optional child and its sandbox.
+///
+/// The child is cleaned before the sandbox so the sandbox remains available
+/// as its parent. Identity observation is best-effort here; cleanup refuses
+/// to delete any entry whose identity cannot later be verified. Each path is
+/// diagnostic and access remains anchored by the retained parent handle.
 fn host_temp_recovery_entries(
     sandbox_path: &Path,
     sandbox: crate::temp::internal::NativePrivateEntry,
@@ -383,6 +409,12 @@ fn open_temp_directory(path: &Path) -> io::Result<File> {
     File::open(path)
 }
 
+/// Attempts cleanup after a temporary creation failure while preserving owners.
+///
+/// Existing recovery ownership from `primary` is combined with `owner` when
+/// both are native-entry owners. Cleanup failure is attached to the primary
+/// error and the remaining owner is returned so callers can retry; partial
+/// cleanup may already have released earlier entries.
 fn cleanup_failed_temp_owner(
     primary: LocalFileError,
     mut owner: crate::LocalTempRecovery,
@@ -426,6 +458,11 @@ fn cleanup_failed_temp_owner(
     }
 }
 
+/// Attempts cleanup for an owner already attached to a creation error.
+///
+/// Successful cleanup leaves the original error intact. Failed cleanup is
+/// recorded separately and the owner stays attached for a caller-controlled
+/// retry rather than being dropped at this boundary.
 fn cleanup_failed_temp_creation_owner(primary: LocalFileError) -> LocalFileError {
     let (primary, recovery) = primary.into_temp_recovery_parts();
     let Some(mut recovery) = recovery else {
@@ -893,9 +930,13 @@ fn private_create_error(
 /// Creates recovery ownership for a native temporary entry and optional
 /// sandbox.
 ///
+/// Transfers retained parent/name and object handles into recovery ownership.
+///
 /// The parent handle and name retain namespace access, while the file handle
-/// retains the created object. Identity observation is best-effort and may be
-/// absent; the returned owner carries both entries when a sandbox is supplied.
+/// retains the created object. Identity observation is best-effort; if it is
+/// unavailable, later cleanup refuses path-only deletion. When supplied,
+/// `sandbox` is appended after the primary entry so cleanup removes the child
+/// before its containing sandbox.
 fn native_temp_recovery(
     path: PathBuf,
     parent: File,
@@ -945,7 +986,8 @@ fn reserve_private_parent(parent: &File) -> io::Result<File> {
 /// Reserves recovery ownership for a created sandbox directory.
 ///
 /// On failure, returns the parent handle to the caller so it can transfer that
-/// handle and the still-open directory into a recovery value.
+/// handle and the still-open directory into a recovery value. Identity capture
+/// is best-effort; if it is absent, cleanup refuses deletion by path alone.
 fn reserve_private_directory_guard(
     parent: File,
     name: &str,

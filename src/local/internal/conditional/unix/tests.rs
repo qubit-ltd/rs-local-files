@@ -551,7 +551,7 @@ fn conditional_unix_preserves_read_only_mode_and_handles_empty_and_large_candida
         backend,
         LocalWritePrecondition::Content(Sha256::digest(b"old")),
         LocalWriteOptions::new(LocalWriteMode::CreateOrReplace),
-        payload.len(),
+        payload.len() as u64,
     );
     assert!(result.is_ok(), "large candidate should publish: {result:?}");
     assert_eq!(fs::read(&target).expect("large target should be readable"), payload);

@@ -18,6 +18,69 @@ use crate::outcome::LocalTreeAccessState;
 use crate::outcome::LocalTreePublication;
 use crate::policy::LocalTreeFinalAccess;
 
+#[cfg(unix)]
+struct WritableTreeFixture {
+    tempdir: Option<tempfile::TempDir>,
+    published_trees: Vec<std::path::PathBuf>,
+}
+
+#[cfg(unix)]
+impl WritableTreeFixture {
+    fn new() -> Self {
+        Self {
+            tempdir: Some(tempfile::tempdir().expect("fixture should be created")),
+            published_trees: Vec::new(),
+        }
+    }
+
+    fn path(&self) -> &Path {
+        self.tempdir.as_ref().expect("fixture is open").path()
+    }
+
+    fn record_published_tree(&mut self, name: &str) {
+        let path = self.path().join(name);
+        self.published_trees.push(path);
+    }
+
+    fn cleanup_published_trees(&mut self) -> std::io::Result<()> {
+        use std::os::unix::fs::PermissionsExt;
+
+        for root in &self.published_trees {
+            if !root.exists() {
+                continue;
+            }
+            let mut directories = vec![root.clone()];
+            let mut index = 0;
+            while index < directories.len() {
+                let directory = directories[index].clone();
+                index += 1;
+                std::fs::set_permissions(&directory, std::fs::Permissions::from_mode(0o700))?;
+                for entry in std::fs::read_dir(&directory)? {
+                    let entry = entry?;
+                    if entry.file_type()?.is_dir() {
+                        directories.push(entry.path());
+                    }
+                }
+            }
+            std::fs::remove_dir_all(root)?;
+        }
+        Ok(())
+    }
+
+    fn close(mut self) -> std::io::Result<()> {
+        self.cleanup_published_trees()?;
+        drop(self.tempdir.take());
+        Ok(())
+    }
+}
+
+#[cfg(unix)]
+impl Drop for WritableTreeFixture {
+    fn drop(&mut self) {
+        let _ = self.cleanup_published_trees();
+    }
+}
+
 #[test]
 fn lf_review_tree_exact_set_conflicts_leave_destination_and_owner_untouched() {
     for (name, expected) in [
@@ -771,7 +834,7 @@ fn lf_revision_readonly_sync_publishes_all_sync_requirements() {
         crate::policy::LocalFileSyncRequirement::Preferred,
         crate::policy::LocalFileSyncRequirement::Required,
     ] {
-        let fixture = tempfile::tempdir().expect("fixture should be created");
+        let mut fixture = WritableTreeFixture::new();
         let fs = crate::LocalFileSystem::host().expect("host filesystem should open");
         let parent = fs
             .open_directory_with_options(fixture.path(), &LocalDirectoryOpenOptions::new())
@@ -790,6 +853,7 @@ fn lf_revision_readonly_sync_publishes_all_sync_requirements() {
             .publish_new(&parent, OsStr::new("published"), &options)
             .expect("read-only stage should publish with requested file sync");
         assert_eq!(outcome.publication(), LocalTreePublication::Published);
+        fixture.record_published_tree("published");
         assert_eq!(
             std::os::unix::fs::MetadataExt::mode(
                 &std::fs::metadata(fixture.path().join("published")).expect("root metadata")
@@ -809,6 +873,7 @@ fn lf_revision_readonly_sync_publishes_all_sync_requirements() {
             std::os::unix::fs::MetadataExt::mode(&std::fs::metadata(path).expect("published metadata")) & 0o777,
             0o400,
         );
+        fixture.close().expect("published read-only tree should be removed");
     }
 }
 
@@ -824,7 +889,7 @@ fn lf_revision_readonly_sync_failure_states_preserve_truthful_outcomes() {
         crate::policy::LocalFileSyncRequirement::Preferred,
         crate::policy::LocalFileSyncRequirement::Required,
     ] {
-        let fixture = tempfile::tempdir().expect("fixture should be created");
+        let mut fixture = WritableTreeFixture::new();
         let fs = crate::LocalFileSystem::host().expect("host filesystem should open");
         let parent = fs
             .open_directory_with_options(fixture.path(), &LocalDirectoryOpenOptions::new())
@@ -844,6 +909,7 @@ fn lf_revision_readonly_sync_failure_states_preserve_truthful_outcomes() {
             Ok(outcome) => {
                 assert_eq!(requirement, crate::policy::LocalFileSyncRequirement::Preferred);
                 assert_eq!(outcome.publication(), LocalTreePublication::Published);
+                fixture.record_published_tree("published");
                 assert!(
                     !outcome.file_synced(),
                     "failed preferred sync must not be reported as complete"
@@ -871,7 +937,47 @@ fn lf_revision_readonly_sync_failure_states_preserve_truthful_outcomes() {
                 retained.cleanup().expect("restored stage should be cleanable");
             }
         }
+        fixture.close().expect("published read-only tree should be removed");
     }
+}
+
+#[cfg(unix)]
+#[test]
+fn test_readonly_tree_fixture_cleans_after_unwind() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let mut fixture = WritableTreeFixture::new();
+    let path = fixture.path().join("published");
+    fixture.record_published_tree("published");
+    std::fs::create_dir_all(path.join("nested")).expect("tree should be created");
+    std::fs::write(path.join("nested/file"), b"payload").expect("file should be created");
+    std::fs::set_permissions(path.join("nested/file"), std::fs::Permissions::from_mode(0o400))
+        .expect("file should become read-only");
+    std::fs::set_permissions(path.join("nested"), std::fs::Permissions::from_mode(0o500))
+        .expect("nested directory should become read-only");
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o500))
+        .expect("root directory should become read-only");
+    fixture.close().expect("explicit close should remove the fixture");
+    assert!(!path.exists(), "explicit close should remove the fixture");
+
+    let panic_path = std::cell::RefCell::new(None);
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let mut fixture = WritableTreeFixture::new();
+        let path = fixture.path().join("published");
+        fixture.record_published_tree("published");
+        std::fs::create_dir_all(path.join("nested")).expect("tree should be created");
+        std::fs::write(path.join("nested/file"), b"payload").expect("file should be created");
+        std::fs::set_permissions(path.join("nested/file"), std::fs::Permissions::from_mode(0o400))
+            .expect("file should become read-only");
+        std::fs::set_permissions(path.join("nested"), std::fs::Permissions::from_mode(0o500))
+            .expect("nested directory should become read-only");
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o500))
+            .expect("root directory should become read-only");
+        *panic_path.borrow_mut() = Some(path);
+        panic!("exercise fixture Drop during unwind");
+    }));
+    assert!(result.is_err());
+    assert!(!panic_path.into_inner().expect("panic path should be recorded").exists());
 }
 
 #[cfg(windows)]
