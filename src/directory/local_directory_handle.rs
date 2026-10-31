@@ -36,7 +36,6 @@ use crate::LocalSymlinkPolicy;
 use crate::LocalWriteOptions;
 use crate::directory::LocalComponentPolicy;
 use crate::directory::binding::BindingAnchor;
-use crate::directory::binding::DirectoryPathBinding;
 use crate::directory::binding::PathBindingBudget;
 use crate::local::LocalNamespace;
 use crate::observation::LocalFileObservation;
@@ -49,6 +48,8 @@ use crate::options::LocalPathBindingOptions;
 use crate::options::LocalWriteMode;
 use crate::rooted::Root;
 
+#[path = "local_directory_handle/observed.rs"]
+mod observed;
 #[path = "local_directory_handle/staged.rs"]
 mod staged;
 
@@ -851,23 +852,7 @@ impl LocalDirectoryHandle {
         relative: &Path,
         options: &LocalObservedReadOptions,
     ) -> LocalResult<LocalObservedReader> {
-        let read_options = options.read_options().unwrap_or(self.filesystem.default_read_options());
-        let symlink_policy = self.filesystem.read_symlink_policy(read_options, None);
-        crate::local_file_system_validation::validate_scope_symlink_policy(
-            self.filesystem.scope(),
-            symlink_policy,
-            LocalFileOperation::OpenReader,
-            Some(relative),
-        )?;
-        let checked = self.validate_with_policy(relative, true, symlink_policy)?;
-        let mut reader = self.filesystem.open_observed_reader(&checked, options)?;
-        if let Some(anchors) = &self.binding_anchors {
-            reader = reader.with_binding(Box::new(DirectoryPathBinding::new(
-                anchors.clone(),
-                self.binding_deadline,
-            )));
-        }
-        Ok(reader)
+        observed::open(self, relative, options)
     }
 
     /// Starts a directory listing for a relative path under this authority.

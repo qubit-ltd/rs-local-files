@@ -19,6 +19,13 @@ use crate::error::LocalResourceKind;
 use crate::error::LocalResourceLimitError;
 
 /// Counters and validation policy for one path-resolution attempt.
+///
+/// Hop counts include each link before following it. Pending counts describe
+/// the unresolved worklist; resolved counts describe the accumulated result.
+/// Path-byte limits use native encoded bytes (UTF-16 code units times two on
+/// Windows). The referenced contract already contains the strictest inherited
+/// limits and an absolute deadline; this session does not restart that
+/// deadline.
 pub(crate) struct ResolutionSession {
     contract: ResolutionContract,
     scope: LocalResolutionScope,
@@ -34,6 +41,11 @@ impl ResolutionSession {
         }
     }
 
+    /// Charges one hop before following a link and enforces the inherited cap.
+    ///
+    /// Returns a resource-limit error on counter overflow or when the updated
+    /// count exceeds the contract. Component policies are checked separately
+    /// as each link target is interpreted.
     pub(crate) fn before_follow_link(&mut self) -> LocalResult<()> {
         self.hops = self
             .hops
@@ -52,6 +64,11 @@ impl ResolutionSession {
         Ok(())
     }
 
+    /// Checks the current unresolved worklist against component and byte
+    /// limits.
+    ///
+    /// Errors preserve the resource kind and observed value from the contract
+    /// limit check; byte counts use the platform-native encoding unit.
     pub(crate) fn check_pending(&self, components: usize, bytes: usize) -> LocalResult<()> {
         self.check(
             LocalResourceKind::PendingResolutionComponents,
@@ -65,6 +82,10 @@ impl ResolutionSession {
         )
     }
 
+    /// Checks the accumulated resolved path against component and byte limits.
+    ///
+    /// This is independent of [`Self::check_pending`]: both snapshots must fit
+    /// their respective limits during resolution.
     pub(crate) fn check_resolved(&self, components: usize, bytes: usize) -> LocalResult<()> {
         self.check(
             LocalResourceKind::ResolvedComponents,
@@ -78,10 +99,19 @@ impl ResolutionSession {
         )
     }
 
+    /// Applies the inherited component policy in the supplied resolution scope.
+    ///
+    /// The contract determines policy precedence and returns its typed local
+    /// error unchanged when a component is denied.
     pub(crate) fn validate_component(&self, component: &OsStr, origin: LocalResolutionOrigin) -> LocalResult<()> {
         self.contract.validate_component(component, self.scope, origin)
     }
 
+    /// Checks native target-byte length before applying target component
+    /// policy.
+    ///
+    /// Windows measures UTF-16 code units times two. Overflow and policy
+    /// rejection remain resource-limit and typed contract errors respectively.
     pub(crate) fn validate_target(&self, target: &Path) -> LocalResult<()> {
         let bytes = native_bytes(target.as_os_str())
             .ok_or_else(|| limit_error(LocalResourceKind::SymlinkTargetBytes, usize::MAX, true))?;

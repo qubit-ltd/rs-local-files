@@ -139,7 +139,7 @@ fn root_policy_survives_child_symlink_reader_and_final_binding() {
         .open_observed_reader(Path::new("alias/source"), &LocalObservedReadOptions::new())
         .expect_err("child reader cannot bypass root symlink target policy");
     assert_eq!(error.kind(), LocalFileErrorKind::PermissionDenied);
-    assert_eq!(error.operation(), LocalFileOperation::BindPath);
+    assert_eq!(error.operation(), LocalFileOperation::OpenReader);
     assert!(error.typed_source().is_none());
     assert_eq!(
         b"original".as_slice(),

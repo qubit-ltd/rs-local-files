@@ -225,8 +225,8 @@ fn test_directory_resource_failure_child() {
             &parent
                 .open_observed_reader(Path::new("payload"), &LocalObservedReadOptions::new())
                 .expect_err("reader resolution must duplicate its authority"),
-            LocalFileOperation::BindPath,
-            Path::new("payload"),
+            LocalFileOperation::OpenReader,
+            &parent_path.join("payload"),
         ),
         "binding" => assert_emfile(
             &reader

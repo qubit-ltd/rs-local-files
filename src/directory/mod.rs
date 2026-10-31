@@ -16,6 +16,7 @@ mod directory_path_binding;
 #[path = "local_directory_handle.rs"]
 mod handle;
 mod internal;
+pub(crate) use internal::directory_reader_path_binding::DirectoryReaderPathBinding;
 mod local_resolution_origin;
 mod local_resolution_policy;
 mod local_resolution_scope;

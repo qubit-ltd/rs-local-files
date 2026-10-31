@@ -7,6 +7,8 @@
 // =============================================================================
 //! Stateful Host or Rooted local filesystem service.
 
+use std::path::PathBuf;
+
 use super::HostLocalFileSystem;
 use super::Input;
 use super::LocalFileError;
@@ -32,6 +34,7 @@ use crate::directory::binding::DirectoryPathBinding;
 use crate::directory::binding::PathBinding;
 #[cfg(feature = "test-support")]
 use crate::local::take_test_support;
+use crate::local_file_system::internal::observed_read_path::ObservedReadPath;
 use crate::local_file_system_validation::validate_write_options;
 use crate::observation::LocalObservationRequirement;
 use crate::observation::LocalObservedReader;
@@ -68,12 +71,12 @@ impl LocalFileSystem {
             .and_then(|limits| limits.deadline())
             .and_then(|limit| resolver_started.checked_add(limit));
         self.open_observed_reader_with_binding_limits(
-            path,
+            ObservedReadPath::Namespace(path),
             options,
             binding_options,
             binding_deadline,
-            resolver_started,
             true,
+            None,
         )
     }
 
@@ -85,24 +88,88 @@ impl LocalFileSystem {
         deadline: Option<std::time::Instant>,
     ) -> LocalResult<LocalObservedReader> {
         self.open_observed_reader_with_binding_limits(
-            path,
+            ObservedReadPath::Namespace(path),
             options,
             Some(limits),
             deadline,
-            std::time::Instant::now(),
             false,
+            None,
+        )
+    }
+
+    /// Opens an observed reader using an existing fixed-directory authority.
+    pub(crate) fn open_observed_reader_fixed(
+        &self,
+        original: &Path,
+        request_path: &Path,
+        component_policy: &crate::directory::LocalComponentPolicy,
+        options: &LocalObservedReadOptions,
+        authority_binding_deadline: Option<std::time::Duration>,
+    ) -> LocalResult<LocalObservedReader> {
+        let resolver_started = std::time::Instant::now();
+        let binding_options = options.path_binding().copied();
+        let binding_deadline = binding_options
+            .and_then(|limits| limits.deadline())
+            .into_iter()
+            .chain(authority_binding_deadline)
+            .min()
+            .and_then(|limit| resolver_started.checked_add(limit));
+        self.open_observed_reader_with_binding_limits(
+            ObservedReadPath::FixedRelative {
+                original,
+                request_path,
+                component_policy,
+            },
+            options,
+            binding_options,
+            binding_deadline,
+            true,
+            authority_binding_deadline,
+        )
+    }
+
+    /// Reopens a fixed-relative source during path-binding verification.
+    pub(crate) fn open_observed_reader_fixed_with_deadline(
+        &self,
+        original: &Path,
+        request_path: &Path,
+        component_policy: &crate::directory::LocalComponentPolicy,
+        options: &LocalObservedReadOptions,
+        deadline: Option<std::time::Instant>,
+        authority_binding_deadline: Option<std::time::Duration>,
+    ) -> LocalResult<LocalObservedReader> {
+        let started_at = std::time::Instant::now();
+        let authority_deadline = authority_binding_deadline.and_then(|limit| started_at.checked_add(limit));
+        let deadline = match (deadline, authority_deadline) {
+            (Some(explicit), Some(authority)) => Some(explicit.min(authority)),
+            (explicit, authority) => explicit.or(authority),
+        };
+        self.open_observed_reader_with_binding_limits(
+            ObservedReadPath::FixedRelative {
+                original,
+                request_path,
+                component_policy,
+            },
+            options,
+            options.path_binding().copied(),
+            deadline,
+            false,
+            authority_binding_deadline,
         )
     }
 
     fn open_observed_reader_with_binding_limits(
         &self,
-        path: &Path,
+        path_mode: ObservedReadPath<'_>,
         options: &LocalObservedReadOptions,
         binding_options: Option<crate::options::LocalPathBindingOptions>,
         binding_deadline: Option<std::time::Instant>,
-        resolver_started: std::time::Instant,
         attach_binding: bool,
+        authority_binding_deadline: Option<std::time::Duration>,
     ) -> LocalResult<LocalObservedReader> {
+        let resolver_started = std::time::Instant::now();
+        let path = path_mode.original();
+        let request_path = path_mode.request_path();
         let read_options = options.read_options().unwrap_or(&self.defaults.read);
         let symlink_policy = self.read_symlink_policy(read_options, None);
         let mut resolution = self.core.resolution.clone();
@@ -125,167 +192,33 @@ impl LocalFileSystem {
         let mut path_budget =
             binding_options.map(|limits| crate::directory::binding::PathBindingBudget::new(limits.max_path_bytes()));
         check_binding_deadline(binding_deadline, path)?;
-        let resolver = self.resolver_for(path, LocalFileOperation::OpenReader)?;
-        let resolved = resolve_operation_path(&resolver, path, LocalFileOperation::OpenReader)?;
-        check_binding_deadline(binding_deadline, path)?;
-        let namespace_absolute = if path.is_absolute() {
-            path.to_path_buf()
-        } else {
-            resolver
-                .current_directory()
-                .unwrap_or_else(|| Path::new("/"))
-                .join(path)
-        };
-        let authority_path = namespace_absolute
-            .strip_prefix(Path::new(std::path::MAIN_SEPARATOR_STR))
-            .unwrap_or(&namespace_absolute);
-        if binding_options.is_some() {
-            let absolute_bytes = resolved.namespace_absolute().as_os_str().len();
-            let raw_component_bytes = path
-                .components()
-                .filter_map(|component| match component {
-                    std::path::Component::Normal(name) => Some(name.len().saturating_add(1)),
-                    _ => None,
-                })
-                .fold(0_usize, usize::saturating_add);
-            if let Some(budget) = path_budget.as_mut() {
-                budget.debit(
-                    absolute_bytes,
-                    LocalFileOperation::OpenReader,
-                    resolved.namespace_absolute(),
-                )?;
-                budget.debit(
-                    raw_component_bytes,
-                    LocalFileOperation::OpenReader,
-                    resolved.namespace_absolute(),
-                )?;
-            }
-            let (root, symlink_policy) = match &self.core.namespace {
-                LocalNamespace::Host => (
-                    Root::open(Path::new("/"))
-                        .map_err(|source| {
-                            LocalFileError::from_io(
-                                LocalFileOperation::OpenRoot,
-                                Some(namespace_absolute.clone()),
-                                None,
-                                source,
-                            )
-                        })?
-                        .with_resolution_contract(resolution.clone()),
-                    if symlink_policy == LocalSymlinkPolicy::FollowAcrossScope {
-                        LocalSymlinkPolicy::FollowWithinScope
-                    } else {
-                        symlink_policy
-                    },
-                ),
-                LocalNamespace::Rooted(rooted) => {
-                    let authority = rooted.root_authority();
-                    let file = authority.try_clone_authority().map_err(|source| {
-                        LocalFileError::from_io(
-                            LocalFileOperation::OpenRoot,
-                            Some(namespace_absolute.clone()),
-                            None,
-                            source,
+        let fixed_resolved = (|| -> LocalResult<Option<PathBuf>> {
+            Ok(match &path_mode {
+                ObservedReadPath::Namespace(_) => None,
+                ObservedReadPath::FixedRelative {
+                    original,
+                    component_policy,
+                    ..
+                } => {
+                    if original.is_absolute() || original.has_root() {
+                        return Err(LocalFileError::new(
+                            LocalFileErrorKind::InvalidPath,
+                            LocalFileOperation::OpenReader,
                         )
-                    })?;
-                    (
-                        Root::from_directory_authority_with_contract(
-                            file,
-                            authority.path().to_path_buf(),
-                            resolution.clone(),
-                        ),
-                        symlink_policy,
-                    )
-                }
-            };
-            let allow_all = crate::directory::LocalComponentPolicy::allow_all();
-            crate::rooted_local_file_system::resolve_rooted_path_allow_root_with_component_policy_and_budget(
-                &root,
-                authority_path,
-                symlink_policy,
-                true,
-                LocalFileOperation::OpenReader,
-                &allow_all,
-                binding_deadline,
-                path_budget.as_mut(),
-            )?;
-            check_binding_deadline(binding_deadline, resolved.namespace_absolute())?;
-        }
-        let reader = self.open_resolved_reader_with_policy_and_contract(
-            &resolved,
-            read_options,
-            LocalFileOperation::OpenReader,
-            resolver.current_directory(),
-            symlink_policy,
-            Some(resolution.clone()),
-        )?;
-        check_binding_deadline(binding_deadline, path)?;
-        let mut observed = LocalObservedReader::from_reader(reader, options.native_observation())?;
-        if attach_binding {
-            let Some(binding_options) = binding_options else {
-                check_binding_deadline(binding_deadline, path)?;
-                return Ok(observed);
-            };
-            let ancestors = resolved.namespace_absolute().components().count().saturating_sub(1);
-            if binding_options.max_ancestors().is_some_and(|limit| ancestors > limit)
-                || binding_options.max_ancestors() == Some(0)
-            {
-                return Err(
-                    LocalFileError::new(LocalFileErrorKind::ResourceLimit, LocalFileOperation::OpenReader)
-                        .with_path(resolved.namespace_absolute().to_path_buf()),
-                );
-            }
-            check_binding_deadline(binding_deadline, resolved.namespace_absolute())?;
-            let identity =
-                observed.observation().identity().cloned().ok_or_else(|| {
-                    LocalFileError::new(LocalFileErrorKind::Unsupported, LocalFileOperation::Metadata)
-                })?;
-            let parent_path = resolved.authority_relative().parent().unwrap_or_else(|| Path::new(""));
-            let (parent_root, parent_anchors) = match &self.core.namespace {
-                LocalNamespace::Host => {
-                    let host_root = Root::open(Path::new("/"))
-                        .map_err(|source| {
-                            LocalFileError::from_io(
-                                LocalFileOperation::OpenRoot,
-                                Some(parent_path.to_path_buf()),
-                                None,
-                                source,
-                            )
-                        })?
-                        .with_resolution_contract(resolution.clone());
-                    let relative_parent = parent_path.strip_prefix("/").unwrap_or(parent_path);
-                    let policy = if symlink_policy == LocalSymlinkPolicy::FollowAcrossScope {
-                        LocalSymlinkPolicy::FollowWithinScope
-                    } else {
-                        symlink_policy
+                        .with_path(original.to_path_buf()));
+                    }
+                    let LocalNamespace::Rooted(rooted) = &self.core.namespace else {
+                        return Err(LocalFileError::new(
+                            LocalFileErrorKind::InvalidState,
+                            LocalFileOperation::OpenRoot,
+                        ));
                     };
-                    let allow_all = crate::directory::LocalComponentPolicy::allow_all();
-                    let relative_parent = crate::rooted_local_file_system::resolve_rooted_path_allow_root_with_component_policy_and_budget(
-                        &host_root, relative_parent, policy, true, LocalFileOperation::OpenRoot, &allow_all,
-                        binding_deadline, path_budget.as_mut(),
-                    )?;
-                    check_binding_deadline(binding_deadline, &relative_parent)?;
-                    let diagnostic_parent = Path::new("/").join(&relative_parent);
-                    let (root, _, anchors) = crate::directory::retain_directory_chain(
-                        &host_root,
-                        &relative_parent,
-                        &diagnostic_parent,
-                        Some(namespace_absolute.parent().unwrap_or(Path::new("/"))),
-                        true,
-                        Some(&binding_options),
-                        path_budget.as_mut(),
-                        policy,
-                        resolver_started,
-                    )?;
-                    (root, anchors.unwrap_or_default())
-                }
-                LocalNamespace::Rooted(rooted) => {
                     let source_root = rooted.root_authority();
-                    let working_root = Root::from_directory_authority_with_contract(
+                    let authority = Root::from_directory_authority_with_contract(
                         source_root.try_clone_authority().map_err(|source| {
                             LocalFileError::from_io(
                                 LocalFileOperation::OpenRoot,
-                                Some(resolved.namespace_absolute().to_path_buf()),
+                                Some(source_root.path().to_path_buf()),
                                 None,
                                 source,
                             )
@@ -293,46 +226,315 @@ impl LocalFileSystem {
                         source_root.path().to_path_buf(),
                         resolution.clone(),
                     );
-                    let allow_all = crate::directory::LocalComponentPolicy::allow_all();
-                    let resolved_parent = crate::rooted_local_file_system::resolve_rooted_path_allow_root_with_component_policy_and_budget(
+                    if let Some(budget) = path_budget.as_mut() {
+                        budget.debit(original.as_os_str().len(), LocalFileOperation::OpenReader, original)?;
+                    }
+                    Some(
+                    crate::rooted_local_file_system::resolve_rooted_path_allow_root_with_component_policy_and_budget(
+                        &authority,
+                        original,
+                        symlink_policy,
+                        true,
+                        LocalFileOperation::OpenReader,
+                        component_policy,
+                        binding_deadline,
+                        path_budget.as_mut(),
+                    )?,
+                )
+                }
+            })
+        })()
+        .map_err(|error| operation_error(error, LocalFileOperation::OpenReader, request_path, None, None))?;
+        let operation_path = fixed_resolved.as_deref().unwrap_or(path);
+        let resolver = self.resolver_for(operation_path, LocalFileOperation::OpenReader)?;
+        let resolved = resolve_operation_path(&resolver, operation_path, LocalFileOperation::OpenReader)?;
+        let error_path = match path_mode {
+            ObservedReadPath::Namespace(_) => resolved.namespace_absolute().to_path_buf(),
+            ObservedReadPath::FixedRelative { .. } => request_path.to_path_buf(),
+        };
+        let error_current_directory = match path_mode {
+            ObservedReadPath::Namespace(_) => resolver.current_directory().map(Path::to_path_buf),
+            ObservedReadPath::FixedRelative { .. } => None,
+        };
+        let result = (|| -> LocalResult<LocalObservedReader> {
+            if fixed_resolved.is_some()
+                && let Some(budget) = path_budget.as_mut()
+            {
+                budget.debit(
+                    resolved.namespace_absolute().as_os_str().len(),
+                    LocalFileOperation::OpenReader,
+                    path,
+                )?;
+            }
+            if attach_binding && let Some(binding_options) = binding_options {
+                let ancestors = match &path_mode {
+                    ObservedReadPath::FixedRelative { original, .. } => original
+                        .components()
+                        .count()
+                        .saturating_sub(1)
+                        .max(resolved.namespace_absolute().components().count().saturating_sub(1)),
+                    ObservedReadPath::Namespace(_) => {
+                        resolved.namespace_absolute().components().count().saturating_sub(1)
+                    }
+                };
+                if binding_options.max_ancestors().is_some_and(|limit| ancestors > limit)
+                    || binding_options.max_ancestors() == Some(0)
+                {
+                    return Err(
+                        LocalFileError::new(LocalFileErrorKind::ResourceLimit, LocalFileOperation::OpenReader)
+                            .with_path(path.to_path_buf()),
+                    );
+                }
+            }
+            check_binding_deadline(binding_deadline, path)?;
+            let namespace_absolute = if path.is_absolute() {
+                path.to_path_buf()
+            } else {
+                resolver
+                    .current_directory()
+                    .unwrap_or_else(|| Path::new("/"))
+                    .join(path)
+            };
+            let authority_path = namespace_absolute
+                .strip_prefix(Path::new(std::path::MAIN_SEPARATOR_STR))
+                .unwrap_or(&namespace_absolute);
+            if binding_options.is_some() && fixed_resolved.is_none() {
+                let absolute_bytes = resolved.namespace_absolute().as_os_str().len();
+                let raw_component_bytes = path
+                    .components()
+                    .filter_map(|component| match component {
+                        std::path::Component::Normal(name) => Some(name.len().saturating_add(1)),
+                        _ => None,
+                    })
+                    .fold(0_usize, usize::saturating_add);
+                if let Some(budget) = path_budget.as_mut() {
+                    budget.debit(
+                        absolute_bytes,
+                        LocalFileOperation::OpenReader,
+                        resolved.namespace_absolute(),
+                    )?;
+                    budget.debit(
+                        raw_component_bytes,
+                        LocalFileOperation::OpenReader,
+                        resolved.namespace_absolute(),
+                    )?;
+                }
+                let (root, symlink_policy) = match &self.core.namespace {
+                    LocalNamespace::Host => (
+                        Root::open(Path::new("/"))
+                            .map_err(|source| {
+                                LocalFileError::from_io(
+                                    LocalFileOperation::OpenRoot,
+                                    Some(namespace_absolute.clone()),
+                                    None,
+                                    source,
+                                )
+                            })?
+                            .with_resolution_contract(resolution.clone()),
+                        if symlink_policy == LocalSymlinkPolicy::FollowAcrossScope {
+                            LocalSymlinkPolicy::FollowWithinScope
+                        } else {
+                            symlink_policy
+                        },
+                    ),
+                    LocalNamespace::Rooted(rooted) => {
+                        let authority = rooted.root_authority();
+                        let file = authority.try_clone_authority().map_err(|source| {
+                            LocalFileError::from_io(
+                                LocalFileOperation::OpenRoot,
+                                Some(namespace_absolute.clone()),
+                                None,
+                                source,
+                            )
+                        })?;
+                        (
+                            Root::from_directory_authority_with_contract(
+                                file,
+                                authority.path().to_path_buf(),
+                                resolution.clone(),
+                            ),
+                            symlink_policy,
+                        )
+                    }
+                };
+                let allow_all = crate::directory::LocalComponentPolicy::allow_all();
+                crate::rooted_local_file_system::resolve_rooted_path_allow_root_with_component_policy_and_budget(
+                    &root,
+                    authority_path,
+                    symlink_policy,
+                    true,
+                    LocalFileOperation::OpenReader,
+                    &allow_all,
+                    binding_deadline,
+                    path_budget.as_mut(),
+                )?;
+                check_binding_deadline(binding_deadline, resolved.namespace_absolute())?;
+            }
+            let reader = self.open_resolved_reader_with_policy_and_contract(
+                &resolved,
+                read_options,
+                LocalFileOperation::OpenReader,
+                resolver.current_directory(),
+                symlink_policy,
+                Some(resolution.clone()),
+            )?;
+            check_binding_deadline(binding_deadline, path)?;
+            let mut observed = LocalObservedReader::from_reader(reader, options.native_observation())?;
+            if attach_binding {
+                if let ObservedReadPath::FixedRelative {
+                    original,
+                    component_policy,
+                    ..
+                } = &path_mode
+                {
+                    if binding_options.is_some() {
+                        let identity = observed.observation().identity().cloned().ok_or_else(|| {
+                            LocalFileError::new(LocalFileErrorKind::Unsupported, LocalFileOperation::Metadata)
+                        })?;
+                        observed = observed.with_binding(Box::new(crate::directory::DirectoryReaderPathBinding::new(
+                            self.clone(),
+                            original.to_path_buf(),
+                            request_path.to_path_buf(),
+                            (*component_policy).clone(),
+                            *options,
+                            identity,
+                            authority_binding_deadline,
+                        )));
+                    }
+                    check_binding_deadline(binding_deadline, original)?;
+                    return Ok(observed);
+                }
+                let Some(binding_options) = binding_options else {
+                    check_binding_deadline(binding_deadline, path)?;
+                    return Ok(observed);
+                };
+                check_binding_deadline(binding_deadline, resolved.namespace_absolute())?;
+                let identity = observed.observation().identity().cloned().ok_or_else(|| {
+                    LocalFileError::new(LocalFileErrorKind::Unsupported, LocalFileOperation::Metadata)
+                })?;
+                let parent_path = resolved.authority_relative().parent().unwrap_or_else(|| Path::new(""));
+                let (parent_root, parent_anchors) = match &self.core.namespace {
+                    LocalNamespace::Host => {
+                        let host_root = Root::open(Path::new("/"))
+                            .map_err(|source| {
+                                LocalFileError::from_io(
+                                    LocalFileOperation::OpenRoot,
+                                    Some(parent_path.to_path_buf()),
+                                    None,
+                                    source,
+                                )
+                            })?
+                            .with_resolution_contract(resolution.clone());
+                        let relative_parent = parent_path.strip_prefix("/").unwrap_or(parent_path);
+                        let policy = if symlink_policy == LocalSymlinkPolicy::FollowAcrossScope {
+                            LocalSymlinkPolicy::FollowWithinScope
+                        } else {
+                            symlink_policy
+                        };
+                        let allow_all = crate::directory::LocalComponentPolicy::allow_all();
+                        let relative_parent = crate::rooted_local_file_system::resolve_rooted_path_allow_root_with_component_policy_and_budget(
+                        &host_root, relative_parent, policy, true, LocalFileOperation::OpenRoot, &allow_all,
+                        binding_deadline, path_budget.as_mut(),
+                    )?;
+                        check_binding_deadline(binding_deadline, &relative_parent)?;
+                        let diagnostic_parent = Path::new("/").join(&relative_parent);
+                        let (root, _, anchors) = crate::directory::retain_directory_chain(
+                            &host_root,
+                            &relative_parent,
+                            &diagnostic_parent,
+                            Some(namespace_absolute.parent().unwrap_or(Path::new("/"))),
+                            true,
+                            Some(&binding_options),
+                            path_budget.as_mut(),
+                            policy,
+                            resolver_started,
+                        )?;
+                        (root, anchors.unwrap_or_default())
+                    }
+                    LocalNamespace::Rooted(rooted) => {
+                        let source_root = rooted.root_authority();
+                        let working_root = Root::from_directory_authority_with_contract(
+                            source_root.try_clone_authority().map_err(|source| {
+                                LocalFileError::from_io(
+                                    LocalFileOperation::OpenRoot,
+                                    Some(resolved.namespace_absolute().to_path_buf()),
+                                    None,
+                                    source,
+                                )
+                            })?,
+                            source_root.path().to_path_buf(),
+                            resolution.clone(),
+                        );
+                        let allow_all = crate::directory::LocalComponentPolicy::allow_all();
+                        let resolved_parent = crate::rooted_local_file_system::resolve_rooted_path_allow_root_with_component_policy_and_budget(
                         &working_root, parent_path, symlink_policy, true, LocalFileOperation::OpenRoot,
                         &allow_all, binding_deadline, path_budget.as_mut(),
                     )?;
-                    check_binding_deadline(binding_deadline, &resolved_parent)?;
-                    let diagnostic_parent = rooted.diagnostic_path().join(&resolved_parent);
-                    let recipe_parent = rooted
-                        .diagnostic_path()
-                        .join(authority_path.parent().unwrap_or_else(|| Path::new("")));
-                    let (root, _, anchors) = crate::directory::retain_directory_chain(
-                        &working_root,
-                        &resolved_parent,
-                        &diagnostic_parent,
-                        Some(&recipe_parent),
-                        true,
-                        Some(&binding_options),
-                        path_budget.as_mut(),
-                        symlink_policy,
-                        resolver_started,
-                    )?;
-                    (root, anchors.unwrap_or_default())
+                        check_binding_deadline(binding_deadline, &resolved_parent)?;
+                        let diagnostic_parent = rooted.diagnostic_path().join(&resolved_parent);
+                        let recipe_parent = rooted
+                            .diagnostic_path()
+                            .join(authority_path.parent().unwrap_or_else(|| Path::new("")));
+                        let (root, _, anchors) = crate::directory::retain_directory_chain(
+                            &working_root,
+                            &resolved_parent,
+                            &diagnostic_parent,
+                            Some(&recipe_parent),
+                            true,
+                            Some(&binding_options),
+                            path_budget.as_mut(),
+                            symlink_policy,
+                            resolver_started,
+                        )?;
+                        (root, anchors.unwrap_or_default())
+                    }
+                };
+                drop(parent_root);
+                check_binding_deadline(binding_deadline, resolved.namespace_absolute())?;
+                match &path_mode {
+                    ObservedReadPath::Namespace(_) => {
+                        observed = observed.with_binding(Box::new(PathBinding::new(
+                            self.clone(),
+                            resolved.namespace_absolute().to_path_buf(),
+                            identity,
+                            *options,
+                            binding_options,
+                        )));
+                        observed = observed.with_binding(Box::new(DirectoryPathBinding::new(
+                            parent_anchors,
+                            binding_options.deadline(),
+                        )));
+                    }
+                    ObservedReadPath::FixedRelative {
+                        original,
+                        component_policy,
+                        ..
+                    } => {
+                        observed = observed.with_binding(Box::new(crate::directory::DirectoryReaderPathBinding::new(
+                            self.clone(),
+                            original.to_path_buf(),
+                            request_path.to_path_buf(),
+                            (*component_policy).clone(),
+                            *options,
+                            identity,
+                            authority_binding_deadline,
+                        )));
+                        drop(parent_anchors);
+                    }
                 }
-            };
-            drop(parent_root);
-            check_binding_deadline(binding_deadline, resolved.namespace_absolute())?;
-            observed = observed.with_binding(Box::new(PathBinding::new(
-                self.clone(),
-                resolved.namespace_absolute().to_path_buf(),
-                identity,
-                *options,
-                binding_options,
-            )));
-            observed = observed.with_binding(Box::new(DirectoryPathBinding::new(
-                parent_anchors,
-                binding_options.deadline(),
-            )));
-        }
-        check_binding_deadline(binding_deadline, path)?;
-        Ok(observed)
+            }
+            check_binding_deadline(binding_deadline, path)?;
+            Ok(observed)
+        })();
+        result.map_err(|error| {
+            operation_error(
+                error,
+                LocalFileOperation::OpenReader,
+                &error_path,
+                None,
+                error_current_directory.as_deref(),
+            )
+        })
     }
 
     /// Reads metadata for the final target while honoring this filesystem's

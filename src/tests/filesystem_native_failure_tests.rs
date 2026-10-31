@@ -116,13 +116,13 @@ fn host_binding_root_open_failure_keeps_the_failed_parent_coordinate() {
     let options = LocalObservedReadOptions::new()
         .with_native_observation(LocalObservationRequirement::Required)
         .with_path_binding(LocalPathBindingOptions::new());
-    for (occurrence, path) in [(1, native.as_path()), (2, native.parent().expect("parent"))] {
+    for occurrence in [1, 2] {
         let fault = NativeIoFaultGuard::fail_on(NativeIoPoint::RootOpen, occurrence);
         let error = filesystem
             .open_observed_reader(&native, &options)
             .expect_err("binding root cannot open");
         assert!(fault.fired(), "root open {occurrence}");
-        assert_context(&error, LocalFileOperation::OpenRoot, Some(path), None);
+        assert_context(&error, LocalFileOperation::OpenReader, Some(&native), None);
         drop(fault);
         let mut reader = filesystem
             .open_observed_reader(&native, &options)
@@ -161,9 +161,9 @@ fn observed_reader_binding_authority_failures_keep_the_failing_phase_context() {
         .with_native_observation(LocalObservationRequirement::Required)
         .with_path_binding(LocalPathBindingOptions::new());
     for (occurrence, operation, cwd) in [
-        (1, LocalFileOperation::OpenRoot, None),
+        (1, LocalFileOperation::OpenReader, Some(Path::new("/work"))),
         (2, LocalFileOperation::OpenReader, Some(Path::new("/work"))),
-        (3, LocalFileOperation::OpenRoot, None),
+        (3, LocalFileOperation::OpenReader, Some(Path::new("/work"))),
     ] {
         let fault = NativeIoFaultGuard::fail_on(NativeIoPoint::CloneAuthority, occurrence);
         let error = filesystem

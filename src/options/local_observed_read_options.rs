@@ -72,7 +72,15 @@ impl LocalObservedReadOptions {
         self
     }
 
-    /// Sets whether native identity and timestamp details are required.
+    /// Sets whether the complete native identity and timestamp extension is
+    /// required.
+    ///
+    /// The normalized metadata query remains required with either setting.
+    /// `Optional` omits the native extension when its query fails; `Required`
+    /// reports a Unix native-query error with its I/O cause, or reports a
+    /// missing extension as `RequirementNotMet`. On Windows, a failed native
+    /// extension query is classified as `RequirementNotMet` while retaining
+    /// its source.
     pub const fn with_native_observation(mut self, requirement: LocalObservationRequirement) -> Self {
         self.native_observation = requirement;
         self

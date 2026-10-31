@@ -984,7 +984,7 @@ fn test_rooted_writer_commit_reports_state() {
 
     let outcome = writer.commit().expect("rooted writer should commit");
     assert_eq!(outcome.state(), LocalWriterState::Committed);
-    assert_eq!(outcome.bytes_written(), payload.len());
+    assert_eq!(outcome.bytes_written(), payload.len() as u64);
 }
 
 /// Verifies that rooted overwrite publication follows a final symlink.
