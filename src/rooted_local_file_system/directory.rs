@@ -89,6 +89,16 @@ impl RootedLocalFileSystem {
             return create_rooted_directory_tree(&self.root, &relative, options.exists_ok())
                 .map(LocalCreateDirectoryOutcome::new);
         }
+        #[cfg(feature = "test-support")]
+        let result = if crate::local::take_test_support_on_nth("rooted-create-directory-race", 1) {
+            if let Err(error) = self.root.create_dir(&relative) {
+                return Err(rooted_io_error(LocalFileOperation::CreateDirectory, path, error));
+            }
+            Err(io::Error::from(io::ErrorKind::AlreadyExists))
+        } else {
+            self.root.create_dir(&relative)
+        };
+        #[cfg(not(feature = "test-support"))]
         let result = self.root.create_dir(&relative);
         match result {
             Ok(()) => Ok(LocalCreateDirectoryOutcome::new(!existed)),
@@ -153,7 +163,18 @@ fn create_rooted_directory_tree(
                         crate::local::test_fault_error(),
                     ));
                 }
-                match root.create_dir(&current) {
+                #[cfg(feature = "test-support")]
+                let create_result = if crate::local::take_test_support_on_nth("rooted-create-directory-race", 2) {
+                    if let Err(error) = root.create_dir(&current) {
+                        return Err(rooted_create_component_error(&current, created_any, error));
+                    }
+                    Err(io::Error::from(io::ErrorKind::AlreadyExists))
+                } else {
+                    root.create_dir(&current)
+                };
+                #[cfg(not(feature = "test-support"))]
+                let create_result = root.create_dir(&current);
+                match create_result {
                     Ok(()) => {
                         created_any = true;
                         created_target = current.as_path() == path.as_path();

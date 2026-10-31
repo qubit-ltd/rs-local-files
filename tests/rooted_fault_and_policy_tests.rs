@@ -154,6 +154,36 @@ fn test_rooted_directory_creation_reports_injected_status_error() {
     });
 }
 
+/// Verifies `exists_ok` accepts a concurrently created final Rooted directory.
+#[cfg(feature = "test-support")]
+#[test]
+fn test_rooted_directory_creation_accepts_concurrent_creation() {
+    let directory = tempdir().expect("temporary directory should be created");
+    let rooted = LocalFileSystem::rooted(directory.path()).expect("root authority should open");
+
+    let fault = install_test_fault("rooted-create-directory-race").expect("race selector should install");
+    let outcome = rooted
+        .create_directory_with_options(
+            Path::new("single"),
+            &LocalCreateDirectoryOptions::new().with_exists_ok(),
+        )
+        .expect("a directory created by a concurrent caller should be accepted");
+    assert!(!outcome.created());
+    assert!(directory.path().join("single").is_dir());
+    drop(fault);
+
+    let fault = install_test_fault("rooted-create-directory-race").expect("recursive race selector should install");
+    let outcome = rooted
+        .create_directory_with_options(
+            Path::new("nested/child"),
+            &LocalCreateDirectoryOptions::new().with_recursive().with_exists_ok(),
+        )
+        .expect("a concurrently created final component should be accepted");
+    assert!(!outcome.created());
+    assert!(directory.path().join("nested/child").is_dir());
+    drop(fault);
+}
+
 /// Verifies rooted accessors expose the opened diagnostic anchor and the
 /// platform capability snapshot used by rooted operations.
 #[test]
