@@ -21,7 +21,7 @@ use crate::policy::LocalPrivacyRequirement;
 ///
 /// ```
 /// use std::path::PathBuf;
-/// use qubit_local_files::LocalFileKind;
+/// use qubit_local_files::outcome::LocalFileKind;
 /// use qubit_local_files::directory::{LocalTreeEntry, LocalTreeValidationOptions};
 /// use qubit_local_files::options::LocalListOptions;
 ///

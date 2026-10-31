@@ -24,7 +24,7 @@ use crate::LocalResult;
 ///
 /// ```
 /// use std::path::PathBuf;
-/// use qubit_local_files::LocalFileKind;
+/// use qubit_local_files::outcome::LocalFileKind;
 /// use qubit_local_files::directory::LocalTreeEntry;
 ///
 /// # fn main() -> Result<(), qubit_local_files::LocalFileError> {
