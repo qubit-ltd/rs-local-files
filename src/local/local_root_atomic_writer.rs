@@ -80,6 +80,10 @@ use crate::policy::LocalFileSyncRequirement;
 use crate::writer::internal::LocalCommitSyncObserver;
 use crate::writer::internal::LocalCommitSyncOutcome;
 
+#[cfg(all(test, windows))]
+#[path = "local_root_atomic_writer/windows_diagnostic_tests.rs"]
+mod windows_diagnostic_tests;
+
 #[cfg(unix)]
 fn sync_rooted_parent_chain_observed(
     parent: &File,
@@ -420,7 +424,7 @@ impl LocalRootAtomicWriter {
                 )
             })?;
             let write_options = WriteOpenOptions::new(WriteMode::CreateNew);
-            match open_rooted_native_writer(root, diagnostic_root, &staging_path, &write_options) {
+            match open_rooted_staging_writer(root, diagnostic_root, &staging_path, &write_options) {
                 Ok(file) => {
                     return Ok(Self {
                         path: requested_path,
@@ -445,7 +449,7 @@ impl LocalRootAtomicWriter {
                     return Err(LocalAtomicWriteError::new(
                         LocalAtomicWriteStage::CreateTemporaryFile,
                         requested_path,
-                        Some(diagnostic_path),
+                        None,
                         LocalAtomicDestinationState::Unchanged,
                         source,
                     ));
@@ -1103,6 +1107,20 @@ impl LocalRootAtomicWriter {
             .map(|()| true),
         }
     }
+}
+
+#[cfg(windows)]
+fn open_rooted_staging_writer(
+    root: &File,
+    diagnostic_root: &Path,
+    path: &LocalRelativePath,
+    options: &WriteOpenOptions,
+) -> io::Result<File> {
+    #[cfg(test)]
+    if let Some(error) = windows_diagnostic_tests::take_staging_open_error() {
+        return Err(error);
+    }
+    open_rooted_native_writer(root, diagnostic_root, path, options)
 }
 
 #[cfg(windows)]
