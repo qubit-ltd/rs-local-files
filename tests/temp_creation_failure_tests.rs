@@ -107,7 +107,7 @@ fn test_host_temp_identity_failure_reports_sandbox_cleanup_failure() {
         assert!(
             fs::canonicalize(recovery.path())
                 .expect("recovery path should exist")
-                .starts_with(&fs::canonicalize(parent.path()).expect("parent should exist"))
+                .starts_with(fs::canonicalize(parent.path()).expect("parent should exist"))
         );
         assert!(recovery.identity().is_some(), "created entry identity must be retained");
         drop(fault_guard);
