@@ -211,6 +211,14 @@ let result = (|| -> Result<(), Box<dyn std::error::Error>> {
     publish_backup(&parent)?;
     Ok(())
 })();
+#[cfg(target_os = "freebsd")]
+{
+    let error = result.expect_err("FreeBSD 无法提供所请求的 rename 保证");
+    let cause = error.downcast_ref::<qubit_local_files::error::LocalFileError>()
+        .expect("发布失败会返回结构化文件系统错误");
+    assert_eq!(cause.kind(), qubit_local_files::error::LocalFileErrorKind::RequirementNotMet);
+}
+#[cfg(not(target_os = "freebsd"))]
 result.unwrap();
 }
 ```
@@ -488,14 +496,14 @@ assert_eq!(text, r#"{"complete":true}"#);
 | Linux / macOS | `Absent`、`Content` | `Absent`、`Content` |
 | Windows | `Absent`；`Content` 需使用 `PreserveExisting` 元数据策略 | `Absent`；`Content` 不支持 |
 | Android | 仅编译检查；未声明协议支持 | 仅编译检查；未声明协议支持 |
-| FreeBSD 14.3 | workflow 已配置运行本 crate 完整测试（`--no-default-features` 与 `--all-features`）；runner 结果待取得，未声明协议支持 | workflow 已配置运行本 crate 完整测试（`--no-default-features` 与 `--all-features`）；runner 结果待取得，未声明协议支持 |
+| FreeBSD 14.3 | 暂不支持 | 暂不支持 |
 跨平台都会拒绝 `Append`、`Content` 配合 `CreateNew`，以及跟随符号链接策略等无效条件写入配置。
 Windows 不支持 Rooted `Content` 和 Host `Content` 配合 `UseStaging`。Host 与 Rooted
 使用 `Required` writer durability 时，都会在路径解析或创建 staging 前返回
 `RequirementNotMet`。Linux 和 macOS 可尝试有效配置下的 `Required` 耐久性与 `UseStaging`，
 但仍受所选文件系统和实际运行操作约束。应用需要展示能力提示时可查询
 `LocalDirectoryHandle::conditional_support`，但仍须处理打开和提交错误。Android 仍配置为编译检查；
-FreeBSD 14.3 不声明条件写入协议支持；workflow 已配置在两种 feature 设置下运行本 crate 完整测试，但尚无 runner 结果。
+FreeBSD 暂不支持。其 CI 只检查编译和少量兼容性合同，不再运行完整行为测试套件。各 API 的失败用例和观察到的原因见[FreeBSD 兼容性说明](freebsd-compatibility.zh_CN.md)。
 
 当应用读取文档 A、基于它准备新内容 B，并且不能覆盖其他人后来保存的版本时，使用
 条件写入。Content 成功与竞态测试仅在 Linux 和 macOS 启用，符合当前实现的平台范围；其他 Unix 的 Content
@@ -1284,7 +1292,7 @@ Rooted metadata 等操作对不含链接的普通路径使用私有的一次顺�
 ## 限制与最佳实践
 
 CI 配置了 Linux、Windows 和 macOS 运行时测试；具体修改的验证状态以实际 CI 结果为准。
-FreeBSD 14.3 workflow 已配置在 `--no-default-features` 与 `--all-features` 下运行本 crate 完整测试，但 runner 结果待取得；
+FreeBSD 暂不支持；原生 workflow 只做编译和少量合同检查，不运行完整行为套件。详细失败 API 和用例见[兼容性说明](freebsd-compatibility.zh_CN.md)。
 Android 仍配置为编译检查。T3/T4 的 Windows 清理与条件写入行为，以及 LF-09 私有资源和
 LF-10 sealed 清理，尚无原生 Windows runner 证据时必须视为待验证：Linux 对应筛选为 0 tests，Windows
 GNU `cargo check --lib` 只能证明可编译，不能证明运行行为。
@@ -1336,3 +1344,4 @@ cargo bench --locked --bench local_files -- '^(writer_scenarios|temp_directory_c
 继续阅读 [README](../README.zh_CN.md)、[English user guide](user_guide.md)、
 [设计文档](local_file_system_design.zh_CN.md) 或
 [API 文档](https://docs.rs/qubit-local-files)。
+FreeBSD 当前支持边界见 [FreeBSD 兼容性说明](freebsd-compatibility.zh_CN.md)。

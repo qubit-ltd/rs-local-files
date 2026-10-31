@@ -318,10 +318,11 @@ walk.
 
 ## Platform Scope
 
-CI is configured to run behavioral tests on Linux, Windows, and macOS; consult
-the matching CI results for validation of a particular change. FreeBSD 14.3's
-workflow now invokes the complete crate suite with `--no-default-features` and
-`--all-features`; the native runner result is pending. Android remains
+CI runs behavioral tests on Linux, Windows, and macOS; consult the matching CI
+results for validation of a particular change. FreeBSD is temporarily
+unsupported: its current native checks cover compilation and selected
+compatibility contracts, not the complete behavioral suite. See the detailed
+[FreeBSD compatibility status](doc/freebsd-compatibility.md). Android remains
 configured for compile checks. T3/T4
 Windows cleanup and conditional-open behavior, and LF-09 private-resource and LF-10 sealed-cleanup
 behavior, remain unverified without native Windows runner results. Linux filters
@@ -339,7 +340,7 @@ Conditional-write support is operation- and authority-specific:
 | Linux / macOS | `Absent`, `Content` | `Absent`, `Content` |
 | Windows | `Absent`, `Content` with `PreserveExisting` metadata | `Absent`; `Content` unsupported |
 | Android | Compile check only; no protocol claimed | Compile check only; no protocol claimed |
-| FreeBSD 14.3 | Workflow configured to run the complete crate suite with `--no-default-features` and `--all-features`; runner result pending, no protocol claimed | Workflow configured to run the complete crate suite with `--no-default-features` and `--all-features`; runner result pending, no protocol claimed |
+| FreeBSD 14.3 | Temporarily unsupported | Temporarily unsupported |
 
 Required atomicity or durability is rejected before namespace changes when the
 selected operation protocol cannot be met.
@@ -359,6 +360,7 @@ path conversion intentionally does not support UNC paths.
 ## Learn More
 
 - [User guide](doc/user_guide.md)
+- [FreeBSD compatibility status](doc/freebsd-compatibility.md)
 - [Synchronize and publish a complete staged tree](doc/user_guide.md#sync-a-complete-tree-before-durable-publication)
 - [用户手册](doc/user_guide.zh_CN.md)
 - [API reference](https://docs.rs/qubit-local-files)

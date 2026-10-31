@@ -21,9 +21,21 @@
 /// let source = directory.path().join("source.txt");
 /// let target = directory.path().join("renamed.txt");
 /// std::fs::write(&source, b"rename example")?;
-/// let outcome = filesystem.rename(Path::new(&source), Path::new(&target))?;
-/// assert!(outcome.atomic());
-/// assert_eq!(std::fs::read(&target)?, b"rename example");
+/// let rename = filesystem.rename(Path::new(&source), Path::new(&target));
+/// #[cfg(target_os = "freebsd")]
+/// {
+///     let failure = rename.expect_err("FreeBSD no-replace rename is unsupported");
+///     assert_eq!(
+///         failure.error().kind(),
+///         qubit_local_files::error::LocalFileErrorKind::RequirementNotMet,
+///     );
+/// }
+/// #[cfg(not(target_os = "freebsd"))]
+/// {
+///     let outcome = rename?;
+///     assert!(outcome.atomic());
+///     assert_eq!(std::fs::read(&target)?, b"rename example");
+/// }
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

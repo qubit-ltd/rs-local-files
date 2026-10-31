@@ -1144,7 +1144,7 @@ Windows 会在创建时为条件候选 B 及其独立恢复副本设置受保护
 | Windows Host | 原生 no-replace 安装 | 仅 `PreserveExisting` | Content 配合其他元数据策略及 `Required` writer durability 不受支持。 |
 | Windows Rooted | 原生 no-replace 安装 | 不支持 | Rooted `Absent` 使用相对已打开句柄的安装；不支持 `Required` writer durability。 |
 | Android | 未声明支持 | 未声明支持 | CI 配置为编译检查；不应从其他 Unix 目标推断支持。 |
-| FreeBSD 14.3 | 未声明支持 | 未声明支持 | workflow 已配置运行本 crate 完整测试（`--no-default-features` 与 `--all-features`）；原生 runner 结果待取得，不应从其他 Unix 目标推断支持。 |
+| FreeBSD 14.3 | 暂不支持 | 暂不支持 | 原生 CI 只检查编译和少量兼容性合同，不再以完整行为套件作为门禁。详见 [FreeBSD 兼容性说明](freebsd-compatibility.zh_CN.md)。 |
 
 Windows Rooted `Content`，以及 Host `Content` 配合 `UseStaging`，在打开 writer 阶段返回
 `Unsupported`，早于路径解析、父目录操作或 candidate/staging 创建。Host `Content` 配合
@@ -2093,7 +2093,7 @@ namespace-absolute、不含 `.`/`..`，再次规范化保持不变。Host 绑定
 - T3/T4 的 Windows 清理与条件写入用例，以及 LF-09 私有资源和 LF-10 sealed cleanup，尚无原生
   Windows runner 证据时必须标为待验证；Linux 对应测试为 0 tests，Windows GNU `cargo check --lib`
   仅证明可编译，不证明运行行为；
-- FreeBSD 14.3 workflow 已配置运行本 crate 完整测试（`--no-default-features` 与 `--all-features`）；原生 runner 结果待取得，配置不代表运行通过。
+- FreeBSD 暂不支持；原生 workflow 只检查编译和少量兼容性合同，不运行完整行为套件。详见 [FreeBSD 兼容性说明](freebsd-compatibility.zh_CN.md)。
   Android 仍配置为 compile-check；这些配置不能据以宣称 runtime guarantee；
 - `cargo test --all-features`；
 - `cargo clippy --all-targets --all-features -- -D warnings`；
@@ -2187,7 +2187,7 @@ Host `Content` 配合 `UseStaging` 仍不支持。`Append` 与 `Content` 配合 
 条件发布协议不支持 Required namespace durability。Linux 和 macOS 在所选协议、有效配置与运行时文件系统条件允许时可以尝试
 Required namespace durability；`CanAttempt` 只表示实现会尝试，不保证具体文件系统一定接受原生操作。
 
-T03 的 Host 临时创建失败与恢复 owner 用例已执行完成；这只构成 Host 测试证据，不代表 Windows 原生行为已验证。FreeBSD workflow 现已配置在两种 feature 设置下运行本 crate 完整测试，但 runner 结果仍待取得。
+T03 的 Host 临时创建失败与恢复 owner 用例已执行完成；这只构成 Host 测试证据，不代表 Windows 原生行为已验证。按本设计记录当时的状态，FreeBSD workflow 已配置在两种 feature 设置下运行本 crate 完整测试，runner 结果仍待取得。后续平台状态见下文更新。
 
 LF-Q01 已确认并修正：`LocalCopyOutcome` 的 metadata preservation 表示已复制条目实际应用的策略；完全跳过时为
 `None`，成功复制仍报告应用的策略，混合树的结果只针对已复制条目。LF-Q02 有 FreeBSD 源码证据表明属性列表探测与
@@ -2203,6 +2203,10 @@ LF-Q01 已确认并修正：`LocalCopyOutcome` 的 metadata preservation 表示�
 RLF-20261031-Q01（复制时能否保留符号链接条目自身权限）仍待验证。当前 fixture 环境无法独立设置链接权限与 referent 权限，
 因此默认值相同不能证明复制保留了链接自身权限；Windows 原生执行也未运行。该环境限制不能推导为所有平台都无法设置链接权限，
 也不据此修改生产实现。
+
+后续状态更新（2026-10-31）：FreeBSD 14.3 CI run 41173303438 暴露了复制、重命名、持久化、metadata 和树发布路径的
+不支持问题，以及 all-features 下 8 个 doctest 失败。FreeBSD 现标记为暂不支持；完整失败清单和调整后的原生检查见
+[FreeBSD 兼容性说明](freebsd-compatibility.zh_CN.md)。
 
 CI workflow 在 Linux、macOS、Windows 上运行当前 crate 的测试。`windows-recovery` job 需要 checkout
 `rs-json`，因为同级 `rs-redact` manifest 将 `qubit-json` 声明为传递的可选 path dependency；Cargo 解析 manifest

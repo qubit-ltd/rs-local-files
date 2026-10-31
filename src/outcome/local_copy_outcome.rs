@@ -26,8 +26,20 @@ use crate::LocalMetadataPreservePolicy;
 /// let source = directory.path().join("source.txt");
 /// let target = directory.path().join("copy.txt");
 /// std::fs::write(&source, b"copy example")?;
-/// let outcome = filesystem.copy(&source, &target)?;
-/// assert_eq!(outcome.stats().bytes(), 12);
+/// let copy = filesystem.copy(&source, &target);
+/// #[cfg(target_os = "freebsd")]
+/// {
+///     let failure = copy.expect_err("FreeBSD is temporarily unsupported for copy");
+///     assert_eq!(
+///         failure.error().kind(),
+///         qubit_local_files::error::LocalFileErrorKind::Unsupported,
+///     );
+/// }
+/// #[cfg(not(target_os = "freebsd"))]
+/// {
+///     let outcome = copy?;
+///     assert_eq!(outcome.stats().bytes(), 12);
+/// }
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

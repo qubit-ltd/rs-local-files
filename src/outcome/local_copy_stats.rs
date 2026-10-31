@@ -21,10 +21,22 @@ use crate::local::LocalCopyDirStats;
 /// let source = directory.path().join("source.txt");
 /// let target = directory.path().join("copy.txt");
 /// std::fs::write(&source, b"copy statistics")?;
-/// let outcome = filesystem.copy(&source, &target)?;
-/// let stats = outcome.stats();
-/// assert_eq!(stats.bytes(), 15);
-/// assert_eq!(stats.files(), 1);
+/// let copy = filesystem.copy(&source, &target);
+/// #[cfg(target_os = "freebsd")]
+/// {
+///     let failure = copy.expect_err("FreeBSD is temporarily unsupported for copy");
+///     assert_eq!(
+///         failure.error().kind(),
+///         qubit_local_files::error::LocalFileErrorKind::Unsupported,
+///     );
+/// }
+/// #[cfg(not(target_os = "freebsd"))]
+/// {
+///     let outcome = copy?;
+///     let stats = outcome.stats();
+///     assert_eq!(stats.bytes(), 15);
+///     assert_eq!(stats.files(), 1);
+/// }
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]

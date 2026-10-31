@@ -268,6 +268,14 @@ let result = (|| -> Result<(), Box<dyn std::error::Error>> {
     publish_backup(&parent)?;
     Ok(())
 })();
+#[cfg(target_os = "freebsd")]
+{
+    let error = result.expect_err("FreeBSD does not provide the requested rename guarantee");
+    let cause = error.downcast_ref::<qubit_local_files::error::LocalFileError>()
+        .expect("publication returns its structured filesystem error");
+    assert_eq!(cause.kind(), qubit_local_files::error::LocalFileErrorKind::RequirementNotMet);
+}
+#[cfg(not(target_os = "freebsd"))]
 result.unwrap();
 }
 ```
@@ -591,7 +599,7 @@ filesystem will accept the native operation. Conditional-write support is:
 | Linux / macOS | `Absent`, `Content` | `Absent`, `Content` |
 | Windows | `Absent`; `Content` with `PreserveExisting` metadata | `Absent`; `Content` unsupported |
 | Android | Compile-checked only; protocol support not declared | Compile-checked only; protocol support not declared |
-| FreeBSD 14.3 | Complete native suite configured for both feature sets; runner result pending, protocol support not declared | Complete native suite configured for both feature sets; runner result pending, protocol support not declared |
+| FreeBSD 14.3 | Temporarily unsupported | Temporarily unsupported |
 
 Across platforms, `Append`, `Content` with `CreateNew`, and symlink-following
 policies are rejected as invalid conditional-write configurations. The Content
@@ -604,8 +612,11 @@ before path resolution or staging creation. Linux and macOS can attempt valid
 `Required` durability and `UseStaging` configurations, subject to the selected
 filesystem and runtime operation. Check `LocalDirectoryHandle::conditional_support`
 when the application needs to present a capability hint, and still handle
-open/commit errors. Android remains configured for compile checks. FreeBSD 14.3
-protocol support remains undeclared.
+open/commit errors. Android remains configured for compile checks. FreeBSD is
+temporarily unsupported; its CI job checks compilation and selected
+compatibility contracts, not the complete behavioral suite. See the [FreeBSD
+compatibility status](freebsd-compatibility.md) for failing APIs, test names,
+and observed causes.
 
 Use a conditional write when an application reads document A, prepares an edit B,
 and must avoid replacing a newer version written by someone else. Add the
@@ -1605,11 +1616,11 @@ rely on the same path and error contracts in either case.
 
 ## Limitations and Best Practices
 
-CI is configured for Linux, Windows, and macOS behavioral tests; actual CI
-results establish validation for a particular change. FreeBSD 14.3 now has the
-complete crate suite configured under `--no-default-features` and
-`--all-features`; the native runner result is pending, so this does not establish
-a successful run. Android remains configured for compile checks. T3/T4 Windows
+CI runs Linux, Windows, and macOS behavioral tests; actual CI results establish
+validation for a particular change. FreeBSD is temporarily unsupported. Its
+native job checks compilation and selected contracts but does not run the
+complete suite; see the [compatibility report](freebsd-compatibility.md) for
+the failed native APIs and tests. Android remains configured for compile checks. T3/T4 Windows
 cleanup and conditional-open behavior, and LF-09 private-resource and LF-10
 sealed-cleanup behavior, remain unverified
 without native Windows runner results: Linux filters execute zero tests for
@@ -1676,3 +1687,4 @@ cleanup IDs use `temp_directory_cleanup/{scope}/{shape}/{limits}`.
 Continue with the [README](../README.md), [中文用户手册](user_guide.zh_CN.md),
 the [design document](local_file_system_design.md), or the
 [API reference](https://docs.rs/qubit-local-files).
+For FreeBSD's current support boundary, see the [compatibility status](freebsd-compatibility.md).

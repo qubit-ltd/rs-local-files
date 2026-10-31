@@ -897,7 +897,7 @@ Backend scope currently established by the implementation:
 | Windows Host | Native no-replace install | `PreserveExisting` only | Content with another metadata policy and `Required` writer durability are unsupported. |
 | Windows Rooted | Native no-replace install | Unsupported | Rooted `Absent` is handle-relative; `Required` writer durability is unsupported. |
 | Android | Not claimed | Not claimed | Compile checks are configured; do not infer support from other Unix targets. |
-| FreeBSD 14.3 | Not claimed | Not claimed | Workflow configured to run the complete crate suite with `--no-default-features` and `--all-features`; native runner result pending. Do not infer support from other Unix targets. |
+| FreeBSD 14.3 | Temporarily unsupported | Temporarily unsupported | Native CI checks compilation and selected contracts; the complete behavioral suite is not a gate. See [FreeBSD compatibility status](freebsd-compatibility.md). |
 
 Windows Rooted `Content` and Host `Content` with `UseStaging` return
 `Unsupported` while opening the writer, before path resolution, parent access,
@@ -1853,10 +1853,10 @@ Verification follows contracts rather than line count:
   lifecycle invariants; lifecycle targets use unique per-process sandboxes,
   bounded collision retries, and RAII cleanup, and never rely on ambient
   machine paths;
-- CI runs the current crate on Linux, Windows, and macOS. The FreeBSD 14.3
-  workflow is configured to run the complete crate suite with both
-  `--no-default-features` and `--all-features`; its native runner result is
-  pending. Android remains configured for compile checks;
+- CI runs the current crate on Linux, Windows, and macOS. FreeBSD is temporarily
+  unsupported; its native job checks compilation and selected contracts rather
+  than the complete behavioral suite. See the [FreeBSD compatibility report](freebsd-compatibility.md).
+  Android remains configured for compile checks;
 - Windows-specific T3/T4 recovery and conditional-open cases, plus LF-09
   private-resource and LF-10 sealed-cleanup behavior, remain unverified unless
   native Windows runner results are available. Linux filters execute zero tests
@@ -1947,8 +1947,9 @@ response does not guarantee a filesystem will perform the native operation.
 
 T03's Host temporary-creation failure and retained-recovery-owner tests have
 completed. This is Host test evidence only; it does not establish Windows
-native behavior. The FreeBSD workflow now requests the complete current-crate
-suite for both feature sets, but its runner result remains pending.
+native behavior. As of this design update, the FreeBSD workflow requested the
+complete current-crate suite for both feature sets; its runner result was still
+pending at that time. The later platform status is recorded below.
 
 LF-Q01 was confirmed and corrected: `LocalCopyOutcome` metadata preservation
 describes the policy applied to copied entries. A complete skip reports `None`,
@@ -1975,6 +1976,12 @@ entry itself, also remains unverified. The available fixture environment cannot
 set link permissions independently of the referent, so its observed default
 values cannot establish preservation. Windows native execution was unavailable;
 no platform-wide conclusion or production change follows from this fixture.
+
+Later status update (2026-10-31): FreeBSD 14.3 CI run 41173303438 exposed
+unsupported copy, rename, persistence, metadata, and tree-publication paths, as
+well as eight all-features doctest failures. FreeBSD is now temporarily
+unsupported; the failure inventory and revised native checks are recorded in
+the [FreeBSD compatibility report](freebsd-compatibility.md).
 
 The CI workflows run current-crate tests on Linux, macOS, and Windows. The
 `windows-recovery` job checks out `rs-json` because the sibling `rs-redact`

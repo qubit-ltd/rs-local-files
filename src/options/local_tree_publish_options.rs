@@ -54,8 +54,25 @@ use crate::policy::LocalTreeFinalAccess;
 ///
 /// // Ordinary publication preserves the stage's existing access settings.
 /// let stage = parent.create_staged_directory(&LocalTempDirectoryOptions::new())?;
-/// stage.publish_new(&parent, OsStr::new("published"), &LocalTreePublishOptions::new())?;
-/// assert!(fixture.path().join("published").is_dir());
+/// let publication = stage.publish_new(&parent, OsStr::new("published"), &LocalTreePublishOptions::new());
+/// #[cfg(target_os = "freebsd")]
+/// {
+///     let failure = publication.expect_err("FreeBSD tree publication is unsupported");
+///     assert_eq!(failure.cause().kind(), LocalFileErrorKind::RequirementNotMet);
+///     assert_eq!(failure.publication(), LocalTreePublication::NotPublished);
+///     let (_, stage, retained) = failure.into_parts();
+///     if let Some(stage) = stage {
+///         stage.cleanup()?;
+///     }
+///     for resource in retained {
+///         resource.cleanup()?;
+///     }
+/// }
+/// #[cfg(not(target_os = "freebsd"))]
+/// {
+///     publication?;
+///     assert!(fixture.path().join("published").is_dir());
+/// }
 ///
 /// // These independent builder values conflict; publish_new reports it and
 /// // returns the stage without starting mutation or publication.

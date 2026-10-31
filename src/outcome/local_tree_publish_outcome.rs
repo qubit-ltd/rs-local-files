@@ -44,17 +44,34 @@ use crate::policy::LocalOwnerAccessPolicy;
 ///     temporary.path(), &LocalDirectoryOpenOptions::new(),
 /// )?;
 /// let stage = parent.create_staged_directory(&LocalTempDirectoryOptions::new())?;
-/// let outcome = stage.publish_new(
+/// let publication = stage.publish_new(
 ///     &parent,
 ///     OsStr::new("published"),
 ///     &LocalTreePublishOptions::new()
 ///         .with_durability(LocalDurabilityRequirement::Preferred)
 ///         .with_file_sync(LocalFileSyncRequirement::Preferred),
-/// )?;
-/// assert_eq!(outcome.publication(), LocalTreePublication::Published);
-/// let _namespace_durable = outcome.durable();
-/// let _regular_files_synced = outcome.file_synced();
-/// let _access_state = outcome.access_state();
+/// );
+/// #[cfg(target_os = "freebsd")]
+/// {
+///     let failure = publication.expect_err("FreeBSD tree publication is unsupported");
+///     assert_eq!(failure.cause().kind(), qubit_local_files::error::LocalFileErrorKind::RequirementNotMet);
+///     assert_eq!(failure.publication(), LocalTreePublication::NotPublished);
+///     let (_, stage, retained) = failure.into_parts();
+///     if let Some(stage) = stage {
+///         stage.cleanup()?;
+///     }
+///     for resource in retained {
+///         resource.cleanup()?;
+///     }
+/// }
+/// #[cfg(not(target_os = "freebsd"))]
+/// {
+///     let outcome = publication?;
+///     assert_eq!(outcome.publication(), LocalTreePublication::Published);
+///     let _namespace_durable = outcome.durable();
+///     let _regular_files_synced = outcome.file_synced();
+///     let _access_state = outcome.access_state();
+/// }
 /// # Ok(())
 /// # }
 /// ```

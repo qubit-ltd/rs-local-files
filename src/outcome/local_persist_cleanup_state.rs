@@ -22,10 +22,17 @@
 /// temporary.write_fully(b"payload")?;
 /// let target_directory = tempfile::tempdir_in(std::env::current_dir()?)?;
 /// let target = target_directory.path().join("persisted");
-/// let outcome = temporary
-///     .persist(&target)
-///     .expect("temporary file must persist");
-/// assert_eq!(outcome.cleanup_state(), LocalPersistCleanupState::Complete);
+/// let persistence = temporary.persist(&target);
+/// #[cfg(target_os = "freebsd")]
+/// {
+///     let failure = persistence.expect_err("FreeBSD temporary persistence is unsupported");
+///     assert_eq!(failure.kind(), qubit_local_files::error::LocalFileErrorKind::Unsupported);
+/// }
+/// #[cfg(not(target_os = "freebsd"))]
+/// {
+///     let outcome = persistence?;
+///     assert_eq!(outcome.cleanup_state(), LocalPersistCleanupState::Complete);
+/// }
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
 #[must_use]
