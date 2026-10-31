@@ -84,7 +84,8 @@ impl LocalReadAllOptions {
         self.max_bytes
     }
 
-    /// Returns the explicit reader configuration; `None` means inherit defaults.
+    /// Returns the explicit reader configuration; `None` means inherit
+    /// defaults.
     pub(crate) const fn read_options(&self) -> Option<&LocalReadOptions> {
         self.read_options.as_ref()
     }

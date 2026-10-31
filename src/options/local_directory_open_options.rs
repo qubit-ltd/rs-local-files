@@ -125,7 +125,8 @@ impl LocalDirectoryOpenOptions {
     pub(crate) const fn path_binding(&self) -> Option<&LocalPathBindingOptions> {
         self.path_binding.as_ref()
     }
-    /// Returns additional limits; `None` adds no constraint to enclosing limits.
+    /// Returns additional limits; `None` adds no constraint to enclosing
+    /// limits.
     pub(crate) const fn resolution_limits(&self) -> Option<LocalResolutionLimits> {
         self.resolution_limits
     }

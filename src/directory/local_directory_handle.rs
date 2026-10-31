@@ -448,11 +448,9 @@ impl LocalDirectoryHandle {
                 Component::ParentDir => {
                     if !normalized.as_os_str().is_empty() {
                         match &self.filesystem.core.namespace {
-                            LocalNamespace::Rooted(rooted) => {
-                                rooted
-                                    .validate_directory_until(&normalized, symlink_policy, operation_deadline)
-                                    .map_err(copy_deadline_operation_error)?
-                            }
+                            LocalNamespace::Rooted(rooted) => rooted
+                                .validate_directory_until(&normalized, symlink_policy, operation_deadline)
+                                .map_err(copy_deadline_operation_error)?,
                             LocalNamespace::Host => {
                                 return Err(LocalFileError::new(
                                     LocalFileErrorKind::InvalidState,
@@ -985,7 +983,9 @@ impl LocalDirectoryHandle {
             .validate_with_policy_until(destination, false, policy, effective_deadline)
             .map_err(|error| {
                 crate::local::copy_failure_unchanged(
-                    error.with_path(source.to_path_buf()).with_target(destination.to_path_buf()),
+                    error
+                        .with_path(source.to_path_buf())
+                        .with_target(destination.to_path_buf()),
                 )
             })?;
         if let Err(error) = check_copy_deadline(effective_deadline, source) {
