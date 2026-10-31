@@ -51,7 +51,7 @@ use qubit_local_files::test_support::TestConditionalHooks;
 use qubit_local_files::test_support::TestConditionalPoint;
 use qubit_local_files::test_support::TestFaultPlan;
 use qubit_local_files::test_support::TestFaultPoint;
-#[cfg(unix)]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 use sha2::Digest;
 use sha2::Sha256;
 use support::conditional_temp_directory::tempdir;
@@ -92,7 +92,7 @@ fn absent_race_preserves_late_file_and_independent_candidate_copy() {
     assert_eq!(failure.publication(), LocalConditionalPublicationState::NotPublished);
 }
 
-#[cfg(unix)]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 #[test]
 fn after_precheck_inode_content_change_is_detected_and_restored() {
     let directory = tempdir().unwrap();
@@ -117,7 +117,7 @@ fn after_precheck_inode_content_change_is_detected_and_restored() {
     assert_eq!(conditional::read_candidate(&failure), b"B");
 }
 
-#[cfg(unix)]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 #[test]
 fn same_contents_on_a_new_inode_remain_eligible_for_content_publish() {
     let directory = tempdir().unwrap();
@@ -147,7 +147,7 @@ fn same_contents_on_a_new_inode_remain_eligible_for_content_publish() {
     assert_eq!(outcome.digest(), &Sha256::digest(b"B"));
 }
 
-#[cfg(unix)]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 #[test]
 fn aba_back_to_expected_contents_is_allowed_by_content_condition() {
     let directory = tempdir().unwrap();
@@ -174,7 +174,7 @@ fn aba_back_to_expected_contents_is_allowed_by_content_condition() {
     assert_eq!(outcome.digest(), &Sha256::digest(b"B"));
 }
 
-#[cfg(unix)]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 #[test]
 fn symlink_replacement_after_precheck_is_not_followed_or_overwritten() {
     let directory = tempdir().unwrap();
@@ -220,7 +220,7 @@ fn symlink_replacement_after_precheck_is_not_followed_or_overwritten() {
     assert_eq!(conditional::read_candidate(&failure), b"B");
 }
 
-#[cfg(unix)]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 #[test]
 fn after_publish_change_is_never_overwritten_during_recovery() {
     let directory = tempdir().unwrap();

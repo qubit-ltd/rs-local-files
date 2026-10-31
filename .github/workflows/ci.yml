@@ -44,8 +44,8 @@ jobs:
             cargo --version
             CARGO_HOME=/tmp/ci-cargo cargo fetch --locked
             chown -R ci-runner:ci-runner /tmp/ci-cargo
-            su -m ci-runner -c 'id && cd "$GITHUB_WORKSPACE" && HOME=/tmp/ci-home CARGO_HOME=/tmp/ci-cargo CARGO_TARGET_DIR=/tmp/ci-target cargo test --locked --no-default-features --tests --no-run'
-            su -m ci-runner -c 'cd "$GITHUB_WORKSPACE" && HOME=/tmp/ci-home CARGO_HOME=/tmp/ci-cargo CARGO_TARGET_DIR=/tmp/ci-target cargo test --locked --all-features --tests --no-run'
+            su -m ci-runner -c 'id && cd "$GITHUB_WORKSPACE" && HOME=/tmp/ci-home CARGO_HOME=/tmp/ci-cargo CARGO_TARGET_DIR=/tmp/ci-target cargo test --locked --no-default-features --no-fail-fast'
+            su -m ci-runner -c 'cd "$GITHUB_WORKSPACE" && HOME=/tmp/ci-home CARGO_HOME=/tmp/ci-cargo CARGO_TARGET_DIR=/tmp/ci-target cargo test --locked --all-features --no-fail-fast'
             su -m ci-runner -c 'cd "$GITHUB_WORKSPACE" && HOME=/tmp/ci-home CARGO_HOME=/tmp/ci-cargo CARGO_TARGET_DIR=/tmp/ci-target cargo test --locked --no-default-features --lib test_attribute_read'
             su -m ci-runner -c 'cd "$GITHUB_WORKSPACE" && HOME=/tmp/ci-home CARGO_HOME=/tmp/ci-cargo CARGO_TARGET_DIR=/tmp/ci-target cargo test --locked --all-features --lib test_attribute_read'
             su -m ci-runner -c 'cd "$GITHUB_WORKSPACE" && HOME=/tmp/ci-home CARGO_HOME=/tmp/ci-cargo CARGO_TARGET_DIR=/tmp/ci-target cargo test --locked --all-features --test host_fault_and_guarantee_tests test_freebsd_xattr_short_read_and_atomic_preservation'
