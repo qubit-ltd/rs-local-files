@@ -68,7 +68,7 @@ fn test_tree_publish_required_durability_rejects_before_access_mutation() {
     assert_eq!(error.access_state(), LocalTreeAccessState::Preserved);
     assert!(!fixture.path().join("published").exists());
 
-    let mut stage = error.into_stage().expect("failed publish returns stage owner");
+    let stage = error.into_stage().expect("failed publish returns stage owner");
     assert_eq!(stage.identity(), Some(&identity));
     let payload_security_after = payload_reader
         .security_observation(&LocalSecurityObservationOptions::new())

@@ -49,7 +49,7 @@ fn ascii_uppercase_unit(unit: u16) -> u16 {
     }
 }
 
-fn read_root_payload(root: &Path) -> Result<Vec<u8>, qubit_local_files::LocalFileError> {
+fn read_root_payload(root: &Path) -> Result<Vec<u8>, Box<qubit_local_files::LocalFileError>> {
     let filesystem = LocalFileSystem::rooted(root)?;
     let mut reader = filesystem.open_reader(Path::new("payload"))?;
     let mut bytes = [0_u8; 14];
