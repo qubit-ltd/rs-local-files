@@ -61,7 +61,7 @@ fn test_windows_rooted_staging_create_failure_has_no_retained_path() {
         "a destination path must not be labeled as a staging path"
     );
     assert_eq!(
-        b"original contents",
+        b"original contents".as_slice(),
         fs::read(&target).expect("target should remain readable")
     );
 }
@@ -93,7 +93,7 @@ fn test_windows_rooted_commit_failure_retains_actual_staging_path() {
         "retained path must identify staging, not destination"
     );
     assert_eq!(
-        b"competing destination",
+        b"competing destination".as_slice(),
         fs::read(&target).expect("competing destination should remain readable")
     );
 }

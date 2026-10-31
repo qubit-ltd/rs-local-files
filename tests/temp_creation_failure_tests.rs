@@ -96,7 +96,11 @@ fn test_host_temp_identity_failure_reports_sandbox_cleanup_failure() {
         let sandbox_path = std::path::absolute(parent.path())
             .expect("parent path should resolve absolutely")
             .join(sandbox);
-        assert_eq!(cleanup.path(), Some(sandbox_path.as_path()));
+        assert_eq!(
+            fs::canonicalize(cleanup.path().expect("cleanup path should be retained"))
+                .expect("retained cleanup path should exist"),
+            fs::canonicalize(&sandbox_path).expect("sandbox should exist")
+        );
         assert!(cleanup.to_string().contains("injected sandbox cleanup failure"));
         let (_cause, recovery) = error.into_temp_recovery_parts();
         let mut recovery = recovery.expect("retained owner");
