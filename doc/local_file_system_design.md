@@ -2056,3 +2056,8 @@ For filesystem facts specifically, Unix targets other than Linux and macOS
 return `None` for `Optional` and `RequirementNotMet` for `Required`; identity
 and link-count observations remain separate. An explicitly unimplemented query
 is distinct from a supported query that fails with an I/O error.
+## RLF2 implementation status
+
+Snapshot builders start from `LocalReadOptions::new()` rather than filesystem defaults; callers copy defaults explicitly. Snapshot byte limits report resource-limit errors, and bracketing observations do not make concurrent content changes atomic. Fixed-handle observed reads retain the original component-by-component path recipe. Accumulated writer bytes use `u64`; per-call I/O lengths remain `usize`.
+
+RLF2-Q02 was confirmed and fixed using no-follow identity validation through the retained parent. RLF2-Q01 (Windows sealed cleanup) and RLF2-Q03 (Windows enumeration fallback) remain unverified because no native Windows environment was available. The existing FreeBSD temporary unsupported status and Windows Rooted Content unsupported status remain unchanged.

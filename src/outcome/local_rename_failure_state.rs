@@ -20,8 +20,9 @@
 /// use qubit_local_files::outcome::LocalRenameFailureState;
 ///
 /// let filesystem = LocalFileSystem::host()?;
-/// let source = std::env::temp_dir().join("qubit-local-files-missing-rename-source");
-/// let target = std::env::temp_dir().join("qubit-local-files-rename-target");
+/// let fixture = tempfile::tempdir()?;
+/// let source = fixture.path().join("missing-source");
+/// let target = fixture.path().join("target");
 /// let failure = filesystem
 ///     .rename(Path::new(&source), Path::new(&target))
 ///     .expect_err("source is missing");

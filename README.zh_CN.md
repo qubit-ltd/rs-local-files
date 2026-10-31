@@ -315,3 +315,4 @@ Pull Request 前运行 `./.infra/bin/align-ci.sh`格式化代码，运行`./.inf
 **Haixing Hu** - *Qubit Co. Ltd.*
 
 仓库地址：[https://github.com/qubit-ltd/rs-local-files](https://github.com/qubit-ltd/rs-local-files)
+Snapshot options 从 `LocalReadOptions::new()` 开始，不继承 filesystem defaults。用户指南说明如何显式复制默认读取配置、观测要求以及累计写入计数迁移到 `u64`。RLF2-Q02 已证实并修复；RLF2-Q01 和 RLF2-Q03 缺 Windows 原生环境，尚未验证。详见[用户指南](doc/user_guide.zh_CN.md)。

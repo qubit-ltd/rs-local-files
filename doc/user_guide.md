@@ -1688,3 +1688,10 @@ Continue with the [README](../README.md), [中文用户手册](user_guide.zh_CN.
 the [design document](local_file_system_design.md), or the
 [API reference](https://docs.rs/qubit-local-files).
 For FreeBSD's current support boundary, see the [compatibility status](freebsd-compatibility.md).
+## Observation requirements and counters
+
+Optional native observation may omit an unavailable native identity or time extension; failures to obtain the base metadata still propagate. Required native observation requires the complete facts requested by that entry point: Unix query failures retain their I/O cause, while Windows query failures are reported as `RequirementNotMet` with their source. Security observations follow a separate contract: Optional omits only explicitly unsupported facts, while permission, I/O, format, and identity errors propagate; Required reports incomplete or unsupported requested facts as `RequirementNotMet`.
+
+A fixed directory handle resolves the caller's original relative path component by component. It applies the handle and call budgets during that resolution; it does not replace the recipe with a lexically normalized path. `LocalWriteOutcome::bytes_written()` now returns `u64`, while individual I/O calls and slice lengths remain `usize`. Callers binding the accumulated count to `usize` must migrate to `u64`; use checked conversion only when an index requires `usize`.
+
+RLF2-Q02 was confirmed and fixed: Unix cleanup validates the retained entry with no-follow metadata relative to the retained parent, so owner-read permission is not an extra cleanup requirement. RLF2-Q01 and RLF2-Q03 remain unverified because a native Windows environment was unavailable.

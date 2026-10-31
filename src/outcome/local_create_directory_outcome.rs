@@ -18,13 +18,10 @@
 /// use qubit_local_files::LocalFileSystem;
 ///
 /// let filesystem = LocalFileSystem::host()?;
-/// let directory = std::env::temp_dir().join(format!(
-///     "qubit-create-directory-example-{}",
-///     std::process::id(),
-/// ));
+/// let fixture = tempfile::tempdir()?;
+/// let directory = fixture.path().join("child");
 /// let outcome = filesystem.create_directory(&directory)?;
 /// assert!(outcome.created());
-/// std::fs::remove_dir(directory)?;
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

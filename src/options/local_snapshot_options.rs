@@ -9,6 +9,29 @@ use super::LocalReadOptions;
 use crate::policy::LocalSymlinkPolicy;
 
 /// Options for reading bytes bracketed by same-handle observations.
+///
+/// The builder starts with [`LocalReadOptions::new`], not the filesystem's
+/// configured defaults. Copy defaults explicitly when they are desired.
+/// The before/after observations detect changes to the opened object; they do
+/// not make the bytes an atomic snapshot against concurrent writes.
+///
+/// ```
+/// use qubit_local_files::LocalFileSystem;
+/// use qubit_local_files::options::LocalSnapshotOptions;
+///
+/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+/// let fixture = tempfile::tempdir()?;
+/// let source = fixture.path().join("input.bin");
+/// std::fs::write(&source, b"snapshot")?;
+/// let filesystem = LocalFileSystem::host()?;
+/// let options = LocalSnapshotOptions::builder(4096)
+///     .read_options(*filesystem.default_read_options())
+///     .build();
+/// let snapshot = filesystem.read_consistent_with_options(&source, &options)?;
+/// assert_eq!(snapshot.bytes(), b"snapshot");
+/// # Ok(())
+/// # }
+/// ```
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[must_use = "snapshot options have no effect unless they are used"]
 pub struct LocalSnapshotOptions {
@@ -19,6 +42,10 @@ pub struct LocalSnapshotOptions {
 
 impl LocalSnapshotOptions {
     /// Starts building snapshot options with an explicit byte limit.
+    ///
+    /// Read options start at [`LocalReadOptions::new`]; filesystem defaults
+    /// are not inherited unless passed to
+    /// [`LocalSnapshotOptionsBuilder::read_options`].
     pub const fn builder(max_bytes: u64) -> LocalSnapshotOptionsBuilder {
         LocalSnapshotOptionsBuilder {
             max_bytes,
@@ -51,6 +78,8 @@ pub struct LocalSnapshotOptionsBuilder {
 
 impl LocalSnapshotOptionsBuilder {
     /// Replaces reader options used to open the source.
+    ///
+    /// This is a complete replacement, not a merge with filesystem defaults.
     pub const fn read_options(mut self, options: LocalReadOptions) -> Self {
         self.read_options = options;
         self
@@ -62,7 +91,9 @@ impl LocalSnapshotOptionsBuilder {
         self
     }
 
-    /// Completes snapshot configuration.
+    /// Completes snapshot configuration. Reads exceeding the configured byte
+    /// limit fail with a resource-limit error; the limit bounds bytes read,
+    /// while the before/after observations do not provide atomic content.
     pub const fn build(self) -> LocalSnapshotOptions {
         LocalSnapshotOptions {
             max_bytes: self.max_bytes,

@@ -402,3 +402,4 @@ API documentation and tests current, and run `./.infra/bin/align-ci.sh` to forma
 **Haixing Hu** - *Qubit Co. Ltd.*
 
 Repository: [https://github.com/qubit-ltd/rs-local-files](https://github.com/qubit-ltd/rs-local-files)
+Snapshot options start from `LocalReadOptions::new()` and do not inherit filesystem defaults. The user guide documents explicit default copying, observation requirements, and the `u64` accumulated writer count migration. RLF2-Q02 was confirmed and fixed; RLF2-Q01 and RLF2-Q03 remain unverified without a native Windows environment. See the [user guide](doc/user_guide.md).

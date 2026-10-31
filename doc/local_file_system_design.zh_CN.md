@@ -2248,3 +2248,8 @@ CI workflow 在 Linux、macOS、Windows 上运行当前 crate 的测试。`windo
 `LocalAccessObservation::unix()` / `windows()`。调用方必须检查每一层 `Option`。access 为 `None` 表示没有可用访问事实；平台 accessor 返回 `None` 表示该平台事实不可用。`Optional` 仍会尝试查询，不会屏蔽权限拒绝、I/O、格式错误或身份变化错误。不同字段分别查询，因此结果只是观察事实，不是授权结论或原子快照，也不保证未来仍可访问。
 
 对文件系统事实查询而言，Linux/macOS 以外的 Unix 目标在 `Optional` 下返回 `None`，在 `Required` 下返回 `RequirementNotMet`；identity 和 link count 仍单独观测。明确未实现的查询与已支持查询发生 I/O 错误是两种情况。
+## RLF2 实施状态
+
+Snapshot builder 从 `LocalReadOptions::new()` 开始，不继承 filesystem defaults；调用方可显式复制默认配置。超过 snapshot 字节上限会返回 resource-limit 错误，前后括界观测不保证并发内容变化下的原子性。固定目录句柄 observed read 保留原始逐组件路径配方。累计写入字节使用 `u64`，单次 I/O 长度仍为 `usize`。
+
+RLF2-Q02 已证实并修复：通过保留父目录执行 no-follow identity 验证。RLF2-Q01（Windows sealed cleanup）和 RLF2-Q03（Windows 枚举 fallback）未验证，因缺少 Windows 原生环境。既有 FreeBSD 暂不支持及 Windows Rooted Content 不支持状态保持不变。
