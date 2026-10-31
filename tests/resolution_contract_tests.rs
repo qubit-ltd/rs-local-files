@@ -7,8 +7,10 @@
 // =============================================================================
 
 use std::ffi::OsStr;
+#[cfg(unix)]
 use std::path::Component;
 use std::path::Path;
+#[cfg(unix)]
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -24,9 +26,13 @@ use qubit_local_files::directory::LocalResolutionPolicy;
 use qubit_local_files::directory::LocalResolutionScope;
 use qubit_local_files::error::LocalFileErrorKind;
 use qubit_local_files::error::LocalFileOperation;
+#[cfg(unix)]
 use qubit_local_files::error::LocalResourceKind;
+#[cfg(unix)]
 use qubit_local_files::options::LocalDirectoryOpenOptions;
+#[cfg(unix)]
 use qubit_local_files::options::LocalObservedReadOptions;
+#[cfg(unix)]
 use qubit_local_files::options::LocalResolutionLimits;
 use qubit_local_files::options::LocalRootOpenOptions;
 
@@ -36,9 +42,11 @@ fn rooted_filesystem_can_open_the_native_root_directory() {
     LocalFileSystem::rooted(Path::new("/")).expect("the native root directory should open as a Rooted filesystem");
 }
 
+#[cfg(unix)]
 #[derive(Debug)]
 struct TargetRecorder(Arc<Mutex<Vec<(String, LocalResolutionScope)>>>);
 
+#[cfg(unix)]
 impl LocalResolutionPolicy for TargetRecorder {
     fn validate_component(&self, _: &OsStr, _: LocalResolutionScope, _: LocalResolutionOrigin) -> LocalResult<()> {
         Ok(())
@@ -56,9 +64,11 @@ impl LocalResolutionPolicy for TargetRecorder {
     }
 }
 
+#[cfg(unix)]
 #[derive(Debug)]
 struct RejectComponent(&'static str);
 
+#[cfg(unix)]
 impl LocalResolutionPolicy for RejectComponent {
     fn validate_component(
         &self,
@@ -80,9 +90,11 @@ impl LocalResolutionPolicy for RejectComponent {
     }
 }
 
+#[cfg(unix)]
 #[derive(Debug)]
 struct OriginRecorder(Arc<Mutex<Vec<(String, LocalResolutionScope, LocalResolutionOrigin)>>>);
 
+#[cfg(unix)]
 impl LocalResolutionPolicy for OriginRecorder {
     fn validate_component(
         &self,
@@ -103,12 +115,14 @@ impl LocalResolutionPolicy for OriginRecorder {
     }
 }
 
+#[cfg(unix)]
 #[derive(Debug)]
 struct SymlinkTargetRecorder {
     expected: PathBuf,
     observed: Arc<Mutex<Option<PathBuf>>>,
 }
 
+#[cfg(unix)]
 impl LocalResolutionPolicy for SymlinkTargetRecorder {
     fn validate_component(&self, _: &OsStr, _: LocalResolutionScope, _: LocalResolutionOrigin) -> LocalResult<()> {
         Ok(())
