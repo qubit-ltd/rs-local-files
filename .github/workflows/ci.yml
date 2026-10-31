@@ -120,6 +120,42 @@ jobs:
         fi
         if [ "$RUNNER_OS" = Linux ]; then
           cargo test --locked --test owner_policy_lifecycle_tests
+          uid_build_log="$RUNNER_TEMP/local-files-uid-build.jsonl"
+          cargo test --locked --test stage_reopen_effective_uid_tests --no-run --message-format=json > "$uid_build_log"
+          uid_test_binary=$(python3 - "$uid_build_log" <<'PYCODE'
+        import json
+        import os
+        import sys
+        found = set()
+        with open(sys.argv[1], encoding="utf-8") as stream:
+            for line in stream:
+                message = json.loads(line)
+                if (message.get("reason") == "compiler-artifact"
+                        and message.get("target", {}).get("name") == "stage_reopen_effective_uid_tests"
+                        and message.get("executable")):
+                    found.add(message["executable"])
+        if len(found) != 1:
+            raise SystemExit("expected one UID test executable")
+        path = found.pop()
+        if not os.path.isfile(path) or not os.access(path, os.X_OK):
+            raise SystemExit("UID test executable is unavailable")
+        print(path)
+        PYCODE
+          )
+          if uid_test_output=$(sudo -n -- "$uid_test_binary" --exact unix::test_reopen_uses_effective_uid_child --nocapture 2>&1); then
+            printf '%s\n' "$uid_test_output"
+          else
+            printf '%s\n' "$uid_test_output"
+            exit 1
+          fi
+          if ! grep -Fq 'test unix::test_reopen_uses_effective_uid_child ... ok' <<< "$uid_test_output"; then
+            echo 'UID-difference exact test did not run successfully' >&2
+            exit 1
+          fi
+          if ! grep -Fxq 'UID-difference scenario EXECUTED: 1 isolated Linux child completed' <<< "$uid_test_output"; then
+            echo 'UID-difference scenario completion marker was missing' >&2
+            exit 1
+          fi
           rustup target add --toolchain 1.94 x86_64-unknown-freebsd armv7-linux-androideabi
           cargo +1.94 check --locked --target x86_64-unknown-freebsd
           cargo +1.94 check --locked --target armv7-linux-androideabi
