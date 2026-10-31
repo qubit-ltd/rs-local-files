@@ -31,7 +31,8 @@ pub struct LocalWindowsAceObservation {
     native_size: u16,
     /// Decoded access mask, absent for ACE forms without a mask.
     access_mask: Option<u32>,
-    /// Decoded trustee SID, absent when no trustee is exposed or decoding failed.
+    /// Decoded trustee SID, absent when no trustee is exposed or decoding
+    /// failed.
     trustee_sid: Option<String>,
     /// Whether the decoded trustee matches the current principal, if knowable.
     trustee_is_current_user: Option<bool>,

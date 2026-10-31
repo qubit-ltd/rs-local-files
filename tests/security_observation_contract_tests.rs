@@ -120,7 +120,8 @@ fn required_fields_and_each_individual_requirement_are_reported() {
 #[cfg(all(unix, not(any(target_os = "linux", target_os = "macos"))))]
 #[test]
 fn unimplemented_unix_filesystem_observation_obeys_optional_and_required_requests() {
-    use qubit_local_files::error::{LocalFileErrorKind, LocalFileOperation};
+    use qubit_local_files::error::LocalFileErrorKind;
+    use qubit_local_files::error::LocalFileOperation;
 
     let directory = tempfile::tempdir().expect("temporary directory");
     let path = directory.path().join("file");
@@ -139,8 +140,7 @@ fn unimplemented_unix_filesystem_observation_obeys_optional_and_required_request
 
     let error = reader
         .security_observation(
-            &LocalSecurityObservationOptions::new()
-                .with_filesystem(LocalObservationRequirement::Required),
+            &LocalSecurityObservationOptions::new().with_filesystem(LocalObservationRequirement::Required),
         )
         .expect_err("required filesystem facts are unimplemented on this Unix target");
     assert_eq!(error.kind(), LocalFileErrorKind::RequirementNotMet);
@@ -158,8 +158,7 @@ fn unimplemented_unix_filesystem_observation_obeys_optional_and_required_request
 
     let error = directory_handle
         .security_observation(
-            &LocalSecurityObservationOptions::new()
-                .with_filesystem(LocalObservationRequirement::Required),
+            &LocalSecurityObservationOptions::new().with_filesystem(LocalObservationRequirement::Required),
         )
         .expect_err("required directory filesystem facts are unimplemented");
     assert_eq!(error.kind(), LocalFileErrorKind::RequirementNotMet);

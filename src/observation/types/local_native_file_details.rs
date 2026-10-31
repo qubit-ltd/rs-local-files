@@ -42,7 +42,8 @@ impl LocalNativeFileDetails {
         }
     }
 
-    /// Wraps Windows identity and timestamp details from one native handle query.
+    /// Wraps Windows identity and timestamp details from one native handle
+    /// query.
     #[cfg(any(windows, test))]
     pub(crate) const fn from_windows(details: LocalWindowsFileDetails) -> Self {
         Self {
@@ -78,7 +79,9 @@ mod tests {
         let details = LocalWindowsFileDetails::new(u64::MAX, file_id, i64::MIN, i64::MAX);
         let native = LocalNativeFileDetails::from_windows(details);
         assert!(native.unix().is_none());
-        let windows = native.windows().expect("Windows details remain readable on any platform");
+        let windows = native
+            .windows()
+            .expect("Windows details remain readable on any platform");
         assert_eq!(windows.volume_serial(), u64::MAX);
         assert_eq!(windows.file_id(), &file_id);
         assert_eq!(windows.last_write_time(), i64::MIN);

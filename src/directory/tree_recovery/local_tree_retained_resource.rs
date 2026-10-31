@@ -45,21 +45,26 @@ use crate::outcome::LocalTreeMutationState;
 /// }
 /// ```
 pub struct LocalTreeRetainedResource {
-    /// Diagnostic namespace path; cleanup uses the retained parent and relative name.
+    /// Diagnostic namespace path; cleanup uses the retained parent and relative
+    /// name.
     path: PathBuf,
     /// Child name addressed through the retained parent authority.
     relative: PathBuf,
-    /// Captured identity; cleanup refuses to remove a name when this is unknown.
+    /// Captured identity; cleanup refuses to remove a name when this is
+    /// unknown.
     identity: Option<LocalFileIdentity>,
-    /// Retained parent authority used to bind cleanup to the original namespace.
+    /// Retained parent authority used to bind cleanup to the original
+    /// namespace.
     parent: LocalDirectoryHandle,
     /// Open child authority, when available for safe recursive cleanup.
     child: Option<LocalDirectoryHandle>,
-    /// Whether Drop may attempt cleanup; reopened owners stay disarmed until validated.
+    /// Whether Drop may attempt cleanup; reopened owners stay disarmed until
+    /// validated.
     cleanup_armed: bool,
     /// Resource limits applied to explicit cleanup and Drop's final attempt.
     cleanup_limits: LocalTempCleanupLimits,
-    /// Identities observed during creation, checked before owned names are removed.
+    /// Identities observed during creation, checked before owned names are
+    /// removed.
     owned_entries: HashMap<PathBuf, LocalFileIdentity>,
     /// Whether cleanup has begun mutating the namespace.
     mutation_state: LocalTreeMutationState,
@@ -96,7 +101,8 @@ impl LocalTreeRetainedResource {
         CLEANUP_INDEX_QUERIES.with(std::cell::Cell::get)
     }
 
-    /// Creates a reopened owner disarmed until its parent binding is revalidated.
+    /// Creates a reopened owner disarmed until its parent binding is
+    /// revalidated.
     pub(crate) fn new_for_reopen(
         path: PathBuf,
         relative: PathBuf,
@@ -110,12 +116,14 @@ impl LocalTreeRetainedResource {
         resource
     }
 
-    /// Arms best-effort Drop cleanup after the reopened name matched its identity.
+    /// Arms best-effort Drop cleanup after the reopened name matched its
+    /// identity.
     pub(crate) fn arm_after_reopen_validation(&mut self) {
         self.cleanup_armed = true;
     }
 
-    /// Creates an armed owner bound to a retained parent and optional child handle.
+    /// Creates an armed owner bound to a retained parent and optional child
+    /// handle.
     pub(crate) fn new(
         path: PathBuf,
         relative: PathBuf,
@@ -199,7 +207,8 @@ impl LocalTreeRetainedResource {
         self.cleanup_armed = false;
         self.child.take();
     }
-    /// Checks whether `parent` and the retained parent refer to the same object.
+    /// Checks whether `parent` and the retained parent refer to the same
+    /// object.
     pub(crate) fn parent_matches(&self, parent: &LocalDirectoryHandle) -> crate::LocalResult<bool> {
         let expected = self.parent.observe()?.identity().cloned();
         let actual = parent.observe()?.identity().cloned();
@@ -239,7 +248,8 @@ impl LocalTreeRetainedResource {
         self.owned_entries.insert(relative.to_path_buf(), identity.clone());
         Ok(())
     }
-    /// Attempts identity-checked cleanup without disarming ownership on failure.
+    /// Attempts identity-checked cleanup without disarming ownership on
+    /// failure.
     ///
     /// # Errors
     ///

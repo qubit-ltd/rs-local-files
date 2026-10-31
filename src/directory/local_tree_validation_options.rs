@@ -42,7 +42,8 @@ pub struct LocalTreeValidationOptions {
     reject_symlinks: bool,
     /// Whether FIFO, socket, device, and unknown kinds invalidate validation.
     reject_special_files: bool,
-    /// Whether files with hard links outside the checked tree invalidate validation.
+    /// Whether files with hard links outside the checked tree invalidate
+    /// validation.
     reject_external_hardlinks: bool,
     /// Required privacy level for entries when supported.
     privacy: LocalPrivacyRequirement,

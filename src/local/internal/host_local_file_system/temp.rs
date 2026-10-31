@@ -85,25 +85,15 @@ impl HostLocalFileSystem {
                             None,
                             error,
                         );
-                        let (recovery_path, recovery_entries) = host_temp_recovery_entries(
-                            &sandbox,
-                            sandbox_entry,
-                            Some((&path, file)),
-                            false,
-                        )?;
-                        let recovery = crate::LocalTempRecovery::from_native_entries_with_paths(
-                            recovery_path,
-                            recovery_entries,
-                        );
+                        let (recovery_path, recovery_entries) =
+                            host_temp_recovery_entries(&sandbox, sandbox_entry, Some((&path, file)), false)?;
+                        let recovery =
+                            crate::LocalTempRecovery::from_native_entries_with_paths(recovery_path, recovery_entries);
                         return Err(cleanup_failed_temp_owner(primary, recovery, &sandbox));
                     }
                 };
-                let (recovery_path, recovery_entries) = host_temp_recovery_entries(
-                    &sandbox,
-                    sandbox_entry,
-                    Some((&path, recovery_child)),
-                    false,
-                )?;
+                let (recovery_path, recovery_entries) =
+                    host_temp_recovery_entries(&sandbox, sandbox_entry, Some((&path, recovery_child)), false)?;
                 match LocalTempFile::host(path.clone(), sandbox.clone(), file, symlink_policy) {
                     Ok(resource) => Ok(resource),
                     Err(error) => Err(cleanup_failed_temp_owner(
@@ -219,8 +209,7 @@ fn create_host_temp_sandbox(
         None,
         max_attempts,
         operation,
-    )
-    {
+    ) {
         Ok(created) => created,
         Err(error) => return Err(cleanup_failed_temp_creation_owner(error)),
     };
@@ -311,13 +300,10 @@ fn host_temp_recovery_entries(
 ) -> LocalResult<(PathBuf, Vec<(PathBuf, crate::temp::internal::NativePrivateEntry)>)> {
     let mut entries = Vec::with_capacity(2);
     let recovery_path = if let Some((child_path, child_handle)) = child {
-        let child_parent = sandbox
-            .file
-            .as_ref()
-            .ok_or_else(|| {
-                LocalFileError::new(LocalFileErrorKind::RequirementNotMet, LocalFileOperation::Cleanup)
-                    .with_path(child_path.to_path_buf())
-            })?;
+        let child_parent = sandbox.file.as_ref().ok_or_else(|| {
+            LocalFileError::new(LocalFileErrorKind::RequirementNotMet, LocalFileOperation::Cleanup)
+                .with_path(child_path.to_path_buf())
+        })?;
         let child_parent = Arc::clone(child_parent);
         let identity = crate::observation::query::query_observation(
             &child_handle,
@@ -329,13 +315,16 @@ fn host_temp_recovery_entries(
             LocalFileError::new(LocalFileErrorKind::InvalidPath, LocalFileOperation::Cleanup)
                 .with_path(child_path.to_path_buf())
         })?;
-        entries.push((child_path.to_path_buf(), crate::temp::internal::NativePrivateEntry {
-            parent: child_parent,
-            name: name.to_os_string(),
-            file: Some(Arc::new(child_handle)),
-            identity,
-            directory: child_is_directory,
-        }));
+        entries.push((
+            child_path.to_path_buf(),
+            crate::temp::internal::NativePrivateEntry {
+                parent: child_parent,
+                name: name.to_os_string(),
+                file: Some(Arc::new(child_handle)),
+                identity,
+                directory: child_is_directory,
+            },
+        ));
         child_path.to_path_buf()
     } else {
         sandbox_path.to_path_buf()
@@ -356,6 +345,7 @@ fn open_temp_directory(path: &Path) -> io::Result<File> {
 #[cfg(windows)]
 fn open_temp_directory(path: &Path) -> io::Result<File> {
     use std::os::windows::fs::OpenOptionsExt;
+
     use windows_sys::Win32::Storage::FileSystem::FILE_FLAG_BACKUP_SEMANTICS;
     use windows_sys::Win32::Storage::FileSystem::FILE_FLAG_OPEN_REPARSE_POINT;
     fs::OpenOptions::new()
@@ -379,11 +369,9 @@ fn cleanup_failed_temp_owner(
         owner = match prior_owner.append_native_owner(owner) {
             Ok(owner) => owner,
             Err((prior_owner, sandbox_owner)) => {
-                let cleanup_error = LocalFileError::new(
-                    LocalFileErrorKind::RequirementNotMet,
-                    LocalFileOperation::Cleanup,
-                )
-                .with_temp_recovery(sandbox_owner);
+                let cleanup_error =
+                    LocalFileError::new(LocalFileErrorKind::RequirementNotMet, LocalFileOperation::Cleanup)
+                        .with_temp_recovery(sandbox_owner);
                 return primary
                     .with_cleanup_error(cleanup_error)
                     .with_temp_recovery(prior_owner);
@@ -1175,7 +1163,10 @@ fn test_host_temp_creation_error_releases_known_identity_owner() {
 
     let error = cleanup_failed_temp_creation_owner(primary);
 
-    assert!(error.cleanup_error().is_none(), "successful cleanup adds no cleanup error");
+    assert!(
+        error.cleanup_error().is_none(),
+        "successful cleanup adds no cleanup error"
+    );
     assert!(error.temp_recovery().is_none(), "successful cleanup releases the owner");
     assert!(!path.exists(), "identity-checked cleanup removes the sandbox");
 }
@@ -1219,7 +1210,10 @@ fn test_host_temp_sandbox_open_failure_reports_cleanup_error_and_retains_owner()
         let (_primary, mut recovery) = error.into_temp_recovery_parts();
         let mut recovery = recovery.take().expect("owner transfers from public error");
         assert_eq!(
-            recovery.cleanup().expect_err("unknown identity is not cleanup authority").kind(),
+            recovery
+                .cleanup()
+                .expect_err("unknown identity is not cleanup authority")
+                .kind(),
             LocalFileErrorKind::RequirementNotMet
         );
         assert!(path.is_dir(), "cleanup must not remove by diagnostic path");
@@ -1245,11 +1239,17 @@ fn test_host_temp_directory_open_failure_retains_unauthoritative_entry() {
     assert!(path.is_dir(), "creation succeeded before the open failure");
     let recovery = error.temp_recovery().expect("creation failure retains the entry");
     assert_eq!(recovery.path(), path);
-    assert!(recovery.identity().is_none(), "path text alone cannot establish identity");
+    assert!(
+        recovery.identity().is_none(),
+        "path text alone cannot establish identity"
+    );
     let (_primary, mut recovery) = error.into_temp_recovery_parts();
     let mut recovery = recovery.take().expect("retained owner");
     assert_eq!(
-        recovery.cleanup().expect_err("unknown identity must not authorize deletion").kind(),
+        recovery
+            .cleanup()
+            .expect_err("unknown identity must not authorize deletion")
+            .kind(),
         LocalFileErrorKind::RequirementNotMet
     );
     assert!(path.is_dir(), "path-only recovery must not delete the entry");
@@ -1332,8 +1332,13 @@ fn test_host_temp_recovery_keeps_original_parent_handle_after_sandbox_replacemen
         .expect("construct recovery using the retained sandbox handle");
     let mut recovery = crate::LocalTempRecovery::from_native_entries_with_paths(path, entries);
 
-    let error = recovery.cleanup().expect_err("the retained parent handle cannot see the replacement child");
+    let error = recovery
+        .cleanup()
+        .expect_err("the retained parent handle cannot see the replacement child");
 
     assert_eq!(error.path(), Some(child.as_path()));
-    assert!(child.is_dir(), "cleanup must not re-open the replacement parent by path");
+    assert!(
+        child.is_dir(),
+        "cleanup must not re-open the replacement parent by path"
+    );
 }

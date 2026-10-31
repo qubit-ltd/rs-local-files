@@ -8,7 +8,8 @@
 
 /// Unix device, inode, and native change-time details from one handle.
 ///
-/// Values are available through [`crate::observation::LocalNativeFileDetails::unix`]. Device and
+/// Values are available through
+/// [`crate::observation::LocalNativeFileDetails::unix`]. Device and
 /// inode identify an object on the native filesystem, not its content version.
 ///
 /// # Examples

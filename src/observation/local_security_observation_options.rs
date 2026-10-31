@@ -43,7 +43,8 @@ pub struct LocalSecurityObservationOptions {
     link_count: LocalObservationRequirement,
     /// Maximum ACL entries decoded; `None` leaves the count unrestricted.
     max_acl_entries: Option<usize>,
-    /// Maximum ACL bytes read and retained; `None` leaves the byte budget unrestricted.
+    /// Maximum ACL bytes read and retained; `None` leaves the byte budget
+    /// unrestricted.
     max_acl_bytes: Option<usize>,
 }
 impl LocalSecurityObservationOptions {

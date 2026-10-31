@@ -10,7 +10,8 @@
 //! A fully skipped copy has no publication whose parent needs synchronization.
 
 use std::fs;
-use std::os::unix::fs::{PermissionsExt, symlink};
+use std::os::unix::fs::PermissionsExt;
+use std::os::unix::fs::symlink;
 use std::path::Path;
 
 use qubit_local_files::LocalFileSystem;
@@ -34,11 +35,7 @@ enum Entry {
     Symlink,
 }
 
-fn test_skipped_copy_does_not_sync_parent(
-    facade: Facade,
-    entry: Entry,
-    durability: LocalDurabilityRequirement,
-) {
+fn test_skipped_copy_does_not_sync_parent(facade: Facade, entry: Entry, durability: LocalDurabilityRequirement) {
     let fixture = tempdir().expect("fixture should exist");
     let source = fixture.path().join("source");
     let target = fixture.path().join("target");
@@ -46,8 +43,7 @@ fn test_skipped_copy_does_not_sync_parent(
     let target_referent = fixture.path().join("target-referent");
     fs::write(&source, b"source").expect("source should exist");
     fs::write(&target, b"existing").expect("target should exist");
-    fs::set_permissions(&target, fs::Permissions::from_mode(0o640))
-        .expect("target mode should be set");
+    fs::set_permissions(&target, fs::Permissions::from_mode(0o640)).expect("target mode should be set");
     if matches!(entry, Entry::Symlink) {
         fs::write(&referent, b"referent").expect("link referent should exist");
         fs::remove_file(&source).expect("regular source should be removed");
@@ -69,9 +65,7 @@ fn test_skipped_copy_does_not_sync_parent(
     let _guard = install_test_fault(fault).expect("parent-sync fault should install");
     let fs = match facade {
         Facade::Host => LocalFileSystem::host().expect("host filesystem should open"),
-        Facade::Rooted => {
-            LocalFileSystem::rooted(fixture.path()).expect("rooted filesystem should open")
-        }
+        Facade::Rooted => LocalFileSystem::rooted(fixture.path()).expect("rooted filesystem should open"),
     };
     let options = LocalCopyOptions::new()
         .with_conflict(LocalCopyConflictPolicy::Skip)
@@ -85,14 +79,8 @@ fn test_skipped_copy_does_not_sync_parent(
     assert_eq!(0, outcome.stats().files());
     assert!(!outcome.atomic());
     assert!(!outcome.durable());
-    assert_eq!(
-        LocalMetadataPreservePolicy::None,
-        outcome.metadata_preservation()
-    );
-    assert_eq!(
-        b"existing",
-        fs::read(&target).expect("target should remain").as_slice()
-    );
+    assert_eq!(LocalMetadataPreservePolicy::None, outcome.metadata_preservation());
+    assert_eq!(b"existing", fs::read(&target).expect("target should remain").as_slice());
     assert_eq!(
         0o640,
         fs::metadata(if matches!(entry, Entry::Symlink) {
@@ -107,10 +95,7 @@ fn test_skipped_copy_does_not_sync_parent(
     );
     if matches!(entry, Entry::Symlink) {
         assert_eq!(referent, fs::read_link(&source).expect("link remains"));
-        assert_eq!(
-            target_referent,
-            fs::read_link(&target).expect("target link remains")
-        );
+        assert_eq!(target_referent, fs::read_link(&target).expect("target link remains"));
     }
 }
 
@@ -136,8 +121,7 @@ fn test_published_copy_retains_failure_state_after_sync_error() {
     let source = fixture.path().join("source");
     let target = fixture.path().join("target");
     fs::write(&source, b"published").expect("source should exist");
-    let _fault =
-        install_test_fault("copy-parent-sync").expect("copy parent-sync fault should install");
+    let _fault = install_test_fault("copy-parent-sync").expect("copy parent-sync fault should install");
 
     let failure = LocalFileSystem::host()
         .expect("host filesystem should open")
@@ -152,9 +136,7 @@ fn test_published_copy_retains_failure_state_after_sync_error() {
     assert_eq!(1, failure.partial_stats().files());
     assert_eq!(
         b"published",
-        fs::read(&target)
-            .expect("published target should remain")
-            .as_slice()
+        fs::read(&target).expect("published target should remain").as_slice()
     );
 }
 
@@ -164,8 +146,7 @@ fn test_replaced_symlink_destination_failure_is_not_unchanged() {
     let target = fixture.path().join("target");
     symlink("referent", &source).expect("source link should exist");
     fs::write(&target, b"old destination").expect("old target should exist");
-    let _fault = install_test_fault("local-fs-copy-symlink-create")
-        .expect("symlink-create fault should install");
+    let _fault = install_test_fault("local-fs-copy-symlink-create").expect("symlink-create fault should install");
 
     let failure = LocalFileSystem::host()
         .expect("host filesystem should open")
@@ -177,10 +158,7 @@ fn test_replaced_symlink_destination_failure_is_not_unchanged() {
         .expect_err("injected link creation failure should follow destination removal");
 
     assert_eq!(LocalCopyFailureState::Indeterminate, failure.state());
-    assert!(
-        !target.exists(),
-        "the old destination should have been removed"
-    );
+    assert!(!target.exists(), "the old destination should have been removed");
 }
 
 #[test]

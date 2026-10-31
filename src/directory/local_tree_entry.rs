@@ -42,7 +42,8 @@ pub struct LocalTreeEntry {
 }
 
 impl LocalTreeEntry {
-    /// Creates an expected entry from a safe relative path and ordinary tree kind.
+    /// Creates an expected entry from a safe relative path and ordinary tree
+    /// kind.
     ///
     /// Returns `InvalidPath` for empty, absolute, dotted, parent, or prefixed
     /// paths and `InvalidOptions` for kinds other than file, directory, and

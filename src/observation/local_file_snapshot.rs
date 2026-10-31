@@ -106,7 +106,8 @@ impl LocalFileSnapshot {
     }
 }
 
-/// Checks that observations and the completed byte count satisfy snapshot policy.
+/// Checks that observations and the completed byte count satisfy snapshot
+/// policy.
 ///
 /// Identity, length, and native timestamps must all be available and equal;
 /// missing identity or native details therefore returns `false`.

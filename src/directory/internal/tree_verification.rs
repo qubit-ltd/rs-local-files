@@ -361,7 +361,8 @@ fn requirement_not_met() -> LocalFileError {
     LocalFileError::new(LocalFileErrorKind::RequirementNotMet, LocalFileOperation::Metadata)
 }
 
-/// Creates the error used when required native identity or count data is absent.
+/// Creates the error used when required native identity or count data is
+/// absent.
 fn unsupported() -> LocalFileError {
     LocalFileError::new(LocalFileErrorKind::Unsupported, LocalFileOperation::Metadata)
 }

@@ -104,10 +104,7 @@ impl LocalTempRecovery {
         }
     }
 
-    pub(crate) fn from_native_entries_with_paths(
-        path: PathBuf,
-        entries: Vec<(PathBuf, NativePrivateEntry)>,
-    ) -> Self {
+    pub(crate) fn from_native_entries_with_paths(path: PathBuf, entries: Vec<(PathBuf, NativePrivateEntry)>) -> Self {
         let identity = entries.first().and_then(|(_, entry)| entry.identity.clone());
         Self {
             path,

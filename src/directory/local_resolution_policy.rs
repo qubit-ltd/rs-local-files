@@ -9,10 +9,9 @@
 use std::ffi::OsStr;
 use std::path::Path;
 
-use crate::LocalResult;
-
 use super::LocalResolutionOrigin;
 use super::LocalResolutionScope;
+use crate::LocalResult;
 
 /// Pure validation hooks applied before the resolver accesses a component or
 /// target.

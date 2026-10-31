@@ -5,10 +5,9 @@
 //
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
-use crate::LocalFileMetadata;
-
 use super::LocalFileIdentity;
 use super::LocalNativeFileDetails;
+use crate::LocalFileMetadata;
 
 /// Metadata and native identity gathered from one retained handle.
 ///
@@ -36,7 +35,8 @@ use super::LocalNativeFileDetails;
 pub struct LocalFileObservation {
     /// Normalized metadata collected from the retained handle.
     metadata: LocalFileMetadata,
-    /// Native object identity, absent when the platform query could not supply it.
+    /// Native object identity, absent when the platform query could not supply
+    /// it.
     identity: Option<LocalFileIdentity>,
     /// Native timestamps and platform facts from that handle, when available.
     native_details: Option<LocalNativeFileDetails>,

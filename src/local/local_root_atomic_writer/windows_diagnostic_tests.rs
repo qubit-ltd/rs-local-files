@@ -36,13 +36,9 @@ fn test_windows_rooted_staging_create_failure_has_no_retained_path() {
     let target = directory.path().join("target.txt");
     fs::write(&target, b"original contents").expect("target fixture should be written");
     let root = crate::rooted::Root::open(directory.path()).expect("root authority should open");
-    let root_handle = root
-        .try_clone_authority()
-        .expect("root authority should clone");
-    let requested_path = LocalRelativePath::new(Path::new("target.txt"))
-        .expect("relative target path should be valid");
-    let options =
-        LocalAtomicWriteOptions::new().with_durability(LocalDurabilityRequirement::NotRequired);
+    let root_handle = root.try_clone_authority().expect("root authority should clone");
+    let requested_path = LocalRelativePath::new(Path::new("target.txt")).expect("relative target path should be valid");
+    let options = LocalAtomicWriteOptions::new().with_durability(LocalDurabilityRequirement::NotRequired);
 
     inject_staging_open_error(io::Error::new(
         io::ErrorKind::PermissionDenied,
@@ -52,10 +48,7 @@ fn test_windows_rooted_staging_create_failure_has_no_retained_path() {
         .expect_err("injected staging open failure should reject writer creation");
 
     assert_eq!(LocalAtomicWriteStage::CreateTemporaryFile, error.stage());
-    assert_eq!(
-        LocalAtomicDestinationState::Unchanged,
-        error.destination_state()
-    );
+    assert_eq!(LocalAtomicDestinationState::Unchanged, error.destination_state());
     assert_eq!(requested_path.as_path(), error.path());
     assert_eq!(None, error.temporary_path());
     assert_eq!(
@@ -80,13 +73,9 @@ fn test_windows_rooted_commit_failure_retains_actual_staging_path() {
     let target = directory.path().join("target.txt");
     fs::write(&target, b"original contents").expect("target fixture should be written");
     let root = crate::rooted::Root::open(directory.path()).expect("root authority should open");
-    let root_handle = root
-        .try_clone_authority()
-        .expect("root authority should clone");
-    let requested_path = LocalRelativePath::new(Path::new("target.txt"))
-        .expect("relative target path should be valid");
-    let options =
-        LocalAtomicWriteOptions::new().with_durability(LocalDurabilityRequirement::NotRequired);
+    let root_handle = root.try_clone_authority().expect("root authority should clone");
+    let requested_path = LocalRelativePath::new(Path::new("target.txt")).expect("relative target path should be valid");
+    let options = LocalAtomicWriteOptions::new().with_durability(LocalDurabilityRequirement::NotRequired);
     let writer = LocalRootAtomicWriter::new(&root_handle, root.path(), &requested_path, options)
         .expect("rooted staging file should be created");
     let staging_path = writer.staging_path().to_path_buf();

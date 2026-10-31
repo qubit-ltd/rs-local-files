@@ -13,10 +13,11 @@ use super::internal::LocalNativeIdentity;
 /// it is not a version of the object's contents. Rechecking identity alone
 /// cannot prove that file bytes remained unchanged.
 ///
-/// Obtain identities through [`crate::observation::LocalFileObservation::identity`]
-/// or [`crate::observation::LocalSecurityObservation::identity`]. Equality compares the
-/// platform identity values; it does not promise uniqueness after object
-/// deletion and identifier reuse.
+/// Obtain identities through
+/// [`crate::observation::LocalFileObservation::identity`]
+/// or [`crate::observation::LocalSecurityObservation::identity`]. Equality
+/// compares the platform identity values; it does not promise uniqueness after
+/// object deletion and identifier reuse.
 ///
 /// ```
 /// use std::path::Path;
