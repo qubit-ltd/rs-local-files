@@ -69,25 +69,15 @@ impl HostLocalFileSystem {
         if options.privacy() == LocalPrivacyRequirement::Required {
             return create_private_host_temp_file(&parent, options, symlink_policy);
         }
-        let sandbox =
-            crate::local::create_temp_dir_in_dir_with_affixes(&parent, Some("sandbox-"), None, options.max_attempts())
-                .map_err(|error| {
-                    let invalid_options = error.kind() == io::ErrorKind::InvalidInput;
-                    let error =
-                        LocalFileError::from_io(LocalFileOperation::CreateTempFile, Some(parent.clone()), None, error);
-                    if invalid_options {
-                        error.with_kind(LocalFileErrorKind::InvalidOptions)
-                    } else {
-                        error
-                    }
-                })?;
+        let (sandbox, sandbox_entry) =
+            create_host_temp_sandbox(&parent, LocalFileOperation::CreateTempFile, options.max_attempts())?;
         let created =
             crate::local::create_temp_file_in_dir(&sandbox, options.prefix(), options.suffix(), options.max_attempts());
         match created {
             Ok((path, file)) => {
                 let (recovery_path, recovery_entries) = host_temp_recovery_entries(
-                    &parent,
                     &sandbox,
+                    sandbox_entry,
                     Some((
                         &path,
                         file.try_clone().map_err(|error| {
@@ -108,7 +98,8 @@ impl HostLocalFileSystem {
             Err(error) => {
                 let primary =
                     LocalFileError::from_io(LocalFileOperation::CreateTempFile, Some(sandbox.clone()), None, error);
-                let (recovery_path, recovery_entries) = host_temp_recovery_entries(&parent, &sandbox, None, false)?;
+                let recovery_path = sandbox.clone();
+                let recovery_entries = vec![sandbox_entry];
                 let recovery = crate::LocalTempRecovery::from_native_entries(recovery_path, recovery_entries);
                 Err(cleanup_failed_temp_owner(primary, recovery, &sandbox))
             }
@@ -154,35 +145,19 @@ impl HostLocalFileSystem {
         if options.privacy() == LocalPrivacyRequirement::Required {
             return create_private_host_temp_directory(&parent, options, symlink_policy);
         }
-        let sandbox =
-            crate::local::create_temp_dir_in_dir_with_affixes(&parent, Some("sandbox-"), None, options.max_attempts())
-                .map_err(|error| {
-                    let invalid_options = error.kind() == io::ErrorKind::InvalidInput;
-                    let error = LocalFileError::from_io(
-                        LocalFileOperation::CreateTempDirectory,
-                        Some(parent.clone()),
-                        None,
-                        error,
-                    );
-                    if invalid_options {
-                        error.with_kind(LocalFileErrorKind::InvalidOptions)
-                    } else {
-                        error
-                    }
-                })?;
-        let created = crate::local::create_temp_dir_in_dir_with_affixes(
+        let (sandbox, sandbox_entry) =
+            create_host_temp_sandbox(&parent, LocalFileOperation::CreateTempDirectory, options.max_attempts())?;
+        let created = create_host_temp_directory_entry(
             &sandbox,
             options.prefix(),
             options.suffix(),
             options.max_attempts(),
+            LocalFileOperation::CreateTempDirectory,
         );
         match created {
-            Ok(path) => {
-                let child = open_temp_directory(&path).map_err(|error| {
-                    LocalFileError::from_io(LocalFileOperation::CreateTempDirectory, Some(path.clone()), None, error)
-                })?;
+            Ok((path, child)) => {
                 let (recovery_path, recovery_entries) =
-                    host_temp_recovery_entries(&parent, &sandbox, Some((&path, child)), true)?;
+                    host_temp_recovery_entries(&sandbox, sandbox_entry, Some((&path, child)), true)?;
                 match LocalTempDirectory::host(path.clone(), sandbox.clone(), symlink_policy, options.cleanup_limits())
                 {
                     Ok(resource) => Ok(resource),
@@ -193,14 +168,9 @@ impl HostLocalFileSystem {
                     )),
                 }
             }
-            Err(error) => {
-                let primary = LocalFileError::from_io(
-                    LocalFileOperation::CreateTempDirectory,
-                    Some(sandbox.clone()),
-                    None,
-                    error,
-                );
-                let (recovery_path, recovery_entries) = host_temp_recovery_entries(&parent, &sandbox, None, true)?;
+            Err(primary) => {
+                let recovery_path = sandbox.clone();
+                let recovery_entries = vec![sandbox_entry];
                 let recovery = crate::LocalTempRecovery::from_native_entries(recovery_path, recovery_entries);
                 Err(cleanup_failed_temp_owner(primary, recovery, &sandbox))
             }
@@ -208,25 +178,81 @@ impl HostLocalFileSystem {
     }
 }
 
-fn host_temp_recovery_entries(
+fn create_host_temp_sandbox(
     parent: &Path,
-    sandbox: &Path,
+    operation: LocalFileOperation,
+    max_attempts: Option<usize>,
+) -> LocalResult<(PathBuf, crate::temp::internal::NativePrivateEntry)> {
+    let parent_handle = File::open(parent)
+        .map_err(|error| LocalFileError::from_io(operation, Some(parent.to_path_buf()), None, error))?;
+    let (sandbox, sandbox_handle) =
+        create_host_temp_directory_entry(parent, Some("sandbox-"), None, max_attempts, operation)?;
+    let identity = crate::observation::query::query_observation(
+        &sandbox_handle,
+        crate::observation::LocalObservationRequirement::Optional,
+    )
+    .ok()
+    .and_then(|observation| observation.identity().cloned());
+    let name = sandbox
+        .file_name()
+        .ok_or_else(|| LocalFileError::new(LocalFileErrorKind::InvalidPath, operation).with_path(sandbox.clone()))?;
+    let entry = crate::temp::internal::NativePrivateEntry {
+        parent: parent_handle,
+        name: name.to_os_string(),
+        file: Some(sandbox_handle),
+        identity,
+        directory: true,
+    };
+    Ok((sandbox, entry))
+}
+
+fn create_host_temp_directory_entry(
+    parent: &Path,
+    prefix: Option<&str>,
+    suffix: Option<&str>,
+    max_attempts: Option<usize>,
+    operation: LocalFileOperation,
+) -> LocalResult<(PathBuf, File)> {
+    let path =
+        crate::local::create_temp_dir_in_dir_with_affixes(parent, prefix, suffix, max_attempts).map_err(|error| {
+            let invalid_options = error.kind() == io::ErrorKind::InvalidInput;
+            let error = LocalFileError::from_io(operation, Some(parent.to_path_buf()), None, error);
+            if invalid_options {
+                error.with_kind(LocalFileErrorKind::InvalidOptions)
+            } else {
+                error
+            }
+        })?;
+    let handle = open_temp_directory(&path)
+        .map_err(|error| LocalFileError::from_io(operation, Some(path.clone()), None, error))?;
+    Ok((path, handle))
+}
+
+fn host_temp_recovery_entries(
+    sandbox_path: &Path,
+    sandbox: crate::temp::internal::NativePrivateEntry,
     child: Option<(&Path, File)>,
     child_is_directory: bool,
 ) -> LocalResult<(PathBuf, Vec<crate::temp::internal::NativePrivateEntry>)> {
-    let parent_handle = File::open(parent).map_err(|error| {
-        LocalFileError::from_io(LocalFileOperation::Cleanup, Some(parent.to_path_buf()), None, error)
-    })?;
-    let sandbox_handle = open_temp_directory(sandbox).map_err(|error| {
-        LocalFileError::from_io(LocalFileOperation::Cleanup, Some(sandbox.to_path_buf()), None, error)
-    })?;
-    let sandbox_identity = temp_recovery_identity(&sandbox_handle, sandbox)?;
     let mut entries = Vec::with_capacity(2);
     let recovery_path = if let Some((child_path, child_handle)) = child {
-        let child_parent = open_temp_directory(sandbox).map_err(|error| {
-            LocalFileError::from_io(LocalFileOperation::Cleanup, Some(sandbox.to_path_buf()), None, error)
-        })?;
-        let identity = temp_recovery_identity(&child_handle, child_path)?;
+        let child_parent = sandbox
+            .file
+            .as_ref()
+            .ok_or_else(|| {
+                LocalFileError::new(LocalFileErrorKind::RequirementNotMet, LocalFileOperation::Cleanup)
+                    .with_path(child_path.to_path_buf())
+            })?
+            .try_clone()
+            .map_err(|error| {
+                LocalFileError::from_io(LocalFileOperation::Cleanup, Some(child_path.to_path_buf()), None, error)
+            })?;
+        let identity = crate::observation::query::query_observation(
+            &child_handle,
+            crate::observation::LocalObservationRequirement::Optional,
+        )
+        .ok()
+        .and_then(|observation| observation.identity().cloned());
         let name = child_path.file_name().ok_or_else(|| {
             LocalFileError::new(LocalFileErrorKind::InvalidPath, LocalFileOperation::Cleanup)
                 .with_path(child_path.to_path_buf())
@@ -235,36 +261,15 @@ fn host_temp_recovery_entries(
             parent: child_parent,
             name: name.to_os_string(),
             file: Some(child_handle),
-            identity: Some(identity),
+            identity,
             directory: child_is_directory,
         });
         child_path.to_path_buf()
     } else {
-        sandbox.to_path_buf()
+        sandbox_path.to_path_buf()
     };
-    let sandbox_name = sandbox.file_name().ok_or_else(|| {
-        LocalFileError::new(LocalFileErrorKind::InvalidPath, LocalFileOperation::Cleanup)
-            .with_path(sandbox.to_path_buf())
-    })?;
-    entries.push(crate::temp::internal::NativePrivateEntry {
-        parent: parent_handle,
-        name: sandbox_name.to_os_string(),
-        file: Some(sandbox_handle),
-        identity: Some(sandbox_identity),
-        directory: true,
-    });
+    entries.push(sandbox);
     Ok((recovery_path, entries))
-}
-
-fn temp_recovery_identity(file: &File, path: &Path) -> LocalResult<crate::observation::LocalFileIdentity> {
-    crate::observation::query::query_observation(file, crate::observation::LocalObservationRequirement::Required)
-        .map_err(|error| error.with_path(path.to_path_buf()))?
-        .identity()
-        .cloned()
-        .ok_or_else(|| {
-            LocalFileError::new(LocalFileErrorKind::RequirementNotMet, LocalFileOperation::Cleanup)
-                .with_path(path.to_path_buf())
-        })
 }
 
 #[cfg(unix)]
@@ -983,4 +988,54 @@ fn create_host_temp_parent(parent: &Path, operation: LocalFileOperation) -> Loca
             error,
         )),
     }
+}
+
+#[cfg(all(test, unix))]
+#[test]
+fn test_host_temp_recovery_does_not_claim_replaced_sandbox() {
+    let fixture = tempfile::tempdir().expect("fixture");
+    let parent = fixture.path();
+    let (sandbox, sandbox_entry) = create_host_temp_sandbox(parent, LocalFileOperation::CreateTempDirectory, Some(1))
+        .expect("create sandbox and retain its native owner");
+    let original = sandbox.with_extension("original");
+    fs::rename(&sandbox, &original).expect("move original sandbox");
+    fs::create_dir(&sandbox).expect("create replacement sandbox");
+
+    let (path, entries) =
+        host_temp_recovery_entries(&sandbox, sandbox_entry, None, false).expect("construct recovery owner");
+    let mut recovery = crate::LocalTempRecovery::from_native_entries(path, entries);
+    assert_eq!(
+        recovery.cleanup().expect_err("replacement must be rejected").kind(),
+        LocalFileErrorKind::RequirementNotMet
+    );
+    drop(recovery);
+
+    assert!(sandbox.is_dir(), "replacement sandbox must not be deleted");
+}
+
+#[cfg(all(test, unix))]
+#[test]
+fn test_host_temp_recovery_does_not_claim_replaced_child_directory() {
+    let fixture = tempfile::tempdir().expect("fixture");
+    let (sandbox, sandbox_entry) =
+        create_host_temp_sandbox(fixture.path(), LocalFileOperation::CreateTempDirectory, Some(1))
+            .expect("create sandbox and retain its native owner");
+    let (child, child_handle) = create_host_temp_directory_entry(
+        &sandbox,
+        Some("child-"),
+        None,
+        Some(1),
+        LocalFileOperation::CreateTempDirectory,
+    )
+    .expect("create child directory and retain its handle");
+    let original = child.with_extension("original");
+    fs::rename(&child, &original).expect("move original child");
+    fs::create_dir(&child).expect("create replacement child");
+
+    let (path, entries) = host_temp_recovery_entries(&sandbox, sandbox_entry, Some((&child, child_handle)), true)
+        .expect("construct recovery owner");
+    let mut recovery = crate::LocalTempRecovery::from_native_entries(path, entries);
+    let _cleanup = recovery.cleanup();
+
+    assert!(child.is_dir(), "replacement child directory must not be deleted");
 }
