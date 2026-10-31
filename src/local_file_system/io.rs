@@ -379,7 +379,8 @@ impl LocalFileSystem {
                 Some(resolution.clone()),
             )?;
             check_binding_deadline(binding_deadline, path)?;
-            let mut observed = LocalObservedReader::from_reader(reader, options.native_observation())?;
+            let mut observed = LocalObservedReader::from_reader(reader, options.native_observation())?
+                .bind_error_context(error_path.clone(), error_current_directory.clone());
             if attach_binding {
                 if let ObservedReadPath::FixedRelative {
                     original,
@@ -491,37 +492,17 @@ impl LocalFileSystem {
                 };
                 drop(parent_root);
                 check_binding_deadline(binding_deadline, resolved.namespace_absolute())?;
-                match &path_mode {
-                    ObservedReadPath::Namespace(_) => {
-                        observed = observed.with_binding(Box::new(PathBinding::new(
-                            self.clone(),
-                            resolved.namespace_absolute().to_path_buf(),
-                            identity,
-                            *options,
-                            binding_options,
-                        )));
-                        observed = observed.with_binding(Box::new(DirectoryPathBinding::new(
-                            parent_anchors,
-                            binding_options.deadline(),
-                        )));
-                    }
-                    ObservedReadPath::FixedRelative {
-                        original,
-                        component_policy,
-                        ..
-                    } => {
-                        observed = observed.with_binding(Box::new(crate::directory::DirectoryReaderPathBinding::new(
-                            self.clone(),
-                            original.to_path_buf(),
-                            request_path.to_path_buf(),
-                            (*component_policy).clone(),
-                            *options,
-                            identity,
-                            authority_binding_deadline,
-                        )));
-                        drop(parent_anchors);
-                    }
-                }
+                observed = observed.with_binding(Box::new(PathBinding::new(
+                    self.clone(),
+                    resolved.namespace_absolute().to_path_buf(),
+                    identity,
+                    *options,
+                    binding_options,
+                )));
+                observed = observed.with_binding(Box::new(DirectoryPathBinding::new(
+                    parent_anchors,
+                    binding_options.deadline(),
+                )));
             }
             check_binding_deadline(binding_deadline, path)?;
             Ok(observed)
@@ -797,8 +778,8 @@ impl LocalFileSystem {
             resolver.current_directory(),
             symlink_policy,
         )?;
-        let mut observed =
-            LocalObservedReader::from_reader(reader, LocalObservationRequirement::Required).map_err(|error| {
+        let mut observed = LocalObservedReader::from_reader(reader, LocalObservationRequirement::Required)
+            .map_err(|error| {
                 operation_error(
                     error,
                     LocalFileOperation::Read,
@@ -806,7 +787,11 @@ impl LocalFileSystem {
                     None,
                     resolver.current_directory(),
                 )
-            })?;
+            })?
+            .bind_error_context(
+                resolved.namespace_absolute().to_path_buf(),
+                resolver.current_directory().map(Path::to_path_buf),
+            );
         let before = observed.observation().clone();
         if before.metadata().len() > options.max_bytes() {
             return Err(operation_error(

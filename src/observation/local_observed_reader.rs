@@ -8,6 +8,7 @@
 //! Same-handle observed readers and bounded collection.
 
 use std::io;
+use std::path::PathBuf;
 
 use crate::LocalFileReader;
 use crate::LocalResult;
@@ -135,6 +136,12 @@ pub(crate) trait ReaderPathBinding: std::fmt::Debug + Send + Sync {
 /// A byte reader whose initial and refreshed observations share its open
 /// handle.
 ///
+/// Structured errors may include the path and working directory captured when
+/// the reader was opened. These coordinates can become stale after a rename;
+/// they neither lock the path nor grant authority. The `qubit_io::Input`
+/// interface continues to return `io::Error` and does not promise these
+/// coordinates.
+///
 /// A path binding can additionally check whether the source name still refers
 /// to the same native object. Object identity does not identify a content
 /// version; use a content digest or another application-level check when that
@@ -176,6 +183,10 @@ pub struct LocalObservedReader {
     requirement: LocalObservationRequirement,
     /// Optional pathname binding used by `verify_path_binding`.
     binding: Option<Box<dyn ReaderPathBinding>>,
+    /// Path coordinate captured for structured error diagnostics.
+    error_path: Option<PathBuf>,
+    /// Working directory captured for structured error diagnostics.
+    error_current_directory: Option<PathBuf>,
 }
 
 impl std::fmt::Debug for LocalObservedReader {
@@ -198,7 +209,34 @@ impl LocalObservedReader {
             observation,
             requirement,
             binding: None,
+            error_path: None,
+            error_current_directory: None,
         })
+    }
+
+    /// Binds diagnostic coordinates captured by the opening facade.
+    pub(crate) fn bind_error_context(mut self, path: PathBuf, current_directory: Option<PathBuf>) -> Self {
+        self.error_path = Some(path);
+        self.error_current_directory = current_directory;
+        self
+    }
+
+    /// Adds captured diagnostic coordinates only when the error lacks them.
+    ///
+    /// Existing path, working-directory, operation, source, and other error
+    /// state are retained unchanged.
+    fn contextualize_error(&self, mut error: LocalFileError) -> LocalFileError {
+        if error.path().is_none()
+            && let Some(path) = &self.error_path
+        {
+            error = error.with_path(path.clone());
+        }
+        if error.current_directory().is_none()
+            && let Some(current_directory) = &self.error_current_directory
+        {
+            error = error.with_current_directory(current_directory.clone());
+        }
+        error
     }
 
     pub(crate) fn with_binding(mut self, binding: Box<dyn ReaderPathBinding>) -> Self {
@@ -221,6 +259,7 @@ impl LocalObservedReader {
     /// This does not change the value returned by [`Self::observation`].
     pub fn observe_now(&self) -> LocalResult<LocalFileObservation> {
         super::query::query_observation(self.reader.as_file(), self.requirement)
+            .map_err(|error| self.contextualize_error(error))
     }
 
     /// Queries security facts from this reader's retained file handle.
@@ -239,7 +278,7 @@ impl LocalObservedReader {
         &self,
         options: &LocalSecurityObservationOptions,
     ) -> LocalResult<LocalSecurityObservation> {
-        super::security::query_security(self.reader.as_file(), options)
+        super::security::query_security(self.reader.as_file(), options).map_err(|error| self.contextualize_error(error))
     }
 
     /// Checks the optional path binding retained when opening this reader.
@@ -252,10 +291,13 @@ impl LocalObservedReader {
     /// Returns `InvalidState` if this reader has no path binding and propagates
     /// resolution, policy, timeout, or native query errors from verification.
     pub fn verify_path_binding(&self) -> LocalResult<LocalSourceVerification> {
-        self.binding
-            .as_ref()
-            .ok_or_else(|| LocalFileError::new(LocalFileErrorKind::InvalidState, LocalFileOperation::Metadata))?
-            .verify()
+        let result = (|| {
+            self.binding
+                .as_ref()
+                .ok_or_else(|| LocalFileError::new(LocalFileErrorKind::InvalidState, LocalFileOperation::Metadata))?
+                .verify()
+        })();
+        result.map_err(|error| self.contextualize_error(error))
     }
 
     /// Reads through EOF, failing if more than `maximum` bytes are available.
@@ -273,7 +315,8 @@ impl LocalObservedReader {
     /// Returns `ResourceLimit` when input exceeds the limit, or a read error;
     /// partial bytes are discarded although consumed input cannot be restored.
     pub fn read_to_end_limited(&mut self, maximum: u64) -> LocalResult<Vec<u8>> {
-        collect_limited(self, Some(maximum))
+        let result = collect_limited(self, Some(maximum));
+        result.map_err(|error| self.contextualize_error(error))
     }
 }
 
@@ -323,15 +366,25 @@ impl qubit_io::Input for LocalObservedReader {
 
 #[cfg(test)]
 mod binding_tests {
+    use std::io;
     use std::sync::Arc;
     use std::sync::Mutex;
     use std::time::Duration;
     use std::time::Instant;
 
     use super::CombinedPathBinding;
+    use super::LocalObservedReader;
     use super::ReaderPathBinding;
+    use crate::LocalFileSystem;
     use crate::LocalResult;
+    use crate::error::LocalFileEffectState;
+    use crate::error::LocalFileError;
+    use crate::error::LocalFileErrorKind;
+    use crate::error::LocalFileErrorSource;
+    use crate::error::LocalFileOperation;
+    use crate::observation::LocalObservationRequirement;
     use crate::observation::LocalSourceVerification;
+    use crate::options::LocalObservedReadOptions;
 
     #[derive(Debug)]
     struct DeadlineRecorder {
@@ -366,5 +419,61 @@ mod binding_tests {
         let second_deadline = *second.lock().expect("deadline mutex should be available");
         assert!(first_deadline.is_some());
         assert_eq!(first_deadline, second_deadline);
+    }
+
+    #[test]
+    fn test_observed_reader_context_fills_only_missing_fields() {
+        let fixture = tempfile::tempdir().expect("create fixture");
+        let source_path = fixture.path().join("item");
+        std::fs::write(&source_path, b"payload").expect("write item");
+        let reader = LocalFileSystem::host()
+            .expect("open Host")
+            .open_observed_reader(&source_path, &LocalObservedReadOptions::new())
+            .expect("open reader")
+            .bind_error_context(source_path.clone(), Some(fixture.path().to_path_buf()));
+
+        let native = io::Error::other("native source");
+        let cleanup = LocalFileError::new(LocalFileErrorKind::NotFound, LocalFileOperation::DeleteFile);
+        let original = LocalFileError::from_io(
+            LocalFileOperation::Read,
+            Some(fixture.path().join("more-specific")),
+            Some(fixture.path().join("target")),
+            native,
+        )
+        .with_current_directory(fixture.path().join("existing-pwd"))
+        .with_reason("preserve this reason")
+        .with_effect_state(LocalFileEffectState::PartiallyApplied)
+        .with_cleanup_error(cleanup);
+        let result = reader.contextualize_error(original);
+        assert_eq!(result.operation(), LocalFileOperation::Read);
+        assert_eq!(result.path(), Some(fixture.path().join("more-specific").as_path()));
+        assert_eq!(result.target(), Some(fixture.path().join("target").as_path()));
+        assert_eq!(
+            result.current_directory(),
+            Some(fixture.path().join("existing-pwd").as_path())
+        );
+        assert_eq!(result.reason(), Some("preserve this reason"));
+        assert_eq!(result.effect_state(), Some(LocalFileEffectState::PartiallyApplied));
+        assert_eq!(
+            result.cleanup_error().map(LocalFileError::kind),
+            Some(LocalFileErrorKind::NotFound)
+        );
+        assert!(
+            matches!(result.typed_source(), Some(LocalFileErrorSource::Io(source)) if source.to_string() == "native source")
+        );
+
+        let missing = LocalFileError::from_io(LocalFileOperation::Read, None, None, io::Error::other("native source"));
+        let filled = reader.contextualize_error(missing);
+        assert_eq!(filled.path(), Some(source_path.as_path()));
+        assert_eq!(filled.current_directory(), Some(fixture.path()));
+
+        let unbound = LocalObservedReader::from_reader(reader.reader, LocalObservationRequirement::Required)
+            .expect("construct unbound reader");
+        let unbound_error = unbound.contextualize_error(LocalFileError::new(
+            LocalFileErrorKind::InvalidState,
+            LocalFileOperation::Metadata,
+        ));
+        assert_eq!(unbound_error.path(), None);
+        assert_eq!(unbound_error.current_directory(), None);
     }
 }
