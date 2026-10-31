@@ -30,8 +30,18 @@ jobs:
           release: "14.3"
           prepare: |
             pkg install -y bash ca_root_nss git
-            git clone --depth 1 --branch main https://github.com/qubit-ltd/rs-redact.git ../rs-redact
-            git clone --depth 1 --branch main https://github.com/qubit-ltd/rs-json.git ../rs-json
+            test ! -e ../rs-redact
+            git init ../rs-redact
+            git -C ../rs-redact remote add origin https://github.com/qubit-ltd/rs-redact.git
+            git -C ../rs-redact fetch --depth 1 origin 04f4bef3ac9a391cc220438918dcb1451a1963a6
+            git -C ../rs-redact checkout --detach FETCH_HEAD
+            test "$(git -C ../rs-redact rev-parse HEAD)" = 04f4bef3ac9a391cc220438918dcb1451a1963a6
+            test ! -e ../rs-json
+            git init ../rs-json
+            git -C ../rs-json remote add origin https://github.com/qubit-ltd/rs-json.git
+            git -C ../rs-json fetch --depth 1 origin 0bc4aa9eb0aa2993aa4a75c4162e7ae45f2bebab
+            git -C ../rs-json checkout --detach FETCH_HEAD
+            test "$(git -C ../rs-json rev-parse HEAD)" = 0bc4aa9eb0aa2993aa4a75c4162e7ae45f2bebab
             toolchain_dir=$(mktemp -d)
             trap 'rm -rf "$toolchain_dir"' EXIT
             fetch -qo "$toolchain_dir/rust.tar.xz" https://static.rust-lang.org/dist/rust-1.94.0-x86_64-unknown-freebsd.tar.xz

@@ -25,14 +25,14 @@ jobs:
       - uses: actions/checkout@v6
         with:
           repository: qubit-ltd/rs-redact
-          ref: main
+          ref: 04f4bef3ac9a391cc220438918dcb1451a1963a6
           path: ci-root/rs-redact
           submodules: recursive
           persist-credentials: false
       - uses: actions/checkout@v6
         with:
           repository: qubit-ltd/rs-json
-          ref: main
+          ref: 0bc4aa9eb0aa2993aa4a75c4162e7ae45f2bebab
           path: ci-root/rs-json
           submodules: recursive
           persist-credentials: false
@@ -137,14 +137,14 @@ jobs:
       - uses: actions/checkout@v6
         with:
           repository: qubit-ltd/rs-redact
-          ref: main
+          ref: 04f4bef3ac9a391cc220438918dcb1451a1963a6
           path: ci-root/rs-redact
           submodules: recursive
           persist-credentials: false
       - uses: actions/checkout@v6
         with:
           repository: qubit-ltd/rs-json
-          ref: main
+          ref: 0bc4aa9eb0aa2993aa4a75c4162e7ae45f2bebab
           path: ci-root/rs-json
           submodules: recursive
           persist-credentials: false
