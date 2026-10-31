@@ -586,9 +586,9 @@ pub(crate) fn create_owner_entry_at(
         return Err(NativePrivateCreateError {
             source,
             retained: Some(NativePrivateEntry {
-                parent: retained_parent,
+                parent: std::sync::Arc::new(retained_parent),
                 name: retained_name,
-                file: Some(file),
+                file: Some(std::sync::Arc::new(file)),
                 identity,
                 directory,
             }),
@@ -614,9 +614,9 @@ fn create_private_entry_at(parent: &File, name: &OsStr, directory: bool) -> Resu
         return Err(NativePrivateCreateError {
             source,
             retained: Some(NativePrivateEntry {
-                parent: retained_parent,
+                parent: std::sync::Arc::new(retained_parent),
                 name: retained_name,
-                file: Some(file),
+                file: Some(std::sync::Arc::new(file)),
                 identity,
                 directory,
             }),

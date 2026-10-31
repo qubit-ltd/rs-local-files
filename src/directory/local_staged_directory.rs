@@ -358,9 +358,9 @@ fn create_private_directory(
             .try_clone()
             .ok()
             .map(|parent| crate::temp::types::NativePrivateEntry {
-                parent,
+                parent: std::sync::Arc::new(parent),
                 name: name.to_os_string(),
-                file: Some(result),
+                file: Some(std::sync::Arc::new(result)),
                 identity,
                 directory: true,
             });
@@ -462,9 +462,9 @@ fn cleanup_partial_private_file(
         return cause;
     };
     let entry = crate::temp::types::NativePrivateEntry {
-        parent,
+        parent: std::sync::Arc::new(parent),
         name: name.to_os_string(),
-        file: Some(file),
+        file: Some(std::sync::Arc::new(file)),
         identity,
         directory: false,
     };

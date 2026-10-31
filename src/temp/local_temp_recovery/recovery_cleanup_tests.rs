@@ -17,9 +17,9 @@ use crate::observation::LocalFileIdentity;
 
 fn entry(parent: &File, name: &str, file: Option<File>, identity: Option<LocalFileIdentity>) -> NativePrivateEntry {
     NativePrivateEntry {
-        parent: parent.try_clone().expect("clone parent directory"),
+        parent: std::sync::Arc::new(parent.try_clone().expect("clone parent directory")),
         name: name.into(),
-        file,
+        file: file.map(std::sync::Arc::new),
         identity,
         directory: false,
     }
@@ -83,6 +83,32 @@ fn test_review_recovery_releases_only_successful_prefix() {
         !fixture.path().join("first").exists(),
         "successfully removed prefix is not retried"
     );
+}
+
+#[test]
+fn test_review_recovery_reports_path_of_failing_entry_after_partial_cleanup() {
+    let fixture = tempfile::tempdir().expect("temporary directory");
+    let parent = File::open(fixture.path()).expect("open parent directory");
+    let first = crate::temp::internal::privacy_unix::create_private_file_at(&parent, std::ffi::OsStr::new("first"))
+        .expect("create first file");
+    let first_identity = identity(&first);
+    let first_path = fixture.path().join("first");
+    let failing_path = fixture.path().join("failing");
+    let mut recovery = LocalTempRecovery::from_native_entries_with_paths(
+        first_path.clone(),
+        vec![
+            (
+                first_path.clone(),
+                entry(&parent, "first", Some(first), Some(first_identity)),
+            ),
+            (failing_path.clone(), entry(&parent, "failing", None, None)),
+        ],
+    );
+
+    let error = recovery.cleanup().expect_err("second entry has no identity");
+
+    assert!(!first_path.exists(), "the first entry was already cleaned");
+    assert_eq!(error.path(), Some(failing_path.as_path()));
 }
 
 #[test]

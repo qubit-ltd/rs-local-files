@@ -16,5 +16,5 @@ use super::native_private_entry::NativePrivateEntry;
 #[derive(Debug)]
 pub(crate) enum RecoveryResource {
     LiveFile(Box<crate::temp::LocalTempFile>),
-    Native(Vec<NativePrivateEntry>),
+    Native(Vec<(std::path::PathBuf, NativePrivateEntry)>),
 }

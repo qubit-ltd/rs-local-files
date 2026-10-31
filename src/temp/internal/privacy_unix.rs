@@ -625,9 +625,9 @@ fn create_error(
     NativePrivateCreateError {
         source,
         retained: Some(NativePrivateEntry {
-            parent,
+            parent: std::sync::Arc::new(parent),
             name: name.to_os_string(),
-            file,
+            file: file.map(std::sync::Arc::new),
             identity,
             directory,
         }),

@@ -729,9 +729,9 @@ fn lf3_temp_recovery_unknown_or_replaced_entries_are_not_removed() {
     let mut recovery = crate::temp::LocalTempRecovery::from_native(
         path.clone(),
         NativePrivateEntry {
-            parent: parent.try_clone().expect("clone parent"),
+            parent: parent.try_clone().expect("clone parent").into(),
             name: OsString::from("entry"),
-            file: Some(original),
+            file: Some(original.into()),
             identity,
             directory: false,
         },
@@ -750,9 +750,9 @@ fn lf3_temp_recovery_unknown_or_replaced_entries_are_not_removed() {
     let mut unknown = crate::temp::LocalTempRecovery::from_native(
         unknown_path.clone(),
         NativePrivateEntry {
-            parent,
+            parent: parent.into(),
             name: OsString::from("unknown"),
-            file: Some(unknown_file),
+            file: Some(unknown_file.into()),
             identity: None,
             directory: false,
         },
@@ -770,9 +770,9 @@ fn lf3_temp_recovery_unknown_or_replaced_entries_are_not_removed() {
     let mut directory_recovery = crate::temp::LocalTempRecovery::from_native(
         directory_path.clone(),
         NativePrivateEntry {
-            parent: File::open(fixture.path()).expect("parent handle"),
+            parent: File::open(fixture.path()).expect("parent handle").into(),
             name: OsString::from("native-directory"),
-            file: Some(directory_handle),
+            file: Some(directory_handle.into()),
             identity: directory_identity,
             directory: true,
         },
@@ -806,9 +806,9 @@ fn lf_revision_recovery_fifo_original_cleanup_and_symlink_are_safe() {
     let mut recovery = crate::LocalTempRecovery::from_native(
         original_path.clone(),
         crate::temp::types::NativePrivateEntry {
-            parent: parent.try_clone().expect("clone parent"),
+            parent: parent.try_clone().expect("clone parent").into(),
             name: OsString::from("original"),
-            file: Some(original),
+            file: Some(original.into()),
             identity,
             directory: false,
         },
@@ -833,9 +833,9 @@ fn lf_revision_recovery_fifo_original_cleanup_and_symlink_are_safe() {
     let mut recovery = crate::LocalTempRecovery::from_native(
         link.clone(),
         crate::temp::types::NativePrivateEntry {
-            parent,
+            parent: parent.into(),
             name: OsString::from("link"),
-            file: Some(original_link_entry),
+            file: Some(original_link_entry.into()),
             identity,
             directory: false,
         },
@@ -999,9 +999,9 @@ fn recovery_fifo_child(child_env: &str, mode_env: &str, sentinel_env: &str, expe
     let mut recovery = crate::LocalTempRecovery::from_native(
         path.clone(),
         crate::temp::types::NativePrivateEntry {
-            parent,
+            parent: parent.into(),
             name: OsString::from("entry"),
-            file: Some(original),
+            file: Some(original.into()),
             identity,
             directory: false,
         },

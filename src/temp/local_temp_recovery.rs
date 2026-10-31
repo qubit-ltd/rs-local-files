@@ -86,20 +86,46 @@ impl LocalTempRecovery {
     }
 
     pub(crate) fn from_native(path: PathBuf, entry: NativePrivateEntry) -> Self {
+        let entry_path = path.clone();
         Self {
             path,
             identity: entry.identity.clone(),
-            resource: Some(RecoveryResource::Native(vec![entry])),
+            resource: Some(RecoveryResource::Native(vec![(entry_path, entry)])),
         }
     }
 
     pub(crate) fn from_native_entries(path: PathBuf, entries: Vec<NativePrivateEntry>) -> Self {
         let identity = entries.first().and_then(|entry| entry.identity.clone());
+        let entries = entries.into_iter().map(|entry| (path.clone(), entry)).collect();
         Self {
             path,
             identity,
             resource: Some(RecoveryResource::Native(entries)),
         }
+    }
+
+    pub(crate) fn from_native_entries_with_paths(
+        path: PathBuf,
+        entries: Vec<(PathBuf, NativePrivateEntry)>,
+    ) -> Self {
+        let identity = entries.first().and_then(|(_, entry)| entry.identity.clone());
+        Self {
+            path,
+            identity,
+            resource: Some(RecoveryResource::Native(entries)),
+        }
+    }
+
+    pub(crate) fn append_native_owner(mut self, mut other: Self) -> Result<Self, (Self, Self)> {
+        let Some(RecoveryResource::Native(mut other_entries)) = other.resource.take() else {
+            return Err((self, other));
+        };
+        let Some(RecoveryResource::Native(entries)) = self.resource.as_mut() else {
+            other.resource = Some(RecoveryResource::Native(other_entries));
+            return Err((self, other));
+        };
+        entries.append(&mut other_entries);
+        Ok(self)
     }
 
     pub(crate) fn into_file(mut self) -> Option<super::LocalTempFile> {
@@ -144,8 +170,8 @@ impl LocalTempRecovery {
             RecoveryResource::Native(entries) => {
                 let mut completed = 0;
                 let mut failure = None;
-                for entry in entries.iter_mut() {
-                    match cleanup_native_entry(entry, &self.path) {
+                for (path, entry) in entries.iter_mut() {
+                    match cleanup_native_entry(entry, path) {
                         Ok(()) => completed += 1,
                         Err(error) => {
                             failure = Some(error);

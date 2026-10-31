@@ -7,6 +7,7 @@
 // =============================================================================
 use std::ffi::OsString;
 use std::fs::File;
+use std::sync::Arc;
 
 use crate::observation::LocalFileIdentity;
 
@@ -21,10 +22,10 @@ use crate::observation::LocalFileIdentity;
 #[derive(Debug)]
 pub(crate) struct NativePrivateEntry {
     #[cfg_attr(windows, allow(dead_code))]
-    pub(crate) parent: File,
+    pub(crate) parent: Arc<File>,
     #[cfg_attr(windows, allow(dead_code))]
     pub(crate) name: OsString,
-    pub(crate) file: Option<File>,
+    pub(crate) file: Option<Arc<File>>,
     pub(crate) identity: Option<LocalFileIdentity>,
     pub(crate) directory: bool,
 }

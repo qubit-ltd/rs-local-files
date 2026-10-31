@@ -726,12 +726,17 @@ fn private_rooted_error(
     extra: Option<NativePrivateEntry>,
 ) -> crate::LocalFileError {
     let mut result = rooted_io_error(operation, path, error.source);
-    let mut entries = error.retained.into_iter().collect::<Vec<_>>();
+    let sandbox_path = path.parent().unwrap_or_else(|| std::path::Path::new(""));
+    let mut entries = error
+        .retained
+        .into_iter()
+        .map(|entry| (path.to_path_buf(), entry))
+        .collect::<Vec<_>>();
     if let Some(extra) = extra {
-        entries.push(extra);
+        entries.push((sandbox_path.to_path_buf(), extra));
     }
     if !entries.is_empty() {
-        result = result.with_temp_recovery(crate::LocalTempRecovery::from_native_entries(
+        result = result.with_temp_recovery(crate::LocalTempRecovery::from_native_entries_with_paths(
             path.to_path_buf(),
             entries,
         ));
@@ -773,17 +778,18 @@ fn rooted_temp_recovery(
             .ok()
             .and_then(|observation| observation.identity().cloned());
     let primary = NativePrivateEntry {
-        parent,
+        parent: std::sync::Arc::new(parent),
         name: name.into(),
-        file: Some(file),
+        file: Some(std::sync::Arc::new(file)),
         identity,
         directory,
     };
-    let mut entries = vec![primary];
+    let sandbox_path = path.parent().unwrap_or_else(|| std::path::Path::new("")).to_path_buf();
+    let mut entries = vec![(path.clone(), primary)];
     if let Some(sandbox) = sandbox {
-        entries.push(sandbox);
+        entries.push((sandbox_path, sandbox));
     }
-    crate::LocalTempRecovery::from_native_entries(path, entries)
+    crate::LocalTempRecovery::from_native_entries_with_paths(path, entries)
 }
 
 fn reserve_rooted_private_parent(parent: &File) -> io::Result<File> {
@@ -820,9 +826,9 @@ fn reserve_rooted_directory_guard(
     .ok()
     .and_then(|observation| observation.identity().cloned());
     Ok(NativePrivateEntry {
-        parent,
+        parent: std::sync::Arc::new(parent),
         name: name.into(),
-        file: Some(directory_handle),
+        file: Some(std::sync::Arc::new(directory_handle)),
         identity,
         directory: true,
     })
