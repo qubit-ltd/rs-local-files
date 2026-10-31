@@ -165,8 +165,15 @@ impl HostLocalFileSystem {
         }
         let (sandbox, sandbox_entry) =
             create_host_temp_sandbox(&parent, LocalFileOperation::CreateTempDirectory, options.max_attempts())?;
+        let sandbox_handle = Arc::clone(
+            sandbox_entry
+                .file
+                .as_ref()
+                .expect("created sandbox retains its open directory handle"),
+        );
         let created = create_host_temp_directory_entry(
             &sandbox,
+            sandbox_handle,
             options.prefix(),
             options.suffix(),
             options.max_attempts(),
@@ -201,10 +208,22 @@ fn create_host_temp_sandbox(
     operation: LocalFileOperation,
     max_attempts: Option<usize>,
 ) -> LocalResult<(PathBuf, crate::temp::internal::NativePrivateEntry)> {
-    let parent_handle = File::open(parent)
-        .map_err(|error| LocalFileError::from_io(operation, Some(parent.to_path_buf()), None, error))?;
-    let (sandbox, sandbox_handle) =
-        create_host_temp_directory_entry(parent, Some("sandbox-"), None, max_attempts, operation)?;
+    let parent_handle = Arc::new(
+        File::open(parent)
+            .map_err(|error| LocalFileError::from_io(operation, Some(parent.to_path_buf()), None, error))?,
+    );
+    let (sandbox, sandbox_handle) = match create_host_temp_directory_entry(
+        parent,
+        Arc::clone(&parent_handle),
+        Some("sandbox-"),
+        None,
+        max_attempts,
+        operation,
+    )
+    {
+        Ok(created) => created,
+        Err(error) => return Err(cleanup_failed_temp_creation_owner(error)),
+    };
     let identity = crate::observation::query::query_observation(
         &sandbox_handle,
         crate::observation::LocalObservationRequirement::Optional,
@@ -215,7 +234,7 @@ fn create_host_temp_sandbox(
         .file_name()
         .ok_or_else(|| LocalFileError::new(LocalFileErrorKind::InvalidPath, operation).with_path(sandbox.clone()))?;
     let entry = crate::temp::internal::NativePrivateEntry {
-        parent: Arc::new(parent_handle),
+        parent: parent_handle,
         name: name.to_os_string(),
         file: Some(Arc::new(sandbox_handle)),
         identity,
@@ -226,24 +245,32 @@ fn create_host_temp_sandbox(
 
 fn create_host_temp_directory_entry(
     parent: &Path,
+    parent_handle: Arc<File>,
     prefix: Option<&str>,
     suffix: Option<&str>,
     max_attempts: Option<usize>,
     operation: LocalFileOperation,
 ) -> LocalResult<(PathBuf, File)> {
-    create_host_temp_directory_entry_with_opener(parent, prefix, suffix, max_attempts, operation, open_temp_directory)
+    create_host_temp_directory_entry_with_opener(
+        parent,
+        parent_handle,
+        prefix,
+        suffix,
+        max_attempts,
+        operation,
+        open_temp_directory,
+    )
 }
 
 fn create_host_temp_directory_entry_with_opener(
     parent: &Path,
+    parent_handle: Arc<File>,
     prefix: Option<&str>,
     suffix: Option<&str>,
     max_attempts: Option<usize>,
     operation: LocalFileOperation,
     open_directory: impl FnOnce(&Path) -> io::Result<File>,
 ) -> LocalResult<(PathBuf, File)> {
-    let parent_handle = File::open(parent)
-        .map_err(|error| LocalFileError::from_io(operation, Some(parent.to_path_buf()), None, error))?;
     let path =
         crate::local::create_temp_dir_in_dir_with_affixes(parent, prefix, suffix, max_attempts).map_err(|error| {
             let invalid_options = error.kind() == io::ErrorKind::InvalidInput;
@@ -263,7 +290,7 @@ fn create_host_temp_directory_entry_with_opener(
             let owner = crate::LocalTempRecovery::from_native(
                 path.clone(),
                 crate::temp::internal::NativePrivateEntry {
-                    parent: Arc::new(parent_handle),
+                    parent: Arc::clone(&parent_handle),
                     name: name.to_os_string(),
                     file: None,
                     identity: None,
@@ -319,6 +346,10 @@ fn host_temp_recovery_entries(
 
 #[cfg(unix)]
 fn open_temp_directory(path: &Path) -> io::Result<File> {
+    #[cfg(feature = "test-support")]
+    if crate::local::test_support_enabled("host-temp-sandbox-open") {
+        return Err(io::Error::other("injected sandbox directory open failure"));
+    }
     File::open(path)
 }
 
@@ -380,6 +411,17 @@ fn cleanup_failed_temp_owner(
     match cleanup {
         Ok(()) => primary,
         Err(cleanup_error) => primary.with_cleanup_error(cleanup_error).with_temp_recovery(owner),
+    }
+}
+
+fn cleanup_failed_temp_creation_owner(primary: LocalFileError) -> LocalFileError {
+    let (primary, recovery) = primary.into_temp_recovery_parts();
+    let Some(mut recovery) = recovery else {
+        return primary;
+    };
+    match recovery.cleanup() {
+        Ok(()) => primary,
+        Err(cleanup_error) => primary.with_cleanup_error(cleanup_error).with_temp_recovery(recovery),
     }
 }
 
@@ -1100,10 +1142,98 @@ fn test_host_temp_file_clone_failure_transfers_owned_recovery_for_retry() {
 
 #[cfg(all(test, unix))]
 #[test]
+fn test_host_temp_creation_error_releases_known_identity_owner() {
+    let fixture = tempfile::tempdir().expect("fixture");
+    let path = fixture.path().join("sandbox");
+    fs::create_dir(&path).expect("create sandbox");
+    let parent = File::open(fixture.path()).expect("open parent");
+    let handle = File::open(&path).expect("open sandbox");
+    let identity = crate::observation::query::query_observation(
+        &handle,
+        crate::observation::LocalObservationRequirement::Required,
+    )
+    .expect("observe sandbox identity")
+    .identity()
+    .cloned();
+    let owner = crate::LocalTempRecovery::from_native(
+        path.clone(),
+        crate::temp::internal::NativePrivateEntry {
+            parent: Arc::new(parent),
+            name: OsStr::new("sandbox").to_os_string(),
+            file: Some(Arc::new(handle)),
+            identity,
+            directory: true,
+        },
+    );
+    let primary = LocalFileError::from_io(
+        LocalFileOperation::CreateTempFile,
+        Some(path.clone()),
+        None,
+        io::Error::other("injected creation failure"),
+    )
+    .with_temp_recovery(owner);
+
+    let error = cleanup_failed_temp_creation_owner(primary);
+
+    assert!(error.cleanup_error().is_none(), "successful cleanup adds no cleanup error");
+    assert!(error.temp_recovery().is_none(), "successful cleanup releases the owner");
+    assert!(!path.exists(), "identity-checked cleanup removes the sandbox");
+}
+
+#[cfg(all(test, unix))]
+#[test]
+#[cfg(feature = "test-support")]
+fn test_host_temp_sandbox_open_failure_reports_cleanup_error_and_retains_owner() {
+    let fixture = tempfile::tempdir().expect("fixture");
+    for (operation, error) in [
+        {
+            let guard = crate::local::install_test_fault("host-temp-sandbox-open").expect("install open failure");
+            let error = HostLocalFileSystem::create_temp_file_with_policy(
+                &LocalTempFileOptions::new().with_parent(fixture.path()),
+                LocalSymlinkPolicy::FollowWithinScope,
+            )
+            .expect_err("sandbox open should fail");
+            drop(guard);
+            (LocalFileOperation::CreateTempFile, error)
+        },
+        {
+            let guard = crate::local::install_test_fault("host-temp-sandbox-open").expect("install open failure");
+            let error = HostLocalFileSystem::create_temp_directory_with_policy(
+                &LocalTempDirectoryOptions::new().with_parent(fixture.path()),
+                LocalSymlinkPolicy::FollowWithinScope,
+            )
+            .expect_err("sandbox open should fail");
+            drop(guard);
+            (LocalFileOperation::CreateTempDirectory, error)
+        },
+    ] {
+        assert_eq!(error.operation(), operation);
+        assert_eq!(
+            error.cleanup_error().expect("cleanup failure is reported").kind(),
+            LocalFileErrorKind::RequirementNotMet
+        );
+        let recovery = error.temp_recovery().expect("sandbox recovery owner is retained");
+        let path = recovery.path().to_path_buf();
+        assert!(path.is_dir(), "unknown identity must preserve the residual sandbox");
+        assert!(recovery.identity().is_none(), "no path-derived identity is trusted");
+        let (_primary, mut recovery) = error.into_temp_recovery_parts();
+        let mut recovery = recovery.take().expect("owner transfers from public error");
+        assert_eq!(
+            recovery.cleanup().expect_err("unknown identity is not cleanup authority").kind(),
+            LocalFileErrorKind::RequirementNotMet
+        );
+        assert!(path.is_dir(), "cleanup must not remove by diagnostic path");
+    }
+}
+
+#[cfg(all(test, unix))]
+#[test]
 fn test_host_temp_directory_open_failure_retains_unauthoritative_entry() {
     let fixture = tempfile::tempdir().expect("fixture");
+    let parent_handle = Arc::new(File::open(fixture.path()).expect("open parent"));
     let error = create_host_temp_directory_entry_with_opener(
         fixture.path(),
+        parent_handle,
         Some("child-"),
         None,
         Some(1),
@@ -1155,8 +1285,10 @@ fn test_host_temp_recovery_does_not_claim_replaced_child_directory() {
     let (sandbox, sandbox_entry) =
         create_host_temp_sandbox(fixture.path(), LocalFileOperation::CreateTempDirectory, Some(1))
             .expect("create sandbox and retain its native owner");
+    let sandbox_handle = Arc::clone(sandbox_entry.file.as_ref().expect("retain sandbox directory handle"));
     let (child, child_handle) = create_host_temp_directory_entry(
         &sandbox,
+        sandbox_handle,
         Some("child-"),
         None,
         Some(1),
@@ -1173,4 +1305,35 @@ fn test_host_temp_recovery_does_not_claim_replaced_child_directory() {
     let _cleanup = recovery.cleanup();
 
     assert!(child.is_dir(), "replacement child directory must not be deleted");
+}
+
+#[cfg(all(test, unix))]
+#[test]
+fn test_host_temp_recovery_keeps_original_parent_handle_after_sandbox_replacement() {
+    let fixture = tempfile::tempdir().expect("fixture");
+    let (sandbox, sandbox_entry) =
+        create_host_temp_sandbox(fixture.path(), LocalFileOperation::CreateTempDirectory, Some(1))
+            .expect("create sandbox and retain its native owner");
+    let original = sandbox.with_extension("original");
+    fs::rename(&sandbox, &original).expect("move original sandbox");
+    fs::create_dir(&sandbox).expect("create replacement sandbox");
+
+    let sandbox_handle = Arc::clone(sandbox_entry.file.as_ref().expect("retain original sandbox handle"));
+    let (child, child_handle) = create_host_temp_directory_entry(
+        &sandbox,
+        sandbox_handle,
+        Some("child-"),
+        None,
+        Some(1),
+        LocalFileOperation::CreateTempDirectory,
+    )
+    .expect("create child in replacement namespace");
+    let (path, entries) = host_temp_recovery_entries(&sandbox, sandbox_entry, Some((&child, child_handle)), true)
+        .expect("construct recovery using the retained sandbox handle");
+    let mut recovery = crate::LocalTempRecovery::from_native_entries_with_paths(path, entries);
+
+    let error = recovery.cleanup().expect_err("the retained parent handle cannot see the replacement child");
+
+    assert_eq!(error.path(), Some(child.as_path()));
+    assert!(child.is_dir(), "cleanup must not re-open the replacement parent by path");
 }
