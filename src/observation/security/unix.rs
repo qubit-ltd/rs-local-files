@@ -86,6 +86,7 @@ fn stat(file: &File) -> LocalResult<libc::stat> {
     Ok(stat)
 }
 
+#[cfg(any(target_os = "linux", target_os = "macos", test))]
 fn requested_value<T>(
     requirement: LocalObservationRequirement,
     query: impl FnOnce() -> io::Result<T>,
@@ -106,11 +107,27 @@ fn requested_value<T>(
     }
 }
 
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 fn query_filesystem(
     file: &File,
     requirement: LocalObservationRequirement,
 ) -> LocalResult<Option<LocalFileSystemObservation>> {
     requested_value(requirement, || filesystem_facts(file))
+}
+
+#[cfg(all(unix, not(any(target_os = "linux", target_os = "macos"))))]
+fn query_filesystem(
+    _file: &File,
+    requirement: LocalObservationRequirement,
+) -> LocalResult<Option<LocalFileSystemObservation>> {
+    match requirement {
+        LocalObservationRequirement::Optional => Ok(None),
+        LocalObservationRequirement::Required => Err(LocalFileError::new(
+            LocalFileErrorKind::RequirementNotMet,
+            LocalFileOperation::Metadata,
+        )
+        .with_reason("filesystem facts are not implemented on this Unix target")),
+    }
 }
 
 #[cfg(target_os = "linux")]
@@ -170,14 +187,6 @@ fn filesystem_facts(file: &File) -> io::Result<LocalFileSystemObservation> {
             Some(type_name),
         )),
         None,
-    ))
-}
-
-#[cfg(all(unix, not(any(target_os = "linux", target_os = "macos"))))]
-fn filesystem_facts(_file: &File) -> io::Result<LocalFileSystemObservation> {
-    Err(io::Error::new(
-        io::ErrorKind::Unsupported,
-        "filesystem facts unavailable",
     ))
 }
 
@@ -374,6 +383,7 @@ fn invalid_native_metadata() -> LocalFileError {
     LocalFileError::new(LocalFileErrorKind::DataCorruption, LocalFileOperation::Metadata)
 }
 
+#[cfg(any(target_os = "linux", target_os = "macos", test))]
 fn explicitly_unsupported(error: &io::Error) -> bool {
     error
         .raw_os_error()

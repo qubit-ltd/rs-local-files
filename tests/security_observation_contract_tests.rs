@@ -7,7 +7,7 @@
 // =============================================================================
 
 use qubit_local_files::LocalFileSystem;
-#[cfg(target_os = "linux")]
+#[cfg(all(unix, not(target_os = "macos")))]
 use qubit_local_files::observation::LocalObservationRequirement;
 use qubit_local_files::observation::LocalSecurityObservationOptions;
 use qubit_local_files::options::LocalDirectoryOpenOptions;
@@ -115,4 +115,53 @@ fn required_fields_and_each_individual_requirement_are_reported() {
             .security_observation(&options)
             .expect("each individually required Unix fact is available");
     }
+}
+
+#[cfg(all(unix, not(any(target_os = "linux", target_os = "macos"))))]
+#[test]
+fn unimplemented_unix_filesystem_observation_obeys_optional_and_required_requests() {
+    use qubit_local_files::error::{LocalFileErrorKind, LocalFileOperation};
+
+    let directory = tempfile::tempdir().expect("temporary directory");
+    let path = directory.path().join("file");
+    std::fs::write(&path, b"data").expect("create source");
+    let filesystem = LocalFileSystem::host().expect("host filesystem");
+    let reader = filesystem
+        .open_observed_reader(&path, &LocalObservedReadOptions::new())
+        .expect("open reader");
+
+    let optional = reader
+        .security_observation(&LocalSecurityObservationOptions::new())
+        .expect("optional facts should succeed");
+    assert!(optional.identity().is_some());
+    assert!(optional.link_count().is_some());
+    assert!(optional.filesystem().is_none());
+
+    let error = reader
+        .security_observation(
+            &LocalSecurityObservationOptions::new()
+                .with_filesystem(LocalObservationRequirement::Required),
+        )
+        .expect_err("required filesystem facts are unimplemented on this Unix target");
+    assert_eq!(error.kind(), LocalFileErrorKind::RequirementNotMet);
+    assert_eq!(error.operation(), LocalFileOperation::Metadata);
+
+    let directory_handle = filesystem
+        .open_directory_with_options(directory.path(), &LocalDirectoryOpenOptions::new())
+        .expect("open directory handle");
+    let optional = directory_handle
+        .security_observation(&LocalSecurityObservationOptions::new())
+        .expect("optional directory facts should succeed");
+    assert!(optional.identity().is_some());
+    assert!(optional.link_count().is_some());
+    assert!(optional.filesystem().is_none());
+
+    let error = directory_handle
+        .security_observation(
+            &LocalSecurityObservationOptions::new()
+                .with_filesystem(LocalObservationRequirement::Required),
+        )
+        .expect_err("required directory filesystem facts are unimplemented");
+    assert_eq!(error.kind(), LocalFileErrorKind::RequirementNotMet);
+    assert_eq!(error.operation(), LocalFileOperation::Metadata);
 }
