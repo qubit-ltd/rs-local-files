@@ -17,6 +17,7 @@ use qubit_local_files::LocalFileSystem;
 use qubit_local_files::options::LocalCopyConflictPolicy;
 use qubit_local_files::options::LocalCopyOptions;
 use qubit_local_files::options::LocalMetadataPreservePolicy;
+use qubit_local_files::outcome::LocalCopyFailureState;
 use qubit_local_files::policy::LocalDurabilityRequirement;
 use qubit_local_files::test_support::install_test_fault;
 use tempfile::tempdir;
@@ -125,6 +126,61 @@ fn test_fully_skipped_copy_does_not_sync_parent() {
             }
         }
     }
+
+    test_published_copy_retains_failure_state_after_sync_error();
+    test_replaced_symlink_destination_failure_is_not_unchanged();
+}
+
+fn test_published_copy_retains_failure_state_after_sync_error() {
+    let fixture = tempdir().expect("fixture should exist");
+    let source = fixture.path().join("source");
+    let target = fixture.path().join("target");
+    fs::write(&source, b"published").expect("source should exist");
+    let _fault =
+        install_test_fault("copy-parent-sync").expect("copy parent-sync fault should install");
+
+    let failure = LocalFileSystem::host()
+        .expect("host filesystem should open")
+        .copy_with_options(
+            &source,
+            &target,
+            &LocalCopyOptions::new().with_durability(LocalDurabilityRequirement::Required),
+        )
+        .expect_err("required parent synchronization should fail after publication");
+
+    assert_eq!(LocalCopyFailureState::Published, failure.state());
+    assert_eq!(1, failure.partial_stats().files());
+    assert_eq!(
+        b"published",
+        fs::read(&target)
+            .expect("published target should remain")
+            .as_slice()
+    );
+}
+
+fn test_replaced_symlink_destination_failure_is_not_unchanged() {
+    let fixture = tempdir().expect("fixture should exist");
+    let source = fixture.path().join("source");
+    let target = fixture.path().join("target");
+    symlink("referent", &source).expect("source link should exist");
+    fs::write(&target, b"old destination").expect("old target should exist");
+    let _fault = install_test_fault("local-fs-copy-symlink-create")
+        .expect("symlink-create fault should install");
+
+    let failure = LocalFileSystem::host()
+        .expect("host filesystem should open")
+        .copy_with_options(
+            &source,
+            &target,
+            &LocalCopyOptions::new().with_conflict(LocalCopyConflictPolicy::Overwrite),
+        )
+        .expect_err("injected link creation failure should follow destination removal");
+
+    assert_eq!(LocalCopyFailureState::Indeterminate, failure.state());
+    assert!(
+        !target.exists(),
+        "the old destination should have been removed"
+    );
 }
 
 #[test]
