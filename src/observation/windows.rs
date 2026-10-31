@@ -28,6 +28,10 @@ use crate::observation::LocalNativeFileDetails;
 use crate::observation::LocalObservationRequirement;
 use crate::observation::LocalWindowsFileDetails;
 
+/// Native handle query function used to retrieve Windows file information.
+///
+/// The caller must provide a valid live handle and a writable buffer with the
+/// size required by the selected information class.
 pub(crate) type NativeQuery = unsafe extern "system" fn(
     windows_sys::Win32::Foundation::HANDLE,
     windows_sys::Win32::Storage::FileSystem::FILE_INFO_BY_HANDLE_CLASS,
@@ -35,10 +39,20 @@ pub(crate) type NativeQuery = unsafe extern "system" fn(
     u32,
 ) -> i32;
 
+/// Queries identity and timestamps through the operating system API.
+///
+/// The handle remains borrowed from `file`. When optional facts cannot be
+/// queried, the result retains normalized metadata with absent native details;
+/// required facts turn that condition into `RequirementNotMet`.
 pub(crate) fn query_native(file: &File, requirement: LocalObservationRequirement) -> LocalResult<LocalFileObservation> {
     query_native_with(file, requirement, GetFileInformationByHandleEx)
 }
 
+/// Runs a supplied native query function, primarily to exercise failure paths.
+///
+/// Metadata failure is returned as an I/O error regardless of requirement. A
+/// failed native facts query is omitted for `Optional` and returned as
+/// `RequirementNotMet` for `Required`.
 pub(crate) fn query_native_with(
     file: &File,
     requirement: LocalObservationRequirement,
@@ -78,6 +92,7 @@ pub(crate) fn query_native_with(
     }
 }
 
+/// Calls one information class with a correctly sized output value.
 fn query_info<T: Default>(
     query: NativeQuery,
     handle: windows_sys::Win32::Foundation::HANDLE,

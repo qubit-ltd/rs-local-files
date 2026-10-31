@@ -11,24 +11,9 @@ use std::path::Path;
 
 use crate::LocalResult;
 
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-#[non_exhaustive]
-/// Identifies whether resolution is opening the authority root or a descendant.
-pub enum LocalResolutionScope {
-    /// The native path is being resolved to establish the root authority.
-    OpeningRoot,
-    /// The path is being resolved beneath an established authority.
-    Descendant,
-}
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-#[non_exhaustive]
-/// Identifies whether a path component came from caller input or a link target.
-pub enum LocalResolutionOrigin {
-    /// The component came from the operation's input path.
-    Input,
-    /// The component came from the native target of a followed symlink.
-    SymlinkTarget,
-}
+use super::LocalResolutionOrigin;
+use super::LocalResolutionScope;
+
 /// Pure validation hooks applied before the resolver accesses a component or
 /// target.
 ///

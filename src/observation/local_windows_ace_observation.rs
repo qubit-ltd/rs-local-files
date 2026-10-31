@@ -6,19 +6,36 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 
-#[derive(Clone, Debug, Eq, PartialEq)]
 /// One Windows access-control entry, retaining undecoded native facts.
 ///
 /// The type and flag bytes are the native ACE values. Consumers needing an
 /// access decision must interpret them together with the descriptor and the
 /// operating system's access-check rules.
+///
+/// # Examples
+///
+/// ```
+/// use qubit_local_files::observation::LocalWindowsAceObservation;
+///
+/// fn inspect(entry: &LocalWindowsAceObservation) -> (u8, Option<u32>) {
+///     (entry.ace_type(), entry.access_mask())
+/// }
+/// ```
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LocalWindowsAceObservation {
+    /// Native ACE type byte; its interpretation depends on the descriptor.
     ace_type: u8,
+    /// Native ACE inheritance and audit flags.
     flags: u8,
+    /// Native size of this ACE in bytes.
     native_size: u16,
+    /// Decoded access mask, absent for ACE forms without a mask.
     access_mask: Option<u32>,
+    /// Decoded trustee SID, absent when no trustee is exposed or decoding failed.
     trustee_sid: Option<String>,
+    /// Whether the decoded trustee matches the current principal, if knowable.
     trustee_is_current_user: Option<bool>,
+    /// Whether the supported ACE type and trustee facts were fully decoded.
     is_decoded: bool,
 }
 impl LocalWindowsAceObservation {

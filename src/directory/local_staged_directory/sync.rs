@@ -271,6 +271,7 @@ mod owner_policy_sync_order_tests {
 }
 
 impl LocalStagedDirectory {
+    /// Synchronizes stage files under the caller's requirement and traversal limits.
     pub(in crate::directory) fn sync_tree_files(
         &self,
         limits: &LocalListOptions,
@@ -279,6 +280,7 @@ impl LocalStagedDirectory {
         self.sync_tree_files_started_at(limits, requirement, Instant::now())
     }
 
+    /// Synchronizes regular files using a deadline shared with a later tree pass.
     fn sync_tree_files_started_at(
         &self,
         limits: &LocalListOptions,
@@ -444,6 +446,9 @@ impl LocalStagedDirectory {
     /// remains unpublished. `limits` bounds every tree traversal; a depth
     /// limit that would truncate the tree is an error. This operation requires
     /// all requested handle synchronizations to succeed.
+    /// Synchronization is a durability operation only; publication remains a
+    /// separate explicit step, so a successfully synchronized stage is still
+    /// cleanup-owned and unpublished.
     /// One cooperative deadline, when configured, starts at this call's entry
     /// and covers both tree traversals and every file, directory, root, and
     /// parent synchronization. It cannot cancel an operating-system call

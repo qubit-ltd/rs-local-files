@@ -75,11 +75,17 @@ const MAX_OWNER_POLICY_ENTRY_HANDLES: usize = 256;
 /// ```
 #[derive(Debug)]
 pub struct LocalStagedDirectory {
+    /// Retained cleanup owner; `None` after successful publication or cleanup.
     pub(super) owner: Option<LocalTreeRetainedResource>,
+    /// Open handle for operations beneath the stage root, when still available.
     directory: Option<LocalDirectoryHandle>,
+    /// Name of this stage relative to its creating parent authority.
     relative_name: PathBuf,
+    /// Captured root identity; `None` means identity was unavailable.
     identity: Option<LocalFileIdentity>,
+    /// Whether the stage was created with private access settings.
     private: bool,
+    /// Owner policy retained for validation and publication, if configured.
     owner_access_policy: Option<crate::policy::LocalOwnerAccessPolicy>,
 }
 
@@ -163,6 +169,7 @@ impl LocalStagedDirectory {
 
 impl Drop for LocalStagedDirectory {
     fn drop(&mut self) {
+        // Close the child authority before the owner attempts namespace cleanup.
         drop(self.directory.take());
         if let Some(owner) = self.owner.take() {
             let _ = owner.cleanup();

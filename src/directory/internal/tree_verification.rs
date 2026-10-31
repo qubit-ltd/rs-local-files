@@ -34,6 +34,12 @@ type LinkCounts = HashMap<LocalFileIdentity, (u64, usize)>;
 /// observation ceiling: actual entries beyond it fail rather than being
 /// silently omitted. This checks a sequence of observations and does not
 /// provide an atomic filesystem snapshot.
+///
+/// # Errors
+///
+/// Returns `ChangedDuringRead` if the retained root or an entry changes,
+/// `RequirementNotMet` when the tree violates a requested constraint, and
+/// `ResourceLimit` when traversal exceeds a configured budget or deadline.
 pub(in crate::directory) fn verify_tree(
     stage: &LocalStagedDirectory,
     expected: Option<&[LocalTreeEntry]>,
@@ -186,6 +192,7 @@ pub(in crate::directory) fn verify_tree(
     Ok(())
 }
 
+/// Determines whether any configured constraint requires enumerating entries.
 fn requires_tree_walk(options: &LocalTreeValidationOptions) -> bool {
     let limits = options.limits();
     options.exact_entries().is_some()
@@ -201,6 +208,7 @@ fn requires_tree_walk(options: &LocalTreeValidationOptions) -> bool {
         || limits.deadline().is_some()
 }
 
+/// Checks privacy of the retained stage root when privacy is required.
 fn verify_root_privacy(stage: &LocalStagedDirectory, options: &LocalTreeValidationOptions) -> LocalResult<()> {
     if options.privacy() != LocalPrivacyRequirement::Required && options.owner_access_policy().is_none() {
         return Ok(());
@@ -261,6 +269,7 @@ fn verify_root_privacy(stage: &LocalStagedDirectory, options: &LocalTreeValidati
     Ok(())
 }
 
+/// Checks privacy for an observed ordinary file or directory entry.
 fn verify_entry_privacy(
     stage: &LocalStagedDirectory,
     path: &Path,
@@ -319,10 +328,12 @@ fn verify_entry_privacy(
     Ok(())
 }
 
+/// Associates a native access error with the operation and diagnostic path.
 fn file_error(operation: LocalFileOperation, path: &Path, source: std::io::Error) -> LocalFileError {
     LocalFileError::from_io(operation, Some(path.to_path_buf()), None, source)
 }
 
+/// Returns a resource-limit error when a cooperative deadline has elapsed.
 fn check_deadline(deadline: Option<Instant>) -> LocalResult<()> {
     if deadline.is_some_and(|deadline| Instant::now() >= deadline) {
         Err(resource_limit())
@@ -331,6 +342,7 @@ fn check_deadline(deadline: Option<Instant>) -> LocalResult<()> {
     }
 }
 
+/// Enforces the logical encoded-name byte budget, excluding allocator overhead.
 fn check_name_budget(options: &LocalListOptions, bytes: usize) -> LocalResult<()> {
     if options.max_seen_name_bytes().is_some_and(|maximum| bytes > maximum) {
         Err(resource_limit())
@@ -339,14 +351,17 @@ fn check_name_budget(options: &LocalListOptions, bytes: usize) -> LocalResult<()
     }
 }
 
+/// Creates the common error used when complete traversal exceeds a budget.
 fn resource_limit() -> LocalFileError {
     LocalFileError::new(LocalFileErrorKind::ResourceLimit, LocalFileOperation::Read)
 }
 
+/// Creates the error used when an observed tree violates a requested condition.
 fn requirement_not_met() -> LocalFileError {
     LocalFileError::new(LocalFileErrorKind::RequirementNotMet, LocalFileOperation::Metadata)
 }
 
+/// Creates the error used when required native identity or count data is absent.
 fn unsupported() -> LocalFileError {
     LocalFileError::new(LocalFileErrorKind::Unsupported, LocalFileOperation::Metadata)
 }

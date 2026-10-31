@@ -10,15 +10,45 @@ use crate::options::LocalListOptions;
 use crate::policy::LocalOwnerAccessPolicy;
 use crate::policy::LocalPrivacyRequirement;
 
-/// Optional constraints applied while validating a staged tree.
+/// Constraints applied while validating a staged tree.
+///
+/// An omitted exact-entry set does not request an exact-set check during
+/// publication. Passing an explicit expected slice to `verify_entries` still
+/// checks both missing and unexpected entries. Traversal limits bound observed
+/// paths and entries; they are not a total memory limit.
+///
+/// # Examples
+///
+/// ```
+/// use std::path::PathBuf;
+/// use qubit_local_files::LocalFileKind;
+/// use qubit_local_files::directory::{LocalTreeEntry, LocalTreeValidationOptions};
+/// use qubit_local_files::options::LocalListOptions;
+///
+/// # fn main() -> Result<(), qubit_local_files::LocalFileError> {
+/// let expected = LocalTreeEntry::new(PathBuf::from("payload"), LocalFileKind::File)?;
+/// let options = LocalTreeValidationOptions::new()
+///     .with_exact_entries(vec![expected])
+///     .with_limits(LocalListOptions::new().with_max_entries(16));
+/// let _ = options;
+/// # Ok(())
+/// # }
+/// ```
 #[derive(Clone, Debug)]
 pub struct LocalTreeValidationOptions {
+    /// Exact expected entries, when configured.
     exact_entries: Option<Vec<LocalTreeEntry>>,
+    /// Whether symbolic links invalidate validation.
     reject_symlinks: bool,
+    /// Whether FIFO, socket, device, and unknown kinds invalidate validation.
     reject_special_files: bool,
+    /// Whether files with hard links outside the checked tree invalidate validation.
     reject_external_hardlinks: bool,
+    /// Required privacy level for entries when supported.
     privacy: LocalPrivacyRequirement,
+    /// Exact owner access policy, if one is required.
     owner_access_policy: Option<LocalOwnerAccessPolicy>,
+    /// Traversal limits shared by complete-tree validation.
     limits: LocalListOptions,
 }
 
@@ -84,24 +114,32 @@ impl LocalTreeValidationOptions {
         self.limits = limits;
         self
     }
+    /// Returns the configured exact set; `None` means publication did not
+    /// receive a stored exact set through these options.
     pub(crate) fn exact_entries(&self) -> Option<&[LocalTreeEntry]> {
         self.exact_entries.as_deref()
     }
+    /// Reports whether symbolic links are excluded.
     pub(crate) const fn rejects_symlinks(&self) -> bool {
         self.reject_symlinks
     }
+    /// Reports whether special and unknown native kinds are excluded.
     pub(crate) const fn rejects_special_files(&self) -> bool {
         self.reject_special_files
     }
+    /// Reports whether external hard links are excluded.
     pub(crate) const fn rejects_external_hardlinks(&self) -> bool {
         self.reject_external_hardlinks
     }
+    /// Returns the requested privacy level.
     pub(crate) const fn privacy(&self) -> LocalPrivacyRequirement {
         self.privacy
     }
+    /// Returns the owner policy, or `None` when no exact policy was requested.
     pub(crate) const fn owner_access_policy(&self) -> Option<&LocalOwnerAccessPolicy> {
         self.owner_access_policy.as_ref()
     }
+    /// Returns the traversal budget applied to complete-tree validation.
     pub(crate) const fn limits(&self) -> &LocalListOptions {
         &self.limits
     }

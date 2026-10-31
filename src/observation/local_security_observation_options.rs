@@ -35,14 +35,23 @@ use crate::observation::LocalObservationRequirement;
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 #[must_use]
 pub struct LocalSecurityObservationOptions {
+    /// Requirement for native filesystem facts.
     filesystem: LocalObservationRequirement,
+    /// Requirement for native access-control facts.
     access: LocalObservationRequirement,
+    /// Requirement for native link-count facts.
     link_count: LocalObservationRequirement,
+    /// Maximum ACL entries decoded; `None` leaves the count unrestricted.
     max_acl_entries: Option<usize>,
+    /// Maximum ACL bytes read and retained; `None` leaves the byte budget unrestricted.
     max_acl_bytes: Option<usize>,
 }
 impl LocalSecurityObservationOptions {
     /// Creates options with all queries optional and no additional ACL limits.
+    ///
+    /// Optional means the query is still attempted. Explicitly unsupported
+    /// facts can be absent; permission, ordinary I/O, malformed-data, and
+    /// identity-change failures remain errors.
     pub const fn new() -> Self {
         Self {
             filesystem: LocalObservationRequirement::Optional,
@@ -53,16 +62,25 @@ impl LocalSecurityObservationOptions {
         }
     }
     /// Sets whether filesystem details are optional or required.
+    ///
+    /// `Optional` retains available facts and represents unavailable facts as
+    /// `None`; `Required` returns an error if the selected facts are missing.
     pub const fn with_filesystem(mut self, v: LocalObservationRequirement) -> Self {
         self.filesystem = v;
         self
     }
     /// Sets whether access-control details are optional or required.
+    ///
+    /// `Optional` still performs the native query. `Required` fails when the
+    /// requested ACL or access facts are unavailable.
     pub const fn with_access(mut self, v: LocalObservationRequirement) -> Self {
         self.access = v;
         self
     }
     /// Sets whether the native link count is optional or required.
+    ///
+    /// `Optional` permits an unavailable count; `Required` makes its absence
+    /// an unmet requirement.
     pub const fn with_link_count(mut self, v: LocalObservationRequirement) -> Self {
         self.link_count = v;
         self
@@ -77,21 +95,26 @@ impl LocalSecurityObservationOptions {
         self.max_acl_bytes = Some(v);
         self
     }
+    /// Returns the selected filesystem fact requirement for native backends.
     pub(crate) const fn filesystem(&self) -> LocalObservationRequirement {
         self.filesystem
     }
+    /// Returns the selected access fact requirement for native backends.
     pub(crate) const fn access(&self) -> LocalObservationRequirement {
         self.access
     }
     #[allow(dead_code)] // Read by target-gated Unix and Windows security backends.
+    /// Returns the selected link-count requirement for native backends.
     pub(crate) const fn link_count(&self) -> LocalObservationRequirement {
         self.link_count
     }
     #[cfg(any(target_os = "linux", windows))]
+    /// Returns the ACL entry ceiling; `None` means no caller-specified ceiling.
     pub(crate) const fn max_acl_entries(&self) -> Option<usize> {
         self.max_acl_entries
     }
     #[cfg(any(target_os = "linux", windows))]
+    /// Returns the ACL byte ceiling; `None` means no caller-specified ceiling.
     pub(crate) const fn max_acl_bytes(&self) -> Option<usize> {
         self.max_acl_bytes
     }

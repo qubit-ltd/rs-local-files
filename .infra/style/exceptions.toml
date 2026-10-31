@@ -37,23 +37,8 @@ reason = "The snapshot options builder is the dedicated construction API for Loc
 
 [[exceptions]]
 rule = "multiple-public-types"
-path = "src/observation/types.rs"
-reason = "Observation identity, metadata, platform details, and verification values form one cohesive observation model."
-
-[[exceptions]]
-rule = "multiple-public-types"
-path = "src/directory/local_resolution_policy.rs"
-reason = "Scope, origin, and policy define one cohesive public resolution validation contract."
-
-[[exceptions]]
-rule = "multiple-public-types"
 path = "src/observation/local_security_observation.rs"
 reason = "Filesystem, access, ACL, and platform observation values form one cohesive public observation model."
-
-[[exceptions]]
-rule = "aggregation-files"
-path = "src/resolution/mod.rs"
-reason = "The module root owns the shared resolution contract consumed by the tokenizer and rooted resolver."
 
 [[exceptions]]
 rule = "aggregation-files"

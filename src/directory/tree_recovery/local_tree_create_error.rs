@@ -37,9 +37,13 @@ use crate::outcome::LocalTreeMutationState;
 /// ```
 #[derive(Debug)]
 pub struct LocalTreeCreateError {
+    /// Primary cause describing why stage creation stopped.
     cause: LocalFileError,
+    /// Partially created stage owner, when the child authority was established.
     stage: Option<LocalStagedDirectory>,
+    /// Additional cleanup owners for native resources retained after failure.
     retained: Vec<LocalTreeRetainedResource>,
+    /// Whether creation had already mutated the namespace before failing.
     state: LocalTreeMutationState,
 }
 impl LocalTreeCreateError {
@@ -56,7 +60,8 @@ impl LocalTreeCreateError {
             state,
         }
     }
-    /// Returns the primary stage creation failure.
+    /// Returns the primary stage creation failure, preserving its operation and
+    /// any native error context.
     pub fn cause(&self) -> &LocalFileError {
         &self.cause
     }
@@ -99,6 +104,9 @@ impl LocalTreeCreateError {
         (self.cause, self.stage, self.retained)
     }
     /// Returns the name of a fully or partially created stage, when known.
+    ///
+    /// `None` means neither the stage owner, retained resources, nor primary
+    /// cause supplied a diagnostic basename.
     pub fn stage_name(&self) -> Option<&std::ffi::OsStr> {
         self.stage
             .as_ref()
@@ -111,6 +119,8 @@ impl LocalTreeCreateError {
             .or_else(|| self.cause.path().and_then(Path::file_name))
     }
     /// Returns the identity of a fully or partially created stage, when known.
+    ///
+    /// `None` means no retained stage or recovery owner had a native identity.
     pub fn stage_identity(&self) -> Option<&LocalFileIdentity> {
         self.stage
             .as_ref()
