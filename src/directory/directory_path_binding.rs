@@ -65,10 +65,11 @@ impl ReaderPathBinding for DirectoryPathBinding {
             if retained_observation.identity() != Some(&anchor.identity) {
                 return Ok(LocalSourceVerification::Changed);
             }
-            let root_result = crate::rooted_local_file_system::RootedLocalFileSystem::open_with_contract(
+            let root_result = crate::rooted_local_file_system::RootedLocalFileSystem::open_with_contract_and_deadline(
                 &anchor.opening_recipe,
                 anchor.contract.clone(),
                 anchor.symlink_policy,
+                deadline,
             );
             check_verification_deadline(deadline, &anchor.path)?;
             let root = match root_result {

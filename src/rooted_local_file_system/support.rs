@@ -150,26 +150,7 @@ pub(crate) fn resolve_rooted_path_allow_root_with_deadline(
     )
 }
 
-pub(crate) fn resolve_rooted_path_allow_root_with_scope(
-    root: &crate::rooted::Root,
-    path: &Path,
-    symlink_policy: LocalSymlinkPolicy,
-    follow_final: bool,
-    operation: LocalFileOperation,
-    scope: LocalResolutionScope,
-) -> LocalResult<PathBuf> {
-    resolve_rooted_path_allow_root_with_scope_and_deadline(
-        root,
-        path,
-        symlink_policy,
-        follow_final,
-        operation,
-        scope,
-        None,
-    )
-}
-
-fn resolve_rooted_path_allow_root_with_scope_and_deadline(
+pub(super) fn resolve_rooted_path_allow_root_with_scope_and_deadline(
     root: &crate::rooted::Root,
     path: &Path,
     symlink_policy: LocalSymlinkPolicy,
@@ -264,7 +245,7 @@ pub(crate) fn resolve_rooted_path_allow_root_with_component_policy_and_budget(
     )
 }
 
-fn check_resolution_deadline(
+pub(super) fn check_resolution_deadline(
     deadline: Option<Instant>,
     original: &Path,
     operation: LocalFileOperation,

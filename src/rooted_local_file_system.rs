@@ -145,6 +145,16 @@ impl RootedLocalFileSystem {
         contract: crate::resolution::ResolutionContract,
         policy: LocalSymlinkPolicy,
     ) -> LocalResult<Self> {
+        Self::open_with_contract_and_deadline(path, contract, policy, None)
+    }
+
+    pub(crate) fn open_with_contract_and_deadline(
+        path: &Path,
+        contract: crate::resolution::ResolutionContract,
+        policy: LocalSymlinkPolicy,
+        deadline: Option<std::time::Instant>,
+    ) -> LocalResult<Self> {
+        support::check_resolution_deadline(deadline, path, LocalFileOperation::OpenRoot)?;
         if policy == LocalSymlinkPolicy::FollowAcrossScope {
             return Err(
                 LocalFileError::new(LocalFileErrorKind::InvalidOptions, LocalFileOperation::OpenRoot)
@@ -156,27 +166,34 @@ impl RootedLocalFileSystem {
             let absolute = std::path::absolute(path).map_err(|source| {
                 LocalFileError::from_io(LocalFileOperation::OpenRoot, Some(path.to_path_buf()), None, source)
             })?;
+            support::check_resolution_deadline(deadline, path, LocalFileOperation::OpenRoot)?;
             let host = crate::rooted::Root::open(Path::new("/"))
                 .map_err(|source| {
                     LocalFileError::from_io(LocalFileOperation::OpenRoot, Some(path.to_path_buf()), None, source)
                 })?
                 .with_resolution_contract(contract.clone());
+            support::check_resolution_deadline(deadline, path, LocalFileOperation::OpenRoot)?;
             let relative = absolute.strip_prefix("/").unwrap_or(&absolute);
-            let resolved = support::resolve_rooted_path_allow_root_with_scope(
+            let resolved = support::resolve_rooted_path_allow_root_with_scope_and_deadline(
                 &host,
                 relative,
                 policy,
                 true,
                 LocalFileOperation::OpenRoot,
                 crate::directory::LocalResolutionScope::OpeningRoot,
+                deadline,
             )?;
+            support::check_resolution_deadline(deadline, path, LocalFileOperation::OpenRoot)?;
             let mut cursor = host.resolution_cursor().map_err(|source| {
                 LocalFileError::from_io(LocalFileOperation::OpenRoot, Some(path.to_path_buf()), None, source)
             })?;
+            support::check_resolution_deadline(deadline, path, LocalFileOperation::OpenRoot)?;
             for component in resolved.components() {
+                support::check_resolution_deadline(deadline, path, LocalFileOperation::OpenRoot)?;
                 cursor.descend(component.as_os_str()).map_err(|source| {
                     LocalFileError::from_io(LocalFileOperation::OpenRoot, Some(path.to_path_buf()), None, source)
                 })?;
+                support::check_resolution_deadline(deadline, path, LocalFileOperation::OpenRoot)?;
             }
             crate::rooted::Root::from_directory_authority_with_contract(cursor.into_file(), absolute, contract)
         };
@@ -186,6 +203,7 @@ impl RootedLocalFileSystem {
             let absolute = std::path::absolute(path).map_err(|source| {
                 LocalFileError::from_io(LocalFileOperation::OpenRoot, Some(path.to_path_buf()), None, source)
             })?;
+            support::check_resolution_deadline(deadline, path, LocalFileOperation::OpenRoot)?;
             let mut components = absolute.components();
             let prefix = match components.next() {
                 Some(Component::Prefix(prefix)) => prefix,
@@ -210,25 +228,31 @@ impl RootedLocalFileSystem {
                     LocalFileError::from_io(LocalFileOperation::OpenRoot, Some(path.to_path_buf()), None, source)
                 })?
                 .with_resolution_contract(contract.clone());
+            support::check_resolution_deadline(deadline, path, LocalFileOperation::OpenRoot)?;
             let relative = absolute.strip_prefix(&anchor).map_err(|_| {
                 LocalFileError::new(LocalFileErrorKind::InvalidPath, LocalFileOperation::OpenRoot)
                     .with_path(path.to_path_buf())
             })?;
-            let resolved = support::resolve_rooted_path_allow_root_with_scope(
+            let resolved = support::resolve_rooted_path_allow_root_with_scope_and_deadline(
                 &host,
                 relative,
                 policy,
                 true,
                 LocalFileOperation::OpenRoot,
                 crate::directory::LocalResolutionScope::OpeningRoot,
+                deadline,
             )?;
+            support::check_resolution_deadline(deadline, path, LocalFileOperation::OpenRoot)?;
             let mut cursor = host.resolution_cursor().map_err(|source| {
                 LocalFileError::from_io(LocalFileOperation::OpenRoot, Some(path.to_path_buf()), None, source)
             })?;
+            support::check_resolution_deadline(deadline, path, LocalFileOperation::OpenRoot)?;
             for component in resolved.components() {
+                support::check_resolution_deadline(deadline, path, LocalFileOperation::OpenRoot)?;
                 cursor.descend(component.as_os_str()).map_err(|source| {
                     LocalFileError::from_io(LocalFileOperation::OpenRoot, Some(path.to_path_buf()), None, source)
                 })?;
+                support::check_resolution_deadline(deadline, path, LocalFileOperation::OpenRoot)?;
             }
             crate::rooted::Root::from_directory_authority_with_contract(cursor.into_file(), absolute, contract)
         };
@@ -239,7 +263,9 @@ impl RootedLocalFileSystem {
             })?;
             root.with_resolution_contract(contract)
         };
+        support::check_resolution_deadline(deadline, path, LocalFileOperation::OpenRoot)?;
         let root = Arc::new(root);
+        support::check_resolution_deadline(deadline, path, LocalFileOperation::OpenRoot)?;
         let limits = match root
             .try_clone_authority()
             .and_then(|file| crate::capability::probe_limits(&file))
@@ -251,6 +277,7 @@ impl RootedLocalFileSystem {
                 crate::LocalPathLengthUnit::native(),
             ),
         };
+        support::check_resolution_deadline(deadline, path, LocalFileOperation::OpenRoot)?;
         Ok(Self {
             root,
             capabilities: LocalFileSystemCapabilities::detect_rooted(),

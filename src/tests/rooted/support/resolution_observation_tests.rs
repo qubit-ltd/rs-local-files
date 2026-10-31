@@ -100,6 +100,12 @@ pub(crate) fn reset() {
         NATIVE_DIRECTORY_OPEN.set(0);
     }
 }
+
+/// Returns deadline checks observed by the current test thread.
+#[must_use]
+pub(crate) fn deadline_check_count() -> usize {
+    DEADLINE_CHECKS.get()
+}
 /// Returns metadata, directory-open, and fallback observations in that order.
 #[must_use]
 pub(crate) fn snapshot() -> (usize, usize, usize) {

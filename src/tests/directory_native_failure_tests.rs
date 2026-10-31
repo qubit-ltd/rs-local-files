@@ -225,6 +225,97 @@ fn test_directory_binding_reopened_authority_clone_failure_preserves_reader() {
 }
 
 #[test]
+fn lf_rev_directory_binding_deadline_expires_during_resolution_with_anchor_context() {
+    let (_scratch, native, parent) = fixture();
+    fs::write(native.join("nested/deeper/payload"), b"bound payload").expect("payload should exist");
+    let options = LocalDirectoryOpenOptions::new()
+        .with_path_binding(LocalPathBindingOptions::new().with_deadline(Duration::from_secs(3600)));
+    let child = parent
+        .open_directory(Path::new("nested/deeper"), &options)
+        .expect("bound directory should open before installing the test clock");
+    let reader = child
+        .open_observed_reader(Path::new("payload"), &LocalObservedReadOptions::new())
+        .expect("observed reader should open before installing the test clock");
+
+    let observations = crate::tests::rooted::support::resolution_observation_tests::snapshot;
+    crate::tests::rooted::support::resolution_observation_tests::reset();
+    let successful_operations = {
+        let _clock =
+            crate::tests::rooted::support::resolution_observation_tests::DeadlineClockGuard::expire_after(usize::MAX);
+        assert_eq!(
+            LocalSourceVerification::Unchanged,
+            reader
+                .verify_path_binding()
+                .expect("ample binding deadline should succeed"),
+        );
+        observations()
+    };
+
+    crate::tests::rooted::support::resolution_observation_tests::reset();
+    let _clock = crate::tests::rooted::support::resolution_observation_tests::DeadlineClockGuard::expire_after(5);
+    let error = reader
+        .verify_path_binding()
+        .expect_err("verification deadline should interrupt multi-component re-resolution");
+    assert_eq!(std::io::ErrorKind::TimedOut, error.io_error_kind());
+    assert_eq!(LocalFileOperation::Metadata, error.operation());
+    assert_eq!(Some(native.as_path()), error.path());
+    assert!(
+        crate::tests::rooted::support::resolution_observation_tests::snapshot().1 < successful_operations.1,
+        "later native directory opens must not run after the deadline"
+    );
+}
+
+#[test]
+fn lf_rev_directory_binding_deadline_stops_final_root_descent() {
+    use std::time::Instant;
+
+    let (_scratch, native, _parent) = fixture();
+    let path = native.join("nested/deeper");
+    let deadline = Instant::now() + Duration::from_secs(3600);
+    let resolution = crate::resolution::ResolutionContract::unrestricted();
+    crate::tests::rooted::support::resolution_observation_tests::reset();
+    let total_checks = {
+        let _clock =
+            crate::tests::rooted::support::resolution_observation_tests::DeadlineClockGuard::expire_after(usize::MAX);
+        crate::rooted_local_file_system::RootedLocalFileSystem::open_with_contract_and_deadline(
+            &path,
+            resolution.clone(),
+            crate::LocalSymlinkPolicy::FollowWithinScope,
+            Some(deadline),
+        )
+        .expect("ample deadline should open the complete authority");
+        crate::tests::rooted::support::resolution_observation_tests::deadline_check_count()
+    };
+    let successful_native = crate::tests::rooted::support::resolution_observation_tests::native_snapshot();
+
+    let mut stopped_at_final_component = false;
+    for checks in (0..total_checks).rev() {
+        crate::tests::rooted::support::resolution_observation_tests::reset();
+        let _clock =
+            crate::tests::rooted::support::resolution_observation_tests::DeadlineClockGuard::expire_after(checks);
+        let error = crate::rooted_local_file_system::RootedLocalFileSystem::open_with_contract_and_deadline(
+            &path,
+            resolution.clone(),
+            crate::LocalSymlinkPolicy::FollowWithinScope,
+            Some(deadline),
+        )
+        .expect_err("an injected mid-operation deadline should stop root opening");
+        let native = crate::tests::rooted::support::resolution_observation_tests::native_snapshot();
+        if native.1 + 1 == successful_native.1 {
+            assert_eq!(std::io::ErrorKind::TimedOut, error.io_error_kind());
+            assert_eq!(LocalFileOperation::OpenRoot, error.operation());
+            assert_eq!(Some(path.as_path()), error.path());
+            stopped_at_final_component = true;
+            break;
+        }
+    }
+    assert!(
+        stopped_at_final_component,
+        "a deadline boundary should prevent the final native component open"
+    );
+}
+
+#[test]
 fn test_private_stage_reopen_late_authority_failure_does_not_remove_stage() {
     let (_scratch, native, parent) = fixture();
     let stage = parent
