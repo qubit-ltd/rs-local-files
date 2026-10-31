@@ -18,7 +18,7 @@ use qubit_local_files::options::LocalCopyConflictPolicy;
 use qubit_local_files::options::LocalCopyOptions;
 use qubit_local_files::options::LocalCopySourceMode;
 use qubit_local_files::outcome::LocalCopyFailureState;
-#[cfg(any(unix, windows))]
+#[cfg(unix)]
 use qubit_local_files::policy::LocalSymlinkPolicy;
 use tempfile::tempdir;
 
@@ -293,11 +293,6 @@ fn test_tree_copy_preserves_dangling_directory_link_kind() {
             PathBuf::from("source")
         } else {
             directory.path().join("source")
-        };
-        let target = if rooted {
-            PathBuf::from("target")
-        } else {
-            directory.path().join("target")
         };
         for policy in [
             None,
