@@ -41,7 +41,7 @@ use qubit_local_files::options::LocalWriteOptions;
 use qubit_local_files::outcome::LocalCopyFailureState;
 #[cfg(feature = "test-support")]
 use qubit_local_files::outcome::LocalRenameFailureState;
-#[cfg(feature = "test-support")]
+#[cfg(all(feature = "test-support", not(windows)))]
 use qubit_local_files::outcome::LocalWriteFailureState;
 use qubit_local_files::policy::LocalAtomicityRequirement;
 use qubit_local_files::policy::LocalDurabilityRequirement;
