@@ -284,8 +284,12 @@ fn cleanup_native_entry(entry: &mut NativePrivateEntry, path: &Path) -> crate::L
         // `dev_t` and `ino_t` are not u64 on every Unix target.
         #[allow(clippy::unnecessary_cast)]
         let named_identity = LocalFileIdentity::unix(named_metadata.st_dev as u64, named_metadata.st_ino as u64);
-        let named_type = named_metadata.st_mode & libc::S_IFMT;
-        let expected_type = if entry.directory { libc::S_IFDIR } else { libc::S_IFREG };
+        let named_type = u64::from(named_metadata.st_mode) & u64::from(libc::S_IFMT);
+        let expected_type = if entry.directory {
+            u64::from(libc::S_IFDIR)
+        } else {
+            u64::from(libc::S_IFREG)
+        };
         if &named_identity != expected || named_type != expected_type {
             return Err(LocalFileError::new(
                 LocalFileErrorKind::RequirementNotMet,
