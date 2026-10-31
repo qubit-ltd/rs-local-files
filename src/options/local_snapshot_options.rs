@@ -91,9 +91,10 @@ impl LocalSnapshotOptionsBuilder {
         self
     }
 
-    /// Completes snapshot configuration. Reads exceeding the configured byte
-    /// limit fail with a resource-limit error; the limit bounds bytes read,
-    /// while the before/after observations do not provide atomic content.
+    /// Completes snapshot configuration. Reads exceeding the configured content
+    /// limit fail with a resource-limit error. At the limit, one additional
+    /// byte may be read to distinguish EOF from excess input. Before/after
+    /// observations do not provide atomic content.
     pub const fn build(self) -> LocalSnapshotOptions {
         LocalSnapshotOptions {
             max_bytes: self.max_bytes,
