@@ -52,7 +52,22 @@ impl LocalFileSystem {
     /// state, partial statistics, and cleanup error before retrying.
     #[allow(clippy::result_large_err)]
     pub fn copy_with_options(&self, source: &Path, destination: &Path, options: &LocalCopyOptions) -> LocalCopyResult {
-        let started_at = Instant::now();
+        self.copy_with_options_started_at(source, destination, options, Instant::now())
+    }
+
+    /// Copies using a start time captured by an enclosing operation.
+    ///
+    /// The supplied time anchors deadline enforcement for resolution, copy
+    /// progress, and destination cleanup. Returns the same structured result
+    /// as [`Self::copy_with_options`].
+    #[allow(clippy::result_large_err)]
+    pub(crate) fn copy_with_options_started_at(
+        &self,
+        source: &Path,
+        destination: &Path,
+        options: &LocalCopyOptions,
+        started_at: Instant,
+    ) -> LocalCopyResult {
         let request_source = source;
         let request_destination = destination;
         validate_copy_options(

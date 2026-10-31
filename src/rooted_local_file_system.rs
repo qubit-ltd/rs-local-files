@@ -310,7 +310,17 @@ impl RootedLocalFileSystem {
     /// Propagates path/policy and native inspection errors; a resolved
     /// non-directory returns a structured type-conflict error.
     pub(crate) fn validate_directory(&self, path: &Path, symlink_policy: LocalSymlinkPolicy) -> LocalResult<()> {
-        validate_rooted_list_start(&self.root, path, symlink_policy, None).map(|_| ())
+        self.validate_directory_until(path, symlink_policy, None)
+    }
+
+    /// Validates a directory while enforcing an enclosing operation deadline.
+    pub(crate) fn validate_directory_until(
+        &self,
+        path: &Path,
+        symlink_policy: LocalSymlinkPolicy,
+        deadline: Option<std::time::Instant>,
+    ) -> LocalResult<()> {
+        validate_rooted_list_start(&self.root, path, symlink_policy, deadline).map(|_| ())
     }
 
     /// Observes objective path limits through the nearest existing rooted
