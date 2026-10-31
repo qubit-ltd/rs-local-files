@@ -32,7 +32,7 @@ fn options() -> LocalCopyOptions {
 fn assert_host_tree_copy_deadline(source_kind: SourceKind) {
     for (checkpoint, expected_state, child_survives) in [
         (2, LocalCopyFailureState::Unchanged, true),
-        (8, LocalCopyFailureState::PartiallyPublished, false),
+        (9, LocalCopyFailureState::PartiallyPublished, false),
     ] {
         let directory = tempdir().expect("fixture should be created");
         let source = directory.path().join("source");

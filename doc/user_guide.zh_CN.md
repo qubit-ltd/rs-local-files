@@ -827,34 +827,65 @@ match reader.verify_path_binding()? {
 
 ### 处理 seal 失败
 
-`seal_with_options` 会消费可写 owner。失败后应先读取 `cause()` 和 `access_state()`，再通过
-`into_resource()` 取回临时资源。状态用于判断是否有理由考虑再次写入；下面的应用统一选择显式
-cleanup。若清理失败，返回的 `LocalFileError` 会保留资源恢复信息，可供之后重试。
-`LocalTempRecovery` 的所有权与清理合同见[Rustdoc 源码](../src/temp/local_temp_recovery.rs)。
+`seal_with_options` 会消费可写 owner。失败后先查看 `cause()` 和 `access_state()`，再用
+`into_resource()` 接管临时资源。状态可帮助应用判断是否仍可考虑有限重试；本例在所有状态下都选择显式
+cleanup。若 cleanup 失败，返回的应用错误会同时持有 cleanup 产生的 `LocalFileError` 和
+`LocalTempFile`。`LocalFileError` 自身不会重新获得已经取出的 owner。所有权和清理合同见
+[`LocalTempRecovery` Rustdoc 源码](../src/temp/local_temp_recovery.rs)。
 
 ```rust
 use qubit_io::Output;
-use qubit_local_files::error::LocalTempSealError;
-use qubit_local_files::outcome::LocalTempAccessState;
 use qubit_local_files::{LocalFileSystem, LocalSealOptions};
 
-fn cleanup_failed_seal(
-    error: LocalTempSealError,
-) -> Result<(), Box<dyn std::error::Error>> {
+// BEGIN executable seal cleanup helper
+use qubit_local_files::error::LocalTempSealError;
+use qubit_local_files::{LocalFileError, LocalTempFile};
+
+#[derive(Debug)]
+struct PendingSealCleanup {
+    cause: LocalFileError,
+    resource: LocalTempFile,
+}
+
+impl std::fmt::Display for PendingSealCleanup {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(formatter, "temporary cleanup remains pending: {}", self.cause)
+    }
+}
+
+impl std::error::Error for PendingSealCleanup {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(&self.cause)
+    }
+}
+
+fn cleanup_failed_seal(error: LocalTempSealError) -> Result<(), Box<PendingSealCleanup>> {
     let cause = error.cause().to_string();
     let access_state = error.access_state();
     eprintln!("seal 失败：{cause}");
-    match access_state {
-        LocalTempAccessState::Writable => eprintln!("可以评估重试；本示例选择清理"),
-        LocalTempAccessState::ReadOnly => eprintln!("不要写入；本示例选择清理"),
-        LocalTempAccessState::Indeterminate => eprintln!("不要写入或重试；本示例选择清理"),
-        _ => eprintln!("未知状态，按保守方式清理"),
+    eprintln!("seal 访问状态：{access_state:?}；本例选择清理");
+    let mut resource = error.into_resource();
+    match resource.cleanup() {
+        Ok(()) => Ok(()),
+        Err(cause) => Err(Box::new(PendingSealCleanup { cause, resource })),
     }
-    let mut recovered = error.into_resource();
-    recovered
-        .cleanup()
-        .map_err(|cleanup_error| Box::new(cleanup_error) as Box<dyn std::error::Error>)
 }
+
+fn retry_pending_seal_cleanup(
+    retained_error: Box<dyn std::error::Error>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut pending = retained_error
+        .downcast::<PendingSealCleanup>()
+        .map_err(|error| error)?;
+    match pending.resource.cleanup() {
+        Ok(()) => Ok(()),
+        Err(cause) => {
+            pending.cause = cause;
+            Err(pending as Box<dyn std::error::Error>)
+        }
+    }
+}
+// END executable seal cleanup helper
 
 let filesystem = LocalFileSystem::host()?;
 let mut temporary = filesystem.create_temp_file()?;
@@ -862,17 +893,23 @@ temporary.write_fully(b"generated data")?;
 match temporary.seal_with_options(&LocalSealOptions::new()) {
     Ok(mut sealed) => sealed.cleanup()?,
     Err(error) => {
-        if let Err(cleanup_error) = cleanup_failed_seal(error) {
-            return Err(cleanup_error);
-        }
+        cleanup_failed_seal(error)
+            .map_err(|pending| pending as Box<dyn std::error::Error>)?;
         return Err(std::io::Error::other("seal 失败，已清理恢复资源").into());
     }
 }
 # Ok::<(), Box<dyn std::error::Error>>(())
 ```
 
-成功 seal 后，原 writer owner 已被消费，不能再通过它写入；返回的 owner 只允许读取观察和清理。
-若 cleanup 失败，不要丢弃含恢复资源的错误，也不要直接创建替代条目覆盖原路径。
+seal 成功后，原 writer owner 已被消费，不能再用它写入；返回的 owner 只允许读取和清理。
+若 cleanup 失败，资源由 `PendingSealCleanup` 持有，而非 `LocalFileError`。应用应返回或保留这个错误，之后再按
+cause 和资源当前状态决定是否重试。选择重试时，先把应用错误向下转型取回资源，再调用示例中与 helper 并列的
+`retry_pending_seal_cleanup` 函数。
+调用时将保留的错误作为 `Box<dyn Error>` 传入。如果再次 cleanup 仍失败，函数会更新 cause，并返回仍持有
+资源的同一个应用错误。再次决定是否重试前，应检查这次返回的错误和资源状态。
+
+如果暂不适合重试，就继续保留错误；只保存路径字符串无法保留资源所有权。丢弃错误也会丢弃 owner，并触发尽力清理。
+不要无条件循环重试，也不要在原路径直接创建替代条目。
 
 ### 从输出名称冲突中恢复
 

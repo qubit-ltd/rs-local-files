@@ -59,6 +59,7 @@ impl DeleteBudget {
             ("local-delete-deadline-6", 6),
             ("local-delete-deadline-7", 7),
             ("local-delete-deadline-8", 8),
+            ("local-delete-deadline-9", 9),
         ]
         .into_iter()
         .any(|(name, occurrence)| crate::local::take_test_support_on_nth(name, occurrence))

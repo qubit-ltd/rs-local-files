@@ -40,7 +40,7 @@ fn copy_options() -> LocalCopyOptions {
 fn test_rooted_file_replacement_uses_copy_deadline_during_tree_removal() {
     for (checkpoint, expected_state, child_survives) in [
         (2, LocalCopyFailureState::Unchanged, true),
-        (8, LocalCopyFailureState::PartiallyPublished, false),
+        (9, LocalCopyFailureState::PartiallyPublished, false),
     ] {
         let directory = tempdir().expect("fixture should be created");
         fs::write(directory.path().join("source"), b"replacement").expect("source should be written");
@@ -65,7 +65,7 @@ fn test_rooted_file_replacement_uses_copy_deadline_during_tree_removal() {
 fn test_host_symlink_replacement_uses_copy_deadline_during_tree_removal() {
     for (checkpoint, expected_state, child_survives) in [
         (2, LocalCopyFailureState::Unchanged, true),
-        (8, LocalCopyFailureState::PartiallyPublished, false),
+        (9, LocalCopyFailureState::PartiallyPublished, false),
     ] {
         let directory = tempdir().expect("fixture should be created");
         symlink("link-target", directory.path().join("source")).expect("source link should be created");
@@ -93,7 +93,7 @@ fn test_host_symlink_replacement_uses_copy_deadline_during_tree_removal() {
 fn test_rooted_symlink_replacement_uses_copy_deadline_during_tree_removal() {
     for (checkpoint, expected_state, child_survives) in [
         (2, LocalCopyFailureState::Unchanged, true),
-        (8, LocalCopyFailureState::PartiallyPublished, false),
+        (9, LocalCopyFailureState::PartiallyPublished, false),
     ] {
         let directory = tempdir().expect("fixture should be created");
         symlink("link-target", directory.path().join("source")).expect("source link should be created");

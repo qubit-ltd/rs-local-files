@@ -1053,34 +1053,66 @@ parent synchronization; it never rolls the target back.
 `seal_with_options` consumes the writable owner. If it fails, inspect the cause
 and `access_state()` before transferring ownership with `into_resource()`. The
 state tells the application whether another bounded write attempt could still
-be considered. This example chooses explicit cleanup in every state; if
-cleanup fails, the returned `LocalFileError` retains the resource recovery
-information for a later retry. See the [`LocalTempRecovery` Rustdoc source](../src/temp/local_temp_recovery.rs)
-for its ownership and cleanup contract.
+be considered. This example chooses explicit cleanup in every state. A cleanup
+failure returns an application-owned error that contains both the cleanup
+`LocalFileError` and the `LocalTempFile`; the cleanup error itself does not
+recover an owner that has already been extracted. See the
+[`LocalTempRecovery` Rustdoc source](../src/temp/local_temp_recovery.rs) for its
+ownership and cleanup contract.
 
 ```rust
 use qubit_io::Output;
-use qubit_local_files::error::LocalTempSealError;
-use qubit_local_files::outcome::LocalTempAccessState;
 use qubit_local_files::{LocalFileSystem, LocalSealOptions};
 
-fn cleanup_failed_seal(
-    error: LocalTempSealError,
-) -> Result<(), Box<dyn std::error::Error>> {
+// BEGIN executable seal cleanup helper
+use qubit_local_files::error::LocalTempSealError;
+use qubit_local_files::{LocalFileError, LocalTempFile};
+
+#[derive(Debug)]
+struct PendingSealCleanup {
+    cause: LocalFileError,
+    resource: LocalTempFile,
+}
+
+impl std::fmt::Display for PendingSealCleanup {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(formatter, "temporary cleanup remains pending: {}", self.cause)
+    }
+}
+
+impl std::error::Error for PendingSealCleanup {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(&self.cause)
+    }
+}
+
+fn cleanup_failed_seal(error: LocalTempSealError) -> Result<(), Box<PendingSealCleanup>> {
     let cause = error.cause().to_string();
     let access_state = error.access_state();
     eprintln!("seal failed: {cause}");
-    match access_state {
-        LocalTempAccessState::Writable => eprintln!("a retry may be considered; this path cleans up"),
-        LocalTempAccessState::ReadOnly => eprintln!("do not write; this path cleans up"),
-        LocalTempAccessState::Indeterminate => eprintln!("do not write or retry; this path cleans up"),
-        _ => eprintln!("unknown access state; clean up conservatively"),
+    eprintln!("seal access state: {access_state:?}; this example chooses cleanup");
+    let mut resource = error.into_resource();
+    match resource.cleanup() {
+        Ok(()) => Ok(()),
+        Err(cause) => Err(Box::new(PendingSealCleanup { cause, resource })),
     }
-    let mut recovered = error.into_resource();
-    recovered
-        .cleanup()
-        .map_err(|cleanup_error| Box::new(cleanup_error) as Box<dyn std::error::Error>)
 }
+
+fn retry_pending_seal_cleanup(
+    retained_error: Box<dyn std::error::Error>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut pending = retained_error
+        .downcast::<PendingSealCleanup>()
+        .map_err(|error| error)?;
+    match pending.resource.cleanup() {
+        Ok(()) => Ok(()),
+        Err(cause) => {
+            pending.cause = cause;
+            Err(pending as Box<dyn std::error::Error>)
+        }
+    }
+}
+// END executable seal cleanup helper
 
 let filesystem = LocalFileSystem::host()?;
 let mut temporary = filesystem.create_temp_file()?;
@@ -1088,9 +1120,8 @@ temporary.write_fully(b"generated data")?;
 match temporary.seal_with_options(&LocalSealOptions::new()) {
     Ok(mut sealed) => sealed.cleanup()?,
     Err(error) => {
-        if let Err(cleanup_error) = cleanup_failed_seal(error) {
-            return Err(cleanup_error);
-        }
+        cleanup_failed_seal(error)
+            .map_err(|pending| pending as Box<dyn std::error::Error>)?;
         return Err(std::io::Error::other("seal failed; recovered resource was cleaned").into());
     }
 }
@@ -1098,9 +1129,20 @@ match temporary.seal_with_options(&LocalSealOptions::new()) {
 ```
 
 The original writer owner is consumed by the seal attempt and cannot be used
-afterward. Successful sealing returns a read-only cleanup owner. A failed
-cleanup error keeps the recovery owner attached; do not replace or discard it
-if the application still needs to retry cleanup.
+afterward. Successful sealing returns a read-only cleanup owner. If cleanup
+fails, return or otherwise retain the application error: that error owns the
+resource, while `LocalFileError` does not. An application that chooses to retry
+can downcast its retained `Box<dyn Error>`, inspect the cause and current
+resource state, then call the `retry_pending_seal_cleanup` function shown
+alongside the helper in the example.
+Pass the retained error as `Box<dyn Error>`; if the retry also fails, this
+function updates the cause and returns the same application error with its
+resource still owned. Inspect that returned error before deciding whether to
+retry again.
+
+Keep the error if retry is not appropriate. Dropping it also drops the owner
+and attempts best-effort cleanup; retaining only a path string does not retain
+ownership. Do not retry unconditionally or replace the resource at its path.
 
 ### Recover an occupied output name
 

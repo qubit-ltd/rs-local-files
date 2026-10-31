@@ -409,7 +409,7 @@ fn test_temp_cleanup_deadline_covers_sandbox_and_restarts_on_retry() {
     for rooted in [false, true] {
         let (_parent, mut directory, native) = fixture(rooted);
         directory.set_cleanup_limits(LocalTempCleanupLimits::new().with_deadline(Duration::from_secs(60)));
-        let fault = install_test_fault("local-delete-deadline-5").expect("fault");
+        let fault = install_test_fault("temp-cleanup-deadline-before-sandbox").expect("fault");
         let error = directory
             .cleanup()
             .expect_err("deadline expires before sandbox removal");

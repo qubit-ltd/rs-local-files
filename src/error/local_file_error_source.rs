@@ -17,6 +17,10 @@ use super::LocalResourceLimitError;
 
 /// Typed source retained by a local filesystem operation failure.
 ///
+/// Debug output for [`Self::InvalidEncoding`] reports byte-length and decoding
+/// position metadata without printing the input body. The typed source still
+/// retains the original bytes for callers that explicitly need to inspect them.
+///
 /// # Examples
 ///
 /// ```
@@ -28,7 +32,6 @@ use super::LocalResourceLimitError;
 /// assert!(matches!(source, LocalFileErrorSource::Io(_)));
 /// ```
 #[must_use]
-#[derive(Debug)]
 #[non_exhaustive]
 pub enum LocalFileErrorSource {
     /// File contents failed UTF-8 decoding.
@@ -56,6 +59,22 @@ pub enum LocalFileErrorSource {
         /// The complete error and its owned recovery resource.
         Box<LocalFileError>,
     ),
+}
+
+impl fmt::Debug for LocalFileErrorSource {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::InvalidEncoding(error) => formatter
+                .debug_struct("InvalidEncoding")
+                .field("byte_len", &error.as_bytes().len())
+                .field("utf8_error", &error.utf8_error())
+                .finish(),
+            Self::Io(error) => formatter.debug_tuple("Io").field(error).finish(),
+            Self::PathCodec(error) => formatter.debug_tuple("PathCodec").field(error).finish(),
+            Self::ResourceLimit(error) => formatter.debug_tuple("ResourceLimit").field(error).finish(),
+            Self::Recovery(error) => formatter.debug_tuple("Recovery").field(error).finish(),
+        }
+    }
 }
 
 impl fmt::Display for LocalFileErrorSource {

@@ -194,7 +194,7 @@ fn test_recursive_delete_deadlines_preserve_partial_effects() {
     for rooted in [false, true] {
         // Both backends check the deadline immediately before native
         // removal; rooted also checks the final end-of-directory read.
-        let removal_check = 7;
+        let removal_check = 8;
         for checkpoint in [2, 3, removal_check, removal_check + 1] {
             let fixture = tempdir().expect("fixture should exist");
             let tree = fixture.path().join("tree");

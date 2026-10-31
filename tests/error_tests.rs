@@ -18,6 +18,84 @@ use qubit_local_files::error::LocalFileOperation;
 use qubit_local_files::error::LocalResourceKind;
 use qubit_local_files::error::LocalResourceLimitError;
 
+/// Verifies invalid UTF-8 Debug output omits bytes while retaining typed
+/// access.
+#[test]
+fn test_invalid_encoding_debug_omits_body_and_preserves_source() {
+    let bytes = vec![0xff, b'S', b'E', b'C', b'R', b'E', b'T'];
+    let utf8 = String::from_utf8(bytes.clone()).expect_err("fixture must be invalid UTF-8");
+    let expected_display = utf8.utf8_error().to_string();
+    let source = LocalFileErrorSource::InvalidEncoding(utf8);
+    assert_eq!(expected_display, source.to_string());
+    assert!(
+        Error::source(&source)
+            .and_then(|cause| cause.downcast_ref::<std::string::FromUtf8Error>())
+            .is_some()
+    );
+    for debug in [format!("{source:?}"), format!("{source:#?}")] {
+        assert!(debug.contains("InvalidEncoding"));
+        assert!(debug.contains("byte_len"));
+        assert!(debug.contains("valid_up_to"));
+        assert!(!debug.contains(&format!("{bytes:?}")));
+        assert!(!debug.contains("bytes:"));
+        assert!(debug.len() < 1024);
+    }
+    match source {
+        LocalFileErrorSource::InvalidEncoding(error) => assert_eq!(error.as_bytes(), bytes),
+        _ => panic!("the original typed source must remain available"),
+    }
+}
+
+/// Verifies read_text Debug output remains bounded for large invalid input.
+#[test]
+fn test_read_text_debug_stays_bounded_for_large_invalid_input() {
+    let directory = tempfile::tempdir().expect("temporary directory should be created");
+    let path = directory.path().join("invalid");
+    let mut bytes = vec![b'x'; 1024 * 1024];
+    bytes[0] = 0xff;
+    std::fs::write(&path, &bytes).expect("fixture should be written");
+    let filesystem = qubit_local_files::LocalFileSystem::host().expect("host filesystem should initialize");
+    let error = filesystem
+        .read_text(&path)
+        .expect_err("invalid bytes should be rejected");
+
+    assert_eq!(LocalFileErrorKind::InvalidEncoding, error.kind());
+    assert_eq!(LocalFileOperation::Read, error.operation());
+    match error.typed_source().expect("typed source should be retained") {
+        LocalFileErrorSource::InvalidEncoding(source) => assert_eq!(source.as_bytes(), bytes),
+        _ => panic!("read_text should retain its UTF-8 decoding source"),
+    }
+    for debug in [format!("{error:?}"), format!("{error:#?}")] {
+        assert!(debug.len() < 1024);
+        assert!(!debug.contains("bytes:"));
+    }
+}
+
+/// Verifies non-encoding source variants retain tuple Debug and source links.
+#[test]
+fn test_other_local_file_error_sources_keep_debug_shape_and_source() {
+    let io_source = LocalFileErrorSource::Io(io::Error::from(io::ErrorKind::NotFound));
+    assert!(format!("{io_source:?}").starts_with("Io("));
+    assert!(Error::source(&io_source).is_some());
+
+    let codec_source =
+        LocalFileErrorSource::PathCodec(qubit_local_files::error::LocalPathCodecError::InvalidEscape { offset: 3 });
+    assert!(format!("{codec_source:?}").starts_with("PathCodec("));
+    assert!(Error::source(&codec_source).is_some());
+
+    let limit_source =
+        LocalFileErrorSource::ResourceLimit(LocalResourceLimitError::new(LocalResourceKind::Entry, 4, 1, 2));
+    assert!(format!("{limit_source:?}").starts_with("ResourceLimit("));
+    assert!(Error::source(&limit_source).is_some());
+
+    let recovery_source = LocalFileErrorSource::Recovery(Box::new(LocalFileError::new(
+        LocalFileErrorKind::RequirementNotMet,
+        LocalFileOperation::Commit,
+    )));
+    assert!(format!("{recovery_source:?}").starts_with("Recovery("));
+    assert!(Error::source(&recovery_source).is_some());
+}
+
 /// Verifies that native I/O errors retain structured operation and path
 /// context.
 #[test]

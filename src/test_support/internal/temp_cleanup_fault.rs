@@ -55,7 +55,7 @@ pub(crate) fn temp_cleanup_add_child() -> bool {
 /// cleanup. Counts checks through the same scoped selector as existing delete
 /// faults.
 pub(crate) fn temp_cleanup_deadline_expired() -> bool {
-    take_test_support_on_nth("local-delete-deadline-5", 5)
+    take_test_support_on_nth("temp-cleanup-deadline-before-sandbox", 6)
 }
 
 /// Replaces an entry after its type was observed, through the original root.
