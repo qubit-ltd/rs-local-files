@@ -98,12 +98,12 @@ fn test_review_canonicalize_requires_existing_target_and_preserves_directory_int
 
 #[test]
 fn test_review_target_metadata_preserves_root_alias_and_directory_intent() {
-    let (root, filesystem) = fixture();
+    let (_root, filesystem) = fixture();
     #[cfg(unix)]
     {
         use std::os::unix::fs::symlink;
-        symlink("/", root.path().join("root-alias")).expect("root alias");
-        symlink("missing-target", root.path().join("dangling")).expect("dangling link");
+        symlink("/", _root.path().join("root-alias")).expect("root alias");
+        symlink("missing-target", _root.path().join("dangling")).expect("dangling link");
         assert_eq!(
             filesystem
                 .target_metadata(Path::new("/root-alias"))

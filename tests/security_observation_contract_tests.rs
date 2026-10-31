@@ -6,11 +6,15 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 
+#[cfg(unix)]
 use qubit_local_files::LocalFileSystem;
 #[cfg(all(unix, not(target_os = "macos")))]
 use qubit_local_files::observation::LocalObservationRequirement;
+#[cfg(unix)]
 use qubit_local_files::observation::LocalSecurityObservationOptions;
+#[cfg(unix)]
 use qubit_local_files::options::LocalDirectoryOpenOptions;
+#[cfg(unix)]
 use qubit_local_files::options::LocalObservedReadOptions;
 
 #[cfg(unix)]
