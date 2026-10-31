@@ -21,6 +21,7 @@ use crate::local::conditional::ConditionalWriterBackend;
 use crate::options::LocalWriteOptions;
 use crate::options::LocalWritePrecondition;
 use crate::outcome::LocalConditionalWriteOutcome;
+use crate::writer::internal::WriterByteCount;
 
 /// Stateful conditional file writer. Call [`commit`](Self::commit) to publish
 /// or [`abort`](Self::abort) to discard its unpublished candidate.
@@ -87,7 +88,7 @@ pub struct LocalConditionalWriter<D: Digest> {
     precondition: Option<LocalWritePrecondition<Output<D>>>,
     options: LocalWriteOptions,
     state: LocalWriterState,
-    bytes_written: usize,
+    bytes_written: WriterByteCount,
     /// Fatal stream errors disable writes and commits; `Interrupted` and
     /// `WouldBlock` remain retryable.
     write_failed: bool,
@@ -123,7 +124,7 @@ impl<D: Digest> LocalConditionalWriter<D> {
             precondition: Some(precondition),
             options,
             state: LocalWriterState::Open,
-            bytes_written: 0,
+            bytes_written: WriterByteCount::default(),
             write_failed: false,
             abort_failed: false,
         }
@@ -199,7 +200,7 @@ impl<D: Digest> LocalConditionalWriter<D> {
                     backend,
                     condition,
                     self.options,
-                    self.bytes_written,
+                    self.bytes_written.get(),
                     self.current_directory.clone(),
                 )
             }
@@ -239,7 +240,7 @@ impl<D: Digest> LocalConditionalWriter<D> {
                     false,
                     LocalWritePublicationMethod::AtomicRename,
                     false,
-                    self.bytes_written,
+                    self.bytes_written.get(),
                     None,
                 ))
             }
@@ -260,6 +261,12 @@ impl<D: Digest> LocalConditionalWriter<D> {
     }
     fn write_inner(&mut self, slices: &[&[u8]], vectored: bool) -> io::Result<usize> {
         self.writable()?;
+        if vectored {
+            self.bytes_written.check_vectored_request(slices.iter().copied())?;
+        } else {
+            self.bytes_written
+                .check_request(slices.first().map_or(0, |slice| slice.len()))?;
+        }
         if vectored && slices.iter().all(|slice| slice.is_empty()) {
             return Ok(0);
         }
@@ -269,11 +276,8 @@ impl<D: Digest> LocalConditionalWriter<D> {
         } else {
             qubit_io::Output::write(backend, slices.first().copied().unwrap_or(&[]))
         };
-        match result {
-            Ok(count) => {
-                self.bytes_written = self.bytes_written.saturating_add(count);
-                Ok(count)
-            }
+        match self.bytes_written.record_result(result) {
+            Ok(count) => Ok(count),
             Err(error) if matches!(error.kind(), io::ErrorKind::Interrupted | io::ErrorKind::WouldBlock) => Err(error),
             Err(error) => {
                 self.write_failed = true;
@@ -304,14 +308,12 @@ impl<D: Digest> qubit_io::Output for LocalConditionalWriter<D> {
     }
     unsafe fn write_unchecked(&mut self, input: &[u8], index: usize, count: usize) -> io::Result<usize> {
         self.writable()?;
+        self.bytes_written.check_request(count)?;
         // SAFETY: the Output caller guarantees the indexed range is valid.
         let backend = self.backend.as_mut().expect("open writer retains backend");
         let result = unsafe { qubit_io::Output::write_unchecked(backend, input, index, count) };
-        match result {
-            Ok(written) => {
-                self.bytes_written = self.bytes_written.saturating_add(written);
-                Ok(written)
-            }
+        match self.bytes_written.record_result(result) {
+            Ok(written) => Ok(written),
             Err(error) if matches!(error.kind(), io::ErrorKind::Interrupted | io::ErrorKind::WouldBlock) => Err(error),
             Err(error) => {
                 self.write_failed = true;
@@ -328,5 +330,51 @@ impl<D: Digest> Drop for LocalConditionalWriter<D> {
         {
             let _ = ConditionalWriterBackend::abort(backend);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use qubit_io::Output;
+    use sha2::Sha256;
+
+    use crate::LocalFileSystem;
+    use crate::options::LocalWritePrecondition;
+    use crate::policy::LocalSymlinkPolicy;
+    use crate::writer::internal::WriterByteCount;
+
+    #[test]
+    fn test_local_conditional_writer_count_crosses_u32_on_commit() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let mut filesystem = LocalFileSystem::host().expect("host filesystem");
+        filesystem
+            .set_symlink_policy(LocalSymlinkPolicy::Reject)
+            .expect("set symlink policy");
+        let target = directory.path().join("target");
+        let mut writer = filesystem
+            .open_conditional_writer::<Sha256>(&target, LocalWritePrecondition::Absent, &Default::default())
+            .expect("open conditional writer");
+        writer.bytes_written = WriterByteCount::with_initial_value(u64::from(u32::MAX) - 1);
+        assert_eq!(3, Output::write(&mut writer, b"abc").expect("write accepted bytes"));
+        let outcome = writer.commit().expect("commit conditional writer");
+        let accepted: u64 = outcome.write_outcome().bytes_written();
+        assert_eq!(u64::from(u32::MAX) + 2, accepted);
+    }
+
+    #[test]
+    fn test_local_conditional_writer_count_crosses_u32_on_abort() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let mut filesystem = LocalFileSystem::host().expect("host filesystem");
+        filesystem
+            .set_symlink_policy(LocalSymlinkPolicy::Reject)
+            .expect("set symlink policy");
+        let target = directory.path().join("target");
+        let mut writer = filesystem
+            .open_conditional_writer::<Sha256>(&target, LocalWritePrecondition::Absent, &Default::default())
+            .expect("open conditional writer");
+        writer.bytes_written = WriterByteCount::with_initial_value(u64::from(u32::MAX) - 1);
+        assert_eq!(3, Output::write(&mut writer, b"abc").expect("write accepted bytes"));
+        let outcome = writer.abort().expect("abort conditional writer");
+        assert_eq!(u64::from(u32::MAX) + 2, outcome.bytes_written());
     }
 }

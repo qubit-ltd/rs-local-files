@@ -53,7 +53,7 @@ fn generic_vectored_writer_counts_once_for_all_backends() {
     for mut writer in writers {
         let n = Output::write_vectored(&mut writer, &[b"", b"ab", b"cd"]).unwrap();
         assert!(n > 0 && n <= 4);
-        assert_eq!(writer.commit().unwrap().bytes_written(), n);
+        assert_eq!(writer.commit().unwrap().bytes_written(), n as u64);
     }
     for (path, prefix) in [
         (host_path, b"".as_slice()),
@@ -78,7 +78,7 @@ fn vectored_writer_entries_share_the_byte_count() {
     let second = writer
         .write_vectored(&[IoSlice::new(b"c"), IoSlice::new(b"d")])
         .unwrap();
-    assert_eq!(writer.commit().unwrap().bytes_written(), first + second);
+    assert_eq!(writer.commit().unwrap().bytes_written(), (first + second) as u64);
     let mut expected = Vec::new();
     expected.extend_from_slice(&b"ab"[..first]);
     expected.extend_from_slice(&b"cd"[..second]);

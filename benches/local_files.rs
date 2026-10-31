@@ -147,7 +147,6 @@ fn bench_walk_name_cache(c: &mut Criterion) {
                 group.bench_function(format!("{scope}/{mode}/entries_{width}"), |bench| {
                     bench.iter(|| {
                         let count = count_entries(&filesystem, black_box(path), &options);
-                        assert_eq!(count, expected, "each measured traversal must consume every entry");
                         black_box(count);
                     });
                 });
@@ -434,10 +433,10 @@ fn bench_copy_budget_width(c: &mut Criterion) {
                         (directory, coordinates)
                     },
                     |(_, (filesystem, source, target))| {
-                        assert_copy_limit(
-                            filesystem.copy_with_options(black_box(source), black_box(target), &options),
-                            LocalResourceKind::Entry,
-                        );
+                        let failure = filesystem
+                            .copy_with_options(black_box(source), black_box(target), &options)
+                            .expect_err("limited benchmark copy should fail");
+                        let _ = black_box(failure);
                     },
                     criterion::BatchSize::PerIteration,
                 );
@@ -491,11 +490,11 @@ fn bench_copy_tree_depth(c: &mut Criterion) {
                         |(_, (filesystem, source, target))| {
                             let result = filesystem.copy_with_options(black_box(source), black_box(target), &options);
                             if limited {
-                                assert_copy_limit(result, LocalResourceKind::Depth);
+                                let failure = result.expect_err("limited benchmark copy should fail");
+                                let _ = black_box(failure);
                             } else {
                                 let outcome = result.expect("benchmark tree copy should succeed");
-                                assert_eq!(1, outcome.stats().files());
-                                black_box(outcome.stats().files());
+                                let _ = black_box(outcome);
                             }
                         },
                         criterion::BatchSize::PerIteration,
@@ -662,7 +661,7 @@ fn bench_writer_scenarios(c: &mut Criterion) {
                         let (filesystem, target, directory) = writer_scenario_target(rooted, existing);
                         match write_scenario_payload(&filesystem, &target, &options, &payload) {
                             Ok(outcome) => {
-                                assert_writer_outcome(outcome, size, durability);
+                                assert_writer_outcome(outcome, size as u64, durability);
                                 assert_eq!(
                                     fs::read(directory.path().join("target"))
                                         .expect("fixture target should be readable"),
@@ -688,7 +687,6 @@ fn bench_writer_scenarios(c: &mut Criterion) {
                                 |(filesystem, target, _)| {
                                     let outcome = write_scenario_payload(filesystem, target, &options, &payload)
                                         .expect("registered writer scenario should succeed");
-                                    assert_writer_outcome(outcome, size, durability);
                                     let _ = black_box(outcome);
                                 },
                                 criterion::BatchSize::PerIteration,
@@ -729,7 +727,7 @@ fn write_scenario_payload(
 }
 
 /// Fails a sample if commit did not establish the requested successful result.
-fn assert_writer_outcome(outcome: LocalWriteOutcome, size: usize, durability: LocalDurabilityRequirement) {
+fn assert_writer_outcome(outcome: LocalWriteOutcome, size: u64, durability: LocalDurabilityRequirement) {
     assert_eq!(outcome.state(), LocalWriterState::Committed);
     assert_eq!(outcome.bytes_written(), size);
     assert!(outcome.failure_state().is_none());

@@ -14,6 +14,7 @@ use std::sync::Arc;
 
 use super::internal::LocalCommitSyncObserver;
 use super::internal::LocalFileWriterBackend;
+use super::internal::WriterByteCount;
 use crate::LocalDurabilityRequirement;
 use crate::LocalFileCommitError;
 use crate::LocalFileError;
@@ -70,7 +71,7 @@ pub struct LocalFileWriter {
     /// Current observable session state.
     state: LocalWriterState,
     /// Bytes accepted by successful stream writes.
-    bytes_written: usize,
+    bytes_written: WriterByteCount,
     /// Publication certainty retained after a non-retryable stream failure.
     failure_state: Option<LocalWriteFailureState>,
     /// Per-writer synchronization observer used by focused crate tests.
@@ -94,7 +95,7 @@ impl LocalFileWriter {
             backend: Some(backend),
             options,
             state: LocalWriterState::Open,
-            bytes_written: 0,
+            bytes_written: WriterByteCount::default(),
             failure_state: None,
             sync_observer: None,
         }
@@ -237,7 +238,7 @@ impl LocalFileWriter {
                     false,
                     LocalWritePublicationMethod::DirectAppend,
                     durable,
-                    self.bytes_written,
+                    self.bytes_written.get(),
                     self.failure_state,
                 )
                 .with_file_synced(file_synced))
@@ -287,7 +288,7 @@ impl LocalFileWriter {
                     false,
                     LocalWritePublicationMethod::AtomicRename,
                     false,
-                    self.bytes_written,
+                    self.bytes_written.get(),
                     self.failure_state,
                 ))
             }
@@ -309,13 +310,13 @@ impl LocalFileWriter {
                 }
                 self.state = LocalWriterState::Aborted;
                 self.failure_state = previous_failure_state
-                    .or_else(|| (self.bytes_written > 0).then_some(LocalWriteFailureState::Published));
+                    .or_else(|| (self.bytes_written.get() > 0).then_some(LocalWriteFailureState::Published));
                 Ok(LocalWriteOutcome::new(
                     self.state,
                     false,
                     LocalWritePublicationMethod::DirectAppend,
                     false,
-                    self.bytes_written,
+                    self.bytes_written.get(),
                     self.failure_state,
                 ))
             }
@@ -353,7 +354,7 @@ impl LocalFileWriter {
                     true,
                     LocalWritePublicationMethod::AtomicRename,
                     sync_outcome.durable,
-                    self.bytes_written,
+                    self.bytes_written.get(),
                     self.failure_state,
                 )
                 .with_file_synced(sync_outcome.file_synced))
@@ -398,16 +399,6 @@ impl LocalFileWriter {
         }
     }
 
-    /// Records bytes accepted by a successful stream operation.
-    ///
-    /// # Parameters
-    ///
-    /// - `written`: Bytes accepted by the backend.
-    #[inline]
-    fn record_written(&mut self, written: usize) {
-        self.bytes_written = self.bytes_written.saturating_add(written);
-    }
-
     /// Records a fatal stream failure without losing known publication state.
     ///
     /// Interrupted and would-block errors leave the writer retryable. Staged
@@ -427,7 +418,9 @@ impl LocalFileWriter {
             && !matches!(error.kind(), io::ErrorKind::Interrupted | io::ErrorKind::WouldBlock)
         {
             self.failure_state = Some(match &self.backend {
-                Some(LocalFileWriterBackend::Append(_)) if self.bytes_written > 0 => LocalWriteFailureState::Published,
+                Some(LocalFileWriterBackend::Append(_)) if self.bytes_written.get() > 0 => {
+                    LocalWriteFailureState::Published
+                }
                 _ => LocalWriteFailureState::NotPublished,
             });
         }
@@ -450,6 +443,7 @@ impl LocalFileWriter {
                 "local file writer is not open",
             ));
         }
+        self.bytes_written.check_request(buffer.len())?;
         #[cfg(feature = "test-support")]
         for (fault, kind) in [
             ("local-writer-interrupted", io::ErrorKind::Interrupted),
@@ -466,8 +460,8 @@ impl LocalFileWriter {
             Some(LocalFileWriterBackend::Append(file)) => qubit_io::Output::write(file, buffer),
             None => unreachable!("open writer must retain one backend"),
         };
-        let written = self.observe_stream_result(result)?;
-        self.record_written(written);
+        let result = self.observe_stream_result(result);
+        let written = self.bytes_written.record_result(result)?;
         Ok(written)
     }
 }
@@ -500,14 +494,15 @@ impl qubit_io::Output for LocalFileWriter {
                 "local file writer is not open",
             ));
         }
+        self.bytes_written.check_vectored_request(buffers.iter().copied())?;
         let result = match self.backend.as_mut() {
             Some(LocalFileWriterBackend::Staged(writer)) => qubit_io::Output::write_vectored(writer, buffers),
             Some(LocalFileWriterBackend::Rooted(writer)) => qubit_io::Output::write_vectored(writer, buffers),
             Some(LocalFileWriterBackend::Append(file)) => qubit_io::Output::write_vectored(file, buffers),
             None => unreachable!("open writer must retain one backend"),
         };
-        let written = self.observe_stream_result(result)?;
-        self.record_written(written);
+        let result = self.observe_stream_result(result);
+        let written = self.bytes_written.record_result(result)?;
         Ok(written)
     }
 
@@ -638,4 +633,36 @@ fn sync_append_file(file: &std::fs::File) -> io::Result<()> {
         return Err(crate::local::test_fault_error());
     }
     file.sync_all()
+}
+
+#[cfg(test)]
+mod tests {
+    use qubit_io::Output;
+
+    use crate::LocalFileSystem;
+    use crate::writer::internal::WriterByteCount;
+
+    #[test]
+    fn test_local_file_writer_count_crosses_u32_on_commit() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let filesystem = LocalFileSystem::host().expect("host filesystem");
+        let target = directory.path().join("target");
+        let mut writer = filesystem.open_writer(&target).expect("open writer");
+        writer.bytes_written = WriterByteCount::with_initial_value(u64::from(u32::MAX) - 1);
+        assert_eq!(3, Output::write(&mut writer, b"abc").expect("write accepted bytes"));
+        let outcome = writer.commit().expect("commit writer");
+        assert_eq!(u64::from(u32::MAX) + 2, outcome.bytes_written());
+    }
+
+    #[test]
+    fn test_local_file_writer_count_crosses_u32_on_abort() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let filesystem = LocalFileSystem::host().expect("host filesystem");
+        let target = directory.path().join("target");
+        let mut writer = filesystem.open_writer(&target).expect("open writer");
+        writer.bytes_written = WriterByteCount::with_initial_value(u64::from(u32::MAX) - 1);
+        assert_eq!(3, Output::write(&mut writer, b"abc").expect("write accepted bytes"));
+        let outcome = writer.abort().expect("abort writer");
+        assert_eq!(u64::from(u32::MAX) + 2, outcome.bytes_written());
+    }
 }

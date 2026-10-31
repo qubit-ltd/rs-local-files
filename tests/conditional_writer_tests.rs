@@ -616,7 +616,7 @@ fn empty_and_large_candidates_return_sha512_digest() {
     writer.write_fully(&content).unwrap();
     let saved = writer.commit().unwrap();
     assert_eq!(saved.digest(), &Sha512::digest(&content));
-    assert_eq!(saved.write_outcome().bytes_written(), content.len());
+    assert_eq!(saved.write_outcome().bytes_written(), content.len() as u64);
 }
 
 #[test]

@@ -39,7 +39,8 @@ fn writer_indexed_range_flush_and_owned_adapter_preserve_staging() {
     assert_eq!(2, writer.write_vectored(&[IoSlice::new(b"ef")]).unwrap());
     assert!(!path.exists(), "flush must not publish staged bytes");
     let outcome = writer.commit().expect("commit should publish staged bytes");
-    assert_eq!(6, outcome.bytes_written());
+    let accepted: u64 = outcome.bytes_written();
+    assert_eq!(6, accepted);
     assert_eq!(b"abcdef", std::fs::read(path).unwrap().as_slice());
 }
 
