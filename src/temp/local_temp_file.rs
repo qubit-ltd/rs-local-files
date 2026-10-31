@@ -543,7 +543,9 @@ impl LocalTempFile {
                 return Err(crate::local::test_fault_error());
             }
             let readonly = match &self.core.backend {
-                LocalTempResourceBackend::Host(_) => reopen_read_only(self.path(), file)?,
+                LocalTempResourceBackend::Host(_) => {
+                    crate::local::open_native_reader_path(self.path(), &crate::read::OpenOptions::default())?
+                }
                 LocalTempResourceBackend::Rooted(rooted) => {
                     let relative = crate::LocalRelativePath::new(&rooted.relative_path)
                         .map_err(|error| Error::new(ErrorKind::InvalidInput, error))?;
@@ -969,7 +971,8 @@ impl LocalTempFile {
                 .expect("closed-source reopen action should run only once")();
             match &self.core.backend {
                 LocalTempResourceBackend::Host(_) => {
-                    let file = File::open(&self.core.path)?;
+                    let file =
+                        crate::local::open_native_reader_path(&self.core.path, &crate::read::OpenOptions::default())?;
                     self.synchronize_open_file(&file)
                 }
                 LocalTempResourceBackend::Rooted(rooted) => {
@@ -1229,24 +1232,6 @@ fn closed_file_error() -> Error {
     Error::new(ErrorKind::BrokenPipe, "temporary file handle is closed")
 }
 
-fn reopen_read_only(path: &Path, _original: &File) -> Result<File> {
-    let reopened = std::fs::OpenOptions::new().read(true).open(path)?;
-    #[cfg(unix)]
-    use std::os::unix::fs::MetadataExt;
-    #[cfg(unix)]
-    {
-        let before = _original.metadata()?;
-        let after = reopened.metadata()?;
-        if before.dev() != after.dev() || before.ino() != after.ino() {
-            return Err(Error::new(
-                ErrorKind::InvalidInput,
-                "read-only handle is a different file",
-            ));
-        }
-    }
-    Ok(reopened)
-}
-
 /// A cleanup-owned temporary file with no public write handle.
 ///
 /// Sealing removes this library owner's write access, but does not guarantee
@@ -1310,8 +1295,15 @@ fn sync_identity_error() -> Error {
 
 #[cfg(all(test, unix))]
 mod sync_identity_tests {
+    use std::ffi::CString;
     use std::fs;
+    use std::os::unix::ffi::OsStrExt;
+    use std::os::unix::fs::FileTypeExt;
     use std::path::Path;
+    use std::process::Child;
+    use std::process::Command;
+    use std::time::Duration;
+    use std::time::Instant;
 
     use crate::LocalDurabilityRequirement;
     use crate::LocalFileSystem;
@@ -1320,6 +1312,17 @@ mod sync_identity_tests {
     use crate::LocalPersistStage;
     use crate::LocalTempFileOptions;
     use crate::outcome::LocalTempSourceState;
+
+    struct ChildGuard(Child);
+
+    impl Drop for ChildGuard {
+        fn drop(&mut self) {
+            if !matches!(self.0.try_wait(), Ok(Some(_))) {
+                let _ = self.0.kill();
+                let _ = self.0.wait();
+            }
+        }
+    }
 
     #[test]
     fn closed_reopen_rejects_path_replacement_after_source_precheck() {
@@ -1393,6 +1396,80 @@ mod sync_identity_tests {
                         .as_slice(),
                 );
             }
+        }
+    }
+
+    #[test]
+    fn closed_reopen_rejects_fifo_path_replacement_without_blocking() {
+        const CHILD: &str = "QUBIT_LF_REV_Q01_PERSIST_CHILD";
+        if let Some(parent) = std::env::var_os(CHILD) {
+            let parent = Path::new(&parent);
+            let mut temporary = LocalFileSystem::host()
+                .expect("host authority should open")
+                .create_temp_file_with_options(&LocalTempFileOptions::new().with_parent(parent))
+                .expect("temporary source should be created");
+            let source = temporary.path().to_path_buf();
+            temporary.close();
+            let target = parent.join("published");
+            let mut seam_reached = false;
+            let error = temporary
+                .persist_with_path_before_reopen(
+                    &target,
+                    None,
+                    LocalPersistOptions::new().with_durability(LocalDurabilityRequirement::Required),
+                    || {
+                        fs::remove_file(&source).expect("source path should be removable");
+                        let native = CString::new(source.as_os_str().as_bytes()).expect("fixture has no NUL");
+                        // SAFETY: native is a live NUL-terminated fixture path.
+                        assert_eq!(unsafe { libc::mkfifo(native.as_ptr(), 0o600) }, 0);
+                        seam_reached = true;
+                    },
+                )
+                .expect_err("FIFO source replacement must be rejected");
+
+            assert!(seam_reached, "replacement seam must run");
+            assert_eq!(LocalPersistStage::SynchronizeSource, error.stage());
+            assert_eq!(LocalPersistFailureState::NotPublished, error.state());
+            assert_eq!(LocalTempSourceState::Owned, error.source_state());
+            assert!(
+                fs::symlink_metadata(&source)
+                    .expect("FIFO replacement remains")
+                    .file_type()
+                    .is_fifo()
+            );
+            fs::write(parent.join("persist-child-completed"), b"rejected").expect("completion marker");
+            return;
+        }
+
+        let fixture = tempfile::tempdir().expect("parent owns fixture");
+        let test_executable = std::env::current_exe().expect("unit test binary");
+        let mut child = ChildGuard(
+            Command::new(test_executable)
+                .args([
+                    "--exact",
+                    "temp::local_temp_file::sync_identity_tests::closed_reopen_rejects_fifo_path_replacement_without_blocking",
+                    "--nocapture",
+                ])
+                .env(CHILD, fixture.path())
+                .spawn()
+                .expect("child should start"),
+        );
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            if let Some(status) = child.0.try_wait().expect("child status") {
+                assert!(status.success(), "child failed: {status}");
+                assert_eq!(
+                    fs::read(fixture.path().join("persist-child-completed"))
+                        .expect("child executed and wrote completion marker"),
+                    b"rejected",
+                );
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "Q01 persist: child failed to return before watchdog"
+            );
+            std::thread::sleep(Duration::from_millis(10));
         }
     }
 }
