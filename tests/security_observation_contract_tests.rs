@@ -38,6 +38,33 @@ fn reader_security_observation_stays_with_open_file_after_rename() {
 
 #[cfg(unix)]
 #[test]
+fn observed_reader_exposes_native_unix_details_from_its_open_handle() {
+    use std::os::unix::fs::MetadataExt;
+
+    let directory = tempfile::tempdir().expect("temporary directory");
+    let path = directory.path().join("file");
+    std::fs::write(&path, b"data").expect("create source");
+    let expected = std::fs::metadata(&path).expect("source metadata");
+    let reader = LocalFileSystem::host()
+        .expect("host filesystem")
+        .open_observed_reader(&path, &LocalObservedReadOptions::new())
+        .expect("open reader");
+
+    let observation = reader.observe_now().expect("observe open file");
+    let details = observation
+        .native_details()
+        .and_then(|native| native.unix())
+        .expect("Unix native details are available");
+    assert_eq!(details.device(), expected.dev());
+    assert_eq!(details.inode(), expected.ino());
+    assert_eq!(details.modified_seconds(), expected.mtime());
+    assert_eq!(details.modified_nanos(), expected.mtime_nsec());
+    assert_eq!(details.changed_seconds(), expected.ctime());
+    assert_eq!(details.changed_nanos(), expected.ctime_nsec());
+}
+
+#[cfg(unix)]
+#[test]
 fn directory_security_observation_stays_with_retained_authority_after_rename() {
     use std::os::unix::fs::MetadataExt;
 

@@ -1342,3 +1342,41 @@ fn test_host_temp_recovery_keeps_original_parent_handle_after_sandbox_replacemen
         "cleanup must not re-open the replacement parent by path"
     );
 }
+
+#[cfg(all(test, unix))]
+#[test]
+fn test_host_temp_private_sandbox_cleanup_removes_owned_directory() {
+    let fixture = tempfile::tempdir().expect("fixture");
+    let (sandbox, owner) = create_host_temp_sandbox(fixture.path(), LocalFileOperation::CreateTempDirectory, Some(1))
+        .expect("create sandbox and retain its native owner");
+    let error = sandbox_failure(
+        LocalFileOperation::CreateTempDirectory,
+        sandbox.clone(),
+        io::Error::other("injected sandbox failure"),
+        None,
+    );
+    assert_eq!(error.operation(), LocalFileOperation::CreateTempDirectory);
+    assert_eq!(error.path(), Some(sandbox.as_path()));
+    assert!(error.temp_recovery().is_none(), "missing ownership stays explicit");
+
+    cleanup_private_sandbox(&sandbox, owner).expect("clean up the owned sandbox");
+
+    assert!(!sandbox.exists(), "successful private cleanup removes the sandbox");
+
+    let (sandbox, owner) = create_host_temp_sandbox(fixture.path(), LocalFileOperation::CreateTempDirectory, Some(1))
+        .expect("create another sandbox");
+    let child = sandbox.join("child");
+    fs::write(&child, b"temporary data").expect("create child file");
+    let mut recovery = native_temp_recovery(
+        child.clone(),
+        File::open(&sandbox).expect("open child parent"),
+        "child".to_owned(),
+        File::open(&child).expect("open child file"),
+        false,
+        Some(owner),
+    );
+    assert_eq!(recovery.path(), child);
+    recovery.cleanup().expect("clean up the child and sandbox owners");
+    assert!(!child.exists(), "recovery removes the owned child");
+    assert!(!sandbox.exists(), "recovery removes the owned sandbox");
+}
