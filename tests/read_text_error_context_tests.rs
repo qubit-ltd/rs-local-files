@@ -24,8 +24,10 @@ use qubit_local_files::LocalFileSystem;
 use qubit_local_files::error::LocalFileErrorKind;
 use qubit_local_files::error::LocalFileOperation;
 use qubit_local_files::options::LocalReadAllOptions;
+#[cfg(unix)]
 use qubit_local_files::options::LocalReadOptions;
 use qubit_local_files::options::LocalSnapshotOptions;
+#[cfg(unix)]
 use qubit_local_files::policy::LocalSymlinkPolicy;
 use tempfile::tempdir;
 
