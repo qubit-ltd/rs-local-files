@@ -184,6 +184,8 @@ Ordinary methods use those defaults. `open_reader_with_options` and
 For `open_observed_reader`, `read_all_with_options`, and `read_text_with_options`,
 an optional nested `LocalReadOptions` replaces `defaults.read` when present and
 inherits it when absent; snapshot builders keep their own default read options.
+Snapshot options start from `LocalReadOptions::new()` and do not inherit
+filesystem defaults; copy defaults explicitly when that is the intended policy.
 Cloning snapshots all mutable state,
 while Rooted clones share only the immutable opened authority. The crate makes
 no thread-safety promise for shared mutable configuration; callers may keep one
@@ -350,7 +352,9 @@ and durable temporary-file persistence are reported as independent
 capabilities because their platform support differs.
 `can_attempt_atomic_temp_persist()` is an implementation capability,
 not a promise for arbitrary source and target paths; the operation outcome
-reports what actually happened.
+reports what actually happened. RLF2-Q02 was confirmed and fixed; RLF2-Q01
+and RLF2-Q03 remain unverified without a native Windows environment. See the
+[user guide's observation requirements and counters](doc/user_guide.md#observation-requirements-and-counters).
 Path-limit observations always include a unit: Unix reports bytes and Windows
 reports UTF-16 code units. Windows whole-path limits remain `Unknown` when the
 handle-relative namespace has no defensible fixed bound. `space_at()` and
@@ -362,6 +366,7 @@ path conversion intentionally does not support UNC paths.
 - [User guide](doc/user_guide.md)
 - [FreeBSD compatibility status](doc/freebsd-compatibility.md)
 - [Synchronize and publish a complete staged tree](doc/user_guide.md#sync-a-complete-tree-before-durable-publication)
+- [Observation requirements and accumulated counters](doc/user_guide.md#observation-requirements-and-counters)
 - [用户手册](doc/user_guide.zh_CN.md)
 - [API reference](https://docs.rs/qubit-local-files)
 - [Design document](doc/local_file_system_design.md)
@@ -402,4 +407,3 @@ API documentation and tests current, and run `./.infra/bin/align-ci.sh` to forma
 **Haixing Hu** - *Qubit Co. Ltd.*
 
 Repository: [https://github.com/qubit-ltd/rs-local-files](https://github.com/qubit-ltd/rs-local-files)
-Snapshot options start from `LocalReadOptions::new()` and do not inherit filesystem defaults. The user guide documents explicit default copying, observation requirements, and the `u64` accumulated writer count migration. RLF2-Q02 was confirmed and fixed; RLF2-Q01 and RLF2-Q03 remain unverified without a native Windows environment. See the [user guide](doc/user_guide.md).

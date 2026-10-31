@@ -11,6 +11,117 @@
 文件系统 API，也不替代 provider 层的逻辑路径模型。本 crate 提供同步 API；异步应用应在
 合适的 blocking 执行环境中调用。
 
+## 安装与最小配置
+
+在应用的 Cargo 清单中添加依赖：
+
+```toml
+[dependencies]
+qubit-local-files = "0.5.0"
+qubit-io = "0.19"
+```
+
+配置操作策略前，先选择权限范围。Host 模式使用进程可见的命名空间；Rooted 模式打开一个
+已存在目录并将其映射为虚拟 `/`。权限句柄打开后，构造时传入的 Host 路径只用于诊断。
+
+```rust,no_run
+use std::path::Path;
+
+use qubit_local_files::LocalFileSystem;
+
+let host = LocalFileSystem::host()?;
+let rooted = LocalFileSystem::rooted(Path::new("workspace"))?;
+assert!(host.diagnostic_root().is_none());
+assert!(rooted.diagnostic_root().is_some());
+# Ok::<(), Box<dyn std::error::Error>>(())
+```
+
+## 概念模型
+
+```text
+Host 命名空间 ── LocalFileSystem::host() ── 操作时读取进程 PWD
+已打开根目录 ─── LocalFileSystem::rooted(root) ── 虚拟 / 与实例 PWD
+```
+
+## 场景：写入并检查导出产物
+
+导出程序需要创建 `build/output`，只在完整写入后发布 `manifest.json`，并读回结果。成功
+的可观察条件是 writer 返回 `Committed`，且能读取已经发布的字节。
+
+```rust,no_run
+use qubit_io::{Output, Streams};
+use qubit_local_files::LocalFileSystem;
+use qubit_local_files::options::{
+    LocalCreateDirectoryOptions, LocalWriteMode, LocalWriteOptions,
+};
+use qubit_local_files::outcome::LocalWriterState;
+
+let mut filesystem = LocalFileSystem::host()?;
+filesystem.set_default_create_directory_options(
+    LocalCreateDirectoryOptions::new().with_recursive(),
+)?;
+filesystem.set_default_write_options(LocalWriteOptions::new(
+    LocalWriteMode::CreateOrReplace,
+))?;
+
+let output = std::path::Path::new("build/output");
+filesystem.create_directory(output)?;
+let path = output.join("manifest.json");
+let mut writer = filesystem.open_writer(&path)?;
+writer.write_fully(br#"{"complete":true}"#)?;
+let result = writer.commit()?;
+assert_eq!(result.state(), LocalWriterState::Committed);
+let mut bytes = Vec::new();
+Streams::copy_input_to_output(&mut filesystem.open_reader(&path)?, &mut bytes)?;
+let text = String::from_utf8(bytes)?;
+assert_eq!(text, r#"{"complete":true}"#);
+# Ok::<(), Box<dyn std::error::Error>>(())
+```
+
+多次系统调用使用的相对路径会在操作开始时绑定。复制和重命名会用同一个当前目录快照绑定
+源和目标。`metadata` 观察最终条目本身，不跟随最终符号链接。
+
+## 字节流协议与标准 I/O
+
+`LocalFileReader` 使用 `ByteInput`，并保留 `std::io::Seek`。
+`LocalFileWriter`、`LocalTempFile` 和内部原子 writer 使用 `ByteOutput`。这两个标记
+trait 会由 `Input<Item = u8>` 和 `Output<Item = u8>` 自动实现。
+这些对象使用 `Input::read_exactly` 和 `Output::write_fully`；标准 reader 可通过
+`into_std_read()` 适配。
+
+若标准 producer 写入后还要显式发布 writer，可使用借用适配器，并在提交前结束借用：
+
+```rust,no_run
+use qubit_io::{Output, OutputRef};
+use qubit_local_files::LocalFileSystem;
+
+let filesystem = LocalFileSystem::host()?;
+let mut writer = filesystem.open_writer(std::path::Path::new("report.txt"))?;
+{
+    let mut standard = OutputRef::new(&mut writer).into_std_write();
+    std::io::Write::write_all(&mut standard, b"report")?;
+    std::io::Write::flush(&mut standard)?;
+}
+writer.commit()?;
+# Ok::<(), Box<dyn std::error::Error>>(())
+```
+
+拥有型 `StdWrite<LocalFileWriter>` 可通过 `into_inner().commit()` 消耗包装器并取回 writer。
+适配器转换不会 flush 或 commit。`flush` 不会发布目标，也不提供 durable 同步。原生向量 I/O
+仍通过固有 `read_vectored` 和 `write_vectored` 方法提供。
+
+`LocalFileSystem` 是有状态的文件系统对象。`host()` 选择进程可见命名空间，但构造时
+不读取当前目录；Host 绝对路径从不依赖 PWD，相对路径在操作开始时捕获一次进程 PWD。
+`rooted(root)` 打开唯一目录 authority，将其映射为虚拟
+根 `/`，初始 PWD 为 `/`。两种形式都接受 namespace-absolute 路径以及相对于实例
+对应 PWD 的路径，并提供相同操作。reader、writer、walker 与临时条目都是拥有资源的有状态
+对象。`LocalFileNames` 和 `LocalPaths` 提供原生词法工具，不会把文件名强制转换为
+UTF-8。
+
+权限观测反映文件条目的原生元数据，不等于综合 ACL、挂载策略等因素后调用者实际拥有的
+访问权限。Unix 的 `unix_mode()` 保留观测到的权限位和特殊位；Windows 返回 `None`。
+`metadata()` 和目录遍历查看最终链接条目本身，reader 则报告已打开内容句柄的元数据。
+
 ## 操作契约
 
 `LocalFileSystem` 会在解析路径或修改文件系统前校验静态选项组合。复制失败会报告已证明的
@@ -19,12 +130,92 @@
 `read_all`、`read_text` 和一致性读取的结构化错误会保留解析后的命名空间路径；相对路径还会保留
 本次请求使用的 PWD 快照。
 
-## 概念模型
+## 配置一次，显式覆盖
 
-```text
-Host 命名空间 ── LocalFileSystem::host() ── 操作时读取进程 PWD
-已打开根目录 ─── LocalFileSystem::rooted(root) ── 虚拟 / 与实例 PWD
+每个 Rooted filesystem 实例拥有自己的虚拟 PWD；Host 实例观察进程全局 PWD。每个实例
+都拥有符号链接策略，以及 read、write、list、copy、
+create-directory、delete、rename、temporary-file 和 temporary-directory 九种默认
+Options。调用方可以通过 `set_default_*_options` 一次配置，然后使用普通操作方法。
+
+`open_reader_with_options` 和 `read_prefix_with_options` 使用传入的
+`LocalReadOptions` 完整替代 `defaults.read`。组合操作 `open_observed_reader`、
+`read_all_with_options` 和 `read_text_with_options` 接受可选的嵌套读取选项：存在时完整替代
+`defaults.read`，缺少时继承它。Snapshot builder 自行创建 `LocalReadOptions::new()`，不继承
+`defaults.read`。其它操作各自的 `*_with_options` 方法仍以传入 Options 完整替代相应实例默认值。
+这些规则都不在不同 Options 值之间逐字段合并。若要保留默认值中的其它字段，应先显式复制相关默认值、
+修改副本，再传入。
+
+链接策略按以下顺序确定：外层操作显式指定的策略优先，其次是所选嵌套读取选项的
+`symlink_policy`，最后才是 filesystem 实例策略。Rooted 会在 I/O 前拒绝
+`FollowAcrossScope`。目录子 handle 的拒绝组件名称与父 handle 的集合取并集；子 handle
+不能解除父级限制，包括通过 `.` 打开时。筛选只作用于绑定输入和解析路径时遇到的组件；递归列表和复制仍可能发现并复制被拒绝名称。该策略不隔离私有子树，也不防护并发重命名。
+
+例如，若 `defaults.read` 设置了 `open_retry_timeout`，`read_all_with_options` 未提供嵌套读取选项时
+会继承该 timeout。调用 `LocalReadAllOptions::new().with_read_options(LocalReadOptions::new())` 则会
+完整替代读取默认值并清除该 timeout；`LocalReadAllOptions` 的其它字段仍然生效。
+
+```rust,no_run
+use qubit_local_files::LocalFileSystem;
+use qubit_local_files::options::LocalListOptions;
+
+let mut filesystem = LocalFileSystem::rooted(std::path::Path::new("/srv/app"))?;
+filesystem.set_current_directory(std::path::Path::new("/assets"))?;
+filesystem.set_default_list_options(
+    LocalListOptions::new().with_recursive().with_max_entries(10_000),
+)?;
+
+let default_walk = filesystem.list(std::path::Path::new("."))?;
+let one_level = filesystem.list_with_options(
+    std::path::Path::new("."),
+    &LocalListOptions::new(),
+)?;
+# drop((default_walk, one_level));
+# Ok::<(), Box<dyn std::error::Error>>(())
 ```
+
+初始 Options 不包含隐藏的业务资源上限。遍历和复制预算、重试时长、deadline 与临时名称
+尝试次数，只有调用方显式设置后才生效。clone filesystem 会复制 Rooted 虚拟 PWD 与全部配置；
+Host clone 继续观察同一进程 PWD；
+Rooted clone 只共享不可变的已打开 authority。本 crate 不承诺共享可变配置时的同步；
+调用方应每线程持有一个 clone，或自行添加同步包装。
+
+## 符号链接策略
+
+`LocalFileSystem` 实例保存一个由所有操作继承的符号链接策略。
+`LocalFileSystem::rooted(root)` 默认使用 `FollowWithinScope`：允许跟随链接，
+但解析结果必须仍位于已打开的 root 内。Host 默认使用 `FollowAcrossScope`，因为
+Host 没有更窄的 root 边界。Rooted 仅支持 `Reject` 和 `FollowWithinScope`；配置
+`FollowAcrossScope` 会返回 `InvalidOptions`。可失败的 `set_symlink_policy` 以及
+`list`、`copy` options 可以选择受支持的策略。
+
+策略作用于所有中间路径组件。Rooted 使用 `FollowWithinScope` 时，像
+`etc/link/config` 这样的路径若通过 `link` 越出已打开 root，会返回 `InvalidPath`。
+`FollowAcrossScope` 仅适用于 Host。Rooted 中以 `/` 开始的链接目标会从虚拟根重新
+开始，而不是从 Host 根开始。`.` 与 `..` 在链接目标中保留原生词法语义，但 `..`
+一旦越过虚拟根就返回 `InvalidPath`。
+
+最终路径组件遵循真实文件系统中的操作语义：
+
+| 操作 | 最终符号链接 |
+| --- | --- |
+| `metadata` | 查看链接条目本身。 |
+| `open_reader` | 有效策略允许时跟随内容目标；使用 `Reject` 时返回错误。 |
+| `CreateNew` writer | 将已有链接视为已存在条目。 |
+| `Append` writer | 跟随链接追加到目标。 |
+| `CreateOrReplace` writer | 跟随链接替换目标，并保留链接。 |
+| `delete_file` | 删除链接条目本身，包括指向目录的链接。 |
+| `delete_directory` | 最终条目是链接时返回 `NotDirectory`。 |
+| `rename` | 移动或替换链接条目。 |
+| `copy` 源 | 复制链接条目本身。 |
+| `copy` 目标 | 替换目标链接条目。 |
+| `temp persist` | 通过 rename 发布并替换目标链接条目。 |
+
+Reader 和 writer 最终只接受普通文件内容。即使策略允许跟随链接，其目标也必须是普通文件；
+目录和特殊文件都会被拒绝。
+
+目录遍历在有效策略允许时跟随目录链接。返回路径保持逻辑路径，例如 `link/child`，而不
+是规范化后的目标路径；递归遍历按底层目录对象身份检测循环。深度限制按逻辑路径条目计算，
+穿过链接不会额外增加一层。
 
 ## 快照、固定目录与私有临时数据
 
@@ -68,7 +259,24 @@ opaque identity，不含权限句柄；重新操作前须通过同一个 parent 
 | Some(policy) | `Preserve` | 应用精确 owner policy，仍受平台能力和值校验约束 |
 | Some(policy) | 非 `Preserve` | 在开始修改前返回 `InvalidOptions`；不发布并交还 stage |
 
-冲突由 `publish_new` 检查，构造 options 时不会报错。下面的函数展示如何读取失败状态并显式清理 stage；调用时传入像前面的目录备份示例那样打开的 `parent`：
+冲突由 `publish_new` 检查，构造 options 时不会报错。下面的函数展示如何读取失败状态并显式清理 stage。应用先提供一个已经存在的目录作为 `root`，打开 Rooted authority，再把得到的 `parent` 传给这个函数：
+
+```rust
+use std::path::Path;
+use qubit_local_files::LocalFileSystem;
+use qubit_local_files::directory::LocalDirectoryHandle;
+use qubit_local_files::options::LocalDirectoryOpenOptions;
+
+fn open_backup_parent(root: &Path) -> Result<LocalDirectoryHandle, Box<dyn std::error::Error>> {
+    let filesystem = LocalFileSystem::rooted(root)?;
+    Ok(filesystem.open_directory_with_options(
+        Path::new("/"), &LocalDirectoryOpenOptions::new(),
+    )?)
+}
+```
+
+调用顺序是先执行 `let parent = open_backup_parent(root)?;`，再调用
+`reject_conflicting_publish(&parent)?;`。准备函数只打开 handle，本身没有运行或验证发布流程。
 
 ```rust
 use std::ffi::OsStr;
@@ -295,197 +503,6 @@ create_backup(&parent)?;
 自行恢复，不会自动删除。这两者的所有权合同不同。Windows Rooted `Content` 以及 Host `Content`
 配合 `UseStaging` 会在打开 writer 时返回 `Unsupported`，早于路径解析、父目录操作或 staging 创建。
 Host `Content` 配合 `PreserveExisting` 和有效 `Absent` 组合仍可用。
-
-## 字节流协议与标准 I/O
-
-`LocalFileReader` 使用 `ByteInput`，并保留 `std::io::Seek`。
-`LocalFileWriter`、`LocalTempFile` 和内部原子 writer 使用 `ByteOutput`。这两个标记
-trait 会由 `Input<Item = u8>` 和 `Output<Item = u8>` 自动实现。
-这些对象使用 `Input::read_exactly` 和 `Output::write_fully`；标准 reader 可通过
-`into_std_read()` 适配。
-
-若标准 producer 写入后还要显式发布 writer，可使用借用适配器，并在提交前结束借用：
-
-```rust,no_run
-use qubit_io::{Output, OutputRef};
-use qubit_local_files::LocalFileSystem;
-
-let filesystem = LocalFileSystem::host()?;
-let mut writer = filesystem.open_writer(std::path::Path::new("report.txt"))?;
-{
-    let mut standard = OutputRef::new(&mut writer).into_std_write();
-    std::io::Write::write_all(&mut standard, b"report")?;
-    std::io::Write::flush(&mut standard)?;
-}
-writer.commit()?;
-# Ok::<(), Box<dyn std::error::Error>>(())
-```
-
-拥有型 `StdWrite<LocalFileWriter>` 可通过 `into_inner().commit()` 消耗包装器并取回 writer。
-适配器转换不会 flush 或 commit。`flush` 不会发布目标，也不提供 durable 同步。原生向量 I/O
-仍通过固有 `read_vectored` 和 `write_vectored` 方法提供。
-
-`LocalFileSystem` 是有状态的文件系统对象。`host()` 选择进程可见命名空间，但构造时
-不读取当前目录；Host 绝对路径从不依赖 PWD，相对路径在操作开始时捕获一次进程 PWD。
-`rooted(root)` 打开唯一目录 authority，将其映射为虚拟
-根 `/`，初始 PWD 为 `/`。两种形式都接受 namespace-absolute 路径以及相对于实例
-对应 PWD 的路径，并提供相同操作。reader、writer、walker 与临时条目都是拥有资源的有状态
-对象。`LocalFileNames` 和 `LocalPaths` 提供原生词法工具，不会把文件名强制转换为
-UTF-8。
-
-权限观测反映文件条目的原生元数据，不等于综合 ACL、挂载策略等因素后调用者实际拥有的
-访问权限。Unix 的 `unix_mode()` 保留观测到的权限位和特殊位；Windows 返回 `None`。
-`metadata()` 和目录遍历查看最终链接条目本身，reader 则报告已打开内容句柄的元数据。
-
-## 安装与最小配置
-
-在应用的 Cargo 清单中添加依赖：
-
-```toml
-[dependencies]
-qubit-local-files = "0.5.0"
-qubit-io = "0.19"
-```
-
-配置操作策略前，先选择权限范围。Host 模式使用进程可见的命名空间；Rooted 模式打开一个
-已存在目录并将其映射为虚拟 `/`。权限句柄打开后，构造时传入的 Host 路径只用于诊断。
-
-```rust,no_run
-use std::path::Path;
-
-use qubit_local_files::LocalFileSystem;
-
-let host = LocalFileSystem::host()?;
-let rooted = LocalFileSystem::rooted(Path::new("workspace"))?;
-assert!(host.diagnostic_root().is_none());
-assert!(rooted.diagnostic_root().is_some());
-# Ok::<(), Box<dyn std::error::Error>>(())
-```
-
-## 配置一次，显式覆盖
-
-每个 Rooted filesystem 实例拥有自己的虚拟 PWD；Host 实例观察进程全局 PWD。每个实例
-都拥有符号链接策略，以及 read、write、list、copy、
-create-directory、delete、rename、temporary-file 和 temporary-directory 九种默认
-Options。调用方可以通过 `set_default_*_options` 一次配置，然后使用普通操作方法。
-
-`open_reader_with_options` 和 `read_prefix_with_options` 使用传入的
-`LocalReadOptions` 完整替代 `defaults.read`。组合操作 `open_observed_reader`、
-`read_all_with_options` 和 `read_text_with_options` 接受可选的嵌套读取选项：存在时完整替代
-`defaults.read`，缺少时继承它。Snapshot builder 自行创建 `LocalReadOptions::new()`，不继承
-`defaults.read`。其它操作各自的 `*_with_options` 方法仍以传入 Options 完整替代相应实例默认值。
-这些规则都不在不同 Options 值之间逐字段合并。若要保留默认值中的其它字段，应先显式复制相关默认值、
-修改副本，再传入。
-
-链接策略按以下顺序确定：外层操作显式指定的策略优先，其次是所选嵌套读取选项的
-`symlink_policy`，最后才是 filesystem 实例策略。Rooted 会在 I/O 前拒绝
-`FollowAcrossScope`。目录子 handle 的拒绝组件名称与父 handle 的集合取并集；子 handle
-不能解除父级限制，包括通过 `.` 打开时。筛选只作用于绑定输入和解析路径时遇到的组件；递归列表和复制仍可能发现并复制被拒绝名称。该策略不隔离私有子树，也不防护并发重命名。
-
-例如，若 `defaults.read` 设置了 `open_retry_timeout`，`read_all_with_options` 未提供嵌套读取选项时
-会继承该 timeout。调用 `LocalReadAllOptions::new().with_read_options(LocalReadOptions::new())` 则会
-完整替代读取默认值并清除该 timeout；`LocalReadAllOptions` 的其它字段仍然生效。
-
-```rust,no_run
-use qubit_local_files::LocalFileSystem;
-use qubit_local_files::options::LocalListOptions;
-
-let mut filesystem = LocalFileSystem::rooted(std::path::Path::new("/srv/app"))?;
-filesystem.set_current_directory(std::path::Path::new("/assets"))?;
-filesystem.set_default_list_options(
-    LocalListOptions::new().with_recursive().with_max_entries(10_000),
-)?;
-
-let default_walk = filesystem.list(std::path::Path::new("."))?;
-let one_level = filesystem.list_with_options(
-    std::path::Path::new("."),
-    &LocalListOptions::new(),
-)?;
-# drop((default_walk, one_level));
-# Ok::<(), Box<dyn std::error::Error>>(())
-```
-
-初始 Options 不包含隐藏的业务资源上限。遍历和复制预算、重试时长、deadline 与临时名称
-尝试次数，只有调用方显式设置后才生效。clone filesystem 会复制 Rooted 虚拟 PWD 与全部配置；
-Host clone 继续观察同一进程 PWD；
-Rooted clone 只共享不可变的已打开 authority。本 crate 不承诺共享可变配置时的同步；
-调用方应每线程持有一个 clone，或自行添加同步包装。
-
-## 符号链接策略
-
-`LocalFileSystem` 实例保存一个由所有操作继承的符号链接策略。
-`LocalFileSystem::rooted(root)` 默认使用 `FollowWithinScope`：允许跟随链接，
-但解析结果必须仍位于已打开的 root 内。Host 默认使用 `FollowAcrossScope`，因为
-Host 没有更窄的 root 边界。Rooted 仅支持 `Reject` 和 `FollowWithinScope`；配置
-`FollowAcrossScope` 会返回 `InvalidOptions`。可失败的 `set_symlink_policy` 以及
-`list`、`copy` options 可以选择受支持的策略。
-
-策略作用于所有中间路径组件。Rooted 使用 `FollowWithinScope` 时，像
-`etc/link/config` 这样的路径若通过 `link` 越出已打开 root，会返回 `InvalidPath`。
-`FollowAcrossScope` 仅适用于 Host。Rooted 中以 `/` 开始的链接目标会从虚拟根重新
-开始，而不是从 Host 根开始。`.` 与 `..` 在链接目标中保留原生词法语义，但 `..`
-一旦越过虚拟根就返回 `InvalidPath`。
-
-最终路径组件遵循真实文件系统中的操作语义：
-
-| 操作 | 最终符号链接 |
-| --- | --- |
-| `metadata` | 查看链接条目本身。 |
-| `open_reader` | 有效策略允许时跟随内容目标；使用 `Reject` 时返回错误。 |
-| `CreateNew` writer | 将已有链接视为已存在条目。 |
-| `Append` writer | 跟随链接追加到目标。 |
-| `CreateOrReplace` writer | 跟随链接替换目标，并保留链接。 |
-| `delete_file` | 删除链接条目本身，包括指向目录的链接。 |
-| `delete_directory` | 最终条目是链接时返回 `NotDirectory`。 |
-| `rename` | 移动或替换链接条目。 |
-| `copy` 源 | 复制链接条目本身。 |
-| `copy` 目标 | 替换目标链接条目。 |
-| `temp persist` | 通过 rename 发布并替换目标链接条目。 |
-
-Reader 和 writer 最终只接受普通文件内容。即使策略允许跟随链接，其目标也必须是普通文件；
-目录和特殊文件都会被拒绝。
-
-目录遍历在有效策略允许时跟随目录链接。返回路径保持逻辑路径，例如 `link/child`，而不
-是规范化后的目标路径；递归遍历按底层目录对象身份检测循环。深度限制按逻辑路径条目计算，
-穿过链接不会额外增加一层。
-
-## 场景：写入并检查导出产物
-
-导出程序需要创建 `build/output`，只在完整写入后发布 `manifest.json`，并读回结果。成功
-的可观察条件是 writer 返回 `Committed`，且能读取已经发布的字节。
-
-```rust,no_run
-use qubit_io::{Output, Streams};
-use qubit_local_files::LocalFileSystem;
-use qubit_local_files::options::{
-    LocalCreateDirectoryOptions, LocalWriteMode, LocalWriteOptions,
-};
-use qubit_local_files::outcome::LocalWriterState;
-
-let mut filesystem = LocalFileSystem::host()?;
-filesystem.set_default_create_directory_options(
-    LocalCreateDirectoryOptions::new().with_recursive(),
-)?;
-filesystem.set_default_write_options(LocalWriteOptions::new(
-    LocalWriteMode::CreateOrReplace,
-))?;
-
-let output = std::path::Path::new("build/output");
-filesystem.create_directory(output)?;
-let path = output.join("manifest.json");
-let mut writer = filesystem.open_writer(&path)?;
-writer.write_fully(br#"{"complete":true}"#)?;
-let result = writer.commit()?;
-assert_eq!(result.state(), LocalWriterState::Committed);
-let mut bytes = Vec::new();
-Streams::copy_input_to_output(&mut filesystem.open_reader(&path)?, &mut bytes)?;
-let text = String::from_utf8(bytes)?;
-assert_eq!(text, r#"{"complete":true}"#);
-# Ok::<(), Box<dyn std::error::Error>>(())
-```
-
-多次系统调用使用的相对路径会在操作开始时绑定。复制和重命名会用同一个当前目录快照绑定
-源和目标。`metadata` 观察最终条目本身，不跟随最终符号链接。
 
 ## 条件写入
 
@@ -1282,6 +1299,8 @@ Windows Rooted 条件 `Content` 发布仍为 `Unsupported`。Windows 尚未证�
 namespace-absolute 主/目标路径、操作使用的 PWD snapshot，以及可选的 typed source。
 物理路径只作为可选诊断信息，绝不定义 Rooted authority。发布操作用专门失败类型保存部分
 成功状态。
+
+`LocalFileSnapshot` 的 `Debug` 只输出有界摘要，包含字节数和前后观测，不会打印文件正文；需要内容时使用 `bytes()` 或 `into_bytes()`。observed reader 返回的结构化错误会带上打开时记录的路径和 PWD。若失败操作已经提供更具体的路径，补充诊断信息时会保留它。路径和 PWD 都只是诊断坐标快照：它们不会锁定路径、授予访问权限，也不保证重命名后该名称仍指向已打开的对象。
 
 `LocalPersistError` 同时保留临时资源和结构化的 `LocalFileError`；其 `state()` 报告本次发布，`source_state()` 保存源资格快照；
 完整恢复须同时检查两者，操作资源后再读取其当前 `source_state()`。存在原生 I/O 错误时，可从结构化错误的 source 取得。

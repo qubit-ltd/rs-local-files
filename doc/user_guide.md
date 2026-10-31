@@ -13,6 +13,129 @@ API, or a replacement for provider-level logical paths. The crate is
 synchronous; async applications should call it from an appropriate blocking
 execution context.
 
+## Installation and Minimal Configuration
+
+Add the crate to the application manifest:
+
+```toml
+[dependencies]
+qubit-local-files = "0.5.0"
+qubit-io = "0.19"
+```
+
+Choose the authority before configuring operation policy. Host mode uses the
+process-visible namespace. Rooted mode opens one existing directory and treats
+it as virtual `/`; the constructor path is only a Host-side diagnostic after
+the authority is open.
+
+```rust,no_run
+use std::path::Path;
+
+use qubit_local_files::LocalFileSystem;
+
+let host = LocalFileSystem::host()?;
+let rooted = LocalFileSystem::rooted(Path::new("workspace"))?;
+assert!(host.diagnostic_root().is_none());
+assert!(rooted.diagnostic_root().is_some());
+# Ok::<(), Box<dyn std::error::Error>>(())
+```
+
+## Conceptual Model
+
+```text
+Host namespace ── LocalFileSystem::host() ── operation-time process PWD
+opened root ───── LocalFileSystem::rooted(root) ── virtual / and instance PWD
+```
+
+## Scenario: write and inspect an export
+
+An exporter must create `build/output`, publish `manifest.json` only after a
+complete write, and inspect the result. The observable success condition is a
+`Committed` writer outcome and the bytes read back from the published file.
+
+```rust,no_run
+use qubit_io::{Output, Streams};
+use qubit_local_files::LocalFileSystem;
+use qubit_local_files::options::{
+    LocalCreateDirectoryOptions, LocalWriteMode, LocalWriteOptions,
+};
+use qubit_local_files::outcome::LocalWriterState;
+
+let mut filesystem = LocalFileSystem::host()?;
+filesystem.set_default_create_directory_options(
+    LocalCreateDirectoryOptions::new().with_recursive(),
+)?;
+filesystem.set_default_write_options(LocalWriteOptions::new(
+    LocalWriteMode::CreateOrReplace,
+))?;
+
+let output = std::path::Path::new("build/output");
+filesystem.create_directory(output)?;
+let path = output.join("manifest.json");
+let mut writer = filesystem.open_writer(&path)?;
+writer.write_fully(br#"{"complete":true}"#)?;
+let result = writer.commit()?;
+assert_eq!(result.state(), LocalWriterState::Committed);
+let mut bytes = Vec::new();
+Streams::copy_input_to_output(&mut filesystem.open_reader(&path)?, &mut bytes)?;
+let text = String::from_utf8(bytes)?;
+assert_eq!(text, r#"{"complete":true}"#);
+# Ok::<(), Box<dyn std::error::Error>>(())
+```
+
+Relative paths used by a multi-call operation are bound when that operation
+starts. Copy and rename bind source and target from one current-directory
+snapshot. `metadata` observes the final entry without following a final
+symbolic link.
+
+## Byte stream protocols and standard I/O
+
+`LocalFileReader` uses `ByteInput` and retains `std::io::Seek`.
+`LocalFileWriter`, `LocalTempFile`, and the internal atomic writers use
+`ByteOutput`. These marker traits are implemented automatically for
+`Input<Item = u8>` and `Output<Item = u8>`, which provide `read_exactly` and
+`write_fully`. Standard readers can be adapted with `into_std_read()`.
+
+For a standard producer that must leave the writer available for publication,
+use a borrowed adapter and end its scope before committing:
+
+```rust,no_run
+use qubit_io::{Output, OutputRef};
+use qubit_local_files::LocalFileSystem;
+
+let filesystem = LocalFileSystem::host()?;
+let mut writer = filesystem.open_writer(std::path::Path::new("report.txt"))?;
+{
+    let mut standard = OutputRef::new(&mut writer).into_std_write();
+    std::io::Write::write_all(&mut standard, b"report")?;
+    std::io::Write::flush(&mut standard)?;
+}
+writer.commit()?;
+# Ok::<(), Box<dyn std::error::Error>>(())
+```
+
+An owned `StdWrite<LocalFileWriter>` can instead be consumed with
+`into_inner().commit()`. Adapter conversion does not flush or commit. `flush`
+does not publish the destination and does not provide durable synchronization.
+The native vectored paths remain available as inherent `read_vectored` and
+`write_vectored` methods.
+
+`LocalFileSystem` is a stateful filesystem object. `host()` selects the
+process-visible namespace without reading the current directory. An absolute
+Host path never requires it; a relative Host path captures one process-PWD
+snapshot when its operation begins.
+`rooted(root)` opens one directory authority, gives it the virtual root `/`,
+and starts with PWD `/`. Both forms accept namespace-absolute paths and paths
+relative to the applicable PWD, and expose the same operations. Readers, writers,
+walkers, and temporary entries are owned stateful resources. `LocalFileNames`
+and `LocalPaths` provide native lexical utilities without converting names to
+UTF-8.
+
+Permission observations describe native entry metadata, not the caller's effective access after
+ACLs, mount policy, or other operating-system checks. On Unix, `unix_mode()` preserves the observed
+permission and special bits; on Windows it returns `None`. `metadata()` and listing inspect the final
+link entry, while a reader reports metadata from its opened content handle.
+
 ## Operational contracts
 
 `LocalFileSystem` validates static option combinations before resolving or
@@ -23,12 +146,114 @@ keeps the outer `Read` operation even when opening the reader failed.
 `read_all`, `read_text`, and consistent reads retain the bound namespace path
 and the PWD snapshot used for a relative request in structured read errors.
 
-## Conceptual Model
+## Configure Once, Override Deliberately
 
-```text
-Host namespace ── LocalFileSystem::host() ── operation-time process PWD
-opened root ───── LocalFileSystem::rooted(root) ── virtual / and instance PWD
+Each Rooted instance owns a virtual PWD. Host instances instead observe the
+process-global PWD. Every instance owns its symbolic-link policy and defaults for
+read, write, list, copy, create-directory, delete, rename, temporary-file, and
+temporary-directory operations. Configure those values once with the
+`set_default_*_options` methods and then use ordinary operation methods.
+
+`open_reader_with_options` and `read_prefix_with_options` use their supplied
+`LocalReadOptions` as a complete replacement for `defaults.read`. The combined
+`open_observed_reader`, `read_all_with_options`, and `read_text_with_options`
+operations accept optional nested read options: a present value completely
+replaces `defaults.read`, while an absent value inherits it. Snapshot builders
+create their own `LocalReadOptions::new()` and do not inherit `defaults.read`.
+Other operation-specific `*_with_options` methods use their supplied options
+as a complete replacement. These rules do not merge fields between option
+values. To change one field while retaining others, clone the relevant default,
+change the clone, and pass it explicitly.
+
+For link handling, an explicit outer-operation policy takes precedence over
+the selected nested read option's `symlink_policy`, which takes precedence over
+the filesystem instance policy. Rooted rejects `FollowAcrossScope` before I/O.
+Directory child handles combine denied component names with the parent's set;
+a child cannot remove a parent's restriction, including when opened as `.`. The
+filter applies to input names and components resolved while binding the handle.
+Recursive listing and copy can still discover and copy denied names; this does
+not isolate a private subtree or protect against concurrent renames.
+
+For example, if `defaults.read` sets `open_retry_timeout`, omitting nested read
+options from `read_all_with_options` inherits that timeout. Passing
+`LocalReadAllOptions::new().with_read_options(LocalReadOptions::new())` clears
+it because the nested value replaces the whole read-options value; other
+`LocalReadAllOptions` fields remain in effect.
+
+```rust,no_run
+use qubit_local_files::LocalFileSystem;
+use qubit_local_files::options::LocalListOptions;
+
+let mut filesystem = LocalFileSystem::rooted(std::path::Path::new("/srv/app"))?;
+filesystem.set_current_directory(std::path::Path::new("/assets"))?;
+filesystem.set_default_list_options(
+    LocalListOptions::new().with_recursive().with_max_entries(10_000),
+)?;
+
+let default_walk = filesystem.list(std::path::Path::new("."))?;
+let one_level = filesystem.list_with_options(
+    std::path::Path::new("."),
+    &LocalListOptions::new(),
+)?;
+# drop((default_walk, one_level));
+# Ok::<(), Box<dyn std::error::Error>>(())
 ```
+
+The initial Options contain no hidden business resource caps. Traversal and
+copy budgets, retry durations, deadlines, and temporary-name attempt limits
+apply only when the caller sets them. Cloning snapshots a Rooted virtual PWD
+and all configuration; Host clones continue to observe the same process PWD.
+Rooted clones share only the immutable opened authority.
+The crate does not promise synchronization for shared mutable configuration.
+Use one clone per thread or add a caller-owned synchronization wrapper.
+
+## Symbolic-link policy
+
+`LocalFileSystem` stores one symbolic-link policy inherited by all operations.
+`LocalFileSystem::rooted(root)` defaults to `FollowWithinScope`; it follows
+links only while the resolved path remains below the opened root. Host defaults
+to `FollowAcrossScope`, because Host has no narrower root boundary. Rooted
+supports only `Reject` and `FollowWithinScope`; configuring
+`FollowAcrossScope` returns `InvalidOptions`. The fallible
+`set_symlink_policy` method and list/copy options can select a supported policy.
+
+The policy applies to every non-final path component. With
+`FollowWithinScope`, a rooted path such as `etc/link/config` is rejected when
+`link` resolves outside the opened directory. `FollowAcrossScope` is available
+only in Host mode. A Rooted link target beginning with `/` restarts at the
+Rooted virtual root, not at the Host root. `.` and `..` in link targets retain
+their native lexical meaning, but resolving `..` across the virtual root
+returns `InvalidPath`.
+
+Final components retain native operation semantics:
+
+| Operation | Final symbolic link |
+| --- | --- |
+| `metadata` | Inspects the link entry itself. |
+| `open_reader` | Follows the content target when the effective policy permits it; `Reject` returns an error. |
+| `CreateNew` writer | Treats an existing link as an existing entry. |
+| `Append` writer | Follows the link and appends to its target. |
+| `CreateOrReplace` writer | Follows the link, replaces its target, and preserves the link. |
+| `delete_file` | Removes the link entry itself, including a link to a directory. |
+| `delete_directory` | Rejects a final link with `NotDirectory`. |
+| `rename` | Moves or replaces the link entry. |
+| `copy` source | Copies the link entry itself. |
+| `copy` target | Replaces the target link entry. |
+| `temp persist` | Publishes by rename and replaces the target link entry. |
+
+Readers and writers accept only regular-file content targets. A permitted link
+must resolve to a regular file; directories and special files are rejected.
+
+Listing follows directory links when the effective policy allows it. Returned
+paths remain logical paths through the link (for example, `link/child`), and
+recursive traversal detects directory-identity cycles. Depth counts logical
+entries; crossing a link does not add another level.
+When descent is not allowed, listing returns the link entry from its own
+metadata without resolving its target; this includes dangling links in a
+non-recursive Host listing. Recursive follow attempts can report dangling or
+out-of-scope links. With `Continue`, a local child-open error is yielded and
+other safe siblings remain available; global budget or deadline exhaustion
+still terminates the walk.
 
 ## Snapshots, fixed directories, and private temporary data
 
@@ -95,8 +320,27 @@ never clears the other one. Use one of these combinations:
 | Some(policy) | Any non-`Preserve` value | `InvalidOptions` before mutation; publication does not occur and the stage is returned |
 
 The conflict is checked by `publish_new`, not by either builder. The following
-routine demonstrates the failure and an explicit cleanup path. It can be
-called after opening `parent` as in the backup example above:
+routine demonstrates the failure and an explicit cleanup path. The application
+must supply an existing directory as `root`; open its Rooted authority first,
+then pass the returned `parent` to this routine:
+
+```rust
+use std::path::Path;
+use qubit_local_files::LocalFileSystem;
+use qubit_local_files::directory::LocalDirectoryHandle;
+use qubit_local_files::options::LocalDirectoryOpenOptions;
+
+fn open_backup_parent(root: &Path) -> Result<LocalDirectoryHandle, Box<dyn std::error::Error>> {
+    let filesystem = LocalFileSystem::rooted(root)?;
+    Ok(filesystem.open_directory_with_options(
+        Path::new("/"), &LocalDirectoryOpenOptions::new(),
+    )?)
+}
+```
+
+Call `let parent = open_backup_parent(root)?;` and then
+`reject_conflicting_publish(&parent)?;`. The function above only prepares the
+handle; it does not run or verify the publication workflow.
 
 ```rust
 use std::ffi::OsStr;
@@ -363,231 +607,6 @@ conditional-write `LocalRecoveryFile` values are retained for caller-directed
 recovery and are not automatically deleted. These are different ownership
 contracts. Windows Rooted content-conditional replacement remains unsupported;
 the crate does not claim otherwise.
-
-## Byte stream protocols and standard I/O
-
-`LocalFileReader` uses `ByteInput` and retains `std::io::Seek`.
-`LocalFileWriter`, `LocalTempFile`, and the internal atomic writers use
-`ByteOutput`. These marker traits are implemented automatically for
-`Input<Item = u8>` and `Output<Item = u8>`, which provide `read_exactly` and
-`write_fully`. Standard readers can be adapted with `into_std_read()`.
-
-For a standard producer that must leave the writer available for publication,
-use a borrowed adapter and end its scope before committing:
-
-```rust,no_run
-use qubit_io::{Output, OutputRef};
-use qubit_local_files::LocalFileSystem;
-
-let filesystem = LocalFileSystem::host()?;
-let mut writer = filesystem.open_writer(std::path::Path::new("report.txt"))?;
-{
-    let mut standard = OutputRef::new(&mut writer).into_std_write();
-    std::io::Write::write_all(&mut standard, b"report")?;
-    std::io::Write::flush(&mut standard)?;
-}
-writer.commit()?;
-# Ok::<(), Box<dyn std::error::Error>>(())
-```
-
-An owned `StdWrite<LocalFileWriter>` can instead be consumed with
-`into_inner().commit()`. Adapter conversion does not flush or commit. `flush`
-does not publish the destination and does not provide durable synchronization.
-The native vectored paths remain available as inherent `read_vectored` and
-`write_vectored` methods.
-
-`LocalFileSystem` is a stateful filesystem object. `host()` selects the
-process-visible namespace without reading the current directory. An absolute
-Host path never requires it; a relative Host path captures one process-PWD
-snapshot when its operation begins.
-`rooted(root)` opens one directory authority, gives it the virtual root `/`,
-and starts with PWD `/`. Both forms accept namespace-absolute paths and paths
-relative to the applicable PWD, and expose the same operations. Readers, writers,
-walkers, and temporary entries are owned stateful resources. `LocalFileNames`
-and `LocalPaths` provide native lexical utilities without converting names to
-UTF-8.
-
-Permission observations describe native entry metadata, not the caller's effective access after
-ACLs, mount policy, or other operating-system checks. On Unix, `unix_mode()` preserves the observed
-permission and special bits; on Windows it returns `None`. `metadata()` and listing inspect the final
-link entry, while a reader reports metadata from its opened content handle.
-
-## Installation and Minimal Configuration
-
-Add the crate to the application manifest:
-
-```toml
-[dependencies]
-qubit-local-files = "0.5.0"
-qubit-io = "0.19"
-```
-
-Choose the authority before configuring operation policy. Host mode uses the
-process-visible namespace. Rooted mode opens one existing directory and treats
-it as virtual `/`; the constructor path is only a Host-side diagnostic after
-the authority is open.
-
-```rust,no_run
-use std::path::Path;
-
-use qubit_local_files::LocalFileSystem;
-
-let host = LocalFileSystem::host()?;
-let rooted = LocalFileSystem::rooted(Path::new("workspace"))?;
-assert!(host.diagnostic_root().is_none());
-assert!(rooted.diagnostic_root().is_some());
-# Ok::<(), Box<dyn std::error::Error>>(())
-```
-
-## Configure Once, Override Deliberately
-
-Each Rooted instance owns a virtual PWD. Host instances instead observe the
-process-global PWD. Every instance owns its symbolic-link policy and defaults for
-read, write, list, copy, create-directory, delete, rename, temporary-file, and
-temporary-directory operations. Configure those values once with the
-`set_default_*_options` methods and then use ordinary operation methods.
-
-`open_reader_with_options` and `read_prefix_with_options` use their supplied
-`LocalReadOptions` as a complete replacement for `defaults.read`. The combined
-`open_observed_reader`, `read_all_with_options`, and `read_text_with_options`
-operations accept optional nested read options: a present value completely
-replaces `defaults.read`, while an absent value inherits it. Snapshot builders
-create their own `LocalReadOptions::new()` and do not inherit `defaults.read`.
-Other operation-specific `*_with_options` methods use their supplied options
-as a complete replacement. These rules do not merge fields between option
-values. To change one field while retaining others, clone the relevant default,
-change the clone, and pass it explicitly.
-
-For link handling, an explicit outer-operation policy takes precedence over
-the selected nested read option's `symlink_policy`, which takes precedence over
-the filesystem instance policy. Rooted rejects `FollowAcrossScope` before I/O.
-Directory child handles combine denied component names with the parent's set;
-a child cannot remove a parent's restriction, including when opened as `.`. The
-filter applies to input names and components resolved while binding the handle.
-Recursive listing and copy can still discover and copy denied names; this does
-not isolate a private subtree or protect against concurrent renames.
-
-For example, if `defaults.read` sets `open_retry_timeout`, omitting nested read
-options from `read_all_with_options` inherits that timeout. Passing
-`LocalReadAllOptions::new().with_read_options(LocalReadOptions::new())` clears
-it because the nested value replaces the whole read-options value; other
-`LocalReadAllOptions` fields remain in effect.
-
-```rust,no_run
-use qubit_local_files::LocalFileSystem;
-use qubit_local_files::options::LocalListOptions;
-
-let mut filesystem = LocalFileSystem::rooted(std::path::Path::new("/srv/app"))?;
-filesystem.set_current_directory(std::path::Path::new("/assets"))?;
-filesystem.set_default_list_options(
-    LocalListOptions::new().with_recursive().with_max_entries(10_000),
-)?;
-
-let default_walk = filesystem.list(std::path::Path::new("."))?;
-let one_level = filesystem.list_with_options(
-    std::path::Path::new("."),
-    &LocalListOptions::new(),
-)?;
-# drop((default_walk, one_level));
-# Ok::<(), Box<dyn std::error::Error>>(())
-```
-
-The initial Options contain no hidden business resource caps. Traversal and
-copy budgets, retry durations, deadlines, and temporary-name attempt limits
-apply only when the caller sets them. Cloning snapshots a Rooted virtual PWD
-and all configuration; Host clones continue to observe the same process PWD.
-Rooted clones share only the immutable opened authority.
-The crate does not promise synchronization for shared mutable configuration.
-Use one clone per thread or add a caller-owned synchronization wrapper.
-
-## Symbolic-link policy
-
-`LocalFileSystem` stores one symbolic-link policy inherited by all operations.
-`LocalFileSystem::rooted(root)` defaults to `FollowWithinScope`; it follows
-links only while the resolved path remains below the opened root. Host defaults
-to `FollowAcrossScope`, because Host has no narrower root boundary. Rooted
-supports only `Reject` and `FollowWithinScope`; configuring
-`FollowAcrossScope` returns `InvalidOptions`. The fallible
-`set_symlink_policy` method and list/copy options can select a supported policy.
-
-The policy applies to every non-final path component. With
-`FollowWithinScope`, a rooted path such as `etc/link/config` is rejected when
-`link` resolves outside the opened directory. `FollowAcrossScope` is available
-only in Host mode. A Rooted link target beginning with `/` restarts at the
-Rooted virtual root, not at the Host root. `.` and `..` in link targets retain
-their native lexical meaning, but resolving `..` across the virtual root
-returns `InvalidPath`.
-
-Final components retain native operation semantics:
-
-| Operation | Final symbolic link |
-| --- | --- |
-| `metadata` | Inspects the link entry itself. |
-| `open_reader` | Follows the content target when the effective policy permits it; `Reject` returns an error. |
-| `CreateNew` writer | Treats an existing link as an existing entry. |
-| `Append` writer | Follows the link and appends to its target. |
-| `CreateOrReplace` writer | Follows the link, replaces its target, and preserves the link. |
-| `delete_file` | Removes the link entry itself, including a link to a directory. |
-| `delete_directory` | Rejects a final link with `NotDirectory`. |
-| `rename` | Moves or replaces the link entry. |
-| `copy` source | Copies the link entry itself. |
-| `copy` target | Replaces the target link entry. |
-| `temp persist` | Publishes by rename and replaces the target link entry. |
-
-Readers and writers accept only regular-file content targets. A permitted link
-must resolve to a regular file; directories and special files are rejected.
-
-Listing follows directory links when the effective policy allows it. Returned
-paths remain logical paths through the link (for example, `link/child`), and
-recursive traversal detects directory-identity cycles. Depth counts logical
-entries; crossing a link does not add another level.
-When descent is not allowed, listing returns the link entry from its own
-metadata without resolving its target; this includes dangling links in a
-non-recursive Host listing. Recursive follow attempts can report dangling or
-out-of-scope links. With `Continue`, a local child-open error is yielded and
-other safe siblings remain available; global budget or deadline exhaustion
-still terminates the walk.
-
-## Scenario: write and inspect an export
-
-An exporter must create `build/output`, publish `manifest.json` only after a
-complete write, and inspect the result. The observable success condition is a
-`Committed` writer outcome and the bytes read back from the published file.
-
-```rust,no_run
-use qubit_io::{Output, Streams};
-use qubit_local_files::LocalFileSystem;
-use qubit_local_files::options::{
-    LocalCreateDirectoryOptions, LocalWriteMode, LocalWriteOptions,
-};
-use qubit_local_files::outcome::LocalWriterState;
-
-let mut filesystem = LocalFileSystem::host()?;
-filesystem.set_default_create_directory_options(
-    LocalCreateDirectoryOptions::new().with_recursive(),
-)?;
-filesystem.set_default_write_options(LocalWriteOptions::new(
-    LocalWriteMode::CreateOrReplace,
-))?;
-
-let output = std::path::Path::new("build/output");
-filesystem.create_directory(output)?;
-let path = output.join("manifest.json");
-let mut writer = filesystem.open_writer(&path)?;
-writer.write_fully(br#"{"complete":true}"#)?;
-let result = writer.commit()?;
-assert_eq!(result.state(), LocalWriterState::Committed);
-let mut bytes = Vec::new();
-Streams::copy_input_to_output(&mut filesystem.open_reader(&path)?, &mut bytes)?;
-let text = String::from_utf8(bytes)?;
-assert_eq!(text, r#"{"complete":true}"#);
-# Ok::<(), Box<dyn std::error::Error>>(())
-```
-
-Relative paths used by a multi-call operation are bound when that operation
-starts. Copy and rename bind source and target from one current-directory
-snapshot. `metadata` observes the final entry without following a final
-symbolic link.
 
 ## Conditional write
 
@@ -1605,6 +1624,14 @@ namespace-absolute primary and target paths when available, the operation's PWD
 snapshot, and an optional typed source. Physical paths are optional diagnostics
 and never define Rooted authority. Publication operations use dedicated failure
 types to preserve partial-success state.
+
+`LocalFileSnapshot` implements a bounded `Debug` summary that reports its byte
+length and observations without printing the file body; use `bytes()` or
+`into_bytes()` when the contents are needed. Structured errors from an observed
+reader retain the path and PWD coordinates captured when it was opened. A more
+specific path already supplied by the failing operation is preserved. These
+coordinates are diagnostic snapshots: they do not lock a path, grant access,
+or guarantee that the name still refers to the opened object after a rename.
 
 `LocalPersistError` retains the temporary resource and its structured
 `LocalFileError`; `state()` reports this call's publication and `source_state()` snapshots source

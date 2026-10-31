@@ -157,7 +157,8 @@ Reader 和 writer 只接受普通文件；目录和特殊文件会被拒绝，�
 `read_prefix_with_options` 使用传入的完整 `LocalReadOptions`。对于
 `open_observed_reader`、`read_all_with_options` 和 `read_text_with_options`，存在可选的嵌套
 `LocalReadOptions` 时会完整替代 `defaults.read`，缺少时则继承它；snapshot builder 使用自己的
-默认读取选项。clone 会复制全部可变状态，Rooted clone 只共享不可变的已打开
+默认读取选项。Snapshot options 从 `LocalReadOptions::new()` 开始，不继承 filesystem defaults；
+若要沿用默认读取策略，需显式复制配置。clone 会复制全部可变状态，Rooted clone 只共享不可变的已打开
 authority。本 crate 不承诺共享可变配置时的线程安全；调用方可以每线程持有一个 clone，
 也可以自行添加同步包装。Host 实例的 `set_current_directory` 修改进程全局当前目录；
 Rooted 实例的同名方法只修改该实例。
@@ -250,7 +251,7 @@ T3/T4 的 Windows 清理和条件写入行为，以及 LF-09 私有资源和 LF-
 本 crate CI 只验证当前 crate；
 adapter 兼容性由 adapter 仓库或独立集成 job 负责。FreeBSD 暂不支持：当前原生检查只覆盖编译和少量兼容性合同，
 不再运行完整行为测试套件。各 API 失败用例及原因见 [FreeBSD 兼容性说明](doc/freebsd-compatibility.zh_CN.md)。
-Android 仍配置为编译检查。
+Android 仍配置为编译检查。RLF2-Q02 已证实并修复；RLF2-Q01 与 RLF2-Q03 缺少 Windows 原生环境，仍未验证。详见[用户指南中的观测要求与累计计数](doc/user_guide.zh_CN.md#观测要求与累计计数)。
 本 crate 不承诺这些目标上的运行时保证。`capabilities()` 只报告当前 build 是否实现了
 对应的完整操作协议，不会探测具体的运行时文件系统，也不声称证明底层硬件已经持久化数据；无法满足要求的原子性或耐久性时，
 会在命名空间变更前拒绝操作。条件写入支持范围取决于平台和 authority：
@@ -276,6 +277,7 @@ Android 仍配置为编译检查。
 - [User guide](doc/user_guide.md)
 - [FreeBSD 兼容性说明](doc/freebsd-compatibility.zh_CN.md)
 - [同步并发布完整暂存目录树](doc/user_guide.zh_CN.md#完整树同步后再耐久发布)
+- [观测要求与累计计数](doc/user_guide.zh_CN.md#观测要求与累计计数)
 - [用户手册](doc/user_guide.zh_CN.md)
 - [API 文档](https://docs.rs/qubit-local-files)
 - [English design document](doc/local_file_system_design.md)
@@ -315,4 +317,3 @@ Pull Request 前运行 `./.infra/bin/align-ci.sh`格式化代码，运行`./.inf
 **Haixing Hu** - *Qubit Co. Ltd.*
 
 仓库地址：[https://github.com/qubit-ltd/rs-local-files](https://github.com/qubit-ltd/rs-local-files)
-Snapshot options 从 `LocalReadOptions::new()` 开始，不继承 filesystem defaults。用户指南说明如何显式复制默认读取配置、观测要求以及累计写入计数迁移到 `u64`。RLF2-Q02 已证实并修复；RLF2-Q01 和 RLF2-Q03 缺 Windows 原生环境，尚未验证。详见[用户指南](doc/user_guide.zh_CN.md)。
