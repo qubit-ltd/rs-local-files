@@ -14,9 +14,8 @@ use qubit_local_files::error::LocalFileErrorKind;
 use qubit_local_files::error::LocalFileOperation;
 use qubit_local_files::error::LocalResult;
 use qubit_local_files::observation::LocalSecurityObservationOptions;
-use qubit_local_files::options::LocalCopyOptions;
 use qubit_local_files::options::LocalCopyConflictPolicy;
-use qubit_local_files::outcome::LocalCopyFailureState;
+use qubit_local_files::options::LocalCopyOptions;
 use qubit_local_files::options::LocalCreateDirectoryOptions;
 use qubit_local_files::options::LocalDirectoryOpenOptions;
 use qubit_local_files::options::LocalListOptions;
@@ -24,6 +23,7 @@ use qubit_local_files::options::LocalObservedReadOptions;
 use qubit_local_files::options::LocalPathBindingOptions;
 use qubit_local_files::options::LocalWriteMode;
 use qubit_local_files::options::LocalWriteOptions;
+use qubit_local_files::outcome::LocalCopyFailureState;
 use qubit_local_files::outcome::LocalFileKind;
 
 fn populated_directory() -> (tempfile::TempDir, LocalDirectoryHandle) {
@@ -165,8 +165,7 @@ fn directory_handle_creates_writes_and_copies_with_options() {
 #[test]
 fn directory_handle_copy_deadline_zero_preserves_destination_and_parent() {
     let (fixture, directory) = populated_directory();
-    std::fs::write(fixture.path().join("existing"), b"original")
-        .expect("existing destination should be written");
+    std::fs::write(fixture.path().join("existing"), b"original").expect("existing destination should be written");
 
     let failure = directory
         .copy_with_options(
@@ -178,6 +177,7 @@ fn directory_handle_copy_deadline_zero_preserves_destination_and_parent() {
         )
         .expect_err("zero copy budget should expire before copying");
     assert_eq!(failure.state(), LocalCopyFailureState::Unchanged);
+    assert_eq!(failure.error().kind(), LocalFileErrorKind::Io);
     assert_eq!(failure.error().operation(), LocalFileOperation::Copy);
     assert_eq!(failure.error().io_error_kind(), std::io::ErrorKind::TimedOut);
     assert_eq!(failure.partial_stats().files(), 0);
@@ -193,6 +193,7 @@ fn directory_handle_copy_deadline_zero_preserves_destination_and_parent() {
         )
         .expect_err("zero copy budget should not create a parent");
     assert_eq!(failure.state(), LocalCopyFailureState::Unchanged);
+    assert_eq!(failure.error().kind(), LocalFileErrorKind::Io);
     assert_eq!(failure.error().operation(), LocalFileOperation::Copy);
     assert_eq!(failure.error().io_error_kind(), std::io::ErrorKind::TimedOut);
     assert_eq!(failure.partial_stats().files(), 0);
