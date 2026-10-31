@@ -11,6 +11,9 @@ use std::fs;
 use std::path::Path;
 
 use qubit_io::Output;
+#[cfg(windows)]
+mod support;
+
 use qubit_local_files::LocalFileSystem;
 use qubit_local_files::error::LocalFileErrorKind;
 #[cfg(unix)]
@@ -335,14 +338,15 @@ fn test_host_mutations_use_native_parent_target() {
 #[cfg(windows)]
 #[test]
 fn test_host_windows_link_parent_reads_match_native() {
-    use std::os::windows::fs::symlink_dir;
     let fixture = tempfile::tempdir().expect("Windows path fixture");
     fs::create_dir(fixture.path().join("a")).expect("lexical parent");
     fs::create_dir_all(fixture.path().join("b/inner")).expect("link destination");
     fs::write(fixture.path().join("a/config"), b"A").expect("lexical content");
     fs::write(fixture.path().join("b/config"), b"B").expect("native content");
-    symlink_dir(fixture.path().join("b/inner"), fixture.path().join("a/link"))
-        .expect("Windows runtime contract requires directory symlink privilege");
+    if !support::windows_symlink::create_directory_link(&fixture.path().join("b/inner"), &fixture.path().join("a/link"))
+    {
+        return;
+    }
     let host = LocalFileSystem::host().expect("Host filesystem");
     for base in [
         fixture.path().to_path_buf(),

@@ -919,14 +919,66 @@ fn conditional_windows_recovery_container_collision_does_not_reuse_existing_dire
     fs::create_dir(&collision).expect("collision directory should be created");
     let marker = collision.join("user-data");
     fs::write(&marker, b"keep").expect("collision marker should be written");
-    let result = namespace.backup_container_named(Path::new(".conditional-recovery-collision"));
-    assert_eq!(
-        result
-            .expect_err("existing recovery directory must not be reused")
-            .kind(),
-        io::ErrorKind::AlreadyExists
-    );
+    let names = [
+        (".conditional-recovery-collision", "displaced-collision.bak"),
+        (".conditional-recovery-created", "displaced-created.bak"),
+    ];
+    let mut next = names.into_iter();
+    let (container, backup) = namespace
+        .backup_container_with_names(|| {
+            let (container, backup) = next.next().expect("allocator should request two names");
+            Ok((container.into(), backup.into()))
+        })
+        .expect("allocator should retry with the second name");
+    assert_eq!(container, directory.path().join(".conditional-recovery-created"));
+    assert_eq!(backup, container.join("displaced-created.bak"));
     assert_eq!(fs::read(marker).expect("existing container data must remain"), b"keep");
+    assert!(
+        namespace
+            .recovery_container_is_bound(&container)
+            .expect("recorded and current container identities should be readable"),
+        "retained recovery handle should match the created container name"
+    );
+    assert_eq!(fs::read(&marker).expect("collision marker should remain"), b"keep");
+}
+
+#[test]
+fn conditional_windows_recovery_container_exhausts_collision_retries() {
+    let directory = tempfile::tempdir().expect("fixture directory should be created");
+    let target = directory.path().join("target");
+    let namespace =
+        Namespace::open_host(&target, &options(LocalWriteMode::CreateOrReplace)).expect("Host namespace should open");
+    let collision = directory.path().join(".conditional-recovery-always-collision");
+    fs::create_dir(&collision).expect("collision directory should be created");
+    let marker = collision.join("user-data");
+    fs::write(&marker, b"keep").expect("collision marker should be written");
+    let mut attempts = 0;
+    let error = namespace
+        .backup_container_with_names(|| {
+            attempts += 1;
+            Ok((".conditional-recovery-always-collision".into(), "displaced.bak".into()))
+        })
+        .expect_err("32 occupied candidates should exhaust allocation");
+    assert_eq!(error.kind(), io::ErrorKind::AlreadyExists);
+    assert_eq!(attempts, 32, "allocator should stop after 32 candidates");
+    assert_eq!(fs::read(marker).expect("collision marker should remain"), b"keep");
+}
+
+#[test]
+fn conditional_windows_recovery_container_name_error_does_not_retry() {
+    let directory = tempfile::tempdir().expect("fixture directory should be created");
+    let target = directory.path().join("target");
+    let namespace =
+        Namespace::open_host(&target, &options(LocalWriteMode::CreateOrReplace)).expect("Host namespace should open");
+    let mut attempts = 0;
+    let error = namespace
+        .backup_container_with_names(|| {
+            attempts += 1;
+            Err(io::Error::new(io::ErrorKind::PermissionDenied, "injected name failure"))
+        })
+        .expect_err("name source failure should be returned");
+    assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
+    assert_eq!(attempts, 1, "non-collision errors must not retry");
 }
 
 #[test]
@@ -936,9 +988,16 @@ fn conditional_windows_failed_container_verification_cleans_bound_directory() {
     let namespace =
         Namespace::open_host(&target, &options(LocalWriteMode::CreateOrReplace)).expect("Host namespace should open");
     namespace.fail_next_container_verification();
-
+    let expected = directory.path().join(".conditional-recovery-verification-failure");
+    let mut requested = false;
     let error = namespace
-        .backup_container()
+        .backup_container_with_names(|| {
+            requested = true;
+            Ok((
+                ".conditional-recovery-verification-failure".into(),
+                "displaced.bak".into(),
+            ))
+        })
         .expect_err("injected verification failure should fail creation");
 
     assert!(
@@ -958,6 +1017,8 @@ fn conditional_windows_failed_container_verification_cleans_bound_directory() {
         leftovers.is_empty(),
         "bound failed container should be cleaned: {leftovers:?}"
     );
+    assert!(requested, "allocator should use the injected candidate name");
+    assert!(!expected.exists(), "failed bound container should be removed");
 }
 
 #[test]

@@ -13,6 +13,9 @@ mod file_io;
 mod handle;
 mod namespace_mutation;
 pub(in crate::local::internal) mod native;
+mod reparse_buffer;
+mod rooted_link_target;
+mod rooted_link_target_read;
 mod symlink;
 mod volume_probe;
 
@@ -37,7 +40,7 @@ pub(crate) use namespace_mutation::rename_rooted_entry;
 pub(crate) use namespace_mutation::set_rooted_permissions;
 #[cfg(feature = "digest")]
 pub(in crate::local::internal) use native::open_conditional_entry_at;
-pub(crate) use symlink::RootedLinkTargetRead;
+pub(crate) use rooted_link_target_read::RootedLinkTargetRead;
 pub(crate) use symlink::create_rooted_symlink;
 pub(crate) use symlink::normalize_rooted_link_target;
 pub(crate) use symlink::read_rooted_link;

@@ -177,8 +177,7 @@ impl Namespace {
     }
 
     pub(super) fn backup_container(&self) -> io::Result<(PathBuf, PathBuf)> {
-        let parent = self.host_parent_path()?;
-        for _ in 0..32 {
+        self.backup_container_with_names(|| {
             let dirname = crate::local::internal::file_name_generation::try_random_file_name(
                 ".qubit-conditional-recovery-",
                 None,
@@ -186,6 +185,17 @@ impl Namespace {
             )?;
             let backup_name =
                 crate::local::internal::file_name_generation::try_random_file_name("displaced-", None, Some(".bak"))?;
+            Ok((dirname, backup_name))
+        })
+    }
+
+    pub(super) fn backup_container_with_names<F>(&self, mut next: F) -> io::Result<(PathBuf, PathBuf)>
+    where
+        F: FnMut() -> io::Result<(OsString, OsString)>,
+    {
+        let parent = self.host_parent_path()?;
+        for _ in 0..32 {
+            let (dirname, backup_name) = next()?;
             let container = parent.join(&dirname);
             let handle = nt_open_at_with_share_mode(
                 &self.parent,
@@ -248,10 +258,13 @@ impl Namespace {
     }
 
     #[cfg(test)]
-    pub(super) fn backup_container_named(&self, name: &Path) -> io::Result<PathBuf> {
-        let container = self.host_parent_path()?.join(name);
-        fs::create_dir(&container)?;
-        Ok(container)
+    pub(super) fn recovery_container_is_bound(&self, path: &Path) -> io::Result<bool> {
+        let parents = self.recovery_parents.borrow();
+        let Some((_, handle)) = parents.iter().find(|(container, _)| container == path) else {
+            return Ok(false);
+        };
+        let current = open_host_directory_no_reparse(path)?;
+        Ok(file_identity(handle)? == file_identity(&current)?)
     }
 
     pub(super) fn entry_in_container(

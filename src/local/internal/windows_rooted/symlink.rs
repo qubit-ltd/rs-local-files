@@ -18,7 +18,6 @@ use std::os::windows::ffi::OsStringExt;
 use std::os::windows::io::AsRawHandle;
 use std::path::Path;
 use std::path::PathBuf;
-use std::ptr::null;
 use std::ptr::null_mut;
 
 use windows_sys::Wdk::Storage::FileSystem::FILE_CREATE;
@@ -36,13 +35,15 @@ use windows_sys::Win32::Storage::FileSystem::GetFileInformationByHandleEx;
 use windows_sys::Win32::Storage::FileSystem::MAXIMUM_REPARSE_DATA_BUFFER_SIZE;
 use windows_sys::Win32::Storage::FileSystem::SYNCHRONIZE;
 use windows_sys::Win32::System::IO::DeviceIoControl;
-use windows_sys::Win32::System::Ioctl::FSCTL_GET_REPARSE_POINT;
 use windows_sys::Win32::System::Ioctl::FSCTL_SET_REPARSE_POINT;
 
 use super::handle::open_parent;
 use super::namespace_mutation::delete_open_entry;
 use super::native::handle_attributes;
 use super::native::nt_open_at;
+use super::reparse_buffer::read_reparse_buffer;
+use super::rooted_link_target::RootedLinkTarget;
+pub(crate) use super::rooted_link_target_read::RootedLinkTargetRead;
 use crate::local::LocalRelativePath;
 use crate::local::internal::RootedSymlinkCreateError;
 use crate::local::internal::RootedSymlinkCreateFailureState;
@@ -66,24 +67,6 @@ pub(crate) fn read_rooted_link(root: &File, _diagnostic_root: &Path, path: &Loca
     let link = open_link(root, path, GENERIC_READ | FILE_READ_ATTRIBUTES | SYNCHRONIZE)?;
     let buffer = read_reparse_buffer(&link)?;
     parse_symbolic_link_target(buffer.as_bytes())
-}
-
-/// Result of reading a symbolic-link target under a byte limit.
-#[derive(Debug)]
-pub(crate) enum RootedLinkTargetRead {
-    /// The target fits within the requested byte limit.
-    Target(RootedLinkTarget),
-    /// The target exceeds the limit; the value is its bounded observed byte
-    /// length.
-    Exceeded(usize),
-}
-
-/// Bounded raw substitute target and reparse flags, before namespace
-/// normalization.
-#[derive(Debug)]
-pub(crate) struct RootedLinkTarget {
-    pub(crate) raw_path: PathBuf,
-    pub(crate) flags: u32,
 }
 
 /// Reads one final symbolic-link target, constructing a `PathBuf` only when it
@@ -230,50 +213,6 @@ fn open_link(root: &File, path: &LocalRelativePath, access: u32) -> Result<File>
 
 /// Retrieves the opaque reparse record for an already-opened link handle.
 /// Returns a native query error or `InvalidData` for an oversized response.
-struct ReparseBuffer {
-    storage: Vec<usize>,
-    length: usize,
-}
-
-impl ReparseBuffer {
-    fn as_bytes(&self) -> &[u8] {
-        // SAFETY: storage is initialized, aligned native workspace; `length`
-        // was checked against MAXIMUM_REPARSE_DATA_BUFFER_SIZE before this
-        // view was constructed, and DeviceIoControl wrote that many bytes.
-        unsafe { std::slice::from_raw_parts(self.storage.as_ptr().cast::<u8>(), self.length) }
-    }
-}
-
-fn read_reparse_buffer(link: &File) -> Result<ReparseBuffer> {
-    let mut storage = vec![0_usize; (MAXIMUM_REPARSE_DATA_BUFFER_SIZE as usize).div_ceil(size_of::<usize>())];
-    let mut returned = 0_u32;
-    // SAFETY: `link` remains open, the output allocation is writable for the
-    // advertised capacity, and this synchronous call retains no pointers.
-    let result = unsafe {
-        DeviceIoControl(
-            link.as_raw_handle(),
-            FSCTL_GET_REPARSE_POINT,
-            null(),
-            0,
-            storage.as_mut_ptr().cast(),
-            MAXIMUM_REPARSE_DATA_BUFFER_SIZE,
-            &raw mut returned,
-            null_mut(),
-        )
-    };
-    if result == 0 {
-        return Err(Error::last_os_error());
-    }
-    let returned = returned as usize;
-    if returned > MAXIMUM_REPARSE_DATA_BUFFER_SIZE as usize {
-        return Err(corrupt_reparse("reparse query returned an oversized buffer"));
-    }
-    Ok(ReparseBuffer {
-        storage,
-        length: returned,
-    })
-}
-
 /// Installs a complete symbolic-link reparse record on a placeholder handle.
 /// The caller supplies the complete `buffer` and a writable placeholder.
 /// Returns `InvalidInput` for an unrepresentable buffer length or a native
@@ -570,7 +509,7 @@ fn wide_range(record_length: usize, offset: usize, length: usize) -> Result<(usi
 }
 
 /// Builds an invalid-data error for a malformed native reparse record.
-fn corrupt_reparse(message: &'static str) -> Error {
+pub(super) fn corrupt_reparse(message: &'static str) -> Error {
     Error::new(ErrorKind::InvalidData, message)
 }
 

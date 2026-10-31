@@ -6,12 +6,16 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 
-/// Whether a security observation must provide the selected native facts.
+/// Whether an observation must provide the complete facts requested by its
+/// entry point.
 ///
-/// `Optional` still attempts the query and returns `None` for unsupported
-/// facts. `Required` turns unavailable or unsupported selected facts into
-/// `RequirementNotMet`; permission, I/O, malformed-data, and identity-change
-/// errors remain distinct failures.
+/// Ordinary native observation uses this to control its identity and timestamp
+/// extension; normalized metadata remains required independently. Security
+/// observation uses it for each selected filesystem, access, or link-count
+/// fact. `Optional` still attempts native queries and omits facts only under
+/// that entry point's documented unsupported or query-failure rules. `Required`
+/// reports incomplete requested facts as `RequirementNotMet`. Error kinds and
+/// retained native error sources can differ by entry point and platform.
 ///
 /// # Examples
 ///
@@ -28,6 +32,7 @@ pub enum LocalObservationRequirement {
     /// Return available native details when possible.
     #[default]
     Optional,
-    /// Fail unless identity, length, and native change times are available.
+    /// Fail unless the complete facts requested by the current entry point are
+    /// available.
     Required,
 }

@@ -56,13 +56,33 @@ use crate::rooted::Metadata;
 /// Returns an I/O error when final-path inspection, metadata validation, or
 /// handle duplication fails unexpectedly.
 pub(crate) fn open_root_directory_reader(root: &File, _diagnostic_root: &Path) -> Result<RootedDirectoryReader> {
-    let directory = match open_independent_root_directory(root)? {
+    open_root_directory_reader_with_reopen(root, open_independent_root_directory)
+}
+
+/// Opens a root enumerator, allowing tests to force the handle-clone fallback.
+///
+/// `reopen` attempts to obtain a distinct file object for enumeration. If it
+/// returns `None`, this function duplicates `root` with `try_clone`.
+///
+/// # Errors
+///
+/// Propagates reopen and handle-clone errors, and returns an error if the
+/// resulting handle is not a real directory.
+fn open_root_directory_reader_with_reopen<F>(root: &File, reopen: F) -> Result<RootedDirectoryReader>
+where
+    F: FnOnce(&File) -> Result<Option<File>>,
+{
+    let directory = match reopen(root)? {
         Some(directory) => directory,
         None => root.try_clone()?,
     };
     verify_real_directory(&directory)?;
     Ok(RootedDirectoryReader::new(directory))
 }
+
+#[cfg(test)]
+#[path = "directory/fallback_tests.rs"]
+mod fallback_tests;
 
 /// Opens the root's normalized final path as a new file object.
 ///

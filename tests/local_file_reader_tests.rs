@@ -31,6 +31,9 @@ use qubit_local_files::options::LocalSnapshotOptions;
 use qubit_local_files::policy::LocalSymlinkPolicy;
 use tempfile::tempdir;
 
+#[cfg(windows)]
+mod support;
+
 /// Verifies explicit reader policies override Host and Rooted instance
 /// policies.
 #[cfg(unix)]
@@ -249,18 +252,12 @@ fn test_local_file_reader_supports_vectored_reads() {
 #[cfg(windows)]
 #[test]
 fn test_local_file_reader_follows_final_file_symlink_on_windows() {
-    use std::io::ErrorKind;
-    use std::os::windows::fs::symlink_file;
-
     let directory = tempdir().expect("temporary directory should be created");
     let target = directory.path().join("target");
     let link = directory.path().join("link");
     std::fs::write(&target, b"payload").expect("target should be written");
-    if let Err(error) = symlink_file(&target, &link) {
-        if error.kind() == ErrorKind::PermissionDenied {
-            return;
-        }
-        panic!("file symlink should be created: {error}");
+    if !support::windows_symlink::create_file_link(&target, &link) {
+        return;
     }
 
     let mut reader = LocalFileSystem::host()

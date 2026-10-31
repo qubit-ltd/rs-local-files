@@ -11,15 +11,18 @@ use crate::observation::LocalObservationRequirement;
 ///
 /// Each query defaults to `Optional`; ACL limits default to `None` (no caller
 /// limit), while a configured zero is a real zero-entry or zero-byte limit.
-/// Optional queries return no field only when the mechanism is explicitly
-/// unsupported. Required queries fail when complete facts are unavailable;
-/// permission errors, ordinary I/O errors, and malformed ACL data remain errors
-/// for either requirement.
+/// Optional queries omit a fact only when the mechanism explicitly reports it
+/// as unsupported. Required queries fail with `RequirementNotMet` when a
+/// requested fact is unsupported or incomplete. Other query errors, including
+/// permission, ordinary I/O, malformed ACL data, and detected identity changes,
+/// remain errors. Unix preserves native I/O error kinds; Windows converts
+/// unsupported required facts to `RequirementNotMet` and preserves other
+/// errors.
 ///
 /// Optional requirements still attempt their native query. Only explicitly
-/// unsupported or unavailable facts become `None`; access denial, ordinary
-/// I/O failures, malformed ACLs, and changes detected during the observation
-/// return errors. On Unix, filesystem facts are implemented on Linux and
+/// unsupported facts become `None`; access denial, ordinary I/O failures,
+/// malformed ACLs, and changes detected during the observation return errors.
+/// On Unix, filesystem facts are implemented on Linux and
 /// macOS, while complete ACL access facts are currently queried on Linux. On
 /// Windows, the native filesystem and security descriptor queries are used.
 ///

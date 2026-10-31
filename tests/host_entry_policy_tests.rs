@@ -16,6 +16,9 @@ use qubit_local_files::options::LocalReadOptions;
 use qubit_local_files::outcome::LocalFileKind;
 use tempfile::tempdir;
 
+#[cfg(windows)]
+mod support;
+
 /// Verifies metadata errors retain the caller-visible path when an
 /// intermediate symbolic link is resolved for native inspection.
 #[cfg(unix)]
@@ -128,14 +131,14 @@ fn test_local_file_system_delete_handles_missing_and_type_conflicts() {
 #[cfg(windows)]
 #[test]
 fn test_host_delete_directory_symlink_preserves_target() {
-    use std::os::windows::fs::symlink_dir;
-
     let directory = tempdir().expect("temporary directory should be created");
     let target = directory.path().join("target");
     let link = directory.path().join("link");
     fs::create_dir(&target).expect("target directory should be created");
     fs::write(target.join("payload"), b"preserved").expect("target payload should be written");
-    symlink_dir(&target, &link).expect("directory link should be created");
+    if !support::windows_symlink::create_directory_link(&target, &link) {
+        return;
+    }
 
     let outcome = LocalFileSystem::host()
         .expect("Host filesystem should open")

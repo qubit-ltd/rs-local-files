@@ -22,6 +22,9 @@ use qubit_local_files::outcome::LocalCopyFailureState;
 use qubit_local_files::policy::LocalSymlinkPolicy;
 use tempfile::tempdir;
 
+#[cfg(windows)]
+mod support;
+
 /// Socket sources must fail before creating a requested destination parent.
 #[cfg(unix)]
 #[test]
@@ -169,11 +172,19 @@ fn test_final_link_source_modes_do_not_follow_targets() {
                     .expect("source link should exist");
                 #[cfg(windows)]
                 if matches!(referent, "directory" | "missing-directory") {
-                    std::os::windows::fs::symlink_dir(referent, directory.path().join("source"))
-                        .expect("directory link fixture requires symlink privilege");
+                    if !support::windows_symlink::create_directory_link(
+                        PathBuf::from(referent).as_path(),
+                        &directory.path().join("source"),
+                    ) {
+                        continue;
+                    }
                 } else {
-                    std::os::windows::fs::symlink_file(referent, directory.path().join("source"))
-                        .expect("file link fixture requires symlink privilege");
+                    if !support::windows_symlink::create_file_link(
+                        PathBuf::from(referent).as_path(),
+                        &directory.path().join("source"),
+                    ) {
+                        continue;
+                    }
                 }
                 let filesystem = if rooted {
                     LocalFileSystem::rooted(directory.path())
@@ -281,8 +292,12 @@ fn test_tree_copy_preserves_dangling_directory_link_kind() {
     for rooted in [false, true] {
         let directory = tempdir().expect("fixture should exist");
         fs::create_dir(directory.path().join("source")).expect("source directory should exist");
-        std::os::windows::fs::symlink_dir("missing", directory.path().join("source/link"))
-            .expect("directory-link fixture requires symlink privilege");
+        if !support::windows_symlink::create_directory_link(
+            PathBuf::from("missing").as_path(),
+            &directory.path().join("source/link"),
+        ) {
+            continue;
+        }
         let filesystem = if rooted {
             LocalFileSystem::rooted(directory.path())
         } else {
@@ -425,10 +440,11 @@ fn test_link_copy_overwrites_directory_link_without_removing_referent() {
             }
             #[cfg(windows)]
             {
-                std::os::windows::fs::symlink_file(new_referent, &source_link)
-                    .expect("source link fixture requires symlink privilege");
-                std::os::windows::fs::symlink_dir(old_referent, &target_link)
-                    .expect("target link fixture requires symlink privilege");
+                if !support::windows_symlink::create_file_link(new_referent, &source_link)
+                    || !support::windows_symlink::create_directory_link(old_referent, &target_link)
+                {
+                    continue;
+                }
             }
             let filesystem = if rooted {
                 LocalFileSystem::rooted(directory.path())
@@ -492,8 +508,12 @@ fn test_link_copy_rejects_required_atomicity_before_mutation() {
             #[cfg(unix)]
             std::os::unix::fs::symlink("missing", directory.path().join("source")).expect("source link should exist");
             #[cfg(windows)]
-            std::os::windows::fs::symlink_file("missing", directory.path().join("source"))
-                .expect("source link fixture requires symlink privilege");
+            if !support::windows_symlink::create_file_link(
+                PathBuf::from("missing").as_path(),
+                &directory.path().join("source"),
+            ) {
+                continue;
+            }
             let filesystem = if rooted {
                 LocalFileSystem::rooted(directory.path())
             } else {
