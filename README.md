@@ -217,13 +217,18 @@ make the observation atomic or guarantee cross-platform ACL equivalence. See
 the [resolution and security guide](doc/user_guide.md#bounded-resolution-and-security-policy)
 and its [Chinese version](doc/user_guide.zh_CN.md#有界解析与安全策略).
 
-The conditional-publication support matrix remains platform-specific. In
-particular, Windows Rooted `Content` and Host `Content` with `UseStaging` are
-`Unsupported`; Windows Host `Content` with `PreserveExisting` and `Absent` remain
-available subject to the documented options. Unix native behavior is supported
-by the implementation, while runtime filesystem behavior may still prevent an
-attempt. See the [conditional-write guide](doc/user_guide.md#conditional-write)
-for the full matrix and recovery boundaries.
+On Unix targets other than Linux and macOS, filesystem security facts are not
+implemented: `Optional` returns no filesystem value and `Required` returns
+`RequirementNotMet`; other independently supported facts remain available.
+
+The conditional-publication support matrix remains platform-specific. Linux and
+macOS support valid `Absent` and `Content` protocols subject to the selected
+options and runtime filesystem behavior. Windows Rooted `Content` and Host
+`Content` with `UseStaging` are `Unsupported`; Windows Host `Content` with
+`PreserveExisting` and valid `Absent` remain available. Other Unix targets do
+not inherit this support claim. See the
+[conditional-write guide](doc/user_guide.md#conditional-write) for the full
+matrix and recovery boundaries.
 
 Temporary-resource cleanup is ownership-aware, not a synchronization boundary.
 Call `cleanup()` when the caller must observe cleanup failures; dropping a
@@ -240,6 +245,10 @@ Each temporary resource is created inside a private per-resource sandbox. The
 resource path therefore includes one generated sandbox component; `keep`
 atomically publishes the entry to a generated sibling path, returns a
 `LocalPersistOutcome`, and reports whether sandbox cleanup left a residual.
+If default Host creation fails before the temporary owner is returned and
+cleanup leaves residue, the `LocalFileError` retains `cleanup_error()` and a
+`temp_recovery()` owner for an explicit retry; callers should not delete by
+path alone.
 
 Temporary publication failures have two independent axes: `LocalPersistError::state()`
 reports this call's destination publication, while `source_state()` snapshots
@@ -310,10 +319,10 @@ walk.
 ## Platform Scope
 
 CI is configured to run behavioral tests on Linux, Windows, and macOS; consult
-the matching CI results for validation of a particular change. FreeBSD 14.3 has
-native tests with `--no-default-features` and `--all-features` configured in CI, but that
-configuration does not establish a successful run; native results have not been
-verified in this review. Android remains configured for compile checks. T3/T4
+the matching CI results for validation of a particular change. FreeBSD 14.3's
+workflow now invokes the complete crate suite with `--no-default-features` and
+`--all-features`; the native runner result is pending. Android remains
+configured for compile checks. T3/T4
 Windows cleanup and conditional-open behavior, and LF-09 private-resource and LF-10 sealed-cleanup
 behavior, remain unverified without native Windows runner results. Linux filters
 execute zero tests for these Windows-only cases; Windows GNU `cargo check --lib`
@@ -330,7 +339,7 @@ Conditional-write support is operation- and authority-specific:
 | Linux / macOS | `Absent`, `Content` | `Absent`, `Content` |
 | Windows | `Absent`, `Content` with `PreserveExisting` metadata | `Absent`; `Content` unsupported |
 | Android | Compile check only; no protocol claimed | Compile check only; no protocol claimed |
-| FreeBSD 14.3 | Native tests with `--no-default-features` and `--all-features` configured; results unverified, no protocol claimed | Native tests with `--no-default-features` and `--all-features` configured; results unverified, no protocol claimed |
+| FreeBSD 14.3 | Workflow configured to run the complete crate suite with `--no-default-features` and `--all-features`; runner result pending, no protocol claimed | Workflow configured to run the complete crate suite with `--no-default-features` and `--all-features`; runner result pending, no protocol claimed |
 
 Required atomicity or durability is rejected before namespace changes when the
 selected operation protocol cannot be met.

@@ -1144,7 +1144,7 @@ Windows 会在创建时为条件候选 B 及其独立恢复副本设置受保护
 | Windows Host | 原生 no-replace 安装 | 仅 `PreserveExisting` | Content 配合其他元数据策略及 `Required` writer durability 不受支持。 |
 | Windows Rooted | 原生 no-replace 安装 | 不支持 | Rooted `Absent` 使用相对已打开句柄的安装；不支持 `Required` writer durability。 |
 | Android | 未声明支持 | 未声明支持 | CI 配置为编译检查；不应从其他 Unix 目标推断支持。 |
-| FreeBSD 14.3 | 未声明支持 | 未声明支持 | CI 已配置原生 `--no-default-features` 与 `--all-features` 测试，但本轮未核实原生运行结果；不应从其他 Unix 目标推断支持。 |
+| FreeBSD 14.3 | 未声明支持 | 未声明支持 | workflow 已配置运行本 crate 完整测试（`--no-default-features` 与 `--all-features`）；原生 runner 结果待取得，不应从其他 Unix 目标推断支持。 |
 
 Windows Rooted `Content`，以及 Host `Content` 配合 `UseStaging`，在打开 writer 阶段返回
 `Unsupported`，早于路径解析、父目录操作或 candidate/staging 创建。Host `Content` 配合
@@ -1295,6 +1295,10 @@ Host 与 Rooted 的复制统计含义一致：`files` 计入复制的普通文�
 `Overwrite` 策略下合并的已有目录，包括复制根目录。`Skip` 仍会合并同类型目录，
 但不把这些合并计为覆盖。
 
+若一次成功的复制跳过了所有条目，则不会发布目标，也不会执行发布后的命名空间同步；结果为 `atomic = false`、
+`durable = false`、`metadata_preservation = None`。实际复制的零字节文件仍计入 `files` 并走正常发布流程。
+失败时即使统计为零，也不能据此推断目标未变或全部跳过。
+
 目录树复制准备阶段可能先删除类型冲突的目标，再安装替代条目。后续步骤失败时，即使已复制文件统计
 仍为零，只要该删除已经改变目标，就会报告 `PartiallyPublished`。目标状态应合并已发生的发布事实，
 不能只根据错误阶段推断。
@@ -1402,6 +1406,10 @@ source 或 destination 为 Rooted `/` 时返回 `InvalidPath`。
 | `CleanupRequired` | 原实体已离开源位置，只剩私有 sandbox 的清理责任；禁止 persist 和 keep。 |
 | `Released` | 无剩余清理责任；cleanup 幂等成功，persist 和 keep 被拒绝。 |
 | `Indeterminate` | 无法证明源命名空间操作资格；persist、keep、显式 cleanup 与 Drop 删除均被禁止。 |
+
+默认 Host 临时文件或目录创建若在 sandbox/子项创建后失败，会一直保留原生清理 owner，直到清理成功或将责任交给错误对象。
+若清理也失败，返回的 `LocalFileError` 同时携带 `cleanup_error()` 和 `temp_recovery()`，调用方解决清理条件后可通过 owner 重试。
+身份未知时不得仅凭路径删除。
 
 `outcome::LocalPersistFailureState` 是另一个独立事实轴：本次目标发布状态为
 `NotPublished`、`Published` 或 `Indeterminate`，不能单独推断源资格。构造错误时必须明确
@@ -2085,7 +2093,7 @@ namespace-absolute、不含 `.`/`..`，再次规范化保持不变。Host 绑定
 - T3/T4 的 Windows 清理与条件写入用例，以及 LF-09 私有资源和 LF-10 sealed cleanup，尚无原生
   Windows runner 证据时必须标为待验证；Linux 对应测试为 0 tests，Windows GNU `cargo check --lib`
   仅证明可编译，不证明运行行为；
-- FreeBSD 14.3 已配置原生 `--no-default-features` 与 `--all-features` 测试，但配置本身不代表运行通过；本轮未核实原生结果。
+- FreeBSD 14.3 workflow 已配置运行本 crate 完整测试（`--no-default-features` 与 `--all-features`）；原生 runner 结果待取得，配置不代表运行通过。
   Android 仍配置为 compile-check；这些配置不能据以宣称 runtime guarantee；
 - `cargo test --all-features`；
 - `cargo clippy --all-targets --all-features -- -D warnings`；
@@ -2172,11 +2180,14 @@ CI 记录为准，CI 配置本身不证明本次修改通过。
 | L05 解析 policy hook | 实现已接受 | 在访问前校验路径组件与原始 symlink target；hook 只能做纯校验，调用次数不固定。 |
 | 条件发布支持同步（T11/T12） | `BLOCKED_DEPENDENCY` | Windows gate 解除前，Windows Rooted `Content` 在 capability、validation、backend 各层仍保持 `Unsupported`。仅当所选条件发布协议无法提供 Required namespace durability 时才拒绝；Linux 和 macOS 在配置有效且运行时文件系统条件允许时可以尝试。 |
 
-条件发布方面，Unix 的 Host 与 Rooted 支持 `Absent` 和 `Content`，仍受有效 mode、symlink、耐久性及文件系统条件约束。
+条件发布方面，Linux 和 macOS 的 Host 与 Rooted 支持有效配置下的 `Absent` 和 `Content`，仍受 mode、symlink、耐久性及文件系统条件约束。
+其他 Unix 的 `Content` 保留 `Unsupported` 合同；`Absent` 有独立能力，不能据此推断支持 `Content`。
 Windows 的 Host 和 Rooted 支持 `Absent`；Host `Content` 仅在 `PreserveExisting` 下支持。Rooted `Content` 与
 Host `Content` 配合 `UseStaging` 仍不支持。`Append` 与 `Content` 配合 `CreateNew` 不支持。Windows 对应的
 条件发布协议不支持 Required namespace durability。Linux 和 macOS 在所选协议、有效配置与运行时文件系统条件允许时可以尝试
 Required namespace durability；`CanAttempt` 只表示实现会尝试，不保证具体文件系统一定接受原生操作。
+
+T03 的 Host 临时创建失败与恢复 owner 用例已执行完成；这只构成 Host 测试证据，不代表 Windows 原生行为已验证。FreeBSD workflow 现已配置在两种 feature 设置下运行本 crate 完整测试，但 runner 结果仍待取得。
 
 LF-Q01 已确认并修正：`LocalCopyOutcome` 的 metadata preservation 表示已复制条目实际应用的策略；完全跳过时为
 `None`，成功复制仍报告应用的策略，混合树的结果只针对已复制条目。LF-Q02 有 FreeBSD 源码证据表明属性列表探测与
@@ -2188,6 +2199,10 @@ LF-Q01 已确认并修正：`LocalCopyOutcome` 的 metadata preservation 表示�
 `freebsd-version` 或原生 FreeBSD runner。`x86_64-unknown-freebsd` 全特性 cross-target check 编译成功，但不能证明
 `extattr_list_fd` 的运行时行为。本轮没有收集 FreeBSD 内核版本、文件系统类型、user xattr 支持或原生 probe/read 结果。
 因此 LF-Q02 保持 `BLOCKED_PLATFORM`，没有修改生产 xattr 算法。
+
+RLF-20261031-Q01（复制时能否保留符号链接条目自身权限）仍待验证。当前 fixture 环境无法独立设置链接权限与 referent 权限，
+因此默认值相同不能证明复制保留了链接自身权限；Windows 原生执行也未运行。该环境限制不能推导为所有平台都无法设置链接权限，
+也不据此修改生产实现。
 
 CI workflow 在 Linux、macOS、Windows 上运行当前 crate 的测试。`windows-recovery` job 需要 checkout
 `rs-json`，因为同级 `rs-redact` manifest 将 `qubit-json` 声明为传递的可选 path dependency；Cargo 解析 manifest
@@ -2227,3 +2242,5 @@ CI workflow 在 Linux、macOS、Windows 上运行当前 crate 的测试。`windo
 `LocalObservedReader::security_observation()` →
 `LocalSecurityObservation::access()` →
 `LocalAccessObservation::unix()` / `windows()`。调用方必须检查每一层 `Option`。access 为 `None` 表示没有可用访问事实；平台 accessor 返回 `None` 表示该平台事实不可用。`Optional` 仍会尝试查询，不会屏蔽权限拒绝、I/O、格式错误或身份变化错误。不同字段分别查询，因此结果只是观察事实，不是授权结论或原子快照，也不保证未来仍可访问。
+
+对文件系统事实查询而言，Linux/macOS 以外的 Unix 目标在 `Optional` 下返回 `None`，在 `Required` 下返回 `RequirementNotMet`；identity 和 link count 仍单独观测。明确未实现的查询与已支持查询发生 I/O 错误是两种情况。

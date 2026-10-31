@@ -488,17 +488,18 @@ assert_eq!(text, r#"{"complete":true}"#);
 | Linux / macOS | `Absent`、`Content` | `Absent`、`Content` |
 | Windows | `Absent`；`Content` 需使用 `PreserveExisting` 元数据策略 | `Absent`；`Content` 不支持 |
 | Android | 仅编译检查；未声明协议支持 | 仅编译检查；未声明协议支持 |
-| FreeBSD 14.3 | 已配置原生 `--no-default-features` 与 `--all-features` 测试；结果未核实，未声明协议支持 | 已配置原生 `--no-default-features` 与 `--all-features` 测试；结果未核实，未声明协议支持 |
+| FreeBSD 14.3 | workflow 已配置运行本 crate 完整测试（`--no-default-features` 与 `--all-features`）；runner 结果待取得，未声明协议支持 | workflow 已配置运行本 crate 完整测试（`--no-default-features` 与 `--all-features`）；runner 结果待取得，未声明协议支持 |
 跨平台都会拒绝 `Append`、`Content` 配合 `CreateNew`，以及跟随符号链接策略等无效条件写入配置。
 Windows 不支持 Rooted `Content` 和 Host `Content` 配合 `UseStaging`。Host 与 Rooted
 使用 `Required` writer durability 时，都会在路径解析或创建 staging 前返回
 `RequirementNotMet`。Linux 和 macOS 可尝试有效配置下的 `Required` 耐久性与 `UseStaging`，
 但仍受所选文件系统和实际运行操作约束。应用需要展示能力提示时可查询
 `LocalDirectoryHandle::conditional_support`，但仍须处理打开和提交错误。Android 仍配置为编译检查；
-FreeBSD 14.3 已配置原生 `--no-default-features` 与 `--all-features` 测试，但本轮未核实原生运行结果。两者均未声明条件写入协议支持。
+FreeBSD 14.3 不声明条件写入协议支持；workflow 已配置在两种 feature 设置下运行本 crate 完整测试，但尚无 runner 结果。
 
 当应用读取文档 A、基于它准备新内容 B，并且不能覆盖其他人后来保存的版本时，使用
-条件写入。应用清单需启用可选 feature，并加入算法实现：
+条件写入。Content 成功与竞态测试仅在 Linux 和 macOS 启用，符合当前实现的平台范围；其他 Unix 的 Content
+操作保留 `Unsupported` 合同，`Absent` 有独立合同。应用清单需启用可选 feature，并加入算法实现：
 
 ```toml
 # BEGIN executable application dependencies
@@ -662,6 +663,10 @@ match filesystem.copy_with_options(
 Host 与 Rooted 中，`files()` 包括复制的链接，`directories()` 只计入新建目录，
 `bytes()` 只计入普通文件字节。`overwritten()` 包括替换的条目和 `Overwrite` 策略下
 合并的已有目录，包括复制根目录；`Skip` 策略下的目录合并不计为覆盖。
+
+一次复制若成功跳过所有条目，就不会发布目标，也不会执行发布后的父目录同步；结果为 `atomic = false`、
+`durable = false`、`metadata_preservation = None`。实际复制的零字节文件仍会计入 `files` 并按正常流程发布。
+失败时即使文件统计为零，也要检查类型化失败状态和部分统计，不能据此认定没有副作用。
 
 | 模式 | 普通文件 | 最终链接，包括悬空链接 | 实体目录 | 特殊文件 |
 | --- | --- | --- | --- | --- |
@@ -1062,8 +1067,10 @@ MIME 检测器和外部程序通常需要重新按路径打开文件。应先写
 再调用路径使用者，最后显式清理。`close()` 不会解除清理责任。下面用文件读取代替
 外部程序，让示例无需额外安装工具就能运行；应用可在回调中改为启动自己的工具。
 
-错误对同时保留主 I/O 错误与清理错误。创建失败发生在检查之前，保存在结构化错误
-位置。正式应用可用具名错误类型包装这两个独立信息，避免清理错误覆盖主错误。
+错误对同时保留主 I/O 错误与清理错误。默认 Host 临时文件或目录创建若在 owner 接管前失败，且清理残留也失败，
+`LocalFileError` 会分别保留主错误、`cleanup_error()` 和 `temp_recovery()`。应用应保留该错误，提取恢复 owner，
+在清理条件允许后显式重试；不要只按错误文本或路径删除。创建失败发生在检查之前，保存在结构化错误位置。
+正式应用可用具名错误类型包装这两个独立信息，避免清理错误覆盖主错误。
 
 ```rust
 use std::io;
@@ -1197,6 +1204,9 @@ Rooted 有限解析预算按相应解析层实际处理的工作计量；适用�
 为 `None`，设为 0 则不允许对应数据。查询直接使用已保留的文件或目录对象，不按诊断路径重新打开。
 结果由一系列观察组成，不是 ACL 与 identity 的原子快照，也不保证返回后权限保持不变。
 
+Linux/macOS 以外的 Unix 目标尚未实现文件系统事实查询：请求 `Optional` 时相应字段为 `None`，请求 `Required`
+时返回 `RequirementNotMet`。identity、link count 等其他事实仍可单独查询。这是明确的不支持结果，不会吞掉真实 I/O 错误。
+
 `LocalOwnerAccessPolicy` 可精确设置 Unix 目录/文件 mode，或 Windows 目录/文件 access mask。
 Unix 使用 `with_unix_modes(directory_mode, file_mode)`，Windows 使用
 `with_windows_masks(directory_mask, file_mask)`，只填写目标平台的设置；策略没有隐含权限预设。
@@ -1274,7 +1284,7 @@ Rooted metadata 等操作对不含链接的普通路径使用私有的一次顺�
 ## 限制与最佳实践
 
 CI 配置了 Linux、Windows 和 macOS 运行时测试；具体修改的验证状态以实际 CI 结果为准。
-FreeBSD 14.3 已配置原生 `--no-default-features` 与 `--all-features` 测试，但配置本身不表示通过，本轮未核实原生运行结果；
+FreeBSD 14.3 workflow 已配置在 `--no-default-features` 与 `--all-features` 下运行本 crate 完整测试，但 runner 结果待取得；
 Android 仍配置为编译检查。T3/T4 的 Windows 清理与条件写入行为，以及 LF-09 私有资源和
 LF-10 sealed 清理，尚无原生 Windows runner 证据时必须视为待验证：Linux 对应筛选为 0 tests，Windows
 GNU `cargo check --lib` 只能证明可编译，不能证明运行行为。

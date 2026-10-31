@@ -591,10 +591,13 @@ filesystem will accept the native operation. Conditional-write support is:
 | Linux / macOS | `Absent`, `Content` | `Absent`, `Content` |
 | Windows | `Absent`; `Content` with `PreserveExisting` metadata | `Absent`; `Content` unsupported |
 | Android | Compile-checked only; protocol support not declared | Compile-checked only; protocol support not declared |
-| FreeBSD 14.3 | Native tests with `--no-default-features` and `--all-features` are configured; results unverified, protocol support not declared | Native tests with `--no-default-features` and `--all-features` are configured; results unverified, protocol support not declared |
+| FreeBSD 14.3 | Complete native suite configured for both feature sets; runner result pending, protocol support not declared | Complete native suite configured for both feature sets; runner result pending, protocol support not declared |
 
 Across platforms, `Append`, `Content` with `CreateNew`, and symlink-following
-policies are rejected as invalid conditional-write configurations. On Windows,
+policies are rejected as invalid conditional-write configurations. The Content
+success and race cases are gated to Linux and macOS, matching the implemented
+protocol. Other Unix targets retain the `Unsupported` contract for those
+Content operations; `Absent` has a separate contract. On Windows,
 Rooted `Content` and Host `Content` with `UseStaging` are unsupported. `Required`
 writer durability is rejected with `RequirementNotMet` for both Host and Rooted
 before path resolution or staging creation. Linux and macOS can attempt valid
@@ -602,9 +605,7 @@ before path resolution or staging creation. Linux and macOS can attempt valid
 filesystem and runtime operation. Check `LocalDirectoryHandle::conditional_support`
 when the application needs to present a capability hint, and still handle
 open/commit errors. Android remains configured for compile checks. FreeBSD 14.3
-has native tests with `--no-default-features` and `--all-features` configured in CI, but native
-results have not been verified in this review. Protocol support remains
-undeclared on both targets.
+protocol support remains undeclared.
 
 Use a conditional write when an application reads document A, prepares an edit B,
 and must avoid replacing a newer version written by someone else. Add the
@@ -814,6 +815,14 @@ In both Host and Rooted, `files()` includes copied links, `directories()` counts
 only newly created directories, and `bytes()` counts regular-file bytes.
 `overwritten()` includes replaced entries and existing directories merged under
 `Overwrite`, including the copy root. A `Skip` directory merge is not an overwrite.
+
+When every requested entry is skipped, the copy succeeds without publishing a
+destination entry. It does not run post-publication parent synchronization, so
+the outcome reports `atomic = false`, `durable = false`, and
+`metadata_preservation = None`. A zero-byte file that is actually copied is
+still counted in `files` and follows the normal publication path. Do not infer
+that a failed or partially completed copy was skipped from zero file counts;
+inspect its typed failure state and partial statistics.
 
 | Mode | Regular file | Final link, including dangling links | Directory | Special file |
 | --- | --- | --- | --- | --- |
@@ -1320,6 +1329,11 @@ program; an application can invoke its tool in the callback instead.
 The error pair retains both the primary I/O failure and a cleanup failure.
 Creation failures occupy the structured-error slot before any inspection runs.
 Production applications may wrap these two channels in their own named error.
+For default Host temporary-file and temporary-directory creation, if owner
+construction fails and residual cleanup also fails, retain the returned
+`LocalFileError`: `cleanup_error()` describes the cleanup failure and
+`temp_recovery()` carries the identity-checked owner for a later retry. Do not
+reconstruct deletion authority from the displayed path or error text.
 
 ```rust
 use std::io;
@@ -1491,6 +1505,12 @@ file or directory object rather than reopening its diagnostic path. The result
 is a sequence of observations, not an atomic ACL/identity snapshot, and does
 not guarantee that access remains unchanged afterward.
 
+On Unix targets other than Linux and macOS, filesystem facts are not
+implemented: an `Optional` filesystem request returns `None`, while `Required`
+returns `RequirementNotMet`. Other requested facts, such as identity and link
+count, remain independently observable. This is an explicit unsupported
+feature result, not suppression of an I/O error.
+
 An owner policy can set exact Unix directory/file modes or Windows
 directory/file access masks using `LocalOwnerAccessPolicy`. For example, the
 policy value is built with `with_unix_modes(directory_mode, file_mode)` on Unix
@@ -1586,10 +1606,10 @@ rely on the same path and error contracts in either case.
 ## Limitations and Best Practices
 
 CI is configured for Linux, Windows, and macOS behavioral tests; actual CI
-results establish validation for a particular change. FreeBSD 14.3 has native
-tests with `--no-default-features` and `--all-features` configured, but this configuration does
-not establish a successful run and native results have not been verified in
-this review. Android remains configured for compile checks. T3/T4 Windows
+results establish validation for a particular change. FreeBSD 14.3 now has the
+complete crate suite configured under `--no-default-features` and
+`--all-features`; the native runner result is pending, so this does not establish
+a successful run. Android remains configured for compile checks. T3/T4 Windows
 cleanup and conditional-open behavior, and LF-09 private-resource and LF-10
 sealed-cleanup behavior, remain unverified
 without native Windows runner results: Linux filters execute zero tests for

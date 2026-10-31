@@ -142,6 +142,9 @@ opaque identity，不含 authority；操作前应通过同一个 parent 重新�
 路径不重复；达到有限深度上限时会报错，不会静默截断。验证按条目观测链接，不跟随目标或展开 alias
 子项。特殊条目默认允许，只有显式启用拒绝规则才会失败；未配置验证的发布不会递归扫描 stage。
 
+默认 Host 临时资源创建若失败且残留清理也失败，`LocalFileError` 会保留 `cleanup_error()` 与可供显式重试的
+`temp_recovery()` owner；调用方不应只凭路径自行删除。
+
 Reader 和 writer 只接受普通文件；目录和特殊文件会被拒绝，不会被当作字节流打开。
 
 权限观测反映文件条目的原生元数据，不等于综合 ACL、挂载策略等因素后调用者实际拥有的
@@ -177,9 +180,11 @@ Rooted 实例的同名方法只修改该实例。
 详见[解析与安全策略指南](doc/user_guide.zh_CN.md#有界解析与安全策略)及
 [英文版](doc/user_guide.md#bounded-resolution-and-security-policy)。
 
-条件发布能力依平台而异。Windows Rooted `Content` 和 Host `Content` 配合 `UseStaging`
-仍返回 `Unsupported`；Windows Host `Content` 配合 `PreserveExisting`，以及 `Absent`，在选项满足要求时仍可尝试。
-Unix 原生实现提供相应协议，但具体文件系统仍可能拒绝操作。完整矩阵和恢复边界见
+Linux/macOS 以外的 Unix 目标尚未实现文件系统安全事实查询：`Optional` 不提供该字段，`Required` 返回 `RequirementNotMet`；其他独立支持的事实仍可用。
+
+条件发布能力依平台而异。Linux 和 macOS 支持有效配置下的 `Absent` 与 `Content`，但具体文件系统仍可能拒绝原生操作。
+Windows Rooted `Content` 和 Host `Content` 配合 `UseStaging` 仍返回 `Unsupported`；Windows Host `Content` 配合
+`PreserveExisting`，以及 `Absent`，在选项满足要求时仍可尝试。其他 Unix 目标不继承上述支持结论。完整矩阵和恢复边界见
 [条件写入指南](doc/user_guide.zh_CN.md#条件写入)。
 
 临时资源清理会校验所有权，但它不是并发同步边界。调用方需要观察清理失败时应显式调用
@@ -243,8 +248,8 @@ CI 配置了 Linux、Windows 和 macOS 运行时测试；本次修改是否通�
 T3/T4 的 Windows 清理和条件写入行为，以及 LF-09 私有资源和 LF-10 sealed 清理，尚无原生 Windows runner
 证据时必须视为待验证：Linux 对应筛选为 0 tests，Windows GNU `cargo check --lib` 只能证明可编译，不能证明运行行为。
 本 crate CI 只验证当前 crate；
-adapter 兼容性由 adapter 仓库或独立集成 job 负责。FreeBSD 14.3 已在 CI 中配置原生
-`--no-default-features`（本 crate 的 `default = []`）与 `--all-features` 测试；配置本身不代表测试已通过，本轮未核实对应原生运行结果。Android 仍配置为编译检查。
+adapter 兼容性由 adapter 仓库或独立集成 job 负责。FreeBSD 14.3 workflow 现已配置运行本 crate 的完整
+`--no-default-features` 与 `--all-features` 测试；原生 runner 结果待取得。Android 仍配置为编译检查。
 本 crate 不承诺这些目标上的运行时保证。`capabilities()` 只报告当前 build 是否实现了
 对应的完整操作协议，不会探测具体的运行时文件系统，也不声称证明底层硬件已经持久化数据；无法满足要求的原子性或耐久性时，
 会在命名空间变更前拒绝操作。条件写入支持范围取决于平台和 authority：
@@ -254,7 +259,7 @@ adapter 兼容性由 adapter 仓库或独立集成 job 负责。FreeBSD 14.3 已
 | Linux / macOS | `Absent`、`Content` | `Absent`、`Content` |
 | Windows | `Absent`；`Content` 需使用 `PreserveExisting` 元数据策略 | `Absent`；`Content` 不支持 |
 | Android | 仅编译检查；不声明协议支持 | 仅编译检查；不声明协议支持 |
-| FreeBSD 14.3 | 已配置原生 `--no-default-features` 与 `--all-features` 测试；结果未核实，不声明协议支持 | 已配置原生 `--no-default-features` 与 `--all-features` 测试；结果未核实，不声明协议支持 |
+| FreeBSD 14.3 | workflow 已配置运行本 crate 完整测试（`--no-default-features` 与 `--all-features`）；runner 结果待取得，不声明协议支持 | workflow 已配置运行本 crate 完整测试（`--no-default-features` 与 `--all-features`）；runner 结果待取得，不声明协议支持 |
 
 所选操作协议无法满足 Required 原子性或耐久性时，会在命名空间变更前拒绝操作。
 原子 rename、原子 replace、尝试临时资源原子持久化的能力、耐久 rename、耐久文件复制、

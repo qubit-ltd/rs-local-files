@@ -897,7 +897,7 @@ Backend scope currently established by the implementation:
 | Windows Host | Native no-replace install | `PreserveExisting` only | Content with another metadata policy and `Required` writer durability are unsupported. |
 | Windows Rooted | Native no-replace install | Unsupported | Rooted `Absent` is handle-relative; `Required` writer durability is unsupported. |
 | Android | Not claimed | Not claimed | Compile checks are configured; do not infer support from other Unix targets. |
-| FreeBSD 14.3 | Not claimed | Not claimed | Native tests with `--no-default-features` and `--all-features` are configured, but results were not verified in this review; do not infer support from other Unix targets. |
+| FreeBSD 14.3 | Not claimed | Not claimed | Workflow configured to run the complete crate suite with `--no-default-features` and `--all-features`; native runner result pending. Do not infer support from other Unix targets. |
 
 Windows Rooted `Content` and Host `Content` with `UseStaging` return
 `Unsupported` while opening the writer, before path resolution, parent access,
@@ -1031,6 +1031,12 @@ directories, and `bytes` counts regular-file bytes. `overwritten` includes
 replaced entries and existing directories merged under `Overwrite`, including
 the copy root. `Skip` still merges same-kind directories but does not count
 those merges as overwrites.
+
+If a successful copy skips every entry, it publishes nothing and bypasses
+post-publication namespace synchronization. Its outcome reports no atomic or
+durable publication and `metadata_preservation = None`; a copied zero-byte file
+still counts as a copied file and follows the regular publication path. This
+success-only rule must not be inferred from zero statistics on a failure.
 
 ### 16.4 File publication
 
@@ -1178,6 +1184,13 @@ source eligibility. `keep()` follows the same publication protocol as persist
 but generates a sibling target outside the private sandbox. Drop is a silent,
 best-effort cleanup attempt only for responsibility still proven by the source
 state and must never delete an `Indeterminate` source.
+
+If default Host temporary-file or temporary-directory creation fails after a
+sandbox or child exists, creation retains the native cleanup owner until
+cleanup succeeds or error ownership is transferred. When cleanup also fails,
+the returned `LocalFileError` carries both `cleanup_error()` and
+`temp_recovery()`; callers can retry through that owner after resolving the
+cleanup condition. Unknown identity never grants path-based deletion authority.
 
 ### 18.2 Creation and paths
 
@@ -1840,10 +1853,10 @@ Verification follows contracts rather than line count:
   lifecycle invariants; lifecycle targets use unique per-process sandboxes,
   bounded collision retries, and RAII cleanup, and never rely on ambient
   machine paths;
-- CI is configured for Linux, Windows, and macOS behavioral tests; FreeBSD 14.3
-  has native tests with `--no-default-features` and `--all-features` configured, but this
-  configuration does not establish a successful run and native results were
-  not verified in this review; Android remains configured for compile checks;
+- CI runs the current crate on Linux, Windows, and macOS. The FreeBSD 14.3
+  workflow is configured to run the complete crate suite with both
+  `--no-default-features` and `--all-features`; its native runner result is
+  pending. Android remains configured for compile checks;
 - Windows-specific T3/T4 recovery and conditional-open cases, plus LF-09
   private-resource and LF-10 sealed-cleanup behavior, remain unverified unless
   native Windows runner results are available. Linux filters execute zero tests
@@ -1919,9 +1932,11 @@ passed. `GateResult::Blocked` is a report state, not a public Rust type.
 | L05 resolution policy hooks | Accepted implementation | Hooks validate components and raw symlink targets before access; they are pure checks and are not promised a fixed invocation count. |
 | Conditional support synchronization (T11/T12) | `BLOCKED_DEPENDENCY` | Until the Windows gate clears, Windows Rooted `Content` remains `Unsupported` in capability, validation, and backend layers. Required namespace durability is rejected only where the selected conditional-publication protocol cannot provide it; Linux and macOS can attempt it when configuration and runtime filesystem conditions permit. |
 
-For conditional publication, Unix supports `Absent` and `Content` for Host and
-Rooted authorities, subject to valid mode, symlink, durability, and filesystem
-constraints. Windows supports `Absent` for Host and Rooted and Host `Content`
+For conditional publication, Linux and macOS support valid `Absent` and
+`Content` operations for Host and Rooted authorities, subject to mode, symlink,
+durability, and filesystem constraints. Other Unix targets retain the
+`Unsupported` contract for `Content`; `Absent` is a separate capability and
+does not imply support for `Content`. Windows supports `Absent` for Host and Rooted and Host `Content`
 only with `PreserveExisting`; Rooted `Content` and Host `Content` with
 `UseStaging` remain unsupported. `Append` and `Content` with `CreateNew` are
 unsupported. Windows rejects required namespace durability for the
@@ -1929,6 +1944,11 @@ corresponding conditional-publication protocol. Linux and macOS can attempt
 required namespace durability when the selected protocol, effective
 configuration, and runtime filesystem conditions permit it; a `CanAttempt`
 response does not guarantee a filesystem will perform the native operation.
+
+T03's Host temporary-creation failure and retained-recovery-owner tests have
+completed. This is Host test evidence only; it does not establish Windows
+native behavior. The FreeBSD workflow now requests the complete current-crate
+suite for both feature sets, but its runner result remains pending.
 
 LF-Q01 was confirmed and corrected: `LocalCopyOutcome` metadata preservation
 describes the policy applied to copied entries. A complete skip reports `None`,
@@ -1949,6 +1969,12 @@ not establish `extattr_list_fd` runtime behavior. No FreeBSD kernel version,
 filesystem type, user-xattr support, or native probe/read result was collected.
 LF-Q02 therefore remains `BLOCKED_PLATFORM`; no production xattr algorithm
 change was made.
+
+RLF-20261031-Q01, whether copying can preserve permissions on the symbolic-link
+entry itself, also remains unverified. The available fixture environment cannot
+set link permissions independently of the referent, so its observed default
+values cannot establish preservation. Windows native execution was unavailable;
+no platform-wide conclusion or production change follows from this fixture.
 
 The CI workflows run current-crate tests on Linux, macOS, and Windows. The
 `windows-recovery` job checks out `rs-json` because the sibling `rs-redact`
@@ -2018,3 +2044,8 @@ unavailable. `Optional` still attempts the selected query and does not suppress
 permission, I/O, malformed-data, or identity-change errors. Observations are
 facts from separately queried fields, not an authorization decision or an
 atomic snapshot, and do not guarantee future access.
+
+For filesystem facts specifically, Unix targets other than Linux and macOS
+return `None` for `Optional` and `RequirementNotMet` for `Required`; identity
+and link-count observations remain separate. An explicitly unimplemented query
+is distinct from a supported query that fails with an I/O error.
