@@ -313,7 +313,6 @@ impl LocalRootAtomicWriter {
         defer_destination_check: bool,
     ) -> Result<Self, LocalAtomicWriteError> {
         let requested_path = path.as_path().to_path_buf();
-        let diagnostic_path = diagnostic_root.join(path.as_path());
         if options.creates_parent()
             && let Some(parent) = path.as_path().parent().filter(|parent| !parent.as_os_str().is_empty())
         {
