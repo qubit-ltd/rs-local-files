@@ -72,8 +72,12 @@ impl HostLocalFileSystem {
         }
         let (sandbox, sandbox_entry) =
             create_host_temp_sandbox(&parent, LocalFileOperation::CreateTempFile, options.max_attempts())?;
-        let created =
-            crate::local::create_temp_file_in_dir(&sandbox, options.prefix(), options.suffix(), options.max_attempts());
+        let created = crate::local::internal::create_temp_file_in_dir_with_delete_access(
+            &sandbox,
+            options.prefix(),
+            options.suffix(),
+            options.max_attempts(),
+        );
         match created {
             Ok((path, file)) => {
                 let recovery_child = match clone_host_temp_file(&file) {
@@ -364,10 +368,12 @@ fn open_temp_directory(path: &Path) -> io::Result<File> {
 fn open_temp_directory(path: &Path) -> io::Result<File> {
     use std::os::windows::fs::OpenOptionsExt;
 
+    use windows_sys::Win32::Storage::FileSystem::DELETE;
     use windows_sys::Win32::Storage::FileSystem::FILE_FLAG_BACKUP_SEMANTICS;
     use windows_sys::Win32::Storage::FileSystem::FILE_FLAG_OPEN_REPARSE_POINT;
+    use windows_sys::Win32::Storage::FileSystem::FILE_READ_ATTRIBUTES;
     fs::OpenOptions::new()
-        .read(true)
+        .access_mode(DELETE | FILE_READ_ATTRIBUTES)
         .custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT)
         .open(path)
 }

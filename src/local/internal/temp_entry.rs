@@ -69,6 +69,26 @@ pub(crate) fn create_temp_file_in_dir(
     suffix: Option<&str>,
     max_tries: Option<usize>,
 ) -> Result<(PathBuf, File)> {
+    create_temp_file_in_dir_with_access(dir, prefix, suffix, max_tries, false)
+}
+
+/// Creates a temporary file with delete access retained for recovery cleanup.
+pub(crate) fn create_temp_file_in_dir_with_delete_access(
+    dir: &Path,
+    prefix: Option<&str>,
+    suffix: Option<&str>,
+    max_tries: Option<usize>,
+) -> Result<(PathBuf, File)> {
+    create_temp_file_in_dir_with_access(dir, prefix, suffix, max_tries, true)
+}
+
+fn create_temp_file_in_dir_with_access(
+    dir: &Path,
+    prefix: Option<&str>,
+    suffix: Option<&str>,
+    max_tries: Option<usize>,
+    delete_access: bool,
+) -> Result<(PathBuf, File)> {
     validate_max_tries(max_tries)?;
     let mut attempt = 0_usize;
     loop {
@@ -76,6 +96,18 @@ pub(crate) fn create_temp_file_in_dir(
         let path = dir.join(try_random_file_name("qubit-local-files-", prefix, suffix)?);
         let mut options = OpenOptions::new();
         options.read(true).write(true).create_new(true);
+        #[cfg(windows)]
+        if delete_access {
+            use std::os::windows::fs::OpenOptionsExt;
+
+            use windows_sys::Win32::Storage::FileSystem::DELETE;
+            use windows_sys::Win32::Storage::FileSystem::GENERIC_READ;
+            use windows_sys::Win32::Storage::FileSystem::GENERIC_WRITE;
+
+            options.access_mode(GENERIC_READ | GENERIC_WRITE | DELETE);
+        }
+        #[cfg(not(windows))]
+        let _ = delete_access;
         #[cfg(unix)]
         options.mode(0o600);
         #[cfg(feature = "test-support")]

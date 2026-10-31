@@ -80,7 +80,6 @@ pub(crate) use internal::create_rooted_directory;
 #[cfg(any(unix, windows))]
 pub(crate) use internal::create_rooted_symlink;
 pub(crate) use internal::create_temp_dir_in_dir_with_affixes;
-pub(crate) use internal::create_temp_file_in_dir;
 pub use internal::decide_copy_destination;
 pub(crate) use internal::directory_mutation_error;
 pub(crate) use internal::ensure_parent_path_with_sync_dirs;

@@ -209,6 +209,7 @@ pub(crate) use rooted_symlink_create_failure_state::RootedSymlinkCreateFailureSt
 pub(crate) use staged_file::StagedFile;
 pub(crate) use temp_entry::create_temp_dir_in_dir_with_affixes;
 pub(crate) use temp_entry::create_temp_file_in_dir;
+pub(crate) use temp_entry::create_temp_file_in_dir_with_delete_access;
 pub(crate) use temp_entry::validate_temp_affixes;
 #[cfg(unix)]
 pub(crate) use unix_nonblocking::clear_nonblocking;
