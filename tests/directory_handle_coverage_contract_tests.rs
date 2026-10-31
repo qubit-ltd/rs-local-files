@@ -15,13 +15,16 @@ use qubit_local_files::directory::LocalDirectoryHandle;
 use qubit_local_files::directory::LocalTreeValidationOptions;
 use qubit_local_files::error::LocalFileErrorKind;
 use qubit_local_files::error::LocalFileOperation;
+#[cfg(unix)]
 use qubit_local_files::observation::LocalSourceVerification;
 use qubit_local_files::options::LocalDirectoryOpenOptions;
 use qubit_local_files::options::LocalListOptions;
+#[cfg(unix)]
 use qubit_local_files::options::LocalObservedReadOptions;
 use qubit_local_files::options::LocalPathBindingOptions;
 use qubit_local_files::options::LocalTempDirectoryOptions;
 use qubit_local_files::outcome::LocalTreeMutationState;
+#[cfg(unix)]
 use qubit_local_files::policy::LocalPrivacyRequirement;
 use qubit_local_files::policy::LocalSymlinkPolicy;
 use tempfile::TempDir;
