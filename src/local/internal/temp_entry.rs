@@ -100,9 +100,9 @@ fn create_temp_file_in_dir_with_access(
         if delete_access {
             use std::os::windows::fs::OpenOptionsExt;
 
-            use windows_sys::Win32::Storage::FileSystem::DELETE;
             use windows_sys::Win32::Foundation::GENERIC_READ;
             use windows_sys::Win32::Foundation::GENERIC_WRITE;
+            use windows_sys::Win32::Storage::FileSystem::DELETE;
 
             options.access_mode(GENERIC_READ | GENERIC_WRITE | DELETE);
         }
