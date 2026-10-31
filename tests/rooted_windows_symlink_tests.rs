@@ -36,12 +36,8 @@ fn test_windows_symlink_fixture_preflight() {
     let directory_target = root.path().join("directory-target");
     fs::write(&file_target, b"target").expect("file target should be written");
     fs::create_dir(&directory_target).expect("directory target should be created");
-    if !create_file_link(&file_target, &root.path().join("file-link")) {
-        return;
-    }
-    if !create_directory_link(&directory_target, &root.path().join("directory-link")) {
-        return;
-    }
+    let _fixtures_available = create_file_link(&file_target, &root.path().join("file-link"))
+        && create_directory_link(&directory_target, &root.path().join("directory-link"));
 }
 
 /// Replaces a file link's record with distinct actual and display names.
