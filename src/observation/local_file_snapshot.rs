@@ -51,6 +51,9 @@ pub(crate) fn run_read_hook() {
 /// snapshot; an identity is not a content version and same-size writes can
 /// evade timestamp granularity or races.
 ///
+/// Its [`Debug`] output reports the byte length and observations without
+/// including the snapshot body.
+///
 /// # Example
 ///
 /// ```no_run
@@ -72,7 +75,7 @@ pub(crate) fn run_read_hook() {
 /// # Ok(())
 /// # }
 /// ```
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct LocalFileSnapshot {
     /// Bytes returned by the bounded read.
     bytes: Vec<u8>,
@@ -80,6 +83,17 @@ pub struct LocalFileSnapshot {
     before: LocalFileObservation,
     /// Same-handle observation taken after reading bytes.
     after: LocalFileObservation,
+}
+
+impl std::fmt::Debug for LocalFileSnapshot {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("LocalFileSnapshot")
+            .field("byte_len", &self.bytes.len())
+            .field("before", &self.before)
+            .field("after", &self.after)
+            .finish()
+    }
 }
 
 impl LocalFileSnapshot {
