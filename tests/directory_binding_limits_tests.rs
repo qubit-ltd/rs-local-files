@@ -16,6 +16,7 @@ use qubit_local_files::options::LocalDirectoryOpenOptions;
 use qubit_local_files::options::LocalObservedReadOptions;
 use qubit_local_files::options::LocalPathBindingOptions;
 use qubit_local_files::options::LocalResolutionLimits;
+#[cfg(unix)]
 use qubit_local_files::options::LocalRootOpenOptions;
 use tempfile::tempdir;
 
