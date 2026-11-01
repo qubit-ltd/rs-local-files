@@ -22,6 +22,8 @@ use qubit_local_files::outcome::LocalWritePublicationMethod;
 use qubit_local_files::outcome::LocalWriterState;
 use qubit_local_files::policy::LocalDurabilityRequirement;
 #[cfg(all(feature = "test-support", unix))]
+use qubit_local_files::policy::LocalFileSyncRequirement;
+#[cfg(all(feature = "test-support", unix))]
 use qubit_local_files::test_support::install_test_fault;
 use tempfile::tempdir;
 
@@ -1186,6 +1188,79 @@ fn test_local_file_writer_reports_injected_required_append_sync_failure() {
         assert_eq!(LocalWriteFailureState::Published, error.state());
         assert_eq!(LocalFileErrorKind::PublicationIncomplete, error.error().kind(),);
     });
+}
+
+/// Required append sync failures report whether this writer accepted bytes.
+#[cfg(all(feature = "test-support", unix))]
+#[test]
+fn test_append_required_sync_failure_tracks_accepted_bytes() {
+    for rooted in [false, true] {
+        for write in [None, Some(&b""[..]), Some(&b"+"[..])] {
+            for file_sync in [false, true] {
+                let directory = tempdir().expect("temporary directory should exist");
+                let filesystem = if rooted {
+                    LocalFileSystem::rooted(directory.path())
+                } else {
+                    LocalFileSystem::host()
+                }
+                .expect("filesystem should open");
+                let target = if rooted {
+                    std::path::PathBuf::from("payload")
+                } else {
+                    directory.path().join("payload")
+                };
+                fs::write(directory.path().join("payload"), b"base").expect("payload should be written");
+                let mut options = LocalWriteOptions::new(LocalWriteMode::Append);
+                if file_sync {
+                    options = options.with_file_sync(LocalFileSyncRequirement::Required);
+                } else {
+                    options = options.with_durability(LocalDurabilityRequirement::Required);
+                }
+                let mut writer = filesystem
+                    .open_writer_with_options(&target, &options)
+                    .expect("append writer should open");
+                if let Some(bytes) = write {
+                    Output::write_fully(&mut writer, bytes).expect("append bytes should be accepted");
+                }
+                let _fault = install_test_fault("writer-append-required-sync").expect("sync fault should install");
+                let error = writer.commit().expect_err("required sync failure should fail commit");
+                let expected = if write.is_some_and(|bytes| !bytes.is_empty()) {
+                    LocalWriteFailureState::Published
+                } else {
+                    LocalWriteFailureState::NotPublished
+                };
+                assert_eq!(expected, error.state());
+                assert_eq!(LocalFileOperation::Commit, error.error().operation());
+                assert_eq!(
+                    if expected == LocalWriteFailureState::Published {
+                        LocalFileErrorKind::PublicationIncomplete
+                    } else {
+                        LocalFileErrorKind::Io
+                    },
+                    error.error().kind(),
+                );
+                let sync_error = error
+                    .error()
+                    .io_error()
+                    .expect("sync failure should retain its I/O source");
+                assert!(
+                    sync_error.raw_os_error().is_some(),
+                    "injected sync error should retain its native code"
+                );
+                assert!(error.writer().is_none(), "append writer is terminal after sync failure");
+                assert_eq!(
+                    if expected == LocalWriteFailureState::Published {
+                        &b"base+"[..]
+                    } else {
+                        &b"base"[..]
+                    },
+                    fs::read(directory.path().join("payload"))
+                        .expect("payload remains readable")
+                        .as_slice(),
+                );
+            }
+        }
+    }
 }
 
 /// Verifies an injected direct-append abort flush failure retains the abort

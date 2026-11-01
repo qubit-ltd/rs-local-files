@@ -50,6 +50,42 @@ type RetainedOwnerPolicyEntry = (
     bool,
 );
 
+#[cfg(test)]
+thread_local! {
+    static OWNER_POLICY_FINAL_INDEX_QUERIES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    static OWNER_POLICY_TEST_DEADLINE_BOUNDARY: std::cell::Cell<Option<OwnerPolicyDeadlineBoundary>> = const { std::cell::Cell::new(None) };
+    static OWNER_POLICY_TEST_NOW: std::cell::Cell<Option<std::time::Instant>> = const { std::cell::Cell::new(None) };
+}
+
+#[cfg(test)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum OwnerPolicyDeadlineBoundary {
+    IndexBuild,
+    FinalMatch,
+    PinnedHandle,
+}
+
+#[cfg(test)]
+fn reach_owner_policy_deadline_boundary(boundary: OwnerPolicyDeadlineBoundary, started_at: std::time::Instant) {
+    OWNER_POLICY_TEST_DEADLINE_BOUNDARY.with(|selected| {
+        if selected.get() == Some(boundary) {
+            OWNER_POLICY_TEST_NOW.with(|now| now.set(Some(started_at + std::time::Duration::from_secs(3600))));
+        }
+    });
+}
+
+fn owner_policy_deadline_exceeded(limits: &LocalListOptions, started_at: std::time::Instant) -> bool {
+    limits.deadline().is_some_and(|deadline| {
+        #[cfg(test)]
+        let now = OWNER_POLICY_TEST_NOW
+            .with(|now| now.get())
+            .unwrap_or_else(std::time::Instant::now);
+        #[cfg(not(test))]
+        let now = std::time::Instant::now();
+        now.saturating_duration_since(started_at) >= deadline
+    })
+}
+
 impl LocalStagedDirectory {
     /// Observes the stage directory through its retained handle.
     pub fn observation(&self) -> LocalResult<LocalFileObservation> {
@@ -107,6 +143,12 @@ impl LocalStagedDirectory {
 
     /// Removes the stage after identity checks and returns cleanup failures
     /// with an owner.
+    ///
+    /// A stage made read-only by `ReadOnlyCurrentUser` may need its access
+    /// restored first through [`Self::apply_access_policy`] while this retained
+    /// authority is available. On Windows, restoring the DACL does not clear
+    /// an existing `FILE_ATTRIBUTE_READONLY`. See the guide's read-only staged
+    /// tree recovery example.
     pub fn cleanup(mut self) -> Result<(), LocalTreeCleanupError> {
         drop(self.directory.take());
         self.owner
@@ -127,6 +169,11 @@ impl LocalStagedDirectory {
 }
 impl LocalStagedDirectory {
     /// Applies an access policy without publishing or relinquishing this stage.
+    ///
+    /// Use this method through the retained stage authority to restore cleanup
+    /// access after a read-only publication fails. On Windows, DACL changes do
+    /// not clear an existing `FILE_ATTRIBUTE_READONLY`; see the guide's
+    /// read-only staged tree recovery example for the supported recovery flow.
     pub fn apply_access_policy(
         &mut self,
         policy: crate::policy::LocalTreeFinalAccess,
@@ -173,6 +220,7 @@ impl LocalStagedDirectory {
         pre_synced: bool,
     ) -> Result<(crate::outcome::LocalTreeAccessOutcome, bool), super::super::tree_recovery::LocalTreeAccessError> {
         use crate::outcome::LocalTreeAccessState as State;
+        let started_at = std::time::Instant::now();
         validate_owner_policy(policy)
             .map_err(|cause| super::super::tree_recovery::LocalTreeAccessError::new(cause, State::Preserved))?;
         let file_synced = sync_requirement != LocalFileSyncRequirement::NotRequired && pre_synced;
@@ -181,10 +229,29 @@ impl LocalStagedDirectory {
             owner.set_owner_access_policy(Some(*policy));
         }
         let (entries, traversal, maximum_entries, directory_mode_restricts_traversal) =
-            self.collect_owner_policy_entries(policy, limits)?;
-        let retained = self.open_and_pin_owner_policy_entries(&entries, sync_requirement)?;
+            self.collect_owner_policy_entries_started_at(policy, limits, started_at)?;
+        if owner_policy_deadline_exceeded(limits, started_at) {
+            return Err(super::super::tree_recovery::LocalTreeAccessError::new(
+                resource_limit(),
+                State::Preserved,
+            ));
+        }
+        let retained =
+            self.open_and_pin_owner_policy_entries_started_at(&entries, sync_requirement, limits, started_at)?;
+        if owner_policy_deadline_exceeded(limits, started_at) {
+            return Err(super::super::tree_recovery::LocalTreeAccessError::new(
+                resource_limit(),
+                State::Preserved,
+            ));
+        }
         let root = self.apply_owner_policy_mutations(policy, &retained)?;
-        self.verify_owner_policy_entries(
+        if owner_policy_deadline_exceeded(limits, started_at) {
+            return Err(super::super::tree_recovery::LocalTreeAccessError::new(
+                resource_limit(),
+                State::Indeterminate,
+            ));
+        }
+        self.verify_owner_policy_entries_started_at(
             policy,
             limits,
             &entries,
@@ -193,8 +260,15 @@ impl LocalStagedDirectory {
             maximum_entries,
             directory_mode_restricts_traversal,
             &root,
+            started_at,
         )?;
-        let file_synced = self.sync_owner_policy_files(&retained, sync_requirement, file_synced)?;
+        if owner_policy_deadline_exceeded(limits, started_at) {
+            return Err(super::super::tree_recovery::LocalTreeAccessError::new(
+                resource_limit(),
+                State::OwnerPolicyApplied,
+            ));
+        }
+        let file_synced = self.sync_owner_policy_files(&retained, sync_requirement, file_synced, limits, started_at)?;
         Ok((
             crate::outcome::LocalTreeAccessOutcome::with_owner_policy(State::OwnerPolicyApplied, *policy),
             file_synced,
@@ -203,10 +277,21 @@ impl LocalStagedDirectory {
 
     /// Scans the staged namespace and enforces the existing pre-mutation
     /// budgets.
+    #[cfg(test)]
     fn collect_owner_policy_entries(
         &self,
         policy: &crate::policy::LocalOwnerAccessPolicy,
         limits: &LocalListOptions,
+    ) -> Result<(Vec<OwnerPolicyEntry>, LocalListOptions, usize, bool), super::super::tree_recovery::LocalTreeAccessError>
+    {
+        self.collect_owner_policy_entries_started_at(policy, limits, std::time::Instant::now())
+    }
+
+    fn collect_owner_policy_entries_started_at(
+        &self,
+        policy: &crate::policy::LocalOwnerAccessPolicy,
+        limits: &LocalListOptions,
+        started_at: std::time::Instant,
     ) -> Result<(Vec<OwnerPolicyEntry>, LocalListOptions, usize, bool), super::super::tree_recovery::LocalTreeAccessError>
     {
         use crate::outcome::LocalTreeAccessState as State;
@@ -219,7 +304,7 @@ impl LocalStagedDirectory {
         let mut entries = Vec::new();
         let mut seen_bytes = 0_usize;
         for item in self
-            .observe_tree_with_options(&traversal)
+            .observe_tree_with_options_started_at(&traversal, started_at)
             .map_err(|cause| super::super::tree_recovery::LocalTreeAccessError::new(cause, State::Preserved))?
         {
             let item =
@@ -306,10 +391,26 @@ impl LocalStagedDirectory {
 
     /// Opens each observed entry and pins the identity before the first
     /// mutation.
+    #[cfg(test)]
     fn open_and_pin_owner_policy_entries(
         &self,
         entries: &[OwnerPolicyEntry],
         sync_requirement: LocalFileSyncRequirement,
+    ) -> Result<Vec<RetainedOwnerPolicyEntry>, super::super::tree_recovery::LocalTreeAccessError> {
+        self.open_and_pin_owner_policy_entries_started_at(
+            entries,
+            sync_requirement,
+            &LocalListOptions::new(),
+            std::time::Instant::now(),
+        )
+    }
+
+    fn open_and_pin_owner_policy_entries_started_at(
+        &self,
+        entries: &[OwnerPolicyEntry],
+        sync_requirement: LocalFileSyncRequirement,
+        limits: &LocalListOptions,
+        started_at: std::time::Instant,
     ) -> Result<Vec<RetainedOwnerPolicyEntry>, super::super::tree_recovery::LocalTreeAccessError> {
         use crate::outcome::LocalTreeAccessState as State;
         let mut retained = Vec::new();
@@ -317,6 +418,12 @@ impl LocalStagedDirectory {
             .try_reserve_exact(entries.len())
             .map_err(|_| super::super::tree_recovery::LocalTreeAccessError::new(resource_limit(), State::Preserved))?;
         for (path, kind, expected) in entries {
+            if owner_policy_deadline_exceeded(limits, started_at) {
+                return Err(super::super::tree_recovery::LocalTreeAccessError::new(
+                    resource_limit(),
+                    State::Preserved,
+                ));
+            }
             if !matches!(kind, crate::LocalFileKind::File | crate::LocalFileKind::Directory) {
                 return Err(super::super::tree_recovery::LocalTreeAccessError::new(
                     LocalFileError::new(LocalFileErrorKind::RequirementNotMet, LocalFileOperation::Metadata),
@@ -637,6 +744,7 @@ impl LocalStagedDirectory {
 
     /// Rewalks names and rechecks identities and final policy facts before
     /// syncing.
+    #[cfg(test)]
     #[allow(clippy::too_many_arguments)]
     fn verify_owner_policy_entries(
         &mut self,
@@ -648,6 +756,32 @@ impl LocalStagedDirectory {
         maximum_entries: usize,
         directory_mode_restricts_traversal: bool,
         root: &std::fs::File,
+    ) -> Result<(), super::super::tree_recovery::LocalTreeAccessError> {
+        self.verify_owner_policy_entries_started_at(
+            policy,
+            limits,
+            entries,
+            retained,
+            traversal,
+            maximum_entries,
+            directory_mode_restricts_traversal,
+            root,
+            std::time::Instant::now(),
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn verify_owner_policy_entries_started_at(
+        &mut self,
+        policy: &crate::policy::LocalOwnerAccessPolicy,
+        limits: &LocalListOptions,
+        entries: &[OwnerPolicyEntry],
+        retained: &[RetainedOwnerPolicyEntry],
+        traversal: &LocalListOptions,
+        maximum_entries: usize,
+        directory_mode_restricts_traversal: bool,
+        root: &std::fs::File,
+        started_at: std::time::Instant,
     ) -> Result<(), super::super::tree_recovery::LocalTreeAccessError> {
         use crate::outcome::LocalTreeAccessState as State;
         #[cfg(all(feature = "test-support", unix))]
@@ -723,17 +857,41 @@ impl LocalStagedDirectory {
         }
         // Rewalk the complete tree while the configured directory policy
         // retains the read/list and traversal rights needed for name checks.
-        let mut final_entries = Vec::new();
+        let mut expected: std::collections::HashMap<
+            &Path,
+            (crate::LocalFileKind, Option<&crate::observation::LocalFileIdentity>),
+        > = std::collections::HashMap::new();
+        expected.try_reserve(entries.len()).map_err(|_| {
+            super::super::tree_recovery::LocalTreeAccessError::new(resource_limit(), State::Indeterminate)
+        })?;
+        for (path, kind, identity) in entries {
+            #[cfg(test)]
+            reach_owner_policy_deadline_boundary(OwnerPolicyDeadlineBoundary::IndexBuild, started_at);
+            if owner_policy_deadline_exceeded(limits, started_at) {
+                return Err(super::super::tree_recovery::LocalTreeAccessError::new(
+                    resource_limit(),
+                    State::Indeterminate,
+                ));
+            }
+            expected.insert(path.as_path(), (*kind, identity.as_ref()));
+        }
+        let mut final_entry_count = 0_usize;
         let mut final_name_bytes = 0_usize;
         if !entries.is_empty() || !directory_mode_restricts_traversal {
             for item in self
-                .observe_tree_with_options(traversal)
+                .observe_tree_with_options_started_at(traversal, started_at)
                 .map_err(|cause| super::super::tree_recovery::LocalTreeAccessError::new(cause, State::Indeterminate))?
             {
                 let item = item.map_err(|cause| {
                     super::super::tree_recovery::LocalTreeAccessError::new(cause, State::Indeterminate)
                 })?;
-                if final_entries.len() >= maximum_entries {
+                if owner_policy_deadline_exceeded(limits, started_at) {
+                    return Err(super::super::tree_recovery::LocalTreeAccessError::new(
+                        resource_limit(),
+                        State::Indeterminate,
+                    ));
+                }
+                if final_entry_count >= maximum_entries {
                     return Err(super::super::tree_recovery::LocalTreeAccessError::new(
                         resource_limit(),
                         State::Indeterminate,
@@ -762,22 +920,26 @@ impl LocalStagedDirectory {
                         State::Indeterminate,
                     ));
                 }
-                final_entries.try_reserve(1).map_err(|_| {
-                    super::super::tree_recovery::LocalTreeAccessError::new(resource_limit(), State::Indeterminate)
-                })?;
-                final_entries.push((
-                    item.relative_path().to_path_buf(),
-                    item.observation().metadata().kind(),
-                    item.observation().identity().cloned(),
-                ));
+                final_entry_count = final_entry_count.saturating_add(1);
+                let observed = (item.observation().metadata().kind(), item.observation().identity());
+                #[cfg(test)]
+                OWNER_POLICY_FINAL_INDEX_QUERIES.with(|count| count.set(count.get().saturating_add(1)));
+                if expected.remove(item.relative_path()) != Some(observed) {
+                    return Err(super::super::tree_recovery::LocalTreeAccessError::new(
+                        LocalFileError::new(LocalFileErrorKind::ChangedDuringRead, LocalFileOperation::Metadata),
+                        State::Indeterminate,
+                    ));
+                }
+                #[cfg(test)]
+                reach_owner_policy_deadline_boundary(OwnerPolicyDeadlineBoundary::FinalMatch, started_at);
+                if owner_policy_deadline_exceeded(limits, started_at) {
+                    return Err(super::super::tree_recovery::LocalTreeAccessError::new(
+                        resource_limit(),
+                        State::Indeterminate,
+                    ));
+                }
             }
-            if final_entries.len() != entries.len()
-                || final_entries.iter().any(|(path, kind, identity)| {
-                    !entries.iter().any(|(expected_path, expected_kind, expected_identity)| {
-                        path == expected_path && kind == expected_kind && identity == expected_identity
-                    })
-                })
-            {
+            if !expected.is_empty() {
                 return Err(super::super::tree_recovery::LocalTreeAccessError::new(
                     LocalFileError::new(LocalFileErrorKind::ChangedDuringRead, LocalFileOperation::Metadata),
                     State::Indeterminate,
@@ -787,6 +949,14 @@ impl LocalStagedDirectory {
         // The complete namespace set is now checked, then every pre-opened
         // identity-bound handle is checked for exact policy facts.
         for (path, kind, expected, file, _) in retained {
+            #[cfg(test)]
+            reach_owner_policy_deadline_boundary(OwnerPolicyDeadlineBoundary::PinnedHandle, started_at);
+            if owner_policy_deadline_exceeded(limits, started_at) {
+                return Err(super::super::tree_recovery::LocalTreeAccessError::new(
+                    resource_limit(),
+                    State::Indeterminate,
+                ));
+            }
             let rebound = self
                 .directory()
                 .observe_entry(path)
@@ -851,6 +1021,12 @@ impl LocalStagedDirectory {
                 }
             }
         }
+        if owner_policy_deadline_exceeded(limits, started_at) {
+            return Err(super::super::tree_recovery::LocalTreeAccessError::new(
+                resource_limit(),
+                State::Indeterminate,
+            ));
+        }
         #[cfg(unix)]
         crate::temp::internal::privacy_unix::verify_owner_access(root, true, policy).map_err(|source| {
             super::super::tree_recovery::LocalTreeAccessError::new(
@@ -884,9 +1060,17 @@ impl LocalStagedDirectory {
         retained: &[RetainedOwnerPolicyEntry],
         sync_requirement: LocalFileSyncRequirement,
         mut file_synced: bool,
+        limits: &LocalListOptions,
+        started_at: std::time::Instant,
     ) -> Result<bool, super::super::tree_recovery::LocalTreeAccessError> {
         use crate::outcome::LocalTreeAccessState as State;
         for (path, kind, _expected, file, sync_capable) in retained {
+            if owner_policy_deadline_exceeded(limits, started_at) {
+                return Err(super::super::tree_recovery::LocalTreeAccessError::new(
+                    resource_limit(),
+                    State::OwnerPolicyApplied,
+                ));
+            }
             if *kind != crate::LocalFileKind::File || sync_requirement == LocalFileSyncRequirement::NotRequired {
                 continue;
             }
@@ -1436,6 +1620,11 @@ mod owner_policy_checkpoint_tests {
     use std::path::Path;
 
     use super::LocalStagedDirectory;
+    use super::OWNER_POLICY_FINAL_INDEX_QUERIES;
+    use super::OWNER_POLICY_TEST_DEADLINE_BOUNDARY;
+    use super::OWNER_POLICY_TEST_NOW;
+    use super::OwnerPolicyDeadlineBoundary;
+    use super::OwnerPolicySyncEvent;
     use crate::LocalFileErrorKind;
     use crate::LocalFileOperation;
     use crate::LocalFileSystem;
@@ -1445,6 +1634,23 @@ mod owner_policy_checkpoint_tests {
     use crate::outcome::LocalTreeAccessState;
     use crate::policy::LocalFileSyncRequirement;
     use crate::policy::LocalOwnerAccessPolicy;
+
+    struct DeadlineBoundaryGuard;
+
+    impl DeadlineBoundaryGuard {
+        fn expire_at(boundary: OwnerPolicyDeadlineBoundary) -> Self {
+            OWNER_POLICY_TEST_NOW.with(|now| now.set(None));
+            OWNER_POLICY_TEST_DEADLINE_BOUNDARY.with(|selected| selected.set(Some(boundary)));
+            Self
+        }
+    }
+
+    impl Drop for DeadlineBoundaryGuard {
+        fn drop(&mut self) {
+            OWNER_POLICY_TEST_DEADLINE_BOUNDARY.with(|selected| selected.set(None));
+            OWNER_POLICY_TEST_NOW.with(|now| now.set(None));
+        }
+    }
 
     fn fixture(with_file: bool) -> (tempfile::TempDir, LocalStagedDirectory, LocalOwnerAccessPolicy) {
         let scratch = tempfile::tempdir().expect("checkpoint scratch directory");
@@ -1668,6 +1874,134 @@ mod owner_policy_checkpoint_tests {
     }
 
     #[test]
+    fn test_final_verification_accepts_the_same_set_in_a_different_order() {
+        let (_scratch, mut stage, policy) = fixture(true);
+        stage
+            .write_file_new(Path::new("second"), &mut &b"second"[..], 16)
+            .expect("second file");
+        let (mut entries, traversal, maximum_entries, restricted) = stage
+            .collect_owner_policy_entries(&policy, &LocalListOptions::new())
+            .expect("collect identities");
+        let retained = stage
+            .open_and_pin_owner_policy_entries(&entries, LocalFileSyncRequirement::NotRequired)
+            .expect("pin handles");
+        let root = stage
+            .apply_owner_policy_mutations(&policy, &retained)
+            .expect("apply policy");
+        entries.reverse();
+        stage
+            .verify_owner_policy_entries(
+                &policy,
+                &LocalListOptions::new(),
+                &entries,
+                &retained,
+                &traversal,
+                maximum_entries,
+                restricted,
+                &root,
+            )
+            .expect("ordering does not affect exact-set verification");
+        let _recovery = stage.retain_in_place();
+    }
+
+    #[test]
+    fn test_final_verification_queries_one_index_entry_per_observation() {
+        for count in [16, 256, 512] {
+            let (_scratch, mut stage, policy) = fixture(false);
+            for index in 0..count {
+                let relative = format!("entry-{index:04}");
+                stage
+                    .write_file_new(Path::new(&relative), &mut &b"x"[..], 1)
+                    .expect("entry");
+            }
+            let (entries, traversal, maximum_entries, restricted) = stage
+                .collect_owner_policy_entries(&policy, &LocalListOptions::new().with_max_entries(count))
+                .expect("collect entries");
+            let retained = stage
+                .open_and_pin_owner_policy_entries(&entries, LocalFileSyncRequirement::NotRequired)
+                .expect("pin entries");
+            let root = stage
+                .apply_owner_policy_mutations(&policy, &retained)
+                .expect("apply policy");
+            OWNER_POLICY_FINAL_INDEX_QUERIES.with(|queries| queries.set(0));
+            stage
+                .verify_owner_policy_entries(
+                    &policy,
+                    &LocalListOptions::new().with_max_entries(count),
+                    &entries,
+                    &retained,
+                    &traversal,
+                    maximum_entries,
+                    restricted,
+                    &root,
+                )
+                .expect("final set should match");
+            OWNER_POLICY_FINAL_INDEX_QUERIES.with(|queries| assert_eq!(count, queries.get()));
+            let _recovery = stage.retain_in_place();
+        }
+    }
+
+    #[test]
+    fn test_final_verification_rejects_an_expired_absolute_deadline() {
+        let (_scratch, mut stage, policy) = fixture(true);
+        let limits = LocalListOptions::new().with_deadline(std::time::Duration::from_secs(1));
+        let (entries, traversal, maximum_entries, restricted) = stage
+            .collect_owner_policy_entries(&policy, &limits)
+            .expect("collect identities");
+        let retained = stage
+            .open_and_pin_owner_policy_entries(&entries, LocalFileSyncRequirement::NotRequired)
+            .expect("pin handles");
+        let root = stage
+            .apply_owner_policy_mutations(&policy, &retained)
+            .expect("apply policy");
+        let started_at = std::time::Instant::now() - std::time::Duration::from_secs(2);
+        let error = stage
+            .verify_owner_policy_entries_started_at(
+                &policy,
+                &limits,
+                &entries,
+                &retained,
+                &traversal,
+                maximum_entries,
+                restricted,
+                &root,
+                started_at,
+            )
+            .expect_err("final verification must use the original elapsed budget");
+        assert_eq!(LocalFileErrorKind::ResourceLimit, error.cause().kind());
+        assert_eq!(LocalTreeAccessState::Indeterminate, error.access_state());
+        let _recovery = stage.retain_in_place();
+    }
+
+    #[test]
+    fn test_owner_policy_deadline_stops_final_verification_at_each_boundary() {
+        for boundary in [
+            OwnerPolicyDeadlineBoundary::IndexBuild,
+            OwnerPolicyDeadlineBoundary::FinalMatch,
+            OwnerPolicyDeadlineBoundary::PinnedHandle,
+        ] {
+            let (_scratch, mut stage, policy) = fixture(true);
+            let _clock = DeadlineBoundaryGuard::expire_at(boundary);
+            super::super::sync::OWNER_POLICY_SYNC_EVENTS.with(|events| *events.borrow_mut() = Some(Vec::new()));
+            let limits = LocalListOptions::new().with_deadline(std::time::Duration::from_secs(30));
+            let error = stage
+                .apply_owner_access_policy_with_sync(&policy, &limits, LocalFileSyncRequirement::Required, false)
+                .expect_err("deadline expiration prevents the next owner-policy phase");
+            assert_eq!(LocalFileErrorKind::ResourceLimit, error.cause().kind());
+            assert_eq!(LocalTreeAccessState::Indeterminate, error.access_state());
+            let events =
+                super::super::sync::OWNER_POLICY_SYNC_EVENTS.with(|events| events.borrow_mut().take().unwrap());
+            assert!(
+                events
+                    .iter()
+                    .all(|event| !matches!(event, OwnerPolicySyncEvent::FinalSync(_))),
+                "expired verification must not start the final sync"
+            );
+            let _recovery = stage.retain_in_place();
+        }
+    }
+
+    #[test]
     fn test_final_verification_rechecks_file_and_root_access_after_mutations() {
         for change_root in [false, true] {
             let (scratch, mut stage, policy) = fixture(true);
@@ -1729,7 +2063,13 @@ mod owner_policy_checkpoint_tests {
                 .apply_owner_policy_mutations(&policy, &retained)
                 .expect("apply owner access");
             super::super::sync::fail_tree_sync_after(0);
-            let result = stage.sync_owner_policy_files(&retained, requirement, true);
+            let result = stage.sync_owner_policy_files(
+                &retained,
+                requirement,
+                true,
+                &LocalListOptions::new(),
+                std::time::Instant::now(),
+            );
             if requirement == LocalFileSyncRequirement::Required {
                 let error = result.expect_err("required final sync fails");
                 assert_eq!(LocalFileErrorKind::Io, error.cause().kind());
@@ -1740,7 +2080,13 @@ mod owner_policy_checkpoint_tests {
             }
             assert!(
                 stage
-                    .sync_owner_policy_files(&retained, requirement, true)
+                    .sync_owner_policy_files(
+                        &retained,
+                        requirement,
+                        true,
+                        &LocalListOptions::new(),
+                        std::time::Instant::now(),
+                    )
                     .expect("one-shot failure is consumed")
             );
             stage.cleanup().expect("cleanup after sync retry");

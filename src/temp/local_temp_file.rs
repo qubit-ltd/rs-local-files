@@ -49,6 +49,22 @@ use crate::path::LocalFileSystemScope;
 use crate::path::LocalPathResolver;
 use crate::policy::LocalFileSyncRequirement;
 
+#[cfg(all(test, unix))]
+thread_local! {
+    static FAIL_NEXT_TEMP_SOURCE_IDENTITY_QUERY: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    static FAIL_NEXT_TEMP_SOURCE_SYNC: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+#[cfg(all(test, unix))]
+fn inject_temp_source_identity_query_error() {
+    FAIL_NEXT_TEMP_SOURCE_IDENTITY_QUERY.with(|selected| selected.set(true));
+}
+
+#[cfg(all(test, unix))]
+fn inject_temp_source_sync_error() {
+    FAIL_NEXT_TEMP_SOURCE_SYNC.with(|selected| selected.set(true));
+}
+
 /// A temporary file whose cleanup remains bound to its creating authority.
 ///
 /// Cleanup rejects ordinary path replacement by checking the identity captured
@@ -964,7 +980,7 @@ impl LocalTempFile {
         let mut before_reopen = Some(before_reopen);
         let mut synchronize = || -> Result<bool> {
             if let Some(file) = self.file.as_ref() {
-                return self.synchronize_open_file(file);
+                return self.synchronize_open_file(file, durability);
             }
             before_reopen
                 .take()
@@ -973,40 +989,41 @@ impl LocalTempFile {
                 LocalTempResourceBackend::Host(_) => {
                     let file =
                         crate::local::open_native_reader_path(&self.core.path, &crate::read::OpenOptions::default())?;
-                    self.synchronize_open_file(&file)
+                    self.synchronize_open_file(&file, durability)
                 }
                 LocalTempResourceBackend::Rooted(rooted) => {
                     let path = LocalRelativePath::new(&rooted.relative_path)?;
                     let file = rooted.root.open_probe_file(&path)?;
-                    self.synchronize_open_file(&file)
+                    self.synchronize_open_file(&file, durability)
                 }
             }
         };
         match durability {
-            LocalDurabilityRequirement::Required => match synchronize()? {
-                true => Ok(true),
-                false => Err(sync_identity_error()),
-            },
-            LocalDurabilityRequirement::Preferred => match synchronize() {
-                Ok(true) => Ok(true),
-                Ok(false) => Err(sync_identity_error()),
-                Err(_) => Ok(false),
-            },
+            LocalDurabilityRequirement::Required => {
+                synchronize().and_then(|synced| if synced { Ok(true) } else { Err(sync_identity_error()) })
+            }
+            LocalDurabilityRequirement::Preferred => synchronize(),
             LocalDurabilityRequirement::NotRequired => Ok(false),
         }
     }
 
-    /// Synchronizes `file` only when it identifies the retained source entity.
+    /// Validates the reopened handle before applying the sync fallback.
     ///
     /// # Parameters
     /// - `file`: The candidate handle to validate and synchronize.
     ///
     /// # Returns
-    /// `true` after synchronization, or `false` for a different file identity.
+    /// `true` after synchronization, or `false` only when a preferred
+    /// `sync_all` operation fails after the handle has been verified.
     ///
     /// # Errors
-    /// Returns identity-inspection or synchronization failures.
-    fn synchronize_open_file(&self, file: &File) -> Result<bool> {
+    /// Returns identity-inspection failures for both modes and required
+    /// synchronization failures.
+    fn synchronize_open_file(&self, file: &File, durability: LocalDurabilityRequirement) -> Result<bool> {
+        #[cfg(all(test, unix))]
+        if FAIL_NEXT_TEMP_SOURCE_IDENTITY_QUERY.with(|selected| selected.replace(false)) {
+            return Err(Error::other("injected source identity query error"));
+        }
         let matches = match &self.core.backend {
             LocalTempResourceBackend::Host(backend) => backend.identity.matches_file(file)?,
             LocalTempResourceBackend::Rooted(backend) => {
@@ -1014,11 +1031,21 @@ impl LocalTempFile {
                 backend.identity.is_same_file(&opened)
             }
         };
-        if matches {
-            file.sync_all()?;
-            Ok(true)
+        if !matches {
+            return Err(sync_identity_error());
+        }
+        #[cfg(all(test, unix))]
+        let sync_result = if FAIL_NEXT_TEMP_SOURCE_SYNC.with(|selected| selected.replace(false)) {
+            Err(Error::other("injected source sync error"))
         } else {
-            Ok(false)
+            file.sync_all()
+        };
+        #[cfg(not(all(test, unix)))]
+        let sync_result = file.sync_all();
+        match sync_result {
+            Ok(()) => Ok(true),
+            Err(_) if durability == LocalDurabilityRequirement::Preferred => Ok(false),
+            Err(error) => Err(error),
         }
     }
 
@@ -1400,10 +1427,147 @@ mod sync_identity_tests {
     }
 
     #[test]
+    fn preferred_closed_reopen_error_is_not_treated_as_sync_degradation() {
+        for rooted in [false, true] {
+            let directory = tempfile::tempdir().expect("private parent should be created");
+            let filesystem = if rooted {
+                LocalFileSystem::rooted(directory.path()).expect("root authority should open")
+            } else {
+                LocalFileSystem::host().expect("host authority should open")
+            };
+            let parent = if rooted { Path::new("/") } else { directory.path() };
+            let mut temporary = filesystem
+                .create_temp_file_with_options(&LocalTempFileOptions::new().with_parent(parent))
+                .expect("temporary source should be created");
+            let namespace_source = temporary.path().to_path_buf();
+            let source = if rooted {
+                directory
+                    .path()
+                    .join(namespace_source.strip_prefix(Path::new("/")).expect("virtual source"))
+            } else {
+                namespace_source
+            };
+            temporary.close();
+            let relocated = directory.path().join("relocated-source");
+            let target = directory.path().join("published");
+            let namespace_target = if rooted {
+                Path::new("/published")
+            } else {
+                target.as_path()
+            };
+            let error = temporary
+                .persist_with_path_before_reopen(
+                    namespace_target,
+                    None,
+                    LocalPersistOptions::new().with_durability(LocalDurabilityRequirement::Preferred),
+                    || fs::rename(&source, &relocated).expect("retain source under another fixture name"),
+                )
+                .expect_err("Preferred must propagate source reopen failure");
+            assert_eq!(LocalPersistStage::SynchronizeSource, error.stage());
+            assert_eq!(LocalPersistFailureState::NotPublished, error.state());
+            assert_eq!(LocalTempSourceState::Owned, error.source_state());
+            assert!(!target.exists(), "reopen failure must prevent target installation");
+            assert!(relocated.exists(), "the fixture retains the original source entity");
+        }
+    }
+
+    #[test]
+    fn preferred_closed_identity_query_error_is_not_treated_as_sync_degradation() {
+        for rooted in [false, true] {
+            let directory = tempfile::tempdir().expect("private parent should be created");
+            let filesystem = if rooted {
+                LocalFileSystem::rooted(directory.path()).expect("root authority should open")
+            } else {
+                LocalFileSystem::host().expect("host authority should open")
+            };
+            let parent = if rooted { Path::new("/") } else { directory.path() };
+            let mut temporary = filesystem
+                .create_temp_file_with_options(&LocalTempFileOptions::new().with_parent(parent))
+                .expect("temporary source should be created");
+            let namespace_source = temporary.path().to_path_buf();
+            let source = if rooted {
+                directory
+                    .path()
+                    .join(namespace_source.strip_prefix(Path::new("/")).expect("virtual source"))
+            } else {
+                namespace_source
+            };
+            temporary.close();
+            let target = directory.path().join("published");
+            let namespace_target = if rooted {
+                Path::new("/published")
+            } else {
+                target.as_path()
+            };
+            let error = temporary
+                .persist_with_path_before_reopen(
+                    namespace_target,
+                    None,
+                    LocalPersistOptions::new().with_durability(LocalDurabilityRequirement::Preferred),
+                    super::inject_temp_source_identity_query_error,
+                )
+                .expect_err("Preferred must propagate source identity inspection failure");
+            assert_eq!(LocalPersistStage::SynchronizeSource, error.stage());
+            assert_eq!(LocalPersistFailureState::NotPublished, error.state());
+            assert_eq!(LocalTempSourceState::Owned, error.source_state());
+            assert!(
+                error
+                    .error()
+                    .to_string()
+                    .contains("injected source identity query error"),
+                "identity inspection error is preserved"
+            );
+            assert!(
+                !target.exists(),
+                "identity inspection failure must prevent installation"
+            );
+            assert!(source.exists(), "source remains owned after rejection");
+        }
+    }
+
+    #[test]
+    fn verified_sync_failure_degrades_only_for_preferred() {
+        for durability in [
+            LocalDurabilityRequirement::Required,
+            LocalDurabilityRequirement::Preferred,
+        ] {
+            let directory = tempfile::tempdir().expect("private parent should be created");
+            let mut temporary = LocalFileSystem::host()
+                .expect("host authority should open")
+                .create_temp_file_with_options(&LocalTempFileOptions::new().with_parent(directory.path()))
+                .expect("temporary source should be created");
+            super::inject_temp_source_sync_error();
+            let result = temporary.synchronize_source_before_reopen(durability, || {
+                panic!("open source handle does not invoke the closed-reopen seam")
+            });
+            match durability {
+                LocalDurabilityRequirement::Required => {
+                    assert!(
+                        result
+                            .expect_err("required sync failure propagates")
+                            .to_string()
+                            .contains("injected source sync error")
+                    );
+                }
+                LocalDurabilityRequirement::Preferred => {
+                    assert!(!result.expect("only verified sync failure may degrade"));
+                }
+                LocalDurabilityRequirement::NotRequired => unreachable!(),
+            }
+            temporary.cleanup().expect("source cleanup remains available");
+        }
+    }
+
+    #[test]
     fn closed_reopen_rejects_fifo_path_replacement_without_blocking() {
         const CHILD: &str = "QUBIT_LF_REV_Q01_PERSIST_CHILD";
+        const DURABILITY: &str = "QUBIT_LF_REV_Q01_PERSIST_DURABILITY";
         if let Some(parent) = std::env::var_os(CHILD) {
             let parent = Path::new(&parent);
+            let durability = match std::env::var(DURABILITY).as_deref() {
+                Ok("preferred") => LocalDurabilityRequirement::Preferred,
+                _ => LocalDurabilityRequirement::Required,
+            };
             let mut temporary = LocalFileSystem::host()
                 .expect("host authority should open")
                 .create_temp_file_with_options(&LocalTempFileOptions::new().with_parent(parent))
@@ -1416,7 +1580,7 @@ mod sync_identity_tests {
                 .persist_with_path_before_reopen(
                     &target,
                     None,
-                    LocalPersistOptions::new().with_durability(LocalDurabilityRequirement::Required),
+                    LocalPersistOptions::new().with_durability(durability),
                     || {
                         fs::remove_file(&source).expect("source path should be removable");
                         let native = CString::new(source.as_os_str().as_bytes()).expect("fixture has no NUL");
@@ -1437,39 +1601,46 @@ mod sync_identity_tests {
                     .file_type()
                     .is_fifo()
             );
-            fs::write(parent.join("persist-child-completed"), b"rejected").expect("completion marker");
+            let marker = format!("persist-child-completed-{durability:?}");
+            fs::write(parent.join(marker), b"rejected").expect("completion marker");
             return;
         }
 
-        let fixture = tempfile::tempdir().expect("parent owns fixture");
-        let test_executable = std::env::current_exe().expect("unit test binary");
-        let mut child = ChildGuard(
-            Command::new(test_executable)
-                .args([
-                    "--exact",
-                    "temp::local_temp_file::sync_identity_tests::closed_reopen_rejects_fifo_path_replacement_without_blocking",
-                    "--nocapture",
-                ])
-                .env(CHILD, fixture.path())
-                .spawn()
-                .expect("child should start"),
-        );
-        let deadline = Instant::now() + Duration::from_secs(10);
-        loop {
-            if let Some(status) = child.0.try_wait().expect("child status") {
-                assert!(status.success(), "child failed: {status}");
-                assert_eq!(
-                    fs::read(fixture.path().join("persist-child-completed"))
-                        .expect("child executed and wrote completion marker"),
-                    b"rejected",
-                );
-                break;
-            }
-            assert!(
-                Instant::now() < deadline,
-                "Q01 persist: child failed to return before watchdog"
+        for (durability_name, durability) in [
+            ("required", LocalDurabilityRequirement::Required),
+            ("preferred", LocalDurabilityRequirement::Preferred),
+        ] {
+            let fixture = tempfile::tempdir().expect("parent owns fixture");
+            let test_executable = std::env::current_exe().expect("unit test binary");
+            let mut child = ChildGuard(
+                Command::new(test_executable)
+                    .args([
+                        "--exact",
+                        "temp::local_temp_file::sync_identity_tests::closed_reopen_rejects_fifo_path_replacement_without_blocking",
+                        "--nocapture",
+                    ])
+                    .env(CHILD, fixture.path())
+                    .env(DURABILITY, durability_name)
+                    .spawn()
+                    .expect("child should start"),
             );
-            std::thread::sleep(Duration::from_millis(10));
+            let deadline = Instant::now() + Duration::from_secs(10);
+            loop {
+                if let Some(status) = child.0.try_wait().expect("child status") {
+                    assert!(status.success(), "child failed: {status}");
+                    let marker = format!("persist-child-completed-{durability:?}");
+                    assert_eq!(
+                        fs::read(fixture.path().join(marker)).expect("child executed and wrote completion marker"),
+                        b"rejected",
+                    );
+                    break;
+                }
+                assert!(
+                    Instant::now() < deadline,
+                    "Q01 {durability_name} FIFO persist: child failed to return before watchdog"
+                );
+                std::thread::sleep(Duration::from_millis(10));
+            }
         }
     }
 }

@@ -223,7 +223,10 @@ impl CopyBudget {
             self.check_deadline_at(now())?;
             let read_capacity = self.read_capacity(buffer.len());
             let read = match Input::read(reader, &mut buffer[..read_capacity]) {
-                Ok(0) => return Ok(copied),
+                Ok(0) => {
+                    self.check_deadline_at(now())?;
+                    return Ok(copied);
+                }
                 Ok(read) => read,
                 Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
                 Err(error) => return Err(error),
@@ -486,6 +489,29 @@ mod tests {
         assert_eq!(io::ErrorKind::TimedOut, error.kind());
         assert_eq!(b"ab", writer.bytes.as_slice());
         assert_eq!(Some(1), budget.remaining_bytes());
+    }
+
+    #[test]
+    fn test_copy_budget_checks_deadline_after_eof() {
+        let started = Instant::now();
+        let duration = Duration::from_secs(60);
+        let mut budget = CopyBudget::new(
+            LocalCopyDirOptions::new()
+                .with_started_at(started)
+                .with_deadline(duration),
+        );
+        let mut reader = Cursor::new(&b""[..]);
+        let mut writer = Vec::<u8>::new();
+        let mut calls = 0;
+        let failure = budget
+            .copy_with_now(&mut reader, &mut writer, || {
+                calls += 1;
+                if calls == 1 { started } else { started + duration }
+            })
+            .expect_err("EOF must not bypass the post-read deadline check");
+        assert_eq!(io::ErrorKind::TimedOut, failure.kind());
+        assert!(writer.is_empty());
+        assert!(calls >= 2, "the clock must be read after EOF");
     }
 
     #[test]

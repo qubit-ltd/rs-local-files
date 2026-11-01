@@ -448,6 +448,21 @@ fn stage_copy_file(
     };
     let (mut source_file, source_metadata) = opened_source.into_parts();
     let copied = copy_into_staging(src, dst, stats, &mut source_file, &mut staged_file, budget)?;
+    #[cfg(test)]
+    crate::tests::rooted::support::resolution_observation_tests::reach_deadline_boundary(
+        crate::tests::rooted::support::resolution_observation_tests::DeadlineBoundary::HostCopyDataFinished,
+    );
+    if let Err(source) = budget.check_deadline() {
+        return Err(copy_dir_error_with_staging(
+            LocalCopyDirStage::CopyFileContents,
+            src,
+            dst,
+            stats,
+            source,
+            &mut staged_file,
+        )
+        .with_atomic_destination_state(crate::LocalAtomicDestinationState::Unchanged));
+    }
     if options.preserves_permissions() {
         preserve_staged_permissions(src, dst, &source_metadata, stats, &mut staged_file)?;
     }
@@ -518,6 +533,25 @@ fn commit_staged_copy_file(
     mut staged_file: StagedFile,
     budget: &CopyBudget,
 ) -> CopyDirResult<bool> {
+    #[cfg(test)]
+    crate::tests::rooted::support::resolution_observation_tests::reach_deadline_boundary(
+        crate::tests::rooted::support::resolution_observation_tests::DeadlineBoundary::HostCopyBeforeInstall,
+    );
+    if let Err(source) = budget.check_deadline() {
+        return Err(copy_dir_error_with_staging(
+            if options.remove_destination_directory {
+                LocalCopyDirStage::PrepareDestination
+            } else {
+                LocalCopyDirStage::CommitFile
+            },
+            src,
+            dst,
+            stats,
+            source,
+            &mut staged_file,
+        )
+        .with_atomic_destination_state(crate::LocalAtomicDestinationState::Unchanged));
+    }
     if options.remove_destination_directory {
         // Stage source bytes before deleting a conflicting directory. The
         // second type check ensures a racing file is left for file policy.
@@ -539,6 +573,21 @@ fn commit_staged_copy_file(
                 error
             });
         }
+    }
+
+    #[cfg(test)]
+    crate::tests::rooted::support::resolution_observation_tests::reach_deadline_boundary(
+        crate::tests::rooted::support::resolution_observation_tests::DeadlineBoundary::HostCopyAfterConflictRemoval,
+    );
+    if let Err(source) = budget.check_deadline() {
+        let mut error =
+            copy_dir_error_with_staging(LocalCopyDirStage::CommitFile, src, dst, stats, source, &mut staged_file);
+        if options.remove_destination_directory {
+            error = error.with_failure_state(crate::LocalCopyFailureState::PartiallyPublished);
+        } else {
+            error = error.with_atomic_destination_state(crate::LocalAtomicDestinationState::Unchanged);
+        }
+        return Err(error);
     }
 
     let commit_result = match options.conflict {

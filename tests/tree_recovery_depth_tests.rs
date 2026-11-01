@@ -90,6 +90,102 @@ fn test_empty_stage_cleanup_succeeds_at_depth_zero() {
 }
 
 #[test]
+fn test_empty_stage_cleanup_honors_path_byte_budget() {
+    use qubit_local_files::directory::LocalTreeValidationOptions;
+
+    for rooted in [false, true] {
+        for limit_kind in 0..4 {
+            let scratch = tempfile::tempdir().expect("scratch");
+            let filesystem = if rooted {
+                LocalFileSystem::rooted(scratch.path())
+            } else {
+                LocalFileSystem::host()
+            }
+            .expect("filesystem");
+            let parent_path = if rooted { Path::new("/") } else { scratch.path() };
+            let parent = filesystem
+                .open_directory_with_options(parent_path, &LocalDirectoryOpenOptions::new())
+                .expect("parent");
+            let stage = parent
+                .create_staged_directory(&LocalTempDirectoryOptions::new())
+                .expect("stage");
+            let relative = std::path::PathBuf::from(stage.relative_name());
+            let identity = stage.identity().expect("stage identity").clone();
+            let location = stage.retain_in_place();
+            let namespace_path = location.namespace_path().to_path_buf();
+            let root_bytes = namespace_path.as_os_str().as_encoded_bytes().len();
+            let native_stage = scratch.path().join(&relative);
+            let maximum = match limit_kind {
+                0 => Some(0),
+                1 => Some(root_bytes.saturating_sub(1)),
+                2 => Some(root_bytes),
+                _ => None,
+            };
+            let mut retained = parent
+                .open_staged_directory(&relative, &identity, &LocalTreeValidationOptions::new())
+                .expect("stage should reopen");
+            if let Some(maximum) = maximum {
+                retained.set_cleanup_limits(LocalTempCleanupLimits::new().with_max_pending_path_bytes(maximum));
+            }
+            if maximum.is_some_and(|maximum| maximum < root_bytes) {
+                let error = retained.cleanup().expect_err("root path exceeds budget");
+                assert_eq!(LocalFileErrorKind::ResourceLimit, error.cause().kind());
+                assert_eq!(LocalFileOperation::Cleanup, error.cause().operation());
+                assert_eq!(
+                    qubit_local_files::outcome::LocalTreeMutationState::NotStarted,
+                    error.mutation_state()
+                );
+                assert_eq!(Some(namespace_path.as_path()), error.cause().path());
+                assert!(native_stage.exists(), "budget failure must precede deletion");
+                for mut owner in error.into_retained_resources() {
+                    owner.set_cleanup_limits(LocalTempCleanupLimits::new().with_max_pending_path_bytes(root_bytes));
+                    owner.cleanup().expect("exact root budget permits cleanup");
+                }
+            } else {
+                retained.cleanup().expect("root path fits budget");
+            }
+            assert!(!native_stage.exists());
+        }
+    }
+}
+
+#[test]
+fn test_empty_stage_drop_honors_path_byte_budget() {
+    use qubit_local_files::directory::LocalTreeValidationOptions;
+
+    for rooted in [false, true] {
+        let scratch = tempfile::tempdir().expect("scratch");
+        let filesystem = if rooted {
+            LocalFileSystem::rooted(scratch.path())
+        } else {
+            LocalFileSystem::host()
+        }
+        .expect("filesystem");
+        let parent_path = if rooted { Path::new("/") } else { scratch.path() };
+        let parent = filesystem
+            .open_directory_with_options(parent_path, &LocalDirectoryOpenOptions::new())
+            .expect("parent");
+        let stage = parent
+            .create_staged_directory(&LocalTempDirectoryOptions::new())
+            .expect("stage");
+        let relative = std::path::PathBuf::from(stage.relative_name());
+        let identity = stage.identity().expect("stage identity").clone();
+        let location = stage.retain_in_place();
+        let root_bytes = location.namespace_path().as_os_str().as_encoded_bytes().len();
+        let native_stage = scratch.path().join(&relative);
+        let mut retained = parent
+            .open_staged_directory(&relative, &identity, &LocalTreeValidationOptions::new())
+            .expect("stage should reopen");
+        retained.set_cleanup_limits(LocalTempCleanupLimits::new().with_max_pending_path_bytes(root_bytes - 1));
+        drop(retained);
+        assert!(
+            native_stage.exists(),
+            "Drop must leave a stage whose root exceeds its budget"
+        );
+    }
+}
+
+#[test]
 fn test_child_cleanup_succeeds_at_depth_one() {
     let (_scratch, mut stage, native) = stage_with_files(&["child"]);
     stage.set_cleanup_limits(LocalTempCleanupLimits::new().with_max_depth(1));

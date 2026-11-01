@@ -932,7 +932,7 @@ fn conditional_windows_recovery_container_collision_does_not_reuse_existing_dire
         .expect("allocator should retry with the second name");
     assert_eq!(container, directory.path().join(".conditional-recovery-created"));
     assert_eq!(backup, container.join("displaced-created.bak"));
-    assert_eq!(fs::read(marker).expect("existing container data must remain"), b"keep");
+    assert_eq!(fs::read(&marker).expect("existing container data must remain"), b"keep");
     assert!(
         namespace
             .recovery_container_is_bound(&container)

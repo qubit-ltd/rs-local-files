@@ -44,6 +44,13 @@ pub(crate) fn copy_tree<B: CopyTreeBackend>(
 
         let next = backend.next_entry(frames.last_mut().expect("non-empty frame stack"), stats)?;
         let Some(entry) = next else {
+            #[cfg(test)]
+            crate::tests::rooted::support::resolution_observation_tests::reach_deadline_boundary(
+                crate::tests::rooted::support::resolution_observation_tests::DeadlineBoundary::HostCopyBeforeDirectoryMetadata,
+            );
+            if let Err(source_error) = budget.check_deadline() {
+                return Err(backend.error(LocalCopyDirStage::PreservePermissions, &current, stats, source_error));
+            }
             let frame = frames.pop().expect("non-empty frame stack");
             backend.finish_frame(frame, stats)?;
             continue;

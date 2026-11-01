@@ -267,6 +267,18 @@ impl LocalTreeRetainedResource {
                 crate::LocalFileOperation::Cleanup,
             ));
         }
+        let mut pending_path_bytes = self.path.as_os_str().as_encoded_bytes().len();
+        if self
+            .cleanup_limits
+            .max_pending_path_bytes()
+            .is_some_and(|maximum| pending_path_bytes > maximum)
+        {
+            return Err(crate::LocalFileError::new(
+                crate::LocalFileErrorKind::ResourceLimit,
+                crate::LocalFileOperation::Cleanup,
+            )
+            .with_path(self.path.clone()));
+        }
         let named = self.parent.observe_entry(&self.relative)?;
         if self
             .identity
@@ -281,7 +293,6 @@ impl LocalTreeRetainedResource {
         }
         if let Some(child) = self.child.as_ref() {
             let mut entries = Vec::new();
-            let mut pending_path_bytes = self.path.as_os_str().as_encoded_bytes().len();
             let mut list_options = LocalListOptions::new()
                 .with_recursive()
                 .with_symlink_policy(crate::LocalSymlinkPolicy::Reject);
@@ -457,5 +468,36 @@ impl Drop for LocalTreeRetainedResource {
         if self.cleanup_armed {
             let _ = self.cleanup_inner();
         }
+    }
+}
+
+#[cfg(test)]
+mod retained_cleanup_tests {
+    use crate::LocalFileSystem;
+    use crate::options::LocalDirectoryOpenOptions;
+    use crate::options::LocalTempCleanupLimits;
+    use crate::options::LocalTempDirectoryOptions;
+
+    #[test]
+    fn empty_tree_root_budget_is_checked_without_child_handle() {
+        let scratch = tempfile::tempdir().expect("scratch");
+        let parent = LocalFileSystem::host()
+            .expect("host")
+            .open_directory_with_options(scratch.path(), &LocalDirectoryOpenOptions::new())
+            .expect("parent");
+        let mut stage = parent
+            .create_staged_directory(&LocalTempDirectoryOptions::new())
+            .expect("stage");
+        let native = scratch.path().join(stage.relative_name());
+        let owner = stage.owner.as_mut().expect("retained owner");
+        owner.child.take();
+        owner.cleanup_limits = LocalTempCleanupLimits::new().with_max_pending_path_bytes(0);
+        let error = owner
+            .cleanup_inner()
+            .expect_err("root path must fit even after child handle is released");
+        assert_eq!(crate::LocalFileErrorKind::ResourceLimit, error.kind());
+        assert_eq!(crate::LocalFileOperation::Cleanup, error.operation());
+        assert_eq!(Some(owner.path.as_path()), error.path());
+        assert!(native.exists());
     }
 }

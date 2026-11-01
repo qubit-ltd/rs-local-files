@@ -216,6 +216,49 @@ fn test_owner_policy_transition_reports_policy_and_exact_modes() {
 
 #[cfg(target_os = "linux")]
 #[test]
+fn test_owner_policy_final_verification_supports_explicit_large_limit() {
+    use std::os::unix::fs::PermissionsExt;
+
+    use qubit_local_files::options::LocalListOptions;
+
+    let scratch = tempfile::tempdir().expect("scratch directory");
+    let parent = parent(&scratch);
+    let mut stage = parent
+        .create_staged_directory(&LocalTempDirectoryOptions::new())
+        .expect("stage");
+    for index in 0..512 {
+        let relative = format!("payload-{index:04}");
+        stage
+            .write_file_new(Path::new(&relative), &mut &b"payload"[..], 16)
+            .expect("payload");
+    }
+    let policy = LocalOwnerAccessPolicy::new().with_unix_modes(0o700, 0o600);
+    stage
+        .apply_owner_access_policy_with_options(&policy, &LocalListOptions::new().with_max_entries(512))
+        .expect("explicit 512-entry owner policy should succeed");
+    let root = scratch.path().join(stage.relative_name());
+    assert_eq!(512, fs::read_dir(&root).expect("stage contents").count());
+    assert_eq!(
+        0o700,
+        fs::metadata(&root).expect("root metadata").permissions().mode() & 0o777
+    );
+    assert_eq!(
+        0o600,
+        fs::metadata(root.join("payload-0256"))
+            .expect("file metadata")
+            .permissions()
+            .mode()
+            & 0o777
+    );
+    assert_eq!(
+        b"payload",
+        fs::read(root.join("payload-0256")).expect("payload bytes").as_slice()
+    );
+    stage.cleanup().expect("cleanup");
+}
+
+#[cfg(target_os = "linux")]
+#[test]
 fn test_invalid_owner_policy_is_rejected_before_stage_creation() {
     let scratch = tempfile::tempdir().expect("scratch directory");
     let parent = parent(&scratch);

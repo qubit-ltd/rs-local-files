@@ -23,6 +23,7 @@ thread_local! {
     static EXPIRE_AT: Cell<Option<DeadlineBoundary>> = const { Cell::new(None) };
     static FORCED_EXPIRED: Cell<bool> = const { Cell::new(false) };
     static BOUNDARY_METADATA: Cell<Option<usize>> = const { Cell::new(None) };
+    static HOST_INSTALL_BOUNDARIES: Cell<usize> = const { Cell::new(0) };
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -31,6 +32,11 @@ pub(crate) enum DeadlineBoundary {
     TargetResolved,
     FollowedLinkResolved,
     DestinationRemoved,
+    HostCopyDataFinished,
+    HostCopyBeforeInstall,
+    HostCopyBeforeDirectoryMetadata,
+    HostCopyAfterConflictRemoval,
+    HostCopySecondBeforeInstall,
 }
 
 pub(crate) fn resolution_now(deadline: Option<Instant>) -> Instant {
@@ -70,6 +76,7 @@ pub(crate) struct DeadlineClockGuard {
     previous_boundary: Option<DeadlineBoundary>,
     previous_expired: bool,
     previous_boundary_metadata: Option<usize>,
+    previous_host_install_boundaries: usize,
 }
 
 impl DeadlineClockGuard {
@@ -90,12 +97,14 @@ impl DeadlineClockGuard {
         let previous_boundary = EXPIRE_AT.replace(None);
         let previous_expired = FORCED_EXPIRED.replace(false);
         let previous_boundary_metadata = BOUNDARY_METADATA.replace(None);
+        let previous_host_install_boundaries = HOST_INSTALL_BOUNDARIES.replace(0);
         DEADLINE_CHECKS.set(0);
         Self {
             previous_after,
             previous_boundary,
             previous_expired,
             previous_boundary_metadata,
+            previous_host_install_boundaries,
         }
     }
 }
@@ -106,12 +115,20 @@ impl Drop for DeadlineClockGuard {
         EXPIRE_AT.set(self.previous_boundary);
         FORCED_EXPIRED.set(self.previous_expired);
         BOUNDARY_METADATA.set(self.previous_boundary_metadata);
+        HOST_INSTALL_BOUNDARIES.set(self.previous_host_install_boundaries);
         DEADLINE_CHECKS.set(0);
     }
 }
 
 pub(crate) fn reach_deadline_boundary(boundary: DeadlineBoundary) {
-    if EXPIRE_AT.get() == Some(boundary) {
+    if boundary == DeadlineBoundary::HostCopyBeforeInstall {
+        HOST_INSTALL_BOUNDARIES.set(HOST_INSTALL_BOUNDARIES.get() + 1);
+    }
+    let reached = EXPIRE_AT.get() == Some(boundary)
+        || (boundary == DeadlineBoundary::HostCopyBeforeInstall
+            && EXPIRE_AT.get() == Some(DeadlineBoundary::HostCopySecondBeforeInstall)
+            && HOST_INSTALL_BOUNDARIES.get() == 2);
+    if reached {
         BOUNDARY_METADATA.set(Some(METADATA.get()));
         FORCED_EXPIRED.set(true);
     }

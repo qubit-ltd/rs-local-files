@@ -5,14 +5,20 @@
 //
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
-/// Progress of a directory-tree mutation operation.
+/// Progress of attempted tree-content, access-metadata, or namespace changes.
+///
+/// This state describes mutation progress independently of publication. For
+/// example, changing permissions before a no-replace installation fails can
+/// yield `Started` together with
+/// [`crate::outcome::LocalTreePublication::NotPublished`].
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub enum LocalTreeMutationState {
-    /// No namespace mutation was attempted.
+    /// No tree-content, access-metadata, or namespace change was attempted.
     NotStarted,
-    /// A namespace mutation was attempted.
+    /// At least one tree-content, access-metadata, or namespace change was
+    /// attempted; this does not imply that publication completed.
     Started,
-    /// The mutation result could not be determined.
+    /// The effects of the attempted changes could not be determined.
     Indeterminate,
 }

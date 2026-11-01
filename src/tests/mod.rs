@@ -13,6 +13,7 @@ mod directory_native_failure_tests;
 mod error;
 mod file_system;
 mod filesystem_native_failure_tests;
+mod host_copy_completion_deadline_tests;
 mod lf3_authority_tests;
 #[cfg(feature = "digest")]
 mod lf3_conditional_tests;

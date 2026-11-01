@@ -248,12 +248,17 @@ impl LocalFileWriter {
                         #[cfg(not(feature = "test-support"))]
                         let sync_result = sync_append_file(&file);
                         if let Err(error) = sync_result {
+                            let failure_state = if self.bytes_written.get() == 0 {
+                                LocalWriteFailureState::NotPublished
+                            } else {
+                                LocalWriteFailureState::Published
+                            };
                             return Err(LocalFileCommitError::new(
                                 self.contextualize_error(publication_error(
                                     writer_io_error(&self.path, LocalFileOperation::Commit, error),
-                                    LocalWriteFailureState::Published,
+                                    failure_state,
                                 )),
-                                LocalWriteFailureState::Published,
+                                failure_state,
                                 None,
                             ));
                         }
