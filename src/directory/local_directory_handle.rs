@@ -46,6 +46,7 @@ use crate::options::LocalDirectoryOpenOptions;
 use crate::options::LocalObservedReadOptions;
 use crate::options::LocalPathBindingOptions;
 use crate::options::LocalWriteMode;
+use crate::resolution::internal::checked_path_binding_deadline;
 use crate::rooted::Root;
 
 #[path = "local_directory_handle/observed.rs"]
@@ -224,7 +225,12 @@ impl LocalDirectoryHandle {
                     } else {
                         policy
                     };
-                    let deadline = path_binding_deadline(started_at, options.path_binding());
+                    let deadline = path_binding_deadline(
+                        started_at,
+                        options.path_binding(),
+                        LocalFileOperation::OpenRoot,
+                        Some(path),
+                    )?;
                     validate_parent_steps(
                         &host_root,
                         relative,
@@ -353,7 +359,12 @@ impl LocalDirectoryHandle {
                 let authority_path = virtual_path
                     .strip_prefix(Path::new(std::path::MAIN_SEPARATOR_STR))
                     .unwrap_or(&virtual_path);
-                let deadline = path_binding_deadline(started_at, options.path_binding());
+                let deadline = path_binding_deadline(
+                    started_at,
+                    options.path_binding(),
+                    LocalFileOperation::OpenRoot,
+                    Some(path),
+                )?;
                 validate_parent_steps(
                     &working_root,
                     authority_path,
@@ -480,10 +491,12 @@ impl LocalDirectoryHandle {
             }
         }
         let root = self.root_authority()?;
-        let deadline = operation_deadline.or_else(|| {
-            let started_at = Instant::now();
-            self.binding_deadline.and_then(|limit| started_at.checked_add(limit))
-        });
+        let deadline = match operation_deadline {
+            Some(deadline) => Some(deadline),
+            None => {
+                checked_path_binding_deadline(Instant::now(), self.binding_deadline, timeout_operation, Some(path))?
+            }
+        };
         check_operation_deadline(deadline, path, timeout_operation)?;
         let resolved =
             crate::rooted_local_file_system::resolve_rooted_path_allow_root_with_component_policy_and_budget(
@@ -553,10 +566,12 @@ impl LocalDirectoryHandle {
         );
         let policy = options.symlink_policy().unwrap_or(self.filesystem.symlink_policy());
         let started_at = Instant::now();
-        let deadline = options
-            .path_binding()
-            .and_then(|limits| limits.deadline())
-            .and_then(|limit| started_at.checked_add(limit));
+        let deadline = checked_path_binding_deadline(
+            started_at,
+            options.path_binding().and_then(|limits| limits.deadline()),
+            LocalFileOperation::OpenRoot,
+            Some(raw_relative),
+        )?;
         let mut path_budget = options
             .path_binding()
             .map(|limits| PathBindingBudget::new(limits.max_path_bytes()));
@@ -1284,10 +1299,13 @@ fn timeout_operation_error(error: LocalFileError, operation: LocalFileOperation)
     }
 }
 
-fn path_binding_deadline(started_at: Instant, limits: Option<&LocalPathBindingOptions>) -> Option<Instant> {
-    limits
-        .and_then(|limits| limits.deadline())
-        .and_then(|duration| started_at.checked_add(duration))
+fn path_binding_deadline(
+    started_at: Instant,
+    limits: Option<&LocalPathBindingOptions>,
+    operation: LocalFileOperation,
+    path: Option<&Path>,
+) -> LocalResult<Option<Instant>> {
+    checked_path_binding_deadline(started_at, limits.and_then(|limits| limits.deadline()), operation, path)
 }
 
 fn check_binding_deadline(

@@ -6,5 +6,7 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 
+mod path_binding_deadline;
 mod resolution_contract;
+pub(crate) use path_binding_deadline::checked_path_binding_deadline;
 pub(crate) use resolution_contract::ResolutionContract;

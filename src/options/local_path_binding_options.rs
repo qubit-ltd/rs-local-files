@@ -19,6 +19,8 @@ use super::LocalResolutionLimits;
 /// still resolves to the same native object, not whether that object's
 /// contents have the same version. Use a digest or another content-level
 /// check when content identity matters.
+/// A finite deadline outside the monotonic clock range returns
+/// `InvalidOptions`.
 ///
 /// # Examples
 ///

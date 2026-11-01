@@ -20,6 +20,7 @@ use crate::observation::LocalObservationRequirement;
 use crate::observation::LocalSecurityObservation;
 use crate::observation::LocalSecurityObservationOptions;
 use crate::observation::LocalSourceVerification;
+use crate::resolution::internal::checked_path_binding_deadline;
 
 const BLOCK_SIZE: usize = 8 * 1024;
 
@@ -126,9 +127,12 @@ pub(crate) trait ReaderPathBinding: std::fmt::Debug + Send + Sync {
     fn verify_until(&self, deadline: Option<std::time::Instant>) -> LocalResult<LocalSourceVerification>;
 
     fn verify(&self) -> LocalResult<LocalSourceVerification> {
-        let deadline = self
-            .verification_deadline()
-            .and_then(|limit| std::time::Instant::now().checked_add(limit));
+        let deadline = checked_path_binding_deadline(
+            std::time::Instant::now(),
+            self.verification_deadline(),
+            LocalFileOperation::Metadata,
+            None,
+        )?;
         self.verify_until(deadline)
     }
 }
@@ -369,6 +373,8 @@ mod binding_tests {
     use std::io;
     use std::sync::Arc;
     use std::sync::Mutex;
+    use std::sync::atomic::AtomicUsize;
+    use std::sync::atomic::Ordering;
     use std::time::Duration;
     use std::time::Instant;
 
@@ -389,11 +395,12 @@ mod binding_tests {
     #[derive(Debug)]
     struct DeadlineRecorder {
         seen: Arc<Mutex<Option<Instant>>>,
+        deadline: Duration,
     }
 
     impl ReaderPathBinding for DeadlineRecorder {
         fn verification_deadline(&self) -> Option<Duration> {
-            Some(Duration::from_secs(1))
+            Some(self.deadline)
         }
 
         fn verify_until(&self, deadline: Option<Instant>) -> LocalResult<LocalSourceVerification> {
@@ -408,17 +415,57 @@ mod binding_tests {
         let second = Arc::new(Mutex::new(None));
         let binding = CombinedPathBinding {
             bindings: vec![
-                Box::new(DeadlineRecorder { seen: first.clone() }),
-                Box::new(DeadlineRecorder { seen: second.clone() }),
+                Box::new(DeadlineRecorder {
+                    seen: first.clone(),
+                    deadline: Duration::ZERO,
+                }),
+                Box::new(DeadlineRecorder {
+                    seen: second.clone(),
+                    deadline: Duration::from_secs(1),
+                }),
             ],
         };
 
+        assert_eq!(binding.verification_deadline(), Some(Duration::ZERO));
         binding.verify().expect("combined binding should verify");
 
         let first_deadline = *first.lock().expect("deadline mutex should be available");
         let second_deadline = *second.lock().expect("deadline mutex should be available");
         assert!(first_deadline.is_some());
         assert_eq!(first_deadline, second_deadline);
+    }
+
+    #[derive(Debug)]
+    struct OverflowRecorder {
+        calls: Arc<AtomicUsize>,
+    }
+
+    impl ReaderPathBinding for OverflowRecorder {
+        fn verification_deadline(&self) -> Option<Duration> {
+            Some(Duration::MAX)
+        }
+
+        fn verify_until(&self, _: Option<Instant>) -> LocalResult<LocalSourceVerification> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            Ok(LocalSourceVerification::Unchanged)
+        }
+    }
+
+    #[test]
+    fn path_binding_deadline_overflow_rejects_verification_before_calling_binding() {
+        assert!(Instant::now().checked_add(Duration::MAX).is_none());
+        let calls = Arc::new(AtomicUsize::new(0));
+        let binding = OverflowRecorder { calls: calls.clone() };
+
+        let error = binding.verify().expect_err("unrepresentable deadline is invalid");
+
+        assert_eq!(error.kind(), LocalFileErrorKind::InvalidOptions);
+        assert_eq!(error.operation(), LocalFileOperation::Metadata);
+        assert_eq!(
+            error.reason(),
+            Some("path binding deadline exceeds the monotonic clock range")
+        );
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
     }
 
     #[test]

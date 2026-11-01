@@ -42,6 +42,7 @@ use crate::options::LocalObservedReadOptions;
 use crate::options::LocalReadAllOptions;
 use crate::options::LocalSnapshotOptions;
 use crate::path::LocalNamespacePath;
+use crate::resolution::internal::checked_path_binding_deadline;
 use crate::rooted::Root;
 use crate::test_support::TestFaultPoint;
 
@@ -67,9 +68,12 @@ impl LocalFileSystem {
                     .with_reason("Windows Host path binding requires drive-root ancestor traversal"),
             );
         }
-        let binding_deadline = binding_options
-            .and_then(|limits| limits.deadline())
-            .and_then(|limit| resolver_started.checked_add(limit));
+        let binding_deadline = checked_path_binding_deadline(
+            resolver_started,
+            binding_options.and_then(|limits| limits.deadline()),
+            LocalFileOperation::OpenReader,
+            Some(path),
+        )?;
         self.open_observed_reader_with_binding_limits(
             ObservedReadPath::Namespace(path),
             options,
@@ -108,12 +112,16 @@ impl LocalFileSystem {
     ) -> LocalResult<LocalObservedReader> {
         let resolver_started = std::time::Instant::now();
         let binding_options = options.path_binding().copied();
-        let binding_deadline = binding_options
-            .and_then(|limits| limits.deadline())
-            .into_iter()
-            .chain(authority_binding_deadline)
-            .min()
-            .and_then(|limit| resolver_started.checked_add(limit));
+        let binding_deadline = checked_path_binding_deadline(
+            resolver_started,
+            binding_options
+                .and_then(|limits| limits.deadline())
+                .into_iter()
+                .chain(authority_binding_deadline)
+                .min(),
+            LocalFileOperation::OpenReader,
+            Some(original),
+        )?;
         self.open_observed_reader_with_binding_limits(
             ObservedReadPath::FixedRelative {
                 original,
@@ -139,7 +147,12 @@ impl LocalFileSystem {
         authority_binding_deadline: Option<std::time::Duration>,
     ) -> LocalResult<LocalObservedReader> {
         let started_at = std::time::Instant::now();
-        let authority_deadline = authority_binding_deadline.and_then(|limit| started_at.checked_add(limit));
+        let authority_deadline = checked_path_binding_deadline(
+            started_at,
+            authority_binding_deadline,
+            LocalFileOperation::OpenReader,
+            Some(original),
+        )?;
         let deadline = match (deadline, authority_deadline) {
             (Some(explicit), Some(authority)) => Some(explicit.min(authority)),
             (explicit, authority) => explicit.or(authority),
@@ -1142,14 +1155,18 @@ mod tests {
     use std::cell::Cell;
     use std::io::Cursor;
     use std::path::Path;
+    use std::time::Duration;
 
     use super::LocalFileSystem;
     use super::collect_prefix_with_reserver;
     use super::operation_error;
+    use crate::directory::LocalComponentPolicy;
     use crate::error::LocalFileError;
     use crate::error::LocalFileErrorKind;
     use crate::error::LocalFileErrorSource;
     use crate::error::LocalFileOperation;
+    use crate::options::LocalObservedReadOptions;
+    use crate::options::LocalPathBindingOptions;
 
     thread_local! {
         static PREFIX_RESERVE_FAILURE_AFTER: Cell<Option<usize>> = const { Cell::new(None) };
@@ -1339,5 +1356,62 @@ mod tests {
                 if source.kind() == std::io::ErrorKind::Other
                     && source.to_string() == "observation-source-sentinel"
         ));
+    }
+
+    #[test]
+    fn fixed_reader_rejects_overflow_when_authority_and_reader_deadlines_are_maximum() {
+        assert!(std::time::Instant::now().checked_add(Duration::MAX).is_none());
+        let fixture = tempfile::tempdir().expect("fixture directory should be created");
+        std::fs::write(fixture.path().join("item"), b"payload").expect("fixture file should be written");
+        let filesystem = LocalFileSystem::rooted(fixture.path()).expect("rooted filesystem should open");
+        let path = Path::new("item");
+        let options = LocalObservedReadOptions::new()
+            .with_path_binding(LocalPathBindingOptions::new().with_deadline(Duration::MAX));
+
+        let error = filesystem
+            .open_observed_reader_fixed(
+                path,
+                path,
+                &LocalComponentPolicy::allow_all(),
+                &options,
+                Some(Duration::MAX),
+            )
+            .expect_err("combined unrepresentable deadlines should be rejected");
+
+        assert_eq!(error.kind(), LocalFileErrorKind::InvalidOptions);
+        assert_eq!(error.operation(), LocalFileOperation::OpenReader);
+        assert_eq!(error.path(), Some(path));
+        assert_eq!(
+            error.reason(),
+            Some("path binding deadline exceeds the monotonic clock range")
+        );
+    }
+
+    #[test]
+    fn fixed_reader_uses_the_smaller_authority_or_reader_deadline() {
+        let fixture = tempfile::tempdir().expect("fixture directory should be created");
+        std::fs::write(fixture.path().join("item"), b"payload").expect("fixture file should be written");
+        let filesystem = LocalFileSystem::rooted(fixture.path()).expect("rooted filesystem should open");
+        let path = Path::new("item");
+        let open_fixed = |reader_deadline, authority_deadline| {
+            let options = LocalObservedReadOptions::new()
+                .with_path_binding(LocalPathBindingOptions::new().with_deadline(reader_deadline));
+            filesystem.open_observed_reader_fixed(
+                path,
+                path,
+                &LocalComponentPolicy::allow_all(),
+                &options,
+                Some(authority_deadline),
+            )
+        };
+
+        for (reader_deadline, authority_deadline) in [
+            (Duration::ZERO, Duration::from_secs(5)),
+            (Duration::from_secs(5), Duration::ZERO),
+        ] {
+            let error = open_fixed(reader_deadline, authority_deadline)
+                .expect_err("the smaller zero deadline should expire immediately");
+            assert_eq!(error.io_error_kind(), std::io::ErrorKind::TimedOut);
+        }
     }
 }
