@@ -1157,7 +1157,7 @@ MIME 检测器和外部程序通常需要重新按路径打开文件。应先写
 ```rust
 // BEGIN executable inspection cleanup helper
 use std::path::Path;
-use qubit_local_files::{LocalFileError, LocalFileSystem, LocalTempFile};
+use qubit_local_files::{LocalFileError, LocalFileSystem, LocalTempFile, LocalTempRecovery};
 use qubit_local_files::options::LocalTempFileOptions;
 
 #[derive(Debug)]
@@ -1165,16 +1165,43 @@ struct InspectStagedError {
     primary: Option<std::io::Error>,
     local: Option<LocalFileError>,
     pending: Option<LocalTempFile>,
+    creation_recovery: Option<LocalTempRecovery>,
+    creation_cleanup_error: Option<LocalFileError>,
 }
 
 impl InspectStagedError {
+    fn from_setup(error: LocalFileError) -> Self {
+        let (cause, creation_recovery) = error.into_temp_recovery_parts();
+        Self {
+            primary: None,
+            local: Some(cause),
+            pending: None,
+            creation_recovery,
+            creation_cleanup_error: None,
+        }
+    }
+
     // true means no cleanup remains; it does not mean inspection succeeded.
     fn retry_cleanup(&mut self) -> bool {
-        let Some(resource) = self.pending.as_mut() else { return true; };
-        match resource.cleanup() {
-            Ok(()) => { self.pending = None; self.local = None; true }
-            Err(error) => { self.local = Some(error); false }
+        if let Some(resource) = self.pending.as_mut() {
+            match resource.cleanup() {
+                Ok(()) => { self.pending = None; self.local = None; }
+                Err(error) => { self.local = Some(error); return false; }
+            }
         }
+        if let Some(resource) = self.creation_recovery.as_mut() {
+            match resource.cleanup() {
+                Ok(()) => {
+                    self.creation_recovery = None;
+                    self.creation_cleanup_error = None;
+                }
+                Err(error) => {
+                    self.creation_cleanup_error = Some(error);
+                    return false;
+                }
+            }
+        }
+        true
     }
 }
 
@@ -1182,21 +1209,20 @@ fn inspect_staged<R>(
     payload: &[u8],
     inspect: impl FnOnce(&Path) -> std::io::Result<R>,
 ) -> Result<R, InspectStagedError> {
-    let setup_error = |error| InspectStagedError { primary: None, local: Some(error), pending: None };
-    let filesystem = LocalFileSystem::host().map_err(setup_error)?;
+    let filesystem = LocalFileSystem::host().map_err(InspectStagedError::from_setup)?;
     let options = LocalTempFileOptions::new()
         .with_parent(&std::env::temp_dir())
         .with_max_attempts(16);
     let mut file = filesystem.create_temp_file_with_options(&options)
-        .map_err(setup_error)?;
+        .map_err(InspectStagedError::from_setup)?;
     let staged = qubit_io::Output::write_fully(&mut file, payload);
     file.close();
     let primary = staged.and_then(|()| inspect(file.path()));
     match (primary, file.cleanup()) {
         (Ok(value), Ok(())) => Ok(value),
-        (Err(primary), Ok(())) => Err(InspectStagedError { primary: Some(primary), local: None, pending: None }),
-        (Ok(_), Err(cleanup)) => Err(InspectStagedError { primary: None, local: Some(cleanup), pending: Some(file) }),
-        (Err(primary), Err(cleanup)) => Err(InspectStagedError { primary: Some(primary), local: Some(cleanup), pending: Some(file) }),
+        (Err(primary), Ok(())) => Err(InspectStagedError { primary: Some(primary), local: None, pending: None, creation_recovery: None, creation_cleanup_error: None }),
+        (Ok(_), Err(cleanup)) => Err(InspectStagedError { primary: None, local: Some(cleanup), pending: Some(file), creation_recovery: None, creation_cleanup_error: None }),
+        (Err(primary), Err(cleanup)) => Err(InspectStagedError { primary: Some(primary), local: Some(cleanup), pending: Some(file), creation_recovery: None, creation_cleanup_error: None }),
     }
 }
 // END executable inspection cleanup helper
@@ -1206,9 +1232,11 @@ let bytes = inspect_staged(b"payload", |path| std::fs::read(path))
 assert_eq!(b"payload", bytes.as_slice());
 ```
 
-检查或清理失败时，应保留返回的 `InspectStagedError`。`primary` 与 `local` 分别保存独立错误，`pending`
-持有可通过 `retry_cleanup()` 重试清理的资源。返回 `true` 只表示本示例不再有待清理资源，不代表检查成功。
-创建失败发生在回调之前，保存在 `local` 中；如果创建错误通过 `LocalFileError::temp_recovery()` 携带恢复 owner，该 owner 仍保留在错误内。丢弃错误时，资源仍会执行正常的尽力清理。
+检查或清理失败时，应保留返回的 `InspectStagedError`。`primary` 与 `local` 分别保存独立错误。
+`pending` 文件 owner 与 `creation_recovery` 创建恢复 owner 互斥，均可通过 `retry_cleanup()` 重试清理。
+创建失败时，`local` 保留原始创建错误及其中可能已有的历史 `cleanup_error()`；
+`creation_cleanup_error` 单独记录最近一次恢复重试错误。恢复成功会清除此字段，但保留创建错误。
+返回 `true` 只表示本示例没有剩余待清理资源，不代表检查或创建成功。丢弃错误时，owner 仍会执行正常的尽力清理。
 
 ## Rooted 工作区
 

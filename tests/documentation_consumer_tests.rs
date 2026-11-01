@@ -363,6 +363,45 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {{
     assert!(failure.pending.is_none());
     assert!(!sandbox.exists());
     assert_eq!(failure.primary.as_ref().unwrap().to_string(), "inspect primary");
+
+    let mut inspection_ran = false;
+    let mut failure = {{
+        let fault = install_test_fault("temp-identity-file-cleanup")?;
+        let result = inspect_staged::<()>(b"payload", |_| {{
+            inspection_ran = true;
+            Ok(())
+        }}).expect_err("creation failure retains its recovery owner");
+        drop(fault);
+        result
+    }};
+    assert!(!inspection_ran);
+    let creation_error = failure.local.as_ref().expect("creation error is retained");
+    assert_eq!(creation_error.operation(), qubit_local_files::error::LocalFileOperation::CreateTempFile);
+    let creation_error_text = creation_error.to_string();
+    let historical_cleanup = creation_error.cleanup_error().expect("creation error retains its historical cleanup error").to_string();
+    assert!(failure.pending.is_none());
+    assert!(failure.creation_cleanup_error.is_none());
+    let recovery = failure.creation_recovery.as_ref().expect("creation recovery owner is retained");
+    let recovery_path = recovery.path().parent().expect("recovery file has a sandbox").to_path_buf();
+    let blocker = recovery_path.join("inspection-cleanup-test-blocker");
+    std::fs::write(&blocker, b"owned by this test")?;
+    assert!(!failure.retry_cleanup(), "a nonempty sandbox still needs cleanup");
+    assert!(failure.creation_recovery.is_some(), "failed retry retains its owner");
+    assert_eq!(failure.creation_cleanup_error.as_ref().unwrap().operation(), qubit_local_files::error::LocalFileOperation::Cleanup);
+    assert_ne!(failure.creation_cleanup_error.as_ref().unwrap().to_string(), historical_cleanup);
+    assert_eq!(failure.local.as_ref().unwrap().operation(), qubit_local_files::error::LocalFileOperation::CreateTempFile);
+    assert_eq!(failure.local.as_ref().unwrap().to_string(), creation_error_text);
+    assert_eq!(failure.local.as_ref().unwrap().cleanup_error().unwrap().to_string(), historical_cleanup);
+    assert!(blocker.exists());
+    std::fs::remove_file(&blocker)?;
+    assert!(failure.retry_cleanup());
+    assert!(failure.creation_recovery.is_none());
+    assert!(failure.creation_cleanup_error.is_none());
+    assert_eq!(failure.local.as_ref().unwrap().operation(), qubit_local_files::error::LocalFileOperation::CreateTempFile);
+    assert_eq!(failure.local.as_ref().unwrap().to_string(), creation_error_text);
+    assert_eq!(failure.local.as_ref().unwrap().cleanup_error().unwrap().to_string(), historical_cleanup);
+    assert!(!recovery_path.exists());
+    assert!(failure.retry_cleanup(), "retry is idempotent after recovery");
     std::fs::write(std::env::var("{SENTINEL}")?, b"inspection cleanup completed")?;
     Ok(())
 }}
