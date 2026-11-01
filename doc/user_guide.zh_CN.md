@@ -52,8 +52,10 @@ Host 命名空间 ── LocalFileSystem::host() ── 操作时读取进程 PW
 
 导出程序需要创建 `build/output`，只在完整写入后发布 `manifest.json`，并读回结果。成功
 的可观察条件是 writer 返回 `Committed`，且能读取已经发布的字节。
+创建目录时接受已存在的输出目录，因此重复执行此场景也能替换已发布的 manifest。
 
 ```rust,no_run
+// BEGIN executable export example
 use qubit_io::{Output, Streams};
 use qubit_local_files::LocalFileSystem;
 use qubit_local_files::options::{
@@ -63,7 +65,9 @@ use qubit_local_files::outcome::LocalWriterState;
 
 let mut filesystem = LocalFileSystem::host()?;
 filesystem.set_default_create_directory_options(
-    LocalCreateDirectoryOptions::new().with_recursive(),
+    LocalCreateDirectoryOptions::new()
+        .with_recursive()
+        .with_exists_ok(),
 )?;
 filesystem.set_default_write_options(LocalWriteOptions::new(
     LocalWriteMode::CreateOrReplace,
@@ -81,6 +85,7 @@ Streams::copy_input_to_output(&mut filesystem.open_reader(&path)?, &mut bytes)?;
 let text = String::from_utf8(bytes)?;
 assert_eq!(text, r#"{"complete":true}"#);
 # Ok::<(), Box<dyn std::error::Error>>(())
+// END executable export example
 ```
 
 多次系统调用使用的相对路径会在操作开始时绑定。复制和重命名会用同一个当前目录快照绑定

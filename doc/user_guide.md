@@ -57,8 +57,11 @@ opened root ───── LocalFileSystem::rooted(root) ── virtual / and i
 An exporter must create `build/output`, publish `manifest.json` only after a
 complete write, and inspect the result. The observable success condition is a
 `Committed` writer outcome and the bytes read back from the published file.
+The directory creation accepts an existing output directory, so rerunning this
+scenario can replace the published manifest.
 
 ```rust,no_run
+// BEGIN executable export example
 use qubit_io::{Output, Streams};
 use qubit_local_files::LocalFileSystem;
 use qubit_local_files::options::{
@@ -68,7 +71,9 @@ use qubit_local_files::outcome::LocalWriterState;
 
 let mut filesystem = LocalFileSystem::host()?;
 filesystem.set_default_create_directory_options(
-    LocalCreateDirectoryOptions::new().with_recursive(),
+    LocalCreateDirectoryOptions::new()
+        .with_recursive()
+        .with_exists_ok(),
 )?;
 filesystem.set_default_write_options(LocalWriteOptions::new(
     LocalWriteMode::CreateOrReplace,
@@ -86,6 +91,7 @@ Streams::copy_input_to_output(&mut filesystem.open_reader(&path)?, &mut bytes)?;
 let text = String::from_utf8(bytes)?;
 assert_eq!(text, r#"{"complete":true}"#);
 # Ok::<(), Box<dyn std::error::Error>>(())
+// END executable export example
 ```
 
 Relative paths used by a multi-call operation are bound when that operation
