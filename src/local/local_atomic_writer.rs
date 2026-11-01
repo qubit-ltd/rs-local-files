@@ -57,10 +57,10 @@ const ATOMIC_WRITE_TEMP_PREFIX: &str = ".atomic-write-";
 
 /// A streaming same-directory atomic file writer.
 ///
-/// Bytes written through [`Write`] remain in a private staging file until
-/// commit installs them. A later synchronization failure can report an error
-/// after publication. Before installation, [`Self::abort`] or dropping the
-/// writer leaves the destination unchanged and attempts staging cleanup.
+/// Bytes written through [`qubit_io::Output`] remain in a private staging file
+/// until commit installs them. A later synchronization failure can report an
+/// error after publication. Before installation, [`Self::abort`] or dropping
+/// the writer leaves the destination unchanged and attempts staging cleanup.
 /// This API does not implement [`std::io::Seek`]. A relative destination
 /// is bound to the process current directory when the writer is created, so
 /// later current-directory changes do not redirect commit or cleanup

@@ -8,11 +8,55 @@
 
 use super::LocalWindowsAceObservation;
 
-#[derive(Clone, Debug, Eq, PartialEq)]
 /// Windows owner, DACL state, and ordered ACE observations.
 ///
-/// The ACE list preserves observed order and undecoded native details; it is
-/// not a computed access decision or a guarantee of future access.
+/// `owner_is_current_user` compares the owner SID with the effective principal
+/// at query time. Windows first uses the calling thread token, falling back to
+/// the process token only when the thread has no token (`ERROR_NO_TOKEN`). This
+/// comparison is an observation, not an access authorization decision.
+///
+/// The DACL flags distinguish an absent DACL (`dacl_present() == false`), a
+/// NULL DACL (`dacl_present() == true` and `dacl_is_null() == true`), and an
+/// empty ACL (`dacl_present() == true`, `dacl_is_null() == false`, and no
+/// ACEs). `dacl_protected()` reports whether inheritance is protected, while
+/// `acl_valid()` reports whether the ACL structure passed validation. ACEs are
+/// retained in native descriptor order; they are not reordered into an
+/// authorization result.
+///
+/// # Examples
+///
+/// ```
+/// use qubit_local_files::observation::{
+///     LocalObservedReader, LocalObservationRequirement,
+///     LocalSecurityObservationOptions,
+/// };
+///
+/// fn inspect(reader: &LocalObservedReader) -> Result<(), qubit_local_files::error::LocalFileError> {
+///     let options = LocalSecurityObservationOptions::new()
+///         .with_access(LocalObservationRequirement::Optional);
+///     let facts = reader.security_observation(&options)?;
+///     let Some(access) = facts.access().and_then(|access| access.windows()) else {
+///         // Optional access facts can be unavailable on this platform.
+///         return Ok(());
+///     };
+///     let _owner_sid = access.owner_sid();
+///     let _owner_matches_query_principal = access.owner_is_current_user();
+///     let _dacl_state = (
+///         access.dacl_present(),
+///         access.dacl_is_null(),
+///         access.dacl_protected(),
+///         access.acl_valid(),
+///     );
+///     let _ordered_aces = access.aces();
+///     Ok(())
+/// }
+/// # fn main() {}
+/// ```
+///
+/// Optional requirements still attempt the native query. Unsupported facts
+/// may be absent, while native query errors are propagated to the caller.
+/// The fields describe observations, not a guarantee of future access.
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LocalWindowsAccessObservation {
     owner_sid: String,
     owner_is_current_user: bool,
@@ -48,23 +92,29 @@ impl LocalWindowsAccessObservation {
     pub fn owner_sid(&self) -> &str {
         &self.owner_sid
     }
-    /// Returns whether the owner SID matches the current security principal.
+    /// Returns whether the owner SID matched the effective principal at query
+    /// time (thread token, or process token only when no thread token exists).
+    /// This is not an access authorization result.
     pub const fn owner_is_current_user(&self) -> bool {
         self.owner_is_current_user
     }
-    /// Returns whether the security descriptor has a DACL.
+    /// Returns whether the security descriptor has a DACL. `false`
+    /// distinguishes an absent DACL from both a NULL DACL and an empty ACL.
     pub const fn dacl_present(&self) -> bool {
         self.dacl_present
     }
-    /// Returns whether the descriptor contains a NULL DACL.
+    /// Returns whether a present DACL is NULL. A NULL DACL is distinct from an
+    /// absent DACL and from a present, empty ACL.
     pub const fn dacl_is_null(&self) -> bool {
         self.dacl_is_null
     }
-    /// Returns whether DACL inheritance is protected.
+    /// Returns whether DACL inheritance is protected; this is independent of
+    /// whether the ACL structure is valid.
     pub const fn dacl_protected(&self) -> bool {
         self.dacl_protected
     }
-    /// Returns whether the DACL structure passed validation.
+    /// Returns whether the DACL structure passed validation. This reports
+    /// structural validity, not the result of evaluating ACE permissions.
     pub const fn acl_valid(&self) -> bool {
         self.acl_valid
     }
