@@ -452,15 +452,12 @@ fn create_stage_file(
 
 fn cleanup_partial_private_file(
     cause: LocalFileError,
-    parent: &File,
+    parent: File,
     name: &OsStr,
     file: File,
     identity: Option<LocalFileIdentity>,
     path: &Path,
 ) -> LocalFileError {
-    let Ok(parent) = parent.try_clone() else {
-        return cause;
-    };
     let entry = crate::temp::types::NativePrivateEntry {
         parent: std::sync::Arc::new(parent),
         name: name.to_os_string(),
@@ -471,6 +468,8 @@ fn cleanup_partial_private_file(
     let mut recovery = crate::LocalTempRecovery::from_native(path.to_path_buf(), entry);
     match recovery.cleanup() {
         Ok(()) => cause,
-        Err(_) => cause.with_temp_recovery(recovery),
+        Err(cleanup) => cause
+            .with_additional_cleanup_error(cleanup)
+            .with_temp_recovery(recovery),
     }
 }

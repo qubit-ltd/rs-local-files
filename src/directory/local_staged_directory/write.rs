@@ -169,7 +169,7 @@ impl LocalStagedDirectory {
             Err(cause) => {
                 return Err(cleanup_partial_private_file(
                     cause,
-                    &parent_file,
+                    parent_file,
                     name,
                     file,
                     None,
@@ -181,7 +181,7 @@ impl LocalStagedDirectory {
             return Err(cleanup_partial_private_file(
                 LocalFileError::new(LocalFileErrorKind::RequirementNotMet, LocalFileOperation::Metadata)
                     .with_path(path.clone()),
-                &parent_file,
+                parent_file,
                 name,
                 file,
                 None,
@@ -199,7 +199,7 @@ impl LocalStagedDirectory {
                     let cause = LocalFileError::from_io(LocalFileOperation::Read, Some(path.clone()), None, source);
                     return Err(cleanup_partial_private_file(
                         cause,
-                        &parent_file,
+                        parent_file,
                         name,
                         file,
                         Some(identity),
@@ -215,7 +215,7 @@ impl LocalStagedDirectory {
                 None => {
                     return Err(cleanup_partial_private_file(
                         resource_limit(),
-                        &parent_file,
+                        parent_file,
                         name,
                         file,
                         Some(identity),
@@ -226,7 +226,7 @@ impl LocalStagedDirectory {
             if total > maximum {
                 return Err(cleanup_partial_private_file(
                     resource_limit(),
-                    &parent_file,
+                    parent_file,
                     name,
                     file,
                     Some(identity),
@@ -244,7 +244,7 @@ impl LocalStagedDirectory {
                 let cause = LocalFileError::from_io(LocalFileOperation::Commit, Some(path.clone()), None, source);
                 return Err(cleanup_partial_private_file(
                     cause,
-                    &parent_file,
+                    parent_file,
                     name,
                     file,
                     Some(identity),
