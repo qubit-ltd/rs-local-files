@@ -277,6 +277,12 @@ mod recovery_ownership_tests {
             error.owner_access_policy()
         );
         let owners = error.into_retained_resources();
+        let debug = format!("{:?}", owners[0]);
+        assert!(debug.contains("LocalTreeRetainedResource"));
+        assert!(
+            !debug.contains(scratch.path().to_str().expect("UTF-8 fixture path")),
+            "retained-resource debug output must redact filesystem paths"
+        );
         assert!(
             !stage_path.exists(),
             "unextracted stage is cleaned when error is consumed"
