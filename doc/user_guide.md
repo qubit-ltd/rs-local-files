@@ -1655,6 +1655,11 @@ their retained handles after the access policy is applied and verified.
 publish with `file_synced() == false`, while `Required` prevents publication
 and retains the stage if a final sync cannot complete. The access state
 reflects policy changes already applied.
+When these limits include a deadline, it bounds the complete-tree traversal
+and the operation's explicit checkpoints; it is not a hard maximum for the
+whole permission transition. The native permission loop may finish its current
+work before the next checkpoint reports expiration, and any reported access
+state reflects changes already made.
 This does not mean that operating-system ACL inheritance or all effective
 access behavior is identical across platforms.
 
@@ -1756,7 +1761,6 @@ if cfg!(target_os = "linux") {
     }
     assert_eq!(fs::read(&destination)?, b"existing backup");
     assert!(!native_stage.exists());
-    fs::write(std::env::var("QUBIT_LOCAL_FILES_DOCUMENTATION_CONSUMER_SENTINEL")?, b"readonly stage recovery completed")?;
 }
 # Ok::<(), Box<dyn std::error::Error>>(())
 // END executable readonly stage recovery example

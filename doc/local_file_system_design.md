@@ -73,6 +73,13 @@ let limits = qubit_local_files::options::LocalListOptions::new().with_max_entrie
 See the [owner access policy guide](user_guide.md#bounded-resolution-and-security-policy)
 for the operation contract.
 
+For owner-access operations, a `LocalListOptions::deadline` bounds the complete
+tree traversal and the operation's explicit checkpoints. It does not guarantee
+a hard maximum for the entire permission transition: the native mutation loop
+may finish its current work before checking the deadline again. Errors report
+the access state produced by changes already made. Requested file sync uses
+the same stored deadline and its own operation checkpoints.
+
 ### 2.3 One filesystem, one coordinate system
 
 Every instance has one namespace. Absolute paths start at its namespace root;

@@ -1323,6 +1323,9 @@ Unix 使用 `with_unix_modes(directory_mode, file_mode)`，Windows 使用
 只有所有请求的文件同步成功，`file_synced()` 才为 true。`NotRequired` 不增加权限变更后的文件同步；
 `Preferred` 在最终同步失败时仍可发布，但 `file_synced()` 为 false；`Required` 会阻止发布并保留 stage。
 访问状态反映已经发生的权限变更。
+如果这些 limits 设置了 deadline，它约束完整树遍历及操作中明确执行的检查点；它不保证整个权限转换
+在该时限内完成。原生权限修改循环可能先完成当前工作，再由后续检查点报告超时；错误中的 access state
+会如实反映已经发生的修改。
 
 目录树 mutation state 记录尝试过的树内容、访问元数据或命名空间修改，不代表发布已经完成。修改权限后
 no-replace 冲突时，mutation 可以是 `Started`，publication 同时为 `NotPublished`。单独同步操作不算
@@ -1415,7 +1418,6 @@ if cfg!(target_os = "linux") {
     }
     assert_eq!(fs::read(&destination)?, b"existing backup");
     assert!(!native_stage.exists());
-    fs::write(std::env::var("QUBIT_LOCAL_FILES_DOCUMENTATION_CONSUMER_SENTINEL")?, b"readonly stage recovery completed")?;
 }
 # Ok::<(), Box<dyn std::error::Error>>(())
 // END executable readonly stage recovery example

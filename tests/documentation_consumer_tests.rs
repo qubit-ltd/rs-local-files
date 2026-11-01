@@ -487,6 +487,8 @@ fn documented_readonly_stage_recovery_preserves_destination() {
             .collect::<Vec<_>>()
             .join("\n");
         let project = workspace.path().join(format!("readonly-recovery-consumer-{index}"));
+        let sentinel = project.join("consumer.sentinel");
+        let sentinel_path = sentinel.to_string_lossy().replace('\\', "\\\\").replace('"', "\\\"");
         fs::create_dir_all(project.join("src")).expect("consumer source directory is created");
         fs::write(
             project.join("Cargo.toml"),
@@ -496,12 +498,9 @@ fn documented_readonly_stage_recovery_preserves_destination() {
         fs::write(project.join("Cargo.lock"), &consumer_lock).expect("reviewed consumer lock is written");
         fs::write(
             project.join("src/main.rs"),
-            format!("fn main() -> Result<(), Box<dyn std::error::Error>> {{\n{code}\nOk(())\n}}\n"),
+            format!("fn main() -> Result<(), Box<dyn std::error::Error>> {{\n{code}\nstd::fs::write(\"{sentinel_path}\", b\"readonly stage recovery completed\")?;\nOk(())\n}}\n"),
         )
         .expect("consumer source is written");
-        let sentinel = workspace
-            .path()
-            .join(format!("readonly-recovery-completed-{index}.sentinel"));
         let status = Command::new("cargo")
             .arg("run")
             .arg("--frozen")
@@ -512,7 +511,7 @@ fn documented_readonly_stage_recovery_preserves_destination() {
             .env_remove("CARGO_ENCODED_RUSTFLAGS")
             .env_remove("RUSTFLAGS")
             .env_remove("CARGO_BUILD_TARGET")
-            .env(SENTINEL, &sentinel)
+            .env_remove(SENTINEL)
             .output()
             .expect("consumer cargo process starts");
         assert!(

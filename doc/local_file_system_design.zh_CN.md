@@ -68,6 +68,10 @@ let limits = qubit_local_files::options::LocalListOptions::new().with_max_entrie
 
 详见[owner access policy 指南](user_guide.zh_CN.md#有界解析与安全策略)。
 
+owner-access 操作中的 `LocalListOptions::deadline` 约束完整树遍历及操作中明确执行的检查点，
+不保证整个权限转换有硬性最长耗时：原生权限修改循环可能先完成当前工作，再检查 deadline。错误会
+报告已经发生的权限变更所对应的 access state。请求的文件同步沿用同一 deadline，并在自身操作检查点检查。
+
 库仍负责：
 
 - 验证调用方提供的 Options；
