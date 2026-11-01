@@ -18,10 +18,15 @@ execution context.
 Add the crate to the application manifest:
 
 ```toml
+# BEGIN guide introductory dependencies
 [dependencies]
 qubit-local-files = "0.5.0"
 qubit-io = "0.19"
+tempfile = "3.27"
+# END guide introductory dependencies
 ```
+
+`tempfile` is used only by the guide's exercise fixtures to create temporary directories.
 
 Choose the authority before configuring operation policy. Host mode uses the
 process-visible namespace. Rooted mode opens one existing directory and treats
@@ -448,6 +453,7 @@ directories to be synchronized again. The following Unix example creates an
 isolated backup, syncs it, and then asks publication to durably rename it:
 
 ```rust
+// BEGIN executable tree sync example
 #[cfg(unix)]
 {
 use std::ffi::OsStr;
@@ -522,6 +528,7 @@ let result = (|| -> Result<(), Box<dyn std::error::Error>> {
 #[cfg(not(target_os = "freebsd"))]
 result.unwrap();
 }
+// END executable tree sync example
 ```
 
 The example's `outcome.file_synced()` would describe only synchronization
@@ -1421,39 +1428,64 @@ construction fails and residual cleanup also fails, retain the returned
 reconstruct deletion authority from the displayed path or error text.
 
 ```rust
-use std::io;
-use qubit_io::Output;
+// BEGIN executable inspection cleanup helper
 use std::path::Path;
-
-use qubit_local_files::LocalFileError;
-use qubit_local_files::LocalFileSystem;
+use qubit_local_files::{LocalFileError, LocalFileSystem, LocalTempFile};
 use qubit_local_files::options::LocalTempFileOptions;
+
+#[derive(Debug)]
+struct InspectStagedError {
+    primary: Option<std::io::Error>,
+    local: Option<LocalFileError>,
+    pending: Option<LocalTempFile>,
+}
+
+impl InspectStagedError {
+    // true means no cleanup remains; it does not mean inspection succeeded.
+    fn retry_cleanup(&mut self) -> bool {
+        let Some(resource) = self.pending.as_mut() else { return true; };
+        match resource.cleanup() {
+            Ok(()) => { self.pending = None; self.local = None; true }
+            Err(error) => { self.local = Some(error); false }
+        }
+    }
+}
 
 fn inspect_staged<R>(
     payload: &[u8],
-    inspect: impl FnOnce(&Path) -> io::Result<R>,
-) -> Result<R, (Option<io::Error>, Option<LocalFileError>)> {
-    let filesystem = LocalFileSystem::host().map_err(|error| (None, Some(error)))?;
+    inspect: impl FnOnce(&Path) -> std::io::Result<R>,
+) -> Result<R, InspectStagedError> {
+    let setup_error = |error| InspectStagedError { primary: None, local: Some(error), pending: None };
+    let filesystem = LocalFileSystem::host().map_err(setup_error)?;
     let options = LocalTempFileOptions::new()
         .with_parent(&std::env::temp_dir())
         .with_max_attempts(16);
     let mut file = filesystem.create_temp_file_with_options(&options)
-        .map_err(|error| (None, Some(error)))?;
+        .map_err(setup_error)?;
     let staged = qubit_io::Output::write_fully(&mut file, payload);
     file.close();
     let primary = staged.and_then(|()| inspect(file.path()));
     match (primary, file.cleanup()) {
         (Ok(value), Ok(())) => Ok(value),
-        (Err(primary), Ok(())) => Err((Some(primary), None)),
-        (Ok(_), Err(cleanup)) => Err((None, Some(cleanup))),
-        (Err(primary), Err(cleanup)) => Err((Some(primary), Some(cleanup))),
+        (Err(primary), Ok(())) => Err(InspectStagedError { primary: Some(primary), local: None, pending: None }),
+        (Ok(_), Err(cleanup)) => Err(InspectStagedError { primary: None, local: Some(cleanup), pending: Some(file) }),
+        (Err(primary), Err(cleanup)) => Err(InspectStagedError { primary: Some(primary), local: Some(cleanup), pending: Some(file) }),
     }
 }
+// END executable inspection cleanup helper
 
 let bytes = inspect_staged(b"payload", |path| std::fs::read(path))
     .expect("staging, inspection, and cleanup should succeed");
 assert_eq!(b"payload", bytes.as_slice());
 ```
+
+If inspection or cleanup fails, keep the returned `InspectStagedError`. Its `primary` and `local`
+fields retain independent errors, and `pending` owns a resource whose cleanup can be retried with
+`retry_cleanup()`. A `true` result means only that this example has no cleanup left; it does not
+mean inspection succeeded. Creation failures happen before the callback and remain in `local`;
+if a creation error carries a recovery owner in `LocalFileError::temp_recovery()`, that owner
+remains attached to it. Dropping an error still makes the resource's normal best-effort cleanup
+attempt.
 
 ## Rooted Workspaces
 

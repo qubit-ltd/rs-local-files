@@ -16,10 +16,15 @@
 在应用的 Cargo 清单中添加依赖：
 
 ```toml
+# BEGIN guide introductory dependencies
 [dependencies]
 qubit-local-files = "0.5.0"
 qubit-io = "0.19"
+tempfile = "3.27"
+# END guide introductory dependencies
 ```
+
+`tempfile` 仅用于本手册练习 fixture 创建临时目录。
 
 配置操作策略前，先选择权限范围。Host 模式使用进程可见的命名空间；Rooted 模式打开一个
 已存在目录并将其映射为虚拟 `/`。权限句柄打开后，构造时传入的 Host 路径只用于诊断。
@@ -355,6 +360,7 @@ fn inspect_access(root: &std::path::Path) -> Result<(), Box<dyn std::error::Erro
 树同步成功后，发布前不要再修改文件内容、名称或权限。任何此类修改都需要重新同步受影响的文件或目录。下面的 Unix 示例在独立临时目录中创建备份、同步整棵树，然后请求以耐久 rename 发布：
 
 ```rust
+// BEGIN executable tree sync example
 #[cfg(unix)]
 {
 use std::ffi::OsStr;
@@ -429,6 +435,7 @@ let result = (|| -> Result<(), Box<dyn std::error::Error>> {
 #[cfg(not(target_os = "freebsd"))]
 result.unwrap();
 }
+// END executable tree sync example
 ```
 
 示例中的 `outcome.file_synced()` 只表示 `publish_new` 本身执行的文件同步，不会记录之前的 `sync_tree` 调用。默认发布选项的 `file_sync` 为 `NotRequired`，因此示例不对该字段作出断言。Required rename 耐久性取决于平台和文件系统能力；例如 Windows 会在修改 stage 权限前拒绝这一静态要求。命名空间耐久性表示操作系统同步协议的结果，不代表存储硬件已物理持久化数据。
@@ -1143,39 +1150,60 @@ MIME 检测器和外部程序通常需要重新按路径打开文件。应先写
 正式应用可用具名错误类型包装这两个独立信息，避免清理错误覆盖主错误。
 
 ```rust
-use std::io;
-use qubit_io::Output;
+// BEGIN executable inspection cleanup helper
 use std::path::Path;
-
-use qubit_local_files::LocalFileError;
-use qubit_local_files::LocalFileSystem;
+use qubit_local_files::{LocalFileError, LocalFileSystem, LocalTempFile};
 use qubit_local_files::options::LocalTempFileOptions;
+
+#[derive(Debug)]
+struct InspectStagedError {
+    primary: Option<std::io::Error>,
+    local: Option<LocalFileError>,
+    pending: Option<LocalTempFile>,
+}
+
+impl InspectStagedError {
+    // true means no cleanup remains; it does not mean inspection succeeded.
+    fn retry_cleanup(&mut self) -> bool {
+        let Some(resource) = self.pending.as_mut() else { return true; };
+        match resource.cleanup() {
+            Ok(()) => { self.pending = None; self.local = None; true }
+            Err(error) => { self.local = Some(error); false }
+        }
+    }
+}
 
 fn inspect_staged<R>(
     payload: &[u8],
-    inspect: impl FnOnce(&Path) -> io::Result<R>,
-) -> Result<R, (Option<io::Error>, Option<LocalFileError>)> {
-    let filesystem = LocalFileSystem::host().map_err(|error| (None, Some(error)))?;
+    inspect: impl FnOnce(&Path) -> std::io::Result<R>,
+) -> Result<R, InspectStagedError> {
+    let setup_error = |error| InspectStagedError { primary: None, local: Some(error), pending: None };
+    let filesystem = LocalFileSystem::host().map_err(setup_error)?;
     let options = LocalTempFileOptions::new()
         .with_parent(&std::env::temp_dir())
         .with_max_attempts(16);
     let mut file = filesystem.create_temp_file_with_options(&options)
-        .map_err(|error| (None, Some(error)))?;
+        .map_err(setup_error)?;
     let staged = qubit_io::Output::write_fully(&mut file, payload);
     file.close();
     let primary = staged.and_then(|()| inspect(file.path()));
     match (primary, file.cleanup()) {
         (Ok(value), Ok(())) => Ok(value),
-        (Err(primary), Ok(())) => Err((Some(primary), None)),
-        (Ok(_), Err(cleanup)) => Err((None, Some(cleanup))),
-        (Err(primary), Err(cleanup)) => Err((Some(primary), Some(cleanup))),
+        (Err(primary), Ok(())) => Err(InspectStagedError { primary: Some(primary), local: None, pending: None }),
+        (Ok(_), Err(cleanup)) => Err(InspectStagedError { primary: None, local: Some(cleanup), pending: Some(file) }),
+        (Err(primary), Err(cleanup)) => Err(InspectStagedError { primary: Some(primary), local: Some(cleanup), pending: Some(file) }),
     }
 }
+// END executable inspection cleanup helper
 
 let bytes = inspect_staged(b"payload", |path| std::fs::read(path))
     .expect("staging, inspection, and cleanup should succeed");
 assert_eq!(b"payload", bytes.as_slice());
 ```
+
+检查或清理失败时，应保留返回的 `InspectStagedError`。`primary` 与 `local` 分别保存独立错误，`pending`
+持有可通过 `retry_cleanup()` 重试清理的资源。返回 `true` 只表示本示例不再有待清理资源，不代表检查成功。
+创建失败发生在回调之前，保存在 `local` 中；如果创建错误通过 `LocalFileError::temp_recovery()` 携带恢复 owner，该 owner 仍保留在错误内。丢弃错误时，资源仍会执行正常的尽力清理。
 
 ## Rooted 工作区
 

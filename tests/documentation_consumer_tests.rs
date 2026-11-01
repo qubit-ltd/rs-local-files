@@ -28,10 +28,17 @@ const START: &str = "// BEGIN executable conditional write example";
 const END: &str = "// END executable conditional write example";
 const SEAL_START: &str = "// BEGIN executable seal cleanup helper";
 const SEAL_END: &str = "// END executable seal cleanup helper";
+const INSPECT_START: &str = "// BEGIN executable inspection cleanup helper";
+const INSPECT_END: &str = "// END executable inspection cleanup helper";
+const INTRO_DEPS_START: &str = "# BEGIN guide introductory dependencies";
+const INTRO_DEPS_END: &str = "# END guide introductory dependencies";
+const TREE_SYNC_START: &str = "// BEGIN executable tree sync example";
+const TREE_SYNC_END: &str = "// END executable tree sync example";
 const SENTINEL: &str = "QUBIT_LOCAL_FILES_DOCUMENTATION_CONSUMER_SENTINEL";
 // Regenerate this fixture from the documented dependencies when they change.
 // Both consumers have the same package identity and use this reviewed graph.
 const CONSUMER_LOCK: &str = include_str!("fixtures/documentation_consumer/Cargo.lock");
+const INTRO_CONSUMER_LOCK: &str = include_str!("fixtures/documentation_consumer/introductory.Cargo.lock");
 
 #[test]
 fn documented_conditional_write_runs_as_a_consumer_without_a_digest_feature() {
@@ -254,6 +261,196 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {{
         assert_eq!(
             fs::read(&sentinel).expect("consumer completion sentinel exists"),
             b"seal cleanup helper completed"
+        );
+    }
+}
+
+#[test]
+fn documented_inspection_cleanup_retains_owner_for_retry() {
+    let crate_path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .canonicalize()
+        .expect("the tested crate path is canonicalized");
+    let workspace = tempdir().expect("consumer workspace is created");
+    let target = workspace.path().join("target");
+    let parent_lock = fs::read_to_string(crate_path.join("Cargo.lock")).expect("the tested crate has a lockfile");
+    let consumer_lock = consumer_lock::lock_with_parent_sources(CONSUMER_LOCK, &parent_lock);
+
+    for (index, (language, guide)) in GUIDES.into_iter().enumerate() {
+        let dependencies = extract_marked(guide, MANIFEST_START, MANIFEST_END, language);
+        let dependency_line = dependencies
+            .lines()
+            .find(|line| line.trim_start().starts_with("qubit-local-files ="))
+            .expect("marked dependencies contain qubit-local-files");
+        let dependency_path = crate_path.to_string_lossy().replace('\\', "\\\\").replace('"', "\\\"");
+        let dependencies = dependencies.replace(
+            dependency_line,
+            &dependency_line
+                .replace("version = \"0.5.0\"", &format!("path = \"{dependency_path}\""))
+                .replace("features = [\"digest\"]", "features = [\"digest\", \"test-support\"]"),
+        );
+        let helper = extract_marked(guide, INSPECT_START, INSPECT_END, language);
+        let project = workspace.path().join(format!("inspect-consumer-{index}"));
+        fs::create_dir_all(project.join("src")).expect("consumer source directory is created");
+        let manifest = format!(
+            "[package]\nname = \"documentation-consumer\"\nversion = \"0.1.0\"\nedition = \"2024\"\n\n{dependencies}"
+        );
+        fs::write(project.join("Cargo.toml"), manifest).expect("consumer manifest is written");
+        fs::write(project.join("Cargo.lock"), &consumer_lock).expect("reviewed consumer lock is written");
+        let source = format!(
+            r#"{helper}
+fn main() -> Result<(), Box<dyn std::error::Error>> {{
+    use std::io;
+
+    use qubit_local_files::test_support::install_test_fault;
+
+    let mut inspection_path_was_present = false;
+    assert_eq!(inspect_staged(b"payload", |path| {{
+        inspection_path_was_present = path.exists();
+        std::fs::read(path)
+    }}).expect("successful inspection"), b"payload");
+    assert!(inspection_path_was_present);
+
+    let mut failure = inspect_staged::<()>(b"payload", |_| Err(io::Error::other("inspect failed")))
+        .expect_err("inspection failure is retained");
+    assert_eq!(failure.primary.as_ref().unwrap().to_string(), "inspect failed");
+    assert!(failure.pending.is_none());
+
+    let mut native_sandbox = None;
+    let mut failure = {{
+        let fault = install_test_fault("temp-file-sandbox-remove")?;
+        let result = inspect_staged(b"payload", |path| {{
+            native_sandbox = path.parent().map(std::path::Path::to_path_buf);
+            Ok(())
+        }}).expect_err("cleanup fault is retained after successful inspection");
+        drop(fault);
+        result
+    }};
+    assert!(failure.primary.is_none());
+    assert_eq!(failure.local.as_ref().unwrap().operation(), qubit_local_files::error::LocalFileOperation::Cleanup);
+    assert!(failure.pending.is_some());
+    let sandbox = native_sandbox.expect("sandbox path observed");
+    assert!(sandbox.exists());
+    assert!(failure.retry_cleanup());
+    assert!(!sandbox.exists());
+
+    let mut native_sandbox = None;
+    let mut failure = {{
+        let fault = install_test_fault("temp-file-sandbox-remove")?;
+        let result = inspect_staged::<()>(b"payload", |path| {{
+            native_sandbox = path.parent().map(std::path::Path::to_path_buf);
+            Err(io::Error::other("inspect primary"))
+        }}).expect_err("cleanup fault retains its owner");
+        drop(fault);
+        result
+    }};
+    assert_eq!(failure.primary.as_ref().unwrap().to_string(), "inspect primary");
+    assert_eq!(failure.local.as_ref().unwrap().operation(), qubit_local_files::error::LocalFileOperation::Cleanup);
+    assert!(failure.pending.is_some());
+    let sandbox = native_sandbox.expect("sandbox path observed");
+    assert!(sandbox.exists());
+    {{
+        let fault = install_test_fault("temp-file-sandbox-remove")?;
+        assert!(!failure.retry_cleanup());
+        drop(fault);
+    }}
+    assert!(failure.pending.is_some());
+    assert_eq!(failure.primary.as_ref().unwrap().to_string(), "inspect primary");
+    assert!(failure.retry_cleanup());
+    assert!(failure.pending.is_none());
+    assert!(!sandbox.exists());
+    assert_eq!(failure.primary.as_ref().unwrap().to_string(), "inspect primary");
+    std::fs::write(std::env::var("{SENTINEL}")?, b"inspection cleanup completed")?;
+    Ok(())
+}}
+"#
+        );
+        fs::write(project.join("src/main.rs"), source).expect("consumer source is written");
+        let sentinel = workspace.path().join(format!("inspect-completed-{index}.sentinel"));
+        let status = Command::new("cargo")
+            .arg("run")
+            .arg("--frozen")
+            .arg("--manifest-path")
+            .arg(project.join("Cargo.toml"))
+            .current_dir(&project)
+            .env("CARGO_TARGET_DIR", &target)
+            .env_remove("CARGO_ENCODED_RUSTFLAGS")
+            .env_remove("RUSTFLAGS")
+            .env_remove("CARGO_BUILD_TARGET")
+            .env(SENTINEL, &sentinel)
+            .output()
+            .expect("consumer cargo process starts");
+        assert!(
+            status.status.success(),
+            "{language} inspection consumer failed with {}\nstdout:\n{}\nstderr:\n{}",
+            status.status,
+            String::from_utf8_lossy(&status.stdout),
+            String::from_utf8_lossy(&status.stderr)
+        );
+        assert_eq!(
+            fs::read_to_string(project.join("Cargo.lock")).expect("consumer lock remains readable"),
+            consumer_lock
+        );
+        assert_eq!(
+            fs::read(&sentinel).expect("consumer completion sentinel exists"),
+            b"inspection cleanup completed"
+        );
+    }
+}
+
+#[test]
+fn documented_tree_sync_compiles_with_introductory_dependencies() {
+    let crate_path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .canonicalize()
+        .expect("the tested crate path is canonicalized");
+    let workspace = tempdir().expect("consumer workspace is created");
+    let target = workspace.path().join("target");
+    let parent_lock = fs::read_to_string(crate_path.join("Cargo.lock")).expect("the tested crate has a lockfile");
+    let consumer_lock = consumer_lock::lock_with_parent_sources(INTRO_CONSUMER_LOCK, &parent_lock);
+
+    for (index, (language, guide)) in GUIDES.into_iter().enumerate() {
+        let dependencies = extract_marked(guide, INTRO_DEPS_START, INTRO_DEPS_END, language);
+        let dependency_line = dependencies
+            .lines()
+            .find(|line| line.trim_start().starts_with("qubit-local-files ="))
+            .expect("introductory dependencies contain qubit-local-files");
+        let dependency_path = crate_path.to_string_lossy().replace('\\', "\\\\").replace('"', "\\\"");
+        let dependencies = dependencies.replace(
+            dependency_line,
+            &format!("qubit-local-files = {{ path = \"{dependency_path}\" }}"),
+        );
+        let code = extract_marked(guide, TREE_SYNC_START, TREE_SYNC_END, language);
+        assert!(code.contains("sync_tree_with_options"));
+        let project = workspace.path().join(format!("tree-sync-consumer-{index}"));
+        fs::create_dir_all(project.join("src")).expect("consumer source directory is created");
+        fs::write(
+            project.join("Cargo.toml"),
+            format!("[package]\nname = \"documentation-consumer\"\nversion = \"0.1.0\"\nedition = \"2024\"\n\n{dependencies}"),
+        )
+        .expect("consumer manifest is written");
+        fs::write(project.join("Cargo.lock"), &consumer_lock).expect("reviewed consumer lock is written");
+        fs::write(
+            project.join("src/main.rs"),
+            format!("fn main() -> Result<(), Box<dyn std::error::Error>> {{\n{code}\nOk(())\n}}\n"),
+        )
+        .expect("consumer source is written");
+        let status = Command::new("cargo")
+            .arg("check")
+            .arg("--frozen")
+            .arg("--manifest-path")
+            .arg(project.join("Cargo.toml"))
+            .current_dir(&project)
+            .env("CARGO_TARGET_DIR", &target)
+            .env_remove("CARGO_ENCODED_RUSTFLAGS")
+            .env_remove("RUSTFLAGS")
+            .env_remove("CARGO_BUILD_TARGET")
+            .output()
+            .expect("consumer cargo process starts");
+        assert!(
+            status.status.success(),
+            "{language} tree sync consumer failed with {}\nstdout:\n{}\nstderr:\n{}",
+            status.status,
+            String::from_utf8_lossy(&status.stdout),
+            String::from_utf8_lossy(&status.stderr)
         );
     }
 }
