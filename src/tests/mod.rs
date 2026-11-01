@@ -14,6 +14,8 @@ mod error;
 mod file_system;
 mod filesystem_native_failure_tests;
 mod host_copy_completion_deadline_tests;
+#[cfg(unix)]
+mod host_tree_symlink_deadline_tests;
 mod lf3_authority_tests;
 #[cfg(feature = "digest")]
 mod lf3_conditional_tests;
@@ -38,6 +40,7 @@ mod lf3_tree_publish_tests;
 mod local;
 mod local_file_metadata_tests;
 pub(crate) mod native_io_fault_tests;
+mod observed_reader_binding_deadline_tests;
 mod observed_reader_context_tests;
 mod outcome;
 mod path;

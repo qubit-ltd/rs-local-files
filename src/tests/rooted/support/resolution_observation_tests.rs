@@ -37,6 +37,10 @@ pub(crate) enum DeadlineBoundary {
     HostCopyBeforeDirectoryMetadata,
     HostCopyAfterConflictRemoval,
     HostCopySecondBeforeInstall,
+    HostTreeSymlinkTargetRead,
+    HostTreeSymlinkDestinationRemoved,
+    ObservedReaderBeforeContentResolution,
+    ObservedReaderAfterMetadataBeforeContentOpen,
 }
 
 pub(crate) fn resolution_now(deadline: Option<Instant>) -> Instant {

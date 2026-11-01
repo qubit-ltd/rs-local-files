@@ -185,6 +185,9 @@ pub(crate) fn copy_symlink_with_options(
     stats: &mut LocalCopyDirStats,
     budget: &CopyBudget,
 ) -> CopyDirResult<()> {
+    budget
+        .check_deadline()
+        .map_err(|source| copy_dir_error(LocalCopyDirStage::PublishSymlinkUnchanged, src, dst, stats, source))?;
     let destination_metadata = with_copy_context(
         destination_metadata_if_exists(dst),
         LocalCopyDirStage::PrepareDestination,
@@ -223,6 +226,14 @@ pub(crate) fn copy_symlink_with_options(
         dst,
         stats,
     )?;
+    #[cfg(test)]
+    crate::tests::rooted::support::resolution_observation_tests::reach_deadline_boundary(
+        crate::tests::rooted::support::resolution_observation_tests::DeadlineBoundary::HostTreeSymlinkTargetRead,
+    );
+    budget
+        .check_deadline()
+        .map_err(|source| copy_dir_error(LocalCopyDirStage::PublishSymlinkUnchanged, src, dst, stats, source))?;
+    let mut destination_removed = false;
     if action == CopyDestinationAction::Replace {
         let (delete_options, started_at) = budget.deletion_options();
         let removal = match destination_metadata.as_ref() {
@@ -243,7 +254,20 @@ pub(crate) fn copy_symlink_with_options(
                 error
             }
         })?;
+        destination_removed = true;
+        #[cfg(test)]
+        crate::tests::rooted::support::resolution_observation_tests::reach_deadline_boundary(
+            crate::tests::rooted::support::resolution_observation_tests::DeadlineBoundary::HostTreeSymlinkDestinationRemoved,
+        );
     }
+    let stage = if destination_removed {
+        LocalCopyDirStage::PublishSymlinkPartially
+    } else {
+        LocalCopyDirStage::PublishSymlinkUnchanged
+    };
+    budget
+        .check_deadline()
+        .map_err(|source| copy_dir_error(stage, src, dst, stats, source))?;
     with_copy_context(
         create_symlink_entry(&link_target, src, dst),
         LocalCopyDirStage::CommitFile,

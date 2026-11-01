@@ -23,9 +23,9 @@ use crate::error::LocalResourceLimitError;
 /// Hop counts include each link before following it. Pending counts describe
 /// the unresolved worklist; resolved counts describe the accumulated result.
 /// Path-byte limits use native encoded bytes (UTF-16 code units times two on
-/// Windows). The referenced contract already contains the strictest inherited
-/// limits and an absolute deadline; this session does not restart that
-/// deadline.
+/// Windows). The referenced contract contains the strictest inherited limits
+/// and policies. An operation deadline is passed separately and checked by
+/// the resolver; this session does not restart it.
 pub(crate) struct ResolutionSession {
     contract: ResolutionContract,
     scope: LocalResolutionScope,

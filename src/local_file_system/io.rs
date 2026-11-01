@@ -383,6 +383,10 @@ impl LocalFileSystem {
                 )?;
                 check_binding_deadline(binding_deadline, resolved.namespace_absolute())?;
             }
+            #[cfg(test)]
+            crate::tests::rooted::support::resolution_observation_tests::reach_deadline_boundary(
+                crate::tests::rooted::support::resolution_observation_tests::DeadlineBoundary::ObservedReaderBeforeContentResolution,
+            );
             let reader = self.open_resolved_reader_with_policy_and_contract(
                 &resolved,
                 read_options,
@@ -390,6 +394,7 @@ impl LocalFileSystem {
                 resolver.current_directory(),
                 symlink_policy,
                 Some(resolution.clone()),
+                binding_deadline,
             )?;
             check_binding_deadline(binding_deadline, path)?;
             let mut observed = LocalObservedReader::from_reader(reader, options.native_observation())?
@@ -954,9 +959,11 @@ impl LocalFileSystem {
             current_directory,
             symlink_policy,
             None,
+            None,
         )
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn open_resolved_reader_with_policy_and_contract(
         &self,
         resolved: &LocalNamespacePath,
@@ -965,6 +972,7 @@ impl LocalFileSystem {
         current_directory: Option<&Path>,
         symlink_policy: crate::LocalSymlinkPolicy,
         resolution: Option<crate::resolution::ResolutionContract>,
+        deadline: Option<std::time::Instant>,
     ) -> LocalResult<LocalFileReader> {
         validate_scope_symlink_policy(
             self.scope(),
@@ -978,9 +986,13 @@ impl LocalFileSystem {
                 HostLocalFileSystem::open_reader_with_policy(resolved.authority_relative(), options, symlink_policy)
             }
             LocalNamespace::Rooted(rooted) => match resolution {
-                Some(contract) => {
-                    rooted.open_reader_with_contract(resolved.authority_relative(), options, symlink_policy, contract)
-                }
+                Some(contract) => rooted.open_reader_with_contract_and_deadline(
+                    resolved.authority_relative(),
+                    options,
+                    symlink_policy,
+                    contract,
+                    deadline,
+                ),
                 None => rooted.open_reader(resolved.authority_relative(), options, symlink_policy),
             },
         }

@@ -28,6 +28,7 @@ use super::RootedLocalFileSystem;
 use super::ensure_required_directory_durability;
 use super::io;
 use super::resolve_rooted_path;
+use super::resolve_rooted_path_with_deadline;
 use super::rooted_io_error;
 use super::validate_rooted_list_start;
 
@@ -64,6 +65,39 @@ impl RootedLocalFileSystem {
         symlink_policy: LocalSymlinkPolicy,
         contract: crate::resolution::ResolutionContract,
     ) -> LocalResult<LocalFileReader> {
+        self.open_reader_with_contract_and_deadline(path, options, symlink_policy, contract, None)
+    }
+
+    /// Opens a reader after resolving its rooted path within an existing
+    /// absolute operation deadline.
+    ///
+    /// The deadline is shared with the caller and is never restarted. `None`
+    /// adds no deadline. Resolution checks an expired deadline and returns a
+    /// `TimedOut` error with the existing operation and path context.
+    ///
+    /// # Parameters
+    /// - `path`: Validated relative descendant path.
+    /// - `options`: Reader open policy.
+    /// - `symlink_policy`: Intermediate and final link-resolution policy.
+    /// - `contract`: Existing resolution limits and policies.
+    /// - `deadline`: Optional absolute deadline for this operation.
+    ///
+    /// # Returns
+    /// An owned regular-file reader when resolution and opening complete in
+    /// time.
+    ///
+    /// # Errors
+    /// Returns `LocalFileError` for path, policy, type, native open, or timeout
+    /// failures. Timeout errors retain the `OpenReader` operation and input
+    /// path.
+    pub(crate) fn open_reader_with_contract_and_deadline(
+        &self,
+        path: &Path,
+        options: &LocalReadOptions,
+        symlink_policy: LocalSymlinkPolicy,
+        contract: crate::resolution::ResolutionContract,
+        deadline: Option<Instant>,
+    ) -> LocalResult<LocalFileReader> {
         let root = crate::rooted::Root::from_directory_authority_with_contract(
             self.root.try_clone_authority().map_err(|source| {
                 LocalFileError::from_io(LocalFileOperation::OpenReader, Some(path.to_path_buf()), None, source)
@@ -71,7 +105,15 @@ impl RootedLocalFileSystem {
             self.root.path().to_path_buf(),
             contract,
         );
-        let relative = resolve_rooted_path(&root, path, symlink_policy, true, LocalFileOperation::OpenReader)?;
+        let relative = resolve_rooted_path_with_deadline(
+            &root,
+            path,
+            symlink_policy,
+            true,
+            LocalFileOperation::OpenReader,
+            deadline,
+        )?;
+        super::support::check_resolution_deadline(deadline, path, LocalFileOperation::OpenReader)?;
         let native_options = options
             .open_retry_timeout()
             .map_or_else(crate::read::OpenOptions::default, |timeout| {
@@ -86,6 +128,11 @@ impl RootedLocalFileSystem {
                     .with_path(path.to_path_buf()),
             );
         }
+        #[cfg(test)]
+        crate::tests::rooted::support::resolution_observation_tests::reach_deadline_boundary(
+            crate::tests::rooted::support::resolution_observation_tests::DeadlineBoundary::ObservedReaderAfterMetadataBeforeContentOpen,
+        );
+        super::support::check_resolution_deadline(deadline, path, LocalFileOperation::OpenReader)?;
         root.open_reader(&relative, &native_options)
             .and_then(LocalFileReader::from_file)
             .map_err(|error| rooted_io_error(LocalFileOperation::OpenReader, path, error))
@@ -244,5 +291,66 @@ impl RootedLocalFileSystem {
         };
         let diagnostic = self.root.path().join(relative.as_path());
         Ok(LocalFileWriter::new(diagnostic, backend, *options))
+    }
+}
+
+#[cfg(test)]
+mod deadline_tests {
+    use std::path::Path;
+    use std::time::Duration;
+    use std::time::Instant;
+
+    use super::RootedLocalFileSystem;
+    use crate::LocalFileOperation;
+    use crate::LocalReadOptions;
+    use crate::LocalSymlinkPolicy;
+    use crate::tests::rooted::support::resolution_observation_tests::DeadlineClockGuard;
+
+    #[test]
+    fn test_rlf5_observed_rooted_helper_checks_deadline_during_resolution() {
+        let scratch = tempfile::tempdir().expect("fixture directory should be created");
+        std::fs::create_dir(scratch.path().join("nested")).expect("nested directory should be created");
+        std::fs::write(scratch.path().join("nested/item"), b"payload").expect("fixture file should exist");
+        let rooted = RootedLocalFileSystem::open(scratch.path()).expect("rooted authority should open");
+        let deadline = Instant::now() + Duration::from_secs(60);
+        let _clock = DeadlineClockGuard::expire_after(1);
+
+        let error = rooted
+            .open_reader_with_contract_and_deadline(
+                Path::new("nested/item"),
+                &LocalReadOptions::new(),
+                LocalSymlinkPolicy::FollowWithinScope,
+                rooted.root.resolution_contract().clone(),
+                Some(deadline),
+            )
+            .expect_err("deadline must be checked between resolution steps");
+
+        assert_eq!(std::io::ErrorKind::TimedOut, error.io_error_kind());
+        assert_eq!(LocalFileOperation::OpenReader, error.operation());
+    }
+
+    #[test]
+    fn test_rlf5_observed_rooted_helper_stops_after_metadata_before_content_open() {
+        let scratch = tempfile::tempdir().expect("fixture directory should be created");
+        std::fs::write(scratch.path().join("item"), b"payload").expect("fixture file should exist");
+        let rooted = RootedLocalFileSystem::open(scratch.path()).expect("rooted authority should open");
+        let deadline = Instant::now() + Duration::from_secs(60);
+        let _clock = DeadlineClockGuard::expire_at(
+            crate::tests::rooted::support::resolution_observation_tests::DeadlineBoundary::ObservedReaderAfterMetadataBeforeContentOpen,
+        );
+
+        let error = rooted
+            .open_reader_with_contract_and_deadline(
+                Path::new("item"),
+                &LocalReadOptions::new(),
+                LocalSymlinkPolicy::FollowWithinScope,
+                rooted.root.resolution_contract().clone(),
+                Some(deadline),
+            )
+            .expect_err("expired deadline must stop before opening file contents");
+
+        assert_eq!(std::io::ErrorKind::TimedOut, error.io_error_kind());
+        assert_eq!(LocalFileOperation::OpenReader, error.operation());
+        assert_eq!(Some(Path::new("item")), error.path());
     }
 }
