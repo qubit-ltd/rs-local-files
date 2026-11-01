@@ -11,7 +11,9 @@ use std::path::Path;
 use super::LocalFileError;
 use super::LocalFileOperation;
 use super::LocalResult;
+use super::LocalSymlinkPolicy;
 use super::RootedLocalFileSystem;
+use super::resolve_rooted_path;
 use crate::local::conditional::ConditionalWriterBackend;
 use crate::options::LocalWriteOptions;
 
@@ -23,6 +25,13 @@ impl RootedLocalFileSystem {
         diagnostic: Option<&Path>,
         options: &LocalWriteOptions,
     ) -> LocalResult<ConditionalWriterBackend> {
+        let relative = resolve_rooted_path(
+            &self.root,
+            relative,
+            LocalSymlinkPolicy::Reject,
+            false,
+            LocalFileOperation::OpenWriter,
+        )?;
         let root = self.root.try_clone_authority().map_err(|error| {
             LocalFileError::from_io(
                 LocalFileOperation::OpenWriter,
@@ -31,13 +40,15 @@ impl RootedLocalFileSystem {
                 error,
             )
         })?;
-        ConditionalWriterBackend::rooted(root, relative, namespace_absolute, diagnostic, options).map_err(|error| {
-            LocalFileError::from_io(
-                LocalFileOperation::OpenWriter,
-                Some(namespace_absolute.to_path_buf()),
-                None,
-                error,
-            )
-        })
+        ConditionalWriterBackend::rooted(root, relative.as_path(), namespace_absolute, diagnostic, options).map_err(
+            |error| {
+                LocalFileError::from_io(
+                    LocalFileOperation::OpenWriter,
+                    Some(namespace_absolute.to_path_buf()),
+                    None,
+                    error,
+                )
+            },
+        )
     }
 }
