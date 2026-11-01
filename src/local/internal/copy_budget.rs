@@ -85,6 +85,24 @@ impl CopyBudget {
         }
     }
 
+    /// Returns the original copy deadline as an absolute monotonic instant.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`io::ErrorKind::InvalidInput`] when the configured deadline is
+    /// outside the representable monotonic clock range.
+    pub(crate) fn absolute_deadline(&self) -> io::Result<Option<Instant>> {
+        match self.deadline {
+            None => Ok(None),
+            Some((started, duration)) => started.checked_add(duration).map(Some).ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "copy deadline exceeds the monotonic clock range",
+                )
+            }),
+        }
+    }
+
     /// Rejects work after the configured monotonic deadline.
     ///
     /// # Errors
@@ -92,7 +110,17 @@ impl CopyBudget {
     /// Returns [`io::ErrorKind::TimedOut`] once the deadline is reached.
     #[inline]
     pub fn check_deadline(&self) -> io::Result<()> {
-        self.check_deadline_at(Instant::now())
+        let Some(deadline) = self.absolute_deadline()? else {
+            return Ok(());
+        };
+        #[cfg(test)]
+        let now = crate::tests::rooted::support::resolution_observation_tests::copy_budget_now(Some(deadline));
+        #[cfg(not(test))]
+        let now = Instant::now();
+        if now >= deadline {
+            return Err(io::Error::new(io::ErrorKind::TimedOut, "local copy deadline exceeded"));
+        }
+        Ok(())
     }
 
     /// Checks whether a descendant entry is within the configured depth.

@@ -27,7 +27,7 @@ use super::copy_failure_unchanged;
 use super::ensure_required_directory_durability;
 use super::io;
 use super::published_durability;
-use super::resolve_rooted_path;
+use super::resolve_rooted_path_with_deadline;
 use super::rooted_destination_is_directory;
 use super::rooted_io_error;
 use super::sync_rooted_copy_parent_chain;
@@ -83,10 +83,41 @@ impl RootedLocalFileSystem {
         if let Some(max_entries) = internal_options.max_entries() {
             internal_options = internal_options.with_max_entries(max_entries - 1);
         }
-        let source_path = resolve_rooted_path(&self.root, source, symlink_policy, false, LocalFileOperation::Copy)
-            .map_err(copy_failure_unchanged)?;
-        let target_path = resolve_rooted_path(&self.root, target, symlink_policy, false, LocalFileOperation::Copy)
-            .map_err(copy_failure_unchanged)?;
+        let deadline = budget
+            .absolute_deadline()
+            .map_err(|error| copy_failure_unchanged(rooted_io_error(LocalFileOperation::Copy, source, error)))?;
+        let source_path = resolve_rooted_path_with_deadline(
+            &self.root,
+            source,
+            symlink_policy,
+            false,
+            LocalFileOperation::Copy,
+            deadline,
+        )
+        .map_err(copy_failure_unchanged)?;
+        #[cfg(test)]
+        crate::tests::rooted::support::resolution_observation_tests::reach_deadline_boundary(
+            crate::tests::rooted::support::resolution_observation_tests::DeadlineBoundary::SourceResolved,
+        );
+        budget
+            .check_deadline()
+            .map_err(|error| copy_failure_unchanged(rooted_io_error(LocalFileOperation::Copy, source, error)))?;
+        let target_path = resolve_rooted_path_with_deadline(
+            &self.root,
+            target,
+            symlink_policy,
+            false,
+            LocalFileOperation::Copy,
+            deadline,
+        )
+        .map_err(copy_failure_unchanged)?;
+        #[cfg(test)]
+        crate::tests::rooted::support::resolution_observation_tests::reach_deadline_boundary(
+            crate::tests::rooted::support::resolution_observation_tests::DeadlineBoundary::TargetResolved,
+        );
+        budget
+            .check_deadline()
+            .map_err(|error| copy_failure_unchanged(rooted_io_error(LocalFileOperation::Copy, target, error)))?;
         let metadata = self
             .root
             .symlink_metadata(&source_path)
@@ -116,6 +147,9 @@ impl RootedLocalFileSystem {
             .symlink_metadata(&target_path)
             .map(|_| true)
             .or_else(|error| (error.kind() == io::ErrorKind::NotFound).then_some(false).ok_or(error))
+            .map_err(|error| copy_failure_unchanged(rooted_io_error(LocalFileOperation::Copy, target, error)))?;
+        budget
+            .check_deadline()
             .map_err(|error| copy_failure_unchanged(rooted_io_error(LocalFileOperation::Copy, target, error)))?;
         if options.type_conflict() == crate::LocalCopyTypeConflictPolicy::Skip
             && ((directory && !target_is_directory && target_exists) || (!directory && target_is_directory))
@@ -151,6 +185,9 @@ impl RootedLocalFileSystem {
                 .parent()
                 .filter(|parent| !parent.as_os_str().is_empty())
         {
+            budget
+                .check_deadline()
+                .map_err(|error| copy_failure_unchanged(rooted_io_error(LocalFileOperation::Copy, target, error)))?;
             let parent =
                 crate::local::LocalRelativePath::new(parent).expect("parent of a validated rooted path is valid");
             self.root

@@ -41,6 +41,7 @@ mod observed_reader_context_tests;
 mod outcome;
 mod path;
 pub(crate) mod rooted;
+mod rooted_copy_deadline_tests;
 mod security_observation_value_tests;
 mod tree_privacy_failure_tests;
 mod vectored_read_tests;

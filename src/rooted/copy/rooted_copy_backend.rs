@@ -53,7 +53,7 @@ pub(super) fn copy_tree(
             source_error,
         )
     })?;
-    if !prepare_directory(root, source, destination, options, &mut statistics)? {
+    if !prepare_directory(root, source, destination, options, &mut statistics, budget)? {
         drop(root_permit);
         return Ok(statistics);
     }
@@ -176,7 +176,14 @@ impl CopyTreeBackend for RootedCopyBackend<'_> {
                     &self.active_sources,
                     *stats,
                 )?;
-                if prepare_directory(self.root, &source_child, &destination_child, self.options, stats)? {
+                if prepare_directory(
+                    self.root,
+                    &source_child,
+                    &destination_child,
+                    self.options,
+                    stats,
+                    budget,
+                )? {
                     let current = *stats;
                     child_frame = Some(enter_directory(
                         self.root,
@@ -192,12 +199,22 @@ impl CopyTreeBackend for RootedCopyBackend<'_> {
             }
             EntryKind::Symlink => {
                 if self.options.symlink_policy().follows() {
-                    let resolved = match crate::rooted_local_file_system::resolve_rooted_path(
+                    let deadline = budget.absolute_deadline().map_err(|source_error| {
+                        error(
+                            Stage::InspectSourceEntry,
+                            &source_child,
+                            &destination_child,
+                            *stats,
+                            source_error,
+                        )
+                    })?;
+                    let resolved = match crate::rooted_local_file_system::resolve_rooted_path_with_deadline(
                         self.root,
                         source_child.as_path(),
                         crate::LocalSymlinkPolicy::FollowWithinScope,
                         true,
                         crate::LocalFileOperation::Copy,
+                        deadline,
                     ) {
                         Ok(resolved) => resolved,
                         Err(copy_error) if copy_error.kind() == crate::LocalFileErrorKind::NotFound => {
@@ -221,6 +238,21 @@ impl CopyTreeBackend for RootedCopyBackend<'_> {
                             ));
                         }
                     };
+                    #[cfg(test)]
+                    crate::tests::rooted::support::resolution_observation_tests::reach_deadline_boundary(
+                        crate::tests::rooted::support::resolution_observation_tests::DeadlineBoundary::FollowedLinkResolved,
+                    );
+                    budget.check_deadline().map_err(|source_error| {
+                        error(
+                            Stage::InspectSourceEntry,
+                            &source_child,
+                            &destination_child,
+                            *stats,
+                            source_error,
+                        )
+                    })?;
+                    #[cfg(test)]
+                    crate::tests::rooted::support::resolution_observation_tests::record_metadata();
                     let resolved_metadata = match self.root.symlink_metadata(&resolved) {
                         Ok(metadata) => metadata,
                         Err(source_error) if source_error.kind() == ErrorKind::NotFound => {
@@ -252,7 +284,7 @@ impl CopyTreeBackend for RootedCopyBackend<'_> {
                             &self.active_sources,
                             *stats,
                         )?;
-                        if prepare_directory(self.root, &resolved, &destination_child, self.options, stats)? {
+                        if prepare_directory(self.root, &resolved, &destination_child, self.options, stats, budget)? {
                             let current = *stats;
                             child_frame = Some(enter_directory(
                                 self.root,

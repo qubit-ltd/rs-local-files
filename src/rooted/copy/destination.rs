@@ -16,6 +16,7 @@ use super::Path;
 use super::Root;
 use super::deletion_failure_hint;
 use crate::LocalCopyDirError;
+use crate::local::CopyBudget;
 use crate::local::CopyDestinationAction;
 use crate::local::LocalCopyConflictPolicy as ConflictPolicy;
 use crate::local::LocalCopyDirError as Error;
@@ -45,7 +46,17 @@ pub(super) fn prepare_directory(
     destination: &Path,
     options: &Options,
     statistics: &mut Statistics,
+    budget: &CopyBudget,
 ) -> Result<bool, Error> {
+    budget.check_deadline().map_err(|source_error| {
+        error(
+            Stage::PrepareDestination,
+            source,
+            destination,
+            *statistics,
+            source_error,
+        )
+    })?;
     let destination_metadata = match optional_metadata(root, destination) {
         Ok(metadata) => metadata,
         Err(source_error) => {
@@ -58,8 +69,26 @@ pub(super) fn prepare_directory(
             ));
         }
     };
+    budget.check_deadline().map_err(|source_error| {
+        error(
+            Stage::PrepareDestination,
+            source,
+            destination,
+            *statistics,
+            source_error,
+        )
+    })?;
     match destination_metadata {
         None => {
+            budget.check_deadline().map_err(|source_error| {
+                error(
+                    Stage::PrepareDestination,
+                    source,
+                    destination,
+                    *statistics,
+                    source_error,
+                )
+            })?;
             #[cfg(feature = "test-support")]
             {
                 if crate::local::test_support_enabled("rooted-copy-directory-create") {
@@ -104,21 +133,32 @@ pub(super) fn prepare_directory(
                     Ok(false)
                 }
                 Some(CopyDestinationAction::Replace) => {
+                    budget.check_deadline().map_err(|source_error| {
+                        error(
+                            Stage::PrepareDestination,
+                            source,
+                            destination,
+                            *statistics,
+                            source_error,
+                        )
+                    })?;
                     if destination_is_directory {
-                        root.remove_tree_typed(destination).map_err(|delete_error| {
-                            let failure_hint = deletion_failure_hint(&delete_error);
-                            let mut copy_error = error(
-                                Stage::PrepareDestination,
-                                source,
-                                destination,
-                                *statistics,
-                                delete_error.into_io_error(),
-                            );
-                            if let Some(failure_hint) = failure_hint {
-                                copy_error = copy_error.with_failure_state(failure_hint);
-                            }
-                            copy_error
-                        })?;
+                        let (delete_options, started_at) = budget.deletion_options();
+                        root.remove_tree_typed_with_options(destination, delete_options, started_at)
+                            .map_err(|delete_error| {
+                                let failure_hint = deletion_failure_hint(&delete_error);
+                                let mut copy_error = error(
+                                    Stage::PrepareDestination,
+                                    source,
+                                    destination,
+                                    *statistics,
+                                    delete_error.into_io_error(),
+                                );
+                                if let Some(failure_hint) = failure_hint {
+                                    copy_error = copy_error.with_failure_state(failure_hint);
+                                }
+                                copy_error
+                            })?;
                     } else {
                         root.remove_file(destination).map_err(|source_error| {
                             error(
@@ -130,6 +170,20 @@ pub(super) fn prepare_directory(
                             )
                         })?;
                     }
+                    #[cfg(test)]
+                    crate::tests::rooted::support::resolution_observation_tests::reach_deadline_boundary(
+                        crate::tests::rooted::support::resolution_observation_tests::DeadlineBoundary::DestinationRemoved,
+                    );
+                    budget.check_deadline().map_err(|source_error| {
+                        error(
+                            Stage::PrepareDestination,
+                            source,
+                            destination,
+                            *statistics,
+                            source_error,
+                        )
+                        .with_failure_state(crate::LocalCopyFailureState::PartiallyPublished)
+                    })?;
                     #[cfg(feature = "test-support")]
                     if crate::local::test_support_enabled("rooted-copy-replacement-directory-create") {
                         return Err(error(
@@ -265,6 +319,7 @@ mod tests {
     use super::Statistics;
     use super::prepare_directory;
     use crate::LocalCopyFailureState;
+    use crate::local::CopyBudget;
     use crate::local::LocalCopyTypeConflictPolicy;
 
     #[test]
@@ -284,7 +339,8 @@ mod tests {
                 overwritten: if overflow_directories { 0 } else { u64::MAX },
                 ..Statistics::default()
             };
-            let error = prepare_directory(&root, &source, &destination, &options, &mut statistics)
+            let budget = CopyBudget::new(crate::LocalCopyDirOptions::new());
+            let error = prepare_directory(&root, &source, &destination, &options, &mut statistics, &budget)
                 .expect_err("counter overflow after replacement must report a partial publication");
             assert_eq!(error.stage(), Stage::UpdateStatistics);
             assert_eq!(error.source_path(), std::path::Path::new("source"));
@@ -314,8 +370,15 @@ mod tests {
                 b"protected sibling"
             );
             assert!(
-                prepare_directory(&root, &source, &destination, &options, &mut Statistics::default())
-                    .expect("retry should recognize the already prepared directory")
+                prepare_directory(
+                    &root,
+                    &source,
+                    &destination,
+                    &options,
+                    &mut Statistics::default(),
+                    &budget,
+                )
+                .expect("retry should recognize the already prepared directory")
             );
         }
     }

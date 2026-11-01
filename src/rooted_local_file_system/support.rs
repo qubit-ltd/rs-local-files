@@ -106,7 +106,25 @@ pub(crate) fn resolve_rooted_path(
     follow_final: bool,
     operation: LocalFileOperation,
 ) -> LocalResult<crate::local::LocalRelativePath> {
-    let resolved = resolve_rooted_path_allow_root(root, path, symlink_policy, follow_final, operation)?;
+    resolve_rooted_path_with_deadline(root, path, symlink_policy, follow_final, operation, None)
+}
+
+/// Resolves a non-root descendant while checking an optional absolute deadline.
+///
+/// # Errors
+///
+/// Returns rooted path, symlink-policy, or native inspection errors with
+/// `operation` context; an expired deadline is reported as `TimedOut`.
+pub(crate) fn resolve_rooted_path_with_deadline(
+    root: &crate::rooted::Root,
+    path: &Path,
+    symlink_policy: LocalSymlinkPolicy,
+    follow_final: bool,
+    operation: LocalFileOperation,
+    deadline: Option<Instant>,
+) -> LocalResult<crate::local::LocalRelativePath> {
+    let resolved =
+        resolve_rooted_path_allow_root_with_deadline(root, path, symlink_policy, follow_final, operation, deadline)?;
     match crate::local::LocalRelativePath::new(&resolved) {
         Ok(path) => Ok(path),
         Err(error) => Err(rooted_io_error(operation, path, error).with_kind(LocalFileErrorKind::InvalidPath)),

@@ -20,15 +20,30 @@ thread_local! {
     static NATIVE_DIRECTORY_OPEN: Cell<usize> = const { Cell::new(0) };
     static DEADLINE_CHECKS: Cell<usize> = const { Cell::new(0) };
     static EXPIRE_AFTER: Cell<Option<usize>> = const { Cell::new(None) };
+    static EXPIRE_AT: Cell<Option<DeadlineBoundary>> = const { Cell::new(None) };
+    static FORCED_EXPIRED: Cell<bool> = const { Cell::new(false) };
+    static BOUNDARY_METADATA: Cell<Option<usize>> = const { Cell::new(None) };
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum DeadlineBoundary {
+    SourceResolved,
+    TargetResolved,
+    FollowedLinkResolved,
+    DestinationRemoved,
 }
 
 pub(crate) fn resolution_now(deadline: Option<Instant>) -> Instant {
     DEADLINE_CHECKS.set(DEADLINE_CHECKS.get() + 1);
-    if EXPIRE_AFTER.get().is_some_and(|limit| DEADLINE_CHECKS.get() > limit) {
+    if FORCED_EXPIRED.get() || EXPIRE_AFTER.get().is_some_and(|limit| DEADLINE_CHECKS.get() > limit) {
         deadline.unwrap_or_else(Instant::now)
     } else {
         Instant::now()
     }
+}
+
+pub(crate) fn copy_budget_now(deadline: Option<Instant>) -> Instant {
+    resolution_now(deadline)
 }
 
 #[cfg(test)]
@@ -50,21 +65,60 @@ fn test_deadline_clock_guard_restores_hook_after_drop_and_unwind() {
     assert!(resolution_now(Some(deadline)) < deadline);
 }
 
-pub(crate) struct DeadlineClockGuard(Option<usize>);
+pub(crate) struct DeadlineClockGuard {
+    previous_after: Option<usize>,
+    previous_boundary: Option<DeadlineBoundary>,
+    previous_expired: bool,
+    previous_boundary_metadata: Option<usize>,
+}
 
 impl DeadlineClockGuard {
     pub(crate) fn expire_after(checks: usize) -> Self {
-        let previous = EXPIRE_AFTER.replace(Some(checks));
+        let guard = Self::new();
+        EXPIRE_AFTER.set(Some(checks));
+        guard
+    }
+
+    pub(crate) fn expire_at(boundary: DeadlineBoundary) -> Self {
+        let guard = Self::new();
+        EXPIRE_AT.set(Some(boundary));
+        guard
+    }
+
+    fn new() -> Self {
+        let previous_after = EXPIRE_AFTER.replace(None);
+        let previous_boundary = EXPIRE_AT.replace(None);
+        let previous_expired = FORCED_EXPIRED.replace(false);
+        let previous_boundary_metadata = BOUNDARY_METADATA.replace(None);
         DEADLINE_CHECKS.set(0);
-        Self(previous)
+        Self {
+            previous_after,
+            previous_boundary,
+            previous_expired,
+            previous_boundary_metadata,
+        }
     }
 }
 
 impl Drop for DeadlineClockGuard {
     fn drop(&mut self) {
-        EXPIRE_AFTER.set(self.0);
+        EXPIRE_AFTER.set(self.previous_after);
+        EXPIRE_AT.set(self.previous_boundary);
+        FORCED_EXPIRED.set(self.previous_expired);
+        BOUNDARY_METADATA.set(self.previous_boundary_metadata);
         DEADLINE_CHECKS.set(0);
     }
+}
+
+pub(crate) fn reach_deadline_boundary(boundary: DeadlineBoundary) {
+    if EXPIRE_AT.get() == Some(boundary) {
+        BOUNDARY_METADATA.set(Some(METADATA.get()));
+        FORCED_EXPIRED.set(true);
+    }
+}
+
+pub(crate) fn metadata_count_at_boundary() -> Option<usize> {
+    BOUNDARY_METADATA.get()
 }
 
 /// Records a metadata attempt at the cursor's native operation boundary.

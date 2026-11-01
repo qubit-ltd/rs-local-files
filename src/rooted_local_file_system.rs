@@ -52,6 +52,7 @@ pub(crate) use support::resolve_rooted_path;
 pub(crate) use support::resolve_rooted_path_allow_root;
 pub(crate) use support::resolve_rooted_path_allow_root_with_component_policy_and_budget;
 pub(crate) use support::resolve_rooted_path_allow_root_with_deadline;
+pub(crate) use support::resolve_rooted_path_with_deadline;
 pub(super) use support::sync_rooted_copy_parent_chain;
 pub(super) use support::validate_rooted_list_start;
 
