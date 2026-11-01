@@ -1405,7 +1405,7 @@ source 或 destination 为 Rooted `/` 时返回 `InvalidPath`。
 | 源状态 | 含义与允许操作 |
 | --- | --- |
 | `Owned` | 仍有操作原临时实体的资格；每次破坏性操作前仍须复核身份。部分清理可能已改变内容。 |
-| `CleanupRequired` | 原实体已离开源位置，只剩私有 sandbox 的清理责任；禁止 persist 和 keep。 |
+| `CleanupRequired` | 原实体已离开源位置，只剩独立的每资源 sandbox 目录结构需要清理；这本身不保证访问控制。禁止 persist 和 keep。 |
 | `Released` | 无剩余清理责任；cleanup 幂等成功，persist 和 keep 被拒绝。 |
 | `Indeterminate` | 无法证明源命名空间操作资格；persist、keep、显式 cleanup 与 Drop 删除均被禁止。 |
 
@@ -1437,10 +1437,13 @@ prefix、suffix 会先组合成完整名称再校验。分隔符、NUL、控制�
 次数。整树验证、权限转换和文件同步把 `max_depth` 视为包含边界的完整性上限：恰好位于上限的
 条目有效，超过上限返回 `ResourceLimit`，空树在深度零时有效。展示 walker 仍保留自己的截断语义。
 
-### 18.3 私有 sandbox
+### 18.3 独立的每资源 sandbox
 
-资源先在选定 parent 下创建私有 sandbox，再创建实际实体；`path()` 包含生成的 sandbox
-组件。cleanup 先删除实体，再移除空 sandbox。persist 与 keep 将实体发布到 sandbox 外。
+资源先在选定 parent 下创建独立的每资源 sandbox 目录结构，再创建实际实体；这描述目录结构，
+不构成跨平台访问控制保证。Unix 创建 helper 会请求 `0700` mode，Windows 的 `PlatformDefault`
+会继承父目录 ACL。需要隐私保证的调用方应显式请求 `LocalPrivacyRequirement::Required` 并处理失败；
+该保证会在创建期间检查。`path()` 包含生成的 sandbox 组件。cleanup 先删除实体，再移除空 sandbox。
+persist 与 keep 将实体发布到 sandbox 外。
 发布成功后的 sandbox 清理失败，由 `LocalPersistOutcome::cleanup_state()` 和
 `cleanup_error()` 报告，不改成可重试发布的错误。sandbox 缩小普通替换的暴露面，
 但不构成抵御任意并发写入者的绝对同步边界。

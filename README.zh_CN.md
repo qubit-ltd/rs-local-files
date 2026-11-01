@@ -193,8 +193,11 @@ Windows Rooted `Content` 和 Host `Content` 配合 `UseStaging` 仍返回 `Unsup
 文件系统标识，因此通常能拒绝误删替换条目；但标识检查与按路径删除是两个独立操作，
 文件系统也可能复用标识。例如，不受信任的并发者删除临时文件后，反复在同一名称上安装新文件，
 这不在清理契约的保证范围内。应将临时资源放在并发者无写权的目录，或调用 `keep` 后由上层协调删除。
-每个临时资源都创建在独立的私有 sandbox 中，返回路径包含一个生成的 sandbox 组件；调用
-`keep` 会原子发布到生成的 sibling 路径，返回 `LocalPersistOutcome`，并报告 sandbox 清理是否残留。
+每个临时资源都有独立的每资源 sandbox 目录结构，但这本身不构成跨平台访问控制保证：Unix
+创建 helper 会请求 `0700` mode，Windows 的 `PlatformDefault` 则继承父目录 ACL。需要隐私保证的
+调用方应显式请求 `LocalPrivacyRequirement::Required`，并处理创建失败。返回路径包含一个生成的
+sandbox 组件；调用 `keep` 会原子发布到生成的 sibling 路径，返回 `LocalPersistOutcome`，并报告
+sandbox 清理是否残留。
 
 临时发布失败必须同时检查两个状态轴：`LocalPersistError::state()` 说明本次目标是否发布，
 `source_state()` 说明错误产生时的源资源资格。`NotPublished` 可能对应 `Indeterminate`

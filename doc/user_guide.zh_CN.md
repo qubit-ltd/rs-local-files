@@ -744,8 +744,11 @@ namespace 路径作为公开 root；可选的 diagnostic path 仍可记录实际
 保留悬空链接条目。递归跟随目录链接时，悬空或越界链接会产生错误。`Continue` 会返回局部子目录
 打开错误并继续安全的同层条目；全局预算或 deadline 耗尽仍会终止遍历。
 
-临时文件和目录按当前源资格承担清理责任。每个资源都创建在独立的私有 sandbox 中，
-sandbox 会和资源一起清理。需要观察清理失败时应显式调用 `cleanup()`；drop 只会静默地尽力清理。
+临时文件和目录按当前源资格承担清理责任。每个资源都有独立的每资源 sandbox 目录结构，并随资源
+一起清理；这种目录结构本身不保证访问控制。Unix 创建 helper 会请求 `0700` mode，Windows
+`PlatformDefault` 则继承父目录 ACL。跨平台需要隐私保证时，应显式请求
+`LocalPrivacyRequirement::Required` 并处理创建失败；该保证会在创建期间检查。需要观察清理失败时
+应显式调用 `cleanup()`；drop 只会静默地尽力清理。
 `keep` 会原子发布到 sandbox 外生成的 sibling 路径，返回 `LocalPersistOutcome`，其 cleanup state
 会报告 sandbox 残留。未显式指定 parent 时，在该次操作捕获的 filesystem PWD 下创建。
 `path()`、`keep` 和持久化结果对 Host 与 Rooted 都返回 namespace-absolute 路径，因此
@@ -828,8 +831,9 @@ match reader.verify_path_binding()? {
 | `failure.resource().source_state()` | 保留资源的实时资格，包含通过 `resource_mut()` 执行操作后的变化。 |
 
 `Owned` 允许继续执行生命周期操作，但每次仍须复核身份；它不保证内容完整，递归清理失败前
-可能已经删掉部分后代。`CleanupRequired` 表示原条目已离开源位置，guard 只负责私有 sandbox，
-只能重试 sandbox 清理。`Released` 没有剩余责任，重复 `cleanup()` 幂等成功。
+可能已经删掉部分后代。`CleanupRequired` 表示原条目已离开源位置，guard 只负责独立的每资源
+sandbox 目录结构清理；目录结构本身不保证访问控制，只能重试 sandbox 清理。`Released` 没有剩余责任，
+重复 `cleanup()` 幂等成功。
 `Indeterminate` 表示无法证明源操作资格，persist、keep、cleanup 和 Drop 删除均被禁止。
 
 | 失败场景 | 发布状态 | 源资格 | 恢复方式 |

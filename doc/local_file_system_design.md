@@ -1175,7 +1175,7 @@ eligibility:
 | Source state | Meaning and permitted operations |
 | --- | --- |
 | `Owned` | The guard can operate on the original temporary entity, subject to revalidating identity before each destructive action. Partial cleanup may already have removed contents. |
-| `CleanupRequired` | The original entity has left the source; only private sandbox cleanup remains. Persist and keep are forbidden. |
+| `CleanupRequired` | The original entity has left the source; only its per-resource sandbox structure remains to be cleaned. This does not itself guarantee access control. Persist and keep are forbidden. |
 | `Released` | No cleanup responsibility remains. Cleanup is idempotently successful; persist and keep are rejected. |
 | `Indeterminate` | Source namespace authority cannot be proven. Persist, keep, explicit cleanup, and Drop deletion are forbidden. |
 
@@ -1186,7 +1186,7 @@ error; stage and `io::ErrorKind` must not be used to reconstruct ownership.
 
 `close()` on a temporary file closes only its content handle; it does not alter
 source eligibility. `keep()` follows the same publication protocol as persist
-but generates a sibling target outside the private sandbox. Drop is a silent,
+but generates a sibling target outside the per-resource sandbox. Drop is a silent,
 best-effort cleanup attempt only for responsibility still proven by the source
 state and must never delete an `Indeterminate` source.
 
@@ -1231,10 +1231,15 @@ entry at the boundary is valid, deeper entries return `ResourceLimit`, and an
 empty tree is valid at depth zero. Display walkers retain their separate
 truncation semantics.
 
-### 18.3 Private sandbox
+### 18.3 Per-resource sandbox
 
-Creation places the entity inside a private per-resource sandbox beneath the
-selected parent. Its generated component is visible in `path()`. Cleanup removes
+Creation places the entity inside an independent per-resource sandbox directory
+structure beneath the selected parent. This describes directory structure, not
+a cross-platform access-control guarantee. The Unix creation helper requests
+mode `0700`; Windows `PlatformDefault` inherits the parent ACL. A caller that
+requires privacy should explicitly request `LocalPrivacyRequirement::Required`
+and handle failure; the guarantee is checked during creation. The generated
+component is visible in `path()`. Cleanup removes
 the entity and then its empty sandbox. Persist and keep publish the entity out
 of the sandbox; successful publication reports residual sandbox failures through
 `LocalPersistOutcome::cleanup_state()` and `cleanup_error()`, without turning

@@ -243,9 +243,13 @@ and a filesystem may eventually reuse an identity. For example, removing a
 temporary file and repeatedly installing another file at the same name is
 outside the cleanup guarantee. Put temporary entries in a directory not
 writable by concurrent actors, or call `keep` and coordinate deletion yourself.
-Each temporary resource is created inside a private per-resource sandbox. The
-resource path therefore includes one generated sandbox component; `keep`
-atomically publishes the entry to a generated sibling path, returns a
+Each temporary resource is created inside an independent per-resource sandbox.
+This describes its directory structure, not a cross-platform access-control
+guarantee: the Unix helper requests mode `0700`, while Windows
+`PlatformDefault` inherits the parent ACL. Callers that require a privacy
+guarantee should explicitly request `LocalPrivacyRequirement::Required` and
+handle creation failure. The resource path therefore includes one generated
+sandbox component; `keep` atomically publishes the entry to a generated sibling path, returns a
 `LocalPersistOutcome`, and reports whether sandbox cleanup left a residual.
 If default Host creation fails before the temporary owner is returned and
 cleanup leaves residue, the `LocalFileError` retains `cleanup_error()` and a

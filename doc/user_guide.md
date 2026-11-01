@@ -930,9 +930,13 @@ not provide a snapshot or global exactly-once guarantee; reopened frames still
 suppress names already yielded.
 
 Temporary files and directories own cleanup according to current source
-eligibility. Each resource lives in
-a private generated sandbox that is removed with the resource. Dropping them
-performs silent best-effort cleanup; call `cleanup()` when the caller must
+eligibility. Each resource has an independent per-resource sandbox directory
+structure, which is removed with the resource; that structure alone does not
+guarantee access control. The Unix creation helper requests mode `0700`, while
+Windows `PlatformDefault` inherits the parent ACL. Callers that require privacy
+across platforms should explicitly request `LocalPrivacyRequirement::Required`
+and handle creation failure; the guarantee is checked during creation. Dropping
+them performs silent best-effort cleanup; call `cleanup()` when the caller must
 observe a cleanup failure. `keep` atomically publishes to a generated sibling outside
 the sandbox and returns a `LocalPersistOutcome`; its cleanup state reports any
 residual sandbox. With no explicit parent, creation uses the filesystem PWD
@@ -1048,7 +1052,8 @@ On failure, inspect two independent facts:
 `Owned` permits another lifecycle attempt, subject to a fresh identity check.
 It does not promise intact contents: a failed recursive cleanup may already
 have deleted some descendants. `CleanupRequired` means the original entry left
-the source and only its private sandbox remains the guard's responsibility.
+the source and only its per-resource sandbox structure remains the guard's
+responsibility; that structure alone does not guarantee access control.
 Only sandbox cleanup is allowed. `Released` has no cleanup obligation and
 `cleanup()` succeeds idempotently. `Indeterminate` forbids persist, keep,
 cleanup, and Drop deletion because source authority cannot be proven.
