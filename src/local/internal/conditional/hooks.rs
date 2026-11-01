@@ -9,7 +9,9 @@
 
 #[cfg(any(test, all(feature = "digest", feature = "test-support")))]
 use std::io;
+#[cfg(any(test, all(feature = "digest", feature = "test-support")))]
 use std::sync::Arc;
+#[cfg(any(test, all(feature = "digest", feature = "test-support")))]
 use std::sync::Mutex;
 
 use super::ConditionalHookAction;
@@ -21,6 +23,7 @@ type HookCallback = Arc<Mutex<Option<Box<dyn FnOnce() -> io::Result<()> + Send>>
 /// Single-use deterministic actions attached to named protocol checkpoints.
 #[derive(Clone, Default)]
 pub(crate) struct ConditionalHooks {
+    #[cfg(any(test, all(feature = "digest", feature = "test-support")))]
     actions: Arc<Mutex<Vec<(ConditionalPoint, ConditionalHookAction)>>>,
     #[cfg(all(feature = "digest", feature = "test-support"))]
     callbacks: Arc<Mutex<Vec<(ConditionalPoint, HookCallback)>>>,
@@ -100,9 +103,17 @@ impl ConditionalHooks {
     }
 
     pub(crate) fn take(&self, point: ConditionalPoint) -> Option<ConditionalHookAction> {
-        let mut actions = self.actions.lock().expect("conditional hook mutex poisoned");
-        let index = actions.iter().position(|(candidate, _)| *candidate == point)?;
-        Some(actions.remove(index).1)
+        #[cfg(any(test, all(feature = "digest", feature = "test-support")))]
+        {
+            let mut actions = self.actions.lock().expect("conditional hook mutex poisoned");
+            let index = actions.iter().position(|(candidate, _)| *candidate == point)?;
+            Some(actions.remove(index).1)
+        }
+        #[cfg(not(any(test, all(feature = "digest", feature = "test-support"))))]
+        {
+            let _ = point;
+            None
+        }
     }
 
     #[cfg(all(feature = "digest", feature = "test-support"))]
@@ -129,3 +140,6 @@ impl ConditionalHooks {
         Ok(())
     }
 }
+
+#[cfg(not(any(test, all(feature = "digest", feature = "test-support"))))]
+const _: () = assert!(std::mem::size_of::<ConditionalHooks>() == 0);
