@@ -16,6 +16,12 @@ use qubit_local_files::options::LocalSealOptions;
 use qubit_local_files::options::LocalTempDirectoryOptions;
 use qubit_local_files::options::LocalWriteMode;
 use qubit_local_files::options::LocalWriteOptions;
+#[cfg(feature = "digest")]
+use qubit_local_files::options::LocalWritePrecondition;
+#[cfg(feature = "digest")]
+use qubit_local_files::recovery::LocalRecoveryFileRole;
+#[cfg(feature = "digest")]
+use sha2::Sha256;
 
 fn assert_resource_debug_redacted(resource: &impl std::fmt::Debug, expected_type: &str) {
     for output in [format!("{resource:?}"), format!("{resource:#?}")] {
@@ -215,4 +221,51 @@ fn test_nested_retained_stage_debug_redacts_owner_path() {
     assert!(debug.contains("binding_enabled: true"));
     assert!(debug.contains("<redacted>"));
     stage.cleanup().expect("stage should be cleaned by its owner");
+}
+
+#[cfg(feature = "digest")]
+#[test]
+fn test_conditional_writer_and_recovery_debug_redact_paths() {
+    use qubit_io::Output;
+
+    for rooted in [false, true] {
+        let scratch = tempfile::tempdir().expect("fixture should exist");
+        let root = scratch.path().join("customer-secret-root-8f921d");
+        std::fs::create_dir_all(&root).expect("root should exist");
+        let target = root.join("private-leaf-65b3a0");
+        std::fs::write(&target, b"existing").expect("existing target should exist");
+        let mut filesystem = if rooted {
+            LocalFileSystem::rooted(&root)
+        } else {
+            LocalFileSystem::host()
+        }
+        .expect("filesystem should open");
+        filesystem
+            .set_symlink_policy(qubit_local_files::policy::LocalSymlinkPolicy::Reject)
+            .expect("conditional writes should use a non-following policy");
+        let namespace_target = if rooted {
+            Path::new("private-leaf-65b3a0")
+        } else {
+            target.as_path()
+        };
+        let mut writer = filesystem
+            .open_conditional_writer::<Sha256>(
+                namespace_target,
+                LocalWritePrecondition::Absent,
+                &LocalWriteOptions::new(LocalWriteMode::CreateOrReplace),
+            )
+            .expect("Absent writer should be supported");
+        Output::write_fully(&mut writer, b"candidate").expect("candidate should write");
+        assert_resource_debug_redacted(&writer, "LocalConditionalWriter");
+        assert_debug_contains(&writer, "state: Open");
+        assert_debug_contains(&writer, "bytes_written");
+
+        let error = writer.commit().expect_err("existing target should conflict");
+        let recovery = error.candidate().expect("candidate recovery should be retained");
+        assert_eq!(recovery.role(), LocalRecoveryFileRole::CandidateCopy);
+        assert_resource_debug_redacted(recovery, "LocalRecoveryFile");
+        let list = vec![recovery];
+        assert_resource_debug_redacted(&list, "LocalRecoveryFile");
+        assert_debug_contains(&list, "CandidateCopy");
+    }
 }

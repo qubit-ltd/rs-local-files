@@ -61,12 +61,24 @@ use crate::recovery::LocalRecoveryFileRole;
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
 #[must_use]
-#[derive(Debug)]
 pub struct LocalRecoveryFile {
     role: LocalRecoveryFileRole,
     namespace_path: PathBuf,
     diagnostic_path: Option<PathBuf>,
     access: Box<dyn RecoveryAccess>,
+}
+
+impl std::fmt::Debug for LocalRecoveryFile {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LocalRecoveryFile")
+            .field("role", &self.role)
+            .field(
+                "namespace_path",
+                &crate::local_file_system::redacted_path(&self.namespace_path),
+            )
+            .field("has_diagnostic_path", &self.diagnostic_path.is_some())
+            .finish_non_exhaustive()
+    }
 }
 
 impl LocalRecoveryFile {

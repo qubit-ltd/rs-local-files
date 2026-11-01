@@ -100,7 +100,7 @@ pub struct LocalConditionalWriter<D: Digest> {
 impl<D: Digest> std::fmt::Debug for LocalConditionalWriter<D> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("LocalConditionalWriter")
-            .field("path", &self.path)
+            .field("path", &crate::local_file_system::redacted_path(&self.path))
             .field("state", &self.state)
             .field("bytes_written", &self.bytes_written)
             .finish_non_exhaustive()
