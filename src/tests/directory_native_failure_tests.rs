@@ -326,7 +326,7 @@ fn test_private_stage_reopen_late_authority_failure_does_not_remove_stage() {
     let options = LocalTreeValidationOptions::new().with_privacy(LocalPrivacyRequirement::Required);
     for (point, nth, path) in [
         (NativeIoPoint::CloneAuthority, 4, Some(native.join(&name))),
-        (NativeIoPoint::Observation, 1, None),
+        (NativeIoPoint::Observation, 1, Some(native.join(&name))),
     ] {
         let guard = NativeIoFaultGuard::fail_on(point, nth);
         let error = parent

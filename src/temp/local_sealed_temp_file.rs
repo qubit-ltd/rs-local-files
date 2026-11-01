@@ -42,7 +42,14 @@ impl LocalSealedTempFile {
                 super::closed_file_error(),
             )
         })?;
-        crate::observation::query::query_observation(file, LocalObservationRequirement::Required)
+        crate::observation::query::query_observation(file, LocalObservationRequirement::Required).map_err(|error| {
+            let error = if error.path().is_none() {
+                error.with_path(self.path().to_path_buf())
+            } else {
+                error
+            };
+            self.resource.core.contextualize_error(error)
+        })
     }
 
     /// Removes the sealed file and its sandbox.

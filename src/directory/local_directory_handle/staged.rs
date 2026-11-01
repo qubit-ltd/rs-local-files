@@ -73,11 +73,18 @@ impl LocalDirectoryHandle {
         options: &LocalTreeValidationOptions,
     ) -> LocalResult<LocalStagedDirectory> {
         let directory = self.open_directory(relative, &LocalDirectoryOpenOptions::new())?;
-        let observation = directory.observe()?;
+        let observation = directory.observe().map_err(|error| {
+            if error.path().is_none() {
+                error.with_path(self.diagnostic_path().join(relative))
+            } else {
+                error
+            }
+        })?;
         if observation.identity() != Some(expected) {
             return Err(
                 LocalFileError::new(LocalFileErrorKind::RequirementNotMet, LocalFileOperation::Metadata)
-                    .with_path(self.diagnostic_path().join(relative)),
+                    .with_path(self.diagnostic_path().join(relative))
+                    .with_reason("opened stage identity does not match the expected identity"),
             );
         }
         let private = options.privacy() == crate::policy::LocalPrivacyRequirement::Required;
@@ -111,7 +118,9 @@ impl LocalDirectoryHandle {
                     return Err(LocalFileError::new(
                         LocalFileErrorKind::RequirementNotMet,
                         LocalFileOperation::Metadata,
-                    ));
+                    )
+                    .with_path(directory.diagnostic_path().to_path_buf())
+                    .with_reason("stage mode or effective UID does not satisfy the required privacy policy"));
                 }
             }
             #[cfg(windows)]
@@ -137,12 +146,21 @@ impl LocalDirectoryHandle {
                 let access_observation = crate::observation::query::query_observation(
                     &access_file,
                     crate::observation::LocalObservationRequirement::Required,
-                )?;
+                )
+                .map_err(|error| {
+                    if error.path().is_none() {
+                        error.with_path(directory.diagnostic_path().to_path_buf())
+                    } else {
+                        error
+                    }
+                })?;
                 if access_observation.identity() != Some(expected) {
                     return Err(LocalFileError::new(
                         LocalFileErrorKind::ChangedDuringRead,
                         LocalFileOperation::Metadata,
-                    ));
+                    )
+                    .with_path(directory.diagnostic_path().to_path_buf())
+                    .with_reason("opened stage identity changed during privacy verification"));
                 }
                 crate::temp::internal::privacy_windows::verify_current_user_access(&access_file, true, false).map_err(
                     |source| {

@@ -270,6 +270,51 @@ fn test_successful_reopen_cleanup_and_drop_still_clean_up() {
         }
     }
 }
+
+#[cfg(unix)]
+#[test]
+fn test_required_privacy_reopen_reports_mode_mismatch_context() {
+    use std::os::unix::fs::PermissionsExt;
+
+    use qubit_local_files::error::LocalFileOperation;
+    use qubit_local_files::policy::LocalPrivacyRequirement;
+
+    let scratch = tempfile::tempdir().expect("scratch parent");
+    let filesystem = LocalFileSystem::host().expect("filesystem");
+    let parent = filesystem
+        .open_directory_with_options(scratch.path(), &LocalDirectoryOpenOptions::new())
+        .expect("parent authority");
+    let stage = parent
+        .create_staged_directory(&LocalTempDirectoryOptions::new())
+        .expect("stage");
+    let name = Path::new(stage.relative_name()).to_path_buf();
+    let expected = stage.identity().expect("stage identity").clone();
+    let expected_path = scratch.path().join(&name);
+    drop(stage.retain_in_place());
+    fs::set_permissions(&expected_path, fs::Permissions::from_mode(0o755)).expect("set public mode");
+
+    let error = parent
+        .open_staged_directory(
+            &name,
+            &expected,
+            &LocalTreeValidationOptions::new().with_privacy(LocalPrivacyRequirement::Required),
+        )
+        .expect_err("mode mismatch must fail required privacy validation");
+    assert_eq!(error.kind(), LocalFileErrorKind::RequirementNotMet);
+    assert_eq!(error.operation(), LocalFileOperation::Metadata);
+    assert_eq!(error.path(), Some(expected_path.as_path()));
+    let reason = error
+        .reason()
+        .expect("privacy rejection should explain its requirement");
+    assert!(
+        reason.contains("mode"),
+        "reason should identify the mode check: {reason}"
+    );
+    assert!(
+        reason.contains("effective UID"),
+        "reason should identify the owner check: {reason}"
+    );
+}
 // =============================================================================
 //    Copyright (c) 2025 - 2026 Haixing Hu.
 //
