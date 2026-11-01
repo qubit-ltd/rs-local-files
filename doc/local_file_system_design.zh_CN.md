@@ -1572,8 +1572,9 @@ owner 契约。默认选项保留 verifier 无需递归时的快速路径。
 只读清理 owner；失败返回 `LocalTempSealError`，其中仍持有资源。调用方先读取 `cause()` 与
 access state 快照，再通过 `into_resource()` 取回 owner。`Writable` 可让应用考虑有限重试，
 `ReadOnly` 和 `Indeterminate` 不应触发再次写入。这个状态不是权限回滚证明：此前的权限修改可能已生效。
-保守恢复方式是显式 cleanup；若清理失败，结构化错误会继续保留资源供重试。seal 尝试后原 writer
-owner 已被消费，不能继续使用。
+调用 `into_resource()` 后，临时资源由调用方持有。cleanup 失败时，调用方必须同时保留该资源和
+`LocalFileError`；普通清理错误不会重新接管已经取出的 owner。显式重试可参考指南中的
+`PendingSealCleanup`。seal 尝试后原 writer owner 已被消费，不能继续使用。
 
 ## 19. 结构化错误
 
@@ -2243,6 +2244,10 @@ CI workflow 在 Linux、macOS、Windows 上运行当前 crate 的测试。`windo
 `LocalTreePublishError` 的 `cause()`、`mutation_state()` 和 `publication()`，再通过
 `into_parts()` 接管可选 stage 与保留资源。取回的 stage 必须显式清理或调用 `retain_in_place()` 保留。
 此契约不引入 fallible builder，也不改变发布方法签名。
+
+`mutation_state()` 记录尝试过的树内容、访问元数据或命名空间修改，不报告发布结果。因此，修改权限后
+no-replace 安装发生冲突时，mutation 可以是 `Started`，同时
+`LocalTreePublication` 为 `NotPublished`。单独的同步操作不算命名空间变更。
 
 ### 访问观测的获取契约
 

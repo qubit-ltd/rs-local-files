@@ -1324,12 +1324,105 @@ Unix 使用 `with_unix_modes(directory_mode, file_mode)`，Windows 使用
 `Preferred` 在最终同步失败时仍可发布，但 `file_synced()` 为 false；`Required` 会阻止发布并保留 stage。
 访问状态反映已经发生的权限变更。
 
+目录树 mutation state 记录尝试过的树内容、访问元数据或命名空间修改，不代表发布已经完成。修改权限后
+no-replace 冲突时，mutation 可以是 `Started`，publication 同时为 `NotPublished`。单独同步操作不算
+命名空间变更。
+
 macOS 上尚未实现精确 Unix owner-access ACL 验证，因此需要该验证的 owner policy 会返回
 `Unsupported`。单独设置 mode bits 不表示扩展 ACL 已排除其他身份；库不声称在未经验证的 Darwin ACL
 上实现了 `CurrentUserOnly`。
 
 Windows 的访问转换尚无原生运行验证。实现设置 `read_only=false` 时只恢复 DACL，不会清除已有的
 `FILE_ATTRIBUTE_READONLY`；因此恢复当前用户 ACL 不保证一个原先带只读属性的文件可重新写入。
+
+### 恢复只读暂存树
+
+`ReadOnlyCurrentUser` 发布尝试可能先修改 stage 权限，再报告 no-replace 目标名称冲突。只有发布状态为
+`NotPublished` 时才进入此恢复分支：通过保留的 stage handle 恢复权限，然后清理 stage。恢复或清理失败时，
+必须连同 stage 一起保留对应错误。不要按诊断路径 chmod 或删除。Windows 上恢复 DACL 不会清除已有的
+`FILE_ATTRIBUTE_READONLY` 属性。
+
+下面的完整 Linux 示例保持已有目标不变，并通过其 retained authority 清理 stage。
+
+```rust,no_run
+// BEGIN executable readonly stage recovery example
+use std::ffi::OsStr;
+use std::fs;
+use std::path::Path;
+use std::path::PathBuf;
+
+use qubit_local_files::LocalFileSystem;
+use qubit_local_files::directory::LocalStagedDirectory;
+use qubit_local_files::directory::LocalTreeAccessError;
+use qubit_local_files::directory::LocalTreeCleanupError;
+use qubit_local_files::options::LocalDirectoryOpenOptions;
+use qubit_local_files::options::LocalTempDirectoryOptions;
+use qubit_local_files::options::LocalTreePublishOptions;
+use qubit_local_files::outcome::LocalTreePublication;
+use qubit_local_files::policy::LocalTreeFinalAccess;
+
+#[derive(Debug)]
+enum PendingReadOnlyCleanup {
+    Restore {
+        cause: LocalTreeAccessError,
+        stage: LocalStagedDirectory,
+    },
+    Cleanup(LocalTreeCleanupError),
+}
+
+impl std::fmt::Display for PendingReadOnlyCleanup {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("read-only staged-tree recovery failed")
+    }
+}
+
+impl std::error::Error for PendingReadOnlyCleanup {}
+
+fn restore_readonly_stage(
+    mut stage: LocalStagedDirectory,
+) -> Result<(), PendingReadOnlyCleanup> {
+    if let Err(cause) = stage.apply_access_policy(LocalTreeFinalAccess::CurrentUserOnly) {
+        return Err(PendingReadOnlyCleanup::Restore { cause, stage });
+    }
+    stage.cleanup().map_err(PendingReadOnlyCleanup::Cleanup)
+}
+
+if cfg!(target_os = "linux") {
+    let fixture = tempfile::tempdir()?;
+    let filesystem = LocalFileSystem::host()?;
+    let parent = filesystem.open_directory_with_options(
+        fixture.path(),
+        &LocalDirectoryOpenOptions::new(),
+    )?;
+    let mut stage = parent.create_staged_directory(&LocalTempDirectoryOptions::new())?;
+    stage.write_file_new(Path::new("payload"), &mut &b"payload"[..], 32)?;
+    let relative = PathBuf::from(stage.relative_name());
+    let native_stage = fixture.path().join(&relative);
+    let destination = fixture.path().join("backup-current");
+    fs::write(&destination, b"existing backup")?;
+
+    let failure = stage
+        .publish_new(
+            &parent,
+            OsStr::new("backup-current"),
+            &LocalTreePublishOptions::new().with_access(LocalTreeFinalAccess::ReadOnlyCurrentUser),
+        )
+        .expect_err("no-replace publication must report the occupied name");
+    assert_eq!(LocalTreePublication::NotPublished, failure.publication());
+    let stage = failure.into_stage().expect("not-published failure retains stage");
+    if let Err(pending) = restore_readonly_stage(stage) {
+        return Err(Box::new(pending) as Box<dyn std::error::Error>);
+    }
+    assert_eq!(fs::read(&destination)?, b"existing backup");
+    assert!(!native_stage.exists());
+    fs::write(std::env::var("QUBIT_LOCAL_FILES_DOCUMENTATION_CONSUMER_SENTINEL")?, b"readonly stage recovery completed")?;
+}
+# Ok::<(), Box<dyn std::error::Error>>(())
+// END executable readonly stage recovery example
+```
+
+如果恢复权限失败，必须连同 stage 和 cause 一起保留 `PendingReadOnlyCleanup`。发布状态不是
+`NotPublished` 时，不进入该清理分支。
 
 Windows Rooted 条件 `Content` 发布仍为 `Unsupported`。Windows 尚未证明所需的相对目录发布和恢复协议，
 不能把 Unix 支持矩阵当成 Windows 原生证据。

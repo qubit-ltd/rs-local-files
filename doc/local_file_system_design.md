@@ -1415,12 +1415,14 @@ owner contract. Default options keep the verifier's no-recursion fast path.
 returns `LocalSealedTempFile`, a read-only cleanup owner. Failure returns
 `LocalTempSealError`, which retains the resource. Callers inspect `cause()` and
 the access-state snapshot before consuming the error with `into_resource()`.
+After `into_resource()`, the caller owns the temporary resource. If cleanup
+fails, retain that resource together with the `LocalFileError`; the ordinary
+cleanup error does not reacquire the extracted owner. See the guide's
+`PendingSealCleanup` example for explicit retry ownership.
 `Writable` may permit a caller-selected bounded retry; `ReadOnly` and
 `Indeterminate` do not justify another write attempt. An access-state result is
 not permission rollback: earlier permission changes may have taken effect.
-The conservative recovery path is explicit cleanup. If it fails, the structured
-cleanup error retains the resource for retry. The consumed writer owner cannot
-be used after the seal attempt.
+The consumed writer owner cannot be used after the seal attempt.
 
 ## 19. Structured Errors
 
@@ -2047,6 +2049,12 @@ and `publication()` before `into_parts()` transfers the optional stage and
 retained resources. The caller must explicitly clean the returned stage or
 retain it in place. This contract does not add a fallible builder or change the
 publication signature.
+
+`mutation_state()` records attempted changes to tree content, access metadata,
+or namespace; it does not report publication. Permission changes followed by a
+no-replace installation conflict can therefore produce `Started` together
+with `LocalTreePublication::NotPublished`. Synchronization alone is not a
+namespace mutation.
 
 ### Access observation retrieval contract
 

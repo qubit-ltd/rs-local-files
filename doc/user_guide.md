@@ -1658,6 +1658,11 @@ reflects policy changes already applied.
 This does not mean that operating-system ACL inheritance or all effective
 access behavior is identical across platforms.
 
+Tree mutation state records attempts to change tree content, access metadata,
+or namespace. It does not imply that publication completed: a permission
+change followed by a no-replace conflict can be `Started` with publication
+`NotPublished`. Synchronization alone is not a namespace mutation.
+
 On macOS, exact Unix owner-access verification is not implemented, so an owner
 policy that requires it returns `Unsupported`. Mode bits alone are not a claim
 that extended ACLs exclude other identities; the library does not claim
@@ -1667,6 +1672,99 @@ Windows access transitions have not been verified on a native runner. Setting
 `read_only=false` restores the DACL but does not clear a pre-existing
 `FILE_ATTRIBUTE_READONLY`; restoring the current-user ACL therefore does not
 guarantee that a file which already had that attribute becomes writable.
+
+### Recover a read-only staged tree
+
+A `ReadOnlyCurrentUser` publication attempt can change stage access before a
+no-replace name conflict is reported. Only when the publication state is
+`NotPublished` should this recovery branch restore access through the retained
+stage handle and then clean up. Keep the stage together with any restoration or
+cleanup error. Do not chmod or remove a diagnostic path. On Windows, DACL
+restoration does not clear an existing `FILE_ATTRIBUTE_READONLY` attribute.
+
+The complete Linux example below keeps an existing destination unchanged and
+cleans the retained stage through its authority.
+
+```rust,no_run
+// BEGIN executable readonly stage recovery example
+use std::ffi::OsStr;
+use std::fs;
+use std::path::Path;
+use std::path::PathBuf;
+
+use qubit_local_files::LocalFileSystem;
+use qubit_local_files::directory::LocalStagedDirectory;
+use qubit_local_files::directory::LocalTreeAccessError;
+use qubit_local_files::directory::LocalTreeCleanupError;
+use qubit_local_files::options::LocalDirectoryOpenOptions;
+use qubit_local_files::options::LocalTempDirectoryOptions;
+use qubit_local_files::options::LocalTreePublishOptions;
+use qubit_local_files::outcome::LocalTreePublication;
+use qubit_local_files::policy::LocalTreeFinalAccess;
+
+#[derive(Debug)]
+enum PendingReadOnlyCleanup {
+    Restore {
+        cause: LocalTreeAccessError,
+        stage: LocalStagedDirectory,
+    },
+    Cleanup(LocalTreeCleanupError),
+}
+
+impl std::fmt::Display for PendingReadOnlyCleanup {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("read-only staged-tree recovery failed")
+    }
+}
+
+impl std::error::Error for PendingReadOnlyCleanup {}
+
+fn restore_readonly_stage(
+    mut stage: LocalStagedDirectory,
+) -> Result<(), PendingReadOnlyCleanup> {
+    if let Err(cause) = stage.apply_access_policy(LocalTreeFinalAccess::CurrentUserOnly) {
+        return Err(PendingReadOnlyCleanup::Restore { cause, stage });
+    }
+    stage.cleanup().map_err(PendingReadOnlyCleanup::Cleanup)
+}
+
+if cfg!(target_os = "linux") {
+    let fixture = tempfile::tempdir()?;
+    let filesystem = LocalFileSystem::host()?;
+    let parent = filesystem.open_directory_with_options(
+        fixture.path(),
+        &LocalDirectoryOpenOptions::new(),
+    )?;
+    let mut stage = parent.create_staged_directory(&LocalTempDirectoryOptions::new())?;
+    stage.write_file_new(Path::new("payload"), &mut &b"payload"[..], 32)?;
+    let relative = PathBuf::from(stage.relative_name());
+    let native_stage = fixture.path().join(&relative);
+    let destination = fixture.path().join("backup-current");
+    fs::write(&destination, b"existing backup")?;
+
+    let failure = stage
+        .publish_new(
+            &parent,
+            OsStr::new("backup-current"),
+            &LocalTreePublishOptions::new().with_access(LocalTreeFinalAccess::ReadOnlyCurrentUser),
+        )
+        .expect_err("no-replace publication must report the occupied name");
+    assert_eq!(LocalTreePublication::NotPublished, failure.publication());
+    let stage = failure.into_stage().expect("not-published failure retains stage");
+    if let Err(pending) = restore_readonly_stage(stage) {
+        return Err(Box::new(pending) as Box<dyn std::error::Error>);
+    }
+    assert_eq!(fs::read(&destination)?, b"existing backup");
+    assert!(!native_stage.exists());
+    fs::write(std::env::var("QUBIT_LOCAL_FILES_DOCUMENTATION_CONSUMER_SENTINEL")?, b"readonly stage recovery completed")?;
+}
+# Ok::<(), Box<dyn std::error::Error>>(())
+// END executable readonly stage recovery example
+```
+
+If restoration fails, retain the returned `PendingReadOnlyCleanup` with its
+stage and cause. A publication state other than `NotPublished` does not enter
+this cleanup branch.
 
 ## Errors and Diagnostics
 
