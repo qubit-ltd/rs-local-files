@@ -73,7 +73,6 @@ const MAX_OWNER_POLICY_ENTRY_HANDLES: usize = 256;
 /// # Ok(())
 /// # }
 /// ```
-#[derive(Debug)]
 pub struct LocalStagedDirectory {
     /// Retained cleanup owner; `None` after successful publication or cleanup.
     pub(super) owner: Option<LocalTreeRetainedResource>,
@@ -87,6 +86,23 @@ pub struct LocalStagedDirectory {
     private: bool,
     /// Owner policy retained for validation and publication, if configured.
     owner_access_policy: Option<crate::policy::LocalOwnerAccessPolicy>,
+}
+
+impl std::fmt::Debug for LocalStagedDirectory {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("LocalStagedDirectory")
+            .field("owner_present", &self.owner.is_some())
+            .field("directory_present", &self.directory.is_some())
+            .field(
+                "relative_name",
+                &crate::local_file_system::redacted_path(&self.relative_name),
+            )
+            .field("identity_present", &self.identity.is_some())
+            .field("private", &self.private)
+            .field("owner_access_policy_present", &self.owner_access_policy.is_some())
+            .finish_non_exhaustive()
+    }
 }
 
 #[path = "local_staged_directory/access.rs"]

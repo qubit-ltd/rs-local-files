@@ -61,7 +61,6 @@ use crate::local::DirectoryIdentity;
 /// # Ok(())
 /// # }
 /// ```
-#[derive(Debug)]
 pub struct LocalDirectoryWalker {
     /// Namespace-absolute traversal root exposed publicly.
     root: PathBuf,
@@ -89,6 +88,22 @@ pub struct LocalDirectoryWalker {
     seen_name_budget: Option<ResourceBudget<LocalResourceKind, usize>>,
     /// Monotonic deadline fixed when the walker is created.
     deadline: Option<Instant>,
+}
+
+impl std::fmt::Debug for LocalDirectoryWalker {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let active_frames = self
+            .rooted
+            .as_ref()
+            .map_or(self.stack.len(), |rooted| rooted.stack.len());
+        formatter
+            .debug_struct("LocalDirectoryWalker")
+            .field("scope", &if self.rooted.is_some() { "Rooted" } else { "Host" })
+            .field("active_frames", &active_frames)
+            .field("terminated", &self.terminated)
+            .field("symlink_policy", &self.symlink_policy)
+            .finish_non_exhaustive()
+    }
 }
 
 impl LocalDirectoryWalker {

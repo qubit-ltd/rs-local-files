@@ -217,10 +217,75 @@ fn test_nested_retained_stage_debug_redacts_owner_path() {
     let debug = format!("{stage:?}");
     assert_redacted(&debug);
     assert!(debug.contains("LocalStagedDirectory"));
-    assert!(debug.contains("LocalTreeRetainedResource"));
-    assert!(debug.contains("binding_enabled: true"));
+    assert!(debug.contains("owner_present: true"));
+    assert!(debug.contains("directory_present: true"));
     assert!(debug.contains("<redacted>"));
     stage.cleanup().expect("stage should be cleaned by its owner");
+}
+
+#[test]
+fn test_walker_debug_redacts_paths_before_and_after_iteration() {
+    for rooted in [false, true] {
+        let scratch = tempfile::tempdir().expect("fixture should exist");
+        let root = scratch.path().join("customer-secret-root-8f921d");
+        std::fs::create_dir_all(&root).expect("root should exist");
+        std::fs::write(root.join("private-leaf-65b3a0"), b"leaf").expect("leaf should exist");
+
+        let filesystem = if rooted {
+            LocalFileSystem::rooted(&root)
+        } else {
+            LocalFileSystem::host()
+        }
+        .expect("filesystem should open");
+        let path = if rooted { Path::new("/") } else { root.as_path() };
+        let mut walker = filesystem.list(path).expect("walker should open");
+
+        for output in [format!("{walker:?}"), format!("{walker:#?}")] {
+            assert!(!output.contains("customer-secret-root-8f921d"), "{output}");
+            assert!(!output.contains("private-leaf-65b3a0"), "{output}");
+            assert!(output.contains("LocalDirectoryWalker"), "{output}");
+        }
+
+        let _entry = walker
+            .next()
+            .expect("walker should produce an entry")
+            .expect("entry should be readable");
+        for output in [format!("{walker:?}"), format!("{walker:#?}")] {
+            assert!(!output.contains("customer-secret-root-8f921d"), "{output}");
+            assert!(!output.contains("private-leaf-65b3a0"), "{output}");
+            assert!(output.contains("LocalDirectoryWalker"), "{output}");
+        }
+    }
+}
+
+#[test]
+fn test_staged_directory_debug_redacts_sensitive_name_prefix_and_suffix() {
+    let scratch = tempfile::tempdir().expect("fixture should exist");
+    let root = scratch.path().join("customer-secret-root-8f921d");
+    std::fs::create_dir_all(&root).expect("root should exist");
+    let filesystem = LocalFileSystem::host().expect("filesystem should open");
+    let parent = filesystem
+        .open_directory_with_options(&root, &LocalDirectoryOpenOptions::new())
+        .expect("parent directory should open");
+    let stage = parent
+        .create_staged_directory(
+            &LocalTempDirectoryOptions::new()
+                .with_prefix("private-leaf-65b3a0")
+                .with_suffix("private-suffix-a921de"),
+        )
+        .expect("stage should open");
+
+    for output in [format!("{stage:?}"), format!("{stage:#?}")] {
+        assert!(!output.contains("customer-secret-root-8f921d"), "{output}");
+        assert!(!output.contains("private-leaf-65b3a0"), "{output}");
+        assert!(!output.contains("private-suffix-a921de"), "{output}");
+        assert!(output.contains("LocalStagedDirectory"), "{output}");
+        assert!(output.contains("owner_present: true"), "{output}");
+        assert!(output.contains("directory_present: true"), "{output}");
+        assert!(output.contains("relative_name"), "{output}");
+        assert!(output.contains("<redacted>"), "{output}");
+    }
+    stage.cleanup().expect("stage should clean up");
 }
 
 #[cfg(feature = "digest")]
