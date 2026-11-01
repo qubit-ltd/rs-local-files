@@ -29,6 +29,7 @@ use crate::LocalCopyTypeConflictPolicy;
 use crate::LocalDeleteOptions;
 use crate::LocalSymlinkPolicy;
 use crate::error::LocalFileEffectState;
+use crate::local::CopyBudget;
 use crate::local::CopyDestinationAction;
 use crate::local::decide_copy_destination;
 #[cfg(windows)]
@@ -46,6 +47,7 @@ use crate::local::internal::test_support;
 /// * `type_conflict` - Policy for an existing non-directory destination.
 /// * `destination_removed` - Set after this call removes a conflicting entry,
 ///   including when subsequent directory creation fails.
+/// * `budget` - The shared copy deadline and resource budget.
 ///
 /// # Returns
 ///
@@ -56,18 +58,21 @@ use crate::local::internal::test_support;
 ///
 /// # Errors
 ///
-/// Returns an I/O error when inspection, permitted removal, or creation fails.
+/// Returns an I/O error when the deadline expires or inspection, permitted
+/// removal, or creation fails.
 pub(super) fn ensure_copy_destination_dir(
     dst: &Path,
     conflict: LocalCopyConflictPolicy,
     type_conflict: LocalCopyTypeConflictPolicy,
     destination_removed: &mut bool,
+    budget: &CopyBudget,
 ) -> Result<(CopyDestinationAction, bool)> {
-    let action = prepare_existing_directory_destination(dst, conflict, type_conflict, destination_removed)?;
+    budget.check_deadline()?;
+    let action = prepare_existing_directory_destination(dst, conflict, type_conflict, destination_removed, budget)?;
     if !matches!(action, CopyDestinationAction::Create | CopyDestinationAction::Replace) {
         return Ok((action, false));
     }
-    create_copy_destination_dir(dst).map(|created| {
+    create_copy_destination_dir(dst, budget).map(|created| {
         let action = if !created && action == CopyDestinationAction::Create {
             CopyDestinationAction::Merge
         } else {
@@ -209,6 +214,7 @@ pub(super) fn remove_destination_directory_if_unchanged(
 /// * `conflict` - Same-kind conflict policy passed to the shared decision.
 /// * `type_conflict` - Policy for an existing non-directory.
 /// * `destination_removed` - Set only after a conflicting entry was removed.
+/// * `budget` - The shared copy deadline and resource budget.
 ///
 /// # Returns
 ///
@@ -219,16 +225,19 @@ pub(super) fn remove_destination_directory_if_unchanged(
 /// # Errors
 ///
 /// Returns an I/O error when inspection, policy enforcement, or safe removal
-/// fails.
+/// fails or the deadline expires.
 fn prepare_existing_directory_destination(
     dst: &Path,
     conflict: LocalCopyConflictPolicy,
     type_conflict: LocalCopyTypeConflictPolicy,
     destination_removed: &mut bool,
+    budget: &CopyBudget,
 ) -> Result<CopyDestinationAction> {
     let Some(metadata) = destination_metadata_if_exists(dst)? else {
+        budget.check_deadline()?;
         return Ok(CopyDestinationAction::Create);
     };
+    budget.check_deadline()?;
     let action = decide_copy_destination(true, Some(is_real_directory(&metadata)), conflict, type_conflict)
         .ok_or_else(|| {
             Error::new(
@@ -236,8 +245,14 @@ fn prepare_existing_directory_destination(
                 format!("destination type conflicts with source directory: {}", dst.display(),),
             )
         })?;
+    #[cfg(test)]
     if action == CopyDestinationAction::Replace {
-        *destination_removed = remove_destination_non_directory_if_unchanged(dst)?;
+        crate::tests::rooted::support::resolution_observation_tests::reach_deadline_boundary(
+            crate::tests::rooted::support::resolution_observation_tests::DeadlineBoundary::HostCopyDirectoryDestinationInspected,
+        );
+    }
+    if action == CopyDestinationAction::Replace {
+        *destination_removed = remove_destination_non_directory_if_unchanged(dst, budget)?;
     }
     Ok(action)
 }
@@ -255,9 +270,14 @@ fn prepare_existing_directory_destination(
 ///
 /// # Errors
 ///
-/// Returns an I/O error when creation fails or a racing entry is not a real
-/// directory.
-fn create_copy_destination_dir(dst: &Path) -> Result<bool> {
+/// Returns an I/O error when the deadline expires, creation fails, or a racing
+/// entry is not a real directory.
+fn create_copy_destination_dir(dst: &Path, budget: &CopyBudget) -> Result<bool> {
+    #[cfg(test)]
+    crate::tests::rooted::support::resolution_observation_tests::reach_deadline_boundary(
+        crate::tests::rooted::support::resolution_observation_tests::DeadlineBoundary::HostCopyDirectoryBeforeCreate,
+    );
+    budget.check_deadline()?;
     #[cfg(feature = "test-support")]
     let race_file = test_support::is_enabled("copy-directory-race-nondirectory");
     #[cfg(feature = "test-support")]
@@ -273,6 +293,7 @@ fn create_copy_destination_dir(dst: &Path) -> Result<bool> {
     } else if race_directory {
         fs::create_dir(dst)?;
     }
+    budget.check_deadline()?;
     let result = create_private_dir(dst);
     reconcile_directory_creation(dst, result, |path| {
         #[cfg(feature = "test-support")]
@@ -297,8 +318,10 @@ fn create_copy_destination_dir(dst: &Path) -> Result<bool> {
 ///
 /// # Errors
 ///
-/// Returns the I/O error reported while inspecting or removing the entry.
-fn remove_destination_non_directory_if_unchanged(dst: &Path) -> Result<bool> {
+/// Returns the I/O error reported when the deadline expires or while inspecting
+/// or removing the entry.
+fn remove_destination_non_directory_if_unchanged(dst: &Path, budget: &CopyBudget) -> Result<bool> {
+    budget.check_deadline()?;
     let result = inspect_destination_metadata(dst);
     #[cfg(feature = "test-support")]
     let result = if test_support::is_enabled("copy-removal-race-not-found") {
@@ -308,7 +331,15 @@ fn remove_destination_non_directory_if_unchanged(dst: &Path) -> Result<bool> {
     } else {
         result
     };
-    removable_non_directory_metadata(result)?.map_or(Ok(false), |metadata| {
+    let metadata = removable_non_directory_metadata(result)?;
+    #[cfg(test)]
+    if metadata.is_some() {
+        crate::tests::rooted::support::resolution_observation_tests::reach_deadline_boundary(
+            crate::tests::rooted::support::resolution_observation_tests::DeadlineBoundary::HostCopyDirectoryDestinationReinspected,
+        );
+    }
+    budget.check_deadline()?;
+    metadata.map_or(Ok(false), |metadata| {
         #[cfg(windows)]
         if metadata.file_type().is_symlink_dir() {
             remove_directory_symlink(dst)?;
@@ -347,6 +378,7 @@ mod tests {
     use super::remove_destination_directory_if_unchanged;
     use crate::LocalCopyConflictPolicy;
     use crate::LocalCopyTypeConflictPolicy;
+    use crate::local::CopyBudget;
     use crate::local::CopyDestinationAction;
 
     #[test]
@@ -361,6 +393,7 @@ mod tests {
                 LocalCopyConflictPolicy::Fail,
                 LocalCopyTypeConflictPolicy::Fail,
                 &mut destination_removed,
+                &CopyBudget::new(crate::LocalCopyDirOptions::new()),
             )
             .expect("missing destination should be prepared"),
             CopyDestinationAction::Create

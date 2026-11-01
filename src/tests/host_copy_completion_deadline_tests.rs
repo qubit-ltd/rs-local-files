@@ -19,6 +19,117 @@ use crate::local::copy_dir_all_with_paths;
 use crate::tests::rooted::support::resolution_observation_tests as observations;
 use crate::tests::rooted::support::resolution_observation_tests::DeadlineBoundary;
 
+fn host_copy_directory_deadline_fixture(
+    with_conflicting_file: bool,
+) -> (tempfile::TempDir, std::path::PathBuf, std::path::PathBuf) {
+    let fixture = tempfile::tempdir().expect("fixture should exist");
+    let source = fixture.path().join("source");
+    let target = fixture.path().join("target");
+    fs::create_dir(&source).unwrap();
+    fs::create_dir(&target).unwrap();
+    fs::create_dir(source.join("child")).unwrap();
+    if with_conflicting_file {
+        fs::write(target.join("child"), b"old").unwrap();
+    }
+    (fixture, source, target)
+}
+
+fn copy_directory_with_deadline(source: &std::path::Path, target: &std::path::Path) -> crate::LocalCopyFailure {
+    LocalFileSystem::host()
+        .unwrap()
+        .copy_with_options(
+            source,
+            target,
+            &LocalCopyOptions::new()
+                .with_type_conflict(LocalCopyTypeConflictPolicy::Replace)
+                .with_deadline(Duration::from_secs(60)),
+        )
+        .expect_err("expired directory preparation must fail")
+}
+
+#[test]
+fn test_host_copy_directory_deadline_after_source_inspection_preserves_target() {
+    let (_fixture, source, target) = host_copy_directory_deadline_fixture(true);
+    let _clock = observations::DeadlineClockGuard::expire_at(DeadlineBoundary::HostCopyChildDirectorySourceInspected);
+
+    let failure = copy_directory_with_deadline(&source, &target);
+
+    assert_eq!(std::io::ErrorKind::TimedOut, failure.error().io_error_kind());
+    assert_eq!(crate::LocalCopyFailureState::Unchanged, failure.state());
+    assert_eq!(Some(source.join("child").as_path()), failure.failed_source_path());
+    assert_eq!(Some(target.join("child").as_path()), failure.failed_target_path());
+    assert_eq!(b"old", fs::read(target.join("child")).unwrap().as_slice());
+    assert_eq!(0, failure.partial_stats().files());
+    assert_eq!(0, failure.partial_stats().directories());
+}
+
+#[test]
+fn test_host_copy_directory_deadline_after_destination_inspection_preserves_target() {
+    let (_fixture, source, target) = host_copy_directory_deadline_fixture(true);
+    let _clock = observations::DeadlineClockGuard::expire_at(DeadlineBoundary::HostCopyDirectoryDestinationInspected);
+
+    let failure = copy_directory_with_deadline(&source, &target);
+
+    assert_eq!(std::io::ErrorKind::TimedOut, failure.error().io_error_kind());
+    assert_eq!(crate::LocalCopyFailureState::Unchanged, failure.state());
+    assert_eq!(b"old", fs::read(target.join("child")).unwrap().as_slice());
+}
+
+#[test]
+fn test_host_copy_directory_deadline_after_destination_reinspection_preserves_target() {
+    let (_fixture, source, target) = host_copy_directory_deadline_fixture(true);
+    let _clock = observations::DeadlineClockGuard::expire_at(DeadlineBoundary::HostCopyDirectoryDestinationReinspected);
+
+    let failure = copy_directory_with_deadline(&source, &target);
+
+    assert_eq!(std::io::ErrorKind::TimedOut, failure.error().io_error_kind());
+    assert_eq!(crate::LocalCopyFailureState::Unchanged, failure.state());
+    assert_eq!(b"old", fs::read(target.join("child")).unwrap().as_slice());
+}
+
+#[test]
+fn test_host_copy_directory_deadline_before_create_after_removal_is_partial() {
+    let (_fixture, source, target) = host_copy_directory_deadline_fixture(true);
+    let _clock = observations::DeadlineClockGuard::expire_at(DeadlineBoundary::HostCopyDirectoryBeforeCreate);
+
+    let failure = copy_directory_with_deadline(&source, &target);
+
+    assert_eq!(std::io::ErrorKind::TimedOut, failure.error().io_error_kind());
+    assert_eq!(crate::LocalCopyFailureState::PartiallyPublished, failure.state());
+    assert_eq!(Some(source.join("child").as_path()), failure.failed_source_path());
+    assert_eq!(Some(target.join("child").as_path()), failure.failed_target_path());
+    assert!(!target.join("child").exists());
+    assert_eq!(0, failure.partial_stats().files());
+}
+
+#[test]
+fn test_host_copy_directory_deadline_before_create_without_prior_mutation_is_unchanged() {
+    let (_fixture, source, target) = host_copy_directory_deadline_fixture(false);
+    let _clock = observations::DeadlineClockGuard::expire_at(DeadlineBoundary::HostCopyDirectoryBeforeCreate);
+
+    let failure = copy_directory_with_deadline(&source, &target);
+
+    assert_eq!(std::io::ErrorKind::TimedOut, failure.error().io_error_kind());
+    assert_eq!(crate::LocalCopyFailureState::Unchanged, failure.state());
+    assert!(!target.join("child").exists());
+}
+
+#[test]
+fn test_host_copy_directory_without_deadline_still_replaces_conflicting_file() {
+    let (_fixture, source, target) = host_copy_directory_deadline_fixture(true);
+
+    let _outcome = LocalFileSystem::host()
+        .unwrap()
+        .copy_with_options(
+            &source,
+            &target,
+            &LocalCopyOptions::new().with_type_conflict(LocalCopyTypeConflictPolicy::Replace),
+        )
+        .expect("copy without a deadline should replace the conflicting file");
+
+    assert!(target.join("child").is_dir());
+}
+
 #[test]
 fn test_host_copy_deadline_after_staging_preserves_existing_target() {
     let fixture = tempfile::tempdir().expect("fixture should exist");

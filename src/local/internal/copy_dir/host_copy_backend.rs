@@ -301,6 +301,12 @@ fn enter_copy_directory(
         dst,
         stats,
     )?;
+    #[cfg(test)]
+    if depth > 0 {
+        crate::tests::rooted::support::resolution_observation_tests::reach_deadline_boundary(
+            crate::tests::rooted::support::resolution_observation_tests::DeadlineBoundary::HostCopyChildDirectorySourceInspected,
+        );
+    }
     if active_sources.contains(&source_identity) {
         return Err(copy_dir_error(
             LocalCopyDirStage::InspectSource,
@@ -319,6 +325,7 @@ fn enter_copy_directory(
         options.conflict_policy(),
         options.type_conflict_policy(),
         &mut destination_removed,
+        budget,
     )
     .map_err(|source| {
         let error = copy_dir_error(LocalCopyDirStage::PrepareDestination, src, dst, stats, source);
