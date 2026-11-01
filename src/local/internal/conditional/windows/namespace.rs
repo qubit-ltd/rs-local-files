@@ -280,20 +280,26 @@ impl Namespace {
         let parent = open_host_directory_no_reparse(container)?;
         let file = open_conditional_entry_at(&parent, &name, ENTRY_ACCESS, FILE_OPEN, FILE_NON_DIRECTORY_FILE)?;
         let identity = file_identity(&file)?;
+        let diagnostic_path = self
+            .recovery_parents
+            .borrow()
+            .iter()
+            .find(|(known_container, _)| known_container == container)
+            .map(|(known_container, _)| known_container.join(&name));
         self.recovery_parents
             .borrow_mut()
             .push((container.to_path_buf(), parent.try_clone()?));
         let access = EntryAccess {
             parent,
             name: name.clone(),
-            diagnostic_path: self.diagnostic_path.clone(),
+            diagnostic_path: diagnostic_path.clone(),
             identity,
             _retained: None,
         };
         Ok(ConditionalEntry::new(
             role,
             backup_path.to_path_buf(),
-            self.diagnostic_path.clone(),
+            diagnostic_path,
             Box::new(access),
         ))
     }
@@ -306,17 +312,21 @@ impl Namespace {
     ) -> io::Result<ConditionalEntry> {
         let identity = file_identity(file)?;
         verify_regular_no_reparse(file)?;
+        let diagnostic_path = self
+            .diagnostic_path
+            .as_deref()
+            .and_then(|path| path.parent().map(|parent| parent.join(&name)));
         let access = EntryAccess {
             parent: self.parent.try_clone()?,
             name: name.clone(),
-            diagnostic_path: self.diagnostic_path.clone(),
+            diagnostic_path: diagnostic_path.clone(),
             identity,
             _retained: Some(file.try_clone()?),
         };
         Ok(ConditionalEntry::new(
             role,
             self.child_path(&name),
-            self.diagnostic_path.clone(),
+            diagnostic_path,
             Box::new(access),
         ))
     }
@@ -368,17 +378,21 @@ impl Namespace {
         let file = self.open_entry(&name)?;
         let identity = file_identity(&file)?;
         verify_regular_no_reparse(&file)?;
+        let diagnostic_path = self
+            .diagnostic_path
+            .as_deref()
+            .and_then(|path| path.parent().map(|parent| parent.join(&name)));
         let access = EntryAccess {
             parent: self.parent.try_clone()?,
             name: name.clone(),
-            diagnostic_path: self.diagnostic_path.clone(),
+            diagnostic_path: diagnostic_path.clone(),
             identity,
             _retained: None,
         };
         Ok(ConditionalEntry::new(
             role,
             self.child_path(&name),
-            self.diagnostic_path.clone(),
+            diagnostic_path,
             Box::new(access),
         ))
     }

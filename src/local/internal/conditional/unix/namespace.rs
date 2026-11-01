@@ -132,18 +132,18 @@ impl Namespace {
         #[cfg(test)]
         super::test_support::fail_if_requested(super::test_support::FailurePoint::EntryParentClone)?;
         let parent = self.parent.try_clone()?;
-        let access = EntryAccess::new(parent, name.clone(), device, inode, self.diagnostic_path.clone());
+        let diagnostic_path = self
+            .diagnostic_path
+            .as_deref()
+            .and_then(Path::parent)
+            .map(|parent| parent.join(std::ffi::OsStr::from_bytes(name.as_bytes())));
+        let access = EntryAccess::new(parent, name.clone(), device, inode, diagnostic_path.clone());
         let display = self
             .namespace_path
             .parent()
             .unwrap_or(Path::new(""))
             .join(std::ffi::OsStr::from_bytes(name.as_bytes()));
-        Ok(ConditionalEntry::new(
-            role,
-            display,
-            self.diagnostic_path.clone(),
-            Box::new(access),
-        ))
+        Ok(ConditionalEntry::new(role, display, diagnostic_path, Box::new(access)))
     }
 
     pub(super) fn open_name(&self, name: &CString) -> io::Result<File> {

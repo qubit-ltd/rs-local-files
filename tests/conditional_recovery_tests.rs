@@ -217,6 +217,7 @@ fn windows_cleanup_failed_file_remains_readable() {
             .iter()
             .any(|error| error.path() == Some(retained.namespace_path()))
     );
+    assert_eq!(retained.diagnostic_path(), Some(retained.namespace_path()));
     assert_eq!(conditional::read_recovery(retained), b"A");
 }
 
@@ -398,10 +399,72 @@ fn rollback_exchange_displaces_competitor_and_retains_each_resource_once() {
     assert_eq!(conditional::read_recovery(candidate), b"B");
     assert_eq!(displaced.namespace_path(), path);
     assert_eq!(displaced.diagnostic_path(), Some(path.as_path()));
-    assert_eq!(candidate.diagnostic_path(), Some(path.as_path()));
+    let candidate_diagnostic = candidate.diagnostic_path().expect("candidate diagnostic coordinate");
+    assert_ne!(candidate_diagnostic, path);
+    assert_eq!(candidate_diagnostic.file_name(), candidate.namespace_path().file_name());
+    assert_eq!(candidate_diagnostic.parent(), candidate.namespace_path().parent());
     assert_ne!(candidate.namespace_path(), displaced.namespace_path());
     assert_ne!(candidate.namespace_path(), rollback_displaced.namespace_path());
     assert_ne!(displaced.namespace_path(), rollback_displaced.namespace_path());
+}
+
+#[cfg(unix)]
+#[test]
+fn rooted_recovery_candidate_diagnostic_tracks_its_native_entry() {
+    use std::path::Path;
+
+    use qubit_local_files::recovery::LocalRecoveryFileRole;
+
+    let directory = support::conditional_temp_directory::tempdir().unwrap();
+    let native_target = directory.path().join("target");
+    std::fs::write(&native_target, b"A").unwrap();
+    let root = directory.path().to_path_buf();
+    let target_for_mutation = native_target.clone();
+    let competitor = native_target.clone();
+    let mut rooted = LocalFileSystem::rooted(directory.path()).unwrap();
+    rooted
+        .set_symlink_policy(qubit_local_files::policy::LocalSymlinkPolicy::Reject)
+        .unwrap();
+    let filesystem = rooted
+        .with_conditional_test_hooks(TestConditionalHooks::once(
+            TestConditionalPoint::BeforeVerifyDisplaced,
+            move || {
+                for entry in std::fs::read_dir(root)? {
+                    let entry = entry?;
+                    if entry.path() != target_for_mutation && std::fs::read(entry.path()).ok().as_deref() == Some(b"A")
+                    {
+                        std::fs::write(entry.path(), b"C")?;
+                        return Ok(());
+                    }
+                }
+                Err(std::io::Error::new(
+                    std::io::ErrorKind::NotFound,
+                    "displaced A not found",
+                ))
+            },
+        ))
+        .with_conditional_test_hooks(TestConditionalHooks::once(
+            TestConditionalPoint::AfterRollbackPrecheck,
+            move || std::fs::write(competitor, b"D"),
+        ));
+    let mut writer = filesystem
+        .open_conditional_writer::<Sha256>(
+            Path::new("target"),
+            LocalWritePrecondition::Content(Sha256::digest(b"A")),
+            &LocalWriteOptions::new(LocalWriteMode::CreateOrReplace),
+        )
+        .unwrap();
+    writer.write_fully(b"B").unwrap();
+    let failure = writer.commit().unwrap_err();
+    let candidate = failure
+        .recovery_files()
+        .iter()
+        .find(|entry| entry.role() == LocalRecoveryFileRole::CandidateCopy)
+        .expect("Rooted recovery candidate should be retained");
+
+    assert_eq!(std::fs::read(&native_target).unwrap(), b"D");
+    assert_eq!(conditional::read_recovery(candidate), b"B");
+    assert_eq!(candidate.diagnostic_path(), None);
 }
 
 #[cfg(windows)]
@@ -614,6 +677,10 @@ fn windows_rollback_without_target_replacement_restores_original_identity() {
     assert_eq!(conditional::read_recovery(candidate), b"B");
     assert_eq!(restored.namespace_path(), path);
     assert_eq!(restored.diagnostic_path(), Some(path.as_path()));
+    let candidate_diagnostic = candidate.diagnostic_path().expect("candidate diagnostic coordinate");
+    assert_ne!(candidate_diagnostic, path);
+    assert_eq!(candidate_diagnostic.file_name(), candidate.namespace_path().file_name());
+    assert_eq!(candidate_diagnostic.parent(), candidate.namespace_path().parent());
     assert_ne!(rollback_displaced.namespace_path(), path);
     assert_ne!(candidate.namespace_path(), path);
     assert_ne!(rollback_displaced.namespace_path(), candidate.namespace_path());
