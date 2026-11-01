@@ -424,7 +424,7 @@ impl LocalDirectoryHandle {
         follow_final: bool,
         symlink_policy: LocalSymlinkPolicy,
     ) -> LocalResult<PathBuf> {
-        self.validate_with_policy_until(path, follow_final, symlink_policy, None)
+        self.validate_with_policy_until(path, follow_final, symlink_policy, None, LocalFileOperation::BindPath)
     }
 
     fn validate_with_policy_until(
@@ -433,6 +433,7 @@ impl LocalDirectoryHandle {
         follow_final: bool,
         symlink_policy: LocalSymlinkPolicy,
         operation_deadline: Option<Instant>,
+        timeout_operation: LocalFileOperation,
     ) -> LocalResult<PathBuf> {
         if path.is_absolute() || path.has_root() {
             return Err(
@@ -442,7 +443,7 @@ impl LocalDirectoryHandle {
         }
         let mut normalized = PathBuf::new();
         for component in path.components() {
-            check_copy_deadline(operation_deadline, path)?;
+            check_operation_deadline(operation_deadline, path, timeout_operation)?;
             match component {
                 Component::CurDir => continue,
                 Component::ParentDir => {
@@ -450,7 +451,7 @@ impl LocalDirectoryHandle {
                         match &self.filesystem.core.namespace {
                             LocalNamespace::Rooted(rooted) => rooted
                                 .validate_directory_until(&normalized, symlink_policy, operation_deadline)
-                                .map_err(copy_deadline_operation_error)?,
+                                .map_err(|error| timeout_operation_error(error, timeout_operation))?,
                             LocalNamespace::Host => {
                                 return Err(LocalFileError::new(
                                     LocalFileErrorKind::InvalidState,
@@ -483,7 +484,7 @@ impl LocalDirectoryHandle {
             let started_at = Instant::now();
             self.binding_deadline.and_then(|limit| started_at.checked_add(limit))
         });
-        check_copy_deadline(deadline, path)?;
+        check_operation_deadline(deadline, path, timeout_operation)?;
         let resolved =
             crate::rooted_local_file_system::resolve_rooted_path_allow_root_with_component_policy_and_budget(
                 root,
@@ -495,14 +496,14 @@ impl LocalDirectoryHandle {
                 deadline,
                 None,
             )
-            .map_err(copy_deadline_operation_error)?;
+            .map_err(|error| timeout_operation_error(error, timeout_operation))?;
         for component in resolved.components() {
-            check_copy_deadline(deadline, path)?;
+            check_operation_deadline(deadline, path, timeout_operation)?;
             if let Component::Normal(name) = component {
                 self.component_policy.validate_component(name)?;
             }
         }
-        check_copy_deadline(deadline, path)?;
+        check_operation_deadline(deadline, path, timeout_operation)?;
         Ok(resolved)
     }
 
@@ -971,16 +972,16 @@ impl LocalDirectoryHandle {
             (Some(operation), Some(binding)) => Some(operation.min(binding)),
             (operation, binding) => operation.or(binding),
         };
-        if let Err(error) = check_copy_deadline(effective_deadline, source) {
+        if let Err(error) = check_operation_deadline(effective_deadline, source, LocalFileOperation::Copy) {
             return Err(crate::local::copy_failure_unchanged(
                 error.with_target(destination.to_path_buf()),
             ));
         }
         let resolved_source = self
-            .validate_with_policy_until(source, false, policy, effective_deadline)
+            .validate_with_policy_until(source, false, policy, effective_deadline, LocalFileOperation::Copy)
             .map_err(|error| crate::local::copy_failure_unchanged(error.with_target(destination.to_path_buf())))?;
         let resolved_destination = self
-            .validate_with_policy_until(destination, false, policy, effective_deadline)
+            .validate_with_policy_until(destination, false, policy, effective_deadline, LocalFileOperation::Copy)
             .map_err(|error| {
                 crate::local::copy_failure_unchanged(
                     error
@@ -988,7 +989,7 @@ impl LocalDirectoryHandle {
                         .with_target(destination.to_path_buf()),
                 )
             })?;
-        if let Err(error) = check_copy_deadline(effective_deadline, source) {
+        if let Err(error) = check_operation_deadline(effective_deadline, source, LocalFileOperation::Copy) {
             return Err(crate::local::copy_failure_unchanged(
                 error.with_target(destination.to_path_buf()),
             ));
@@ -1256,7 +1257,7 @@ fn validate_parent_steps(
     Ok(())
 }
 
-fn check_copy_deadline(deadline: Option<Instant>, path: &Path) -> LocalResult<()> {
+fn check_operation_deadline(deadline: Option<Instant>, path: &Path, operation: LocalFileOperation) -> LocalResult<()> {
     let Some(deadline) = deadline else {
         return Ok(());
     };
@@ -1266,25 +1267,21 @@ fn check_copy_deadline(deadline: Option<Instant>, path: &Path) -> LocalResult<()
     let now = Instant::now();
     if now >= deadline {
         return Err(LocalFileError::from_io(
-            LocalFileOperation::Copy,
+            operation,
             Some(path.to_path_buf()),
             None,
-            std::io::Error::new(std::io::ErrorKind::TimedOut, "local copy deadline exceeded"),
+            std::io::Error::new(std::io::ErrorKind::TimedOut, "path resolution deadline exceeded"),
         ));
     }
     Ok(())
 }
 
-fn copy_deadline_operation_error(error: LocalFileError) -> LocalFileError {
-    if error.io_error_kind() != std::io::ErrorKind::TimedOut {
-        return error;
+fn timeout_operation_error(error: LocalFileError, operation: LocalFileOperation) -> LocalFileError {
+    if error.io_error_kind() == std::io::ErrorKind::TimedOut {
+        error.with_operation(operation)
+    } else {
+        error
     }
-    LocalFileError::from_io(
-        LocalFileOperation::Copy,
-        error.path().map(Path::to_path_buf),
-        error.target().map(Path::to_path_buf),
-        std::io::Error::new(std::io::ErrorKind::TimedOut, error.to_string()),
-    )
 }
 
 fn path_binding_deadline(started_at: Instant, limits: Option<&LocalPathBindingOptions>) -> Option<Instant> {

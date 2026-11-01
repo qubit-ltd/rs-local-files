@@ -5,20 +5,113 @@
 //
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
+use std::ffi::OsStr;
 use std::fs;
 use std::path::Path;
+use std::sync::Arc;
 
 use qubit_local_files::LocalFileSystem;
+use qubit_local_files::directory::LocalResolutionOrigin;
+use qubit_local_files::directory::LocalResolutionPolicy;
+use qubit_local_files::directory::LocalResolutionScope;
+use qubit_local_files::error::LocalFileError;
 use qubit_local_files::error::LocalFileErrorKind;
 use qubit_local_files::error::LocalFileOperation;
 use qubit_local_files::observation::LocalSourceVerification;
+use qubit_local_files::options::LocalCopyOptions;
 use qubit_local_files::options::LocalDirectoryOpenOptions;
 use qubit_local_files::options::LocalObservedReadOptions;
 use qubit_local_files::options::LocalPathBindingOptions;
 use qubit_local_files::options::LocalResolutionLimits;
-#[cfg(unix)]
 use qubit_local_files::options::LocalRootOpenOptions;
+use qubit_local_files::options::LocalWriteMode;
+use qubit_local_files::options::LocalWriteOptions;
 use tempfile::tempdir;
+
+#[derive(Debug)]
+struct TimeoutPayload;
+
+impl LocalResolutionPolicy for TimeoutPayload {
+    fn validate_component(
+        &self,
+        component: &OsStr,
+        _scope: LocalResolutionScope,
+        _origin: LocalResolutionOrigin,
+    ) -> qubit_local_files::LocalResult<()> {
+        if component == OsStr::new("payload") {
+            Err(LocalFileError::from_io(
+                LocalFileOperation::Metadata,
+                Some(Path::new("payload").to_path_buf()),
+                None,
+                std::io::Error::new(std::io::ErrorKind::TimedOut, "injected payload timeout"),
+            )
+            .with_reason("fixed timeout reason"))
+        } else {
+            Ok(())
+        }
+    }
+
+    fn validate_symlink_target(
+        &self,
+        _target: &Path,
+        _scope: LocalResolutionScope,
+    ) -> qubit_local_files::LocalResult<()> {
+        Ok(())
+    }
+}
+
+fn timeout_test_directory() -> (tempfile::TempDir, qubit_local_files::directory::LocalDirectoryHandle) {
+    let scratch = tempdir().expect("fixture should exist");
+    fs::write(scratch.path().join("payload"), b"data").expect("payload should exist");
+    let options = LocalRootOpenOptions::new().with_resolution_policy(Arc::new(TimeoutPayload));
+    let filesystem = LocalFileSystem::rooted_with_options(scratch.path(), &options).expect("root should open");
+    let directory = filesystem
+        .open_directory_with_options(Path::new("."), &LocalDirectoryOpenOptions::new())
+        .expect("root path should not trigger payload policy");
+    (scratch, directory)
+}
+
+fn assert_bind_path_timeout(error: &LocalFileError) {
+    assert_eq!(error.io_error_kind(), std::io::ErrorKind::TimedOut);
+    assert_eq!(error.operation(), LocalFileOperation::BindPath);
+    assert_eq!(error.reason(), Some("fixed timeout reason"));
+    let source = std::error::Error::source(error)
+        .and_then(|source| source.downcast_ref::<std::io::Error>())
+        .expect("original io error should remain in the source chain");
+    assert_eq!(source.to_string(), "injected payload timeout");
+}
+
+#[test]
+fn test_path_resolution_timeout_preserves_bind_operation_and_source() {
+    let (_scratch, directory) = timeout_test_directory();
+
+    let metadata_error = directory
+        .entry_metadata(Path::new("payload"))
+        .expect_err("metadata resolution should time out");
+    assert_bind_path_timeout(&metadata_error);
+
+    let list_error = directory
+        .list_with_options(
+            Path::new("payload"),
+            &qubit_local_files::options::LocalListOptions::new(),
+        )
+        .expect_err("list resolution should time out");
+    assert_bind_path_timeout(&list_error);
+
+    let writer_error = directory
+        .open_writer_with_options(
+            Path::new("payload"),
+            &LocalWriteOptions::new(LocalWriteMode::CreateOrReplace),
+        )
+        .expect_err("writer resolution should time out");
+    assert_bind_path_timeout(&writer_error);
+
+    let copy_error = directory
+        .copy_with_options(Path::new("payload"), Path::new("target"), &LocalCopyOptions::new())
+        .expect_err("copy source resolution should time out");
+    assert_eq!(copy_error.error().operation(), LocalFileOperation::Copy);
+    assert_eq!(copy_error.error().target(), Some(Path::new("target")));
+}
 
 #[test]
 fn test_child_binding_charges_inherited_anchor_paths() {
