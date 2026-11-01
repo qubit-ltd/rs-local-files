@@ -116,14 +116,18 @@ impl LocalCopyFailure {
         let atomic_destination_state = error.atomic_destination_state();
         let (stage, failed_source, failed_target, stats, staging_path, cleanup_error, primary) = error.into_parts();
         let partial_stats = LocalCopyStats::from_internal(stats);
-        let inferred_state = if atomic_destination_state == Some(crate::LocalAtomicDestinationState::Unchanged) {
-            if partial_stats.files() > 0 || partial_stats.directories() > 0 {
-                LocalCopyFailureState::PartiallyPublished
-            } else {
-                LocalCopyFailureState::Unchanged
+        let inferred_state = match atomic_destination_state {
+            Some(crate::LocalAtomicDestinationState::Indeterminate | crate::LocalAtomicDestinationState::Missing) => {
+                LocalCopyFailureState::Indeterminate
             }
-        } else {
-            copy_failure_state(stage, partial_stats)
+            Some(crate::LocalAtomicDestinationState::Unchanged) => {
+                if partial_stats.files() > 0 || partial_stats.directories() > 0 {
+                    LocalCopyFailureState::PartiallyPublished
+                } else {
+                    LocalCopyFailureState::Unchanged
+                }
+            }
+            _ => copy_failure_state(stage, partial_stats),
         };
         let state = merge_copy_failure_state(inferred_state, failure_hint);
         let resource_limit = primary

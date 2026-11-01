@@ -182,9 +182,54 @@ fn test_copy_atomic_preinstall_fact_preserves_prior_effects() {
             LocalCopyFailureState::Indeterminate,
         ),
         (
+            Some(LocalAtomicDestinationState::Indeterminate),
+            LocalCopyDirStats {
+                files: 1,
+                ..LocalCopyDirStats::default()
+            },
+            None,
+            LocalCopyFailureState::Indeterminate,
+        ),
+        (
+            Some(LocalAtomicDestinationState::Indeterminate),
+            LocalCopyDirStats {
+                directories: 1,
+                ..LocalCopyDirStats::default()
+            },
+            None,
+            LocalCopyFailureState::Indeterminate,
+        ),
+        (
             Some(LocalAtomicDestinationState::Missing),
             LocalCopyDirStats::default(),
             None,
+            LocalCopyFailureState::Indeterminate,
+        ),
+        (
+            Some(LocalAtomicDestinationState::Missing),
+            LocalCopyDirStats {
+                files: 1,
+                ..LocalCopyDirStats::default()
+            },
+            None,
+            LocalCopyFailureState::Indeterminate,
+        ),
+        (
+            Some(LocalAtomicDestinationState::Unchanged),
+            LocalCopyDirStats {
+                files: 1,
+                ..LocalCopyDirStats::default()
+            },
+            Some(LocalCopyFailureState::PartiallyPublished),
+            LocalCopyFailureState::PartiallyPublished,
+        ),
+        (
+            Some(LocalAtomicDestinationState::Indeterminate),
+            LocalCopyDirStats {
+                files: 1,
+                ..LocalCopyDirStats::default()
+            },
+            Some(LocalCopyFailureState::PartiallyPublished),
             LocalCopyFailureState::Indeterminate,
         ),
     ];
@@ -210,6 +255,37 @@ fn test_copy_atomic_preinstall_fact_preserves_prior_effects() {
         assert_eq!(expected_state, failure.state());
         assert_eq!(Some(Path::new("failed-source")), failure.failed_source_path());
         assert_eq!(Some(Path::new("failed-target")), failure.failed_target_path());
+        assert_eq!(stats.files, failure.partial_stats().files());
+        assert_eq!(stats.directories, failure.partial_stats().directories());
         assert_eq!(crate::error::LocalFileErrorKind::Io, failure.error().kind());
     }
+}
+
+#[test]
+fn test_copy_atomic_indeterminate_state_preserves_cleanup_context() {
+    let mut error = LocalCopyDirError::new(
+        LocalCopyDirStage::CommitFile,
+        PathBuf::from("failed-source"),
+        PathBuf::from("failed-target"),
+        LocalCopyDirStats {
+            files: 1,
+            ..LocalCopyDirStats::default()
+        },
+        io::Error::other("commit failed"),
+    )
+    .with_atomic_destination_state(LocalAtomicDestinationState::Indeterminate);
+    error = error.with_staging_context(PathBuf::from("staging-path"), Some(io::Error::other("cleanup failed")));
+
+    let failure =
+        LocalCopyFailure::from_copy_dir_error(Path::new("request-source"), Path::new("request-target"), error);
+
+    assert_eq!(LocalCopyFailureState::Indeterminate, failure.state());
+    assert_eq!(1, failure.partial_stats().files());
+    assert_eq!(Some(Path::new("failed-source")), failure.failed_source_path());
+    assert_eq!(Some(Path::new("failed-target")), failure.failed_target_path());
+    assert_eq!(Some(Path::new("staging-path")), failure.staging_path());
+    assert_eq!(
+        Some(crate::error::LocalFileErrorKind::Io),
+        failure.cleanup_error().map(crate::LocalFileError::kind),
+    );
 }
