@@ -121,36 +121,83 @@ fn preserve_namespace(source: &File, staging: &File, namespace: libc::c_int) -> 
 /// treats an unsupported namespace as empty. Other syscall failures and
 /// malformed name lists are returned as errors.
 fn list_attributes(file: &File, namespace: libc::c_int) -> Result<BTreeSet<Vec<u8>>> {
+    let result = read_attribute_names(
+        || {
+            // SAFETY: the descriptor remains live and null output requests only
+            // the current byte length of the namespace's name list.
+            let length = unsafe { libc::extattr_list_fd(file.as_raw_fd(), namespace, std::ptr::null_mut(), 0) };
+            if length == -1 {
+                Err(Error::last_os_error())
+            } else {
+                usize::try_from(length).map_err(|_| Error::new(ErrorKind::InvalidData, "invalid xattr list length"))
+            }
+        },
+        |buffer| {
+            // SAFETY: `buffer` is writable for its full length and the descriptor
+            // remains live for this non-retaining call.
+            let read =
+                unsafe { libc::extattr_list_fd(file.as_raw_fd(), namespace, buffer.as_mut_ptr().cast(), buffer.len()) };
+            if read == -1 {
+                Err(Error::last_os_error())
+            } else {
+                usize::try_from(read).map_err(|_| Error::new(ErrorKind::InvalidData, "invalid xattr list read length"))
+            }
+        },
+    );
+    match result {
+        Err(error) if is_not_supported(&error) => Ok(BTreeSet::new()),
+        result => result,
+    }
+}
+
+fn read_attribute_names(
+    mut probe: impl FnMut() -> Result<usize>,
+    mut read: impl FnMut(&mut [u8]) -> Result<usize>,
+) -> Result<BTreeSet<Vec<u8>>> {
     let mut remaining_attempts = XATTR_SIZE_RACE_ATTEMPTS;
     loop {
-        // SAFETY: the descriptor remains live and null output requests only
-        // the current byte length of the namespace's name list.
-        let length = unsafe { libc::extattr_list_fd(file.as_raw_fd(), namespace, std::ptr::null_mut(), 0) };
-        if length == -1 {
-            let error = Error::last_os_error();
-            if is_not_supported(&error) {
-                return Ok(BTreeSet::new());
-            }
-            return Err(error);
-        }
-        if length == 0 {
-            return Ok(BTreeSet::new());
-        }
-        let mut buffer = vec![0_u8; length as usize];
-        // SAFETY: `buffer` is writable for its full length and the descriptor
-        // remains live for this non-retaining call.
-        let read =
-            unsafe { libc::extattr_list_fd(file.as_raw_fd(), namespace, buffer.as_mut_ptr().cast(), buffer.len()) };
-        if read == -1 {
-            let error = Error::last_os_error();
-            if error.raw_os_error() == Some(libc::ERANGE) && remaining_attempts > 1 {
+        let length = probe()?;
+        let capacity = length
+            .checked_add(1)
+            .ok_or_else(|| Error::new(ErrorKind::InvalidData, "extended-attribute list length overflow"))?;
+        let mut buffer = Vec::new();
+        buffer.try_reserve_exact(capacity).map_err(|error| {
+            Error::new(
+                ErrorKind::Other,
+                format!("cannot allocate extended-attribute list buffer: {error}"),
+            )
+        })?;
+        buffer.resize(capacity, 0);
+        let read_length = match read(&mut buffer) {
+            Ok(read_length) => read_length,
+            Err(error) if error.raw_os_error() == Some(libc::ERANGE) && remaining_attempts > 1 => {
                 remaining_attempts -= 1;
                 continue;
             }
-            return Err(error);
+            Err(error) => return Err(error),
+        };
+        if read_length < capacity {
+            let current_length = probe()?;
+            if current_length > read_length {
+                if remaining_attempts == 1 {
+                    return Err(Error::new(
+                        ErrorKind::Other,
+                        "extended-attribute list changed during every read attempt",
+                    ));
+                }
+                remaining_attempts -= 1;
+                continue;
+            }
+            buffer.truncate(read_length);
+            return parse_attribute_names(&buffer);
         }
-        buffer.truncate(read as usize);
-        return parse_attribute_names(&buffer);
+        if remaining_attempts == 1 {
+            return Err(Error::new(
+                ErrorKind::Other,
+                "extended-attribute list changed during every read attempt",
+            ));
+        }
+        remaining_attempts -= 1;
     }
 }
 
@@ -356,10 +403,12 @@ fn is_missing_attribute(error: &Error) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeSet;
     use std::collections::VecDeque;
     use std::io::Error;
     use std::io::ErrorKind;
 
+    use super::read_attribute_names;
     use super::read_optional_attribute;
 
     #[test]
@@ -449,6 +498,130 @@ mod tests {
         let error = result.expect_err("repeated full buffers must not return a truncated value");
         assert_eq!(ErrorKind::Other, error.kind());
         assert_eq!(8, reads.get());
+    }
+
+    #[test]
+    fn test_attribute_list_accepts_stable_empty_and_nonempty_lists() {
+        let empty_probes = std::cell::Cell::new(0);
+        let empty = read_attribute_names(
+            || {
+                empty_probes.set(empty_probes.get() + 1);
+                Ok(0)
+            },
+            |buffer| {
+                assert_eq!(1, buffer.len(), "zero-length probes still require an actual read");
+                Ok(0)
+            },
+        )
+        .expect("stable empty list should be read");
+        assert!(empty.is_empty());
+        assert_eq!(2, empty_probes.get());
+
+        let expected: BTreeSet<Vec<u8>> = [b"a".to_vec(), b"bc".to_vec()].into_iter().collect();
+        let names = read_attribute_names(
+            || Ok(5),
+            |buffer| {
+                buffer[..5].copy_from_slice(&[1, b'a', 2, b'b', b'c']);
+                Ok(5)
+            },
+        )
+        .expect("stable nonempty list should be read");
+        assert_eq!(expected, names);
+    }
+
+    #[test]
+    fn test_attribute_list_reprobes_full_buffer_before_parsing_prefix() {
+        let mut probes: VecDeque<Result<usize, Error>> = VecDeque::from([Ok(2), Ok(5), Ok(4)]);
+        let mut reads: VecDeque<Result<Vec<u8>, Error>> =
+            VecDeque::from([Ok(vec![1, b'a', 1]), Ok(vec![1, b'a', 1, b'b'])]);
+        let names = read_attribute_names(
+            || probes.pop_front().expect("probe should be available"),
+            |buffer| {
+                let bytes = reads.pop_front().expect("read should be available")?;
+                buffer[..bytes.len()].copy_from_slice(&bytes);
+                Ok(bytes.len())
+            },
+        )
+        .expect("full-buffer prefix should be discarded and retried");
+        assert_eq!(
+            [b"a".to_vec(), b"b".to_vec()].into_iter().collect::<BTreeSet<_>>(),
+            names
+        );
+        assert!(probes.is_empty());
+        assert!(reads.is_empty());
+    }
+
+    #[test]
+    fn test_attribute_list_retries_erange_and_truncated_last_name() {
+        let mut probes: VecDeque<Result<usize, Error>> = VecDeque::from([Ok(2), Ok(2), Ok(4), Ok(4)]);
+        let mut reads: VecDeque<Result<Vec<u8>, Error>> = VecDeque::from([
+            Err(Error::from_raw_os_error(libc::ERANGE)),
+            Ok(vec![1, b'a', 1]),
+            Ok(vec![1, b'a', 1, b'b']),
+        ]);
+        let names = read_attribute_names(
+            || probes.pop_front().expect("probe should be available"),
+            |buffer| {
+                let result = reads.pop_front().expect("read should be available");
+                if let Ok(bytes) = &result {
+                    buffer[..bytes.len()].copy_from_slice(bytes);
+                }
+                result.map(|bytes| bytes.len())
+            },
+        )
+        .expect("ERANGE and a truncated last name should be retried");
+        assert_eq!(
+            [b"a".to_vec(), b"b".to_vec()].into_iter().collect::<BTreeSet<_>>(),
+            names
+        );
+    }
+
+    #[test]
+    fn test_attribute_list_retries_short_read_when_reprobe_shows_truncation() {
+        let mut probes: VecDeque<Result<usize, Error>> = VecDeque::from([Ok(3), Ok(4), Ok(4), Ok(4)]);
+        let mut reads: VecDeque<Result<Vec<u8>, Error>> =
+            VecDeque::from([Ok(vec![1, b'a', 2]), Ok(vec![1, b'a', 2, b'b'])]);
+        let names = read_attribute_names(
+            || probes.pop_front().expect("probe should be available"),
+            |buffer| {
+                let bytes = reads.pop_front().expect("read should be available")?;
+                buffer[..bytes.len()].copy_from_slice(&bytes);
+                Ok(bytes.len())
+            },
+        )
+        .expect("short successful read followed by a larger probe must be retried");
+        assert_eq!(
+            [b"a".to_vec(), b"b".to_vec()].into_iter().collect::<BTreeSet<_>>(),
+            names
+        );
+        assert!(probes.is_empty());
+        assert!(reads.is_empty());
+    }
+
+    #[test]
+    fn test_attribute_list_returns_error_after_eight_growth_retries() {
+        let reads = std::cell::Cell::new(0);
+        let error = read_attribute_names(
+            || Ok(reads.get()),
+            |buffer| {
+                reads.set(reads.get() + 1);
+                Ok(buffer.len())
+            },
+        )
+        .expect_err("continuous growth must never return a truncated name list");
+        assert_eq!(ErrorKind::Other, error.kind());
+        assert_eq!(8, reads.get());
+    }
+
+    #[test]
+    fn test_attribute_list_rejects_capacity_overflow_and_propagates_native_error() {
+        let overflow = read_attribute_names(|| Ok(usize::MAX), |_| unreachable!("overflow skips read"))
+            .expect_err("length plus terminator must be checked");
+        assert_eq!(ErrorKind::InvalidData, overflow.kind());
+
+        let error = read_attribute_names(|| Ok(0), |_| Err(Error::from_raw_os_error(libc::EACCES)))
+            .expect_err("native permission failures must propagate");
+        assert_eq!(Some(libc::EACCES), error.raw_os_error());
     }
 }
 

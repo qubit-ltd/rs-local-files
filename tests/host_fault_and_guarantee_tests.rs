@@ -336,6 +336,26 @@ fn test_freebsd_xattr_short_read_and_atomic_preservation() {
         panic!("destination extended attribute should be created: {error}");
     }
 
+    let mut listed_before = [0_u8; 64];
+    let listed_before_length = unsafe {
+        libc::extattr_list_fd(
+            file.as_raw_fd(),
+            libc::EXTATTR_NAMESPACE_USER,
+            listed_before.as_mut_ptr().cast(),
+            listed_before.len(),
+        )
+    };
+    assert!(listed_before_length > 0, "source attribute name should be listed");
+    let listed_before = &listed_before[..listed_before_length as usize];
+    assert_eq!(
+        [attribute.as_bytes().len() as u8]
+            .into_iter()
+            .chain(attribute.as_bytes().iter().copied())
+            .collect::<Vec<_>>(),
+        listed_before,
+        "the stable user attribute name should be listed before replacement"
+    );
+
     let mut short_buffer = [0_u8; 1];
     let short_read = unsafe {
         libc::extattr_get_fd(
@@ -376,6 +396,18 @@ fn test_freebsd_xattr_short_read_and_atomic_preservation() {
     };
     assert_eq!(value.len() as isize, length);
     assert_eq!(value, &observed[..length as usize]);
+
+    let mut listed_after = [0_u8; 64];
+    let listed_after_length = unsafe {
+        libc::extattr_list_fd(
+            replaced.as_raw_fd(),
+            libc::EXTATTR_NAMESPACE_USER,
+            listed_after.as_mut_ptr().cast(),
+            listed_after.len(),
+        )
+    };
+    assert_eq!(listed_before.len() as isize, listed_after_length);
+    assert_eq!(listed_before, &listed_after[..listed_after_length as usize]);
 }
 
 /// Verifies namespace metadata probes and symlink-policy transitions preserve
