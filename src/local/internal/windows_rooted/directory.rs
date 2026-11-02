@@ -87,10 +87,7 @@ pub(crate) fn create_rooted_temp_child(
             windows_sys::Wdk::Storage::FileSystem::FILE_NON_DIRECTORY_FILE
         },
     )
-    .map_err(|source| NativePrivateCreateError {
-        source,
-        retained: None,
-    })
+    .map_err(|source| NativePrivateCreateError { source, retained: None })
 }
 
 /// Opens a lazy reader for immediate children of the opened root.

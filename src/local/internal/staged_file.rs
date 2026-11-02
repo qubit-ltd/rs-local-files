@@ -75,8 +75,7 @@ fn path_identity(path: &Path) -> std::io::Result<Option<StagedIdentity>> {
             .read(true)
             .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
             .open(path)?;
-        Ok(windows_file_identity(&file)
-            .map(|(volume, index)| StagedIdentity::Windows(volume, index)))
+        Ok(windows_file_identity(&file).map(|(volume, index)| StagedIdentity::Windows(volume, index)))
     }
 }
 
@@ -93,8 +92,7 @@ fn windows_file_identity(file: &File) -> Option<(u32, u64)> {
     if unsafe { GetFileInformationByHandle(file.as_raw_handle(), &raw mut information) } == 0 {
         return None;
     }
-    let index =
-        (u64::from(information.nFileIndexHigh) << 32) | u64::from(information.nFileIndexLow);
+    let index = (u64::from(information.nFileIndexHigh) << 32) | u64::from(information.nFileIndexLow);
     Some((information.dwVolumeSerialNumber, index))
 }
 
