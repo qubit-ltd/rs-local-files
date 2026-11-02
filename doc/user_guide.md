@@ -802,6 +802,10 @@ For Windows Rooted writers, an identity conflict found at the final check
 before installation is `NotPublished`; staging remains available and the
 competing destination is preserved. Do not infer the same state after a native
 rename has already been attempted; inspect the typed commit failure.
+Staging cleanup also retains the identity captured at creation. If the staging
+name now refers to a different object, cleanup reports the conflict and leaves
+that replacement untouched; identity checking does not make later removal
+atomic against concurrent namespace changes.
 
 `LocalFileSystem::copy` selects file or directory behavior from source
 metadata. Use `with_entry_source()` or `with_tree_source()` when the source
@@ -815,6 +819,15 @@ and destination directories before mutation, because an ancestor target could
 remove part of the source. To replace a tree, copy to an unrelated sibling
 stage and publish it using the application's existing policy. Overwriting a
 symbolic-link target replaces that entry rather than following it.
+
+Host directory-copy preflight has a conservative final-link exception: it may
+follow an existing destination link while checking source/destination overlap.
+For example, with `container/source` and `alias -> container`, copying the
+source to `alias` is rejected before mutation with `InvalidPath` and
+`Unchanged`, because the link referent is an ancestor of the source. This
+preflight result does not mean actual publication follows the link; replacing
+a symbolic-link target still replaces the link entry. Rooted copy follows its
+own authority-bound preflight contract.
 
 ```rust,no_run
 use qubit_local_files::LocalFileSystem;
@@ -1438,11 +1451,12 @@ program; an application can invoke its tool in the callback instead.
 The error pair retains both the primary I/O failure and a cleanup failure.
 Creation failures occupy the structured-error slot before any inspection runs.
 Production applications may wrap these two channels in their own named error.
-For default Host temporary-file and temporary-directory creation, if owner
+For default Host or Rooted temporary-file and temporary-directory creation, if owner
 construction fails and residual cleanup also fails, retain the returned
 `LocalFileError`: `cleanup_error()` describes the cleanup failure and
 `temp_recovery()` carries the identity-checked owner for a later retry. Do not
-reconstruct deletion authority from the displayed path or error text.
+reconstruct deletion authority from the displayed path or error text. Rooted
+recovery uses its retained authority, not the diagnostic Host path.
 
 ```rust
 // BEGIN executable inspection cleanup helper

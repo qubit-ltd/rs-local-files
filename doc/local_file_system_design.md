@@ -454,6 +454,9 @@ makes Host `a/link/../config` access `b/config`, while Rooted's caller-path
 folding accesses `a/config`. Host `missing/../config` fails when `missing`
 does not exist. Windows behavior follows native resolution; drive-relative
 input remains rejected.
+On Unix, opening Host `/..` as a directory binds the native root itself;
+fixed-directory handles and Rooted authorities continue to reject parent
+traversal beyond their boundary.
 
 ### 8.2 Rooted mapping
 
@@ -1112,6 +1115,14 @@ newly created ancestors. Windows link kind comes from no-follow source
 metadata; removing a destination directory link must use the native directory
 link removal operation and preserve its referent.
 
+Host directory-copy preflight uses `canonicalize_existing_prefix` for overlap
+checks and may therefore follow an existing final destination link. For
+example, with `container/source` and `alias -> container`, targeting `alias`
+is rejected before mutation as `InvalidPath`/`Unchanged`, because its referent
+is an ancestor of the source. This conservative preflight does not change the
+publication rule: replacing a final link replaces the link entry rather than
+writing through it. Rooted preflight remains bound to its own authority.
+
 Failure retains requested and failing operands, partial statistics, and staging
 context only when cleanup failed. Preflight rejects directory source and
 destination paths that are equal or ancestor-related in either direction,
@@ -1217,6 +1228,9 @@ cleanup succeeds or error ownership is transferred. When cleanup also fails,
 the returned `LocalFileError` carries both `cleanup_error()` and
 `temp_recovery()`; callers can retry through that owner after resolving the
 cleanup condition. Unknown identity never grants path-based deletion authority.
+Rooted default creation applies the same structured recovery contract using its
+retained root and parent authority; diagnostic Host paths never grant cleanup
+authority.
 
 ### 18.2 Creation and paths
 

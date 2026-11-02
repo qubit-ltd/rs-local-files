@@ -321,6 +321,11 @@ Tree copies reject equal or ancestor-related source and destination directories
 before mutation; stage into an unrelated sibling path when replacing a tree.
 Directory permission changes also count as copy effects even when leaf entries
 are skipped.
+Host directory-copy preflight may follow an existing final destination link
+while checking overlap. For example, with `container/source` and `alias ->
+container`, copying `container/source` to `alias` is rejected as
+`InvalidPath`/`Unchanged` before mutation. This conservative preflight does not
+mean publication follows the link and writes to its referent.
 
 Listing is lazy. A non-recursive walk reports a dangling link from the link
 entry itself without resolving its target. Recursive traversal reports

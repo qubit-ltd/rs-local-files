@@ -590,6 +590,9 @@ Rooted 的同一调用者路径则词法折叠为 `a/config`。Host 的 `missing
 `missing` 不存在时失败；Unix `/..` 按原生根目录行为处理。Windows 以 native/std
 结果为准，仍拒绝 `C:foo` 等 drive-relative 输入。
 
+Host 首次打开目录时，Unix `/..` 作为原生根的父级仍绑定到 `/`；固定目录
+handle 和 Rooted authority 对 `..` 继续拒绝越界。
+
 Rooted PWD 始终保存为规范化的 namespace-absolute `PathBuf`，不随进程
 `set_current_dir()` 变化。Host 不保存 PWD；`current_directory()` 每次读取进程状态并返回
 owned `PathBuf`。
@@ -1337,6 +1340,11 @@ writer 在创建缺失父目录并要求 Required durability 时，会在发布�
 并同步目标父目录和新建祖先目录。Windows 链接类型必须从不跟随源链接的
 metadata 读取；删除已有目录链接时必须使用原生目录链接删除操作，并保留其指向的内容。
 
+Host 目录复制预检使用 `canonicalize_existing_prefix` 判断重叠，因此可能跟随已有的最终目标链接。
+例如，`container/source` 与 `alias -> container` 并存时，目标 `alias` 的 referent 是源的祖先，
+复制会在修改前以 `InvalidPath`/`Unchanged` 拒绝。这项保守预检不改变发布规则：替换最终链接时仍替换链接条目，
+不会通过链接写入 referent。Rooted 预检仍受其自身 authority 限定。
+
 ## 17. Directory create、delete 与 rename
 
 ### 17.1 Create directory
@@ -1421,6 +1429,7 @@ source 或 destination 为 Rooted `/` 时返回 `InvalidPath`。
 默认 Host 临时文件或目录创建若在 sandbox/子项创建后失败，会一直保留原生清理 owner，直到清理成功或将责任交给错误对象。
 若清理也失败，返回的 `LocalFileError` 同时携带 `cleanup_error()` 和 `temp_recovery()`，调用方解决清理条件后可通过 owner 重试。
 身份未知时不得仅凭路径删除。
+Rooted 默认创建遵循相同的结构化恢复合同，并使用保留的 root/parent authority；诊断 Host 路径不授予清理权限。
 
 `outcome::LocalPersistFailureState` 是另一个独立事实轴：本次目标发布状态为
 `NotPublished`、`Published` 或 `Indeterminate`，不能单独推断源资格。构造错误时必须明确
