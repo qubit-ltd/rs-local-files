@@ -106,9 +106,17 @@ pub(crate) mod lifecycle {
         }
     }
 
+    fn assert_expected_publication_success(expected_success: bool, succeeded: bool) {
+        assert!(
+            !expected_success || succeeded,
+            "valid owned fixture publication was unexpectedly rejected"
+        );
+    }
+
     #[derive(Debug, Default, PartialEq, Eq)]
     struct LifecycleWitness {
         created: usize,
+        successful_publications: usize,
         explicit_cleanups: usize,
         released: usize,
         artifacts_absent: usize,
@@ -561,6 +569,20 @@ pub(crate) mod lifecycle {
                     }
                     let previous = expected_source;
                     let is_file = matches!(resource, Resource::File(_));
+                    let full_cleanup_budget = match &resource {
+                        Resource::File(_) => true,
+                        Resource::Directory(directory) => {
+                            directory.cleanup_limits().max_entries() == Some(MAX_ENTRIES)
+                                && directory.cleanup_limits().max_depth() == Some(MAX_DEPTH)
+                                && directory.cleanup_limits().max_pending_path_bytes() == Some(128 * 1024)
+                        }
+                    };
+                    let expected_success = opcode == 2
+                        && selector % 3 == 0
+                        && previous == LocalTempSourceState::Owned
+                        && !source_replaced
+                        && !conflict
+                        && full_cleanup_budget;
                     let directory_snapshot = if !is_file
                         && previous != LocalTempSourceState::Indeterminate
                         && !source_replaced
@@ -570,8 +592,17 @@ pub(crate) mod lifecycle {
                     } else {
                         None
                     };
-                    match resource.publish(parent, &target, opcode, selector, rooted) {
+                    let result = resource.publish(parent, &target, opcode, selector, rooted);
+                    if expected_success && let Err(error) = &result {
+                        eprintln!(
+                            "expected publication success for opcode={opcode}, selector={selector}; got publication={:?}, stage={:?}, source={:?}, target={:?}",
+                            error.publication, error.stage, error.source, error.target
+                        );
+                    }
+                    assert_expected_publication_success(expected_success, result.is_ok());
+                    match result {
                         Ok(outcome) => {
+                            witness.successful_publications += 1;
                             assert_eq!(previous, LocalTempSourceState::Owned);
                             assert!(!source_replaced, "replaced source cannot publish");
                             assert!(!conflict && opcode != 10, "invalid publication succeeded");
@@ -761,8 +792,23 @@ pub(crate) mod lifecycle {
         use qubit_local_files::error::LocalFileErrorKind;
         use qubit_local_files::error::LocalFileOperation;
 
+        use super::assert_expected_publication_success;
         use super::require_created;
         use super::run_model;
+
+        #[test]
+        fn expected_publication_success_rejects_failure_without_rejecting_other_cases() {
+            assert!(
+                std::panic::catch_unwind(|| {
+                    assert_expected_publication_success(true, false);
+                })
+                .is_err()
+            );
+
+            assert_expected_publication_success(true, true);
+            assert_expected_publication_success(false, false);
+            assert_expected_publication_success(false, true);
+        }
 
         #[test]
         fn require_created_panics_for_fixture_creation_errors_and_returns_success() {
@@ -812,6 +858,34 @@ pub(crate) mod lifecycle {
             assert_eq!(witness.explicit_cleanups, 1);
             assert_eq!(witness.released, 1);
             assert_eq!(witness.artifacts_absent, 1);
+        }
+
+        #[test]
+        fn fixed_host_file_publication_succeeds() {
+            let witness = run_model(&[0, 0, 2, 0], false).expect("fixture environment");
+            assert_eq!(witness.created, 1);
+            assert_eq!(witness.successful_publications, 1);
+        }
+
+        #[test]
+        fn fixed_rooted_file_publication_succeeds() {
+            let witness = run_model(&[0, 0, 2, 0], true).expect("fixture environment");
+            assert_eq!(witness.created, 1);
+            assert_eq!(witness.successful_publications, 1);
+        }
+
+        #[test]
+        fn fixed_host_directory_publication_succeeds() {
+            let witness = run_model(&[0, 1, 2, 0], false).expect("fixture environment");
+            assert_eq!(witness.created, 1);
+            assert_eq!(witness.successful_publications, 1);
+        }
+
+        #[test]
+        fn fixed_rooted_directory_publication_succeeds() {
+            let witness = run_model(&[0, 1, 2, 0], true).expect("fixture environment");
+            assert_eq!(witness.created, 1);
+            assert_eq!(witness.successful_publications, 1);
         }
     }
 }
