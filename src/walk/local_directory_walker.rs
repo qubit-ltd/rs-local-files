@@ -977,7 +977,7 @@ fn next_rooted_entry(
                         .reader
                         .as_mut()
                         .expect("rooted frame reader was initialized")
-                        .next_entry(),
+                        .next_entry_with_context(),
                     false,
                 )
             }
@@ -990,10 +990,12 @@ fn next_rooted_entry(
             .reader
             .as_mut()
             .expect("rooted frame reader was initialized")
-            .next_entry();
+            .next_entry_with_context();
         #[cfg(feature = "test-support")]
         let next_entry = if crate::local::take_test_support("walker-entry") {
-            Err(std::io::Error::other("injected walker directory entry failure"))
+            Err(crate::local::RootedDirectoryReadError::stream(std::io::Error::other(
+                "injected walker directory entry failure",
+            )))
         } else {
             next_entry
         };
@@ -1033,12 +1035,36 @@ fn next_rooted_entry(
                 continue;
             }
             Err(error) => {
+                if let Some(name) = error.entry_name().map(std::ffi::OsStr::to_os_string) {
+                    let is_new_name = state
+                        .stack
+                        .last_mut()
+                        .expect("rooted walker stack is non-empty")
+                        .seen
+                        .as_mut()
+                        .is_none_or(|seen| seen.insert(name.clone()));
+                    if !is_new_name {
+                        continue;
+                    }
+                    if let Some(budget) = seen_name_budget.as_mut()
+                        && let Err(error) = budget.try_consume(name_bytes(&name))
+                    {
+                        return Some(Err(directory_limit_error(namespace_root, error)));
+                    }
+                    return Some(Err(walk_io_error(
+                        &namespace_root.join(&output_parent).join(name),
+                        error.into_io_error(),
+                    )));
+                }
                 if let Some(frame) = pop_rooted_frame(state)
                     && let Some(identity) = frame.identity
                 {
                     state.followed_directories.remove(&identity);
                 }
-                return Some(Err(walk_io_error(&namespace_root.join(&output_parent), error)));
+                return Some(Err(walk_io_error(
+                    &namespace_root.join(&output_parent),
+                    error.into_io_error(),
+                )));
             }
         };
         if options.max_depth().is_some_and(|max_depth| entry_depth > max_depth) {

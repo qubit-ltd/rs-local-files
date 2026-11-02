@@ -907,3 +907,200 @@ fn test_local_directory_walker_reports_injected_iteration_failures() {
         });
     }
 }
+
+/// Verifies a child-inspection error does not discard the remaining Rooted
+/// siblings.
+#[cfg(feature = "test-support")]
+#[test]
+fn test_rooted_entry_inspection_error_continue() {
+    const TEST_NAME: &str = "test_rooted_entry_inspection_error_continue";
+    run_walker_fault_process(TEST_NAME, "rooted-child-inspection", || {
+        let directory = tempdir().expect("temporary directory should be created");
+        let expected = ["alpha", "beta", "gamma"].map(|name| {
+            fs::write(directory.path().join(name), b"payload").expect("fixture file should be written");
+            PathBuf::from("/").join(name)
+        });
+        let filesystem = LocalFileSystem::rooted(directory.path()).expect("Rooted filesystem should open");
+        let walker = filesystem
+            .list_with_options(
+                Path::new("/"),
+                &LocalListOptions::new().with_error_policy(LocalWalkErrorPolicy::Continue),
+            )
+            .expect("Rooted walker should open");
+        let results = walker.collect::<Vec<_>>();
+        let error_position = results
+            .iter()
+            .position(Result::is_err)
+            .expect("one child inspection error should be yielded");
+        let successful_after_error = results[error_position + 1..]
+            .iter()
+            .filter(|result| result.is_ok())
+            .count();
+        assert!(
+            successful_after_error > 0,
+            "Rooted Continue should yield siblings after the child inspection error"
+        );
+        assert_eq!(1, results.iter().filter(|result| result.is_err()).count());
+        let error = results[error_position]
+            .as_ref()
+            .expect_err("selected result should be an error");
+        let failed_path = error.path().expect("child error should retain its path").to_path_buf();
+        assert!(
+            expected.contains(&failed_path),
+            "error path should identify the failed child"
+        );
+        let actual = results
+            .into_iter()
+            .filter_map(Result::ok)
+            .map(|entry| entry.path().to_path_buf())
+            .collect::<Vec<_>>();
+        let wanted = expected
+            .into_iter()
+            .filter(|path| path != &failed_path)
+            .collect::<Vec<_>>();
+        assert_eq!(wanted.len(), actual.len(), "each safe sibling should be yielded once");
+        for path in wanted {
+            assert_eq!(1, actual.iter().filter(|actual_path| **actual_path == path).count());
+        }
+    });
+}
+
+/// Verifies a stream error discards its Rooted frame and is reported only once.
+#[cfg(feature = "test-support")]
+#[test]
+fn test_rooted_entry_inspection_error_stream_failure_exits_frame() {
+    const TEST_NAME: &str = "test_rooted_entry_inspection_error_stream_failure_exits_frame";
+    run_walker_fault_process(TEST_NAME, "rooted-stream-read", || {
+        let directory = tempdir().expect("temporary directory should be created");
+        for name in ["alpha", "beta", "gamma"] {
+            fs::write(directory.path().join(name), b"payload").expect("fixture file should be written");
+        }
+        let filesystem = LocalFileSystem::rooted(directory.path()).expect("Rooted filesystem should open");
+        let mut walker = filesystem
+            .list_with_options(
+                Path::new("/"),
+                &LocalListOptions::new().with_error_policy(LocalWalkErrorPolicy::Continue),
+            )
+            .expect("Rooted walker should open");
+        assert!(walker.next().expect("stream error should be yielded").is_err());
+        assert!(walker.next().is_none(), "the failed stream frame should not be retried");
+    });
+}
+
+/// Verifies FailFast remains fused after a Rooted child-inspection error.
+#[cfg(feature = "test-support")]
+#[test]
+fn test_rooted_entry_inspection_error_fail_fast() {
+    const TEST_NAME: &str = "test_rooted_entry_inspection_error_fail_fast";
+    run_walker_fault_process(TEST_NAME, "rooted-child-inspection", || {
+        let directory = tempdir().expect("temporary directory should be created");
+        for name in ["alpha", "beta", "gamma"] {
+            fs::write(directory.path().join(name), b"payload").expect("fixture file should be written");
+        }
+        let filesystem = LocalFileSystem::rooted(directory.path()).expect("Rooted filesystem should open");
+        let mut walker = filesystem
+            .list_with_options(
+                Path::new("/"),
+                &LocalListOptions::new().with_error_policy(LocalWalkErrorPolicy::FailFast),
+            )
+            .expect("Rooted walker should open");
+        assert!(walker.next().expect("first result should exist").is_ok());
+        assert!(walker.next().expect("inspection error should be yielded").is_err());
+        assert!(walker.next().is_none(), "FailFast should fuse after the error");
+    });
+}
+
+/// Verifies Reopen does not process an entry again after its inspection error.
+#[cfg(feature = "test-support")]
+#[test]
+fn test_rooted_entry_inspection_error_reopen_skips_consumed_name() {
+    const TEST_NAME: &str = "test_rooted_entry_inspection_error_reopen_skips_consumed_name";
+    run_walker_fault_process(TEST_NAME, "rooted-child-inspection-first", || {
+        let directory = tempdir().expect("temporary directory should be created");
+        let expected = ["alpha", "beta", "gamma"].map(|name| {
+            fs::create_dir(directory.path().join(name)).expect("sibling directory should be created");
+            PathBuf::from("/").join(name)
+        });
+        let filesystem = LocalFileSystem::rooted(directory.path()).expect("Rooted filesystem should open");
+        let mut walker = filesystem
+            .list_with_options(
+                Path::new("/"),
+                &LocalListOptions::new()
+                    .with_recursive()
+                    .with_max_open_directories(1)
+                    .with_reopen_policy(LocalDirectoryReopenPolicy::Reopen)
+                    .with_error_policy(LocalWalkErrorPolicy::Continue),
+            )
+            .expect("Rooted walker should open");
+        let results = walker.by_ref().collect::<Vec<_>>();
+        let errors = results.iter().filter(|result| result.is_err()).count();
+        assert_eq!(
+            1, errors,
+            "the consumed child should report exactly one inspection error"
+        );
+        let error = results
+            .iter()
+            .find_map(|result| result.as_ref().err())
+            .expect("one child inspection error should be yielded");
+        let failed_path = error.path().expect("child error should retain its path");
+        assert!(
+            expected.contains(&failed_path.to_path_buf()),
+            "error path should identify a fixture child"
+        );
+        let mut actual = results
+            .iter()
+            .filter_map(|result| result.as_ref().ok())
+            .map(|entry| entry.path().to_path_buf())
+            .collect::<Vec<_>>();
+        actual.sort();
+        let mut wanted = expected
+            .into_iter()
+            .filter(|path| path.as_path() != failed_path)
+            .collect::<Vec<_>>();
+        wanted.sort();
+        assert_eq!(
+            wanted, actual,
+            "all unfailed siblings should appear once and the failed child should stay skipped"
+        );
+    });
+}
+
+/// Verifies a child-inspection error consumes the seen-name byte budget.
+#[cfg(feature = "test-support")]
+#[test]
+fn test_rooted_entry_inspection_error_consumes_seen_name_budget() {
+    const TEST_NAME: &str = "test_rooted_entry_inspection_error_consumes_seen_name_budget";
+    run_walker_fault_process(TEST_NAME, "rooted-child-inspection", || {
+        let directory = tempdir().expect("temporary directory should be created");
+        for name in ["aa", "bb", "cc"] {
+            fs::write(directory.path().join(name), b"payload").expect("fixture file should be written");
+        }
+        let filesystem = LocalFileSystem::rooted(directory.path()).expect("Rooted filesystem should open");
+        #[cfg(windows)]
+        let per_entry_bytes = 4;
+        #[cfg(not(windows))]
+        let per_entry_bytes = 2;
+        let mut walker = filesystem
+            .list_with_options(
+                Path::new("/"),
+                &LocalListOptions::new()
+                    .with_max_seen_name_bytes(per_entry_bytes)
+                    .with_error_policy(LocalWalkErrorPolicy::Continue),
+            )
+            .expect("Rooted walker should open");
+        assert!(walker.next().expect("first sibling should be returned").is_ok());
+        let error = walker
+            .next()
+            .expect("exhausted seen-name budget should be reported")
+            .expect_err("the child error name should consume the remaining byte budget");
+        assert_eq!(LocalFileErrorKind::ResourceLimit, error.kind());
+        let limit = error
+            .resource_limit_error()
+            .expect("seen-name exhaustion should retain its resource detail");
+        assert_eq!(LocalResourceKind::SeenNameBytes, limit.resource());
+        assert!(
+            walker.next().is_none(),
+            "global seen-name exhaustion should terminate Continue"
+        );
+    });
+}

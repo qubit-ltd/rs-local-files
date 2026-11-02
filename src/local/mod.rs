@@ -61,6 +61,7 @@ pub(crate) use internal::HostLocalFileSystem;
 #[cfg(test)]
 pub(crate) use internal::LocalAtomicPublicationMode;
 pub(crate) use internal::LocalNamespace;
+pub(crate) use internal::RootedDirectoryReadError;
 #[cfg(any(unix, windows))]
 pub(crate) use internal::RootedDirectoryReader;
 #[cfg(windows)]

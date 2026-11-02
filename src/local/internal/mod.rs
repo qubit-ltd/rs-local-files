@@ -58,6 +58,7 @@ mod rooted_atomic_namespace_race;
 mod rooted_atomic_write;
 #[cfg(unix)]
 mod rooted_directory_entry;
+mod rooted_directory_read_error;
 #[cfg(any(unix, windows))]
 mod rooted_directory_reader;
 #[cfg(unix)]
@@ -162,6 +163,7 @@ pub(super) use rooted_atomic_namespace_race::verify_rooted_atomic_destination_id
 pub(super) use rooted_atomic_write::create_rooted_staged_file;
 #[cfg(unix)]
 pub(super) use rooted_atomic_write::inspect_rooted_atomic_destination;
+pub(crate) use rooted_directory_read_error::RootedDirectoryReadError;
 #[cfg(any(unix, windows))]
 pub(crate) use rooted_directory_reader::RootedDirectoryReader;
 #[cfg(unix)]

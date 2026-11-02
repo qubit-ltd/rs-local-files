@@ -28,6 +28,7 @@ use windows_sys::Win32::Storage::FileSystem::SYNCHRONIZE;
 use windows_sys::Win32::System::IO::IO_STATUS_BLOCK;
 
 use super::RootedDirectoryReader;
+use crate::local::internal::RootedDirectoryReadError;
 use crate::local::internal::windows_rooted::native::nt_open_at;
 use crate::local::internal::windows_rooted::native::nt_result;
 
@@ -53,19 +54,39 @@ impl RootedDirectoryReader {
     /// all native records are consumed. Returns an I/O error when native
     /// enumeration or child inspection fails.
     pub(crate) fn next_entry(&mut self) -> Result<Option<(OsString, File)>> {
+        self.next_entry_with_context()
+            .map_err(RootedDirectoryReadError::into_io_error)
+    }
+
+    /// Reads the next child while retaining whether a failure followed cursor
+    /// advancement.
+    pub(crate) fn next_entry_with_context(
+        &mut self,
+    ) -> std::result::Result<Option<(OsString, File)>, RootedDirectoryReadError> {
+        #[cfg(feature = "test-support")]
+        if crate::local::take_test_support("rooted-stream-read") {
+            return Err(RootedDirectoryReadError::stream(crate::local::test_fault_error()));
+        }
         loop {
             if self.offset >= self.used {
-                self.read_next_buffer()?;
+                self.read_next_buffer().map_err(RootedDirectoryReadError::stream)?;
                 if self.exhausted {
                     return Ok(None);
                 }
             }
-            let (name, next_offset) = self.current_name()?;
+            let (name, next_offset) = self.current_name().map_err(RootedDirectoryReadError::stream)?;
             self.offset = next_offset;
             if name == OsStr::new(".") || name == OsStr::new("..") {
                 continue;
             }
-            let child = nt_open_at(&self.directory, &name, FILE_READ_ATTRIBUTES | SYNCHRONIZE, FILE_OPEN, 0)?;
+            #[cfg(feature = "test-support")]
+            if crate::local::take_test_support_on_nth("rooted-child-inspection-first", 1)
+                || crate::local::take_test_support_on_nth("rooted-child-inspection", 2)
+            {
+                return Err(RootedDirectoryReadError::entry(name, crate::local::test_fault_error()));
+            }
+            let child = nt_open_at(&self.directory, &name, FILE_READ_ATTRIBUTES | SYNCHRONIZE, FILE_OPEN, 0)
+                .map_err(|error| RootedDirectoryReadError::entry(name.clone(), error))?;
             return Ok(Some((name, child)));
         }
     }

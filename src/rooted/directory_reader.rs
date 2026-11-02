@@ -14,6 +14,7 @@ use std::path::Path;
 use super::Entry;
 use super::Metadata;
 use crate::local;
+use crate::local::RootedDirectoryReadError;
 
 /// A single opened rooted directory whose children are yielded on demand.
 #[derive(Debug)]
@@ -101,6 +102,36 @@ impl DirectoryReader {
                 std::io::ErrorKind::Unsupported,
                 "descriptor-relative local roots are unsupported on this platform",
             ))
+        }
+    }
+
+    /// Produces the next child while retaining whether a failure belongs to a
+    /// consumed entry.
+    pub(crate) fn next_entry_with_context(&mut self) -> std::result::Result<Option<Entry>, RootedDirectoryReadError> {
+        #[cfg(unix)]
+        {
+            self.inner
+                .next_entry_with_context()
+                .map(|entry| entry.map(|(name, status)| Entry::new(name, Metadata::from_stat(&status))))
+        }
+        #[cfg(windows)]
+        {
+            self.inner.next_entry_with_context().and_then(|entry| {
+                entry
+                    .map(|(name, file)| {
+                        let metadata = Metadata::from_open_file(&file)
+                            .map_err(|error| RootedDirectoryReadError::entry(name.clone(), error))?;
+                        Ok(Entry::new(name, metadata))
+                    })
+                    .transpose()
+            })
+        }
+        #[cfg(not(any(unix, windows)))]
+        {
+            Err(RootedDirectoryReadError::stream(std::io::Error::new(
+                std::io::ErrorKind::Unsupported,
+                "descriptor-relative local roots are unsupported on this platform",
+            )))
         }
     }
 
