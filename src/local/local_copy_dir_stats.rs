@@ -7,6 +7,8 @@
 // =============================================================================
 //! Recursive directory copy statistics.
 
+use crate::local::internal::CopyMetadataEffect;
+
 /// Statistics reported by recursive directory copy operations.
 #[non_exhaustive]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -34,6 +36,8 @@ pub struct LocalCopyDirStats {
     /// symbolic-link entry. Parent-directory synchronization is tracked
     /// separately.
     pub files_durable: bool,
+    /// Internal evidence of destination directory metadata effects.
+    pub(crate) metadata_effect: CopyMetadataEffect,
 }
 
 impl Default for LocalCopyDirStats {
@@ -47,6 +51,7 @@ impl Default for LocalCopyDirStats {
             overwritten: 0,
             non_atomic_publication: false,
             files_durable: true,
+            metadata_effect: CopyMetadataEffect::None,
         }
     }
 }
@@ -116,6 +121,10 @@ impl LocalCopyDirStats {
     /// Reports a successful copy that skipped every entry without publishing.
     #[inline]
     pub(crate) const fn was_fully_skipped(&self) -> bool {
-        self.skipped > 0 && self.files == 0 && self.directories == 0 && self.overwritten == 0
+        self.skipped > 0
+            && self.files == 0
+            && self.directories == 0
+            && self.overwritten == 0
+            && matches!(self.metadata_effect, CopyMetadataEffect::None)
     }
 }

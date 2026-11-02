@@ -22,6 +22,7 @@ pub(crate) enum NativeToken {
     Normal(OsString, LocalResolutionOrigin),
     Current(LocalResolutionOrigin),
     Parent(LocalResolutionOrigin),
+    RequireDirectory,
 }
 
 /// Measures in constant space, checks the session budget, then builds native
@@ -34,7 +35,14 @@ pub(crate) fn tokenize(
     let (components, bytes) =
         measure_path(path).ok_or_else(|| super::session::overflow_error(LocalResourceKind::PendingResolutionBytes))?;
     session.check_pending(components, bytes)?;
-    tokens_after_check(path, origin, components)
+    let trailing_directory_marker = has_trailing_separator(path);
+    let capacity = token_capacity(components, trailing_directory_marker)
+        .ok_or_else(|| super::session::overflow_error(LocalResourceKind::PendingResolutionComponents))?;
+    tokens_after_check(path, origin, capacity)
+}
+
+fn token_capacity(components: usize, trailing_directory_marker: bool) -> Option<usize> {
+    components.checked_add(usize::from(trailing_directory_marker))
 }
 
 fn tokens_after_check(path: &Path, origin: LocalResolutionOrigin, capacity: usize) -> LocalResult<Vec<NativeToken>> {
@@ -110,7 +118,27 @@ fn tokens_after_check(path: &Path, origin: LocalResolutionOrigin, capacity: usiz
             });
         }
     }
+    if has_trailing_separator(path) {
+        tokens.push(NativeToken::RequireDirectory);
+    }
     Ok(tokens)
+}
+
+fn has_trailing_separator(path: &Path) -> bool {
+    #[cfg(unix)]
+    {
+        use std::os::unix::ffi::OsStrExt;
+        path.as_os_str().as_bytes().last() == Some(&b'/')
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::ffi::OsStrExt;
+        path.as_os_str().encode_wide().last().is_some_and(is_separator)
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        path.to_string_lossy().ends_with(std::path::MAIN_SEPARATOR)
+    }
 }
 
 /// Computes the complete pending component and byte snapshot without
@@ -391,6 +419,48 @@ mod tests {
     #[test]
     fn resolution_session_native_measurement_reports_overflow() {
         assert_eq!(super::checked_sum(usize::MAX, 1), None);
+        assert_eq!(super::token_capacity(usize::MAX, true), None);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn tokenizer_preserves_one_trailing_directory_marker_without_budget_charge() {
+        let origin = LocalResolutionOrigin::Input;
+        let path = Path::new("///a//");
+        assert_eq!(measure_path(path), Some((1, 2)));
+        assert_eq!(
+            tokenize(path, origin, &session(1, 2)).unwrap(),
+            vec![NativeToken::Normal("a".into(), origin), NativeToken::RequireDirectory,]
+        );
+        assert_eq!(
+            tokenize(Path::new("/"), origin, &session(0, 0)).unwrap(),
+            vec![NativeToken::RequireDirectory]
+        );
+        assert_eq!(
+            tokenize(Path::new("a/."), origin, &session(2, 4)).unwrap(),
+            vec![NativeToken::Normal("a".into(), origin), NativeToken::Current(origin)]
+        );
+        use std::os::unix::ffi::OsStrExt;
+        use std::os::unix::ffi::OsStringExt;
+        let non_utf8 = std::ffi::OsString::from_vec(vec![b'x', 0xff, b'/']);
+        assert!(matches!(
+            tokenize(Path::new(&non_utf8), origin, &session(1, 3)).unwrap().as_slice(),
+            [NativeToken::Normal(name, _), NativeToken::RequireDirectory]
+                if name.as_bytes() == [b'x', 0xff]
+        ));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn tokenizer_preserves_windows_trailing_directory_separators() {
+        for path in [r"C:\a\", "C:/a/"] {
+            assert!(matches!(
+                tokenize(Path::new(path), LocalResolutionOrigin::Input, &session(1, 4))
+                    .unwrap()
+                    .last(),
+                Some(NativeToken::RequireDirectory)
+            ));
+        }
     }
 
     #[test]

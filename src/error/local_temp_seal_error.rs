@@ -15,6 +15,27 @@ use crate::LocalTempFile;
 /// the standard error source chain. The retained temporary file remains owned
 /// by this error until it is extracted with [`Self::into_resource`] or the
 /// error is dropped.
+///
+/// # Examples
+///
+/// Preserve the resource owner if explicit cleanup fails:
+///
+/// ```
+/// use qubit_local_files::LocalFileError;
+/// use qubit_local_files::LocalTempFile;
+/// use qubit_local_files::error::LocalTempSealError;
+///
+/// fn cleanup_after_seal_failure(
+///     failure: LocalTempSealError,
+/// ) -> Result<(), (LocalFileError, LocalTempFile)> {
+///     let _observed_access = failure.access_state();
+///     let mut resource = failure.into_resource();
+///     match resource.cleanup() {
+///         Ok(()) => Ok(()),
+///         Err(error) => Err((error, resource)),
+///     }
+/// }
+/// ```
 #[derive(Debug)]
 pub struct LocalTempSealError {
     cause: LocalFileError,

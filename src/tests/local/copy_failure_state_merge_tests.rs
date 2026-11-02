@@ -15,9 +15,40 @@ use crate::LocalAtomicDestinationState;
 use crate::LocalCopyDirError;
 use crate::LocalCopyDirStage;
 use crate::LocalCopyDirStats;
+use crate::local::CopyMetadataEffect;
 use crate::outcome::LocalCopyFailure;
 use crate::outcome::LocalCopyFailureState;
 use crate::outcome::merge_copy_failure_state;
+
+#[test]
+fn test_directory_metadata_effect_changes_failure_state_without_changing_counters() {
+    let failure_for = |metadata_effect| {
+        let error = LocalCopyDirError::new(
+            LocalCopyDirStage::PrepareDestination,
+            PathBuf::from("source"),
+            PathBuf::from("target"),
+            LocalCopyDirStats {
+                metadata_effect,
+                ..LocalCopyDirStats::default()
+            },
+            io::Error::other("later failure"),
+        )
+        .with_atomic_destination_state(LocalAtomicDestinationState::Unchanged);
+        LocalCopyFailure::from_copy_dir_error(Path::new("source"), Path::new("target"), error)
+    };
+
+    let applied = failure_for(CopyMetadataEffect::Applied);
+    assert_eq!(LocalCopyFailureState::PartiallyPublished, applied.state());
+    assert_eq!(0, applied.partial_stats().files());
+    assert_eq!(0, applied.partial_stats().directories());
+    assert_eq!(0, applied.partial_stats().overwritten());
+
+    let indeterminate = failure_for(CopyMetadataEffect::Indeterminate);
+    assert_eq!(LocalCopyFailureState::Indeterminate, indeterminate.state());
+    assert_eq!(0, indeterminate.partial_stats().files());
+    assert_eq!(0, indeterminate.partial_stats().directories());
+    assert_eq!(0, indeterminate.partial_stats().overwritten());
+}
 
 #[test]
 fn test_copy_failure_state_merges_independent_destination_effects() {

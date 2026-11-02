@@ -42,6 +42,7 @@ use super::sync_parent_directory;
 use super::test_io_fault;
 use crate::error::LocalFileEffectState;
 use crate::local::internal::internal_copy_options;
+use crate::local::internal::path_operations::canonicalize_existing_prefix;
 
 impl HostLocalFileSystem {
     /// Copies through a Host namespace using an explicit symbolic-link policy.
@@ -200,6 +201,20 @@ impl HostLocalFileSystem {
                     .with_target(target.to_path_buf()),
             )
         })?;
+        if source_kind == crate::LocalFileKind::Directory {
+            let canonical_source = fs::canonicalize(source)
+                .map_err(|error| copy_failure_unchanged(copy_io_error(source, target, error)))?;
+            let canonical_target = canonicalize_existing_prefix(target)
+                .map_err(|error| copy_failure_unchanged(copy_io_error(source, target, error)))?;
+            if canonical_source.starts_with(&canonical_target) || canonical_target.starts_with(&canonical_source) {
+                return Err(copy_failure_unchanged(
+                    LocalFileError::new(LocalFileErrorKind::InvalidPath, LocalFileOperation::Copy)
+                        .with_reason("source and destination directories must not overlap")
+                        .with_path(source.to_path_buf())
+                        .with_target(target.to_path_buf()),
+                ));
+            }
+        }
         reject_copy_alias(source, target, &source_metadata).map_err(copy_failure_unchanged)?;
         if crate::local::copy_source_guarantee_unavailable(source_kind, options.atomicity(), options.durability()) {
             return Err(copy_failure_unchanged(
@@ -243,7 +258,11 @@ impl HostLocalFileSystem {
                 LocalCopyMethod::Recursive,
                 false,
                 false,
-                if stats.files > 0 || stats.directories > 0 || stats.overwritten > 0 {
+                if stats.metadata_effect == crate::local::internal::CopyMetadataEffect::Applied
+                    || stats.files > 0
+                    || stats.directories > 0
+                    || stats.overwritten > 0
+                {
                     options.preserve_metadata()
                 } else {
                     crate::LocalMetadataPreservePolicy::None

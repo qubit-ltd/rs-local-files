@@ -51,6 +51,7 @@ mod local_root_atomic_writer_support;
 
 pub use internal::CopyBudget;
 pub use internal::CopyDestinationAction;
+pub(crate) use internal::CopyMetadataEffect;
 pub(crate) use internal::CopyTreeBackend;
 pub(crate) use internal::CopyTreeFrameContext;
 pub(crate) use internal::DeleteBackend;

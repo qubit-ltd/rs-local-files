@@ -33,6 +33,7 @@ use crate::LocalCopyDirStats;
 use crate::LocalCopyFailureState;
 use crate::local::CopyBudget;
 use crate::local::CopyDestinationAction;
+use crate::local::internal::CopyMetadataEffect;
 use crate::local::internal::CopyTreeBackend;
 use crate::local::internal::CopyTreeFrameContext;
 use crate::local::internal::copy_tree;
@@ -230,13 +231,20 @@ impl CopyTreeBackend for HostCopyBackend {
     ) -> Result<(), crate::LocalCopyDirError> {
         let _ = self.active_sources.remove(frame.source_identity());
         if self.options.preserves_permissions() {
-            with_copy_context(
-                fs::set_permissions(frame.dst(), frame.source_permissions().clone()),
-                LocalCopyDirStage::PreservePermissions,
-                frame.src(),
-                frame.dst(),
-                stats,
-            )?;
+            let previous_effect = stats.metadata_effect;
+            stats.metadata_effect = CopyMetadataEffect::Indeterminate;
+            if let Err(source_error) = fs::set_permissions(frame.dst(), frame.source_permissions().clone()) {
+                return Err(copy_dir_error(
+                    LocalCopyDirStage::PreservePermissions,
+                    frame.src(),
+                    frame.dst(),
+                    stats,
+                    source_error,
+                ));
+            }
+            if previous_effect != CopyMetadataEffect::Indeterminate {
+                stats.metadata_effect = CopyMetadataEffect::Applied;
+            }
         }
         Ok(())
     }
@@ -476,6 +484,7 @@ mod error_contract_tests {
     use crate::LocalCopyDirStage;
     use crate::LocalCopyDirStats;
     use crate::local::CopyBudget;
+    use crate::local::CopyMetadataEffect;
     use crate::local::internal::CopyTreeBackend;
 
     #[test]
@@ -559,7 +568,9 @@ mod error_contract_tests {
         assert_eq!(error.source_path(), source);
         assert_eq!(error.destination_path(), destination);
         assert_eq!(error.error().kind(), ErrorKind::NotFound);
-        assert_eq!(error.stats(), &recorded);
+        let mut expected = recorded;
+        expected.metadata_effect = CopyMetadataEffect::Indeterminate;
+        assert_eq!(error.stats(), &expected);
         assert!(backend.active_sources.is_empty());
         assert!(source.is_dir());
     }

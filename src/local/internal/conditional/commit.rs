@@ -34,18 +34,8 @@ use crate::policy::LocalFileSyncRequirement;
 use crate::recovery::LocalRecoveryFileRole;
 
 #[allow(clippy::result_large_err)]
-/// Runs the conditional publication protocol using the backend's retained
-/// namespace authority.
-///
-/// The candidate is flushed and digested, then copied to an independently
-/// verified recovery entry before the target precondition is checked. After
-/// publication, the installed entry and displaced entries are verified. A
-/// detected post-publication conflict is rolled back only after rechecking the
-/// installed candidate and displaced entry; uncertainty retains the observed
-/// entries for recovery. A successful return means publication and required
-/// synchronization completed; cleanup failures are returned alongside any
-/// retained files and do not change that success. This protocol does not
-/// provide a strict compare-and-swap guarantee.
+/// Test-only forwarding helper; see [`commit_conditional_with_directory`] for
+/// the protocol contract.
 #[cfg(test)]
 pub(crate) fn commit_conditional<D, B>(
     backend: B,
@@ -60,8 +50,21 @@ where
     commit_conditional_with_directory(backend, precondition, options, bytes_written, None)
 }
 
-/// Executes the commit protocol and binds fallback diagnostics to the resolver
-/// snapshot captured when the public writer was opened.
+/// Executes conditional publication using the backend's retained namespace
+/// authority and binds fallback diagnostics to the resolver snapshot captured
+/// when the public writer was opened. The directory snapshot is diagnostic
+/// context for recovery paths; it does not grant additional namespace
+/// authority.
+///
+/// The candidate is flushed and digested, then copied to an independently
+/// verified recovery entry before the target precondition is checked. After
+/// publication, the installed entry and displaced entries are verified. A
+/// detected post-publication conflict is rolled back only after rechecking the
+/// installed candidate and displaced entry; uncertainty retains the observed
+/// entries for recovery. A successful return means publication and required
+/// synchronization completed; cleanup failures are returned alongside any
+/// retained files and do not change that success. This protocol does not
+/// provide a strict compare-and-swap guarantee.
 #[allow(clippy::result_large_err)]
 pub(crate) fn commit_conditional_with_directory<D, B>(
     mut backend: B,

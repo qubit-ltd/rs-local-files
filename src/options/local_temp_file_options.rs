@@ -63,7 +63,12 @@ impl LocalTempFileOptions {
         self.suffix.as_deref()
     }
 
-    /// Returns the optional maximum random-name creation attempts.
+    /// Returns the optional maximum number of random-name creation attempts.
+    ///
+    /// `None` leaves collision retries unbounded. A positive value includes
+    /// the first attempt; only name collisions are retried. `Some(0)` is
+    /// invalid and is rejected by the consuming creation operation before
+    /// side effects.
     #[inline]
     pub const fn max_attempts(&self) -> Option<usize> {
         self.max_attempts
@@ -126,17 +131,20 @@ impl LocalTempFileOptions {
         self
     }
 
-    /// Sets the maximum number of random-name attempts.
+    /// Sets the maximum number of random-name creation attempts.
     ///
     /// # Parameters
     ///
-    /// - `max_attempts`: Positive attempt count.
+    /// - `max_attempts`: Positive attempt count, including the first attempt.
+    ///   Only name collisions are retried. Zero is invalid and is rejected when
+    ///   the options are consumed by a creation operation, before side effects.
     pub const fn with_max_attempts(mut self, max_attempts: usize) -> Self {
         self.max_attempts = Some(max_attempts);
         self
     }
 
-    /// Removes the random-name attempt budget.
+    /// Removes the random-name attempt budget, leaving name-collision retries
+    /// unbounded.
     #[inline]
     pub const fn without_max_attempts(mut self) -> Self {
         self.max_attempts = None;

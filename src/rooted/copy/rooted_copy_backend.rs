@@ -355,7 +355,7 @@ impl CopyTreeBackend for RootedCopyBackend<'_> {
             &frame.destination,
             frame.metadata,
             self.options,
-            *stats,
+            stats,
         )?;
         self.active_sources.pop();
         // Close the reader before making its capacity available again.
@@ -480,7 +480,9 @@ fn validate_source_directory(
     active_sources: &[Path],
     statistics: Statistics,
 ) -> Result<(), Error> {
-    if destination_root.as_path().starts_with(source.as_path()) {
+    if destination_root.as_path().starts_with(source.as_path())
+        || source.as_path().starts_with(destination_root.as_path())
+    {
         return Err(error(
             Stage::InspectSource,
             source,
@@ -488,7 +490,7 @@ fn validate_source_directory(
             statistics,
             io::Error::new(
                 ErrorKind::InvalidInput,
-                "rooted tree destination must not be inside the source",
+                "rooted destination must not be inside the source or overlap its ancestor",
             ),
         ));
     }

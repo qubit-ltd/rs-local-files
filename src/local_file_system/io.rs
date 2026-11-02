@@ -183,6 +183,8 @@ impl LocalFileSystem {
         let resolver_started = std::time::Instant::now();
         let path = path_mode.original();
         let request_path = path_mode.request_path();
+        let fixed_path_requires_directory =
+            matches!(&path_mode, ObservedReadPath::FixedRelative { .. }) && has_directory_qualification(path);
         let read_options = options.read_options().unwrap_or(&self.defaults.read);
         let symlink_policy = self.read_symlink_policy(read_options, None);
         let mut resolution = self.core.resolution.clone();
@@ -270,6 +272,13 @@ impl LocalFileSystem {
             ObservedReadPath::FixedRelative { .. } => None,
         };
         let result = (|| -> LocalResult<LocalObservedReader> {
+            if fixed_path_requires_directory {
+                return Err(
+                    LocalFileError::new(LocalFileErrorKind::NotDirectory, LocalFileOperation::OpenReader)
+                        .with_reason("a directory-qualified path cannot be used as a file")
+                        .with_path(error_path.clone()),
+                );
+            }
             if fixed_resolved.is_some()
                 && let Some(budget) = path_budget.as_mut()
             {
@@ -1098,6 +1107,35 @@ impl LocalFileSystem {
                 resolver.current_directory(),
             )
         })
+    }
+}
+
+fn has_directory_qualification(path: &Path) -> bool {
+    #[cfg(unix)]
+    {
+        use std::os::unix::ffi::OsStrExt;
+        let bytes = path.as_os_str().as_bytes();
+        if bytes.is_empty() || bytes.last() == Some(&b'/') {
+            return true;
+        }
+        let component = bytes.rsplit(|byte| *byte == b'/').next().unwrap_or_default();
+        component == b"." || component == b".."
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::ffi::OsStrExt;
+        let units = path.as_os_str().encode_wide().collect::<Vec<_>>();
+        let is_separator = |unit: &u16| *unit == b'/' as u16 || *unit == b'\\' as u16;
+        if units.is_empty() || units.last().is_some_and(is_separator) {
+            return true;
+        }
+        let component = units.rsplit(is_separator).next().unwrap_or_default();
+        component == [b'.' as u16] || component == [b'.' as u16, b'.' as u16]
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        let _ = path;
+        false
     }
 }
 

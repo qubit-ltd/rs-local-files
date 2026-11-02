@@ -24,6 +24,7 @@ use crate::LocalCopyStats;
 use crate::LocalFileError;
 use crate::LocalFileOperation;
 use crate::LocalResourceLimitError;
+use crate::local::CopyMetadataEffect;
 
 /// Failure details retained when a unified copy does not complete.
 ///
@@ -114,6 +115,7 @@ impl LocalCopyFailure {
     pub(crate) fn from_copy_dir_error(source: &Path, target: &Path, error: LocalCopyDirError) -> Self {
         let failure_hint = error.failure_state();
         let atomic_destination_state = error.atomic_destination_state();
+        let metadata_effect = error.stats().metadata_effect;
         let (stage, failed_source, failed_target, stats, staging_path, cleanup_error, primary) = error.into_parts();
         let partial_stats = LocalCopyStats::from_internal(stats);
         let inferred_state = match atomic_destination_state {
@@ -121,13 +123,26 @@ impl LocalCopyFailure {
                 LocalCopyFailureState::Indeterminate
             }
             Some(crate::LocalAtomicDestinationState::Unchanged) => {
-                if partial_stats.files() > 0 || partial_stats.directories() > 0 {
+                if metadata_effect == CopyMetadataEffect::Indeterminate {
+                    LocalCopyFailureState::Indeterminate
+                } else if partial_stats.files() > 0
+                    || partial_stats.directories() > 0
+                    || metadata_effect == CopyMetadataEffect::Applied
+                {
                     LocalCopyFailureState::PartiallyPublished
                 } else {
                     LocalCopyFailureState::Unchanged
                 }
             }
             _ => copy_failure_state(stage, partial_stats),
+        };
+        let inferred_state = match metadata_effect {
+            CopyMetadataEffect::None => inferred_state,
+            CopyMetadataEffect::Applied if inferred_state == LocalCopyFailureState::Unchanged => {
+                LocalCopyFailureState::PartiallyPublished
+            }
+            CopyMetadataEffect::Applied => inferred_state,
+            CopyMetadataEffect::Indeterminate => LocalCopyFailureState::Indeterminate,
         };
         let state = merge_copy_failure_state(inferred_state, failure_hint);
         let resource_limit = primary

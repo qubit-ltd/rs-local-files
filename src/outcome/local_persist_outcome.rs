@@ -15,6 +15,37 @@ use crate::LocalPersistCleanupState;
 use crate::LocalPersistMethod;
 
 /// Guarantees actually achieved while persisting a temporary resource.
+///
+/// # Examples
+///
+/// Inspect publication and cleanup independently. A cleanup error does not
+/// undo a successful publication; handle a residual sandbox through the
+/// application's recovery flow rather than publishing again or deleting by
+/// path alone.
+///
+/// ```
+/// use qubit_local_files::LocalFileSystem;
+/// use qubit_local_files::options::LocalTempFileOptions;
+/// use qubit_local_files::outcome::LocalPersistCleanupState;
+///
+/// let fixture = tempfile::tempdir()?;
+/// let filesystem = LocalFileSystem::host()?;
+/// let temporary = filesystem.create_temp_file_with_options(
+///     &LocalTempFileOptions::new().with_parent(fixture.path()),
+/// )?;
+/// let outcome = temporary.keep()?;
+/// assert!(outcome.path().is_absolute());
+/// let _achieved_guarantees = (outcome.atomic(), outcome.durable());
+/// if outcome.cleanup_state() == LocalPersistCleanupState::Complete {
+///     assert!(outcome.cleanup_error().is_none());
+///     std::fs::remove_file(outcome.path())?;
+/// } else {
+///     // Publication succeeded. Return these facts to the application's recovery
+///     // flow instead of publishing again or deleting a sandbox by path alone.
+///     assert!(outcome.cleanup_error().is_some());
+/// }
+/// # Ok::<(), Box<dyn std::error::Error>>(())
+/// ```
 #[must_use]
 #[derive(Debug)]
 pub struct LocalPersistOutcome {

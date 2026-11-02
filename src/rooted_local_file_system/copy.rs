@@ -132,6 +132,17 @@ impl RootedLocalFileSystem {
                     .with_target(target.to_path_buf()),
             )
         })?;
+        if directory
+            && (target_path.as_path().starts_with(source_path.as_path())
+                || source_path.as_path().starts_with(target_path.as_path()))
+        {
+            return Err(copy_failure_unchanged(
+                LocalFileError::new(LocalFileErrorKind::InvalidPath, LocalFileOperation::Copy)
+                    .with_reason("source and destination directories must not overlap")
+                    .with_path(source.to_path_buf())
+                    .with_target(target.to_path_buf()),
+            ));
+        }
         if crate::local::copy_source_guarantee_unavailable(source_kind, options.atomicity(), options.durability()) {
             return Err(copy_failure_unchanged(
                 LocalFileError::new(LocalFileErrorKind::RequirementNotMet, LocalFileOperation::Copy)
@@ -236,7 +247,11 @@ impl RootedLocalFileSystem {
             },
             !directory && stats.atomic_publication(),
             durable,
-            if stats.files > 0 || stats.directories > 0 || stats.overwritten > 0 {
+            if stats.metadata_effect == crate::local::CopyMetadataEffect::Applied
+                || stats.files > 0
+                || stats.directories > 0
+                || stats.overwritten > 0
+            {
                 options.preserve_metadata()
             } else {
                 crate::LocalMetadataPreservePolicy::None

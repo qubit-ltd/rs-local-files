@@ -417,6 +417,9 @@ fn resolve_rooted_symlinks(
                 cursor = None;
             }
             ResolutionStep::Current => ensure_resolved_prefix_is_directory(root, &resolved, original, operation)?,
+            ResolutionStep::RequireDirectory => {
+                ensure_resolved_prefix_is_directory(root, &resolved, original, operation)?;
+            }
             ResolutionStep::Parent => {
                 ensure_resolved_prefix_is_directory(root, &resolved, original, operation)?;
                 if resolved.pop().is_none() {
@@ -537,7 +540,7 @@ fn resolve_rooted_symlinks(
                         .with_path(original.to_path_buf()));
                 }
                 let identity = match metadata.native_identity() {
-                    Some((device, file)) => SymlinkIdentity::Native(device, file),
+                    Some((device, file)) => SymlinkIdentity::Native(device, file, candidate.as_path().to_path_buf()),
                     None => SymlinkIdentity::NamespacePath(candidate.as_path().to_path_buf()),
                 };
                 if !active_symlinks.insert(identity.clone()) {
@@ -706,7 +709,7 @@ fn pending_measure(steps: &std::collections::VecDeque<ResolutionStep>) -> Option
     let unit_bytes = native_unit_bytes();
     for step in steps {
         match step {
-            ResolutionStep::ResetRoot | ResolutionStep::EndSymlink(_) => {}
+            ResolutionStep::ResetRoot | ResolutionStep::RequireDirectory | ResolutionStep::EndSymlink(_) => {}
             ResolutionStep::Current => {
                 components = components.checked_add(1)?;
                 bytes = bytes.checked_add(checked_native_units(2, unit_bytes)?)?;
@@ -762,6 +765,7 @@ fn steps_from_path(
             NativeToken::Current(_) => steps.push_back(ResolutionStep::Current),
             NativeToken::Parent(_) => steps.push_back(ResolutionStep::Parent),
             NativeToken::Normal(name, origin) => steps.push_back(ResolutionStep::Normal(name, origin)),
+            NativeToken::RequireDirectory => steps.push_back(ResolutionStep::RequireDirectory),
         }
     }
     Ok(steps)

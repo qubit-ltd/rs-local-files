@@ -25,6 +25,7 @@ use crate::LocalAtomicWriteOptions;
 use crate::LocalDurabilityRequirement;
 use crate::local::CopyBudget;
 use crate::local::CopyDestinationAction;
+use crate::local::CopyMetadataEffect;
 use crate::local::LocalCopyDirError as Error;
 use crate::local::LocalCopyDirOptions as Options;
 use crate::local::LocalCopyDirStage as Stage;
@@ -521,29 +522,33 @@ pub(super) fn preserve_permissions(
     destination: &Path,
     metadata: Metadata,
     options: &Options,
-    statistics: Statistics,
+    statistics: &mut Statistics,
 ) -> Result<(), Error> {
     if options.preserves_permissions() {
+        let previous_effect = statistics.metadata_effect;
+        statistics.metadata_effect = CopyMetadataEffect::Indeterminate;
         #[cfg(feature = "test-support")]
         if crate::local::test_support_enabled("rooted-copy-set-permissions") {
             return Err(error(
                 Stage::PreservePermissions,
                 source,
                 destination,
-                statistics,
+                *statistics,
                 io::Error::from(ErrorKind::PermissionDenied),
             ));
         }
-        root.set_permissions(destination, metadata.permissions())
-            .map_err(|source_error| {
-                error(
-                    Stage::PreservePermissions,
-                    source,
-                    destination,
-                    statistics,
-                    source_error,
-                )
-            })?;
+        if let Err(source_error) = root.set_permissions(destination, metadata.permissions()) {
+            return Err(error(
+                Stage::PreservePermissions,
+                source,
+                destination,
+                *statistics,
+                source_error,
+            ));
+        }
+        if previous_effect != CopyMetadataEffect::Indeterminate {
+            statistics.metadata_effect = CopyMetadataEffect::Applied;
+        }
     }
     Ok(())
 }

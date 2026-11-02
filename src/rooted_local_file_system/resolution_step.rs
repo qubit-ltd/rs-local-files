@@ -20,6 +20,8 @@ pub(super) enum ResolutionStep {
     Current,
     /// Resolves the real current directory before removing a component.
     Parent,
+    /// Requires the current resolved entry to be a directory.
+    RequireDirectory,
     /// Appends one normal namespace component.
     Normal(
         /// Native component to append to the pending resolution queue.

@@ -17,7 +17,10 @@
 /// `LocalCopyOptions::with_create_parent`, a failed copy can therefore report
 /// [`Unchanged`](Self::Unchanged) while a newly created parent directory
 /// remains. Such directories are not automatically removed because concurrent
-/// operations may already be using them.
+/// operations may already be using them. Directory permission changes are
+/// destination effects: a confirmed change makes a later failure at least
+/// [`PartiallyPublished`](Self::PartiallyPublished), while an uncertain native
+/// permission result is reported as [`Indeterminate`](Self::Indeterminate).
 ///
 /// # Examples
 ///

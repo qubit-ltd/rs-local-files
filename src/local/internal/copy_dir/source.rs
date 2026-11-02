@@ -46,7 +46,7 @@ pub(super) fn inspect_copy_source_directory(
         ));
     }
     let canonical_source = fs::canonicalize(src)?;
-    reject_destination_inside_source(src, &canonical_source, destination_root)?;
+    reject_destination_overlap(src, &canonical_source, destination_root)?;
     let source_identity = DirectoryIdentity::from_metadata(&source_metadata, &canonical_source);
     Ok((source_metadata, source_identity))
 }
@@ -96,7 +96,8 @@ pub(super) fn is_real_directory(metadata: &fs::Metadata) -> bool {
     metadata.is_dir() && !metadata.file_type().is_symlink()
 }
 
-/// Rejects destinations equal to or nested under a source directory.
+/// Rejects a destination that is equal to, above, or nested under a source
+/// directory.
 ///
 /// # Parameters
 ///
@@ -106,13 +107,13 @@ pub(super) fn is_real_directory(metadata: &fs::Metadata) -> bool {
 ///
 /// # Errors
 ///
-/// Returns `InvalidInput` when the destination is inside the source.
-fn reject_destination_inside_source(src: &Path, canonical_source: &Path, destination: &Path) -> Result<()> {
-    if destination == canonical_source || destination.starts_with(canonical_source) {
+/// Returns `InvalidInput` when the source and destination directories overlap.
+fn reject_destination_overlap(src: &Path, canonical_source: &Path, destination: &Path) -> Result<()> {
+    if destination.starts_with(canonical_source) || canonical_source.starts_with(destination) {
         return Err(Error::new(
             ErrorKind::InvalidInput,
             format!(
-                "destination must not be inside source: source={}, destination={}",
+                "destination must not be inside source or be its ancestor: source={}, destination={}",
                 src.display(),
                 destination.display(),
             ),

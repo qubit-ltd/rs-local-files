@@ -17,6 +17,8 @@ pub(super) enum SymlinkIdentity {
         u64,
         /// Native file identifier within the device or volume.
         u64,
+        /// Authority-relative coordinate of this symbolic-link entry.
+        PathBuf,
     ),
     /// Namespace path used when native identity is unavailable.
     NamespacePath(
