@@ -39,19 +39,15 @@ enum StagedIdentity {
 }
 
 fn file_identity(file: &File) -> Option<StagedIdentity> {
-    let metadata = file.metadata().ok()?;
     #[cfg(unix)]
     {
+        let metadata = file.metadata().ok()?;
         use std::os::unix::fs::MetadataExt;
         Some(StagedIdentity::Unix(metadata.dev(), metadata.ino()))
     }
     #[cfg(windows)]
     {
-        use std::os::windows::fs::MetadataExt;
-        Some(StagedIdentity::Windows(
-            metadata.volume_serial_number()?,
-            metadata.file_index()?,
-        ))
+        windows_file_identity(file).map(|(volume, index)| StagedIdentity::Windows(volume, index))
     }
 }
 
@@ -71,12 +67,35 @@ fn path_identity(path: &Path) -> std::io::Result<Option<StagedIdentity>> {
     }
     #[cfg(windows)]
     {
-        use std::os::windows::fs::MetadataExt;
-        Ok(metadata
-            .volume_serial_number()
-            .zip(metadata.file_index())
+        use std::os::windows::fs::OpenOptionsExt;
+
+        use windows_sys::Win32::Storage::FileSystem::FILE_FLAG_OPEN_REPARSE_POINT;
+
+        let file = fs::OpenOptions::new()
+            .read(true)
+            .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
+            .open(path)?;
+        Ok(windows_file_identity(&file)
             .map(|(volume, index)| StagedIdentity::Windows(volume, index)))
     }
+}
+
+#[cfg(windows)]
+fn windows_file_identity(file: &File) -> Option<(u32, u64)> {
+    use std::os::windows::io::AsRawHandle;
+
+    use windows_sys::Win32::Storage::FileSystem::BY_HANDLE_FILE_INFORMATION;
+    use windows_sys::Win32::Storage::FileSystem::GetFileInformationByHandle;
+
+    let mut information = BY_HANDLE_FILE_INFORMATION::default();
+    // SAFETY: `file` owns a live handle and `information` is a writable buffer
+    // with the layout required by `GetFileInformationByHandle`.
+    if unsafe { GetFileInformationByHandle(file.as_raw_handle(), &raw mut information) } == 0 {
+        return None;
+    }
+    let index =
+        (u64::from(information.nFileIndexHigh) << 32) | u64::from(information.nFileIndexLow);
+    Some((information.dwVolumeSerialNumber, index))
 }
 
 impl StagedFile {

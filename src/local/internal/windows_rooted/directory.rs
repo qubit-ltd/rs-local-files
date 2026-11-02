@@ -23,6 +23,8 @@ use windows_sys::Wdk::Storage::FileSystem::FILE_CREATE;
 use windows_sys::Wdk::Storage::FileSystem::FILE_DIRECTORY_FILE;
 use windows_sys::Wdk::Storage::FileSystem::FILE_OPEN;
 use windows_sys::Wdk::Storage::FileSystem::FILE_OPEN_IF;
+use windows_sys::Win32::Foundation::GENERIC_READ;
+use windows_sys::Win32::Foundation::GENERIC_WRITE;
 use windows_sys::Win32::Foundation::INVALID_HANDLE_VALUE;
 use windows_sys::Win32::Storage::FileSystem::CreateFileW;
 use windows_sys::Win32::Storage::FileSystem::DELETE;
@@ -61,7 +63,7 @@ pub(crate) fn create_rooted_temp_child(
     parent: &File,
     name: &OsStr,
     directory: bool,
-) -> Result<File, NativePrivateCreateError> {
+) -> std::result::Result<File, NativePrivateCreateError> {
     let access = if directory {
         FILE_LIST_DIRECTORY
             | FILE_READ_ATTRIBUTES
@@ -72,11 +74,7 @@ pub(crate) fn create_rooted_temp_child(
             | DELETE
             | SYNCHRONIZE
     } else {
-        windows_sys::Win32::Storage::FileSystem::GENERIC_READ
-            | windows_sys::Win32::Storage::FileSystem::GENERIC_WRITE
-            | FILE_READ_ATTRIBUTES
-            | DELETE
-            | SYNCHRONIZE
+        GENERIC_READ | GENERIC_WRITE | FILE_READ_ATTRIBUTES | DELETE | SYNCHRONIZE
     };
     nt_open_at(
         parent,
@@ -89,7 +87,10 @@ pub(crate) fn create_rooted_temp_child(
             windows_sys::Wdk::Storage::FileSystem::FILE_NON_DIRECTORY_FILE
         },
     )
-    .map_err(|source| NativePrivateCreateError { source, retained: None })
+    .map_err(|source| NativePrivateCreateError {
+        source,
+        retained: None,
+    })
 }
 
 /// Opens a lazy reader for immediate children of the opened root.
