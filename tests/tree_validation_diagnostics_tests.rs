@@ -20,6 +20,7 @@ use qubit_local_files::options::LocalTempDirectoryOptions;
 use qubit_local_files::options::LocalTreePublishOptions;
 use qubit_local_files::outcome::LocalFileKind;
 use qubit_local_files::outcome::LocalTreeMutationState;
+use qubit_local_files::policy::LocalOwnerAccessPolicy;
 
 fn make_stage(
     rooted: bool,
@@ -91,7 +92,8 @@ fn diagnostics_cover_host_and_rooted_exact_set_failures() {
                 &LocalTreeValidationOptions::new(),
             )
             .expect_err("entry kind mismatch");
-        assert_requirement(&error, &root.join("wrong-kind"), "kind");
+        assert_requirement(&error, &root.join("wrong-kind"), "kind mismatch");
+        assert!(error.to_string().contains("expected Directory, observed File"));
         stage.cleanup().expect("cleanup");
 
         let (_fixture, _filesystem, stage, root) = make_stage(rooted);
@@ -217,4 +219,43 @@ fn hard_link_and_special_entry_failures_have_context() {
         .expect_err("special file rejected");
     assert_requirement(&error, &root.join("fifo"), "special file");
     stage.cleanup().expect("cleanup");
+}
+
+#[cfg(unix)]
+#[test]
+fn owner_access_policy_failures_include_root_and_entry_paths() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let (_fixture, _filesystem, stage, root) = make_stage(false);
+    let root_mode = std::fs::metadata(&root).expect("root metadata").permissions().mode() & 0o777;
+    let root_error = stage
+        .verify_entries(
+            &[],
+            &LocalTreeValidationOptions::new()
+                .with_owner_access_policy(LocalOwnerAccessPolicy::new().with_unix_modes(root_mode ^ 0o100, 0o644)),
+        )
+        .expect_err("unexpected root access mode");
+    assert_eq!(root_error.path(), Some(root.as_path()));
+    assert!(root_error.reason().expect("root reason").contains("owner-access"));
+    stage.cleanup().expect("cleanup root stage");
+
+    let (_fixture, _filesystem, mut stage, root) = make_stage(false);
+    write_file(&mut stage, "private-file");
+    let root_mode = std::fs::metadata(&root).expect("root metadata").permissions().mode() & 0o777;
+    let file_path = root.join("private-file");
+    let file_mode = std::fs::metadata(&file_path)
+        .expect("file metadata")
+        .permissions()
+        .mode()
+        & 0o777;
+    let entry_error = stage
+        .verify_entries(
+            &[entry("private-file", LocalFileKind::File)],
+            &LocalTreeValidationOptions::new()
+                .with_owner_access_policy(LocalOwnerAccessPolicy::new().with_unix_modes(root_mode, file_mode ^ 0o100)),
+        )
+        .expect_err("unexpected file access mode");
+    assert_eq!(entry_error.path(), Some(root.join("private-file").as_path()));
+    assert!(entry_error.reason().expect("entry reason").contains("owner-access"));
+    stage.cleanup().expect("cleanup entry stage");
 }

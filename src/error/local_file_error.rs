@@ -55,6 +55,8 @@ pub struct LocalFileError {
     target: Option<PathBuf>,
     /// Stable explanation for policy or validation failures.
     reason: Option<&'static str>,
+    /// Additional diagnostic detail for failures whose stable reason is shared.
+    detail: Option<Box<str>>,
     /// Typed source retained from the originating failure.
     source: Option<LocalFileErrorSource>,
     /// Namespace effect explicitly established by an operation scheduler.
@@ -81,6 +83,7 @@ impl LocalFileError {
             path: None,
             target: None,
             reason: None,
+            detail: None,
             source: None,
             effect_state: None,
             cleanup_error: None,
@@ -123,6 +126,7 @@ impl LocalFileError {
             path,
             target,
             reason: None,
+            detail: None,
             source: Some(LocalFileErrorSource::Io(source)),
             effect_state: None,
             cleanup_error: None,
@@ -144,6 +148,7 @@ impl LocalFileError {
             path,
             target: None,
             reason: None,
+            detail: None,
             source: Some(LocalFileErrorSource::InvalidEncoding(source)),
             effect_state: None,
             cleanup_error: None,
@@ -176,6 +181,7 @@ impl LocalFileError {
             path,
             target: None,
             reason: None,
+            detail: None,
             source: Some(LocalFileErrorSource::PathCodec(error)),
             effect_state: None,
             cleanup_error: None,
@@ -208,6 +214,7 @@ impl LocalFileError {
             path,
             target: None,
             reason: None,
+            detail: None,
             source: Some(LocalFileErrorSource::ResourceLimit(source)),
             effect_state: None,
             cleanup_error: None,
@@ -277,6 +284,11 @@ impl LocalFileError {
     #[inline]
     pub const fn with_reason(mut self, reason: &'static str) -> Self {
         self.reason = Some(reason);
+        self
+    }
+
+    pub(crate) fn with_detail(mut self, detail: String) -> Self {
+        self.detail = Some(detail.into_boxed_str());
         self
     }
 
@@ -561,6 +573,9 @@ impl fmt::Display for LocalFileError {
         write!(formatter, "{:?} failed with {:?}", self.operation, self.kind)?;
         if let Some(reason) = self.reason {
             write!(formatter, ": {reason}")?;
+        }
+        if let Some(detail) = &self.detail {
+            write!(formatter, " ({detail})")?;
         }
         if let Some(current_directory) = &self.current_directory {
             write!(formatter, " from PWD {}", current_directory.display())?;

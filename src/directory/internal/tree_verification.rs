@@ -250,12 +250,12 @@ pub(in crate::directory) fn verify_tree(
             let Some((expected_kind, was_seen)) = index.get_mut(path) else {
                 return Err(requirement_error(stage, path, "unexpected tree entry"));
             };
-            if *expected_kind != kind || *was_seen {
-                return Err(requirement_error(
-                    stage,
-                    path,
-                    "tree entry kind does not match expected kind or was observed more than once",
-                ));
+            if *expected_kind != kind {
+                return Err(requirement_error(stage, path, "tree entry kind mismatch")
+                    .with_detail(format!("expected {expected_kind:?}, observed {kind:?}")));
+            }
+            if *was_seen {
+                return Err(requirement_error(stage, path, "tree entry was observed more than once"));
             }
             *was_seen = true;
         }
