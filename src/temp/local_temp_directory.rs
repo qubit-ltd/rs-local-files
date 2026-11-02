@@ -54,9 +54,20 @@ use crate::path::LocalPathResolver;
 /// by the creating [`crate::LocalFileSystem`], while replacing a final link
 /// entry itself.
 ///
-/// The directory is created inside a private generated sandbox. Cleanup
-/// removes the directory tree and then the empty sandbox. [`Self::keep`]
-/// atomically publishes the directory outside that sandbox.
+/// The directory is created inside its own generated per-resource sandbox
+/// directory. This directory structure separates the resource's cleanup
+/// lifecycle; it does not by itself guarantee access control. The Unix
+/// creation helper requests mode `0700`. On Windows, `PlatformDefault`
+/// inherits the parent directory ACL. To require privacy, create the directory
+/// with [`crate::options::LocalTempDirectoryOptions::with_privacy`] set to
+/// [`crate::policy::LocalPrivacyRequirement::Required`]; creation returns an
+/// error if the requirement cannot be satisfied. Tightening permissions after
+/// creation does not remove any exposure window that occurred during creation.
+///
+/// Cleanup removes the directory tree and then the empty sandbox.
+/// [`Self::keep`] atomically publishes the directory outside that sandbox.
+/// Identity checking and deletion are not atomic, so cleanup has the
+/// concurrent-mutation limitation described above.
 ///
 /// # Examples
 ///
@@ -68,6 +79,23 @@ use crate::path::LocalPathResolver;
 /// let mut temporary = filesystem.create_temp_directory()?;
 /// let child = temporary.child(std::path::Path::new("child.txt"))?;
 /// assert!(child.ends_with("child.txt"));
+/// temporary.cleanup()?;
+/// # Ok(())
+/// # }
+/// ```
+/// To require privacy during creation, pass explicit options. Creation returns
+/// an error if the platform cannot satisfy the requirement:
+///
+/// ```no_run
+/// use qubit_local_files::LocalFileSystem;
+/// use qubit_local_files::options::LocalTempDirectoryOptions;
+/// use qubit_local_files::policy::LocalPrivacyRequirement;
+///
+/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+/// let filesystem = LocalFileSystem::host()?;
+/// let options = LocalTempDirectoryOptions::new()
+///     .with_privacy(LocalPrivacyRequirement::Required);
+/// let mut temporary = filesystem.create_temp_directory_with_options(&options)?;
 /// temporary.cleanup()?;
 /// # Ok(())
 /// # }

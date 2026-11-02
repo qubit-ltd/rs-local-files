@@ -75,9 +75,20 @@ fn inject_temp_source_sync_error() {
 /// by the creating [`crate::LocalFileSystem`], while replacing a final link
 /// entry itself.
 ///
-/// The file is created inside a private generated sandbox. Cleanup removes the
-/// file and then the empty sandbox. [`Self::keep`] atomically publishes the
-/// file outside that sandbox.
+/// The file is created inside its own generated per-resource sandbox directory.
+/// This directory structure separates the resource's cleanup lifecycle; it
+/// does not by itself guarantee access control. The Unix creation helper
+/// requests mode `0700`. On Windows, `PlatformDefault` inherits the parent
+/// directory ACL. To require privacy, create the file with
+/// [`crate::options::LocalTempFileOptions::with_privacy`] set to
+/// [`crate::policy::LocalPrivacyRequirement::Required`]; creation returns an
+/// error if the requirement cannot be satisfied. Tightening permissions after
+/// creation does not remove any exposure window that occurred during creation.
+///
+/// Cleanup removes the file and then the empty sandbox. [`Self::keep`]
+/// atomically publishes the file outside that sandbox. Identity checking and
+/// deletion are not atomic, so cleanup has the concurrent-mutation limitation
+/// described above.
 ///
 /// # Examples
 ///
@@ -90,6 +101,24 @@ fn inject_temp_source_sync_error() {
 /// let filesystem = LocalFileSystem::host()?;
 /// let mut temporary = filesystem.create_temp_file()?;
 /// temporary.write_fully(b"temporary data")?;
+/// temporary.cleanup()?;
+/// # Ok(())
+/// # }
+/// ```
+///
+/// To require privacy during creation, pass explicit options. Creation returns
+/// an error if the platform cannot satisfy the requirement:
+///
+/// ```no_run
+/// use qubit_local_files::LocalFileSystem;
+/// use qubit_local_files::options::LocalTempFileOptions;
+/// use qubit_local_files::policy::LocalPrivacyRequirement;
+///
+/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+/// let filesystem = LocalFileSystem::host()?;
+/// let options = LocalTempFileOptions::new()
+///     .with_privacy(LocalPrivacyRequirement::Required);
+/// let mut temporary = filesystem.create_temp_file_with_options(&options)?;
 /// temporary.cleanup()?;
 /// # Ok(())
 /// # }
