@@ -440,6 +440,8 @@ mod tests {
     use std::os::unix::fs::MetadataExt;
 
     use super::File;
+    #[cfg(target_os = "linux")]
+    use super::LocalAclPresence;
     use super::LocalFileErrorKind;
     use super::LocalFileIdentity;
     use super::LocalObservationRequirement;
@@ -453,6 +455,8 @@ mod tests {
     use super::io;
     #[cfg(target_os = "linux")]
     use super::io_error;
+    #[cfg(target_os = "linux")]
+    use super::query_linux_acl;
     use super::query_security;
     use super::requested_value;
     #[cfg(target_os = "linux")]
@@ -691,5 +695,51 @@ mod tests {
         let limit = error.resource_limit_error().expect("structured limit");
         assert_eq!(limit.resource(), LocalResourceKind::AclEntries);
         assert_eq!(limit.observed(), Some(3));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn security_unix_queries_present_acl_and_absent_default_acl_from_retained_file() {
+        use std::os::unix::ffi::OsStrExt;
+
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let path = directory.path().join("acl-file");
+        fs::write(&path, b"acl fixture").expect("create ACL fixture");
+        let native_path = std::ffi::CString::new(path.as_os_str().as_bytes()).expect("path has no NUL");
+        let acl_name = c"system.posix_acl_access";
+        let acl = acl_bytes(&[
+            (0x01, 7, u32::MAX),
+            (0x02, 4, 123456),
+            (0x04, 5, u32::MAX),
+            (0x10, 5, u32::MAX),
+            (0x20, 0, u32::MAX),
+        ]);
+        // SAFETY: both pointers remain valid for this call and `acl` is a valid
+        // Linux POSIX ACL v2 value with a named user and mask.
+        let status = unsafe {
+            libc::setxattr(
+                native_path.as_ptr(),
+                acl_name.as_ptr(),
+                acl.as_ptr().cast(),
+                acl.len(),
+                0,
+            )
+        };
+        if status == -1 {
+            panic!("runner must support POSIX ACL fixtures: {}", io::Error::last_os_error());
+        }
+
+        let file = File::open(&path).expect("open retained ACL file");
+        let options = LocalSecurityObservationOptions::new()
+            .with_max_acl_bytes(acl.len())
+            .with_max_acl_entries(5);
+        assert_eq!(
+            query_linux_acl(&file, b"system.posix_acl_access\0", &options).expect("read access ACL"),
+            LocalAclPresence::Present,
+        );
+        assert_eq!(
+            query_linux_acl(&file, b"system.posix_acl_default\0", &options).expect("read absent default ACL"),
+            LocalAclPresence::Absent,
+        );
     }
 }
