@@ -14,6 +14,8 @@ use crate::LocalCopyConflictPolicy;
 use crate::LocalCopyOptions;
 use crate::LocalCopyTypeConflictPolicy;
 use crate::LocalFileSystem;
+use crate::tests::native_io_fault_tests::NativeIoFaultGuard;
+use crate::tests::native_io_fault_tests::NativeIoPoint;
 use crate::tests::rooted::support::resolution_observation_tests as observations;
 use crate::tests::rooted::support::resolution_observation_tests::DeadlineBoundary;
 
@@ -34,6 +36,49 @@ fn link_fixture() -> (tempfile::TempDir, std::path::PathBuf, std::path::PathBuf)
     fs::write(fixture.path().join("referent"), b"referent bytes").expect("referent should exist");
     symlink("../referent", source.join("link")).expect("source link should exist");
     (fixture, source, target)
+}
+
+fn assert_host_tree_symlink_create_failure_effect(replaced: bool) {
+    let (_fixture, source, target) = link_fixture();
+    let destination = target.join("link");
+    if replaced {
+        fs::write(&destination, b"old destination").expect("old destination");
+    }
+    let guard = NativeIoFaultGuard::fail_on(NativeIoPoint::HostTreeSymlinkCreate, 1);
+    let failure = LocalFileSystem::host()
+        .expect("host filesystem")
+        .copy_with_options(&source, &target, &tree_replace_options())
+        .expect_err("injected link creation failure");
+    assert!(guard.fired());
+    let expected = if replaced {
+        crate::LocalCopyFailureState::PartiallyPublished
+    } else {
+        crate::LocalCopyFailureState::Unchanged
+    };
+    assert_eq!(expected, failure.state());
+    assert_eq!(
+        std::io::ErrorKind::NotFound,
+        fs::symlink_metadata(&destination)
+            .expect_err("destination absent")
+            .kind()
+    );
+    assert_eq!(
+        std::path::Path::new("../referent"),
+        fs::read_link(source.join("link")).expect("source link retained")
+    );
+    assert_eq!(0, failure.partial_stats().files());
+    assert_eq!(0, failure.partial_stats().directories());
+    assert_eq!(0, failure.partial_stats().bytes());
+}
+
+#[test]
+fn test_host_tree_symlink_create_failure_after_removal_reports_partial() {
+    assert_host_tree_symlink_create_failure_effect(true);
+}
+
+#[test]
+fn test_host_tree_symlink_create_failure_without_removal_reports_unchanged() {
+    assert_host_tree_symlink_create_failure_effect(false);
 }
 
 #[test]

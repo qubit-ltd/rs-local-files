@@ -34,6 +34,7 @@ pub(crate) enum NativeIoPoint {
     DeleteReadDirectory,
     DeleteRemoveFile,
     DeleteRemoveDirectory,
+    HostTreeSymlinkCreate,
 }
 
 struct FaultPlan {

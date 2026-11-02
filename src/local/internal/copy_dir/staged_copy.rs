@@ -268,13 +268,7 @@ pub(crate) fn copy_symlink_with_options(
     budget
         .check_deadline()
         .map_err(|source| copy_dir_error(stage, src, dst, stats, source))?;
-    with_copy_context(
-        create_symlink_entry(&link_target, src, dst),
-        LocalCopyDirStage::CommitFile,
-        src,
-        dst,
-        stats,
-    )?;
+    with_copy_context(create_symlink_entry(&link_target, src, dst), stage, src, dst, stats)?;
     with_copy_context(
         record_copied_file(stats, 0),
         LocalCopyDirStage::UpdateStatistics,
@@ -397,13 +391,25 @@ mod symlink_source_read_tests {
 fn create_symlink_entry(link_target: &Path, _source: &Path, target: &Path) -> std::io::Result<()> {
     #[cfg(unix)]
     {
+        #[cfg(test)]
+        crate::tests::native_io_fault_tests::check(
+            crate::tests::native_io_fault_tests::NativeIoPoint::HostTreeSymlinkCreate,
+        )?;
         std::os::unix::fs::symlink(link_target, target)
     }
     #[cfg(windows)]
     {
         if std::fs::symlink_metadata(_source)?.file_type().is_symlink_dir() {
+            #[cfg(test)]
+            crate::tests::native_io_fault_tests::check(
+                crate::tests::native_io_fault_tests::NativeIoPoint::HostTreeSymlinkCreate,
+            )?;
             std::os::windows::fs::symlink_dir(link_target, target)
         } else {
+            #[cfg(test)]
+            crate::tests::native_io_fault_tests::check(
+                crate::tests::native_io_fault_tests::NativeIoPoint::HostTreeSymlinkCreate,
+            )?;
             std::os::windows::fs::symlink_file(link_target, target)
         }
     }
