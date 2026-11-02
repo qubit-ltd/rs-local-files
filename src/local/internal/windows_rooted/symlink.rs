@@ -355,7 +355,9 @@ fn normalize_symbolic_link_target(units: Vec<u16>, flags: u32) -> Result<Vec<u16
         }
         SYMLINK_FLAG_RELATIVE => units,
         0 => normalize_absolute_substitute_name(&units)?,
-        _ => return Err(corrupt_reparse("symbolic-link reparse flags are unsupported")),
+        _ => {
+            return Err(corrupt_reparse("symbolic-link reparse flags are unsupported"));
+        }
     };
     Ok(units)
 }

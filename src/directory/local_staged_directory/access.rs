@@ -2280,7 +2280,9 @@ mod owner_policy_checkpoint_tests {
                 "phase={phase}, slots={slots} must preserve native EMFILE: {error:?}"
             );
             match phase.as_str() {
-                "collect" | "pin" => assert_eq!(LocalTreeAccessState::Preserved, error.access_state()),
+                "collect" | "pin" => {
+                    assert_eq!(LocalTreeAccessState::Preserved, error.access_state())
+                }
                 "verify" => assert_eq!(LocalTreeAccessState::Indeterminate, error.access_state()),
                 "mutate" => assert!(
                     matches!(
@@ -2332,7 +2334,9 @@ mod owner_policy_checkpoint_tests {
                 .mode()
                 & 0o777;
             match phase.as_str() {
-                "collect" | "pin" => assert_eq!(0o644, mode, "non-mutating phase preserves file mode"),
+                "collect" | "pin" => {
+                    assert_eq!(0o644, mode, "non-mutating phase preserves file mode")
+                }
                 "verify" => assert_eq!(0o600, mode, "verification preserves applied file mode"),
                 "mutate" => assert!(
                     matches!(mode, 0o600 | 0o644),

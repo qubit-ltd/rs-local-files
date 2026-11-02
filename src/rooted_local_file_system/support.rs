@@ -516,7 +516,9 @@ fn resolve_rooted_symlinks(
                         match descend_result {
                             Some(Ok(())) | None => {}
                             Some(Err(error)) if error.kind() == io::ErrorKind::NotFound => cursor = None,
-                            Some(Err(error)) => return Err(rooted_io_error(operation, original, error)),
+                            Some(Err(error)) => {
+                                return Err(rooted_io_error(operation, original, error));
+                            }
                         }
                     } else {
                         cursor = None;
@@ -559,7 +561,9 @@ fn resolve_rooted_symlinks(
                 check_resolution_deadline(deadline, original, operation)?;
                 let target = match target_result {
                     Ok(target) => target,
-                    Err(error) => return Err(error.with_operation(operation).with_path(original.to_path_buf())),
+                    Err(error) => {
+                        return Err(error.with_operation(operation).with_path(original.to_path_buf()));
+                    }
                 };
                 if scope == LocalResolutionScope::OpeningRoot && !opening_root_target_matches_anchor(root, &target) {
                     return Err(LocalFileError::new(LocalFileErrorKind::InvalidPath, operation)
