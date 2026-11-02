@@ -102,8 +102,13 @@ jobs:
         run_named_test() {
           local target="$1"
           local name="$2"
+          shift 2
           local output
-          if output=$(cargo test --locked --test "$target" "$name" -- --exact --nocapture 2>&1); then
+          local target_args=(--test "$target")
+          if [ "$target" = "--lib" ]; then
+            target_args=(--lib)
+          fi
+          if output=$(cargo test --locked "$@" "${target_args[@]}" "$name" -- --exact --nocapture 2>&1); then
             printf '%s\n' "$output"
           else
             printf '%s\n' "$output"
@@ -125,6 +130,13 @@ jobs:
           run_named_test rooted_windows_symlink_tests test_rooted_copy_preserves_link_to_existing_external_file
           run_named_test rooted_windows_symlink_tests test_rooted_copy_uses_actual_reparse_target_instead_of_display_name
           run_named_test resolution_contract_tests opening_root_target_hook_sees_and_can_reject_raw_nt_substitute_name
+          run_named_test --lib tests::rooted_copy_deadline_tests::test_rooted_link_kind_deadline_keeps_existing_file
+          run_named_test windows_rooted_staging_cleanup_tests rooted_staging_abort_preserves_competitor_at_old_name
+          run_named_test windows_rooted_staging_cleanup_tests rooted_staging_drop_preserves_competitor_at_old_name
+          run_named_test windows_rooted_staging_cleanup_tests rooted_staging_failed_commit_cleanup_preserves_competitor_at_old_name
+          run_named_test windows_rooted_staging_cleanup_tests rooted_staging_abort_preserves_competitor_at_old_name --all-features
+          run_named_test windows_rooted_staging_cleanup_tests rooted_staging_drop_preserves_competitor_at_old_name --all-features
+          run_named_test windows_rooted_staging_cleanup_tests rooted_staging_failed_commit_cleanup_preserves_competitor_at_old_name --all-features
         fi
         if [ "$RUNNER_OS" != Windows ]; then
           cargo test --locked --test security_observation_contract_tests
