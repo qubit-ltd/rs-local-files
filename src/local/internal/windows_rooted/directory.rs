@@ -7,6 +7,7 @@
 // =============================================================================
 //! Windows handle-relative rooted directory operations.
 
+use std::ffi::OsStr;
 use std::ffi::OsString;
 use std::fs::File;
 use std::io::Error;
@@ -25,6 +26,9 @@ use windows_sys::Wdk::Storage::FileSystem::FILE_OPEN_IF;
 use windows_sys::Win32::Foundation::INVALID_HANDLE_VALUE;
 use windows_sys::Win32::Storage::FileSystem::CreateFileW;
 use windows_sys::Win32::Storage::FileSystem::DELETE;
+use windows_sys::Win32::Storage::FileSystem::FILE_ADD_FILE;
+use windows_sys::Win32::Storage::FileSystem::FILE_ADD_SUBDIRECTORY;
+use windows_sys::Win32::Storage::FileSystem::FILE_DELETE_CHILD;
 use windows_sys::Win32::Storage::FileSystem::FILE_FLAG_BACKUP_SEMANTICS;
 use windows_sys::Win32::Storage::FileSystem::FILE_LIST_DIRECTORY;
 use windows_sys::Win32::Storage::FileSystem::FILE_NAME_NORMALIZED;
@@ -45,6 +49,48 @@ use crate::local::LocalRelativePath;
 use crate::local::internal::rooted_directory_reader::RootedDirectoryReader;
 use crate::rooted::EntryKind;
 use crate::rooted::Metadata;
+use crate::temp::types::NativePrivateCreateError;
+
+/// Creates one temporary child using the inherited default Windows ACL.
+///
+/// # Errors
+/// Returns the native open/create error. `FILE_CREATE` creates the entry and
+/// obtains its handle in one operation, so a failed call has no retained
+/// partial entry.
+pub(crate) fn create_rooted_temp_child(
+    parent: &File,
+    name: &OsStr,
+    directory: bool,
+) -> Result<File, NativePrivateCreateError> {
+    let access = if directory {
+        FILE_LIST_DIRECTORY
+            | FILE_READ_ATTRIBUTES
+            | FILE_TRAVERSE
+            | FILE_ADD_FILE
+            | FILE_ADD_SUBDIRECTORY
+            | FILE_DELETE_CHILD
+            | DELETE
+            | SYNCHRONIZE
+    } else {
+        windows_sys::Win32::Storage::FileSystem::GENERIC_READ
+            | windows_sys::Win32::Storage::FileSystem::GENERIC_WRITE
+            | FILE_READ_ATTRIBUTES
+            | DELETE
+            | SYNCHRONIZE
+    };
+    nt_open_at(
+        parent,
+        name,
+        access,
+        FILE_CREATE,
+        if directory {
+            FILE_DIRECTORY_FILE
+        } else {
+            windows_sys::Wdk::Storage::FileSystem::FILE_NON_DIRECTORY_FILE
+        },
+    )
+    .map_err(|source| NativePrivateCreateError { source, retained: None })
+}
 
 /// Opens a lazy reader for immediate children of the opened root.
 ///

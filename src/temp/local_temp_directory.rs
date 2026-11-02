@@ -7,6 +7,7 @@
 // =============================================================================
 //! Cleanup-owned temporary directories with host or rooted authority.
 
+use std::fs::File;
 use std::io::Error;
 use std::io::ErrorKind;
 use std::io::Result;
@@ -158,6 +159,41 @@ impl LocalTempDirectory {
     ) -> Result<Self> {
         let relative = LocalRelativePath::new(&path).expect("rooted temporary path was validated at creation");
         let identity = root.symlink_metadata(&relative)?;
+        let creation_parent = sandbox_path.parent().unwrap_or_else(|| Path::new("")).to_path_buf();
+        Ok(Self {
+            cleanup_limits,
+            core: LocalTempResourceCore::new(
+                path.clone(),
+                creation_parent,
+                LocalTempResourceBackend::Rooted(RootedTempResourceBackend {
+                    root,
+                    relative_path: path,
+                    sandbox_path,
+                    identity,
+                }),
+                symlink_policy,
+            ),
+        })
+    }
+
+    /// Builds a rooted temporary directory from the handle returned by native
+    /// creation.
+    ///
+    /// Its cleanup identity comes from that handle rather than a later lookup
+    /// by the diagnostic path.
+    ///
+    /// # Errors
+    /// Returns an I/O error if the retained handle cannot be inspected.
+    #[inline]
+    pub(crate) fn rooted_from_created_handle(
+        root: Arc<crate::rooted::Root>,
+        path: PathBuf,
+        sandbox_path: PathBuf,
+        file: &File,
+        symlink_policy: LocalSymlinkPolicy,
+        cleanup_limits: LocalTempCleanupLimits,
+    ) -> Result<Self> {
+        let identity = crate::rooted::Metadata::from_open_file(file)?;
         let creation_parent = sandbox_path.parent().unwrap_or_else(|| Path::new("")).to_path_buf();
         Ok(Self {
             cleanup_limits,

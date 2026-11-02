@@ -9,12 +9,14 @@
 // Private behavior is covered through public integration tests.
 
 use std::ffi::CString;
+use std::ffi::OsStr;
 use std::ffi::OsString;
 use std::fs::File;
 use std::io::Error;
 use std::io::ErrorKind;
 use std::io::Result;
 use std::os::fd::AsRawFd;
+use std::os::fd::FromRawFd;
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::ffi::OsStringExt;
 use std::path::Path;
@@ -30,6 +32,73 @@ use super::rooted_directory_reader::RootedDirectoryReader;
 use super::rooted_file_io::open_rooted_parent;
 use super::rooted_parent_mode::RootedParentMode;
 use crate::LocalRelativePath;
+use crate::temp::types::NativePrivateCreateError;
+use crate::temp::types::NativePrivateEntry;
+
+/// Creates one temporary child relative to a retained directory handle.
+///
+/// Files use the normal `0666` creation mode subject to the process umask;
+/// directories keep the rooted sandbox's `0700` mode. If a new directory
+/// cannot be opened after `mkdirat`, the error retains the parent/name with an
+/// unknown identity.
+pub(crate) fn create_rooted_temp_child(
+    parent: &File,
+    name: &OsStr,
+    directory: bool,
+) -> std::result::Result<File, NativePrivateCreateError> {
+    let retained_parent = parent
+        .try_clone()
+        .map_err(|source| NativePrivateCreateError { source, retained: None })?;
+    let name_c = CString::new(name.as_bytes()).map_err(|_| NativePrivateCreateError {
+        source: Error::new(ErrorKind::InvalidInput, "temporary name contains NUL"),
+        retained: None,
+    })?;
+    if directory {
+        // Keep the same 0700 sandbox mode used by Root::create_dir.
+        if unsafe { libc::mkdirat(parent.as_raw_fd(), name_c.as_ptr(), 0o700) } != 0 {
+            return Err(NativePrivateCreateError {
+                source: Error::last_os_error(),
+                retained: None,
+            });
+        }
+        let descriptor = unsafe {
+            libc::openat(
+                parent.as_raw_fd(),
+                name_c.as_ptr(),
+                libc::O_RDONLY | libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC,
+            )
+        };
+        if descriptor < 0 {
+            let source = Error::last_os_error();
+            return Err(NativePrivateCreateError {
+                source,
+                retained: Some(NativePrivateEntry {
+                    parent: std::sync::Arc::new(retained_parent),
+                    name: name.to_os_string(),
+                    file: None,
+                    identity: None,
+                    directory: true,
+                }),
+            });
+        }
+        return Ok(unsafe { File::from_raw_fd(descriptor) });
+    }
+    let descriptor = unsafe {
+        libc::openat(
+            parent.as_raw_fd(),
+            name_c.as_ptr(),
+            libc::O_RDWR | libc::O_CREAT | libc::O_EXCL | libc::O_NOFOLLOW | libc::O_CLOEXEC,
+            0o666,
+        )
+    };
+    if descriptor < 0 {
+        return Err(NativePrivateCreateError {
+            source: Error::last_os_error(),
+            retained: None,
+        });
+    }
+    Ok(unsafe { File::from_raw_fd(descriptor) })
+}
 
 /// Opens a lazy reader over the opened root directory.
 ///

@@ -16,6 +16,7 @@ use std::path::PathBuf;
 
 /// Retains a rooted temporary creation failure and failed sandbox cleanup.
 #[derive(Debug)]
+#[allow(dead_code)]
 pub(crate) struct TempSandboxCleanupError {
     /// Native failure that caused the operation to stop.
     primary: io::Error,
@@ -27,6 +28,7 @@ pub(crate) struct TempSandboxCleanupError {
 
 impl TempSandboxCleanupError {
     /// Creates an aggregate while preserving both native failures.
+    #[allow(dead_code)]
     pub(crate) const fn new(primary: io::Error, sandbox: PathBuf, cleanup: io::Error) -> Self {
         Self {
             primary,

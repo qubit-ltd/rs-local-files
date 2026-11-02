@@ -139,8 +139,20 @@ fn test_rooted_temp_creation_failure_reports_cleanup_failure() {
                 .create_temp_directory_with_options(&LocalTempDirectoryOptions::new())
                 .expect_err("directory creation should fail")
         };
+        assert!(error.cleanup_error().is_some(), "cleanup failure must be structured");
+        assert!(error.temp_recovery().is_some(), "native recovery must be retained");
         assert!(error.to_string().contains("PermissionDenied"), "{}", error);
         assert_rooted_cleanup_failure(&error, parent.path());
+        assert!(
+            error.temp_recovery().and_then(|owner| owner.identity()).is_some(),
+            "created sandbox identity should be retained"
+        );
+        drop(_fault);
+        let (_, recovery) = error.into_temp_recovery_parts();
+        let mut recovery = recovery.expect("native residual owner should be extracted");
+        recovery.cleanup().expect("recovery should clean after fault removal");
+        recovery.cleanup().expect("recovery cleanup should be idempotent");
+        assert!(parent_entries(parent.path()).is_empty());
     }
 }
 
@@ -172,6 +184,10 @@ fn test_rooted_temp_owner_failure_reports_cleanup_failure() {
         };
         assert!(error.to_string().contains(primary), "{}", error);
         assert_rooted_cleanup_failure(&error, parent.path());
+        assert!(
+            error.temp_recovery().and_then(|owner| owner.identity()).is_some(),
+            "created child identity should be retained"
+        );
         let entries = parent_entries(parent.path());
         assert_eq!(1, entries.len(), "failed owner cleanup must retain its sandbox");
         let sandbox = parent.path().join(&entries[0]);
@@ -181,6 +197,12 @@ fn test_rooted_temp_owner_failure_reports_cleanup_failure() {
                 .expect("retained sandbox should be readable")
                 .count()
         );
+        drop(_fault);
+        let (_, recovery) = error.into_temp_recovery_parts();
+        let mut recovery = recovery.expect("native residual owner should be extracted");
+        recovery.cleanup().expect("recovery should clean after fault removal");
+        recovery.cleanup().expect("recovery cleanup should be idempotent");
+        assert!(parent_entries(parent.path()).is_empty());
     }
 }
 
@@ -211,25 +233,128 @@ fn test_rooted_temp_collision_stops_when_sandbox_cleanup_fails() {
             parent_entries(parent.path()).len(),
             "failed cleanup must stop retries"
         );
+        drop(_fault);
+        let (_, recovery) = error.into_temp_recovery_parts();
+        let mut recovery = recovery.expect("native residual owner should be extracted");
+        recovery.cleanup().expect("recovery should clean after fault removal");
+        recovery.cleanup().expect("recovery cleanup should be idempotent");
+        assert!(parent_entries(parent.path()).is_empty());
+    }
+}
+
+#[test]
+fn test_rooted_temp_recovery_uses_retained_root_authority() {
+    let fixture = tempdir().expect("fixture should be created");
+    let root = fixture.path().join("root");
+    fs::create_dir(&root).expect("root should be created");
+    fs::write(root.join("sentinel"), b"keep").expect("sentinel should be written");
+    let filesystem = LocalFileSystem::rooted(&root).expect("rooted filesystem should open");
+    let fault = install_test_fault("rooted-temp-file-open-cleanup").expect("fault should install");
+    let error = filesystem
+        .create_temp_file_with_options(&LocalTempFileOptions::new())
+        .expect_err("injected file creation should fail");
+    drop(fault);
+    let moved_root = fixture.path().join("root-moved");
+    fs::rename(&root, &moved_root).expect("root should be renamed");
+
+    let (_, recovery) = error.into_temp_recovery_parts();
+    let mut recovery = recovery.expect("recovery owner should remain attached");
+    recovery
+        .cleanup()
+        .expect("cleanup should use retained parent authority");
+    assert_eq!(
+        b"keep".as_slice(),
+        fs::read(moved_root.join("sentinel")).expect("sentinel should remain")
+    );
+    assert_eq!(1, parent_entries(&moved_root).len(), "only the sentinel should remain");
+}
+
+#[test]
+fn test_rooted_temp_recovery_rejects_replaced_sandbox_name() {
+    let parent = tempdir().expect("parent should be created");
+    let filesystem = LocalFileSystem::rooted(parent.path()).expect("rooted filesystem should open");
+    let fault = install_test_fault("rooted-temp-file-open-cleanup").expect("fault should install");
+    let error = filesystem
+        .create_temp_file_with_options(&LocalTempFileOptions::new())
+        .expect_err("injected file creation should fail");
+    drop(fault);
+    let (_, recovery) = error.into_temp_recovery_parts();
+    let mut recovery = recovery.expect("recovery owner should remain attached");
+    let sandbox = parent_entries(parent.path())
+        .into_iter()
+        .find(|entry| entry.starts_with("sandbox-"))
+        .expect("sandbox should remain after injected cleanup failure");
+    let moved = parent.path().join("moved-original");
+    fs::rename(parent.path().join(&sandbox), &moved).expect("original sandbox should be renamed");
+    fs::create_dir(parent.path().join(&sandbox)).expect("replacement sandbox should be created");
+
+    assert!(recovery.cleanup().is_err(), "replacement identity must fail closed");
+    assert!(moved.is_dir(), "original object should remain at its new name");
+    assert!(
+        parent.path().join(&sandbox).is_dir(),
+        "replacement object should remain"
+    );
+}
+
+#[test]
+fn test_rooted_temp_recovery_clone_failure_retains_both_entries() {
+    for (file, fault) in [
+        (true, "rooted-temp-file-recovery-clone-cleanup"),
+        (false, "rooted-temp-directory-recovery-clone-cleanup"),
+    ] {
+        let parent = tempdir().expect("parent should be created");
+        let filesystem = LocalFileSystem::rooted(parent.path()).expect("rooted filesystem should open");
+        let fault = install_test_fault(fault).expect("clone and cleanup fault should install");
+        let error = if file {
+            filesystem
+                .create_temp_file_with_options(&LocalTempFileOptions::new())
+                .expect_err("recovery handle clone failure should return an error")
+        } else {
+            filesystem
+                .create_temp_directory_with_options(&LocalTempDirectoryOptions::new())
+                .expect_err("recovery handle clone failure should return an error")
+        };
+        assert!(error.cleanup_error().is_some(), "cleanup failure should be structured");
+        let recovery = error.temp_recovery().expect("both entries should remain owned");
+        assert!(
+            recovery.identity().is_some(),
+            "created child identity should be retained"
+        );
+        assert_eq!(
+            1,
+            parent_entries(parent.path()).len(),
+            "sandbox should remain after injected cleanup failure"
+        );
+        drop(fault);
+        let (_, recovery) = error.into_temp_recovery_parts();
+        let mut recovery = recovery.expect("recovery owner should transfer from the error");
+        recovery
+            .cleanup()
+            .expect("child-first recovery should clean after fault removal");
+        recovery
+            .cleanup()
+            .expect("completed recovery cleanup should be idempotent");
+        assert!(parent_entries(parent.path()).is_empty());
     }
 }
 
 fn assert_rooted_cleanup_failure(error: &qubit_local_files::LocalFileError, root: &Path) {
     let diagnostic = error.to_string();
-    assert!(diagnostic.contains("injected sandbox cleanup failure"), "{diagnostic}");
-    let sandbox = error.source().expect("aggregated source should be retained");
-    assert!(sandbox.to_string().contains("injected sandbox cleanup failure"));
-    let primary = sandbox.source().expect("primary I/O error should be retained");
+    let cleanup = error.cleanup_error().expect("cleanup error should be structured");
+    assert!(cleanup.path().is_some(), "cleanup path should be retained");
+    assert!(error.temp_recovery().is_some(), "remaining owner should be retained");
+    let primary = error.source().expect("primary I/O error should be retained");
     let primary = primary.downcast_ref::<std::io::Error>().expect("native primary error");
     assert!(matches!(
         primary.kind(),
         std::io::ErrorKind::PermissionDenied | std::io::ErrorKind::AlreadyExists | std::io::ErrorKind::Other
     ));
-    let namespace_sandbox_prefix = format!("{}sandbox-", std::path::MAIN_SEPARATOR);
+    let recovery_path = error.temp_recovery().expect("recovery owner").path();
     assert!(
-        diagnostic.contains(&namespace_sandbox_prefix),
-        "sandbox must use rooted namespace coordinates: {diagnostic}"
+        recovery_path.to_string_lossy().contains("sandbox-"),
+        "{recovery_path:?}"
     );
+    assert!(error.path().is_some(), "primary namespace path should be retained");
     assert!(
         !diagnostic.contains(&root.display().to_string()),
         "physical root must not leak: {diagnostic}"

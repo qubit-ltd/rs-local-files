@@ -48,6 +48,8 @@ pub(crate) use path_support::rooted_path;
 pub(crate) use path_support::rooted_temp_parent;
 pub(crate) use path_support::temp_candidate;
 pub(crate) use path_support::validate_rooted_temp_parent;
+pub(crate) use support::RootParentBehavior;
+pub(crate) use support::resolve_host_root_path_with_component_policy_and_budget;
 pub(crate) use support::resolve_rooted_path;
 pub(crate) use support::resolve_rooted_path_allow_root;
 pub(crate) use support::resolve_rooted_path_allow_root_with_component_policy_and_budget;

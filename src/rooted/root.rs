@@ -7,6 +7,7 @@
 // =============================================================================
 //! Open directory capabilities.
 
+use std::ffi::OsStr;
 use std::fs::File;
 use std::io::Error;
 use std::io::ErrorKind;
@@ -69,6 +70,36 @@ impl std::fmt::Debug for Root {
     }
 }
 impl Root {
+    /// Creates one child under an already retained parent authority.
+    ///
+    /// The native child handle is returned so temporary-resource recovery can
+    /// retain the object created by this operation. Directory creation keeps
+    /// the rooted sandbox permissions; file creation uses the default mode.
+    ///
+    /// # Errors
+    /// Returns the native creation error. If a directory was created but its
+    /// handle could not be opened, the error retains its parent/name with an
+    /// unknown identity so recovery will fail closed.
+    pub(crate) fn create_temp_child(
+        &self,
+        parent: &File,
+        name: &OsStr,
+        directory: bool,
+    ) -> std::result::Result<File, crate::temp::types::NativePrivateCreateError> {
+        local::create_rooted_temp_child(parent, name, directory)
+    }
+    #[cfg(not(any(unix, windows)))]
+    pub(crate) fn create_temp_child(
+        &self,
+        _parent: &File,
+        _name: &OsStr,
+        _directory: bool,
+    ) -> std::result::Result<File, crate::temp::types::NativePrivateCreateError> {
+        Err(crate::temp::types::NativePrivateCreateError {
+            source: Error::new(ErrorKind::Unsupported, "rooted temporary creation is unsupported"),
+            retained: None,
+        })
+    }
     /// Builds a root from an already-open directory authority.
     #[allow(dead_code)] // Retained as the unrestricted-authority constructor for internal callers.
     pub(crate) fn from_directory_authority(directory: File, diagnostic_path: PathBuf) -> Self {
@@ -693,12 +724,14 @@ impl Root {
     ///
     /// # Errors
     /// Returns an I/O error when secure traversal or removal fails.
+    #[allow(dead_code)]
     pub fn remove_tree(&self, path: &path::Path) -> Result<()> {
         self.remove_tree_typed(path).map_err(LocalFileError::into_io_error)
     }
 
     /// Removes a descendant tree while retaining the typed partial-effect
     /// state.
+    #[allow(dead_code)]
     pub(crate) fn remove_tree_typed(&self, path: &path::Path) -> crate::LocalResult<()> {
         self.remove_tree_typed_with_options(
             path,

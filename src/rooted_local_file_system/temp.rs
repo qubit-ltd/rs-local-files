@@ -11,6 +11,9 @@
 use std::ffi::OsStr;
 use std::fs::File;
 
+#[path = "temp_creation_recovery.rs"]
+mod creation_recovery;
+
 use super::Arc;
 use super::LocalFileErrorKind;
 use super::LocalFileOperation;
@@ -27,19 +30,14 @@ use super::rooted_io_error;
 use super::rooted_path;
 use super::rooted_temp_parent;
 use super::temp_candidate;
-use super::temp_sandbox_cleanup_error::TempSandboxCleanupError;
 use super::validate_rooted_temp_parent;
 use super::validate_temp_affixes;
-use crate::LocalFileSystemScope;
 #[cfg(feature = "test-support")]
 use crate::local::test_support_enabled;
 use crate::local::try_random_file_name;
-use crate::path::LocalPathResolver;
 use crate::policy::LocalPrivacyRequirement;
 use crate::temp::types::NativePrivateCreateError;
 use crate::temp::types::NativePrivateEntry;
-use crate::write::Mode;
-use crate::write::OpenOptions;
 
 impl RootedLocalFileSystem {
     /// Creates a cleanup-owned temporary file below this opened root.
@@ -93,6 +91,13 @@ impl RootedLocalFileSystem {
         if options.privacy() == LocalPrivacyRequirement::Required {
             return self.create_private_rooted_temp_file(&parent, options, symlink_policy);
         }
+        let parent_handle = if parent.as_os_str().is_empty() {
+            self.root.open_probe_root()
+        } else {
+            self.root
+                .open_probe_file(&rooted_path(&parent, LocalFileOperation::CreateTempFile)?)
+        }
+        .map_err(|error| rooted_io_error(LocalFileOperation::CreateTempFile, &parent, error))?;
         let mut attempts = 0_usize;
         loop {
             attempts = attempts.saturating_add(1);
@@ -103,83 +108,175 @@ impl RootedLocalFileSystem {
                 }
             };
             let sandbox = temp_candidate(&parent, Some("sandbox-"), None, LocalFileOperation::CreateTempFile)?;
-            let sandbox_relative = rooted_path(&sandbox, LocalFileOperation::CreateTempFile)?;
-            match self.root.create_dir(&sandbox_relative) {
-                Ok(()) => {}
-                Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
+            let sandbox_name = sandbox.file_name().expect("generated sandbox has a name");
+            let sandbox_handle = match self.root.create_temp_child(&parent_handle, sandbox_name, true) {
+                Ok(handle) => handle,
+                Err(error) if error.retained.is_none() && error.source.kind() == io::ErrorKind::AlreadyExists => {
                     if attempt_budget_exhausted(attempts, options.max_attempts()) {
                         break;
                     }
                     continue;
                 }
                 Err(error) => {
-                    return Err(rooted_io_error(
-                        LocalFileOperation::CreateTempFile,
-                        sandbox_relative.as_path(),
-                        error,
-                    ));
+                    let primary = rooted_io_error(LocalFileOperation::CreateTempFile, &sandbox, error.source);
+                    return Err(match error.retained {
+                        Some(entry) => creation_recovery::finish(primary, vec![(sandbox.clone(), entry)]),
+                        None => primary,
+                    });
                 }
-            }
+            };
+            let sandbox_parent = match parent_handle.try_clone() {
+                Ok(parent) => parent,
+                Err(error) => {
+                    let primary = rooted_io_error(LocalFileOperation::CreateTempFile, &sandbox, error);
+                    let entry = creation_recovery::entry(parent_handle, sandbox_name, sandbox_handle, true);
+                    return Err(creation_recovery::finish(primary, vec![(sandbox.clone(), entry)]));
+                }
+            };
+            let sandbox_file = match sandbox_handle.try_clone() {
+                Ok(file) => file,
+                Err(error) => {
+                    let primary = rooted_io_error(LocalFileOperation::CreateTempFile, &sandbox, error);
+                    let entry = creation_recovery::entry(sandbox_parent, sandbox_name, sandbox_handle, true);
+                    return Err(creation_recovery::finish(primary, vec![(sandbox.clone(), entry)]));
+                }
+            };
+            let sandbox_entry = creation_recovery::entry(sandbox_parent, sandbox_name, sandbox_file, true);
             let candidate = sandbox.join(resource_name);
-            let relative = rooted_path(&candidate, LocalFileOperation::CreateTempFile)?;
             #[cfg(feature = "test-support")]
             let opened = if test_support_enabled("rooted-temp-file-collision-cleanup") {
-                Err(io::Error::from(io::ErrorKind::AlreadyExists))
+                Err(NativePrivateCreateError {
+                    source: io::Error::from(io::ErrorKind::AlreadyExists),
+                    retained: None,
+                })
             } else if test_support_enabled("rooted-temp-file-open-cleanup") {
-                Err(io::Error::from(io::ErrorKind::PermissionDenied))
+                Err(NativePrivateCreateError {
+                    source: io::Error::from(io::ErrorKind::PermissionDenied),
+                    retained: None,
+                })
             } else if test_support_enabled("rooted-temp-file-collision") {
-                Err(io::Error::from(io::ErrorKind::AlreadyExists))
+                Err(NativePrivateCreateError {
+                    source: io::Error::from(io::ErrorKind::AlreadyExists),
+                    retained: None,
+                })
             } else if test_support_enabled("rooted-temp-file-open") {
-                Err(io::Error::from(io::ErrorKind::PermissionDenied))
+                Err(NativePrivateCreateError {
+                    source: io::Error::from(io::ErrorKind::PermissionDenied),
+                    retained: None,
+                })
             } else {
-                self.root.open_writer(&relative, &OpenOptions::new(Mode::CreateNew))
+                self.root.create_temp_child(
+                    &sandbox_handle,
+                    candidate.file_name().expect("generated child has a name"),
+                    false,
+                )
             };
             #[cfg(not(feature = "test-support"))]
-            let opened = self.root.open_writer(&relative, &OpenOptions::new(Mode::CreateNew));
+            let opened = self.root.create_temp_child(
+                &sandbox_handle,
+                candidate.file_name().expect("generated child has a name"),
+                false,
+            );
             match opened {
                 Ok(file) => {
-                    let cleanup_sandbox = sandbox.clone();
+                    #[cfg(feature = "test-support")]
+                    let recovery_file = if test_support_enabled("rooted-temp-file-recovery-clone-cleanup") {
+                        Err(io::Error::other("injected rooted temp recovery file clone failure"))
+                    } else {
+                        file.try_clone()
+                    };
+                    #[cfg(not(feature = "test-support"))]
+                    let recovery_file = file.try_clone();
+                    let recovery_file = match recovery_file {
+                        Ok(file) => file,
+                        Err(error) => {
+                            let primary = rooted_io_error(LocalFileOperation::CreateTempFile, &candidate, error);
+                            let child = creation_recovery::entry(
+                                sandbox_handle,
+                                candidate.file_name().expect("generated child has a name"),
+                                file,
+                                false,
+                            );
+                            return Err(creation_recovery::finish(
+                                primary,
+                                vec![(candidate.clone(), child), (sandbox.clone(), sandbox_entry)],
+                            ));
+                        }
+                    };
+                    let child_parent = match sandbox_handle.try_clone() {
+                        Ok(parent) => parent,
+                        Err(error) => {
+                            let primary = rooted_io_error(LocalFileOperation::CreateTempFile, &candidate, error);
+                            let child = creation_recovery::entry(
+                                sandbox_handle,
+                                candidate.file_name().expect("generated child has a name"),
+                                recovery_file,
+                                false,
+                            );
+                            return Err(creation_recovery::finish(
+                                primary,
+                                vec![(candidate.clone(), child), (sandbox.clone(), sandbox_entry)],
+                            ));
+                        }
+                    };
+                    let child_entry = creation_recovery::entry(
+                        child_parent,
+                        candidate.file_name().expect("generated child has a name"),
+                        recovery_file,
+                        false,
+                    );
                     #[cfg(feature = "test-support")]
                     let result = if test_support_enabled("rooted-temp-file-owner-cleanup") {
                         Err(io::Error::other(
                             "injected rooted temporary file owner construction failure",
                         ))
                     } else {
-                        LocalTempFile::rooted(Arc::clone(&self.root), candidate, sandbox, file, symlink_policy)
+                        LocalTempFile::rooted(
+                            Arc::clone(&self.root),
+                            candidate.clone(),
+                            sandbox.clone(),
+                            file,
+                            symlink_policy,
+                        )
                     };
                     #[cfg(not(feature = "test-support"))]
-                    let result =
-                        LocalTempFile::rooted(Arc::clone(&self.root), candidate, sandbox, file, symlink_policy);
+                    let result = LocalTempFile::rooted(
+                        Arc::clone(&self.root),
+                        candidate.clone(),
+                        sandbox.clone(),
+                        file,
+                        symlink_policy,
+                    );
                     return match result {
                         Ok(resource) => Ok(resource),
                         Err(error) => {
-                            let primary = self.cleanup_default_sandbox(
-                                &cleanup_sandbox,
-                                LocalFileOperation::CreateTempFile,
-                                error,
-                            )?;
-                            Err(rooted_io_error(
-                                LocalFileOperation::CreateTempFile,
-                                relative.as_path(),
+                            let primary = rooted_io_error(LocalFileOperation::CreateTempFile, &candidate, error);
+                            Err(creation_recovery::finish(
                                 primary,
+                                vec![(candidate.clone(), child_entry), (sandbox.clone(), sandbox_entry)],
                             ))
                         }
                     };
                 }
-                Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
-                    self.cleanup_default_sandbox(&sandbox, LocalFileOperation::CreateTempFile, error)?;
+                Err(error) if error.retained.is_none() && error.source.kind() == io::ErrorKind::AlreadyExists => {
+                    let primary = rooted_io_error(LocalFileOperation::CreateTempFile, &candidate, error.source);
+                    let error = creation_recovery::finish(primary, vec![(sandbox.clone(), sandbox_entry)]);
+                    if error.temp_recovery().is_some() {
+                        return Err(error);
+                    }
                     if attempt_budget_exhausted(attempts, options.max_attempts()) {
                         break;
                     }
                     continue;
                 }
                 Err(error) => {
-                    let primary = self.cleanup_default_sandbox(&sandbox, LocalFileOperation::CreateTempFile, error)?;
-                    return Err(rooted_io_error(
-                        LocalFileOperation::CreateTempFile,
-                        relative.as_path(),
-                        primary,
-                    ));
+                    let primary = rooted_io_error(LocalFileOperation::CreateTempFile, &candidate, error.source);
+                    let mut entries = Vec::new();
+                    if let Some(child) = error.retained {
+                        entries.push((candidate.clone(), child));
+                    }
+                    entries.push((sandbox.clone(), sandbox_entry));
+                    return Err(creation_recovery::finish(primary, entries));
                 }
             }
         }
@@ -241,6 +338,13 @@ impl RootedLocalFileSystem {
         if options.privacy() == LocalPrivacyRequirement::Required {
             return self.create_private_rooted_temp_directory(&parent, options, symlink_policy);
         }
+        let parent_handle = if parent.as_os_str().is_empty() {
+            self.root.open_probe_root()
+        } else {
+            self.root
+                .open_probe_file(&rooted_path(&parent, LocalFileOperation::CreateTempDirectory)?)
+        }
+        .map_err(|error| rooted_io_error(LocalFileOperation::CreateTempDirectory, &parent, error))?;
         let mut attempts = 0_usize;
         loop {
             attempts = attempts.saturating_add(1);
@@ -251,95 +355,179 @@ impl RootedLocalFileSystem {
                 }
             };
             let sandbox = temp_candidate(&parent, Some("sandbox-"), None, LocalFileOperation::CreateTempDirectory)?;
-            let sandbox_relative = rooted_path(&sandbox, LocalFileOperation::CreateTempDirectory)?;
-            match self.root.create_dir(&sandbox_relative) {
-                Ok(()) => {}
-                Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
+            let sandbox_name = sandbox.file_name().expect("generated sandbox has a name");
+            let sandbox_handle = match self.root.create_temp_child(&parent_handle, sandbox_name, true) {
+                Ok(handle) => handle,
+                Err(error) if error.retained.is_none() && error.source.kind() == io::ErrorKind::AlreadyExists => {
                     if attempt_budget_exhausted(attempts, options.max_attempts()) {
                         break;
                     }
                     continue;
                 }
                 Err(error) => {
-                    return Err(rooted_io_error(
-                        LocalFileOperation::CreateTempDirectory,
-                        sandbox_relative.as_path(),
-                        error,
-                    ));
+                    let primary = rooted_io_error(LocalFileOperation::CreateTempDirectory, &sandbox, error.source);
+                    return Err(match error.retained {
+                        Some(entry) => creation_recovery::finish(primary, vec![(sandbox.clone(), entry)]),
+                        None => primary,
+                    });
                 }
-            }
+            };
+            let sandbox_parent = match parent_handle.try_clone() {
+                Ok(parent) => parent,
+                Err(error) => {
+                    let primary = rooted_io_error(LocalFileOperation::CreateTempDirectory, &sandbox, error);
+                    let entry = creation_recovery::entry(parent_handle, sandbox_name, sandbox_handle, true);
+                    return Err(creation_recovery::finish(primary, vec![(sandbox.clone(), entry)]));
+                }
+            };
+            let sandbox_file = match sandbox_handle.try_clone() {
+                Ok(file) => file,
+                Err(error) => {
+                    let primary = rooted_io_error(LocalFileOperation::CreateTempDirectory, &sandbox, error);
+                    let entry = creation_recovery::entry(sandbox_parent, sandbox_name, sandbox_handle, true);
+                    return Err(creation_recovery::finish(primary, vec![(sandbox.clone(), entry)]));
+                }
+            };
+            let sandbox_entry = creation_recovery::entry(sandbox_parent, sandbox_name, sandbox_file, true);
             let candidate = sandbox.join(resource_name);
-            let relative = rooted_path(&candidate, LocalFileOperation::CreateTempDirectory)?;
             #[cfg(feature = "test-support")]
             let created = if test_support_enabled("rooted-temp-directory-collision-cleanup") {
-                Err(io::Error::from(io::ErrorKind::AlreadyExists))
+                Err(NativePrivateCreateError {
+                    source: io::Error::from(io::ErrorKind::AlreadyExists),
+                    retained: None,
+                })
             } else if test_support_enabled("rooted-temp-directory-create-cleanup") {
-                Err(io::Error::from(io::ErrorKind::PermissionDenied))
+                Err(NativePrivateCreateError {
+                    source: io::Error::from(io::ErrorKind::PermissionDenied),
+                    retained: None,
+                })
             } else if test_support_enabled("rooted-temp-directory-collision") {
-                Err(io::Error::from(io::ErrorKind::AlreadyExists))
+                Err(NativePrivateCreateError {
+                    source: io::Error::from(io::ErrorKind::AlreadyExists),
+                    retained: None,
+                })
             } else if test_support_enabled("rooted-temp-directory-create") {
-                Err(io::Error::from(io::ErrorKind::PermissionDenied))
+                Err(NativePrivateCreateError {
+                    source: io::Error::from(io::ErrorKind::PermissionDenied),
+                    retained: None,
+                })
             } else {
-                self.root.create_dir(&relative)
+                self.root.create_temp_child(
+                    &sandbox_handle,
+                    candidate.file_name().expect("generated child has a name"),
+                    true,
+                )
             };
             #[cfg(not(feature = "test-support"))]
-            let created = self.root.create_dir(&relative);
+            let created = self.root.create_temp_child(
+                &sandbox_handle,
+                candidate.file_name().expect("generated child has a name"),
+                true,
+            );
             match created {
-                Ok(()) => {
-                    let cleanup_sandbox = sandbox.clone();
+                Ok(child_handle) => {
+                    #[cfg(feature = "test-support")]
+                    let child_file = if test_support_enabled("rooted-temp-directory-recovery-clone-cleanup") {
+                        Err(io::Error::other(
+                            "injected rooted temp recovery directory clone failure",
+                        ))
+                    } else {
+                        child_handle.try_clone()
+                    };
+                    #[cfg(not(feature = "test-support"))]
+                    let child_file = child_handle.try_clone();
+                    let child_file = match child_file {
+                        Ok(file) => file,
+                        Err(error) => {
+                            let primary = rooted_io_error(LocalFileOperation::CreateTempDirectory, &candidate, error);
+                            let child = creation_recovery::entry(
+                                sandbox_handle,
+                                candidate.file_name().expect("generated child has a name"),
+                                child_handle,
+                                true,
+                            );
+                            return Err(creation_recovery::finish(
+                                primary,
+                                vec![(candidate.clone(), child), (sandbox.clone(), sandbox_entry)],
+                            ));
+                        }
+                    };
+                    let child_parent = match sandbox_handle.try_clone() {
+                        Ok(parent) => parent,
+                        Err(error) => {
+                            let primary = rooted_io_error(LocalFileOperation::CreateTempDirectory, &candidate, error);
+                            let child = creation_recovery::entry(
+                                sandbox_handle,
+                                candidate.file_name().expect("generated child has a name"),
+                                child_handle,
+                                true,
+                            );
+                            return Err(creation_recovery::finish(
+                                primary,
+                                vec![(candidate.clone(), child), (sandbox.clone(), sandbox_entry)],
+                            ));
+                        }
+                    };
+                    let child_entry = creation_recovery::entry(
+                        child_parent,
+                        candidate.file_name().expect("generated child has a name"),
+                        child_file,
+                        true,
+                    );
                     #[cfg(feature = "test-support")]
                     let result = if test_support_enabled("rooted-temp-directory-owner-cleanup") {
                         Err(io::Error::other(
                             "injected rooted temporary directory owner construction failure",
                         ))
                     } else {
-                        LocalTempDirectory::rooted(
+                        LocalTempDirectory::rooted_from_created_handle(
                             Arc::clone(&self.root),
-                            candidate,
-                            sandbox,
+                            candidate.clone(),
+                            sandbox.clone(),
+                            &child_handle,
                             symlink_policy,
                             options.cleanup_limits(),
                         )
                     };
                     #[cfg(not(feature = "test-support"))]
-                    let result = LocalTempDirectory::rooted(
+                    let result = LocalTempDirectory::rooted_from_created_handle(
                         Arc::clone(&self.root),
-                        candidate,
-                        sandbox,
+                        candidate.clone(),
+                        sandbox.clone(),
+                        &child_handle,
                         symlink_policy,
                         options.cleanup_limits(),
                     );
                     return match result {
                         Ok(resource) => Ok(resource),
                         Err(error) => {
-                            let primary = self.cleanup_default_sandbox(
-                                &cleanup_sandbox,
-                                LocalFileOperation::CreateTempDirectory,
-                                error,
-                            )?;
-                            Err(rooted_io_error(
-                                LocalFileOperation::CreateTempDirectory,
-                                relative.as_path(),
+                            let primary = rooted_io_error(LocalFileOperation::CreateTempDirectory, &candidate, error);
+                            Err(creation_recovery::finish(
                                 primary,
+                                vec![(candidate.clone(), child_entry), (sandbox.clone(), sandbox_entry)],
                             ))
                         }
                     };
                 }
-                Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
-                    self.cleanup_default_sandbox(&sandbox, LocalFileOperation::CreateTempDirectory, error)?;
+                Err(error) if error.retained.is_none() && error.source.kind() == io::ErrorKind::AlreadyExists => {
+                    let primary = rooted_io_error(LocalFileOperation::CreateTempDirectory, &candidate, error.source);
+                    let error = creation_recovery::finish(primary, vec![(sandbox.clone(), sandbox_entry)]);
+                    if error.temp_recovery().is_some() {
+                        return Err(error);
+                    }
                     if attempt_budget_exhausted(attempts, options.max_attempts()) {
                         break;
                     }
                     continue;
                 }
                 Err(error) => {
-                    let primary =
-                        self.cleanup_default_sandbox(&sandbox, LocalFileOperation::CreateTempDirectory, error)?;
-                    return Err(rooted_io_error(
-                        LocalFileOperation::CreateTempDirectory,
-                        relative.as_path(),
-                        primary,
-                    ));
+                    let primary = rooted_io_error(LocalFileOperation::CreateTempDirectory, &candidate, error.source);
+                    let mut entries = Vec::new();
+                    if let Some(child) = error.retained {
+                        entries.push((candidate.clone(), child));
+                    }
+                    entries.push((sandbox.clone(), sandbox_entry));
+                    return Err(creation_recovery::finish(primary, entries));
                 }
             }
         }
@@ -351,49 +539,6 @@ impl RootedLocalFileSystem {
                 "temporary directory name attempts exhausted",
             ),
         ))
-    }
-
-    fn cleanup_default_sandbox(
-        &self,
-        sandbox: &std::path::Path,
-        operation: LocalFileOperation,
-        primary: io::Error,
-    ) -> Result<io::Error, super::LocalFileError> {
-        let sandbox_relative = rooted_path(sandbox, operation)?;
-        #[cfg(feature = "test-support")]
-        let cleanup = if test_support_enabled("rooted-temp-sandbox-cleanup")
-            || test_support_enabled("temp-identity-file-cleanup")
-            || test_support_enabled("rooted-temp-file-open-cleanup")
-            || test_support_enabled("rooted-temp-file-collision-cleanup")
-            || test_support_enabled("rooted-temp-directory-create-cleanup")
-            || test_support_enabled("rooted-temp-directory-collision-cleanup")
-            || test_support_enabled("rooted-temp-file-owner-cleanup")
-            || test_support_enabled("rooted-temp-directory-owner-cleanup")
-        {
-            Err(io::Error::other("injected sandbox cleanup failure"))
-        } else {
-            self.root.remove_tree(&sandbox_relative)
-        };
-        #[cfg(not(feature = "test-support"))]
-        let cleanup = self.root.remove_tree(&sandbox_relative);
-        match cleanup {
-            Ok(()) => Ok(primary),
-            Err(cleanup_error) => {
-                let rooted_input = std::path::Path::new(std::path::MAIN_SEPARATOR_STR).join(sandbox);
-                let sandbox_namespace = LocalPathResolver::new(
-                    LocalFileSystemScope::Rooted,
-                    std::path::Path::new(std::path::MAIN_SEPARATOR_STR),
-                )
-                .and_then(|resolver| resolver.resolve(&rooted_input))
-                .map(|path| path.namespace_absolute().to_path_buf())
-                .unwrap_or(rooted_input);
-                let source = io::Error::new(
-                    primary.kind(),
-                    TempSandboxCleanupError::new(primary, sandbox_namespace.clone(), cleanup_error),
-                );
-                Err(rooted_io_error(operation, &sandbox_namespace, source))
-            }
-        }
     }
 
     fn create_private_rooted_temp_file(

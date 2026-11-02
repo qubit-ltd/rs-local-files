@@ -211,12 +211,11 @@ fn open_link(root: &File, path: &LocalRelativePath, access: u32) -> Result<File>
     nt_open_at(&parent, &name, access, FILE_OPEN, 0)
 }
 
-/// Retrieves the opaque reparse record for an already-opened link handle.
-/// Returns a native query error or `InvalidData` for an oversized response.
 /// Installs a complete symbolic-link reparse record on a placeholder handle.
 /// The caller supplies the complete `buffer` and a writable placeholder.
-/// Returns `InvalidInput` for an unrepresentable buffer length or a native
-/// installation error; rollback remains the caller's responsibility.
+/// This issues `FSCTL_SET_REPARSE_POINT`. Returns `InvalidInput` when the
+/// buffer length cannot be represented as a native `u32`, or propagates the
+/// native installation error. The caller is responsible for rollback.
 fn set_reparse_buffer(link: &File, buffer: &[u8]) -> Result<()> {
     let mut returned = 0_u32;
     let buffer_length = u32::try_from(buffer.len())
