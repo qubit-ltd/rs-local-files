@@ -390,3 +390,61 @@ impl LocalFileSystem {
         self
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::LocalCopyOptions;
+    use super::LocalCreateDirectoryOptions;
+    use super::LocalDeleteOptions;
+    use super::LocalFileSystem;
+    use super::LocalListOptions;
+    use super::LocalReadOptions;
+    use super::LocalRenameOptions;
+    use super::LocalTempDirectoryOptions;
+    use super::LocalTempFileOptions;
+    use super::LocalWriteOptions;
+    use crate::options::LocalWriteMode;
+
+    #[test]
+    fn rooted_default_options_accessors_and_setters_round_trip() {
+        let fixture = tempfile::tempdir().expect("fixture");
+        let mut filesystem = LocalFileSystem::rooted(fixture.path()).expect("rooted filesystem");
+
+        let _ = filesystem.default_read_options();
+        filesystem
+            .set_default_read_options(LocalReadOptions::new())
+            .expect("read defaults");
+        let _ = filesystem.default_write_options();
+        filesystem
+            .set_default_write_options(LocalWriteOptions::new(LocalWriteMode::CreateNew))
+            .expect("write defaults");
+        let _ = filesystem.default_list_options();
+        filesystem
+            .set_default_list_options(LocalListOptions::new())
+            .expect("list defaults");
+        let _ = filesystem.default_copy_options();
+        filesystem
+            .set_default_copy_options(LocalCopyOptions::new())
+            .expect("copy defaults");
+        let _ = filesystem.default_create_directory_options();
+        filesystem
+            .set_default_create_directory_options(LocalCreateDirectoryOptions::new())
+            .expect("create-directory defaults");
+        let _ = filesystem.default_delete_options();
+        filesystem
+            .set_default_delete_options(LocalDeleteOptions::new())
+            .expect("delete defaults");
+        let _ = filesystem.default_rename_options();
+        filesystem
+            .set_default_rename_options(LocalRenameOptions::new())
+            .expect("rename defaults");
+        let _ = filesystem.default_temp_file_options();
+        filesystem
+            .set_default_temp_file_options(LocalTempFileOptions::new())
+            .expect("temp-file defaults");
+        let _ = filesystem.default_temp_directory_options();
+        filesystem
+            .set_default_temp_directory_options(LocalTempDirectoryOptions::new())
+            .expect("temp-directory defaults");
+    }
+}

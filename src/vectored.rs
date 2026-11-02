@@ -28,6 +28,35 @@ pub(crate) fn byte_slices_mut<'a>(buffers: &'a mut [IoSliceMut<'_>]) -> io::Resu
     Ok(slices)
 }
 
+#[cfg(test)]
+mod tests {
+    use std::io::IoSlice;
+    use std::io::IoSliceMut;
+
+    use super::byte_slices;
+    use super::byte_slices_mut;
+
+    #[test]
+    fn byte_slices_preserve_buffer_order_and_contents() {
+        let buffers = [IoSlice::new(b"first"), IoSlice::new(b"second")];
+        let slices = byte_slices(&buffers).expect("borrowed slices");
+        assert_eq!(slices, [b"first".as_slice(), b"second".as_slice()]);
+    }
+
+    #[test]
+    fn byte_slices_mut_preserve_mutable_buffers_in_order() {
+        let mut first = *b"first";
+        let mut second = *b"second";
+        let mut buffers = [IoSliceMut::new(&mut first), IoSliceMut::new(&mut second)];
+        let mut slices = byte_slices_mut(&mut buffers).expect("mutable borrowed slices");
+        slices[0][0] = b'F';
+        slices[1][0] = b'S';
+        drop(slices);
+        assert_eq!(&first, b"First");
+        assert_eq!(&second, b"Second");
+    }
+}
+
 #[cfg(windows)]
 pub(crate) fn io_slices_mut<'a>(buffers: &'a mut [&mut [u8]]) -> io::Result<Vec<IoSliceMut<'a>>> {
     let mut slices = Vec::new();

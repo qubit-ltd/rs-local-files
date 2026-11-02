@@ -154,6 +154,56 @@ fn diagnostics_include_depth_and_name_budget_facts() {
 }
 
 #[test]
+fn validation_deadline_overflow_is_reported_as_resource_limit() {
+    let (_fixture, _filesystem, stage, root) = make_stage(false);
+    let error = stage
+        .verify_entries(
+            &[],
+            &LocalTreeValidationOptions::new()
+                .with_limits(LocalListOptions::new().with_deadline(std::time::Duration::MAX)),
+        )
+        .expect_err("unrepresentable validation deadline");
+    assert_eq!(error.kind(), LocalFileErrorKind::ResourceLimit);
+    assert_eq!(error.path(), Some(root.as_path()));
+    assert!(error.reason().expect("reason").contains("deadline overflowed"));
+    stage.cleanup().expect("cleanup");
+}
+
+#[test]
+fn validation_reports_entry_budget_and_walker_start_failures() {
+    let (_fixture, _filesystem, mut stage, _root) = make_stage(false);
+    write_file(&mut stage, "entry");
+
+    let entry_error = stage
+        .verify_entries(
+            &[],
+            &LocalTreeValidationOptions::new().with_limits(LocalListOptions::new().with_max_entries(0)),
+        )
+        .expect_err("expected entry count exceeds its budget");
+    assert_eq!(entry_error.kind(), LocalFileErrorKind::ResourceLimit);
+    assert!(entry_error.path().is_some());
+    assert_eq!(
+        entry_error.resource_limit_error().expect("entry facts").resource(),
+        LocalResourceKind::Entry
+    );
+
+    let walker_error = stage
+        .verify_entries(
+            &[],
+            &LocalTreeValidationOptions::new().with_limits(LocalListOptions::new().with_max_open_directories(0)),
+        )
+        .expect_err("walker cannot start with a zero directory budget");
+    assert_eq!(walker_error.kind(), LocalFileErrorKind::InvalidOptions);
+    assert!(
+        walker_error
+            .reason()
+            .expect("reason")
+            .contains("tree traversal could not start")
+    );
+    stage.cleanup().expect("cleanup");
+}
+
+#[test]
 fn publish_validation_diagnostic_preserves_state_and_recovery() {
     let (_fixture, filesystem, mut stage, root) = make_stage(false);
     write_file(&mut stage, "extra");
