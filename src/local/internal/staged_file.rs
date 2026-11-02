@@ -25,6 +25,58 @@ pub(crate) struct StagedFile {
     path: Option<PathBuf>,
     /// Open staging handle closed before removal or commit.
     file: Option<File>,
+    /// Identity captured from the creation handle; `None` never authorizes
+    /// removal.
+    identity: Option<StagedIdentity>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum StagedIdentity {
+    #[cfg(unix)]
+    Unix(u64, u64),
+    #[cfg(windows)]
+    Windows(u32, u64),
+}
+
+fn file_identity(file: &File) -> Option<StagedIdentity> {
+    let metadata = file.metadata().ok()?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        Some(StagedIdentity::Unix(metadata.dev(), metadata.ino()))
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        Some(StagedIdentity::Windows(
+            metadata.volume_serial_number()?,
+            metadata.file_index()?,
+        ))
+    }
+}
+
+fn path_identity(path: &Path) -> std::io::Result<Option<StagedIdentity>> {
+    let metadata = match fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error),
+    };
+    if !metadata.file_type().is_file() {
+        return Ok(None);
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        Ok(Some(StagedIdentity::Unix(metadata.dev(), metadata.ino())))
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        Ok(metadata
+            .volume_serial_number()
+            .zip(metadata.file_index())
+            .map(|(volume, index)| StagedIdentity::Windows(volume, index)))
+    }
 }
 
 impl StagedFile {
@@ -38,9 +90,11 @@ impl StagedFile {
     /// A guard that removes `path` unless disarmed.
     #[inline]
     pub(crate) fn new(path: PathBuf, file: File) -> Self {
+        let identity = file_identity(&file);
         Self {
             path: Some(path),
             file: Some(file),
+            identity,
         }
     }
 
@@ -115,6 +169,17 @@ impl StagedFile {
                 || super::test_support::is_enabled("copy-staging-copy-cleanup")
             {
                 return Err(crate::local::test_fault_error());
+            }
+            let current = path_identity(path)?;
+            if current.is_none() {
+                let _ = self.path.take();
+                return Ok(());
+            }
+            if self.identity.is_none() || current != self.identity {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "staging file identity changed before cleanup",
+                ));
             }
             fs::remove_file(path)?;
             let _ = self.path.take();

@@ -523,17 +523,28 @@ fn sync_staged_file(staged_file: &StagedFile) -> std::io::Result<()> {
     staged_file.file().sync_all()
 }
 
+/// Configures destination handling for a staged copy commit.
+///
+/// `conflict` selects the existing-file policy, `remove_destination_directory`
+/// permits removing a conflicting destination directory immediately before
+/// installation, and `symlink_policy` controls links encountered while
+/// preparing the copy.
+struct StagedCopyCommitOptions {
+    conflict: LocalCopyConflictPolicy,
+    remove_destination_directory: bool,
+    symlink_policy: LocalSymlinkPolicy,
+}
+
 /// Commits an already staged regular file according to destination policies.
 ///
 /// # Parameters
 ///
 /// * `src` - Source file associated with the staged contents.
 /// * `dst` - Final destination file path.
-/// * `conflict` - Existing-file conflict policy.
-/// * `remove_destination_directory` - Whether a prior directory conflict may be
-///   removed immediately before commit.
+/// * `options` - Destination conflict, directory-removal, and symlink policies.
 /// * `stats` - Statistics accumulated before commit.
 /// * `staged_file` - Armed staging guard to commit or clean up.
+/// * `budget` - Copy budget carrying the original operation deadline.
 ///
 /// # Returns
 ///
@@ -541,14 +552,9 @@ fn sync_staged_file(staged_file: &StagedFile) -> std::io::Result<()> {
 ///
 /// # Errors
 ///
-/// Returns a structured error when destination removal, commit, or staging
-/// cleanup fails.
-struct StagedCopyCommitOptions {
-    conflict: LocalCopyConflictPolicy,
-    remove_destination_directory: bool,
-    symlink_policy: LocalSymlinkPolicy,
-}
-
+/// Returns a structured error when the deadline expires, destination removal
+/// or installation fails, or staging cleanup fails. A failure after removing a
+/// conflicting destination reports the resulting partial publication state.
 fn commit_staged_copy_file(
     src: &Path,
     dst: &Path,

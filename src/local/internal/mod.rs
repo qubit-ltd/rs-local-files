@@ -185,6 +185,8 @@ pub(crate) use rooted_namespace_io::create_rooted_directory;
 #[cfg(unix)]
 pub(crate) use rooted_namespace_io::create_rooted_symlink;
 #[cfg(unix)]
+pub(crate) use rooted_namespace_io::create_rooted_temp_child;
+#[cfg(unix)]
 pub(crate) use rooted_namespace_io::open_root_directory_reader;
 #[cfg(unix)]
 pub(crate) use rooted_namespace_io::open_rooted_directory_reader;
@@ -223,6 +225,8 @@ pub(crate) use windows_rooted::RootedLinkTargetRead;
 pub(crate) use windows_rooted::create_rooted_directory;
 #[cfg(windows)]
 pub(crate) use windows_rooted::create_rooted_symlink;
+#[cfg(windows)]
+pub(crate) use windows_rooted::create_rooted_temp_child;
 #[cfg(windows)]
 pub(crate) use windows_rooted::normalize_rooted_link_target;
 #[cfg(windows)]

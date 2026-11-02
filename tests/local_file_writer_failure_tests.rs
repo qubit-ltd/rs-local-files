@@ -13,6 +13,7 @@ use std::io::IoSlice;
 use qubit_io::Output;
 use qubit_local_files::LocalFileSystem;
 use qubit_local_files::error::LocalFileErrorKind;
+#[cfg(all(feature = "test-support", unix))]
 use qubit_local_files::error::LocalFileOperation;
 use qubit_local_files::options::LocalWriteMode;
 use qubit_local_files::options::LocalWriteOptions;
@@ -442,10 +443,10 @@ fn test_local_file_writer_returns_retryable_writer_before_publication() {
     assert!(!target.exists());
 }
 
-/// Verifies explicit host staging cleanup preserves its structured error when
-/// an external actor removes the temporary file before abort begins.
+/// Verifies explicit host staging cleanup is idempotent when an external actor
+/// removes the temporary file before abort begins.
 #[test]
-fn test_local_file_writer_abort_reports_missing_host_staging_file() {
+fn test_local_file_writer_abort_accepts_missing_host_staging_file() {
     let directory = tempdir().expect("temporary directory should be created");
     let target = directory.path().join("payload");
     let mut writer = LocalFileSystem::host()
@@ -459,17 +460,9 @@ fn test_local_file_writer_abort_reports_missing_host_staging_file() {
         .expect("staged writer should create one temporary file");
     fs::remove_file(&staging).expect("external actor should remove staging file");
 
-    let error = writer
-        .abort()
-        .expect_err("missing host staging file must report explicit cleanup failure");
-    assert_eq!(LocalFileOperation::Abort, error.operation());
-    assert_eq!(Some(target.as_path()), error.path());
+    let outcome = writer.abort().expect("missing staging file completes cleanup");
+    assert_eq!(LocalWriterState::Aborted, outcome.state());
     assert!(!target.exists());
-
-    let retry = writer
-        .abort()
-        .expect_err("failed abort must retain the writer for retry");
-    assert_eq!(LocalFileOperation::Abort, retry.operation(),);
 }
 
 /// Verifies a failed staged abort rejects every stream operation and commit,

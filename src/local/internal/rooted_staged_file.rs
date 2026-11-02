@@ -11,6 +11,7 @@
 use std::ffi::CString;
 use std::fs::File;
 use std::io::Error;
+use std::io::ErrorKind;
 use std::io::Result;
 use std::os::fd::AsRawFd;
 use std::path::Path;
@@ -35,6 +36,15 @@ pub(in crate::local) struct RootedStagedFile {
     file: Option<File>,
     /// Non-authoritative relative staging path for diagnostics.
     diagnostic_path: PathBuf,
+    /// Identity captured from the creation handle; `None` never authorizes
+    /// unlink.
+    identity: Option<(u64, u64)>,
+}
+
+fn file_identity(file: &File) -> Option<(u64, u64)> {
+    use std::os::unix::fs::MetadataExt;
+    let metadata = file.metadata().ok()?;
+    Some((metadata.dev(), metadata.ino()))
 }
 
 impl RootedStagedFile {
@@ -52,11 +62,13 @@ impl RootedStagedFile {
     /// A guard that removes the staging entry unless disarmed after commit.
     #[inline]
     pub(in crate::local) fn new(parent: File, name: CString, file: File, diagnostic_path: PathBuf) -> Self {
+        let identity = file_identity(&file);
         Self {
             parent,
             name: Some(name),
             file: Some(file),
             diagnostic_path,
+            identity,
         }
     }
 
@@ -215,6 +227,40 @@ impl RootedStagedFile {
             || super::test_support::is_enabled("rooted-copy-install-cleanup")
         {
             return Err(crate::local::test_fault_error());
+        }
+        let Some(identity) = self.identity else {
+            return Err(Error::new(
+                ErrorKind::InvalidData,
+                "staging file identity is unavailable",
+            ));
+        };
+        let mut status = std::mem::MaybeUninit::<libc::stat>::uninit();
+        // SAFETY: parent is a live directory descriptor, name is NUL terminated,
+        // and status points to writable storage for `fstatat`.
+        let observed = unsafe {
+            libc::fstatat(
+                self.parent.as_raw_fd(),
+                name.as_ptr(),
+                status.as_mut_ptr(),
+                libc::AT_SYMLINK_NOFOLLOW,
+            )
+        };
+        if observed == -1 {
+            let error = Error::last_os_error();
+            if error.kind() == ErrorKind::NotFound {
+                let _ = self.name.take();
+                return Ok(());
+            }
+            return Err(error);
+        }
+        // SAFETY: successful `fstatat` initialized status.
+        let status = unsafe { status.assume_init() };
+        if status.st_mode & libc::S_IFMT != libc::S_IFREG || status.st_dev != identity.0 || status.st_ino != identity.1
+        {
+            return Err(Error::new(
+                ErrorKind::InvalidInput,
+                "rooted staging entry identity changed before cleanup",
+            ));
         }
         // SAFETY: the live parent descriptor and NUL-terminated name remain
         // valid for this non-retaining unlink operation.
