@@ -131,6 +131,16 @@ impl LocalStagedDirectory {
     /// Returns `ResourceLimit` if traversal or exact-set indexing exceeds its
     /// budgets, and `RequirementNotMet` when an enabled entry rule or
     /// expected set is violated.
+    ///
+    /// Validation failures carry the best available entry path in the
+    /// filesystem's public namespace and a stable reason. Resource-limit
+    /// failures include typed budget facts when a concrete limit acquisition
+    /// was measured. These diagnostic paths describe the failed entry; they
+    /// are not authority and are never used to perform validation I/O.
+    ///
+    /// A successful return means the checked sequence of observations met the
+    /// requested constraints. It does not make the observations atomic with
+    /// respect to concurrent changes.
     pub fn verify_entries(&self, expected: &[LocalTreeEntry], options: &LocalTreeValidationOptions) -> LocalResult<()> {
         if options.exact_entries().is_some_and(|configured| configured != expected) {
             return Err(LocalFileError::new(

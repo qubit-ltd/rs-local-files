@@ -17,9 +17,10 @@ use crate::LocalResult;
 use crate::directory::LocalStagedDirectory;
 use crate::directory::tree_validation::LocalTreeEntry;
 use crate::directory::tree_validation::LocalTreeValidationOptions;
+use crate::error::LocalResourceKind;
+use crate::error::LocalResourceLimitError;
 use crate::observation::LocalFileIdentity;
 use crate::observation::LocalObservationRequirement;
-use crate::options::LocalListOptions;
 use crate::policy::LocalPrivacyRequirement;
 use crate::policy::LocalSymlinkPolicy;
 
@@ -49,19 +50,27 @@ pub(in crate::directory) fn verify_tree(
     let deadline = options
         .limits()
         .deadline()
-        .map(|duration| started.checked_add(duration).ok_or_else(resource_limit))
+        .map(|duration| {
+            started
+                .checked_add(duration)
+                .ok_or_else(|| resource_error(stage, Path::new("."), "tree validation deadline overflowed", None))
+        })
         .transpose()?;
-    check_deadline(deadline)?;
+    check_deadline(stage, deadline)?;
 
-    let root = stage.directory().observe()?;
+    let root = stage
+        .directory()
+        .observe()
+        .map_err(|error| context_error(error, stage, Path::new("."), "tree root observation failed"))?;
     if root.identity() != stage.identity() {
-        return Err(LocalFileError::new(
-            LocalFileErrorKind::ChangedDuringRead,
-            LocalFileOperation::Metadata,
-        ));
+        return Err(
+            LocalFileError::new(LocalFileErrorKind::ChangedDuringRead, LocalFileOperation::Metadata)
+                .with_path(stage.directory().diagnostic_path().to_path_buf())
+                .with_reason("staged tree root identity changed"),
+        );
     }
     verify_root_privacy(stage, options)?;
-    check_deadline(deadline)?;
+    check_deadline(stage, deadline)?;
 
     if expected.is_none() && !requires_tree_walk(options) {
         return Ok(());
@@ -69,17 +78,51 @@ pub(in crate::directory) fn verify_tree(
 
     let limits = options.limits();
     let expected_name_bytes = if let Some(entries) = expected {
-        if limits.max_entries().is_some_and(|maximum| entries.len() > maximum) {
-            return Err(resource_limit());
+        if let Some(maximum) = limits.max_entries()
+            && entries.len() > maximum
+        {
+            return Err(resource_error(
+                stage,
+                Path::new("."),
+                "tree validation entry limit exceeded",
+                Some(
+                    LocalResourceLimitError::new(LocalResourceKind::Entry, maximum, maximum, entries.len())
+                        .with_observed(entries.len()),
+                ),
+            ));
         }
         let mut bytes = 0_usize;
         for entry in entries {
-            check_deadline(deadline)?;
-            bytes = bytes
-                .checked_add(entry.relative_path().as_os_str().as_encoded_bytes().len())
-                .ok_or_else(resource_limit)?;
+            check_deadline(stage, deadline)?;
+            let requested = entry.relative_path().as_os_str().as_encoded_bytes().len();
+            let next = bytes.checked_add(requested).ok_or_else(|| {
+                resource_overflow(
+                    stage,
+                    entry.relative_path(),
+                    LocalResourceKind::SeenNameBytes,
+                    "tree validation name-byte count overflowed",
+                )
+            })?;
+            if let Some(maximum) = limits.max_seen_name_bytes()
+                && next > maximum
+            {
+                return Err(resource_error(
+                    stage,
+                    entry.relative_path(),
+                    "tree validation name-byte limit exceeded",
+                    Some(
+                        LocalResourceLimitError::new(
+                            LocalResourceKind::SeenNameBytes,
+                            maximum,
+                            maximum.saturating_sub(bytes),
+                            requested,
+                        )
+                        .with_observed(next),
+                    ),
+                ));
+            }
+            bytes = next;
         }
-        check_name_budget(limits, bytes)?;
         bytes
     } else {
         0
@@ -87,13 +130,21 @@ pub(in crate::directory) fn verify_tree(
     let mut expected_index = if let Some(entries) = expected {
         let mut index = ExpectedIndex::new();
         for entry in entries {
-            check_deadline(deadline)?;
-            index.try_reserve(1).map_err(|_| resource_limit())?;
+            check_deadline(stage, deadline)?;
+            index.try_reserve(1).map_err(|_| {
+                resource_error(
+                    stage,
+                    entry.relative_path(),
+                    "tree validation expected-set allocation failed",
+                    None,
+                )
+            })?;
             if index.insert(entry.relative_path(), (entry.kind(), false)).is_some() {
-                return Err(LocalFileError::new(
-                    LocalFileErrorKind::InvalidOptions,
-                    LocalFileOperation::ValidateName,
-                ));
+                return Err(
+                    LocalFileError::new(LocalFileErrorKind::InvalidOptions, LocalFileOperation::ValidateName)
+                        .with_path(stage.directory().diagnostic_path().join(entry.relative_path()))
+                        .with_reason("duplicate expected tree entry path"),
+                );
             }
         }
         Some(index)
@@ -109,24 +160,76 @@ pub(in crate::directory) fn verify_tree(
         .with_recursive()
         .with_symlink_policy(LocalSymlinkPolicy::Reject)
         .with_error_policy(crate::options::LocalWalkErrorPolicy::FailFast);
-    let observer = stage.observe_tree_with_options(&walk_limits)?;
+    let observer = stage
+        .observe_tree_with_options(&walk_limits)
+        .map_err(|error| context_error(error, stage, Path::new("."), "tree traversal could not start"))?;
     for result in observer {
-        check_deadline(deadline)?;
-        let item = result?;
+        check_deadline(stage, deadline)?;
+        let item =
+            result.map_err(|error| context_error(error, stage, Path::new("."), "tree entry observation failed"))?;
         let path = item.relative_path();
         let kind = item.observation().metadata().kind();
         let depth = path.components().count();
         if limits.max_depth().is_some_and(|maximum| depth > maximum) {
-            return Err(resource_limit());
+            return Err(tree_limit(
+                stage,
+                path,
+                LocalResourceLimitError::new(LocalResourceKind::Depth, limits.max_depth().unwrap_or(0), 0, depth)
+                    .with_observed(depth),
+                "tree validation depth limit exceeded",
+            ));
         }
-        count = count.checked_add(1).ok_or_else(resource_limit)?;
+        count = count.checked_add(1).ok_or_else(|| {
+            resource_overflow(
+                stage,
+                path,
+                LocalResourceKind::Entry,
+                "tree validation entry count overflowed",
+            )
+        })?;
         if limits.max_entries().is_some_and(|maximum| count > maximum) {
-            return Err(resource_limit());
+            return Err(tree_limit(
+                stage,
+                path,
+                LocalResourceLimitError::new(
+                    LocalResourceKind::Entry,
+                    limits.max_entries().unwrap_or(0),
+                    limits
+                        .max_entries()
+                        .unwrap_or(0)
+                        .saturating_sub(count.saturating_sub(1)),
+                    1,
+                )
+                .with_observed(count),
+                "tree validation entry limit exceeded",
+            ));
         }
-        name_bytes = name_bytes
-            .checked_add(path.as_os_str().as_encoded_bytes().len())
-            .ok_or_else(resource_limit)?;
-        check_name_budget(limits, name_bytes)?;
+        let requested = path.as_os_str().as_encoded_bytes().len();
+        let next_name_bytes = name_bytes.checked_add(requested).ok_or_else(|| {
+            resource_overflow(
+                stage,
+                path,
+                LocalResourceKind::SeenNameBytes,
+                "tree validation name-byte count overflowed",
+            )
+        })?;
+        if let Some(maximum) = limits.max_seen_name_bytes()
+            && next_name_bytes > maximum
+        {
+            return Err(tree_limit(
+                stage,
+                path,
+                LocalResourceLimitError::new(
+                    LocalResourceKind::SeenNameBytes,
+                    maximum,
+                    maximum.saturating_sub(name_bytes),
+                    requested,
+                )
+                .with_observed(next_name_bytes),
+                "tree validation name-byte limit exceeded",
+            ));
+        }
+        name_bytes = next_name_bytes;
 
         if (options.rejects_symlinks() && kind == LocalFileKind::Symlink)
             || (options.rejects_special_files()
@@ -135,58 +238,89 @@ pub(in crate::directory) fn verify_tree(
                     LocalFileKind::File | LocalFileKind::Directory | LocalFileKind::Symlink
                 ))
         {
-            return Err(requirement_not_met());
+            let reason = if kind == LocalFileKind::Symlink {
+                "symbolic link rejected by tree validation"
+            } else {
+                "special file rejected by tree validation"
+            };
+            return Err(requirement_error(stage, path, reason));
         }
 
         if let Some(index) = expected_index.as_mut() {
             let Some((expected_kind, was_seen)) = index.get_mut(path) else {
-                return Err(requirement_not_met());
+                return Err(requirement_error(stage, path, "unexpected tree entry"));
             };
             if *expected_kind != kind || *was_seen {
-                return Err(requirement_not_met());
+                return Err(requirement_error(
+                    stage,
+                    path,
+                    "tree entry kind does not match expected kind or was observed more than once",
+                ));
             }
             *was_seen = true;
         }
 
         verify_entry_privacy(stage, path, kind, item.observation().identity(), options)?;
         if options.rejects_external_hardlinks() && kind == LocalFileKind::File {
-            let (current, native_count) = stage.directory().observe_entry_with_link_count(path)?;
+            let (current, native_count) = stage
+                .directory()
+                .observe_entry_with_link_count(path)
+                .map_err(|error| context_error(error, stage, path, "tree hard-link metadata observation failed"))?;
             if current.identity() != item.observation().identity() {
-                return Err(LocalFileError::new(
-                    LocalFileErrorKind::ChangedDuringRead,
-                    LocalFileOperation::Metadata,
-                ));
+                return Err(
+                    LocalFileError::new(LocalFileErrorKind::ChangedDuringRead, LocalFileOperation::Metadata)
+                        .with_path(stage.directory().diagnostic_path().join(path))
+                        .with_reason("tree entry identity changed during hard-link verification"),
+                );
             }
-            let native_count = native_count.ok_or_else(unsupported)?;
-            let identity = current.identity().cloned().ok_or_else(unsupported)?;
+            let native_count = native_count.ok_or_else(|| {
+                LocalFileError::new(LocalFileErrorKind::Unsupported, LocalFileOperation::Metadata)
+                    .with_path(stage.directory().diagnostic_path().join(path))
+                    .with_reason("native hard-link count is unavailable")
+            })?;
+            let identity = current.identity().cloned().ok_or_else(|| {
+                LocalFileError::new(LocalFileErrorKind::Unsupported, LocalFileOperation::Metadata)
+                    .with_path(stage.directory().diagnostic_path().join(path))
+                    .with_reason("native file identity is unavailable for hard-link verification")
+            })?;
             if let Some((observed_count, occurrences)) = link_counts.get_mut(&identity) {
                 if *observed_count != native_count {
                     return Err(LocalFileError::new(
                         LocalFileErrorKind::ChangedDuringRead,
                         LocalFileOperation::Metadata,
-                    ));
+                    )
+                    .with_path(stage.directory().diagnostic_path().join(path))
+                    .with_reason("tree entry link count changed during verification"));
                 }
-                *occurrences = occurrences.checked_add(1).ok_or_else(resource_limit)?;
+                *occurrences = occurrences.checked_add(1).ok_or_else(|| {
+                    resource_overflow(stage, path, LocalResourceKind::Entry, "tree hard-link count overflowed")
+                })?;
             } else {
-                link_counts.try_reserve(1).map_err(|_| resource_limit())?;
+                link_counts
+                    .try_reserve(1)
+                    .map_err(|_| resource_error(stage, path, "tree hard-link index allocation failed", None))?;
                 link_counts.insert(identity, (native_count, 1));
             }
         }
     }
-    check_deadline(deadline)?;
+    check_deadline(stage, deadline)?;
 
     if let Some(index) = expected_index.as_ref() {
-        for (_, was_seen) in index.values() {
-            check_deadline(deadline)?;
+        for (expected_path, (_, was_seen)) in index.iter() {
+            check_deadline(stage, deadline)?;
             if !was_seen {
-                return Err(requirement_not_met());
+                return Err(requirement_error(stage, expected_path, "missing expected tree entry"));
             }
         }
     }
     for (native_count, occurrences) in link_counts.values() {
-        check_deadline(deadline)?;
+        check_deadline(stage, deadline)?;
         if u64::try_from(*occurrences).is_ok_and(|seen| native_count > &seen) {
-            return Err(requirement_not_met());
+            return Err(requirement_error(
+                stage,
+                Path::new("."),
+                "tree contains external hard links",
+            ));
         }
     }
     Ok(())
@@ -217,7 +351,15 @@ fn verify_root_privacy(stage: &LocalStagedDirectory, options: &LocalTreeValidati
     {
         let file = stage
             .directory()
-            .root_authority()?
+            .root_authority()
+            .map_err(|error| {
+                context_error(
+                    error,
+                    stage,
+                    Path::new("."),
+                    "tree root privacy authority could not be opened",
+                )
+            })?
             .try_clone_authority()
             .map_err(|source| {
                 file_error(
@@ -245,13 +387,23 @@ fn verify_root_privacy(stage: &LocalStagedDirectory, options: &LocalTreeValidati
             .owner
             .as_ref()
             .expect("stage owner exists")
-            .open_child_for_access()?;
-        let observation = crate::observation::query::query_observation(&root, LocalObservationRequirement::Required)?;
+            .open_child_for_access()
+            .map_err(|error| {
+                context_error(
+                    error,
+                    stage,
+                    Path::new("."),
+                    "tree root privacy authority could not be opened",
+                )
+            })?;
+        let observation = crate::observation::query::query_observation(&root, LocalObservationRequirement::Required)
+            .map_err(|error| context_error(error, stage, Path::new("."), "tree root privacy observation failed"))?;
         if observation.identity() != stage.identity() {
-            return Err(LocalFileError::new(
-                LocalFileErrorKind::ChangedDuringRead,
-                LocalFileOperation::Metadata,
-            ));
+            return Err(
+                LocalFileError::new(LocalFileErrorKind::ChangedDuringRead, LocalFileOperation::Metadata)
+                    .with_path(stage.directory().diagnostic_path().to_path_buf())
+                    .with_reason("staged tree root identity changed during privacy verification"),
+            );
         }
         let result = if let Some(policy) = options.owner_access_policy() {
             crate::temp::internal::privacy_windows::verify_owner_access(&root, true, policy)
@@ -281,19 +433,31 @@ fn verify_entry_privacy(
         return Ok(());
     }
     if !matches!(kind, LocalFileKind::File | LocalFileKind::Directory) {
-        return Err(requirement_not_met());
-    }
-    let identity = identity.ok_or_else(unsupported)?;
-    #[cfg(unix)]
-    let file = crate::directory::staged::open_unix_tree_entry(stage, path, kind)?;
-    #[cfg(windows)]
-    let file = crate::directory::staged::open_windows_tree_entry(stage, path, kind)?;
-    let current = crate::observation::query::query_observation(&file, LocalObservationRequirement::Required)?;
-    if current.identity() != Some(identity) {
-        return Err(LocalFileError::new(
-            LocalFileErrorKind::ChangedDuringRead,
-            LocalFileOperation::Metadata,
+        return Err(requirement_error(
+            stage,
+            path,
+            "privacy requirement excludes this tree entry kind",
         ));
+    }
+    let identity = identity.ok_or_else(|| {
+        LocalFileError::new(LocalFileErrorKind::Unsupported, LocalFileOperation::Metadata)
+            .with_path(stage.directory().diagnostic_path().join(path))
+            .with_reason("entry identity is unavailable for privacy verification")
+    })?;
+    #[cfg(unix)]
+    let file = crate::directory::staged::open_unix_tree_entry(stage, path, kind)
+        .map_err(|error| context_error(error, stage, path, "tree entry privacy authority could not be opened"))?;
+    #[cfg(windows)]
+    let file = crate::directory::staged::open_windows_tree_entry(stage, path, kind)
+        .map_err(|error| context_error(error, stage, path, "tree entry privacy authority could not be opened"))?;
+    let current = crate::observation::query::query_observation(&file, LocalObservationRequirement::Required)
+        .map_err(|error| context_error(error, stage, path, "tree entry privacy observation failed"))?;
+    if current.identity() != Some(identity) {
+        return Err(
+            LocalFileError::new(LocalFileErrorKind::ChangedDuringRead, LocalFileOperation::Metadata)
+                .with_path(stage.directory().diagnostic_path().join(path))
+                .with_reason("tree entry identity changed during privacy verification"),
+        );
     }
     #[cfg(unix)]
     (if let Some(policy) = options.owner_access_policy() {
@@ -307,6 +471,7 @@ fn verify_entry_privacy(
             &stage.directory().diagnostic_path().join(path),
             source,
         )
+        .with_reason("tree entry privacy or owner-access policy verification failed")
     })?;
     #[cfg(windows)]
     (if let Some(policy) = options.owner_access_policy() {
@@ -324,6 +489,7 @@ fn verify_entry_privacy(
             &stage.directory().diagnostic_path().join(path),
             source,
         )
+        .with_reason("tree entry privacy or owner-access policy verification failed")
     })?;
     Ok(())
 }
@@ -331,38 +497,85 @@ fn verify_entry_privacy(
 /// Associates a native access error with the operation and diagnostic path.
 fn file_error(operation: LocalFileOperation, path: &Path, source: std::io::Error) -> LocalFileError {
     LocalFileError::from_io(operation, Some(path.to_path_buf()), None, source)
+        .with_reason("tree privacy or owner-access policy verification failed")
+}
+
+fn context_error(
+    error: LocalFileError,
+    stage: &LocalStagedDirectory,
+    relative: &Path,
+    reason: &'static str,
+) -> LocalFileError {
+    if error.path().is_some() {
+        error.with_reason(reason)
+    } else {
+        error
+            .with_path(stage.directory().diagnostic_path().join(relative))
+            .with_reason(reason)
+    }
 }
 
 /// Returns a resource-limit error when a cooperative deadline has elapsed.
-fn check_deadline(deadline: Option<Instant>) -> LocalResult<()> {
+fn check_deadline(stage: &LocalStagedDirectory, deadline: Option<Instant>) -> LocalResult<()> {
     if deadline.is_some_and(|deadline| Instant::now() >= deadline) {
-        Err(resource_limit())
+        Err(resource_error(
+            stage,
+            Path::new("."),
+            "tree validation deadline exceeded",
+            None,
+        ))
     } else {
         Ok(())
     }
 }
 
 /// Enforces the logical encoded-name byte budget, excluding allocator overhead.
-fn check_name_budget(options: &LocalListOptions, bytes: usize) -> LocalResult<()> {
-    if options.max_seen_name_bytes().is_some_and(|maximum| bytes > maximum) {
-        Err(resource_limit())
-    } else {
-        Ok(())
-    }
-}
-
 /// Creates the common error used when complete traversal exceeds a budget.
 fn resource_limit() -> LocalFileError {
     LocalFileError::new(LocalFileErrorKind::ResourceLimit, LocalFileOperation::Read)
 }
 
 /// Creates the error used when an observed tree violates a requested condition.
-fn requirement_not_met() -> LocalFileError {
+fn requirement_error(stage: &LocalStagedDirectory, relative: &Path, reason: &'static str) -> LocalFileError {
     LocalFileError::new(LocalFileErrorKind::RequirementNotMet, LocalFileOperation::Metadata)
+        .with_path(stage.directory().diagnostic_path().join(relative))
+        .with_reason(reason)
 }
 
-/// Creates the error used when required native identity or count data is
-/// absent.
-fn unsupported() -> LocalFileError {
-    LocalFileError::new(LocalFileErrorKind::Unsupported, LocalFileOperation::Metadata)
+fn resource_error(
+    stage: &LocalStagedDirectory,
+    relative: &Path,
+    reason: &'static str,
+    facts: Option<LocalResourceLimitError>,
+) -> LocalFileError {
+    let path = stage.directory().diagnostic_path().join(relative);
+    match facts {
+        Some(facts) => {
+            LocalFileError::from_resource_limit(LocalFileOperation::Read, Some(path), facts).with_reason(reason)
+        }
+        None => resource_limit().with_path(path).with_reason(reason),
+    }
+}
+
+fn tree_limit(
+    stage: &LocalStagedDirectory,
+    relative: &Path,
+    facts: LocalResourceLimitError,
+    reason: &'static str,
+) -> LocalFileError {
+    resource_error(stage, relative, reason, Some(facts))
+}
+
+fn resource_overflow(
+    stage: &LocalStagedDirectory,
+    relative: &Path,
+    resource: LocalResourceKind,
+    reason: &'static str,
+) -> LocalFileError {
+    resource_error(
+        stage,
+        relative,
+        reason,
+        Some(LocalResourceLimitError::new(resource, usize::MAX, 0, 1).with_overflow()),
+    )
 }
