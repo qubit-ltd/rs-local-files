@@ -22,7 +22,8 @@ struct CleanupTestHook {
     calls: usize,
     expire_after_descendant: bool,
     expire_after_root_identity: bool,
-    expired: bool,
+    started_at: Option<std::time::Instant>,
+    now: Option<std::time::Instant>,
     root_observations: usize,
     root_deletions: usize,
 }
@@ -422,7 +423,7 @@ impl LocalTreeRetainedResource {
                         && hook.path == self.path
                         && hook.expire_after_descendant
                     {
-                        hook.expired = true;
+                        advance_cleanup_test_clock(hook, started_at, self.cleanup_limits.deadline());
                     }
                 });
             }
@@ -456,7 +457,7 @@ impl LocalTreeRetainedResource {
                         && hook.path == self.path
                         && hook.expire_after_root_identity
                     {
-                        hook.expired = true;
+                        advance_cleanup_test_clock(hook, started_at, self.cleanup_limits.deadline());
                     }
                 });
                 if cleanup_deadline_exceeded(self.cleanup_limits, started_at) {
@@ -527,12 +528,29 @@ impl LocalTreeRetainedResource {
 /// Reports whether the cleanup deadline measured from `started_at` has elapsed.
 fn cleanup_deadline_exceeded(limits: LocalTempCleanupLimits, started_at: std::time::Instant) -> bool {
     #[cfg(test)]
-    if CLEANUP_TEST_HOOK.with(|hook| hook.borrow().as_ref().is_some_and(|hook| hook.expired)) {
-        return true;
-    }
+    let now = CLEANUP_TEST_HOOK.with(|hook| {
+        let mut hook = hook.borrow_mut();
+        let Some(hook) = hook.as_mut() else {
+            return std::time::Instant::now();
+        };
+        hook.started_at.get_or_insert(started_at);
+        hook.now.unwrap_or_else(std::time::Instant::now)
+    });
+    #[cfg(not(test))]
+    let now = std::time::Instant::now();
     limits
         .deadline()
-        .is_some_and(|deadline| started_at.elapsed() >= deadline)
+        .is_some_and(|deadline| now.duration_since(started_at) >= deadline)
+}
+
+#[cfg(test)]
+fn advance_cleanup_test_clock(
+    hook: &mut CleanupTestHook,
+    started_at: std::time::Instant,
+    deadline: Option<std::time::Duration>,
+) {
+    let started_at = *hook.started_at.get_or_insert(started_at);
+    hook.now = deadline.and_then(|deadline| started_at.checked_add(deadline + std::time::Duration::from_nanos(1)));
 }
 
 impl Drop for LocalTreeRetainedResource {
@@ -571,7 +589,12 @@ mod retained_cleanup_tests {
             super::CLEANUP_TEST_HOOK.with(|hook| {
                 let hook = hook.borrow();
                 let hook = hook.as_ref().expect("cleanup hook installed");
-                (hook.calls, hook.root_observations, hook.root_deletions, hook.expired)
+                (
+                    hook.calls,
+                    hook.root_observations,
+                    hook.root_deletions,
+                    hook.now.is_some(),
+                )
             })
         }
 
