@@ -174,12 +174,24 @@ impl Drop for Token {
 }
 
 #[derive(Debug)]
+/// Owns the current process token and its `TokenUser` information buffer.
+///
+/// The SID exposed by [`CurrentUser::sid`] points into `information`; it is
+/// borrowed from this value and must not outlive it or be freed separately.
 struct CurrentUser {
+    /// Owns the process-token handle used to obtain `information`.
     _token: Token,
+    /// Owns the aligned storage filled by `GetTokenInformation` for
+    /// `TokenUser`.
     information: Vec<usize>,
 }
 
 impl CurrentUser {
+    /// Opens the current process token and retrieves its `TokenUser` record.
+    ///
+    /// Returns an I/O error if opening the token, sizing the information
+    /// buffer, or retrieving the record fails. The token and returned data
+    /// are owned by the resulting value.
     fn acquire() -> io::Result<Self> {
         check_failure!(Token);
         let mut token = ptr::null_mut();
@@ -192,6 +204,8 @@ impl CurrentUser {
 
         let mut required = 0_u32;
         // The first call obtains the required buffer size.
+        // SAFETY: this is the documented size-query form: the output buffer is
+        // null with a zero length, and `required` is writable output storage.
         unsafe {
             GetTokenInformation(token.0, TokenUser, ptr::null_mut(), 0, &mut required);
         }
@@ -200,6 +214,9 @@ impl CurrentUser {
         }
         let words = (required as usize).div_ceil(size_of::<usize>());
         let mut information = vec![0_usize; words];
+        // SAFETY: `information` is writable and word-aligned, and its rounded
+        // byte capacity is at least the `required` length supplied to the API.
+        // `required` is writable for the returned length.
         if unsafe {
             GetTokenInformation(
                 token.0,
@@ -218,10 +235,21 @@ impl CurrentUser {
         })
     }
 
+    /// Returns the user SID pointer stored in this token-information buffer.
+    ///
+    /// The pointer is borrowed from `self` and is valid only while `self` and
+    /// its `information` allocation remain alive and unchanged. It must not be
+    /// freed independently. An error is returned for a null SID or one whose
+    /// length cannot be read.
     fn sid(&self) -> io::Result<PSID> {
         check_failure!(Sid);
         // GetTokenInformation returns TOKEN_USER at the start of this owned buffer.
+        // SAFETY: `information` is allocated in machine-word units (and thus
+        // aligned for `TOKEN_USER`), and the successful TokenUser query wrote
+        // that record into this live buffer. The SID pointer is borrowed from it.
         let sid = unsafe { (*(self.information.as_ptr().cast::<TOKEN_USER>())).User.Sid };
+        // SAFETY: short-circuit evaluation excludes null; otherwise `sid`
+        // points into the still-live TokenUser result buffer.
         if sid.is_null() || unsafe { GetLengthSid(sid) } == 0 {
             return Err(last_os_error());
         }
@@ -229,17 +257,39 @@ impl CurrentUser {
     }
 }
 
+/// Owns an absolute security descriptor and the ACL storage it references.
+///
+/// The descriptor contains a pointer to `acl`'s heap allocation. Keep this
+/// value alive and do not mutate or replace that allocation while a native
+/// call uses [`SecurityDescriptor::as_ptr`]. Moving this struct preserves the
+/// vector's heap allocation; dropping it or reallocating the vector does not.
 struct SecurityDescriptor {
+    /// Absolute descriptor whose DACL pointer refers to the owned `acl` buffer.
     descriptor: SECURITY_DESCRIPTOR,
+    /// Owns the initialized ACL and ACE bytes for the descriptor's lifetime.
     acl: Vec<usize>,
 }
 
 impl SecurityDescriptor {
+    /// Builds the default current-user descriptor for a file or directory.
+    ///
+    /// `directory` selects the directory or file mask, and `read_only` applies
+    /// the removals documented by [`default_access_mask`]. Token lookup and
+    /// native ACL/descriptor initialization failures are returned as I/O
+    /// errors.
     fn for_current_user(directory: bool, read_only: bool) -> io::Result<Self> {
         let access = default_access_mask(directory, read_only);
         Self::for_current_user_with_mask(access)
     }
 
+    /// Builds a protected DACL granting `access` to the current token user.
+    ///
+    /// The mask is placed in one allow ACE; this constructor does not validate
+    /// it against the owner-policy mask whitelist. `AddAccessAllowedAce` copies
+    /// the SID into the ACE, so the temporary token-information buffer need not
+    /// outlive this function. The returned value owns both the ACL and the
+    /// absolute descriptor that points to it. Native API failures are returned
+    /// as I/O errors.
     fn for_current_user_with_mask(access: u32) -> io::Result<Self> {
         check_failure!(Descriptor);
         let current_user = CurrentUser::acquire()?;
@@ -247,17 +297,28 @@ impl SecurityDescriptor {
 
         let mut acl = vec![0_usize; ACL_BUFFER_SIZE.div_ceil(size_of::<usize>())];
         let acl_ptr = acl.as_mut_ptr().cast::<ACL>();
+        // SAFETY: `acl_ptr` points to the writable, word-aligned allocation
+        // owned by `acl`, and the supplied size is its full byte capacity.
         if unsafe { InitializeAcl(acl_ptr, (acl.len() * size_of::<usize>()) as u32, ACL_REVISION) } == 0 {
             return Err(last_os_error());
         }
+        // SAFETY: `acl_ptr` is an initialized ACL with writable capacity; the
+        // borrowed SID remains valid through this synchronous call, which adds
+        // the SID data to the ACL's ACE storage.
         if unsafe { AddAccessAllowedAce(acl_ptr, ACL_REVISION, access, current_sid) } == 0 {
             return Err(last_os_error());
         }
 
+        // SAFETY: SECURITY_DESCRIPTOR is a plain FFI output structure; it is
+        // immediately initialized by InitializeSecurityDescriptor below.
         let mut descriptor = unsafe { std::mem::zeroed::<SECURITY_DESCRIPTOR>() };
+        // SAFETY: `descriptor` is writable storage for one SECURITY_DESCRIPTOR.
         if unsafe { InitializeSecurityDescriptor((&mut descriptor as *mut SECURITY_DESCRIPTOR).cast(), 1) } == 0 {
             return Err(last_os_error());
         }
+        // SAFETY: `descriptor` was initialized above and `acl_ptr` refers to
+        // the live ACL allocation moved into this returned struct; the
+        // descriptor stores this pointer, so `acl` must remain alive with it.
         if unsafe { SetSecurityDescriptorDacl((&mut descriptor as *mut SECURITY_DESCRIPTOR).cast(), 1, acl_ptr, 0) }
             == 0
         {
@@ -269,11 +330,25 @@ impl SecurityDescriptor {
         Ok(Self { descriptor, acl })
     }
 
+    /// Returns a mutable-typed raw pointer borrowed from this descriptor.
+    ///
+    /// The pointer is valid only while `self` and its ACL allocation remain
+    /// alive and unchanged. It does not transfer ownership or authorize the
+    /// caller to free the descriptor. Do not move `self` while the pointer is
+    /// retained. Keep the value alive for the complete native call that
+    /// consumes the pointer.
     fn as_ptr(&self) -> PSECURITY_DESCRIPTOR {
         (&self.descriptor as *const SECURITY_DESCRIPTOR).cast_mut().cast()
     }
 }
 
+/// Returns this module's default DACL mask for a file or directory.
+///
+/// A writable request returns the corresponding full initial mask. For a
+/// read-only file, only `FILE_WRITE_DATA` and `FILE_APPEND_DATA` are removed.
+/// For a read-only directory, only `FILE_ADD_FILE`, `FILE_ADD_SUBDIRECTORY`,
+/// `FILE_DELETE_CHILD`, `FILE_WRITE_ATTRIBUTES`, and `DELETE` are removed;
+/// other bits in the initial masks remain set.
 fn default_access_mask(directory: bool, read_only: bool) -> u32 {
     if directory {
         if read_only {
@@ -289,6 +364,12 @@ fn default_access_mask(directory: bool, read_only: bool) -> u32 {
     }
 }
 
+/// Selects a configured Windows owner-policy mask after validating both masks.
+///
+/// Returns `InvalidInput` if Windows masks are absent or either the directory
+/// or file mask contains any bit outside `OWNER_ACCESS_MASKS`. Otherwise
+/// returns the directory mask when `directory` is true and the file mask when
+/// it is false.
 fn owner_access_mask(policy: &LocalOwnerAccessPolicy, directory: bool) -> io::Result<u32> {
     let (directory_mask, file_mask) = policy.windows_masks().ok_or_else(|| {
         io::Error::new(
