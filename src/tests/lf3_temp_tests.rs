@@ -98,9 +98,15 @@ fn lf_revision_private_attempt_budget_is_optional_and_bounded() {
                     drop(guard);
                     match (limit, result) {
                         (None, Ok(())) => (),
-                        (Some(128), Err(_)) => assert_eq!(fs::read_dir(fixture.path()).expect("entries").count(), 0),
-                        (None, Err(error)) => panic!("unbounded budget must recover after 129 faults: {error}"),
-                        (Some(128), Ok(_)) => panic!("finite budget must exhaust after 128 attempts"),
+                        (Some(128), Err(_)) => {
+                            assert_eq!(fs::read_dir(fixture.path()).expect("entries").count(), 0)
+                        }
+                        (None, Err(error)) => {
+                            panic!("unbounded budget must recover after 129 faults: {error}")
+                        }
+                        (Some(128), Ok(_)) => {
+                            panic!("finite budget must exhaust after 128 attempts")
+                        }
                         _ => unreachable!(),
                     }
                     assert_eq!(fs::read_dir(fixture.path()).expect("no sandbox residue").count(), 0);

@@ -81,7 +81,9 @@ impl Drop for NativeIoFaultGuard {
 pub(crate) fn check(point: NativeIoPoint) -> io::Result<()> {
     PLAN.with(|plan| {
         let mut plan = plan.borrow_mut();
-        let Some(plan) = plan.as_mut() else { return Ok(()) };
+        let Some(plan) = plan.as_mut() else {
+            return Ok(());
+        };
         if plan.point != point || plan.fired {
             return Ok(());
         }
