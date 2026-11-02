@@ -31,6 +31,7 @@ pub(crate) enum DeadlineBoundary {
     SourceResolved,
     TargetResolved,
     FollowedLinkResolved,
+    RootedLinkKindInspected,
     DestinationRemoved,
     HostCopyDataFinished,
     HostCopyBeforeInstall,

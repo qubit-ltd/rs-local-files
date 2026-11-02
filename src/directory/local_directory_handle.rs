@@ -48,6 +48,7 @@ use crate::options::LocalPathBindingOptions;
 use crate::options::LocalWriteMode;
 use crate::resolution::internal::checked_path_binding_deadline;
 use crate::rooted::Root;
+use crate::rooted_local_file_system::RootParentBehavior;
 
 #[path = "local_directory_handle/observed.rs"]
 mod observed;
@@ -239,18 +240,19 @@ impl LocalDirectoryHandle {
                         deadline,
                         options.component_policy(),
                         path_budget.as_mut(),
+                        RootParentBehavior::StayAtHostRoot,
                     )?;
                     let resolved =
-                            crate::rooted_local_file_system::resolve_rooted_path_allow_root_with_component_policy_and_budget(
-                                &host_root,
-                                relative,
-                                policy,
-                                true,
-                                LocalFileOperation::OpenRoot,
-                                options.component_policy(),
-                                deadline,
-                                path_budget.as_mut(),
-                            )?;
+                        crate::rooted_local_file_system::resolve_host_root_path_with_component_policy_and_budget(
+                            &host_root,
+                            relative,
+                            policy,
+                            true,
+                            LocalFileOperation::OpenRoot,
+                            options.component_policy(),
+                            deadline,
+                            path_budget.as_mut(),
+                        )?;
                     for component in resolved.components() {
                         if let Component::Normal(name) = component {
                             options.component_policy().validate_component(name)?;
@@ -373,6 +375,7 @@ impl LocalDirectoryHandle {
                     deadline,
                     options.component_policy(),
                     path_budget.as_mut(),
+                    RootParentBehavior::RejectEscape,
                 )?;
                 let resolved =
                     crate::rooted_local_file_system::resolve_rooted_path_allow_root_with_component_policy_and_budget(
@@ -1253,6 +1256,7 @@ pub(crate) fn retain_directory_chain(
     ))
 }
 
+#[allow(clippy::too_many_arguments)]
 fn validate_parent_steps(
     root: &Root,
     path: &Path,
@@ -1261,6 +1265,7 @@ fn validate_parent_steps(
     deadline: Option<Instant>,
     component_policy: &LocalComponentPolicy,
     mut path_budget: Option<&mut PathBindingBudget>,
+    parent_behavior: RootParentBehavior,
 ) -> LocalResult<()> {
     let mut prefix = PathBuf::new();
     for component in path.components() {
@@ -1268,7 +1273,12 @@ fn validate_parent_steps(
             Component::Normal(name) => prefix.push(name),
             Component::ParentDir => {
                 if !prefix.as_os_str().is_empty() {
-                    crate::rooted_local_file_system::resolve_rooted_path_allow_root_with_component_policy_and_budget(
+                    let resolve = if parent_behavior == RootParentBehavior::StayAtHostRoot {
+                        crate::rooted_local_file_system::resolve_host_root_path_with_component_policy_and_budget
+                    } else {
+                        crate::rooted_local_file_system::resolve_rooted_path_allow_root_with_component_policy_and_budget
+                    };
+                    resolve(
                         root,
                         &prefix,
                         policy,
@@ -1281,6 +1291,9 @@ fn validate_parent_steps(
                     .map_err(|error| error.with_path(original.to_path_buf()))?;
                 }
                 if !prefix.pop() {
+                    if parent_behavior == RootParentBehavior::StayAtHostRoot {
+                        continue;
+                    }
                     return Err(
                         LocalFileError::new(LocalFileErrorKind::InvalidPath, LocalFileOperation::OpenRoot)
                             .with_path(original.to_path_buf()),

@@ -131,6 +131,19 @@ pub(super) fn copy_symlink(
         .map_err(|source_error| error(Stage::InspectSourceEntry, source, destination, statistics, source_error))?;
     #[cfg(not(windows))]
     let targets_directory = false;
+    #[cfg(test)]
+    crate::tests::rooted::support::resolution_observation_tests::reach_deadline_boundary(
+        crate::tests::rooted::support::resolution_observation_tests::DeadlineBoundary::RootedLinkKindInspected,
+    );
+    if let Err(source_error) = budget.check_deadline() {
+        return Err(error(
+            Stage::PrepareDestination,
+            source,
+            destination,
+            statistics,
+            source_error,
+        ));
+    }
     let mut destination_removed = false;
     if replaced_existing {
         if destination_is_directory {

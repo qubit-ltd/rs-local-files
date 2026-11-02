@@ -189,6 +189,64 @@ fn test_host_root_parent_is_not_a_rooted_escape() {
     assert!(host.metadata(Path::new("/..")).is_ok());
 }
 
+#[cfg(unix)]
+#[test]
+fn test_host_directory_open_accepts_native_root_parent() {
+    use qubit_local_files::options::LocalDirectoryOpenOptions;
+
+    let host = LocalFileSystem::host().expect("Host");
+    assert!(fs::metadata("/..").expect("native root parent").is_dir());
+    let handle = host
+        .open_directory_with_options(Path::new("/.."), &LocalDirectoryOpenOptions::new())
+        .expect("Host root parent must remain a valid directory");
+    drop(handle);
+}
+
+#[cfg(unix)]
+#[test]
+fn test_host_directory_open_preserves_root_parent_traversal_order() {
+    use std::os::unix::fs::symlink;
+
+    use qubit_local_files::options::LocalDirectoryOpenOptions;
+
+    let fixture = tempfile::tempdir().expect("directory-open fixture");
+    symlink("/", fixture.path().join("root-link")).expect("root link");
+    fs::write(fixture.path().join("file"), b"file").expect("file prefix");
+    let host = LocalFileSystem::host().expect("Host");
+
+    let valid_paths = [Path::new("/../../").to_path_buf(), fixture.path().join("root-link/../")];
+    for path in valid_paths {
+        let handle = host
+            .open_directory_with_options(&path, &LocalDirectoryOpenOptions::new())
+            .expect("Parent at the native root stays at the root");
+        drop(handle);
+    }
+    for path in [fixture.path().join("missing/.."), fixture.path().join("file/..")] {
+        assert!(
+            host.open_directory_with_options(&path, &LocalDirectoryOpenOptions::new())
+                .is_err(),
+            "invalid prefix must not disappear before Parent: {}",
+            path.display()
+        );
+    }
+
+    let fixed_root = host
+        .open_directory_with_options(fixture.path(), &LocalDirectoryOpenOptions::new())
+        .expect("fixed directory handle");
+    assert!(
+        fixed_root
+            .open_directory(Path::new(".."), &LocalDirectoryOpenOptions::new())
+            .is_err()
+    );
+
+    let rooted = LocalFileSystem::rooted(fixture.path()).expect("Rooted filesystem");
+    assert!(
+        rooted
+            .open_directory_with_options(Path::new(".."), &LocalDirectoryOpenOptions::new())
+            .is_err()
+    );
+}
+
 /// Metadata preserves dots, parent traversal and final native directory intent.
 #[test]
 fn test_host_metadata_directory_syntax_matches_native() {

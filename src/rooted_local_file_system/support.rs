@@ -10,6 +10,12 @@
 
 use std::time::Instant;
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum RootParentBehavior {
+    RejectEscape,
+    StayAtHostRoot,
+}
+
 use super::LocalFileError;
 use super::LocalFileErrorKind;
 use super::LocalFileOperation;
@@ -206,6 +212,7 @@ pub(super) fn resolve_rooted_path_allow_root_with_scope_and_deadline(
             None,
             None,
             session,
+            RootParentBehavior::RejectEscape,
         );
     }
     resolve_rooted_symlinks(
@@ -220,6 +227,7 @@ pub(super) fn resolve_rooted_path_allow_root_with_scope_and_deadline(
         None,
         None,
         ResolutionSession::new(root.resolution_contract(), scope),
+        RootParentBehavior::RejectEscape,
     )
 }
 
@@ -244,6 +252,55 @@ pub(crate) fn resolve_rooted_path_allow_root_with_component_policy_and_budget(
     deadline: Option<Instant>,
     budget: Option<&mut crate::directory::binding::PathBindingBudget>,
 ) -> LocalResult<PathBuf> {
+    resolve_rooted_path_allow_root_with_component_policy_and_budget_and_parent_behavior(
+        root,
+        path,
+        symlink_policy,
+        follow_final,
+        operation,
+        component_policy,
+        deadline,
+        budget,
+        RootParentBehavior::RejectEscape,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn resolve_host_root_path_with_component_policy_and_budget(
+    root: &crate::rooted::Root,
+    path: &Path,
+    symlink_policy: LocalSymlinkPolicy,
+    follow_final: bool,
+    operation: LocalFileOperation,
+    component_policy: &crate::directory::LocalComponentPolicy,
+    deadline: Option<Instant>,
+    budget: Option<&mut crate::directory::binding::PathBindingBudget>,
+) -> LocalResult<PathBuf> {
+    resolve_rooted_path_allow_root_with_component_policy_and_budget_and_parent_behavior(
+        root,
+        path,
+        symlink_policy,
+        follow_final,
+        operation,
+        component_policy,
+        deadline,
+        budget,
+        RootParentBehavior::StayAtHostRoot,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn resolve_rooted_path_allow_root_with_component_policy_and_budget_and_parent_behavior(
+    root: &crate::rooted::Root,
+    path: &Path,
+    symlink_policy: LocalSymlinkPolicy,
+    follow_final: bool,
+    operation: LocalFileOperation,
+    component_policy: &crate::directory::LocalComponentPolicy,
+    deadline: Option<Instant>,
+    budget: Option<&mut crate::directory::binding::PathBindingBudget>,
+    parent_behavior: RootParentBehavior,
+) -> LocalResult<PathBuf> {
     check_resolution_deadline(deadline, path, operation)?;
     if symlink_policy == LocalSymlinkPolicy::FollowAcrossScope {
         return Err(LocalFileError::new(LocalFileErrorKind::InvalidOptions, operation).with_path(path.to_path_buf()));
@@ -260,6 +317,7 @@ pub(crate) fn resolve_rooted_path_allow_root_with_component_policy_and_budget(
         Some(component_policy),
         budget,
         ResolutionSession::new(root.resolution_contract(), LocalResolutionScope::Descendant),
+        parent_behavior,
     )
 }
 
@@ -386,6 +444,7 @@ fn resolve_rooted_symlinks(
     component_policy: Option<&crate::directory::LocalComponentPolicy>,
     mut budget: Option<&mut crate::directory::binding::PathBindingBudget>,
     mut session: ResolutionSession,
+    parent_behavior: RootParentBehavior,
 ) -> LocalResult<PathBuf> {
     use std::collections::HashSet;
     #[cfg(test)]
@@ -422,11 +481,16 @@ fn resolve_rooted_symlinks(
             }
             ResolutionStep::Parent => {
                 ensure_resolved_prefix_is_directory(root, &resolved, original, operation)?;
-                if resolved.pop().is_none() {
+                if resolved.is_empty() {
+                    if parent_behavior == RootParentBehavior::StayAtHostRoot {
+                        cursor = None;
+                        continue;
+                    }
                     return Err(LocalFileError::new(LocalFileErrorKind::InvalidPath, operation)
                         .with_reason("symbolic-link target escaped the Rooted virtual root")
                         .with_path(original.to_path_buf()));
                 }
+                resolved.pop();
                 let removed_bytes = resolved_component_bytes.pop().ok_or_else(|| {
                     LocalFileError::new(LocalFileErrorKind::ResourceLimit, operation).with_path(original.to_path_buf())
                 })?;
@@ -979,6 +1043,7 @@ mod native_resolution_failure_tests {
                 None,
                 None,
                 session,
+                super::RootParentBehavior::RejectEscape,
             )
             .expect_err("native failure must stop fallback before further traversal");
             assert!(

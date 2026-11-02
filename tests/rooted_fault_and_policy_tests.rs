@@ -1147,10 +1147,9 @@ fn test_rooted_local_file_system_reports_strict_missing_entry_errors() {
     assert_eq!(Some(Path::new("/missing-directory")), directory.path());
 }
 
-/// Verifies rooted staging cleanup preserves its abort error when a concurrent
-/// actor removes the descriptor-relative temporary file before cleanup.
+/// Verifies rooted staging cleanup treats a missing original name as complete.
 #[test]
-fn test_rooted_local_file_system_abort_reports_missing_staging_file() {
+fn test_rooted_local_file_system_abort_is_idempotent_when_staging_is_missing() {
     let directory = tempdir().expect("temporary directory should be created");
     let target = directory.path().join("payload");
     let rooted = LocalFileSystem::rooted(directory.path()).expect("root authority should open");
@@ -1164,11 +1163,10 @@ fn test_rooted_local_file_system_abort_reports_missing_staging_file() {
         .expect("rooted writer should create one temporary file");
     fs::remove_file(&staging).expect("concurrent actor should remove rooted staging file");
 
-    let error = writer
+    let outcome = writer
         .abort()
-        .expect_err("missing rooted staging file must report cleanup failure");
-    assert_eq!(LocalFileOperation::Abort, error.operation());
-    assert_eq!(Some(Path::new("/payload")), error.path());
+        .expect("missing rooted staging name should complete cleanup idempotently");
+    assert_eq!(LocalWriterState::Aborted, outcome.state());
     assert!(!target.exists());
 }
 

@@ -181,6 +181,56 @@ fn test_rooted_copy_deadline_after_removal_reports_partial_publication() {
     assert!(!fixture.path().join("target").exists());
 }
 
+#[cfg(windows)]
+#[test]
+fn test_rooted_link_kind_deadline_keeps_existing_file() {
+    let fixture = tempfile::tempdir().expect("fixture should exist");
+    fs::create_dir(fixture.path().join("source")).expect("source directory should exist");
+    fs::create_dir(fixture.path().join("target")).expect("target directory should exist");
+    std::os::windows::fs::symlink_file("missing-target", fixture.path().join("source/link"))
+        .expect("source symbolic link should be created");
+    assert_link_kind_deadline_keeps_existing_file(fixture.path());
+}
+
+#[cfg(unix)]
+#[test]
+fn test_rooted_symlink_copy_deadline_checkpoint_keeps_existing_file() {
+    let fixture = tempfile::tempdir().expect("fixture should exist");
+    fs::create_dir(fixture.path().join("source")).expect("source directory should exist");
+    fs::create_dir(fixture.path().join("target")).expect("target directory should exist");
+    std::os::unix::fs::symlink("missing-target", fixture.path().join("source/link"))
+        .expect("source symbolic link should be created");
+    assert_link_kind_deadline_keeps_existing_file(fixture.path());
+}
+
+fn assert_link_kind_deadline_keeps_existing_file(root: &std::path::Path) {
+    fs::write(root.join("target/link"), b"protected").expect("preexisting target should exist");
+    let filesystem = LocalFileSystem::rooted(root).expect("rooted filesystem should open");
+    let _clock = observations::DeadlineClockGuard::expire_at(DeadlineBoundary::RootedLinkKindInspected);
+
+    let failure = filesystem
+        .copy_with_options(
+            std::path::Path::new("source"),
+            std::path::Path::new("target"),
+            &LocalCopyOptions::new()
+                .with_tree_source()
+                .with_conflict(LocalCopyConflictPolicy::Overwrite)
+                .with_type_conflict(LocalCopyTypeConflictPolicy::Replace)
+                .with_deadline(Duration::from_secs(60)),
+        )
+        .expect_err("expired deadline after link inspection must stop before target removal");
+    assert_eq!(std::io::ErrorKind::TimedOut, failure.error().io_error_kind());
+    assert_eq!(crate::LocalCopyFailureState::Unchanged, failure.state());
+    assert_eq!(0, failure.partial_stats().files());
+    assert_eq!(0, failure.partial_stats().bytes());
+    assert_eq!(
+        b"protected",
+        fs::read(root.join("target/link"))
+            .expect("preexisting target should remain")
+            .as_slice()
+    );
+}
+
 #[cfg(unix)]
 #[test]
 fn test_rooted_copy_deadline_after_followed_directory_resolution_keeps_target() {

@@ -7,6 +7,8 @@
 // =============================================================================
 #[cfg(test)]
 use std::cell::Cell;
+#[cfg(test)]
+use std::cell::RefCell;
 use std::ffi::CString;
 use std::ffi::OsStr;
 use std::fs::File;
@@ -19,6 +21,18 @@ use std::os::unix::fs::MetadataExt;
 #[cfg(test)]
 thread_local! {
     static ACCESS_FAILURE_AFTER: Cell<Option<usize>> = const { Cell::new(None) };
+    static OWNER_OPEN_FAILURE_HOOK: RefCell<Option<OwnerOpenFailureHook>> = const { RefCell::new(None) };
+}
+
+#[cfg(test)]
+type OwnerOpenFailureHook = Box<dyn FnOnce(&File, &OsStr) -> io::Result<()>>;
+
+#[cfg(test)]
+pub(crate) fn install_owner_open_failure_hook(hook: impl FnOnce(&File, &OsStr) -> io::Result<()> + 'static) {
+    OWNER_OPEN_FAILURE_HOOK.with(|slot| {
+        assert!(slot.borrow().is_none(), "owner open hook already installed");
+        *slot.borrow_mut() = Some(Box::new(hook));
+    });
 }
 
 #[cfg(test)]
@@ -118,6 +132,16 @@ pub(crate) fn create_owner_entry_at(
     directory: bool,
     policy: &LocalOwnerAccessPolicy,
 ) -> Result<File, NativePrivateCreateError> {
+    create_owner_entry_at_with_hook(parent, name, directory, policy, || Ok(()))
+}
+
+fn create_owner_entry_at_with_hook(
+    parent: &File,
+    name: &OsStr,
+    directory: bool,
+    policy: &LocalOwnerAccessPolicy,
+    hook: impl FnOnce() -> io::Result<()>,
+) -> Result<File, NativePrivateCreateError> {
     let mode = match owner_mode(policy, directory) {
         Ok(mode) => mode,
         Err(source) => return Err(pre_create_error(source)),
@@ -155,6 +179,24 @@ pub(crate) fn create_owner_entry_at(
         let file = unsafe { File::from_raw_fd(descriptor) };
         return finish_owner_creation(parent, retained_parent, name, file, false, policy);
     }
+    #[cfg(test)]
+    let hook_result = OWNER_OPEN_FAILURE_HOOK.with(|slot| {
+        slot.borrow_mut()
+            .take()
+            .map_or_else(hook, |hook| hook(parent, OsStr::from_bytes(name.as_bytes())))
+    });
+    #[cfg(not(test))]
+    let hook_result = hook();
+    if let Err(source) = hook_result {
+        return Err(create_error(
+            true,
+            source,
+            retained_parent,
+            OsStr::from_bytes(name.as_bytes()),
+            None,
+            None,
+        ));
+    }
     let descriptor = unsafe {
         libc::openat(
             parent.as_raw_fd(),
@@ -164,14 +206,13 @@ pub(crate) fn create_owner_entry_at(
     };
     if descriptor < 0 {
         let source = io::Error::last_os_error();
-        let identity = identity_for_name(parent, OsStr::from_bytes(name.as_bytes())).ok();
         return Err(create_error(
             true,
             source,
             retained_parent,
             OsStr::from_bytes(name.as_bytes()),
             None,
-            identity,
+            None,
         ));
     }
     // SAFETY: openat returned a fresh descriptor owned by this function.
@@ -664,7 +705,15 @@ mod recovery_open_failure_unix_tests {
 
 #[cfg(test)]
 mod owner_policy_unix_tests {
+    #[cfg(target_os = "linux")]
+    use std::ffi::OsStr;
+    #[cfg(target_os = "linux")]
+    use std::fs;
     use std::fs::File;
+    #[cfg(target_os = "linux")]
+    use std::io;
+    #[cfg(target_os = "linux")]
+    use std::os::unix::ffi::OsStrExt;
     #[cfg(target_os = "linux")]
     use std::os::unix::fs::MetadataExt;
 
@@ -673,7 +722,47 @@ mod owner_policy_unix_tests {
     use super::create_owner_entry_at;
     #[cfg(target_os = "linux")]
     use super::verify_owner_access;
+    #[cfg(target_os = "linux")]
+    use crate::observation::LocalFileIdentity;
     use crate::policy::LocalOwnerAccessPolicy;
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn owner_policy_failed_open_does_not_adopt_replacement() {
+        use std::ffi::CString;
+        use std::os::fd::AsRawFd;
+        use std::os::unix::fs::MetadataExt;
+
+        let temp = tempfile::tempdir().expect("temporary directory");
+        let parent = File::open(temp.path()).expect("open parent directory");
+        let policy = LocalOwnerAccessPolicy::new().with_unix_modes(0o700, 0o600);
+        super::install_owner_open_failure_hook(|parent, name| {
+            let name = CString::new(name.as_bytes()).expect("stage name contains no NUL");
+            let moved = CString::new("moved-original").expect("static name");
+            // SAFETY: names are NUL terminated and parent is an open directory.
+            assert_eq!(
+                unsafe { libc::renameat(parent.as_raw_fd(), name.as_ptr(), parent.as_raw_fd(), moved.as_ptr()) },
+                0
+            );
+            // SAFETY: same authority and a valid directory mode.
+            assert_eq!(unsafe { libc::mkdirat(parent.as_raw_fd(), name.as_ptr(), 0o700) }, 0);
+            Err(io::Error::other("injected open failure"))
+        });
+        let error =
+            super::create_owner_entry_at_with_hook(&parent, OsStr::new("owner-stage"), true, &policy, || Ok(()))
+                .expect_err("injected open failure");
+        let replacement = fs::metadata(temp.path().join("owner-stage")).expect("replacement metadata");
+        let replacement_identity = LocalFileIdentity::unix(replacement.dev(), replacement.ino());
+        let entry = error.retained.as_ref().expect("native recovery retained");
+        assert!(
+            entry.identity.is_none(),
+            "failed open must not adopt replacement identity"
+        );
+        assert!(entry.file.is_none());
+        assert_eq!(error.source.to_string(), "injected open failure");
+        assert!(temp.path().join("moved-original").is_dir());
+        assert_ne!(Some(&replacement_identity), entry.identity.as_ref());
+    }
 
     #[cfg(target_os = "linux")]
     #[test]

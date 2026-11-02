@@ -144,6 +144,25 @@ fn test_directory_resource_failures_are_isolated_and_recoverable() {
             String::from_utf8_lossy(&output.stderr)
         );
     }
+    #[cfg(target_os = "linux")]
+    {
+        let output = Command::new(&binary)
+            .args([
+                "--exact",
+                "test_directory_resource_failure_child",
+                "--nocapture",
+                "--test-threads=1",
+            ])
+            .env(CHILD_SCENARIO, "owner-policy-stage-unproven-slot2")
+            .output()
+            .expect("owner-policy resource-limit scenario should start");
+        assert!(
+            output.status.success(),
+            "owner-policy resource-limit scenario failed: {}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
 }
 
 #[test]
@@ -182,7 +201,7 @@ fn test_directory_resource_failure_child() {
     let mut exhaustion = DescriptorExhaustion::new();
     let available = match scenario.as_str() {
         "bound-dot-observation-slot1" | "plain-dot-cursor-slot1" => 1,
-        "bound-dot-anchor-slot2" | "private-stage-unproven-slot2" => 2,
+        "bound-dot-anchor-slot2" | "private-stage-unproven-slot2" | "owner-policy-stage-unproven-slot2" => 2,
         "private-stage-retained-slot3" => 3,
         _ => 0,
     };
@@ -369,6 +388,46 @@ fn test_directory_resource_failure_child() {
             assert!(!stage_path.exists());
             assert_eq!(
                 fs::read(parent_path.join("payload")).expect("user payload must survive conservative recovery"),
+                b"protected user data"
+            );
+            assert!(parent_path.join("child").is_dir());
+            return;
+        }
+        #[cfg(target_os = "linux")]
+        "owner-policy-stage-unproven-slot2" => {
+            let owner_policy = qubit_local_files::policy::LocalOwnerAccessPolicy::new().with_unix_modes(0o700, 0o600);
+            let error = parent
+                .create_staged_directory(
+                    &LocalTempDirectoryOptions::new()
+                        .with_owner_access_policy(owner_policy)
+                        .with_max_attempts(1),
+                )
+                .expect_err("owner-policy open must fail after mkdir under EMFILE");
+            assert_eq!(error.mutation_state(), LocalTreeMutationState::Started);
+            assert!(
+                error.retained_resources().is_empty(),
+                "failed open cannot arm a tree owner"
+            );
+            let stage_path = error.cause().path().expect("partial stage path").to_path_buf();
+            assert_eq!(stage_path.parent(), Some(parent_path.as_path()));
+            assert_emfile(error.cause(), LocalFileOperation::CreateTempDirectory, &stage_path);
+            let (cause, stage, resources) = error.into_parts();
+            assert!(stage.is_none());
+            assert!(resources.is_empty());
+            let (_cause, recovery) = cause.into_temp_recovery_parts();
+            let mut recovery = recovery.expect("native recovery remains available");
+            assert_eq!(recovery.path(), stage_path.as_path());
+            assert!(recovery.identity().is_none());
+            drop(exhaustion);
+            let cleanup = recovery
+                .cleanup()
+                .expect_err("unknown identity must reject name cleanup after descriptor recovery");
+            assert_eq!(cleanup.kind(), LocalFileErrorKind::RequirementNotMet);
+            assert!(stage_path.is_dir(), "failed cleanup preserves the partial stage");
+            drop(recovery);
+            assert!(stage_path.is_dir(), "native recovery Drop preserves the partial stage");
+            assert_eq!(
+                fs::read(parent_path.join("payload")).expect("parent payload survives"),
                 b"protected user data"
             );
             assert!(parent_path.join("child").is_dir());
