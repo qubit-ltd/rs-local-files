@@ -108,7 +108,9 @@ fn test_temp_creation_recovers_from_each_descriptor_budget() {
 
 #[test]
 fn test_temp_creation_descriptor_budget_child() {
-    let Ok(case) = std::env::var(CASE_ENV) else { return };
+    let Ok(case) = std::env::var(CASE_ENV) else {
+        return;
+    };
     let parts = case.split(',').collect::<Vec<_>>();
     let rooted = parts[0].parse::<bool>().expect("rooted flag");
     let directory = parts[1].parse::<bool>().expect("directory flag");
