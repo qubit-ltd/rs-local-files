@@ -1,7 +1,7 @@
 {
   "config_sources": {
     "rs-infra-ci": "sha256:2cc68b5ab050769382d7e9af468cb60b2261fb8e387d0ced9974c8d068964271",
-    "rs-infra-dependency": "sha256:b5e9ad8c60048a77143bda0affeebf8d2316926fa1b03942258b1061ec492732",
+    "rs-infra-dependency": "sha256:95cb7c3bb91d496afc59722df2cbb567d757a49298f735af291bd8c4f5b200d4",
     "rs-infra-style": "sha256:f5ebba934dfcd04bb4b7a3847f27b8a73dcab28afbfe7cb2a9c2e884ebc4564c",
     "rs-infra-tools": "sha256:b52fdcc1a8382533f3f5f56d0f458fca1e30baa853f6acb394d913ec32972166"
   },
@@ -70,9 +70,13 @@
       "executable": false,
       "sha256": "f7480f84aeeb7b85d2f37e9ced1863a5a220469bb548abc34a7e84ddc0fa1479"
     },
+    ".infra/dependency/policy/baselines/v2026.11.02.txt": {
+      "executable": false,
+      "sha256": "8b595c209fd2d1bbc436f6c9bdaaca19c9250904b64f948174c46172ef8846ff"
+    },
     ".infra/dependency/policy/current.toml": {
       "executable": false,
-      "sha256": "aa981ca67c69096ee6863e3185364618ef482614fbd9779692d7ca47a1118423"
+      "sha256": "8cf39f46b11ae3b04392a90427634587487d84f39296be1655c0acf249718ce6"
     },
     ".infra/pages/pages.json": {
       "executable": false,
