@@ -311,6 +311,8 @@ pub(super) fn unsupported_source_error() -> io::Error {
 #[cfg(all(test, unix))]
 mod tests {
     use std::fs;
+    use std::time::Duration;
+    use std::time::Instant;
 
     use super::Options;
     use super::Path;
@@ -321,6 +323,185 @@ mod tests {
     use crate::LocalCopyFailureState;
     use crate::local::CopyBudget;
     use crate::local::LocalCopyTypeConflictPolicy;
+
+    #[test]
+    fn test_prepare_directory_deadlines_at_each_destination_boundary() {
+        use crate::tests::rooted::support::resolution_observation_tests::DeadlineBoundary;
+        use crate::tests::rooted::support::resolution_observation_tests::DeadlineClockGuard;
+
+        let scratch = tempfile::tempdir().expect("fixture should exist");
+        let root = Root::open(scratch.path()).expect("root authority should open");
+        let source = Path::new("source").expect("source path should be valid");
+        let options = Options::new();
+
+        for (destination_name, checks) in [("initial", 0), ("after-metadata", 1), ("before-create", 2)] {
+            let destination = Path::new(destination_name).expect("destination path should be valid");
+            let budget = CopyBudget::new(
+                crate::LocalCopyDirOptions::new()
+                    .with_started_at(Instant::now())
+                    .with_deadline(Duration::from_secs(60)),
+            );
+            let _clock = DeadlineClockGuard::expire_after(checks);
+            let error = prepare_directory(
+                &root,
+                &source,
+                &destination,
+                &options,
+                &mut Statistics::default(),
+                &budget,
+            )
+            .expect_err("an expired destination deadline must stop mutation");
+            assert_eq!(std::io::ErrorKind::TimedOut, error.error().kind());
+            assert!(!scratch.path().join(destination_name).exists());
+            drop(_clock);
+        }
+
+        fs::write(scratch.path().join("replace-me"), b"old").expect("old target should be created");
+        let destination = Path::new("replace-me").expect("destination path should be valid");
+        let budget = CopyBudget::new(
+            crate::LocalCopyDirOptions::new()
+                .with_started_at(Instant::now())
+                .with_deadline(Duration::from_secs(60)),
+        );
+        let _clock = DeadlineClockGuard::expire_after(2);
+        let error = prepare_directory(
+            &root,
+            &source,
+            &destination,
+            &Options::new().with_type_conflict(LocalCopyTypeConflictPolicy::Replace),
+            &mut Statistics::default(),
+            &budget,
+        )
+        .expect_err("an expired replacement deadline must preserve the destination");
+        assert_eq!(std::io::ErrorKind::TimedOut, error.error().kind());
+        assert_eq!(
+            b"old".as_slice(),
+            fs::read(scratch.path().join("replace-me")).expect("target remains")
+        );
+        drop(_clock);
+
+        let _clock = DeadlineClockGuard::expire_at(DeadlineBoundary::DestinationRemoved);
+        let mut statistics = Statistics::default();
+        let error = prepare_directory(
+            &root,
+            &source,
+            &destination,
+            &Options::new().with_type_conflict(LocalCopyTypeConflictPolicy::Replace),
+            &mut statistics,
+            &budget,
+        )
+        .expect_err("deadline after removal must report partial publication");
+        assert_eq!(std::io::ErrorKind::TimedOut, error.error().kind());
+        assert_eq!(
+            Some(crate::LocalCopyFailureState::PartiallyPublished),
+            error.failure_state()
+        );
+        assert!(!scratch.path().join("replace-me").exists());
+    }
+
+    #[test]
+    fn test_prepare_directory_creates_missing_destination_and_updates_statistics() {
+        let unsupported = super::unsupported_source_error();
+        assert_eq!(std::io::ErrorKind::Unsupported, unsupported.kind());
+        assert!(unsupported.to_string().contains("supports only regular files"));
+
+        let scratch = tempfile::tempdir().expect("fixture should exist");
+        let root = Root::open(scratch.path()).expect("root authority should open");
+        let source = Path::new("source").expect("source path should be valid");
+        let destination = Path::new("target").expect("destination path should be valid");
+        let mut statistics = Statistics::default();
+        let budget = CopyBudget::new(crate::LocalCopyDirOptions::new());
+
+        assert!(
+            prepare_directory(&root, &source, &destination, &Options::new(), &mut statistics, &budget,)
+                .expect("missing destination should be created")
+        );
+
+        assert!(scratch.path().join("target").is_dir());
+        assert_eq!(1, statistics.directories);
+        assert_eq!(0, statistics.skipped);
+
+        let faulted = Path::new("faulted").expect("faulted path should be valid");
+        let guard = crate::tests::native_io_fault_tests::NativeIoFaultGuard::fail_on(
+            crate::tests::native_io_fault_tests::NativeIoPoint::EntryMetadata,
+            1,
+        );
+        let error = prepare_directory(
+            &root,
+            &source,
+            &faulted,
+            &Options::new(),
+            &mut Statistics::default(),
+            &budget,
+        )
+        .expect_err("metadata errors must be retained as destination preparation errors");
+        assert!(guard.fired());
+        assert_eq!(Stage::PrepareDestination, error.stage());
+        assert_eq!(faulted.as_path(), error.destination_path());
+        assert_eq!(std::io::ErrorKind::Other, error.kind());
+        assert!(!scratch.path().join("faulted").exists());
+
+        let missing_parent = Path::new("missing-parent/child").expect("nested path should be valid");
+        let error = prepare_directory(
+            &root,
+            &source,
+            &missing_parent,
+            &Options::new(),
+            &mut Statistics::default(),
+            &budget,
+        )
+        .expect_err("destination creation must report a missing parent");
+        assert_eq!(Stage::PrepareDestination, error.stage());
+        assert_eq!(missing_parent.as_path(), error.destination_path());
+        assert_eq!(std::io::ErrorKind::NotFound, error.kind());
+    }
+
+    #[test]
+    fn test_prepare_directory_merges_skips_and_rejects_conflicts_by_policy() {
+        let scratch = tempfile::tempdir().expect("fixture should exist");
+        std::fs::create_dir(scratch.path().join("target")).expect("existing directory should be created");
+        std::fs::write(scratch.path().join("file"), b"existing file").expect("file should be created");
+        let root = Root::open(scratch.path()).expect("root authority should open");
+        let source = Path::new("source").expect("source path should be valid");
+        let destination = Path::new("target").expect("destination path should be valid");
+        let budget = CopyBudget::new(crate::LocalCopyDirOptions::new());
+
+        let mut merged = Statistics::default();
+        assert!(
+            prepare_directory(&root, &source, &destination, &Options::new(), &mut merged, &budget,)
+                .expect("existing directory should merge")
+        );
+        assert_eq!(0, merged.directories);
+        assert_eq!(0, merged.skipped);
+
+        let mut skipped = Statistics::default();
+        let file_destination = Path::new("file").expect("file destination should be valid");
+        assert!(
+            !prepare_directory(
+                &root,
+                &source,
+                &file_destination,
+                &Options::new().with_type_conflict(LocalCopyTypeConflictPolicy::Skip),
+                &mut skipped,
+                &budget,
+            )
+            .expect("type-conflict skip should retain the existing file")
+        );
+        assert_eq!(1, skipped.skipped);
+
+        let error = prepare_directory(
+            &root,
+            &source,
+            &file_destination,
+            &Options::new().with_type_conflict(LocalCopyTypeConflictPolicy::Fail),
+            &mut Statistics::default(),
+            &budget,
+        )
+        .expect_err("directory and file type conflict should be rejected");
+        assert_eq!(std::io::ErrorKind::AlreadyExists, error.kind());
+        assert_eq!(Stage::PrepareDestination, error.stage());
+        assert_eq!(file_destination.as_path(), error.destination_path());
+    }
 
     #[test]
     fn test_replacement_statistics_overflow_retains_published_type_change_and_progress() {

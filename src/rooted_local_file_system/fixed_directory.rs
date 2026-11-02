@@ -34,3 +34,26 @@ impl RootedLocalFileSystem {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::RootedLocalFileSystem;
+    use crate::SizeLimit;
+    use crate::rooted::Root;
+    use crate::tests::native_io_fault_tests::NativeIoFaultGuard;
+    use crate::tests::native_io_fault_tests::NativeIoPoint;
+
+    #[test]
+    fn authority_clone_failure_keeps_root_and_uses_unknown_limit_fallback() {
+        let fixture = tempfile::tempdir().expect("root fixture");
+        let root = Root::open(fixture.path()).expect("open root authority");
+        let guard = NativeIoFaultGuard::fail_on(NativeIoPoint::CloneAuthority, 1);
+
+        let filesystem = RootedLocalFileSystem::from_root(root).expect("retain rooted filesystem");
+
+        assert!(guard.fired());
+        assert_eq!(filesystem.limits().max_path_length(), SizeLimit::Unknown);
+        assert_eq!(filesystem.limits().max_component_length(), SizeLimit::Unknown);
+        assert!(filesystem.root_authority().metadata().is_ok());
+    }
+}

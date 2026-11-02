@@ -61,4 +61,25 @@ mod tests {
         assert!(debug.contains("BeforePublish"));
         assert!(!debug.contains("action"));
     }
+
+    #[test]
+    fn test_hook_parts_preserve_point_and_run_the_action_once() {
+        let calls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let action_calls = std::sync::Arc::clone(&calls);
+        let hooks = TestConditionalHooks::once(TestConditionalPoint::AfterPublish, move || {
+            action_calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Ok::<(), io::Error>(())
+        });
+
+        let (point, action) = hooks.into_parts();
+        assert_eq!(TestConditionalPoint::AfterPublish, point);
+        let run = action
+            .lock()
+            .expect("hook lock should be available")
+            .take()
+            .expect("action should exist");
+        run().expect("hook action should succeed");
+        assert_eq!(1, calls.load(std::sync::atomic::Ordering::SeqCst));
+        assert!(action.lock().expect("hook lock should be available").is_none());
+    }
 }

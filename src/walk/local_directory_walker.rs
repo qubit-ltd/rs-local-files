@@ -1240,6 +1240,7 @@ mod seen_name_cache_tests {
             Instant::now(),
         )
         .expect("Host walker should open");
+        assert_eq!(directory.path(), host.root());
         assert!(host.stack[0].seen.is_none());
 
         let root = crate::rooted::Root::open(directory.path()).expect("Rooted authority should open");
@@ -1252,6 +1253,7 @@ mod seen_name_cache_tests {
             Instant::now(),
         )
         .expect("Rooted walker should open");
+        assert_eq!(PathBuf::from("/"), rooted.root());
         assert!(
             rooted.rooted.as_ref().expect("Rooted state should exist").stack[0]
                 .seen

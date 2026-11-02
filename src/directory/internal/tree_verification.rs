@@ -579,3 +579,104 @@ fn resource_overflow(
         Some(LocalResourceLimitError::new(resource, usize::MAX, 0, 1).with_overflow()),
     )
 }
+
+#[cfg(test)]
+mod missing_path_tests {
+    use std::path::Path;
+
+    use super::resource_overflow;
+    use super::verify_entry_privacy;
+    use crate::LocalFileKind;
+    use crate::LocalFileSystem;
+    use crate::LocalResourceKind;
+    use crate::directory::LocalTreeValidationOptions;
+    use crate::options::LocalDirectoryOpenOptions;
+    use crate::options::LocalTempDirectoryOptions;
+    use crate::policy::LocalPrivacyRequirement;
+
+    #[test]
+    fn missing_entry_identity_is_reported_before_privacy_reopen() {
+        let fixture = tempfile::tempdir().expect("fixture");
+        let filesystem = LocalFileSystem::host().expect("host filesystem");
+        let parent = filesystem
+            .open_directory_with_options(fixture.path(), &LocalDirectoryOpenOptions::new())
+            .expect("parent directory");
+        let stage = parent
+            .create_staged_directory(&LocalTempDirectoryOptions::new())
+            .expect("staged directory");
+
+        let error = verify_entry_privacy(
+            &stage,
+            Path::new("payload"),
+            LocalFileKind::File,
+            None,
+            &LocalTreeValidationOptions::new().with_privacy(LocalPrivacyRequirement::Required),
+        )
+        .expect_err("required privacy verification needs an observed identity");
+        assert_eq!(error.kind(), crate::LocalFileErrorKind::Unsupported);
+        assert_eq!(
+            error.path(),
+            Some(stage.directory().diagnostic_path().join("payload").as_path())
+        );
+        stage.cleanup().expect("cleanup stage");
+    }
+
+    #[test]
+    fn explicit_resource_overflow_retains_limit_kind_and_path() {
+        let fixture = tempfile::tempdir().expect("fixture");
+        let filesystem = LocalFileSystem::host().expect("host filesystem");
+        let parent = filesystem
+            .open_directory_with_options(fixture.path(), &LocalDirectoryOpenOptions::new())
+            .expect("parent directory");
+        let stage = parent
+            .create_staged_directory(&LocalTempDirectoryOptions::new())
+            .expect("staged directory");
+
+        let error = resource_overflow(
+            &stage,
+            Path::new("payload"),
+            LocalResourceKind::Entry,
+            "entry accounting overflowed",
+        );
+        assert_eq!(error.kind(), crate::LocalFileErrorKind::ResourceLimit);
+        assert_eq!(
+            error.path(),
+            Some(stage.directory().diagnostic_path().join("payload").as_path())
+        );
+        stage.cleanup().expect("cleanup stage");
+    }
+
+    #[test]
+    fn privacy_reopen_failure_keeps_the_entry_path_context() {
+        let fixture = tempfile::tempdir().expect("fixture");
+        let filesystem = LocalFileSystem::host().expect("host filesystem");
+        let parent = filesystem
+            .open_directory_with_options(fixture.path(), &LocalDirectoryOpenOptions::new())
+            .expect("parent directory");
+        let mut stage = parent
+            .create_staged_directory(&LocalTempDirectoryOptions::new())
+            .expect("staged directory");
+        stage
+            .write_file_new(Path::new("payload"), &mut &b"payload"[..], 7)
+            .expect("write staged file");
+        let identity = stage
+            .directory()
+            .observe_entry(Path::new("payload"))
+            .expect("observe staged file")
+            .identity()
+            .cloned()
+            .expect("entry identity");
+        std::fs::remove_file(stage.directory().diagnostic_path().join("payload")).expect("remove staged file");
+
+        let error = verify_entry_privacy(
+            &stage,
+            Path::new("payload"),
+            LocalFileKind::File,
+            Some(&identity),
+            &LocalTreeValidationOptions::new().with_privacy(LocalPrivacyRequirement::Required),
+        )
+        .expect_err("privacy handle cannot be reopened after removal");
+        assert!(error.path().is_some());
+        stage.cleanup().expect("cleanup stage");
+    }
+}

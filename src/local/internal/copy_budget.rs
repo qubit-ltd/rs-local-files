@@ -556,6 +556,59 @@ mod tests {
         assert_eq!(0, facts.remaining());
         assert_eq!(1, facts.requested());
     }
+
+    #[test]
+    fn test_copy_budget_rejects_unrepresentable_absolute_deadline() {
+        let budget = CopyBudget::new(
+            LocalCopyDirOptions::new()
+                .with_started_at(Instant::now())
+                .with_deadline(Duration::MAX),
+        );
+
+        let error = budget
+            .absolute_deadline()
+            .expect_err("an unrepresentable deadline must be rejected");
+
+        assert_eq!(io::ErrorKind::InvalidInput, error.kind());
+        assert!(error.to_string().contains("monotonic clock range"));
+    }
+
+    #[test]
+    fn test_copy_budget_depth_limit_accepts_boundary_and_reports_excess() {
+        let budget = CopyBudget::new(LocalCopyDirOptions::new().with_max_depth(1));
+
+        budget.check_depth(1).expect("the configured depth is allowed");
+        let error = budget.check_depth(2).expect_err("deeper entries must be rejected");
+
+        assert_eq!(io::ErrorKind::QuotaExceeded, error.kind());
+        let facts = error
+            .get_ref()
+            .and_then(|source| source.downcast_ref::<crate::LocalResourceLimitError>())
+            .expect("depth failure must retain resource facts");
+        assert_eq!(crate::LocalResourceKind::Depth, facts.resource());
+        assert_eq!(1, facts.limit());
+        assert_eq!(2, facts.requested());
+    }
+
+    #[test]
+    fn test_copy_budget_directory_permit_exhaustion_recovers_after_drop() {
+        let budget = CopyBudget::new(LocalCopyDirOptions::new().with_max_open_directories(1));
+        let permit = budget
+            .acquire_directory()
+            .expect("first directory permit should be acquired")
+            .expect("configured pool should return a permit");
+        let error = budget
+            .acquire_directory()
+            .expect_err("the single directory slot is occupied");
+        assert_eq!(io::ErrorKind::QuotaExceeded, error.kind());
+        drop(permit);
+        assert!(
+            budget
+                .acquire_directory()
+                .expect("released slot should recover")
+                .is_some()
+        );
+    }
 }
 
 #[cfg(test)]

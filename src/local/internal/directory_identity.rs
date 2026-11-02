@@ -202,4 +202,16 @@ mod tests {
         assert_eq!(identity, DirectoryIdentity::from_metadata(&metadata, directory.path()));
         assert!(matches!(identity, DirectoryIdentity::Native { .. }));
     }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_rooted_metadata_identity_uses_native_directory_identity() {
+        let directory = tempdir().expect("temporary directory should be created");
+        let root = crate::rooted::Root::open(directory.path()).expect("root authority should open");
+        let metadata = root.metadata().expect("root metadata should be available");
+
+        let identity = DirectoryIdentity::from_rooted_metadata(&metadata, directory.path());
+
+        assert!(matches!(identity, DirectoryIdentity::Native { .. }));
+    }
 }

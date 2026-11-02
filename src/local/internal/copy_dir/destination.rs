@@ -413,4 +413,74 @@ mod tests {
 
         assert!(!destination.exists());
     }
+
+    #[test]
+    fn existing_file_conflict_for_directory_destination_reports_policy_error() {
+        let parent = tempfile::tempdir().expect("parent directory should be created");
+        let destination = parent.path().join("destination");
+        std::fs::write(&destination, b"preserve existing file").expect("file destination should be created");
+        let mut destination_removed = false;
+
+        let error = prepare_existing_directory_destination(
+            &destination,
+            LocalCopyConflictPolicy::Fail,
+            LocalCopyTypeConflictPolicy::Fail,
+            &mut destination_removed,
+            &CopyBudget::new(crate::LocalCopyDirOptions::new()),
+        )
+        .expect_err("file and directory destination types conflict");
+
+        assert_eq!(error.kind(), std::io::ErrorKind::AlreadyExists);
+        assert!(!destination_removed);
+        assert_eq!(
+            std::fs::read(&destination).expect("preserved destination"),
+            b"preserve existing file"
+        );
+    }
+
+    #[cfg(feature = "test-support")]
+    #[test]
+    fn partial_directory_removal_reports_indeterminate_effect() {
+        let parent = tempfile::tempdir().expect("parent directory should be created");
+        let destination = parent.path().join("destination");
+        std::fs::create_dir(&destination).expect("destination directory");
+        std::fs::write(destination.join("entry"), b"payload").expect("destination child");
+        let _fault = crate::local::install_test_fault("copy-destination-remove-after-child")
+            .expect("partial-removal fault should install");
+
+        let (error, state) = remove_destination_directory_if_unchanged(
+            &destination,
+            &crate::LocalDeleteOptions::new().with_recursive(),
+            crate::LocalSymlinkPolicy::Reject,
+            std::time::Instant::now(),
+        )
+        .expect_err("injected failure follows a partial directory removal");
+
+        assert!(error.to_string().contains("partial destination removal"));
+        assert_eq!(state, Some(crate::LocalCopyFailureState::Indeterminate));
+        assert!(!destination.join("entry").exists());
+        assert!(destination.is_dir());
+    }
+
+    #[cfg(feature = "test-support")]
+    #[test]
+    fn native_directory_removal_failure_preserves_retry_context() {
+        let parent = tempfile::tempdir().expect("parent directory should be created");
+        let destination = parent.path().join("destination");
+        std::fs::create_dir(&destination).expect("destination directory");
+        let _fault = crate::local::install_test_fault("local-fs-delete-directory-remove")
+            .expect("native removal fault should install");
+
+        let (error, state) = remove_destination_directory_if_unchanged(
+            &destination,
+            &crate::LocalDeleteOptions::new(),
+            crate::LocalSymlinkPolicy::Reject,
+            std::time::Instant::now(),
+        )
+        .expect_err("native removal failure is reported");
+
+        assert_eq!(state, Some(crate::LocalCopyFailureState::Indeterminate));
+        assert_ne!(error.kind(), std::io::ErrorKind::NotFound);
+        assert!(destination.is_dir());
+    }
 }

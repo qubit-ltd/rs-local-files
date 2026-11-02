@@ -446,5 +446,21 @@ mod tests {
         filesystem
             .set_default_temp_directory_options(LocalTempDirectoryOptions::new())
             .expect("temp-directory defaults");
+        #[cfg(feature = "test-support")]
+        let _filesystem = filesystem.with_test_faults(None);
+    }
+
+    #[test]
+    fn rooted_symlink_policy_rejection_preserves_the_previous_default() {
+        let fixture = tempfile::tempdir().expect("fixture");
+        let mut filesystem = LocalFileSystem::rooted(fixture.path()).expect("rooted filesystem");
+        let original = filesystem.symlink_policy();
+
+        let error = filesystem
+            .set_symlink_policy(crate::LocalSymlinkPolicy::FollowAcrossScope)
+            .expect_err("rooted filesystems cannot follow links across scope");
+
+        assert_eq!(error.kind(), crate::LocalFileErrorKind::InvalidOptions);
+        assert_eq!(filesystem.symlink_policy(), original);
     }
 }

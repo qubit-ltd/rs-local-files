@@ -302,8 +302,11 @@ mod deadline_tests {
 
     use super::RootedLocalFileSystem;
     use crate::LocalFileOperation;
+    use crate::LocalListOptions;
     use crate::LocalReadOptions;
     use crate::LocalSymlinkPolicy;
+    use crate::tests::native_io_fault_tests::NativeIoFaultGuard;
+    use crate::tests::native_io_fault_tests::NativeIoPoint;
     use crate::tests::rooted::support::resolution_observation_tests::DeadlineClockGuard;
 
     #[test]
@@ -352,5 +355,48 @@ mod deadline_tests {
         assert_eq!(std::io::ErrorKind::TimedOut, error.io_error_kind());
         assert_eq!(LocalFileOperation::OpenReader, error.operation());
         assert_eq!(Some(Path::new("item")), error.path());
+    }
+
+    #[test]
+    fn rooted_reader_authority_clone_failure_keeps_the_input_path() {
+        let scratch = tempfile::tempdir().expect("fixture directory should be created");
+        std::fs::write(scratch.path().join("item"), b"payload").expect("fixture file should exist");
+        let rooted = RootedLocalFileSystem::open(scratch.path()).expect("rooted authority should open");
+        let guard = NativeIoFaultGuard::fail_on(NativeIoPoint::CloneAuthority, 1);
+
+        let error = rooted
+            .open_reader_with_contract_and_deadline(
+                Path::new("item"),
+                &LocalReadOptions::new(),
+                LocalSymlinkPolicy::FollowWithinScope,
+                rooted.root.resolution_contract().clone(),
+                None,
+            )
+            .expect_err("authority clone failure must reject opening the reader");
+
+        assert!(guard.fired());
+        assert_eq!(LocalFileOperation::OpenReader, error.operation());
+        assert_eq!(Some(Path::new("item")), error.path());
+        assert_eq!(std::io::ErrorKind::Other, error.io_error_kind());
+    }
+
+    #[test]
+    fn rooted_listing_rejects_an_unrepresentable_relative_deadline() {
+        let scratch = tempfile::tempdir().expect("fixture directory should be created");
+        let rooted = RootedLocalFileSystem::open(scratch.path()).expect("rooted authority should open");
+
+        let error = rooted
+            .list(
+                Path::new(""),
+                Path::new("/"),
+                &LocalListOptions::new().with_deadline(Duration::MAX),
+                LocalSymlinkPolicy::FollowWithinScope,
+                Instant::now(),
+            )
+            .expect_err("unrepresentable deadline must be rejected before listing");
+
+        assert_eq!(LocalFileOperation::List, error.operation());
+        assert_eq!(crate::LocalFileErrorKind::InvalidOptions, error.kind());
+        assert_eq!(Some(Path::new("")), error.path());
     }
 }

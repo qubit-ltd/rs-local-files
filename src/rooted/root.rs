@@ -1058,6 +1058,8 @@ mod authority_and_native_failure_tests {
     use std::fs;
     use std::path::Path;
 
+    #[cfg(unix)]
+    use super::Permissions;
     use super::Root;
     #[cfg(not(windows))]
     use crate::LocalFileOperation;
@@ -1097,14 +1099,26 @@ mod authority_and_native_failure_tests {
         fs::write(fixture.path().join("ordinary"), b"unchanged").expect("ordinary file should exist");
         let root = Root::open(fixture.path()).expect("root should open");
         let file = LocalRelativePath::new(Path::new("ordinary")).expect("path should be relative");
+        root.set_permissions(&file, Permissions::from_unix_mode(0o600))
+            .expect("rooted permissions should update through the retained authority");
+        assert_eq!(
+            Some(0o600),
+            root.symlink_metadata(&file)
+                .expect("updated metadata should be available")
+                .permissions()
+                .unix_mode()
+        );
 
-        let mut validations = 0;
-        let mut validate = |_: &Path| {
-            validations += 1;
-            Ok(())
+        let validations = std::cell::Cell::new(0);
+        let validate = || {
+            let validations = &validations;
+            move |_: &Path| {
+                validations.set(validations.get() + 1);
+                Ok(())
+            }
         };
         let error = root
-            .read_link_limited(&file, None, &mut validate)
+            .read_link_limited(&file, None, validate())
             .expect_err("an ordinary file cannot be read as a symlink");
         assert_eq!(error.operation(), LocalFileOperation::Metadata);
         assert_eq!(error.path(), Some(file.as_path()));
@@ -1112,11 +1126,41 @@ mod authority_and_native_failure_tests {
         std::os::unix::fs::symlink("ordinary", fixture.path().join("link")).expect("real link should exist");
         let link = LocalRelativePath::new(Path::new("link")).expect("link path should be relative");
         assert_eq!(
-            root.read_link_limited(&link, None, &mut validate)
+            root.read_link_limited(&link, None, validate())
                 .expect("link target should be validated"),
             Path::new("ordinary")
         );
-        assert_eq!(validations, 1, "only the successful read may validate a raw target");
+        assert_eq!(
+            Path::new("ordinary"),
+            root.read_link(&link).expect("rooted link target should be readable")
+        );
+        assert_eq!(
+            validations.get(),
+            1,
+            "only the successful read may validate a raw target"
+        );
+
+        let limited = root
+            .read_link_limited(&link, Some(1), validate())
+            .expect_err("a target beyond the byte limit must be rejected");
+        assert_eq!(crate::LocalFileErrorKind::ResourceLimit, limited.kind());
+        let facts = limited
+            .resource_limit_error()
+            .expect("link limit facts should be retained");
+        assert_eq!(crate::LocalResourceKind::SymlinkTargetBytes, facts.resource());
+        assert_eq!(Some(2), facts.observed());
+        assert_eq!(
+            1,
+            validations.get(),
+            "over-limit targets must not reach raw-target validation"
+        );
+
+        fs::create_dir(fixture.path().join("nested")).expect("nested directory should exist");
+        let nested = LocalRelativePath::new(Path::new("nested")).expect("path should be relative");
+        let entries = root
+            .read_dir(&nested)
+            .expect("rooted directory entries should be listed");
+        assert!(entries.is_empty());
 
         let missing = LocalRelativePath::new(Path::new("missing")).expect("path should be relative");
         let error = root

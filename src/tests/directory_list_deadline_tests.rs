@@ -145,5 +145,27 @@ fn list_without_deadline_succeeds() {
     let walker = handle
         .list_with_options(Path::new("child"), &LocalListOptions::new())
         .expect("listing without a deadline should succeed");
+    assert!(walker.root().ends_with("child"));
     assert_eq!(walker.count(), 1);
+}
+
+#[cfg(feature = "test-support")]
+#[test]
+fn list_entry_read_failure_is_returned_by_the_walker() {
+    let fixture = tempfile::tempdir().expect("fixture should exist");
+    fs::write(fixture.path().join("entry"), b"payload").expect("entry should exist");
+    let filesystem = LocalFileSystem::host().expect("host filesystem");
+    let mut walker = filesystem
+        .list_with_options(fixture.path(), &LocalListOptions::new())
+        .expect("walker should open before the child read fault");
+    let _fault = crate::local::install_test_fault("walker-entry").expect("entry-read fault should install");
+
+    let error = walker
+        .next()
+        .expect("fault must be yielded as a walker item")
+        .expect_err("entry read should fail");
+
+    assert_eq!(LocalFileOperation::List, error.operation());
+    assert_eq!(LocalFileErrorKind::Io, error.kind());
+    assert_eq!(std::io::ErrorKind::Other, error.io_error_kind());
 }

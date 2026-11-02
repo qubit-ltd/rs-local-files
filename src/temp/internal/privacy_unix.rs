@@ -877,3 +877,36 @@ mod owner_policy_unix_tests {
         assert_eq!(file.metadata().expect("file metadata").mode() & 0o7777, 0o600);
     }
 }
+
+#[cfg(test)]
+mod helper_validation_tests {
+    use std::ffi::OsStr;
+
+    use super::component_name;
+    use super::native_mode;
+    use super::openat_mode;
+    use super::owner_mode;
+    use crate::policy::LocalOwnerAccessPolicy;
+
+    #[test]
+    fn unix_private_entry_helpers_validate_names_and_modes() {
+        let policy = LocalOwnerAccessPolicy::new().with_unix_modes(0o700, 0o400);
+        assert_eq!(owner_mode(&policy, true).expect("directory mode"), 0o700);
+        assert_eq!(owner_mode(&policy, false).expect("file mode"), 0o400);
+        let unconfigured = LocalOwnerAccessPolicy::new();
+        assert!(owner_mode(&unconfigured, true).is_err());
+
+        assert_eq!(native_mode(0o600).expect("native mode"), 0o600);
+        assert_eq!(openat_mode(0o600).expect("openat mode"), 0o600);
+        assert_eq!(component_name(OsStr::new("entry")).expect("component"), c"entry");
+        for invalid in [
+            OsStr::new(""),
+            OsStr::new("."),
+            OsStr::new(".."),
+            OsStr::new("a/b"),
+            OsStr::new("a\0b"),
+        ] {
+            assert!(component_name(invalid).is_err(), "invalid component {invalid:?}");
+        }
+    }
+}

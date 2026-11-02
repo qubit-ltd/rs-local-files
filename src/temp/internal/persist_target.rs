@@ -164,3 +164,49 @@ fn invalid(path: &Path, reason: &'static str) -> LocalFileError {
         .with_path(path.to_path_buf())
         .with_reason(reason)
 }
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+
+    use super::LocalFileSystemScope;
+    use super::LocalSymlinkPolicy;
+    use super::LocalTempResourceBackend;
+    use super::prepare_persist_target;
+    use super::validate_persist_base;
+    use crate::error::LocalFileErrorKind;
+    use crate::temp::internal::HostTempResourceBackend;
+    use crate::temp::internal::TempEntryIdentity;
+
+    #[test]
+    fn persist_target_validation_covers_bases_and_namespace_rules() {
+        let fixture = tempfile::tempdir().expect("fixture");
+        let file = fixture.path().join("file");
+        std::fs::write(&file, b"base file").expect("file base");
+
+        let directory = std::fs::File::open(fixture.path()).expect("open fixture");
+        let backend = LocalTempResourceBackend::Host(HostTempResourceBackend {
+            identity: TempEntryIdentity::from_file(&directory).expect("directory identity"),
+            sandbox_path: fixture.path().to_path_buf(),
+        });
+        validate_persist_base(&backend, fixture.path(), LocalSymlinkPolicy::Reject).expect("directory base");
+
+        let error = validate_persist_base(&backend, &file, LocalSymlinkPolicy::Reject)
+            .expect_err("regular file is not a persistence base");
+        assert_eq!(error.kind(), LocalFileErrorKind::NotDirectory);
+        let missing = fixture.path().join("missing");
+        assert!(validate_persist_base(&backend, &missing, LocalSymlinkPolicy::Reject).is_err());
+
+        let target = fixture.path().join("published");
+        assert!(prepare_persist_target(LocalFileSystemScope::Host, None, &target).is_ok());
+        assert!(prepare_persist_target(LocalFileSystemScope::Host, Some(fixture.path()), Path::new("child")).is_ok());
+
+        let dotted = fixture.path().join("..");
+        let error = prepare_persist_target(LocalFileSystemScope::Host, Some(&dotted), Path::new("child"))
+            .expect_err("persistence base cannot contain parent components");
+        assert_eq!(error.kind(), LocalFileErrorKind::InvalidPath);
+        let error = prepare_persist_target(LocalFileSystemScope::Rooted, None, Path::new("../escape"))
+            .expect_err("rooted persistence cannot escape its namespace");
+        assert_eq!(error.kind(), LocalFileErrorKind::InvalidPath);
+    }
+}
