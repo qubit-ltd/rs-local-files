@@ -9,6 +9,7 @@
 mod coverage_staged_directory_tests;
 mod deletion_native_failure_tests;
 mod directory_copy_deadline_tests;
+mod directory_list_deadline_tests;
 mod directory_native_failure_tests;
 mod error;
 mod file_system;

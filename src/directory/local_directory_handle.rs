@@ -909,11 +909,38 @@ impl LocalDirectoryHandle {
         started_at: std::time::Instant,
     ) -> LocalResult<LocalDirectoryWalker> {
         let policy = options.symlink_policy().unwrap_or(self.filesystem.symlink_policy());
-        self.filesystem.list_with_options_started_at(
-            &self.validate_with_policy(relative, true, policy)?,
+        crate::local_file_system_validation::validate_list_options(
+            self.filesystem.scope(),
+            self.filesystem.symlink_policy(),
             options,
-            started_at,
-        )
+            Some(relative),
+        )?;
+        let operation_deadline = options.deadline().and_then(|duration| started_at.checked_add(duration));
+        if options.deadline().is_some() && operation_deadline.is_none() {
+            return Err(
+                LocalFileError::new(LocalFileErrorKind::InvalidOptions, LocalFileOperation::List)
+                    .with_reason("listing deadline exceeds the monotonic clock range")
+                    .with_path(relative.to_path_buf()),
+            );
+        }
+        let binding_deadline = self.binding_deadline.and_then(|limit| started_at.checked_add(limit));
+        if self.binding_deadline.is_some() && binding_deadline.is_none() {
+            return Err(
+                LocalFileError::new(LocalFileErrorKind::InvalidOptions, LocalFileOperation::List)
+                    .with_reason("path binding deadline exceeds the monotonic clock range")
+                    .with_path(relative.to_path_buf()),
+            );
+        }
+        let effective_deadline = match (operation_deadline, binding_deadline) {
+            (Some(operation), Some(binding)) => Some(operation.min(binding)),
+            (operation, binding) => operation.or(binding),
+        };
+        check_operation_deadline(effective_deadline, relative, LocalFileOperation::List)?;
+        let resolved =
+            self.validate_with_policy_until(relative, true, policy, effective_deadline, LocalFileOperation::List)?;
+        check_operation_deadline(effective_deadline, relative, LocalFileOperation::List)?;
+        self.filesystem
+            .list_with_options_started_at(&resolved, options, started_at)
     }
 
     /// Opens a writer under this authority using the supplied write options.
@@ -1292,7 +1319,12 @@ fn check_operation_deadline(deadline: Option<Instant>, path: &Path, operation: L
 }
 
 fn timeout_operation_error(error: LocalFileError, operation: LocalFileOperation) -> LocalFileError {
-    if error.io_error_kind() == std::io::ErrorKind::TimedOut {
+    if error.io_error_kind() == std::io::ErrorKind::TimedOut
+        && (operation != LocalFileOperation::List
+            || error
+                .io_error()
+                .is_some_and(|source| source.to_string() == "local listing deadline exceeded"))
+    {
         error.with_operation(operation)
     } else {
         error
