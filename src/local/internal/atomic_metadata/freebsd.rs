@@ -580,7 +580,7 @@ mod tests {
     fn test_attribute_list_retries_short_read_when_reprobe_shows_truncation() {
         let mut probes: VecDeque<Result<usize, Error>> = VecDeque::from([Ok(3), Ok(4), Ok(4), Ok(4)]);
         let mut reads: VecDeque<Result<Vec<u8>, Error>> =
-            VecDeque::from([Ok(vec![1, b'a', 2]), Ok(vec![1, b'a', 2, b'b'])]);
+            VecDeque::from([Ok(vec![1, b'a', 2]), Ok(vec![1, b'a', 1, b'b'])]);
         let names = read_attribute_names(
             || probes.pop_front().expect("probe should be available"),
             |buffer| {
