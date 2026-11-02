@@ -19,9 +19,25 @@ fn discard(outcome: qubit_local_files::outcome::LocalTreePublishOutcome) {
     relay(outcome);
 }
 
+#[cfg(feature = "drop-validation-options")]
+fn discard_validation_options() {
+    qubit_local_files::directory::LocalTreeValidationOptions::new()
+        .with_reject_symlinks();
+}
+
+#[cfg(not(feature = "drop-validation-options"))]
+fn consume_validation_options() {
+    let _options = qubit_local_files::directory::LocalTreeValidationOptions::new().with_reject_symlinks();
+}
+
 #[cfg(not(feature = "drop-result"))]
 fn inspect(outcome: qubit_local_files::outcome::LocalTreePublishOutcome) {
     let _ = (outcome.durable(), outcome.file_synced(), outcome.access_state());
 }
 
-fn main() {}
+fn main() {
+    #[cfg(feature = "drop-validation-options")]
+    discard_validation_options();
+    #[cfg(not(feature = "drop-validation-options"))]
+    consume_validation_options();
+}

@@ -5,6 +5,9 @@ edition = "2024"
 
 [features]
 drop-result = []
+drop-validation-options = []
 
 [dependencies]
 qubit-local-files = { path = "../../.." }
+
+[workspace]

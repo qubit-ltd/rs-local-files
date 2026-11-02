@@ -34,6 +34,7 @@ use crate::policy::LocalPrivacyRequirement;
 /// # Ok(())
 /// # }
 /// ```
+#[must_use = "tree validation options have no effect unless they are used"]
 #[derive(Clone, Debug)]
 pub struct LocalTreeValidationOptions {
     /// Exact expected entries, when configured.

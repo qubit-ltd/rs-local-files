@@ -108,4 +108,31 @@ fn test_tree_publish_outcome_must_use_in_external_consumer() {
         fs::read_to_string(&lock).expect("consumer lock remains readable"),
         reviewed_lock
     );
+
+    let discarded_options = Command::new("cargo")
+        .arg("check")
+        .arg("--frozen")
+        .arg("--manifest-path")
+        .arg(&manifest)
+        .arg("--no-default-features")
+        .arg("--features")
+        .arg("drop-validation-options")
+        .env("CARGO_TARGET_DIR", &target)
+        .env_remove("CARGO_ENCODED_RUSTFLAGS")
+        .env_remove("RUSTFLAGS")
+        .env_remove("RUSTDOCFLAGS")
+        .env_remove("CARGO_BUILD_TARGET")
+        .output()
+        .expect("negative validation options check should start");
+    let diagnostic = String::from_utf8_lossy(&discarded_options.stderr);
+    assert!(
+        !discarded_options.status.success() && diagnostic.contains("unused_must_use"),
+        "discarding validation options should fail specifically for unused_must_use:\n{}\n{}",
+        String::from_utf8_lossy(&discarded_options.stdout),
+        diagnostic
+    );
+    assert_eq!(
+        fs::read_to_string(&lock).expect("consumer lock remains readable"),
+        reviewed_lock
+    );
 }
