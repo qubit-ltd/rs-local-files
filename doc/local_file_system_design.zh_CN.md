@@ -667,7 +667,8 @@ Rooted observed read 支持通过 `LocalObservedReadOptions` 设置有限预算�
 有限时（包括 path binding 提供的预算）返回 `Unsupported`；未设置有限预算的 Host 请求保持原行为。
 这样不会把有界预检误称为实际 Host open 也受到了预算限制。
 
-重复分隔符和末尾分隔符按平台 native `Path` 语义规范化。NUL、无效 prefix 组合以及不能
+重复分隔符和末尾分隔符按平台 native `Path` 语义规范化，但尾部分隔符仍是目录限定；它在符号链接目标
+和固定目录 reader 输入的解析、重绑定中必须保留，不能用合成 `.` 组件替代。NUL、无效 prefix 组合以及不能
 无损表示的 native value 必须拒绝。
 
 规范化器不能因为输出 `PathBuf` 相同就丢掉输入的目录意图。平台把末尾 separator、末尾
@@ -767,7 +768,9 @@ Host 链接目标按原生顺序解析。Rooted 链接目标在打开的权限�
 
 symlink/reparse point 循环必须终止并返回结构化路径错误。实现优先使用操作系统循环错误或
 底层对象 identity 检测。固定 expansion 数量不得成为调用方不可见的业务资源上限；平台
-为单次路径解析施加的固有限制应作为平台 I/O/unsupported 事实报告。
+为单次路径解析施加的固有限制应作为平台 I/O/unsupported 事实报告。活动链接检测同时考虑 authority-relative
+entry 坐标和 native identity，因此另一条路径上的硬链接符号链接与当前链接 inode 相同，本身不构成循环。
+显式配置的 hop 限制仍然生效。
 
 ### 9.4 最终组件
 
@@ -1294,7 +1297,8 @@ Tree copy 按 Options 控制递归、symlink、metadata 和预算。特殊文件
 明确允许。发生错误时保留已经创建的 entry 统计并报告 `PartiallyPublished`；本库不假装
 能够普遍事务化整棵目录树。
 
-Copy 永远不得修改 source。
+目录树复制会在副作用前拒绝相同或互为祖先的源和目标目录，包括通过现有前缀解析得到的祖先目标；
+若要替换整棵树，应复制到无祖先重叠的兄弟暂存路径，再按应用策略发布。Copy 永远不得修改 source。
 
 Host 与 Rooted 的复制统计含义一致：`files` 计入复制的普通文件和链接，`directories`
 只计入新建目录，`bytes` 只计入普通文件字节。`overwritten` 包括被替换的条目，以及
@@ -1302,7 +1306,8 @@ Host 与 Rooted 的复制统计含义一致：`files` 计入复制的普通文�
 但不把这些合并计为覆盖。
 
 若一次成功的复制跳过了所有条目，则不会发布目标，也不会执行发布后的命名空间同步；结果为 `atomic = false`、
-`durable = false`、`metadata_preservation = None`。实际复制的零字节文件仍计入 `files` 并走正常发布流程。
+`durable = false`、`metadata_preservation = None`。但显式请求 `Permissions` 时，目录合并仍可能应用遍历目录权限；
+这类副作用独立于内容计数报告。实际复制的零字节文件仍计入 `files` 并走正常发布流程。
 失败时即使统计为零，也不能据此推断目标未变或全部跳过。
 
 目录树复制准备阶段可能先删除类型冲突的目标，再安装替代条目。后续步骤失败时，即使已复制文件统计
@@ -1428,7 +1433,8 @@ parent 可以是命名空间绝对或相对路径；未指定时使用创建操�
 链接策略和命名空间绝对路径，之后修改 filesystem 配置或 PWD 不会改变它们。
 prefix、suffix 会先组合成完整名称再校验。分隔符、NUL、控制字符、Windows 禁用标点、末尾
 空格或句点，以及 `CON.txt` 这类设备保留名称都会被拒绝；校验先于父目录创建和条目 I/O。
-`max_attempts` 为 `None` 时名称冲突尝试不限；设为零则不尝试。非冲突原生错误立即返回。
+`max_attempts` 为 `None` 时名称冲突尝试不限；`Some(0)` 无效，创建入口会在产生副作用前返回
+`InvalidOptions`。正数包含首次尝试，只有名称冲突会重试，其他原生错误立即返回。
 
 `LocalTempFile::creation_parent()` 与 `LocalTempDirectory::creation_parent()` 返回创建时捕获的
 绝对父目录坐标。Host 返回 backend 实际使用的父目录，可能已解析输入别名；Rooted 返回虚拟根下

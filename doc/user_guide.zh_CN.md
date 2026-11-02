@@ -659,7 +659,9 @@ commit failure 中记录的发布状态处理，不能套用这个结论。
 `with_entry_source()` 或 `with_tree_source()`，并通过 `source_mode()` 读取模式。
 Copy Options 分别控制目标冲突、类型冲突、元数据、符号链接、原子性、耐久性以及由调用方
 选择的资源预算；复制策略不包含 mount 或 device 边界。无法满足的要求保证会在破坏性变更
-前被拒绝。自复制和硬链接别名会被拒绝；覆盖符号链接目标时会替换该条目而不跟随它。
+前被拒绝。自复制和硬链接别名会被拒绝。目录树复制还会在修改前拒绝相同或互为祖先的源、目标目录，
+因为祖先目标可能删除源树的一部分。替换目录树时应先复制到无祖先重叠的兄弟暂存路径，再按应用已有策略发布。
+覆盖符号链接目标时会替换该条目而不跟随它。
 
 ```rust,no_run
 use qubit_local_files::LocalFileSystem;
@@ -707,6 +709,7 @@ Host 与 Rooted 中，`files()` 包括复制的链接，`directories()` 只计�
 
 一次复制若成功跳过所有条目，就不会发布目标，也不会执行发布后的父目录同步；结果为 `atomic = false`、
 `durable = false`、`metadata_preservation = None`。实际复制的零字节文件仍会计入 `files` 并按正常流程发布。
+请求 `Permissions` 时，目录合并仍可能应用遍历目录的权限；即使所有叶子冲突都跳过，结果仍会报告元数据保留。
 失败时即使文件统计为零，也要检查类型化失败状态和部分统计，不能据此认定没有副作用。
 
 | 模式 | 普通文件 | 最终链接，包括悬空链接 | 实体目录 | 特殊文件 |
@@ -722,6 +725,8 @@ Copy Options 默认使用 `LocalMetadataPreservePolicy::None`。显式请求 `Pe
 `with_entry_source()` 选择单个普通文件或链接条目，`with_tree_source()` 要求源为实体目录。
 `with_source_mode(LocalCopySourceMode::Auto)` 会明确恢复自动判断。源类型拒绝发生在创建
 目标父目录或修改目标之前。目录限定路径语法单独校验，可能在分派前返回 `NotDirectory`。
+尾部分隔符在普通读取和固定目录 observed read 中都保留为目录限定；path binding 不会丢弃它，
+即使解析后的路径已规范化，带尾分隔符的普通文件读取仍会失败。
 源模式判断不跟随最终链接；递归目录树内部遇到的目录链接仍按有效遍历策略处理。
 源模式不会改变中间链接解析或目录树的链接遍历语义。
 
@@ -767,7 +772,9 @@ namespace 路径作为公开 root；可选的 diagnostic path 仍可记录实际
 后续 PWD 即使变化，也能把它们再次传给同一个 filesystem。持久化失败会保留资源，后续允许
 的操作由发布状态和源资格共同决定。创建前会组合前缀、随机名称和后缀并校验完整组件；原生
 分隔符、NUL、控制字符、Windows 禁用标点、末尾空格或句点，以及 `CON.txt` 这类设备保留名称
-都会被拒绝，且校验先于父目录创建。名称冲突时，`max_attempts` 为 `None` 表示不限尝试次数；零表示不尝试。非冲突原生错误立即返回。
+都会被拒绝，且校验先于父目录创建。名称冲突时，`max_attempts` 为 `None` 表示不限尝试次数；
+`Some(0)` 无效，创建入口会在产生副作用前返回 `InvalidOptions`。正数包含首次尝试，只有名称
+冲突会重试，其他原生错误立即返回。
 
 `LocalDirectoryHandle::create_staged_directory` 始终在该 handle 的固定 authority 下直接创建。
 `LocalTempDirectoryOptions` 中的 `prefix()`、`suffix()` 和 `max_attempts()` 会用于 stage 名称及

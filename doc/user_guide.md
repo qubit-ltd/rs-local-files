@@ -810,8 +810,11 @@ separately control target conflict, type conflict, metadata, symbolic links,
 atomicity, durability, and caller-selected resource budgets. Mount and device
 boundaries are not part of the copy policy. Unsupported required guarantees
 are rejected before destructive changes. Self-copy and hard-link aliases are
-rejected; overwriting a symbolic-link target replaces that entry rather than
-following it.
+rejected. Directory-tree copies also reject equal or ancestor-related source
+and destination directories before mutation, because an ancestor target could
+remove part of the source. To replace a tree, copy to an unrelated sibling
+stage and publish it using the application's existing policy. Overwriting a
+symbolic-link target replaces that entry rather than following it.
 
 ```rust,no_run
 use qubit_local_files::LocalFileSystem;
@@ -871,8 +874,11 @@ When every requested entry is skipped, the copy succeeds without publishing a
 destination entry. It does not run post-publication parent synchronization, so
 the outcome reports `atomic = false`, `durable = false`, and
 `metadata_preservation = None`. A zero-byte file that is actually copied is
-still counted in `files` and follows the normal publication path. Do not infer
-that a failed or partially completed copy was skipped from zero file counts;
+still counted in `files` and follows the normal publication path. When
+`Permissions` is requested, traversed directory permissions may still be
+applied during a merge; that effect is reported as metadata preservation even
+if all leaf conflicts were skipped. Do not infer that a failed or partially
+completed copy was skipped from zero file counts;
 inspect its typed failure state and partial statistics.
 
 | Mode | Regular file | Final link, including dangling links | Directory | Special file |
@@ -894,6 +900,9 @@ requires an actual directory. `with_source_mode(LocalCopySourceMode::Auto)`
 explicitly resets either selection. Source-kind rejection happens before
 creating target parents or changing the destination. Directory-qualified path
 syntax is validated separately and can report `NotDirectory` before dispatch.
+A trailing separator remains a directory qualification through ordinary and
+fixed-directory observed reads; path binding cannot lose it, and a file-
+qualified read fails for a regular file even if the resolved path omits it.
 A final source link is never dereferenced by mode selection. Directory
 links encountered inside a tree still follow the effective traversal policy;
 mode selection does not change intermediate-link or tree-traversal semantics.
@@ -963,8 +972,10 @@ native separators, NUL, and portable reserved-name violations do not leave an
 entry behind. The complete prefix + generated name + suffix is checked before
 parent creation. Portable names reject control characters, Windows-forbidden
 punctuation, trailing spaces or dots, and reserved device names such as
-`CON.txt`. Name-collision attempts are unbounded when `max_attempts` is `None`; zero
-permits no attempts. Non-collision native errors return immediately.
+`CON.txt`. Name-collision attempts are unbounded when `max_attempts` is `None`.
+`Some(0)` is invalid; creation returns `InvalidOptions` before side effects.
+Positive limits include the first attempt, and only name collisions are retried;
+other native errors return immediately.
 
 `LocalTempFile::creation_parent()` and
 `LocalTempDirectory::creation_parent()` return the absolute parent coordinate

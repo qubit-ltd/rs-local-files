@@ -196,8 +196,9 @@ directory; calling it on a Rooted instance changes only that instance.
 Resource budgets are opt-in. Listing and copy depth, entries, bytes, open
 directories, deadlines, duplicate-name memory, retry timeouts, and temporary
 name attempts are unbounded or disabled until the caller sets them explicitly.
-For temporary-name collisions, `None` means unbounded attempts and zero means
-no attempts.
+For temporary-name collisions, `None` means unbounded attempts. `Some(0)` is
+invalid; creation returns `InvalidOptions` before side effects. Positive limits
+include the first attempt, and only name collisions are retried.
 
 Symbolic-link behavior is configurable per `LocalFileSystem` instance; Rooted
 defaults to `FollowWithinScope` and Host defaults to `FollowAcrossScope`. Rooted
@@ -314,7 +315,12 @@ unchanged. `CreateNew` and `CreateOrReplace` stage in the destination directory;
 `Append` writes an existing regular file directly and cannot satisfy required
 atomicity.
 
-Copy modes distinguish one `Entry` (a regular file or final link), a directory `Tree`, and explicit `Auto` detection. See the [source-mode contract](doc/user_guide.md#copy-source-modes).
+Copy modes distinguish one `Entry` (a regular file or final link), a directory
+`Tree`, and explicit `Auto` detection. See the [source-mode contract](doc/user_guide.md#copy-source-modes).
+Tree copies reject equal or ancestor-related source and destination directories
+before mutation; stage into an unrelated sibling path when replacing a tree.
+Directory permission changes also count as copy effects even when leaf entries
+are skipped.
 
 Listing is lazy. A non-recursive walk reports a dangling link from the link
 entry itself without resolving its target. Recursive traversal reports

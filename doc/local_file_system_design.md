@@ -553,9 +553,12 @@ Host does not provide a containment boundary.
 The resolver preserves native component bytes/code units and directory intent.
 Trailing separators, a trailing `.`, and equivalent native directory forms are
 checked after lexical normalization, so `missing/` cannot silently become a
-regular-file target. For two-path operations, source and destination are bound
-from one PWD snapshot; a lexical failure is returned before any parent creation
-or other namespace mutation and is reported as `Unchanged`.
+regular-file target. Directory intent in symbolic-link targets and fixed-
+directory reader inputs survives path rewriting and binding; it is not
+represented by inserting a synthetic `.` component. For two-path operations,
+source and destination are bound from one PWD snapshot; a lexical failure is
+returned before any parent creation or other namespace mutation and is reported
+as `Unchanged`.
 
 ## 9. Symbolic Links and Reparse Points
 
@@ -587,6 +590,11 @@ directory and Rooted absolute targets restart at virtual `/`, never Host `/`.
 
 Cycles return a structured path error and must not be hidden behind a caller-
 invisible fixed expansion budget.
+
+Active-link detection includes the link's authority-relative entry coordinate
+as well as native identity, so a hard link to the same symlink inode at a
+different path is not by itself a cycle. The configured hop limit remains
+effective.
 
 ### 9.4 Final components
 
@@ -1105,8 +1113,14 @@ metadata; removing a destination directory link must use the native directory
 link removal operation and preserve its referent.
 
 Failure retains requested and failing operands, partial statistics, and staging
-context only when cleanup failed. Preflight includes destination-inside-source.
-Copy never mutates its source or silently downgrades required semantics.
+context only when cleanup failed. Preflight rejects directory source and
+destination paths that are equal or ancestor-related in either direction,
+including an existing-prefix target alias. Copy never mutates its source or
+silently downgrades required semantics.
+
+Requested directory permissions are applied to traversed directories and are
+tracked separately from content counters. A merge can therefore change
+directory metadata even when leaf conflicts are skipped.
 
 
 Statistics are portable across scopes: `files` counts copied regular files and
@@ -1216,7 +1230,9 @@ before creating entries. Portable validation rejects separators, NUL, control
 characters, Windows-forbidden punctuation, trailing spaces or dots, and
 reserved device names such as `CON.txt`; invalid names fail before parent
 creation or entry I/O. Collision retries are unbounded when `max_attempts` is
-`None`; zero permits no attempts. Non-collision native errors return immediately.
+`None`. `Some(0)` is invalid; creation returns `InvalidOptions` before side
+effects. Positive limits include the first attempt, and only name collisions
+are retried; other native errors return immediately.
 
 `LocalTempFile::creation_parent()` and
 `LocalTempDirectory::creation_parent()` expose the absolute parent coordinate
