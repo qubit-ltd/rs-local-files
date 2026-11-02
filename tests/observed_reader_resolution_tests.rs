@@ -359,39 +359,64 @@ fn test_fixed_observed_binding_target_byte_limit_has_exact_boundary() {
     let scratch = tempfile::tempdir().expect("fixture should be created");
     std::fs::create_dir(scratch.path().join("target")).expect("target directory should exist");
     std::fs::write(scratch.path().join("target/payload"), b"data").expect("payload should exist");
+    std::fs::create_dir(scratch.path().join("longer")).expect("second target directory should exist");
+    std::fs::write(scratch.path().join("longer/item"), b"second target").expect("second target file should exist");
     symlink("target/payload", scratch.path().join("alias")).expect("alias should exist");
+    symlink("longer/item", scratch.path().join("second-alias")).expect("second alias should exist");
     let filesystem = LocalFileSystem::rooted(scratch.path()).expect("root should open");
     let directory = filesystem
         .open_directory_with_options(Path::new("/"), &LocalDirectoryOpenOptions::new())
         .expect("fixed root should open");
 
-    let exact = (0..128)
-        .find(|maximum| {
-            directory
-                .open_observed_reader(
-                    Path::new("alias"),
-                    &LocalObservedReadOptions::new()
-                        .with_path_binding(LocalPathBindingOptions::new().with_max_path_bytes(*maximum)),
-                )
-                .is_ok()
-        })
-        .expect("a finite target-byte boundary should be found");
-    assert!(exact > 0, "the original path and target must consume bytes");
-    let below = directory
-        .open_observed_reader(
-            Path::new("alias"),
-            &LocalObservedReadOptions::new()
-                .with_path_binding(LocalPathBindingOptions::new().with_max_path_bytes(exact - 1)),
-        )
-        .expect_err("one byte below the measured boundary must fail");
-    assert_eq!(below.kind(), LocalFileErrorKind::ResourceLimit);
-    directory
-        .open_observed_reader(
-            Path::new("alias"),
-            &LocalObservedReadOptions::new()
-                .with_path_binding(LocalPathBindingOptions::new().with_max_path_bytes(exact)),
-        )
-        .expect("the measured exact boundary must succeed");
+    for (alias, first_component, second_component, target, expected_contents) in [
+        ("alias", "target", "payload", "target/payload", &b"data"[..]),
+        ("second-alias", "longer", "item", "longer/item", &b"second target"[..]),
+    ] {
+        let alias_path = Path::new(alias);
+        let first_component = Path::new(first_component);
+        let second_component = Path::new(second_component);
+        let native_target = Path::new(target);
+        let namespace_absolute = Path::new("/").join(native_target);
+
+        // Independent byte budget, all lengths are native Unix path bytes:
+        // - original fixed-reader recipe `alias` / `second-alias`;
+        // - original recipe's ordinary component plus its native `/` separator;
+        // - ordinary components of the native link target plus one `/` separator for
+        //   each component (`target/payload` and `longer/item`);
+        // - the native link target bytes are represented by those expanded components
+        //   and delimiters, not charged a second time;
+        // - final Rooted namespace-absolute target path (`/target/payload` or
+        //   `/longer/item`), relative to the virtual root rather than its host path.
+        // The raw link target also has its separate `symlink_target_bytes` limit.
+        let expected = alias_path.as_os_str().len()
+            + alias_path.as_os_str().len()
+            + 1
+            + first_component.as_os_str().len()
+            + 1
+            + second_component.as_os_str().len()
+            + 1
+            + namespace_absolute.as_os_str().len();
+
+        let below = directory
+            .open_observed_reader(
+                alias_path,
+                &LocalObservedReadOptions::new()
+                    .with_path_binding(LocalPathBindingOptions::new().with_max_path_bytes(expected - 1)),
+            )
+            .expect_err("one byte below the independently derived budget must fail");
+        assert_eq!(below.kind(), LocalFileErrorKind::ResourceLimit);
+
+        let mut reader = directory
+            .open_observed_reader(
+                alias_path,
+                &LocalObservedReadOptions::new()
+                    .with_path_binding(LocalPathBindingOptions::new().with_max_path_bytes(expected)),
+            )
+            .expect("the independently derived exact budget must succeed");
+        let mut contents = Vec::new();
+        Streams::copy_input_to_output(&mut reader, &mut contents).expect("reader should return target contents");
+        assert_eq!(contents, expected_contents);
+    }
 }
 
 #[cfg(unix)]
