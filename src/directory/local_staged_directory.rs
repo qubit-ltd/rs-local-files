@@ -187,9 +187,7 @@ impl Drop for LocalStagedDirectory {
     fn drop(&mut self) {
         // Close the child authority before the owner attempts namespace cleanup.
         drop(self.directory.take());
-        if let Some(owner) = self.owner.take() {
-            let _ = owner.cleanup();
-        }
+        drop(self.owner.take());
     }
 }
 

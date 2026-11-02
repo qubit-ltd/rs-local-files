@@ -12,6 +12,19 @@ use std::path::PathBuf;
 #[cfg(test)]
 thread_local! {
     static CLEANUP_INDEX_QUERIES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    static CLEANUP_TEST_HOOK: std::cell::RefCell<Option<CleanupTestHook>> = const { std::cell::RefCell::new(None) };
+}
+
+#[cfg(test)]
+#[derive(Default)]
+struct CleanupTestHook {
+    path: PathBuf,
+    calls: usize,
+    expire_after_descendant: bool,
+    expire_after_root_identity: bool,
+    expired: bool,
+    root_observations: usize,
+    root_deletions: usize,
 }
 
 use super::local_tree_cleanup_error::LocalTreeCleanupError;
@@ -257,6 +270,14 @@ impl LocalTreeRetainedResource {
     /// matches its identity, when a cleanup budget is exceeded, or when native
     /// observation or deletion fails.
     fn cleanup_inner(&mut self) -> crate::LocalResult<()> {
+        #[cfg(test)]
+        CLEANUP_TEST_HOOK.with(|hook| {
+            if let Some(hook) = hook.borrow_mut().as_mut()
+                && hook.path == self.path
+            {
+                hook.calls = hook.calls.saturating_add(1);
+            }
+        });
         if !self.cleanup_armed {
             return Ok(());
         }
@@ -395,9 +416,33 @@ impl LocalTreeRetainedResource {
                 };
                 self.mutation_state = LocalTreeMutationState::Started;
                 result?;
+                #[cfg(test)]
+                CLEANUP_TEST_HOOK.with(|hook| {
+                    if let Some(hook) = hook.borrow_mut().as_mut()
+                        && hook.path == self.path
+                        && hook.expire_after_descendant
+                    {
+                        hook.expired = true;
+                    }
+                });
             }
             drop(self.child.take());
         }
+        if cleanup_deadline_exceeded(self.cleanup_limits, started_at) {
+            return Err(crate::LocalFileError::new(
+                crate::LocalFileErrorKind::ResourceLimit,
+                crate::LocalFileOperation::Cleanup,
+            )
+            .with_path(self.path.clone()));
+        }
+        #[cfg(test)]
+        CLEANUP_TEST_HOOK.with(|hook| {
+            if let Some(hook) = hook.borrow_mut().as_mut()
+                && hook.path == self.path
+            {
+                hook.root_observations = hook.root_observations.saturating_add(1);
+            }
+        });
         match self.parent.observe_entry(&self.relative) {
             Ok(observation)
                 if self
@@ -405,6 +450,30 @@ impl LocalTreeRetainedResource {
                     .as_ref()
                     .is_some_and(|identity| observation.identity() == Some(identity)) =>
             {
+                #[cfg(test)]
+                CLEANUP_TEST_HOOK.with(|hook| {
+                    if let Some(hook) = hook.borrow_mut().as_mut()
+                        && hook.path == self.path
+                        && hook.expire_after_root_identity
+                    {
+                        hook.expired = true;
+                    }
+                });
+                if cleanup_deadline_exceeded(self.cleanup_limits, started_at) {
+                    return Err(crate::LocalFileError::new(
+                        crate::LocalFileErrorKind::ResourceLimit,
+                        crate::LocalFileOperation::Cleanup,
+                    )
+                    .with_path(self.path.clone()));
+                }
+                #[cfg(test)]
+                CLEANUP_TEST_HOOK.with(|hook| {
+                    if let Some(hook) = hook.borrow_mut().as_mut()
+                        && hook.path == self.path
+                    {
+                        hook.root_deletions = hook.root_deletions.saturating_add(1);
+                    }
+                });
                 self.mutation_state = LocalTreeMutationState::Started;
                 match self
                     .parent
@@ -457,6 +526,10 @@ impl LocalTreeRetainedResource {
 
 /// Reports whether the cleanup deadline measured from `started_at` has elapsed.
 fn cleanup_deadline_exceeded(limits: LocalTempCleanupLimits, started_at: std::time::Instant) -> bool {
+    #[cfg(test)]
+    if CLEANUP_TEST_HOOK.with(|hook| hook.borrow().as_ref().is_some_and(|hook| hook.expired)) {
+        return true;
+    }
     limits
         .deadline()
         .is_some_and(|deadline| started_at.elapsed() >= deadline)
@@ -473,10 +546,164 @@ impl Drop for LocalTreeRetainedResource {
 
 #[cfg(test)]
 mod retained_cleanup_tests {
+    use std::path::Path;
+
     use crate::LocalFileSystem;
     use crate::options::LocalDirectoryOpenOptions;
     use crate::options::LocalTempCleanupLimits;
     use crate::options::LocalTempDirectoryOptions;
+
+    struct CleanupHookGuard;
+
+    impl CleanupHookGuard {
+        fn install(path: &Path, expire_after_descendant: bool) -> Self {
+            super::CLEANUP_TEST_HOOK.with(|hook| {
+                *hook.borrow_mut() = Some(super::CleanupTestHook {
+                    path: path.to_path_buf(),
+                    expire_after_descendant,
+                    ..Default::default()
+                });
+            });
+            Self
+        }
+
+        fn snapshot(&self) -> (usize, usize, usize, bool) {
+            super::CLEANUP_TEST_HOOK.with(|hook| {
+                let hook = hook.borrow();
+                let hook = hook.as_ref().expect("cleanup hook installed");
+                (hook.calls, hook.root_observations, hook.root_deletions, hook.expired)
+            })
+        }
+
+        fn expire_after_root_identity(path: &Path) -> Self {
+            super::CLEANUP_TEST_HOOK.with(|hook| {
+                *hook.borrow_mut() = Some(super::CleanupTestHook {
+                    path: path.to_path_buf(),
+                    expire_after_root_identity: true,
+                    ..Default::default()
+                });
+            });
+            Self
+        }
+    }
+
+    impl Drop for CleanupHookGuard {
+        fn drop(&mut self) {
+            super::CLEANUP_TEST_HOOK.with(|hook| *hook.borrow_mut() = None);
+        }
+    }
+
+    fn stage_with_child() -> (
+        tempfile::TempDir,
+        crate::directory::LocalStagedDirectory,
+        std::path::PathBuf,
+    ) {
+        let scratch = tempfile::tempdir().expect("scratch");
+        let parent = LocalFileSystem::host()
+            .expect("host")
+            .open_directory_with_options(scratch.path(), &LocalDirectoryOpenOptions::new())
+            .expect("parent");
+        let mut stage = parent
+            .create_staged_directory(&LocalTempDirectoryOptions::new())
+            .expect("stage");
+        stage
+            .write_file_new(Path::new("child"), &mut &b"x"[..], 8)
+            .expect("child file");
+        let native = scratch.path().join(stage.relative_name());
+        (scratch, stage, native)
+    }
+
+    #[test]
+    fn test_stage_drop_attempts_cleanup_once() {
+        let (_scratch, mut stage, native) = stage_with_child();
+        stage.set_cleanup_limits(LocalTempCleanupLimits::new().with_max_depth(0));
+        let hook = CleanupHookGuard::install(&native, false);
+        drop(stage);
+        assert_eq!((1, 0, 0, false), hook.snapshot());
+        assert!(native.exists());
+    }
+
+    #[test]
+    fn test_stage_drop_successful_cleanup_has_no_extra_attempt() {
+        let (_scratch, stage, native) = stage_with_child();
+        let hook = CleanupHookGuard::install(&native, false);
+        stage.cleanup().expect("cleanup succeeds");
+        assert_eq!(1, hook.snapshot().0);
+        assert!(!native.exists());
+    }
+
+    #[test]
+    fn test_stage_drop_explicit_cleanup_failure_then_error_drop_attempts_twice() {
+        let (_scratch, mut stage, native) = stage_with_child();
+        stage.set_cleanup_limits(LocalTempCleanupLimits::new().with_max_depth(0));
+        let hook = CleanupHookGuard::install(&native, false);
+        let error = stage.cleanup().expect_err("depth zero cleanup");
+        assert_eq!(1, hook.snapshot().0);
+        drop(error);
+        assert_eq!(2, hook.snapshot().0);
+        assert!(native.exists());
+    }
+
+    #[test]
+    fn test_stage_drop_disarmed_owner_does_not_attempt_cleanup() {
+        let (_scratch, mut stage, native) = stage_with_child();
+        let owner = stage.owner.take().expect("owner");
+        let hook = CleanupHookGuard::install(&native, false);
+        let _location = owner.retain_in_place();
+        drop(stage);
+        assert_eq!(0, hook.snapshot().0);
+        assert!(native.exists());
+    }
+
+    #[test]
+    fn test_cleanup_final_root_deadline_stops_after_last_descendant() {
+        let (_scratch, mut stage, native) = stage_with_child();
+        stage.set_cleanup_limits(LocalTempCleanupLimits::new().with_deadline(std::time::Duration::from_secs(60)));
+        let hook = CleanupHookGuard::install(&native, true);
+        let result = stage.cleanup();
+        assert_eq!(
+            (1, 0, 0, true),
+            hook.snapshot(),
+            "root observe/delete counters prove deadline stopped cleanup"
+        );
+        let error = result.expect_err("deadline after descendant deletion");
+        assert_eq!(crate::outcome::LocalTreeMutationState::Started, error.mutation_state());
+        let (cause, mut owners) = error.into_parts();
+        assert_eq!(crate::LocalFileErrorKind::ResourceLimit, cause.kind());
+        assert_eq!(crate::LocalFileOperation::Cleanup, cause.operation());
+        assert_eq!(Some(native.as_path()), cause.path());
+        assert!(!native.join("child").exists());
+        assert!(native.exists());
+        drop(hook);
+        for owner in &mut owners {
+            owner.set_cleanup_limits(LocalTempCleanupLimits::new().with_deadline(std::time::Duration::from_secs(60)));
+        }
+        for owner in owners {
+            owner.cleanup().expect("retry empty root after clock restoration");
+        }
+        assert!(!native.exists());
+    }
+
+    #[test]
+    fn test_cleanup_final_root_deadline_stops_before_root_delete() {
+        let (_scratch, mut stage, native) = stage_with_child();
+        stage.set_cleanup_limits(LocalTempCleanupLimits::new().with_deadline(std::time::Duration::from_secs(60)));
+        let hook = CleanupHookGuard::expire_after_root_identity(&native);
+        let error = stage.cleanup().expect_err("deadline after root identity observation");
+        assert_eq!((1, 1, 0, true), hook.snapshot());
+        assert_eq!(crate::outcome::LocalTreeMutationState::Started, error.mutation_state());
+        let (cause, owners) = error.into_parts();
+        assert_eq!(crate::LocalFileErrorKind::ResourceLimit, cause.kind());
+        assert_eq!(crate::LocalFileOperation::Cleanup, cause.operation());
+        assert_eq!(Some(native.as_path()), cause.path());
+        assert!(!native.join("child").exists());
+        assert!(native.exists());
+        drop(hook);
+        for owner in owners {
+            owner.cleanup().expect("retry empty root after clock restoration");
+        }
+        assert!(!native.exists());
+    }
 
     #[test]
     fn empty_tree_root_budget_is_checked_without_child_handle() {
