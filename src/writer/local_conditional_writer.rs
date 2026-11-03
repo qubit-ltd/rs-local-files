@@ -350,7 +350,11 @@ mod tests {
         filesystem
             .set_symlink_policy(LocalSymlinkPolicy::Reject)
             .expect("set symlink policy");
-        let target = directory.path().join("target");
+        let target = directory
+            .path()
+            .canonicalize()
+            .expect("temporary directory should resolve to its physical path")
+            .join("target");
         let mut writer = filesystem
             .open_conditional_writer::<Sha256>(&target, LocalWritePrecondition::Absent, &Default::default())
             .expect("open conditional writer");
@@ -368,7 +372,11 @@ mod tests {
         filesystem
             .set_symlink_policy(LocalSymlinkPolicy::Reject)
             .expect("set symlink policy");
-        let target = directory.path().join("target");
+        let target = directory
+            .path()
+            .canonicalize()
+            .expect("temporary directory should resolve to its physical path")
+            .join("target");
         let mut writer = filesystem
             .open_conditional_writer::<Sha256>(&target, LocalWritePrecondition::Absent, &Default::default())
             .expect("open conditional writer");
