@@ -25,11 +25,34 @@ use crate::LocalFileMetadata;
 /// # Examples
 ///
 /// ```
-/// use qubit_local_files::observation::LocalFileObservation;
+/// use std::path::Path;
 ///
-/// fn observed_length(observation: &LocalFileObservation) -> u64 {
-///     observation.metadata().len()
+/// use qubit_local_files::LocalFileSystem;
+/// use qubit_local_files::options::LocalDirectoryOpenOptions;
+///
+/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+/// let scratch = tempfile::tempdir()?;
+/// std::fs::write(scratch.path().join("payload"), b"data")?;
+/// let filesystem = LocalFileSystem::host()?;
+/// let directory = filesystem.open_directory_with_options(
+///     scratch.path(),
+///     &LocalDirectoryOpenOptions::new(),
+/// )?;
+/// let before = directory.observe_entry(Path::new("payload"))?;
+/// assert_eq!(before.metadata().len(), 4);
+/// let after = directory.observe_entry(Path::new("payload"))?;
+/// match (before.identity(), after.identity()) {
+///     (Some(left), Some(right)) => {
+///         // Object identity is not a content version or an atomic snapshot.
+///         assert_eq!(left, right);
+///     }
+///     _ => {
+///         // Unavailable identity cannot establish whether the object is the same.
+///         assert_eq!(after.metadata().len(), 4);
+///     }
 /// }
+/// # Ok(())
+/// # }
 /// ```
 #[derive(Clone, Debug)]
 pub struct LocalFileObservation {
