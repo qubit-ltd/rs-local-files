@@ -185,7 +185,7 @@ impl Namespace {
             )?;
             let backup_name =
                 crate::local::internal::file_name_generation::try_random_file_name("displaced-", None, Some(".bak"))?;
-            Ok((dirname, backup_name))
+            Ok((dirname.into(), backup_name.into()))
         })
     }
 
