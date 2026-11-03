@@ -440,8 +440,11 @@ fn test_link_copy_overwrites_directory_link_without_removing_referent() {
             }
             #[cfg(windows)]
             {
-                if !support::windows_symlink::create_file_link(new_referent, &source_link)
-                    || !support::windows_symlink::create_directory_link(old_referent, &target_link)
+                if !support::windows_symlink::create_file_link(std::path::Path::new(new_referent), &source_link)
+                    || !support::windows_symlink::create_directory_link(
+                        std::path::Path::new(old_referent),
+                        &target_link,
+                    )
                 {
                     continue;
                 }
