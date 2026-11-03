@@ -13,6 +13,16 @@ cargo test --locked --all-features --lib local::internal::windows_rooted::direct
 
 Both commands must show the exact test executing on native Windows to provide execution evidence. Linux filters and cross-compilation do not provide that evidence.
 
+### Current native Windows run (2026-11-03)
+
+- Source/test checkout HEAD: `daa0e0282a575885c904182cc1c456ba2e28329f`.
+- OS: Microsoft Windows Server 2025, version `10.0.26100` Datacenter; runner image `windows-2025-vs2026`, version `20261030.294.1`.
+- Filesystem/volume type: unknown; the job did not record it. Runner account permissions relevant to fixture creation: unknown; the job did not inspect them.
+- Toolchain: `1.94.0-x86_64-pc-windows-msvc`, `rustc 1.94.0 (4a4ef493e 2026-03-02)`.
+- `--no-default-features`: the exact test above reported `... ok`; `1 passed; 0 failed; 0 ignored; 0 measured; 413 filtered out`.
+- `--all-features`: the exact test above reported `... ok`; `1 passed; 0 failed; 0 ignored; 0 measured; 545 filtered out`.
+- Full runner output: [workflow run 41692830948, Windows rooted enumeration fallback job](https://github.com/qubit-ltd/rs-local-files/actions/runs/41692830948/jobs/126115550000).
+
 ## Historical evidence (prior implementation and source revisions)
 
 ### Historical RLF7-Q01 review (2026-11-03)
