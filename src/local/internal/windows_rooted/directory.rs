@@ -137,7 +137,7 @@ fn reopen_root_directory_handle(root: &File) -> Result<File> {
     let handle = unsafe {
         ReOpenFile(
             root.as_raw_handle(),
-            FILE_LIST_DIRECTORY | FILE_READ_ATTRIBUTES | FILE_TRAVERSE | SYNCHRONIZE,
+            FILE_LIST_DIRECTORY | FILE_READ_ATTRIBUTES | SYNCHRONIZE,
             super::native::ROOTED_SHARE_MODE,
             FILE_FLAG_BACKUP_SEMANTICS,
         )
