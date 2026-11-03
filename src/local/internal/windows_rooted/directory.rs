@@ -38,7 +38,6 @@ use windows_sys::Win32::Storage::FileSystem::FILE_READ_ATTRIBUTES;
 use windows_sys::Win32::Storage::FileSystem::FILE_TRAVERSE;
 use windows_sys::Win32::Storage::FileSystem::GetFinalPathNameByHandleW;
 use windows_sys::Win32::Storage::FileSystem::OPEN_EXISTING;
-use windows_sys::Win32::Storage::FileSystem::ReOpenFile;
 use windows_sys::Win32::Storage::FileSystem::SYNCHRONIZE;
 use windows_sys::Win32::Storage::FileSystem::VOLUME_NAME_DOS;
 
@@ -129,29 +128,16 @@ where
 /// Reopens an already-authorized root handle as an independent file object.
 ///
 /// Duplicating a Windows handle with `try_clone` shares the directory
-/// enumeration cursor. `ReOpenFile` creates a new file object while keeping
-/// the original handle as the authority for the directory identity.
+/// enumeration cursor. Opening `.` relative to the retained root handle asks
+/// NT to create a new file object without resolving a path from the namespace.
 fn reopen_root_directory_handle(root: &File) -> Result<File> {
-    // SAFETY: `root` is a live handle obtained from CreateFile; the requested
-    // access matches the directory operations used by this module.
-    let handle = unsafe {
-        ReOpenFile(
-            root.as_raw_handle(),
-            FILE_LIST_DIRECTORY | FILE_READ_ATTRIBUTES | SYNCHRONIZE,
-            super::native::ROOTED_SHARE_MODE,
-            FILE_FLAG_BACKUP_SEMANTICS,
-        )
-    };
-    if handle == INVALID_HANDLE_VALUE {
-        let error = Error::last_os_error();
-        #[cfg(test)]
-        eprintln!("ReOpenFile failed: {error:?}");
-        return Err(error);
-    }
-    #[cfg(test)]
-    eprintln!("ReOpenFile succeeded");
-    // SAFETY: ReOpenFile succeeded and returned a uniquely owned handle.
-    let directory = unsafe { File::from_raw_handle(handle) };
+    let directory = nt_open_at(
+        root,
+        OsStr::new("."),
+        FILE_LIST_DIRECTORY | FILE_READ_ATTRIBUTES | SYNCHRONIZE,
+        FILE_OPEN,
+        FILE_DIRECTORY_FILE,
+    )?;
     if !Metadata::from_open_file(root)?.is_same_file(&Metadata::from_open_file(&directory)?) {
         return Err(Error::new(
             ErrorKind::Other,
