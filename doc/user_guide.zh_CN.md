@@ -1588,4 +1588,4 @@ FreeBSD 当前支持边界见 [FreeBSD 兼容性说明](freebsd-compatibility.zh
 
 固定目录句柄按调用方原始相对路径逐组件解析，并在解析期间应用句柄与调用预算，不会先将路径词法归一化后替代原始解析配方。`LocalWriteOutcome::bytes_written()` 现返回 `u64`，单次 I/O 调用和切片长度仍为 `usize`。将累计值绑定到 `usize` 的调用方应迁移到 `u64`；只有需要索引时才进行可检查的转换。
 
-RLF2-Q02 已证实并修复：Unix 清理通过保留的父目录执行 no-follow metadata 身份验证，因此 owner-read 权限不是额外清理前提。RLF2-Q01 与 RLF2-Q03 未验证，缺 Windows 原生环境。
+RLF2-Q02 已证实并修复：Unix 清理通过保留的父目录执行 no-follow metadata 身份验证，因此 owner-read 权限不是额外清理前提。RLF2-Q01 仍缺少 Windows 原生证据。RLF2-Q03/RLF3-Q01 采用当前 fail-closed 合同：无法重新打开独立句柄时，枚举返回 `Unsupported`。该合同仍缺少 Windows 原生运行证据；不再要求已过时的六次 fallback 游标测试。

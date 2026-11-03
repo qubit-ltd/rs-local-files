@@ -1,6 +1,21 @@
 # RLF3 Windows enumeration fallback evidence
 
-## RLF7-Q01 review (2026-11-03)
+## Current contract and evidence status
+
+The current Windows Rooted enumeration contract opens an independent directory handle when available. If an independent reopen is unavailable, enumeration returns `Unsupported`; it does not clone a handle that may share a cursor or perform the old six-open fallback. The historical six-fallback fixture and its cursor-independence assertions are obsolete for the current implementation. Historical commits, commands, logs, and results below are retained as evidence of their recorded source revisions only; they are not current acceptance criteria. Native execution evidence for the current fail-closed contract remains unknown unless obtained on Windows.
+
+The current native Windows commands are:
+
+```text
+cargo test --locked --no-default-features --lib local::internal::windows_rooted::directory::fallback_tests::test_root_enumeration_fallback_fails_closed_without_independent_handle -- --exact --nocapture
+cargo test --locked --all-features --lib local::internal::windows_rooted::directory::fallback_tests::test_root_enumeration_fallback_fails_closed_without_independent_handle -- --exact --nocapture
+```
+
+Both commands must show the exact test executing on native Windows to provide execution evidence. Linux filters and cross-compilation do not provide that evidence.
+
+## Historical evidence (prior implementation and source revisions)
+
+### Historical RLF7-Q01 review (2026-11-03)
 
 `BLOCKED_NATIVE`: a native Windows CI run exists for the exact source HEAD, but it does not contain a result for the RLF7-Q01 test. The Windows job failed while compiling unrelated code, before any Cargo test command ran. This is a verified Windows build failure, not evidence that the fallback test passed or failed. No production fallback change is supported by this run.
 
@@ -63,7 +78,7 @@ cargo test --locked --all-features --lib test_root_enumeration_fallback_keeps_in
 
 They must run on a native Windows runner at a recorded source HEAD. A qualifying result must show the named test actually executed once in each configuration and cover the fixture's sequential drains, alternating readers, dropped partially advanced reader, unique complete name sets, and `fallback_count == 6`.
 
-### Historical evidence retained
+#### Historical evidence retained
 
 The earlier inspection recorded target HEAD `50e168b4853b777752a75f31a77900bbb6cd476d` and two Linux filter runs that exited 0 but reported `running 0 tests` (474 and 605 filtered out). Those results are historical, do not match the current source HEAD, and are not passes. They establish neither independent native enumeration cursors nor Windows behavior. The Windows targets installed at that time likewise did not replace native execution.
 
