@@ -2281,6 +2281,6 @@ no-replace 安装发生冲突时，mutation 可以是 `Started`，同时
 
 Snapshot builder 从 `LocalReadOptions::new()` 开始，不继承 filesystem defaults；调用方可显式复制默认配置。超过 snapshot 字节上限会返回 resource-limit 错误，前后括界观测不保证并发内容变化下的原子性。固定目录句柄 observed read 保留原始逐组件路径配方。累计写入字节使用 `u64`，单次 I/O 长度仍为 `usize`。
 
-RLF2-Q02 已证实并修复：通过保留父目录执行 no-follow identity 验证。RLF2-Q01（Windows sealed cleanup）仍缺少 Windows 原生证据。RLF2-Q03/RLF3-Q01 遵循当前 Windows 枚举 fail-closed 合同：无法重新打开独立目录句柄时，枚举返回 `Unsupported`。该合同仍缺少 Windows 原生运行证据；不再要求已过时的六次 fallback 游标测试。既有 FreeBSD 暂不支持及 Windows Rooted Content 不支持状态保持不变。
+RLF2-Q02 已证实并修复：通过保留父目录执行 no-follow identity 验证。RLF2-Q01（Windows sealed cleanup）仍未验证。RLF2-Q03/RLF3-Q01 遵循当前 Windows 枚举 fail-closed 合同：无法重新打开独立目录句柄时，枚举返回 `Unsupported`。源码版本 `daa0e0282a575885c904182cc1c456ba2e28329f` 的原生 Windows 日志显示，两种 feature 配置下精确测试各执行 1 项并通过；日志未记录卷类型或相关账户权限，不能外推到后续版本或所有 Windows 文件系统。已过时的六次 fallback 游标测试不再是要求；详见 [Windows 枚举证据](review-rlf3-windows-evidence.md)。既有 FreeBSD 暂不支持及 Windows Rooted Content 不支持状态保持不变。
 
-RLF3-001 将同一个复制开始时间贯穿固定句柄路径验证与复制后端；源、目标解析使用复制 deadline 与 binding deadline 中较紧的期限。RLF3-002 保留本地 path dependency，并在依赖表、conditional-write checkout 和 FreeBSD 准备步骤固定相同的完整源码提交；更新基线时须同步修改三个准备入口并核对准备后的 `HEAD`。RLF3-003 为指定的三个 options 类型补充可执行类型级示例。RLF3-Q01 延续 RLF2-Q03 的当前 fail-closed 合同，仍缺少 Windows 原生运行证据；详见[Windows fallback 证据](review-rlf3-windows-evidence.md)。不再要求已过时的六次 fallback 游标测试。
+RLF3-001 将同一个复制开始时间贯穿固定句柄路径验证与复制后端；源、目标解析使用复制 deadline 与 binding deadline 中较紧的期限。RLF3-002 保留本地 path dependency，并在依赖表、conditional-write checkout 和 FreeBSD 准备步骤固定相同的完整源码提交；更新基线时须同步修改三个准备入口并核对准备后的 `HEAD`。RLF3-003 为指定的三个 options 类型补充可执行类型级示例。RLF3-Q01 延续 RLF2-Q03 的当前 fail-closed 合同；指定源码版本的两种 feature 配置均有原生 Windows 测试通过记录，但卷类型和相关账户权限未知，详见 [Windows 枚举证据](review-rlf3-windows-evidence.md)。不再要求已过时的六次 fallback 游标测试。

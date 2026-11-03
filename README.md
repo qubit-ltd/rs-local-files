@@ -372,9 +372,10 @@ capabilities because their platform support differs.
 `can_attempt_atomic_temp_persist()` is an implementation capability,
 not a promise for arbitrary source and target paths; the operation outcome
 reports what actually happened. RLF2-Q02 was confirmed and fixed; RLF2-Q01
-and RLF2-Q03 remain unverified without a native Windows environment. See the
+(Windows sealed cleanup) remains unverified. RLF2-Q03's current enumeration
+contract has native Windows evidence at the recorded revision below. See the
 [user guide's observation requirements and counters](doc/user_guide.md#observation-requirements-and-counters).
-RLF3-Q01 continues the enumeration question under the current fail-closed contract: if an independent Windows directory handle cannot be reopened, enumeration returns `Unsupported`. Native execution evidence for this contract remains unavailable; the obsolete six-fallback cursor test is not required.
+RLF3-Q01 continues that enumeration question under the current fail-closed contract: if an independent Windows directory handle cannot be reopened, enumeration returns `Unsupported`. At source revision `daa0e0282a575885c904182cc1c456ba2e28329f`, the exact test passed with both feature configurations on native Windows; volume type and relevant account permissions were not recorded, so do not infer later revisions or all Windows filesystems. The obsolete six-fallback cursor test is no longer required. See [detailed Windows enumeration evidence](doc/review-rlf3-windows-evidence.md) for scope and history.
 Path-limit observations always include a unit: Unix reports bytes and Windows
 reports UTF-16 code units. Windows whole-path limits remain `Unknown` when the
 handle-relative namespace has no defensible fixed bound. `space_at()` and

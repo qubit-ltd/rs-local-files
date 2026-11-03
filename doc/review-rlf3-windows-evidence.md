@@ -2,7 +2,9 @@
 
 ## Current contract and evidence status
 
-The current Windows Rooted enumeration contract opens an independent directory handle when available. If an independent reopen is unavailable, enumeration returns `Unsupported`; it does not clone a handle that may share a cursor or perform the old six-open fallback. The historical six-fallback fixture and its cursor-independence assertions are obsolete for the current implementation. Historical commits, commands, logs, and results below are retained as evidence of their recorded source revisions only; they are not current acceptance criteria. Native execution evidence for the current fail-closed contract remains unknown unless obtained on Windows.
+The current Windows Rooted enumeration contract opens an independent directory handle when available. If an independent reopen is unavailable, enumeration returns `Unsupported`; it does not clone a handle that may share a cursor or perform the old six-open fallback. The historical six-fallback fixture and its cursor-independence assertions are obsolete for the current implementation. Historical commits, commands, logs, and results below are retained as evidence of their recorded source revisions only; they are not current acceptance criteria.
+
+Native execution evidence is available for source revision `daa0e0282a575885c904182cc1c456ba2e28329f`: the exact fail-closed test executed and passed once with each of `--no-default-features` and `--all-features` on Windows Server 2025. This establishes the recorded test result for that source revision and runner only. The job did not record volume type or relevant account permissions, and the result does not establish later revisions or all Windows filesystems. This log was independently read during this update using `gh run view 41692830948 --repo qubit-ltd/rs-local-files --job 126115550000 --log`; the run ID and job URL are retained below.
 
 The current native Windows commands are:
 
@@ -100,4 +102,4 @@ The original evidence's requested next step was to run both exact filters on nat
 
 ## Decision
 
-Q01 remains `BLOCKED_NATIVE` / unverified. No matching local Windows logs or native Windows execution are available in this review environment. No production fallback code was changed. Revisit only with current-HEAD Windows execution logs that identify OS, filesystem, Rust/toolchain and target, features, permissions, full test name, actual count, and outcome; distinguish fixture or permission failures from cursor interference before considering a production change.
+The current fail-closed enumeration contract has native Windows execution evidence at source revision `daa0e0282a575885c904182cc1c456ba2e28329f`: `test_root_enumeration_fallback_fails_closed_without_independent_handle` passed once under both `--no-default-features` and `--all-features` in workflow run `41692830948`, job `126115550000`. The hosted job did not record volume type or relevant account permissions. Do not infer results for later source revisions or all Windows filesystems. No production fallback code was changed. Historical `BLOCKED_NATIVE` entries below refer to their own source revisions and remain preserved as historical records.

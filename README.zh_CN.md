@@ -263,8 +263,8 @@ T3/T4 的 Windows 清理和条件写入行为，以及 LF-09 私有资源和 LF-
 本 crate CI 只验证当前 crate；
 adapter 兼容性由 adapter 仓库或独立集成 job 负责。FreeBSD 暂不支持：当前原生检查只覆盖编译和少量兼容性合同，
 不再运行完整行为测试套件。各 API 失败用例及原因见 [FreeBSD 兼容性说明](doc/freebsd-compatibility.zh_CN.md)。
-Android 仍配置为编译检查。RLF2-Q02 已证实并修复；RLF2-Q01 与 RLF2-Q03 缺少 Windows 原生环境，仍未验证。详见[用户指南中的观测要求与累计计数](doc/user_guide.zh_CN.md#观测要求与累计计数)。
-RLF3-Q01 延续枚举问题。当前 fail-closed 合同规定：无法重新打开独立 Windows 目录句柄时，枚举返回 `Unsupported`。该合同仍缺少 Windows 原生运行证据；不再要求已过时的六次 fallback 游标测试。
+Android 仍配置为编译检查。RLF2-Q02 已证实并修复；RLF2-Q01（Windows sealed cleanup）仍未验证。RLF2-Q03 当前枚举合同已有下述版本的 Windows 原生证据。详见[用户指南中的观测要求与累计计数](doc/user_guide.zh_CN.md#观测要求与累计计数)。
+RLF3-Q01 延续该枚举问题。当前 fail-closed 合同规定：无法重新打开独立 Windows 目录句柄时，枚举返回 `Unsupported`。在源码版本 `daa0e0282a575885c904182cc1c456ba2e28329f` 上，两种 feature 配置均在原生 Windows 执行并通过了精确测试；日志未记录卷类型或相关账户权限，因此不能外推到后续版本或所有 Windows 文件系统。不再要求已过时的六次 fallback 游标测试。详见 [Windows 枚举证据](doc/review-rlf3-windows-evidence.md)。
 本 crate 不承诺这些目标上的运行时保证。`capabilities()` 只报告当前 build 是否实现了
 对应的完整操作协议，不会探测具体的运行时文件系统，也不声称证明底层硬件已经持久化数据；无法满足要求的原子性或耐久性时，
 会在命名空间变更前拒绝操作。条件写入支持范围取决于平台和 authority：
