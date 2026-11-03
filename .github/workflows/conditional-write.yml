@@ -35,13 +35,13 @@ jobs:
           persist-credentials: false
       - name: Install project toolchain
         run: rustup toolchain install 1.94.0 --profile minimal
-      - name: Verify independent enumeration cursors
+      - name: Verify unavailable independent enumeration fails closed
         working-directory: ci-root/rs-local-files
         run: |
           export TEMP="$RUNNER_TEMP"
           export TMP="$RUNNER_TEMP"
-          cargo test --locked --no-default-features --lib local::internal::windows_rooted::directory::fallback_tests::test_root_enumeration_fallback_keeps_independent_cursors -- --exact --nocapture
-          cargo test --locked --all-features --lib local::internal::windows_rooted::directory::fallback_tests::test_root_enumeration_fallback_keeps_independent_cursors -- --exact --nocapture
+          cargo test --locked --no-default-features --lib local::internal::windows_rooted::directory::fallback_tests::test_root_enumeration_fallback_fails_closed_without_independent_handle -- --exact --nocapture
+          cargo test --locked --all-features --lib local::internal::windows_rooted::directory::fallback_tests::test_root_enumeration_fallback_fails_closed_without_independent_handle -- --exact --nocapture
 
   conditional:
     strategy:
