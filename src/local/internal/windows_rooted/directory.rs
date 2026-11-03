@@ -95,7 +95,7 @@ pub(crate) fn create_rooted_temp_child(
 /// # Errors
 ///
 /// Reopens an independent enumeration handle when the path and access policy
-/// permit; otherwise reuses the already-authorized root handle.
+/// permit; otherwise reports that independent enumeration is unavailable.
 ///
 /// Returns an I/O error when final-path inspection, metadata validation, or
 /// handle duplication fails unexpectedly.
@@ -106,45 +106,26 @@ pub(crate) fn open_root_directory_reader(root: &File, _diagnostic_root: &Path) -
 /// Opens a root enumerator, allowing tests to force the handle-reopen fallback.
 ///
 /// `reopen` attempts to obtain a distinct file object for enumeration. If it
-/// returns `None`, this function reopens an independent file object from
-/// `root`.
+/// returns `None`, this function returns `Unsupported`: cloning a Windows
+/// directory handle would share its native enumeration cursor.
 ///
 /// # Errors
 ///
-/// Propagates reopen errors and returns an error if the resulting handle is
-/// not a real directory.
+/// Propagates reopen errors, returns `Unsupported` when no independent handle
+/// is available, and returns an error if the resulting handle is not a real
+/// directory.
 fn open_root_directory_reader_with_reopen<F>(root: &File, reopen: F) -> Result<RootedDirectoryReader>
 where
     F: FnOnce(&File) -> Result<Option<File>>,
 {
-    let directory = match reopen(root)? {
-        Some(directory) => directory,
-        None => reopen_root_directory_handle(root)?,
-    };
+    let directory = reopen(root)?.ok_or_else(|| {
+        Error::new(
+            ErrorKind::Unsupported,
+            "cannot open an independent Windows directory enumeration handle",
+        )
+    })?;
     verify_real_directory(&directory)?;
     Ok(RootedDirectoryReader::new(directory))
-}
-
-/// Reopens an already-authorized root handle as an independent file object.
-///
-/// Duplicating a Windows handle with `try_clone` shares the directory
-/// enumeration cursor. Opening `.` relative to the retained root handle asks
-/// NT to create a new file object without resolving a path from the namespace.
-fn reopen_root_directory_handle(root: &File) -> Result<File> {
-    let directory = nt_open_at(
-        root,
-        OsStr::new("."),
-        FILE_LIST_DIRECTORY | FILE_READ_ATTRIBUTES | SYNCHRONIZE,
-        FILE_OPEN,
-        FILE_DIRECTORY_FILE,
-    )?;
-    if !Metadata::from_open_file(root)?.is_same_file(&Metadata::from_open_file(&directory)?) {
-        return Err(Error::new(
-            ErrorKind::Other,
-            "reopened root directory does not match the original handle",
-        ));
-    }
-    Ok(directory)
 }
 
 #[cfg(test)]
