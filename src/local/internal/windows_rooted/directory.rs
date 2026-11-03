@@ -143,8 +143,13 @@ fn reopen_root_directory_handle(root: &File) -> Result<File> {
         )
     };
     if handle == INVALID_HANDLE_VALUE {
-        return Err(Error::last_os_error());
+        let error = Error::last_os_error();
+        #[cfg(test)]
+        eprintln!("ReOpenFile failed: {error:?}");
+        return Err(error);
     }
+    #[cfg(test)]
+    eprintln!("ReOpenFile succeeded");
     // SAFETY: ReOpenFile succeeded and returned a uniquely owned handle.
     let directory = unsafe { File::from_raw_handle(handle) };
     if !Metadata::from_open_file(root)?.is_same_file(&Metadata::from_open_file(&directory)?) {
