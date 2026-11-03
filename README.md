@@ -66,14 +66,17 @@ work.cleanup()?;
 # Ok::<(), Box<dyn std::error::Error>>(())
 ```
 
-## Conditional write: save B only if A is still current
+## Conditional write: check A's content before saving B
 
-An editor can read a document as A, let a user make changes, then publish B only
-when the current file still has A’s digest. Enable the optional `digest` feature
-and choose an algorithm crate that implements `digest::Digest` (for example,
-`sha2` 0.11); the feature uses `digest` 0.11. The writer stages B and commits
-it only if the requested condition still holds. Add the feature and algorithm
-dependency to the application manifest:
+An editor can read a document as A and later request publication of B after
+checking that the current file still has A’s digest. This protocol is not a
+strict compare-and-swap: it checks the old content before publication and
+verifies the displaced content afterward. A concurrent change can be detected
+after B becomes temporarily visible, and rollback or recovery can fail. Enable
+the optional `digest` feature and choose an algorithm crate that implements
+`digest::Digest` (for example, `sha2` 0.11); the feature uses `digest` 0.11. The writer stages B
+and attempts publication against the requested condition. Add the feature and
+algorithm dependency to the application manifest:
 
 ```toml
 qubit-local-files = { version = "0.5", features = ["digest"] }
@@ -106,9 +109,10 @@ let saved = writer.commit()?; // inspect saved.digest(), cleanup_errors(), retai
 
 A successful commit returns the digest of installed B; cleanup problems are
 reported in `cleanup_errors()` and `retained_files()` without changing the
-success result. A failed commit returns a structured error that owns recovery
-files, including an independently verified candidate copy when available. An
-uncommitted writer is cancelled on `abort()` or Drop and does not publish B. See
+success result. On failure, use the error's `publication()` state and retained
+recovery files to decide what to inspect or recover; recovery files can be
+incomplete or unavailable if recovery itself fails. An uncommitted writer is
+cancelled on `abort()` or Drop and does not publish B. See
 the [conditional-write guide](doc/user_guide.md#conditional-write) for complete
 success and recovery flows and platform limits. The visible `cfg` wrapper in
 the example is for this crate's doctest; an application only enables `digest`

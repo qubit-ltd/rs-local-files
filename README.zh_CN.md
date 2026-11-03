@@ -61,12 +61,14 @@ work.cleanup()?;
 # Ok::<(), Box<dyn std::error::Error>>(())
 ```
 
-## 条件写入：仅当 A 未变化时保存 B
+## 条件写入：校验 A 的内容后保存 B
 
-编辑器读取文档 A 后，用户可能花一段时间修改内容。保存时可以要求磁盘上的文件仍与
-先前读取的 A 一致，再发布新内容 B。启用可选 `digest` feature，并选择实现
-`digest::Digest` 的算法 crate（例如 `sha2` 0.11）；本 feature 使用 `digest` 0.11。
-写入器先准备 B，再按条件提交。应用清单中需启用该 feature 并添加算法依赖：
+编辑器读取文档 A 后，保存时可先检查当前文件的摘要是否仍与 A 一致，再请求发布新内容 B。
+此协议不是严格的 compare-and-swap：发布前会检查旧内容，发布后会核验被替换的内容；并发变化仍可能在
+B 已短暂可见后才被发现，回滚或恢复也可能失败。
+启用可选 `digest` feature，并选择实现 `digest::Digest` 的算法 crate（例如 `sha2` 0.11）；
+本 feature 使用 `digest` 0.11。写入器先准备 B，再依据指定条件尝试发布。应用清单中需启用该 feature
+并添加算法依赖：
 
 ```toml
 qubit-local-files = { version = "0.5", features = ["digest"] }
@@ -98,8 +100,9 @@ let saved = writer.commit()?; // 检查 saved.digest()、cleanup_errors() 和 re
 ```
 
 提交成功会返回已安装 B 的摘要；清理失败通过 `cleanup_errors()` 和
-`retained_files()` 报告，但不改变保存成功的结果。提交失败会返回结构化错误，并保留
-可恢复文件；条件允许时，其中包括经过独立校验的 B 副本。尚未提交的写入器调用
+`retained_files()` 报告，但不改变保存成功的结果。提交失败时，根据错误的
+`publication()` 状态和保留的恢复文件判断后续检查或恢复步骤；恢复本身失败时，恢复文件可能不完整或不可用。
+尚未提交的写入器调用
 `abort()` 或离开作用域时会取消，不会发布 B。完整成功和恢复流程及平台限制见
 [条件写入指南](doc/user_guide.zh_CN.md#条件写入)。
 示例中的 `cfg` wrapper 是为了适配库自身的 doctest；应用只需在依赖上启用 `digest`，无需再声明
