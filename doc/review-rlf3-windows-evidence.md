@@ -1,5 +1,35 @@
 # RLF3 Windows enumeration fallback evidence
 
+## RLF7-Q01 review (2026-11-03)
+
+`BLOCKED_NATIVE`: a native Windows CI run exists for the exact source HEAD, but it does not contain a result for the RLF7-Q01 test. The Windows job failed while compiling unrelated code, before any Cargo test command ran. This is a verified Windows build failure, not evidence that the fallback test passed or failed. No production fallback change is supported by this run.
+
+### Matching CI run and environment
+
+- Source repository and HEAD: `qubit-ltd/rs-local-files`, `d4235f2dcfa34cf09ea1bf49ba4fe70bb4307c89`.
+- Run inventory: `gh run list --repo qubit-ltd/rs-local-files --commit d4235f2dcfa34cf09ea1bf49ba4fe70bb4307c89 --json databaseId,headSha,workflowName,event,status,conclusion,url,createdAt --limit 100` returned exactly one run: Rust CI run `41543257374`, push to `main`, created `2026-11-02T23:10:03Z`, conclusion `failure`.
+- Windows job: `rust-ci / verify (windows-latest)`, job ID `125612413682`; [run](https://github.com/qubit-ltd/rs-local-files/actions/runs/41543257374), [job log](https://github.com/qubit-ltd/rs-local-files/actions/runs/41543257374/job/125612413682). The run log identifies Microsoft Windows Server 2025 Datacenter, version `10.0.26100`, runner image `windows-2025-vs2026` version `20261030.294.1`.
+- Toolchain: the job installed `1.94-x86_64-pc-windows-msvc`, rustc `1.94.1 (e408947bf 2026-03-25)`; it also reports project build toolchain `1.94.0-x86_64-pc-windows-msvc`, rustc `1.94.0 (4a4ef493e 2026-03-02)`.
+- The CI log does not record the filesystem/volume type or runner account's filesystem permission details. These facts are therefore unavailable; do not infer them from the hosted runner label.
+- Current review host (not the CI host): `Linux mas-server 6.8.0-147-generic #147-Ubuntu SMP PREEMPT_DYNAMIC Thu Sep 24 11:33:16 UTC 2026 x86_64`; filesystem `ext4`; uid/gid `1001(starfish):1001(developer)`. Local toolchain: rustc/cargo `1.94.0`, active `1.94.0-x86_64-unknown-linux-gnu`.
+
+### What the matching Windows log establishes
+
+The reusable verify job stopped in `cargo build --locked --workspace --all-targets --all-features`. The complete compiler diagnostics identify two `E0308` mismatches at `src\\local\\internal\\conditional\\windows\\namespace.rs:188`: both tuple values returned as `String` where `OsString` was expected. Cargo ended with `could not compile qubit-local-files (lib) due to 2 previous errors`; the orchestration log reports `run --suite build failed`. The test stage was never reached. This is an unrelated Windows compilation blocker; it does not establish the fallback behavior either way.
+
+The desired target is `local::internal::windows_rooted::directory::fallback_tests::test_root_enumeration_fallback_keeps_independent_cursors` (library unit test). The fixture source requires six forced fallback opens and checks sequential drains, alternating readers, a dropped partially advanced reader, and complete unique fixture name sets. No output from this test, execution count, fixture result, or `fallback_count == 6` appears in the matching run.
+
+### Missing evidence and required native commands
+
+The missing evidence is successful execution of that exact test once in both default and all-features configurations on Windows at the RLF7 source revision, including successful fixture creation, complete unique name sets, and `fallback_count == 6`. The available Windows run's build failure prevents both commands below from running; Linux cannot substitute for native Windows filesystem and handle semantics:
+
+```text
+cargo test --locked --lib test_root_enumeration_fallback_keeps_independent_cursors -- --nocapture
+cargo test --locked --all-features --lib test_root_enumeration_fallback_keeps_independent_cursors -- --nocapture
+```
+
+First resolve the Windows compilation blocker. Then run both commands on a native Windows checkout at a source revision that contains the Q01 fixture and builds successfully on Windows; record the actual source HEAD used. Keep this run's `d4235f2dcfa34cf09ea1bf49ba4fe70bb4307c89` status explicit: its Windows job failed before the target test ran and provides no Q01 result. Record the OS, filesystem/volume, toolchain, features, account permissions relevant to fixture creation, full test name and execution count, and logs/URLs for the subsequent runs. Preserve `BLOCKED_NATIVE` until both runs provide the required evidence. No production code was changed as part of this review.
+
 ## Current RLF6 review (2026-11-02)
 
 `BLOCKED_NATIVE`: RLF6-Q01 remains unverified. This review found no locally accessible Windows runner log for the current source HEAD, and this environment is Linux. The existing Windows-gated test therefore has not been shown to pass or reproduce a defect. No production fallback change is supported, and Q01 is not closed.
