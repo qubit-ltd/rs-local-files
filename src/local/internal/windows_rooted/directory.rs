@@ -38,6 +38,7 @@ use windows_sys::Win32::Storage::FileSystem::FILE_READ_ATTRIBUTES;
 use windows_sys::Win32::Storage::FileSystem::FILE_TRAVERSE;
 use windows_sys::Win32::Storage::FileSystem::GetFinalPathNameByHandleW;
 use windows_sys::Win32::Storage::FileSystem::OPEN_EXISTING;
+use windows_sys::Win32::Storage::FileSystem::ReOpenFile;
 use windows_sys::Win32::Storage::FileSystem::SYNCHRONIZE;
 use windows_sys::Win32::Storage::FileSystem::VOLUME_NAME_DOS;
 
@@ -103,25 +104,56 @@ pub(crate) fn open_root_directory_reader(root: &File, _diagnostic_root: &Path) -
     open_root_directory_reader_with_reopen(root, open_independent_root_directory)
 }
 
-/// Opens a root enumerator, allowing tests to force the handle-clone fallback.
+/// Opens a root enumerator, allowing tests to force the handle-reopen fallback.
 ///
 /// `reopen` attempts to obtain a distinct file object for enumeration. If it
-/// returns `None`, this function duplicates `root` with `try_clone`.
+/// returns `None`, this function reopens an independent file object from
+/// `root`.
 ///
 /// # Errors
 ///
-/// Propagates reopen and handle-clone errors, and returns an error if the
-/// resulting handle is not a real directory.
+/// Propagates reopen errors and returns an error if the resulting handle is
+/// not a real directory.
 fn open_root_directory_reader_with_reopen<F>(root: &File, reopen: F) -> Result<RootedDirectoryReader>
 where
     F: FnOnce(&File) -> Result<Option<File>>,
 {
     let directory = match reopen(root)? {
         Some(directory) => directory,
-        None => root.try_clone()?,
+        None => reopen_root_directory_handle(root)?,
     };
     verify_real_directory(&directory)?;
     Ok(RootedDirectoryReader::new(directory))
+}
+
+/// Reopens an already-authorized root handle as an independent file object.
+///
+/// Duplicating a Windows handle with `try_clone` shares the directory
+/// enumeration cursor. `ReOpenFile` creates a new file object while keeping
+/// the original handle as the authority for the directory identity.
+fn reopen_root_directory_handle(root: &File) -> Result<File> {
+    // SAFETY: `root` is a live handle obtained from CreateFile; the requested
+    // access matches the directory operations used by this module.
+    let handle = unsafe {
+        ReOpenFile(
+            root.as_raw_handle(),
+            FILE_LIST_DIRECTORY | FILE_READ_ATTRIBUTES | FILE_TRAVERSE | SYNCHRONIZE,
+            super::native::ROOTED_SHARE_MODE,
+            FILE_FLAG_BACKUP_SEMANTICS,
+        )
+    };
+    if handle == INVALID_HANDLE_VALUE {
+        return Err(Error::last_os_error());
+    }
+    // SAFETY: ReOpenFile succeeded and returned a uniquely owned handle.
+    let directory = unsafe { File::from_raw_handle(handle) };
+    if !Metadata::from_open_file(root)?.is_same_file(&Metadata::from_open_file(&directory)?) {
+        return Err(Error::new(
+            ErrorKind::Other,
+            "reopened root directory does not match the original handle",
+        ));
+    }
+    Ok(directory)
 }
 
 #[cfg(test)]

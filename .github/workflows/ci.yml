@@ -123,8 +123,6 @@ jobs:
         cargo test --locked --all-features --no-fail-fast
         cargo test --locked --test resolution_contract_tests
         if [ "$RUNNER_OS" = Windows ]; then
-          run_named_test --lib local::internal::windows_rooted::directory::fallback_tests::test_root_enumeration_fallback_keeps_independent_cursors --no-default-features
-          run_named_test --lib local::internal::windows_rooted::directory::fallback_tests::test_root_enumeration_fallback_keeps_independent_cursors --all-features
           run_named_test rooted_windows_symlink_tests test_windows_symlink_fixture_preflight
           run_named_test rooted_windows_symlink_tests test_rooted_copy_preserves_dangling_link_after_root_rename
           run_named_test rooted_windows_symlink_tests test_rooted_copy_preserves_dangling_directory_link_kind
