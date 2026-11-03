@@ -293,13 +293,50 @@ impl LocalFileError {
     }
 
     /// Retains a cleanup failure without replacing this primary failure.
+    ///
+    /// This replaces any cleanup error already attached to this error. The
+    /// replaced cleanup chain is dropped, including any recovery owners it
+    /// contains; dropping those owners makes their silent best-effort cleanup
+    /// attempt. Use [`Self::with_additional_cleanup_error`] to preserve the
+    /// existing chain and append another cleanup failure.
     #[inline]
     pub fn with_cleanup_error(mut self, cleanup: LocalFileError) -> Self {
         self.cleanup_error = Some(Box::new(cleanup));
         self
     }
 
-    pub(crate) fn with_additional_cleanup_error(mut self, cleanup: LocalFileError) -> Self {
+    /// Appends a cleanup failure to the end of the retained cleanup chain.
+    ///
+    /// The primary error and any existing cleanup chain remain unchanged. The
+    /// supplied error, including its own nested cleanup chain, is appended at
+    /// the end. Each error keeps ownership of any [`crate::LocalTempRecovery`]
+    /// attached to it, so dropping an error in the chain also drops its
+    /// recovery owner and makes that owner's silent best-effort cleanup
+    /// attempt. Use [`Self::temp_recovery`] to inspect an owner or
+    /// [`Self::into_temp_recovery_parts`] to transfer it before the error is
+    /// dropped.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use qubit_local_files::error::LocalFileError;
+    /// use qubit_local_files::error::LocalFileErrorKind;
+    /// use qubit_local_files::error::LocalFileOperation;
+    ///
+    /// let make = |reason| LocalFileError::new(
+    ///     LocalFileErrorKind::Io,
+    ///     LocalFileOperation::Read,
+    /// ).with_reason(reason);
+    /// let error = make("primary")
+    ///     .with_additional_cleanup_error(make("first"))
+    ///     .with_additional_cleanup_error(make("second"));
+    /// let first = error.cleanup_error().expect("first cleanup error");
+    /// assert_eq!(first.reason(), Some("first"));
+    /// let second = first.cleanup_error().expect("second cleanup error");
+    /// assert_eq!(second.reason(), Some("second"));
+    /// ```
+    #[inline]
+    pub fn with_additional_cleanup_error(mut self, cleanup: LocalFileError) -> Self {
         let mut slot = &mut self.cleanup_error;
         while let Some(existing) = slot {
             slot = &mut existing.cleanup_error;
