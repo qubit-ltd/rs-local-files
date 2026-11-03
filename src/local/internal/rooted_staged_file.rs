@@ -255,7 +255,9 @@ impl RootedStagedFile {
         }
         // SAFETY: successful `fstatat` initialized status.
         let status = unsafe { status.assume_init() };
-        if status.st_mode & libc::S_IFMT != libc::S_IFREG || status.st_dev != identity.0 || status.st_ino != identity.1
+        if status.st_mode & libc::S_IFMT != libc::S_IFREG
+            || i128::from(status.st_dev) != i128::from(identity.0)
+            || status.st_ino != identity.1
         {
             return Err(Error::new(
                 ErrorKind::InvalidInput,
