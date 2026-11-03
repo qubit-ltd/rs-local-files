@@ -40,8 +40,22 @@ jobs:
         run: |
           export TEMP="$RUNNER_TEMP"
           export TMP="$RUNNER_TEMP"
-          cargo test --locked --no-default-features --lib local::internal::windows_rooted::directory::fallback_tests::test_root_enumeration_fallback_fails_closed_without_independent_handle -- --exact --nocapture
-          cargo test --locked --all-features --lib local::internal::windows_rooted::directory::fallback_tests::test_root_enumeration_fallback_fails_closed_without_independent_handle -- --exact --nocapture
+          run_enumeration_test() {
+            local name='local::internal::windows_rooted::directory::fallback_tests::test_root_enumeration_fallback_fails_closed_without_independent_handle'
+            local output
+            if output=$(cargo test --locked "$@" --lib "$name" -- --exact --nocapture 2>&1); then
+              printf '%s\n' "$output"
+            else
+              printf '%s\n' "$output"
+              return 1
+            fi
+            if ! grep -Fxq "test $name ... ok" <<< "$output"; then
+              echo "expected exact test body to run: $name" >&2
+              return 1
+            fi
+          }
+          run_enumeration_test --no-default-features
+          run_enumeration_test --all-features
 
   conditional:
     strategy:
