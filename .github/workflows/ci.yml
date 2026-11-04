@@ -91,8 +91,8 @@ jobs:
       feature-test-os: '[]'
       cross-targets: '[]'
       contract-tests: '[]'
+      # Fuzz binaries are compiled explicitly in the Linux verify-extra-script below.
       fuzz-check: false
-      # Enable remotely only after platform, manager and CI tools are distributable.
       verify-extra-script: |
         if [ "$RUNNER_OS" = Windows ]; then
           export TEMP="$RUNNER_TEMP"
@@ -142,6 +142,7 @@ jobs:
           cargo test --locked --test security_observation_contract_tests
         fi
         if [ "$RUNNER_OS" = Linux ]; then
+          cargo check --locked --manifest-path fuzz/Cargo.toml --bins
           model_test_output=$(cargo test --locked --manifest-path fuzz/Cargo.toml --test lifecycle_model_tests 2>&1) || {
             printf '%s\n' "$model_test_output"
             exit 1
