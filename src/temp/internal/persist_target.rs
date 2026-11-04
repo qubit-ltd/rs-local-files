@@ -201,7 +201,7 @@ mod tests {
         assert!(prepare_persist_target(LocalFileSystemScope::Host, None, &target).is_ok());
         assert!(prepare_persist_target(LocalFileSystemScope::Host, Some(&directory), Path::new("child")).is_ok());
 
-        let dotted = directory.join("..");
+        let dotted = fixture.path().join("..");
         let error = prepare_persist_target(LocalFileSystemScope::Host, Some(&dotted), Path::new("child"))
             .expect_err("persistence base cannot contain parent components");
         assert_eq!(error.kind(), LocalFileErrorKind::InvalidPath);

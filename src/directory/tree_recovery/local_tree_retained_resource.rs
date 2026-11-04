@@ -632,8 +632,9 @@ mod retained_cleanup_tests {
         stage
             .write_file_new(Path::new("child"), &mut &b"x"[..], 8)
             .expect("child file");
-        let native = std::fs::canonicalize(scratch.path().join(stage.relative_name()))
-            .expect("canonicalize staged directory path");
+        let native = scratch.path().join(stage.relative_name());
+        #[cfg(target_os = "macos")]
+        let native = std::fs::canonicalize(native).expect("canonicalize staged directory path");
         (scratch, stage, native)
     }
 

@@ -295,7 +295,9 @@ fn test_conditional_writer_and_recovery_debug_redact_paths() {
 
     for rooted in [false, true] {
         let scratch = tempfile::tempdir().expect("fixture should exist");
-        let root = scratch.path().join("customer-secret-root-8f921d");
+        let root = std::fs::canonicalize(scratch.path())
+            .expect("canonicalize fixture directory")
+            .join("customer-secret-root-8f921d");
         std::fs::create_dir_all(&root).expect("root should exist");
         let target = root.join("private-leaf-65b3a0");
         std::fs::write(&target, b"existing").expect("existing target should exist");
