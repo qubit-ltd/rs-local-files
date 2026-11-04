@@ -23,8 +23,9 @@ fn host_copy_directory_deadline_fixture(
     with_conflicting_file: bool,
 ) -> (tempfile::TempDir, std::path::PathBuf, std::path::PathBuf) {
     let fixture = tempfile::tempdir().expect("fixture should exist");
-    let source = fixture.path().join("source");
-    let target = fixture.path().join("target");
+    let root = fs::canonicalize(fixture.path()).expect("canonicalize fixture directory");
+    let source = root.join("source");
+    let target = root.join("target");
     fs::create_dir(&source).unwrap();
     fs::create_dir(&target).unwrap();
     fs::create_dir(source.join("child")).unwrap();
@@ -226,8 +227,9 @@ fn test_host_copy_deadline_before_final_directory_metadata_stops_frame_finish() 
 #[test]
 fn test_host_copy_deadline_after_conflict_directory_removal_is_partial() {
     let fixture = tempfile::tempdir().expect("fixture should exist");
-    let source = fixture.path().join("source");
-    let target = fixture.path().join("target");
+    let root = fs::canonicalize(fixture.path()).expect("canonicalize fixture directory");
+    let source = root.join("source");
+    let target = root.join("target");
     fs::create_dir(&source).unwrap();
     fs::create_dir(&target).unwrap();
     fs::write(source.join("item"), b"new").unwrap();

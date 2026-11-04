@@ -181,26 +181,27 @@ mod tests {
     #[test]
     fn persist_target_validation_covers_bases_and_namespace_rules() {
         let fixture = tempfile::tempdir().expect("fixture");
-        let file = fixture.path().join("file");
+        let directory = std::fs::canonicalize(fixture.path()).expect("canonicalize fixture directory");
+        let file = directory.join("file");
         std::fs::write(&file, b"base file").expect("file base");
 
         let backend = LocalTempResourceBackend::Host(HostTempResourceBackend {
-            identity: TempEntryIdentity::from_path(fixture.path()).expect("directory identity"),
-            sandbox_path: fixture.path().to_path_buf(),
+            identity: TempEntryIdentity::from_path(&directory).expect("directory identity"),
+            sandbox_path: directory.clone(),
         });
-        validate_persist_base(&backend, fixture.path(), LocalSymlinkPolicy::Reject).expect("directory base");
+        validate_persist_base(&backend, &directory, LocalSymlinkPolicy::Reject).expect("directory base");
 
         let error = validate_persist_base(&backend, &file, LocalSymlinkPolicy::Reject)
             .expect_err("regular file is not a persistence base");
         assert_eq!(error.kind(), LocalFileErrorKind::NotDirectory);
-        let missing = fixture.path().join("missing");
+        let missing = directory.join("missing");
         assert!(validate_persist_base(&backend, &missing, LocalSymlinkPolicy::Reject).is_err());
 
-        let target = fixture.path().join("published");
+        let target = directory.join("published");
         assert!(prepare_persist_target(LocalFileSystemScope::Host, None, &target).is_ok());
-        assert!(prepare_persist_target(LocalFileSystemScope::Host, Some(fixture.path()), Path::new("child")).is_ok());
+        assert!(prepare_persist_target(LocalFileSystemScope::Host, Some(&directory), Path::new("child")).is_ok());
 
-        let dotted = fixture.path().join("..");
+        let dotted = directory.join("..");
         let error = prepare_persist_target(LocalFileSystemScope::Host, Some(&dotted), Path::new("child"))
             .expect_err("persistence base cannot contain parent components");
         assert_eq!(error.kind(), LocalFileErrorKind::InvalidPath);

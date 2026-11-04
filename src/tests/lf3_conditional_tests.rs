@@ -123,7 +123,9 @@ fn lf3_conditional_fixed_parent_content_conflict_keeps_original() {
 fn lf3_conditional_content_is_rejected_before_path_work_on_unsupported_unix() {
     let fixture = tempfile::tempdir().expect("fixture directory");
     let root = fixture_root(&fixture);
-    let fsys = LocalFileSystem::host().expect("host filesystem");
+    let mut fsys = LocalFileSystem::host().expect("host filesystem");
+    fsys.set_symlink_policy(LocalSymlinkPolicy::Reject)
+        .expect("set link policy");
     let parent = fsys
         .open_directory_with_options(&root, &LocalDirectoryOpenOptions::new())
         .expect("open fixed parent");
