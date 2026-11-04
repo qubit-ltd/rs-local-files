@@ -41,6 +41,36 @@ use crate::LocalFileMetadata;
 /// # Ok(())
 /// # }
 /// ```
+///
+/// A vectored read can return a short count. The count describes the ordered
+/// prefix written across the supplied buffers; callers should use that count
+/// instead of assuming every buffer was filled.
+///
+/// ```no_run
+/// use std::io::IoSliceMut;
+/// use std::path::Path;
+///
+/// use qubit_local_files::LocalFileSystem;
+///
+/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+/// let filesystem = LocalFileSystem::host()?;
+/// let mut reader = filesystem.open_reader(Path::new("Cargo.toml"))?;
+/// const FIRST_LEN: usize = 8;
+/// const SECOND_LEN: usize = 64;
+/// let mut first = [0_u8; FIRST_LEN];
+/// let mut second = [0_u8; SECOND_LEN];
+/// let mut buffers = [IoSliceMut::new(&mut first), IoSliceMut::new(&mut second)];
+/// let count = reader.read_vectored(&mut buffers)?;
+/// let mut prefix = Vec::new();
+/// prefix.extend_from_slice(&buffers[0][..count.min(FIRST_LEN)]);
+/// if count > FIRST_LEN {
+///     prefix.extend_from_slice(&buffers[1][..count - FIRST_LEN]);
+/// }
+/// assert!(count <= FIRST_LEN + SECOND_LEN);
+/// assert_eq!(prefix.len(), count);
+/// # Ok(())
+/// # }
+/// ```
 pub struct LocalFileReader {
     /// Open native file handle.
     file: File,
@@ -91,6 +121,32 @@ impl LocalFileReader {
 
 impl LocalFileReader {
     /// Reads bytes into multiple buffers from the current offset.
+    ///
+    /// Empty input, including an empty slice or a slice containing only empty
+    /// buffers, returns `Ok(0)` without reading. Non-empty input may produce a
+    /// short read or reach EOF; the returned count covers only the ordered
+    /// prefix of the buffers and does not imply that all buffers were filled.
+    /// On Windows, buffers are read sequentially. If a later read fails after
+    /// earlier buffers received bytes, the accumulated count is returned and
+    /// that later error is suppressed; an error before any progress is returned.
+    /// Other platforms use the underlying vectored input operation. The
+    /// adapter allocates a vector of borrowed slice descriptors for every
+    /// non-empty call; it does not copy buffer contents. Failure to reserve
+    /// those descriptors is returned as `OutOfMemory` before file I/O begins.
+    ///
+    /// # Parameters
+    ///
+    /// - `buffers`: destination buffers filled in order from the current file
+    ///   offset.
+    ///
+    /// # Returns
+    ///
+    /// The number of bytes read into the ordered prefix of `buffers`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an underlying read error when no bytes were read, or
+    /// `OutOfMemory` if the adapter cannot allocate its slice descriptors.
     pub fn read_vectored(&mut self, buffers: &mut [IoSliceMut<'_>]) -> io::Result<usize> {
         if buffers.iter().all(|buffer| buffer.is_empty()) {
             return Ok(0);

@@ -13,6 +13,33 @@ use crate::LocalResult;
 use crate::observation::LocalFileObservation;
 use crate::observation::LocalObservationRequirement;
 
+/// Queries metadata and available identity and timestamp facts from one handle.
+///
+/// On Unix, normalized metadata comes from the handle and `fstat` supplies
+/// identity and timestamp details. On Windows, normalized metadata comes from
+/// the handle and native handle information supplies identity and timestamps.
+/// On other targets, only normalized metadata is available; `Required` therefore
+/// fails with `RequirementNotMet`, while `Optional` returns an observation
+/// without native identity or timestamp details.
+///
+/// `Optional` permits a failed native identity/timestamp query to be omitted;
+/// it does not suppress failure to obtain the handle's normalized metadata.
+/// `Required` returns an error when required native facts are unavailable.
+///
+/// # Parameters
+///
+/// - `file`: the open file handle to query without reopening its path.
+/// - `requirement`: whether native identity and timestamp facts are required.
+///
+/// # Returns
+///
+/// An observation containing normalized metadata and the native facts available
+/// under the selected requirement and platform.
+///
+/// # Errors
+///
+/// Returns a metadata I/O error if normalized metadata cannot be read. Returns
+/// an error if required native facts cannot be queried or are unavailable.
 pub(crate) fn query_observation(
     file: &File,
     requirement: LocalObservationRequirement,
