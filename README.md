@@ -344,14 +344,16 @@ results for validation of a particular change. FreeBSD is temporarily
 unsupported: its current native checks cover compilation and selected
 compatibility contracts, not the complete behavioral suite. See the detailed
 [FreeBSD compatibility status](doc/freebsd-compatibility.md). Android remains
-configured for compile checks. T3/T4
-Windows cleanup and conditional-open behavior, and LF-09 private-resource and LF-10 sealed-cleanup
-behavior, remain unverified without native Windows runner results. Linux filters
-execute zero tests for these Windows-only cases; Windows GNU `cargo check --lib`
-is compile evidence only. This crate's CI validates this
-crate only; adapter compatibility belongs to the adapter repository or a
-separate integration job. This crate makes no runtime
-guarantee for those targets. `capabilities()` reports whether this build
+configured for compile checks. Some Windows-specific cleanup, conditional-open,
+private-resource, and sealed-cleanup behavior still needs native execution
+evidence; compile checks and Linux filters that execute zero Windows-only tests
+do not establish runtime behavior. See the
+[Windows staging and cleanup evidence](doc/review-rlf4-windows-staging-cleanup-evidence.md)
+and [Windows enumeration evidence](doc/review-rlf3-windows-evidence.md) for
+the recorded scope and limitations. This crate's CI validates this crate only;
+adapter compatibility belongs to the adapter repository or a separate
+integration job. This crate makes no runtime guarantee for those targets.
+`capabilities()` reports whether this build
 implements each complete operation protocol; it does not probe a particular
 runtime filesystem or claim that the underlying hardware has persisted data.
 Conditional-write support is operation- and authority-specific:
@@ -371,11 +373,10 @@ and durable temporary-file persistence are reported as independent
 capabilities because their platform support differs.
 `can_attempt_atomic_temp_persist()` is an implementation capability,
 not a promise for arbitrary source and target paths; the operation outcome
-reports what actually happened. RLF2-Q02 was confirmed and fixed; RLF2-Q01
-(Windows sealed cleanup) remains unverified. RLF2-Q03's current enumeration
-contract has native Windows evidence at the recorded revision below. See the
-[user guide's observation requirements and counters](doc/user_guide.md#observation-requirements-and-counters).
-RLF3-Q01 continues that enumeration question under the current fail-closed contract: if an independent Windows directory handle cannot be reopened, enumeration returns `Unsupported`. At source revision `daa0e0282a575885c904182cc1c456ba2e28329f`, the exact test passed with both feature configurations on native Windows; volume type and relevant account permissions were not recorded, so do not infer later revisions or all Windows filesystems. The obsolete six-fallback cursor test is no longer required. See [detailed Windows enumeration evidence](doc/review-rlf3-windows-evidence.md) for scope and history.
+reports what actually happened. See the
+[user guide's observation requirements and counters](doc/user_guide.md#observation-requirements-and-counters)
+for protocol details. The evidence documents retain historical review notes
+alongside the current platform limits.
 Path-limit observations always include a unit: Unix reports bytes and Windows
 reports UTF-16 code units. Windows whole-path limits remain `Unknown` when the
 handle-relative namespace has no defensible fixed bound. `space_at()` and

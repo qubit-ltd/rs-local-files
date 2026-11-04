@@ -1,5 +1,16 @@
 # RLF4-Q01 Windows 暂存清理证据
 
+## README 历史记录索引
+
+本文件也保留 README 曾列出的相关历史评审状态，避免把内部编号和沿革留在面向使用者的平台摘要中。下列记录是归档摘要，不增加新的执行证据：
+
+- T3/T4 的 Windows 清理与条件写入、LF-09 私有资源、LF-10 sealed cleanup：原 README 标注为缺少原生 Windows runner 证据；Linux 上对应 Windows 专属筛选执行 0 项，Windows GNU `cargo check --lib` 仅为编译证据。它们不能据此视为运行通过。本文件下方保留的 RLF4-Q01 也仍为 `BLOCKED_NATIVE`。
+- RLF2-Q01（Windows sealed cleanup）：原 README 标注为尚未验证；此处不将其改记为通过。
+- RLF2-Q02：原 README 标注为已证实并修复。相关说明称 Unix 清理通过保留的父目录执行 no-follow 身份验证，因此 owner-read 权限不是额外清理前提；该历史修复不构成 Windows 证据。
+- RLF2-Q03 / RLF3-Q01 的当前 Windows 枚举合同及精确执行记录，已归档在[Windows 枚举证据](review-rlf3-windows-evidence.md)，包括源码 revision、两种 feature 配置各执行一次、以及卷类型和账户权限未记录的限制。
+
+历史编号和摘要来自原 README；详细结论应以链接的证据文档及其明确的 revision、平台和限制为准。
+
 ## 结论
 
 **状态：BLOCKED_NATIVE。** 当前执行环境为 Linux x86_64，不能观测 Windows Rooted staging handle 的改名、按名清理及 Windows 文件系统共享语义。本记录不把 Linux 测试、交叉编译或 Windows-gated 测试的零执行数作为 Q01 结论，也不修改生产行为。
