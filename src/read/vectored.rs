@@ -8,7 +8,6 @@
 //! Fallback implementation for platforms without native vectored reads.
 
 use std::io;
-use std::io::IoSliceMut;
 
 use qubit_io::ByteInput;
 use qubit_io::Input;
@@ -37,7 +36,7 @@ use qubit_io::Input;
 #[cfg(any(windows, test))]
 pub(crate) fn read_vectored_fallback<R: ByteInput + ?Sized>(
     reader: &mut R,
-    buffers: &mut [IoSliceMut<'_>],
+    buffers: &mut [&mut [u8]],
 ) -> io::Result<usize> {
     let mut total = 0_usize;
     for buffer in buffers {

@@ -56,13 +56,3 @@ mod tests {
         assert_eq!(&second, b"Second");
     }
 }
-
-#[cfg(windows)]
-pub(crate) fn io_slices_mut<'a>(buffers: &'a mut [&mut [u8]]) -> io::Result<Vec<IoSliceMut<'a>>> {
-    let mut slices = Vec::new();
-    slices
-        .try_reserve(buffers.len())
-        .map_err(|error| io::Error::new(io::ErrorKind::OutOfMemory, error))?;
-    slices.extend(buffers.iter_mut().map(|buffer| IoSliceMut::new(buffer)));
-    Ok(slices)
-}

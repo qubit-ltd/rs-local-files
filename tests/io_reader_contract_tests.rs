@@ -90,6 +90,50 @@ fn inherent_read_vectored_skips_empty_buffers_and_reads_in_order() {
 }
 
 #[test]
+fn trait_vectored_read_preserves_nonzero_file_offset() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("source");
+    std::fs::write(&path, b"012345").unwrap();
+    let filesystem = LocalFileSystem::host().unwrap();
+    let mut reader = filesystem.open_reader(&path).unwrap();
+    reader.seek(SeekFrom::Start(1)).unwrap();
+    let mut first = [0; 2];
+    let mut second = [0; 2];
+
+    assert_eq!(
+        Input::read_vectored(&mut reader, &mut [&mut first, &mut second]).unwrap(),
+        4
+    );
+    assert_eq!(&first, b"12");
+    assert_eq!(&second, b"34");
+    assert_eq!(reader.stream_position().unwrap(), 5);
+    let mut suffix = [0; 1];
+    assert_eq!(Input::read(&mut reader, &mut suffix).unwrap(), 1);
+    assert_eq!(&suffix, b"5");
+}
+
+#[test]
+fn inherent_vectored_read_preserves_nonzero_file_offset() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("source");
+    std::fs::write(&path, b"012345").unwrap();
+    let filesystem = LocalFileSystem::host().unwrap();
+    let mut reader = filesystem.open_reader(&path).unwrap();
+    reader.seek(SeekFrom::Start(1)).unwrap();
+    let mut first = [0; 2];
+    let mut second = [0; 2];
+    let mut buffers = [IoSliceMut::new(&mut first), IoSliceMut::new(&mut second)];
+
+    assert_eq!(reader.read_vectored(&mut buffers).unwrap(), 4);
+    assert_eq!(&first, b"12");
+    assert_eq!(&second, b"34");
+    assert_eq!(reader.stream_position().unwrap(), 5);
+    let mut suffix = [0; 1];
+    assert_eq!(Input::read(&mut reader, &mut suffix).unwrap(), 1);
+    assert_eq!(&suffix, b"5");
+}
+
+#[test]
 fn read_prefix_keeps_limit_and_zero_limit_behavior() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("source");

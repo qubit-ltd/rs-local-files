@@ -111,8 +111,7 @@ impl qubit_io::Input for LocalFileReader {
         crate::tests::native_io_fault_tests::check(crate::tests::native_io_fault_tests::NativeIoPoint::Read)?;
         #[cfg(windows)]
         {
-            let mut slices = crate::vectored::io_slices_mut(buffers)?;
-            crate::read::read_vectored_fallback(&mut self.file, &mut slices)
+            crate::read::read_vectored_fallback(&mut self.file, buffers)
         }
         #[cfg(not(windows))]
         qubit_io::Input::read_vectored(&mut self.file, buffers)

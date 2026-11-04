@@ -9,7 +9,6 @@
 use std::collections::VecDeque;
 use std::io;
 use std::io::ErrorKind;
-use std::io::IoSliceMut;
 
 use qubit_io::Input;
 
@@ -61,7 +60,7 @@ fn test_vectored_fallback_returns_progress_before_later_error() {
     ]);
     let mut first = [0_u8; 2];
     let mut second = [0_u8; 2];
-    let mut buffers = [IoSliceMut::new(&mut first), IoSliceMut::new(&mut second)];
+    let mut buffers = [&mut first[..], &mut second[..]];
 
     let count =
         read_vectored_fallback(&mut reader, &mut buffers).expect("progress before a later error should be returned");
@@ -76,7 +75,7 @@ fn test_vectored_fallback_returns_progress_before_later_error() {
 fn test_vectored_fallback_returns_first_error_without_progress() {
     let mut reader = ScriptedReader::new([ScriptedAction::Error(ErrorKind::PermissionDenied)]);
     let mut buffer = [0_u8; 2];
-    let mut buffers = [IoSliceMut::new(&mut buffer)];
+    let mut buffers = [&mut buffer[..]];
 
     let error = read_vectored_fallback(&mut reader, &mut buffers).expect_err("the first error should be preserved");
 
@@ -90,7 +89,7 @@ fn test_vectored_fallback_skips_empty_buffers() {
     let mut reader = ScriptedReader::new([ScriptedAction::Bytes(b"xy".to_vec())]);
     let mut empty = [];
     let mut buffer = [0_u8; 2];
-    let mut buffers = [IoSliceMut::new(&mut empty), IoSliceMut::new(&mut buffer)];
+    let mut buffers = [&mut empty[..], &mut buffer[..]];
 
     let count = read_vectored_fallback(&mut reader, &mut buffers)
         .expect("a non-empty buffer after an empty buffer should be read");
@@ -108,7 +107,7 @@ fn test_vectored_fallback_stops_after_short_read() {
     ]);
     let mut first = [0_u8; 2];
     let mut second = [0_u8; 2];
-    let mut buffers = [IoSliceMut::new(&mut first), IoSliceMut::new(&mut second)];
+    let mut buffers = [&mut first[..], &mut second[..]];
 
     let count =
         read_vectored_fallback(&mut reader, &mut buffers).expect("a short read should complete the vectored operation");
@@ -127,7 +126,7 @@ fn test_vectored_fallback_stops_at_eof() {
     ]);
     let mut first = [0_u8; 2];
     let mut second = [0_u8; 2];
-    let mut buffers = [IoSliceMut::new(&mut first), IoSliceMut::new(&mut second)];
+    let mut buffers = [&mut first[..], &mut second[..]];
 
     let count = read_vectored_fallback(&mut reader, &mut buffers).expect("EOF should complete the vectored operation");
 
@@ -142,7 +141,7 @@ fn test_vectored_fallback_stops_at_eof() {
 fn test_vectored_fallback_preserves_initial_interrupt_and_later_progress() {
     let mut initial_reader = ScriptedReader::new([ScriptedAction::Error(ErrorKind::Interrupted)]);
     let mut initial_buffer = [0_u8; 2];
-    let mut initial_buffers = [IoSliceMut::new(&mut initial_buffer)];
+    let mut initial_buffers = [&mut initial_buffer[..]];
     let initial_error = read_vectored_fallback(&mut initial_reader, &mut initial_buffers)
         .expect_err("an initial interrupt should be returned");
     assert_eq!(initial_error.kind(), ErrorKind::Interrupted);
@@ -153,10 +152,27 @@ fn test_vectored_fallback_preserves_initial_interrupt_and_later_progress() {
     ]);
     let mut first = [0_u8; 2];
     let mut second = [0_u8; 2];
-    let mut later_buffers = [IoSliceMut::new(&mut first), IoSliceMut::new(&mut second)];
+    let mut later_buffers = [&mut first[..], &mut second[..]];
     let count = read_vectored_fallback(&mut later_reader, &mut later_buffers)
         .expect("progress before an interrupt should be returned");
     assert_eq!(count, 2);
     assert_eq!(&first, b"ab");
     assert_eq!(&second, &[0_u8; 2]);
+}
+
+/// Verifies an all-empty call does not consume a pending read action.
+#[test]
+fn test_vectored_fallback_all_empty_buffers_preserve_pending_action() {
+    let mut reader = ScriptedReader::new([ScriptedAction::Error(ErrorKind::PermissionDenied)]);
+    let mut first = [];
+    let mut second = [];
+    let mut empty_buffers = [&mut first[..], &mut second[..]];
+
+    assert_eq!(read_vectored_fallback(&mut reader, &mut empty_buffers).unwrap(), 0);
+
+    let mut nonempty = [0_u8; 1];
+    let mut buffers = [&mut nonempty[..]];
+    let error = read_vectored_fallback(&mut reader, &mut buffers)
+        .expect_err("the pending action should remain after an all-empty call");
+    assert_eq!(error.kind(), ErrorKind::PermissionDenied);
 }
