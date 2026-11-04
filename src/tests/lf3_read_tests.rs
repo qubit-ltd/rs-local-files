@@ -105,17 +105,25 @@ fn lf3_read_snapshot_match_requires_identity_and_stable_platform_details() {
     let before = observed.observation().clone();
     let count = before.metadata().len();
 
-    assert!(crate::observation::snapshot::observations_match(&before, &before, count));
+    assert!(crate::observation::snapshot::observations_match(
+        &before, &before, count
+    ));
 
-    let missing = LocalFileObservation::from_parts(
-        before.metadata().clone(),
-        None,
-        before.native_details().cloned(),
-    );
-    assert!(!crate::observation::snapshot::observations_match(&missing, &missing, count));
-    assert!(!crate::observation::snapshot::observations_match(&before, &missing, count));
-    assert!(!crate::observation::snapshot::observations_match(&missing, &before, count));
-    assert!(!crate::observation::snapshot::observations_match(&before, &before, count - 1));
+    let missing = LocalFileObservation::from_parts(before.metadata().clone(), None, before.native_details().cloned());
+    assert!(!crate::observation::snapshot::observations_match(
+        &missing, &missing, count
+    ));
+    assert!(!crate::observation::snapshot::observations_match(
+        &before, &missing, count
+    ));
+    assert!(!crate::observation::snapshot::observations_match(
+        &missing, &before, count
+    ));
+    assert!(!crate::observation::snapshot::observations_match(
+        &before,
+        &before,
+        count - 1
+    ));
 
     #[cfg(unix)]
     let different_identity = {
@@ -134,10 +142,18 @@ fn lf3_read_snapshot_match_requires_identity_and_stable_platform_details() {
         Some(different_identity),
         before.native_details().cloned(),
     );
-    assert!(!crate::observation::snapshot::observations_match(&before, &different_identity_observation, count));
+    assert!(!crate::observation::snapshot::observations_match(
+        &before,
+        &different_identity_observation,
+        count
+    ));
 
     let missing_native = LocalFileObservation::from_parts(before.metadata().clone(), before.identity().cloned(), None);
-    assert!(!crate::observation::snapshot::observations_match(&before, &missing_native, count));
+    assert!(!crate::observation::snapshot::observations_match(
+        &before,
+        &missing_native,
+        count
+    ));
 
     let different_len = crate::LocalFileMetadata::from_parts(
         before.metadata().kind(),
@@ -152,7 +168,11 @@ fn lf3_read_snapshot_match_requires_identity_and_stable_platform_details() {
         before.identity().cloned(),
         before.native_details().cloned(),
     );
-    assert!(!crate::observation::snapshot::observations_match(&before, &different_len_observation, count));
+    assert!(!crate::observation::snapshot::observations_match(
+        &before,
+        &different_len_observation,
+        count
+    ));
 
     #[cfg(unix)]
     {
@@ -170,7 +190,9 @@ fn lf3_read_snapshot_match_requires_identity_and_stable_platform_details() {
             before.identity().cloned(),
             Some(same_identity_different_native),
         );
-        assert!(!crate::observation::snapshot::observations_match(&before, &changed, count));
+        assert!(!crate::observation::snapshot::observations_match(
+            &before, &changed, count
+        ));
 
         let details = before.native_details().unwrap().unix().unwrap();
         let changed_status_time = LocalNativeFileDetails::from_unix(LocalUnixFileDetails::from_parts(
@@ -186,7 +208,9 @@ fn lf3_read_snapshot_match_requires_identity_and_stable_platform_details() {
             before.identity().cloned(),
             Some(changed_status_time),
         );
-        assert!(!crate::observation::snapshot::observations_match(&before, &changed, count));
+        assert!(!crate::observation::snapshot::observations_match(
+            &before, &changed, count
+        ));
     }
 
     #[cfg(windows)]
@@ -203,7 +227,9 @@ fn lf3_read_snapshot_match_requires_identity_and_stable_platform_details() {
             before.identity().cloned(),
             Some(changed_write_time),
         );
-        assert!(!crate::observation::snapshot::observations_match(&before, &changed, count));
+        assert!(!crate::observation::snapshot::observations_match(
+            &before, &changed, count
+        ));
 
         let details = before.native_details().unwrap().windows().unwrap();
         let changed_change_time = LocalNativeFileDetails::from_windows(LocalWindowsFileDetails::new(
@@ -217,7 +243,9 @@ fn lf3_read_snapshot_match_requires_identity_and_stable_platform_details() {
             before.identity().cloned(),
             Some(changed_change_time),
         );
-        assert!(!crate::observation::snapshot::observations_match(&before, &changed, count));
+        assert!(!crate::observation::snapshot::observations_match(
+            &before, &changed, count
+        ));
     }
 }
 

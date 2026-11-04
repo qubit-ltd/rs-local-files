@@ -18,15 +18,15 @@ use crate::observation::LocalObservationRequirement;
 /// On Unix, normalized metadata comes from the handle and `fstat` supplies
 /// identity and timestamp details. On Windows, normalized metadata comes from
 /// the handle and native handle information supplies identity and timestamps.
-/// On other targets, only normalized metadata is available; `Required` therefore
-/// fails with `RequirementNotMet`, while `Optional` returns an observation
-/// without native identity or timestamp details.
+/// On other targets, only normalized metadata is available; `Required`
+/// therefore fails with `RequirementNotMet`, while `Optional` returns an
+/// observation without native identity or timestamp details.
 ///
-/// Under `Optional`, unavailable native identity/timestamp facts may be omitted.
-/// Errors from attempted native queries are returned as I/O errors unless the
-/// platform explicitly classifies the error as unsupported. Failure to obtain
-/// normalized metadata is always returned. `Required` returns an error when
-/// required native facts cannot be queried or are unavailable.
+/// Under `Optional`, unavailable native identity/timestamp facts may be
+/// omitted. Errors from attempted native queries are returned as I/O errors
+/// unless the platform explicitly classifies the error as unsupported. Failure
+/// to obtain normalized metadata is always returned. `Required` returns an
+/// error when required native facts cannot be queried or are unavailable.
 ///
 /// # Parameters
 ///

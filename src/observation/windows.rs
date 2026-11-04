@@ -108,8 +108,7 @@ fn explicitly_unsupported(error: &io::Error, querying_file_id: bool) -> bool {
         Some(code) => {
             code == windows_sys::Win32::Foundation::ERROR_NOT_SUPPORTED as i32
                 || code == windows_sys::Win32::Foundation::ERROR_INVALID_FUNCTION as i32
-                || (querying_file_id
-                    && code == windows_sys::Win32::Foundation::ERROR_INVALID_PARAMETER as i32)
+                || (querying_file_id && code == windows_sys::Win32::Foundation::ERROR_INVALID_PARAMETER as i32)
         }
         None => false,
     }

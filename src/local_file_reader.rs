@@ -128,11 +128,12 @@ impl LocalFileReader {
     /// prefix of the buffers and does not imply that all buffers were filled.
     /// On Windows, buffers are read sequentially. If a later read fails after
     /// earlier buffers received bytes, the accumulated count is returned and
-    /// that later error is suppressed; an error before any progress is returned.
-    /// Other platforms use the underlying vectored input operation. The
-    /// adapter allocates a vector of borrowed slice descriptors for every
-    /// non-empty call; it does not copy buffer contents. Failure to reserve
-    /// those descriptors is returned as `OutOfMemory` before file I/O begins.
+    /// that later error is suppressed; an error before any progress is
+    /// returned. Other platforms use the underlying vectored input
+    /// operation. The adapter allocates a vector of borrowed slice
+    /// descriptors for every non-empty call; it does not copy buffer
+    /// contents. Failure to reserve those descriptors is returned as
+    /// `OutOfMemory` before file I/O begins.
     ///
     /// # Parameters
     ///

@@ -150,22 +150,13 @@ fn vectored_payload(count: usize, segment_size: usize) -> [Vec<u8>; 64] {
     })
 }
 
-fn vectored_reader_fixture(
-    payload: &[Vec<u8>; 64],
-    count: usize,
-) -> (LocalFileReader, tempfile::TempDir) {
+fn vectored_reader_fixture(payload: &[Vec<u8>; 64], count: usize) -> (LocalFileReader, tempfile::TempDir) {
     let fixture = tempdir().expect("vectored reader fixture should exist");
-    let contents = payload[..count]
-        .iter()
-        .flatten()
-        .copied()
-        .collect::<Vec<_>>();
+    let contents = payload[..count].iter().flatten().copied().collect::<Vec<_>>();
     let path = fixture.path().join("payload");
     fs::write(&path, contents).expect("vectored reader payload should be written");
     let filesystem = LocalFileSystem::host().expect("Host filesystem should open");
-    let reader = filesystem
-        .open_reader(&path)
-        .expect("vectored reader should open");
+    let reader = filesystem.open_reader(&path).expect("vectored reader should open");
     (reader, fixture)
 }
 
@@ -187,13 +178,7 @@ fn vectored_read_once(
     size: usize,
     direct: bool,
 ) -> usize {
-    let mut output = std::array::from_fn::<_, 64, _>(|index| {
-        if index < count {
-            vec![0; size]
-        } else {
-            Vec::new()
-        }
-    });
+    let mut output = std::array::from_fn::<_, 64, _>(|index| if index < count { vec![0; size] } else { Vec::new() });
     let read = if direct {
         let mut slices = output.iter_mut().map(Vec::as_mut_slice).collect::<Vec<_>>();
         qubit_io::Input::read_vectored(reader, &mut slices[..count])
@@ -205,12 +190,7 @@ fn vectored_read_once(
         reader.read_vectored(&mut buffers[..count])
     }
     .expect("vectored reader call should succeed");
-    let actual = output
-        .iter()
-        .flatten()
-        .copied()
-        .take(read)
-        .collect::<Vec<_>>();
+    let actual = output.iter().flatten().copied().take(read).collect::<Vec<_>>();
     let expected = payload
         .iter()
         .take(count)
@@ -218,10 +198,7 @@ fn vectored_read_once(
         .copied()
         .take(read)
         .collect::<Vec<_>>();
-    assert_eq!(
-        actual, expected,
-        "vectored read should preserve the ordered prefix"
-    );
+    assert_eq!(actual, expected, "vectored read should preserve the ordered prefix");
     read
 }
 
@@ -235,19 +212,10 @@ fn sampled_allocations(call: impl FnOnce()) -> usize {
 
 fn sample_vectored_allocations(payload: &[Vec<u8>; 64], count: usize, size: usize) {
     for direct in [false, true] {
-        let method = if direct {
-            "trait_direct"
-        } else {
-            "local_adapter"
-        };
+        let method = if direct { "trait_direct" } else { "local_adapter" };
         let (mut reader, _fixture) = vectored_reader_fixture(payload, count);
-        let mut output = std::array::from_fn::<_, 64, _>(|index| {
-            if index < count {
-                vec![0; size]
-            } else {
-                Vec::new()
-            }
-        });
+        let mut output =
+            std::array::from_fn::<_, 64, _>(|index| if index < count { vec![0; size] } else { Vec::new() });
         let read_allocations = if direct {
             let mut slices = output.iter_mut().map(Vec::as_mut_slice).collect::<Vec<_>>();
             sampled_allocations(|| {
@@ -269,14 +237,12 @@ fn sample_vectored_allocations(payload: &[Vec<u8>; 64], count: usize, size: usiz
         };
 
         let (mut writer, _fixture) = vectored_writer_fixture();
-        let write_slices: [IoSlice<'_>; 64] =
-            std::array::from_fn(|index| IoSlice::new(&payload[index]));
+        let write_slices: [IoSlice<'_>; 64] = std::array::from_fn(|index| IoSlice::new(&payload[index]));
         let direct_slices = payload.iter().map(Vec::as_slice).collect::<Vec<_>>();
         let write_allocations = if direct {
             sampled_allocations(|| {
-                let written =
-                    qubit_io::Output::write_vectored(&mut writer, &direct_slices[..count])
-                        .expect("sampled vectored writer call should succeed");
+                let written = qubit_io::Output::write_vectored(&mut writer, &direct_slices[..count])
+                    .expect("sampled vectored writer call should succeed");
                 black_box(written);
             })
         } else {
@@ -305,45 +271,26 @@ fn bench_vectored_io(c: &mut Criterion) {
             // Verify both reader interfaces and their exact ordered prefix before timing.
             let (mut inherent_reader, _reader_fixture) = vectored_reader_fixture(&payload, count);
             let (mut direct_reader, _direct_fixture) = vectored_reader_fixture(&payload, count);
-            let inherent_read =
-                vectored_read_once(&mut inherent_reader, &payload, count, size, false);
+            let inherent_read = vectored_read_once(&mut inherent_reader, &payload, count, size, false);
             let direct_read = vectored_read_once(&mut direct_reader, &payload, count, size, true);
-            assert_eq!(
-                inherent_read, direct_read,
-                "reader paths should report equal progress"
-            );
+            assert_eq!(inherent_read, direct_read, "reader paths should report equal progress");
 
             for direct in [false, true] {
-                let method = if direct {
-                    "trait_direct"
-                } else {
-                    "local_adapter"
-                };
+                let method = if direct { "trait_direct" } else { "local_adapter" };
                 let id = format!("reader/{method}/buffers_{count}/segment_{size}");
                 let (mut reader, _fixture) = vectored_reader_fixture(&payload, count);
-                let mut output = std::array::from_fn::<_, 64, _>(|index| {
-                    if index < count {
-                        vec![0; size]
-                    } else {
-                        Vec::new()
-                    }
-                });
+                let mut output =
+                    std::array::from_fn::<_, 64, _>(|index| if index < count { vec![0; size] } else { Vec::new() });
                 group.bench_function(id, |bench| {
                     bench.iter_custom(|iterations| {
                         let mut elapsed = Duration::ZERO;
                         for _ in 0..iterations {
-                            reader
-                                .seek(SeekFrom::Start(0))
-                                .expect("vectored reader should rewind");
+                            reader.seek(SeekFrom::Start(0)).expect("vectored reader should rewind");
                             if direct {
-                                let mut slices =
-                                    output.iter_mut().map(Vec::as_mut_slice).collect::<Vec<_>>();
+                                let mut slices = output.iter_mut().map(Vec::as_mut_slice).collect::<Vec<_>>();
                                 let started = Instant::now();
-                                let amount = qubit_io::Input::read_vectored(
-                                    &mut reader,
-                                    &mut slices[..count],
-                                )
-                                .expect("vectored reader call should succeed");
+                                let amount = qubit_io::Input::read_vectored(&mut reader, &mut slices[..count])
+                                    .expect("vectored reader call should succeed");
                                 elapsed += started.elapsed();
                                 black_box(amount);
                             } else {
@@ -364,20 +311,11 @@ fn bench_vectored_io(c: &mut Criterion) {
                 });
             }
 
-            let write_slices: [IoSlice<'_>; 64] =
-                std::array::from_fn(|index| IoSlice::new(&payload[index]));
+            let write_slices: [IoSlice<'_>; 64] = std::array::from_fn(|index| IoSlice::new(&payload[index]));
             let direct_slices = payload.iter().map(Vec::as_slice).collect::<Vec<_>>();
-            let expected_output = payload[..count]
-                .iter()
-                .flatten()
-                .copied()
-                .collect::<Vec<_>>();
+            let expected_output = payload[..count].iter().flatten().copied().collect::<Vec<_>>();
             for direct in [false, true] {
-                let method = if direct {
-                    "trait_direct"
-                } else {
-                    "local_adapter"
-                };
+                let method = if direct { "trait_direct" } else { "local_adapter" };
                 let id = format!("writer/{method}/buffers_{count}/segment_{size}");
 
                 let (mut writer, fixture) = vectored_writer_fixture();
@@ -388,13 +326,9 @@ fn bench_vectored_io(c: &mut Criterion) {
                 }
                 .expect("vectored writer call should succeed");
                 drop(writer);
+                assert_eq!(written, byte_count as usize, "writer should write the complete fixture");
                 assert_eq!(
-                    written, byte_count as usize,
-                    "writer should write the complete fixture"
-                );
-                assert_eq!(
-                    fs::read(fixture.path().join("payload"))
-                        .expect("vectored output should be readable"),
+                    fs::read(fixture.path().join("payload")).expect("vectored output should be readable"),
                     expected_output,
                     "writer paths should produce identical bytes"
                 );
@@ -408,16 +342,11 @@ fn bench_vectored_io(c: &mut Criterion) {
                     bench.iter_custom(|iterations| {
                         let mut elapsed = Duration::ZERO;
                         for _ in 0..iterations {
-                            truncate
-                                .set_len(0)
-                                .expect("vectored append fixture should reset");
+                            truncate.set_len(0).expect("vectored append fixture should reset");
                             let started = Instant::now();
                             if direct {
-                                let amount = qubit_io::Output::write_vectored(
-                                    &mut writer,
-                                    &direct_slices[..count],
-                                )
-                                .expect("vectored writer call should succeed");
+                                let amount = qubit_io::Output::write_vectored(&mut writer, &direct_slices[..count])
+                                    .expect("vectored writer call should succeed");
                                 black_box(amount);
                             } else {
                                 let amount = writer
