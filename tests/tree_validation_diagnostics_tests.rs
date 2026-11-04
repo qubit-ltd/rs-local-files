@@ -293,7 +293,7 @@ fn hard_link_and_special_entry_failures_have_context() {
     stage.cleanup().expect("cleanup");
 }
 
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 #[test]
 fn owner_access_policy_failures_include_root_and_entry_paths() {
     use std::os::unix::fs::PermissionsExt;
@@ -327,11 +327,24 @@ fn owner_access_policy_failures_include_root_and_entry_paths() {
                 .with_owner_access_policy(LocalOwnerAccessPolicy::new().with_unix_modes(root_mode, file_mode ^ 0o100)),
         )
         .expect_err("unexpected file access mode");
-    assert_eq!(
-        normalize_diagnostic_path(entry_error.path().expect("entry diagnostic path exists")),
-        normalize_diagnostic_path(&root.join("private-file")),
-        "entry_error: {entry_error:#?}"
-    );
+    assert_same_path(entry_error.path(), &root.join("private-file"));
     assert!(entry_error.reason().expect("entry reason").contains("owner-access"));
     stage.cleanup().expect("cleanup entry stage");
+}
+
+#[cfg(all(unix, not(target_os = "linux")))]
+#[test]
+fn owner_access_policy_reports_unsupported_acl_backend() {
+    let (_fixture, _filesystem, stage, root) = make_stage(false);
+    let error = stage
+        .verify_entries(
+            &[],
+            &LocalTreeValidationOptions::new()
+                .with_owner_access_policy(LocalOwnerAccessPolicy::new().with_unix_modes(0o700, 0o600)),
+        )
+        .expect_err("exact owner ACL verification is unsupported on this Unix platform");
+
+    assert_eq!(LocalFileErrorKind::Unsupported, error.kind());
+    assert_same_path(error.path(), &root);
+    stage.cleanup().expect("cleanup unsupported-policy stage");
 }
