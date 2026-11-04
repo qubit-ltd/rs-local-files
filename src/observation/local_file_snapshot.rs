@@ -126,10 +126,11 @@ impl LocalFileSnapshot {
 /// Identity, length, and native timestamps must all be available and equal;
 /// missing identity or native details therefore returns `false`.
 pub(crate) fn observations_match(before: &LocalFileObservation, after: &LocalFileObservation, count: u64) -> bool {
-    if before.identity() != after.identity()
-        || before.metadata().len() != after.metadata().len()
-        || before.metadata().len() != count
-    {
+    match (before.identity(), after.identity()) {
+        (Some(left), Some(right)) if left == right => {}
+        _ => return false,
+    }
+    if before.metadata().len() != after.metadata().len() || before.metadata().len() != count {
         return false;
     }
     match (before.native_details(), after.native_details()) {

@@ -89,6 +89,139 @@ fn lf3_read_snapshot_returns_same_handle_observations() {
 }
 
 #[test]
+fn lf3_read_snapshot_match_requires_identity_and_stable_platform_details() {
+    use crate::observation::LocalFileObservation;
+    use crate::observation::LocalNativeFileDetails;
+    #[cfg(unix)]
+    use crate::observation::LocalUnixFileDetails;
+    #[cfg(windows)]
+    use crate::observation::LocalWindowsFileDetails;
+
+    let mut file = tempfile::tempfile().expect("temporary file");
+    std::io::Write::write_all(&mut file, b"payload").expect("write fixture");
+    let reader = crate::LocalFileReader::from_file(file).expect("construct reader");
+    let observed = LocalObservedReader::from_reader(reader, LocalObservationRequirement::Required)
+        .expect("capture required observation");
+    let before = observed.observation().clone();
+    let count = before.metadata().len();
+
+    assert!(crate::observation::snapshot::observations_match(&before, &before, count));
+
+    let missing = LocalFileObservation::from_parts(
+        before.metadata().clone(),
+        None,
+        before.native_details().cloned(),
+    );
+    assert!(!crate::observation::snapshot::observations_match(&missing, &missing, count));
+    assert!(!crate::observation::snapshot::observations_match(&before, &missing, count));
+    assert!(!crate::observation::snapshot::observations_match(&missing, &before, count));
+    assert!(!crate::observation::snapshot::observations_match(&before, &before, count - 1));
+
+    #[cfg(unix)]
+    let different_identity = {
+        let details = before.native_details().unwrap().unix().unwrap();
+        crate::observation::LocalFileIdentity::unix(details.device(), details.inode().wrapping_add(1))
+    };
+    #[cfg(windows)]
+    let different_identity = {
+        let details = before.native_details().unwrap().windows().unwrap();
+        let mut file_id = *details.file_id();
+        file_id[0] ^= 1;
+        crate::observation::LocalFileIdentity::windows(details.volume_serial(), file_id)
+    };
+    let different_identity_observation = LocalFileObservation::from_parts(
+        before.metadata().clone(),
+        Some(different_identity),
+        before.native_details().cloned(),
+    );
+    assert!(!crate::observation::snapshot::observations_match(&before, &different_identity_observation, count));
+
+    let missing_native = LocalFileObservation::from_parts(before.metadata().clone(), before.identity().cloned(), None);
+    assert!(!crate::observation::snapshot::observations_match(&before, &missing_native, count));
+
+    let different_len = crate::LocalFileMetadata::from_parts(
+        before.metadata().kind(),
+        count + 1,
+        before.metadata().accessed_at(),
+        before.metadata().modified_at(),
+        before.metadata().created_at(),
+        before.metadata().permissions(),
+    );
+    let different_len_observation = LocalFileObservation::from_parts(
+        different_len,
+        before.identity().cloned(),
+        before.native_details().cloned(),
+    );
+    assert!(!crate::observation::snapshot::observations_match(&before, &different_len_observation, count));
+
+    #[cfg(unix)]
+    {
+        let details = before.native_details().unwrap().unix().unwrap();
+        let same_identity_different_native = LocalNativeFileDetails::from_unix(LocalUnixFileDetails::from_parts(
+            details.device(),
+            details.inode(),
+            details.modified_seconds() + 1,
+            details.modified_nanos(),
+            details.changed_seconds(),
+            details.changed_nanos(),
+        ));
+        let changed = LocalFileObservation::from_parts(
+            before.metadata().clone(),
+            before.identity().cloned(),
+            Some(same_identity_different_native),
+        );
+        assert!(!crate::observation::snapshot::observations_match(&before, &changed, count));
+
+        let details = before.native_details().unwrap().unix().unwrap();
+        let changed_status_time = LocalNativeFileDetails::from_unix(LocalUnixFileDetails::from_parts(
+            details.device(),
+            details.inode(),
+            details.modified_seconds(),
+            details.modified_nanos(),
+            details.changed_seconds() + 1,
+            details.changed_nanos(),
+        ));
+        let changed = LocalFileObservation::from_parts(
+            before.metadata().clone(),
+            before.identity().cloned(),
+            Some(changed_status_time),
+        );
+        assert!(!crate::observation::snapshot::observations_match(&before, &changed, count));
+    }
+
+    #[cfg(windows)]
+    {
+        let details = before.native_details().unwrap().windows().unwrap();
+        let changed_write_time = LocalNativeFileDetails::from_windows(LocalWindowsFileDetails::new(
+            details.volume_serial(),
+            *details.file_id(),
+            details.last_write_time() + 1,
+            details.change_time(),
+        ));
+        let changed = LocalFileObservation::from_parts(
+            before.metadata().clone(),
+            before.identity().cloned(),
+            Some(changed_write_time),
+        );
+        assert!(!crate::observation::snapshot::observations_match(&before, &changed, count));
+
+        let details = before.native_details().unwrap().windows().unwrap();
+        let changed_change_time = LocalNativeFileDetails::from_windows(LocalWindowsFileDetails::new(
+            details.volume_serial(),
+            *details.file_id(),
+            details.last_write_time(),
+            details.change_time() + 1,
+        ));
+        let changed = LocalFileObservation::from_parts(
+            before.metadata().clone(),
+            before.identity().cloned(),
+            Some(changed_change_time),
+        );
+        assert!(!crate::observation::snapshot::observations_match(&before, &changed, count));
+    }
+}
+
+#[test]
 fn lf3_read_rooted_paths_stay_virtual() {
     let fixture = tempfile::tempdir().expect("temporary directory");
     std::fs::write(fixture.path().join("payload"), b"rooted").expect("write fixture");
