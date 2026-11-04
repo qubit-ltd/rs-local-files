@@ -19,6 +19,7 @@ use std::path::PathBuf;
 
 use super::atomic_file_install::install_new_atomic_file_at;
 use super::atomic_staging_state::AtomicStagingState;
+use super::unix_stat::is_regular_file_mode;
 use crate::LocalAtomicDestinationState;
 
 /// Owns an uncommitted staging entry relative to its open parent directory.
@@ -255,7 +256,7 @@ impl RootedStagedFile {
         }
         // SAFETY: successful `fstatat` initialized status.
         let status = unsafe { status.assume_init() };
-        if status.st_mode & libc::S_IFMT != libc::S_IFREG
+        if !is_regular_file_mode(status.st_mode)
             || i128::from(status.st_dev) != i128::from(identity.0)
             || status.st_ino != identity.1
         {
