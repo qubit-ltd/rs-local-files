@@ -22,6 +22,7 @@ use qubit_local_files::error::LocalFileErrorKind;
 use qubit_local_files::options::LocalWriteMode;
 use qubit_local_files::options::LocalWriteOptions;
 use qubit_local_files::outcome::LocalWriteFailureState;
+use qubit_local_files::outcome::LocalWriterState;
 use tempfile::tempdir;
 
 const COMPETITOR_BYTES: &[u8] = b"replacement at the former staging name";
@@ -96,7 +97,8 @@ fn rooted_staging_abort_preserves_competitor_at_old_name() {
     let staging = unique_new_entry(&before, directory.path());
     let (old_staging_name, moved_staging) = create_competing_staging_name(directory.path(), &staging);
 
-    writer.abort().expect("Rooted staging abort should complete");
+    let outcome = writer.abort().expect("Rooted staging abort should complete");
+    assert_eq!(LocalWriterState::Aborted, outcome.state());
     assert_cleanup_result(directory.path(), &old_staging_name, &moved_staging, &sentinel);
 }
 
@@ -148,10 +150,11 @@ fn rooted_staging_failed_commit_cleanup_preserves_competitor_at_old_name() {
         Some(ErrorKind::AlreadyExists),
         error.io_error().map(std::io::Error::kind)
     );
-    retained
+    let outcome = retained
         .expect("pre-publication failure should retain its writer")
         .abort()
         .expect("retained Rooted staging should abort");
+    assert_eq!(LocalWriterState::Aborted, outcome.state());
     assert_cleanup_result(directory.path(), &old_staging_name, &moved_staging, &sentinel);
     assert_eq!(
         b"preexisting target",
