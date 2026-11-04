@@ -10,19 +10,32 @@
 // closures propagate it without changing the observed workload.
 #![cfg_attr(windows, allow(clippy::result_large_err))]
 
+use std::alloc::GlobalAlloc;
+use std::alloc::Layout;
+use std::alloc::System;
 use std::ffi::OsStr;
 use std::fs;
 use std::hint::black_box;
+use std::io::IoSlice;
+use std::io::IoSliceMut;
+use std::io::Seek;
+use std::io::SeekFrom;
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::Ordering;
 use std::time::Duration;
+use std::time::Instant;
 
 use criterion::Criterion;
 use criterion::criterion_group;
 use criterion::criterion_main;
 use qubit_io::Output;
+use qubit_local_files::LocalFileReader;
 use qubit_local_files::LocalFileSystem;
+use qubit_local_files::LocalFileWriter;
 use qubit_local_files::LocalTempDirectory;
 use qubit_local_files::directory::LocalResolutionOrigin;
 use qubit_local_files::directory::LocalResolutionPolicy;
@@ -53,6 +66,36 @@ use qubit_local_files::outcome::LocalWriterState;
 use qubit_local_files::path::LocalPathCodec;
 use qubit_local_files::policy::LocalDurabilityRequirement;
 use tempfile::tempdir;
+
+struct SamplingAllocator;
+
+static SAMPLE_ALLOCATIONS: AtomicBool = AtomicBool::new(false);
+static SAMPLED_ALLOCATION_COUNT: AtomicUsize = AtomicUsize::new(0);
+
+unsafe impl GlobalAlloc for SamplingAllocator {
+    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+        let pointer = unsafe { System.alloc(layout) };
+        if !pointer.is_null() && SAMPLE_ALLOCATIONS.load(Ordering::Relaxed) {
+            SAMPLED_ALLOCATION_COUNT.fetch_add(1, Ordering::Relaxed);
+        }
+        pointer
+    }
+
+    unsafe fn dealloc(&self, pointer: *mut u8, layout: Layout) {
+        unsafe { System.dealloc(pointer, layout) };
+    }
+
+    unsafe fn realloc(&self, pointer: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
+        let new_pointer = unsafe { System.realloc(pointer, layout, new_size) };
+        if !new_pointer.is_null() && SAMPLE_ALLOCATIONS.load(Ordering::Relaxed) {
+            SAMPLED_ALLOCATION_COUNT.fetch_add(1, Ordering::Relaxed);
+        }
+        new_pointer
+    }
+}
+
+#[global_allocator]
+static BENCH_ALLOCATOR: SamplingAllocator = SamplingAllocator;
 
 #[derive(Debug)]
 struct NoopResolutionPolicy;
@@ -92,6 +135,305 @@ fn bench_path_codec(c: &mut Criterion) {
             black_box(restored);
         });
     });
+}
+
+const VECTORED_BUFFER_COUNTS: [usize; 6] = [0, 1, 2, 8, 16, 64];
+const VECTORED_SEGMENT_SIZES: [usize; 2] = [64, 4096];
+
+fn vectored_payload(count: usize, segment_size: usize) -> [Vec<u8>; 64] {
+    std::array::from_fn(|index| {
+        if index < count {
+            vec![(index % 251) as u8; segment_size]
+        } else {
+            Vec::new()
+        }
+    })
+}
+
+fn vectored_reader_fixture(
+    payload: &[Vec<u8>; 64],
+    count: usize,
+) -> (LocalFileReader, tempfile::TempDir) {
+    let fixture = tempdir().expect("vectored reader fixture should exist");
+    let contents = payload[..count]
+        .iter()
+        .flatten()
+        .copied()
+        .collect::<Vec<_>>();
+    let path = fixture.path().join("payload");
+    fs::write(&path, contents).expect("vectored reader payload should be written");
+    let filesystem = LocalFileSystem::host().expect("Host filesystem should open");
+    let reader = filesystem
+        .open_reader(&path)
+        .expect("vectored reader should open");
+    (reader, fixture)
+}
+
+fn vectored_writer_fixture() -> (LocalFileWriter, tempfile::TempDir) {
+    let fixture = tempdir().expect("vectored writer fixture should exist");
+    let path = fixture.path().join("payload");
+    fs::write(&path, []).expect("vectored writer target should be created");
+    let filesystem = LocalFileSystem::host().expect("Host filesystem should open");
+    let writer = filesystem
+        .open_writer_with_options(&path, &LocalWriteOptions::new(LocalWriteMode::Append))
+        .expect("vectored append writer should open");
+    (writer, fixture)
+}
+
+fn vectored_read_once(
+    reader: &mut LocalFileReader,
+    payload: &[Vec<u8>; 64],
+    count: usize,
+    size: usize,
+    direct: bool,
+) -> usize {
+    let mut output = std::array::from_fn::<_, 64, _>(|index| {
+        if index < count {
+            vec![0; size]
+        } else {
+            Vec::new()
+        }
+    });
+    let read = if direct {
+        let mut slices = output.iter_mut().map(Vec::as_mut_slice).collect::<Vec<_>>();
+        qubit_io::Input::read_vectored(reader, &mut slices[..count])
+    } else {
+        let mut buffers = output
+            .iter_mut()
+            .map(|buffer| IoSliceMut::new(buffer.as_mut_slice()))
+            .collect::<Vec<_>>();
+        reader.read_vectored(&mut buffers[..count])
+    }
+    .expect("vectored reader call should succeed");
+    let actual = output
+        .iter()
+        .flatten()
+        .copied()
+        .take(read)
+        .collect::<Vec<_>>();
+    let expected = payload
+        .iter()
+        .take(count)
+        .flatten()
+        .copied()
+        .take(read)
+        .collect::<Vec<_>>();
+    assert_eq!(
+        actual, expected,
+        "vectored read should preserve the ordered prefix"
+    );
+    read
+}
+
+fn sampled_allocations(call: impl FnOnce()) -> usize {
+    SAMPLED_ALLOCATION_COUNT.store(0, Ordering::Relaxed);
+    SAMPLE_ALLOCATIONS.store(true, Ordering::SeqCst);
+    call();
+    SAMPLE_ALLOCATIONS.store(false, Ordering::SeqCst);
+    SAMPLED_ALLOCATION_COUNT.load(Ordering::Relaxed)
+}
+
+fn sample_vectored_allocations(payload: &[Vec<u8>; 64], count: usize, size: usize) {
+    for direct in [false, true] {
+        let method = if direct {
+            "trait_direct"
+        } else {
+            "local_adapter"
+        };
+        let (mut reader, _fixture) = vectored_reader_fixture(payload, count);
+        let mut output = std::array::from_fn::<_, 64, _>(|index| {
+            if index < count {
+                vec![0; size]
+            } else {
+                Vec::new()
+            }
+        });
+        let read_allocations = if direct {
+            let mut slices = output.iter_mut().map(Vec::as_mut_slice).collect::<Vec<_>>();
+            sampled_allocations(|| {
+                let read = qubit_io::Input::read_vectored(&mut reader, &mut slices[..count])
+                    .expect("sampled vectored reader call should succeed");
+                black_box(read);
+            })
+        } else {
+            let mut buffers = output
+                .iter_mut()
+                .map(|buffer| IoSliceMut::new(buffer.as_mut_slice()))
+                .collect::<Vec<_>>();
+            sampled_allocations(|| {
+                let read = reader
+                    .read_vectored(&mut buffers[..count])
+                    .expect("sampled vectored reader call should succeed");
+                black_box(read);
+            })
+        };
+
+        let (mut writer, _fixture) = vectored_writer_fixture();
+        let write_slices: [IoSlice<'_>; 64] =
+            std::array::from_fn(|index| IoSlice::new(&payload[index]));
+        let direct_slices = payload.iter().map(Vec::as_slice).collect::<Vec<_>>();
+        let write_allocations = if direct {
+            sampled_allocations(|| {
+                let written =
+                    qubit_io::Output::write_vectored(&mut writer, &direct_slices[..count])
+                        .expect("sampled vectored writer call should succeed");
+                black_box(written);
+            })
+        } else {
+            sampled_allocations(|| {
+                let written = writer
+                    .write_vectored(&write_slices[..count])
+                    .expect("sampled vectored writer call should succeed");
+                black_box(written);
+            })
+        };
+        eprintln!(
+            "ALLOC_SAMPLE vectored_io buffers={count} segment={size} method={method} read_alloc_calls={read_allocations} write_alloc_calls={write_allocations} scope=single_adapter_call"
+        );
+    }
+}
+
+fn bench_vectored_io(c: &mut Criterion) {
+    let mut group = c.benchmark_group("vectored_io");
+    for count in VECTORED_BUFFER_COUNTS {
+        for size in VECTORED_SEGMENT_SIZES {
+            let payload = vectored_payload(count, size);
+            let byte_count = (count * size) as u64;
+            group.throughput(criterion::Throughput::Bytes(byte_count));
+            sample_vectored_allocations(&payload, count, size);
+
+            // Verify both reader interfaces and their exact ordered prefix before timing.
+            let (mut inherent_reader, _reader_fixture) = vectored_reader_fixture(&payload, count);
+            let (mut direct_reader, _direct_fixture) = vectored_reader_fixture(&payload, count);
+            let inherent_read =
+                vectored_read_once(&mut inherent_reader, &payload, count, size, false);
+            let direct_read = vectored_read_once(&mut direct_reader, &payload, count, size, true);
+            assert_eq!(
+                inherent_read, direct_read,
+                "reader paths should report equal progress"
+            );
+
+            for direct in [false, true] {
+                let method = if direct {
+                    "trait_direct"
+                } else {
+                    "local_adapter"
+                };
+                let id = format!("reader/{method}/buffers_{count}/segment_{size}");
+                let (mut reader, _fixture) = vectored_reader_fixture(&payload, count);
+                let mut output = std::array::from_fn::<_, 64, _>(|index| {
+                    if index < count {
+                        vec![0; size]
+                    } else {
+                        Vec::new()
+                    }
+                });
+                group.bench_function(id, |bench| {
+                    bench.iter_custom(|iterations| {
+                        let mut elapsed = Duration::ZERO;
+                        for _ in 0..iterations {
+                            reader
+                                .seek(SeekFrom::Start(0))
+                                .expect("vectored reader should rewind");
+                            if direct {
+                                let mut slices =
+                                    output.iter_mut().map(Vec::as_mut_slice).collect::<Vec<_>>();
+                                let started = Instant::now();
+                                let amount = qubit_io::Input::read_vectored(
+                                    &mut reader,
+                                    &mut slices[..count],
+                                )
+                                .expect("vectored reader call should succeed");
+                                elapsed += started.elapsed();
+                                black_box(amount);
+                            } else {
+                                let mut buffers = output
+                                    .iter_mut()
+                                    .map(|buffer| IoSliceMut::new(buffer.as_mut_slice()))
+                                    .collect::<Vec<_>>();
+                                let started = Instant::now();
+                                let amount = reader
+                                    .read_vectored(&mut buffers[..count])
+                                    .expect("vectored reader call should succeed");
+                                elapsed += started.elapsed();
+                                black_box(amount);
+                            }
+                        }
+                        elapsed
+                    });
+                });
+            }
+
+            let write_slices: [IoSlice<'_>; 64] =
+                std::array::from_fn(|index| IoSlice::new(&payload[index]));
+            let direct_slices = payload.iter().map(Vec::as_slice).collect::<Vec<_>>();
+            let expected_output = payload[..count]
+                .iter()
+                .flatten()
+                .copied()
+                .collect::<Vec<_>>();
+            for direct in [false, true] {
+                let method = if direct {
+                    "trait_direct"
+                } else {
+                    "local_adapter"
+                };
+                let id = format!("writer/{method}/buffers_{count}/segment_{size}");
+
+                let (mut writer, fixture) = vectored_writer_fixture();
+                let written = if direct {
+                    qubit_io::Output::write_vectored(&mut writer, &direct_slices[..count])
+                } else {
+                    writer.write_vectored(&write_slices[..count])
+                }
+                .expect("vectored writer call should succeed");
+                drop(writer);
+                assert_eq!(
+                    written, byte_count as usize,
+                    "writer should write the complete fixture"
+                );
+                assert_eq!(
+                    fs::read(fixture.path().join("payload"))
+                        .expect("vectored output should be readable"),
+                    expected_output,
+                    "writer paths should produce identical bytes"
+                );
+
+                let (mut writer, fixture) = vectored_writer_fixture();
+                let truncate = fs::OpenOptions::new()
+                    .write(true)
+                    .open(fixture.path().join("payload"))
+                    .expect("vectored writer target should remain openable");
+                group.bench_function(id, |bench| {
+                    bench.iter_custom(|iterations| {
+                        let mut elapsed = Duration::ZERO;
+                        for _ in 0..iterations {
+                            truncate
+                                .set_len(0)
+                                .expect("vectored append fixture should reset");
+                            let started = Instant::now();
+                            if direct {
+                                let amount = qubit_io::Output::write_vectored(
+                                    &mut writer,
+                                    &direct_slices[..count],
+                                )
+                                .expect("vectored writer call should succeed");
+                                black_box(amount);
+                            } else {
+                                let amount = writer
+                                    .write_vectored(&write_slices[..count])
+                                    .expect("vectored writer call should succeed");
+                                black_box(amount);
+                            }
+                            elapsed += started.elapsed();
+                        }
+                        elapsed
+                    });
+                });
+            }
+        }
+    }
+    group.finish();
 }
 
 fn bench_walk(c: &mut Criterion) {
@@ -939,6 +1281,7 @@ fn bench_deep_metadata(c: &mut Criterion) {
 criterion_group!(
     local_files,
     bench_path_codec,
+    bench_vectored_io,
     bench_walk,
     bench_walk_name_cache,
     bench_walk_handle_budget,
