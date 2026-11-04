@@ -43,8 +43,7 @@ fn make_stage(
     let stage = parent
         .create_staged_directory(&LocalTempDirectoryOptions::new())
         .expect("stage");
-    let diagnostic_root = std::fs::canonicalize(fixture.path().join(stage.relative_name()))
-        .expect("stage diagnostic root is canonicalized");
+    let diagnostic_root = fixture.path().join(stage.relative_name());
     (fixture, filesystem, stage, diagnostic_root)
 }
 
@@ -65,9 +64,25 @@ fn assert_requirement(error: &qubit_local_files::LocalFileError, expected_path: 
 }
 
 fn assert_same_path(actual: Option<&Path>, expected: &Path) {
-    let actual = actual.expect("diagnostic path exists").components().collect::<Vec<_>>();
-    let expected = expected.components().collect::<Vec<_>>();
+    let actual = normalize_diagnostic_path(actual.expect("diagnostic path exists"));
+    let expected = normalize_diagnostic_path(expected);
     assert_eq!(actual, expected);
+}
+
+fn normalize_diagnostic_path(path: &Path) -> PathBuf {
+    let mut lexical = PathBuf::new();
+    for component in path.components() {
+        lexical.push(component.as_os_str());
+    }
+    let Some(name) = lexical.file_name().map(std::ffi::OsStr::to_os_string) else {
+        return std::fs::canonicalize(&lexical).unwrap_or(lexical);
+    };
+    let Some(parent) = lexical.parent() else {
+        return lexical;
+    };
+    std::fs::canonicalize(parent)
+        .map(|canonical_parent| canonical_parent.join(name))
+        .unwrap_or(lexical)
 }
 
 #[test]
