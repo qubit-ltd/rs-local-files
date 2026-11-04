@@ -21,7 +21,8 @@ use crate::LocalResult;
 /// encountered while resolving those paths. It does not filter names
 /// discovered by recursive listing or copying, and it does not isolate names
 /// from concurrent namespace changes. In particular, it is not a private
-/// subtree boundary.
+/// subtree boundary. Windows host directory handles currently return
+/// `Unsupported` when opened with a custom component policy.
 ///
 /// # Examples
 ///
@@ -41,9 +42,17 @@ use crate::LocalResult;
 /// let options = LocalDirectoryOpenOptions::new().with_component_policy(
 ///     LocalComponentPolicy::deny_names(vec![OsString::from("blocked")])?,
 /// );
-/// let directory = filesystem.open_directory_with_options(scratch.path(), &options)?;
-/// let error = directory.entry_metadata(Path::new("blocked")).unwrap_err();
-/// assert_eq!(error.kind(), LocalFileErrorKind::InvalidPath);
+/// #[cfg(not(windows))]
+/// {
+///     let directory = filesystem.open_directory_with_options(scratch.path(), &options)?;
+///     let error = directory.entry_metadata(Path::new("blocked")).unwrap_err();
+///     assert_eq!(error.kind(), LocalFileErrorKind::InvalidPath);
+/// }
+/// #[cfg(windows)]
+/// {
+///     let error = filesystem.open_directory_with_options(scratch.path(), &options).unwrap_err();
+///     assert_eq!(error.kind(), LocalFileErrorKind::Unsupported);
+/// }
 /// # Ok(())
 /// # }
 /// ```
