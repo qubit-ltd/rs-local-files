@@ -58,7 +58,7 @@ fn lock_documentation_consumer() -> MutexGuard<'static, ()> {
 }
 
 fn diagnose_generated_consumer_lock(project: &Path, reviewed_lock: &str) {
-    if std::env::var_os("QUBIT_LOCAL_FILES_DIAGNOSE_CONSUMER_LOCK").is_none() {
+    if !cfg!(windows) {
         return;
     }
     let output = Command::new("cargo")
