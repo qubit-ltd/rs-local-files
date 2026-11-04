@@ -327,7 +327,11 @@ fn owner_access_policy_failures_include_root_and_entry_paths() {
                 .with_owner_access_policy(LocalOwnerAccessPolicy::new().with_unix_modes(root_mode, file_mode ^ 0o100)),
         )
         .expect_err("unexpected file access mode");
-    assert_same_path(entry_error.path(), &root.join("private-file"));
+    assert_eq!(
+        normalize_diagnostic_path(entry_error.path().expect("entry diagnostic path exists")),
+        normalize_diagnostic_path(&root.join("private-file")),
+        "entry_error: {entry_error:#?}"
+    );
     assert!(entry_error.reason().expect("entry reason").contains("owner-access"));
     stage.cleanup().expect("cleanup entry stage");
 }
