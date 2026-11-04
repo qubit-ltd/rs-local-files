@@ -200,6 +200,31 @@ fn tree_sync_not_required_does_not_traverse_under_expired_deadline() {
     stage.cleanup().expect("cleanup stage");
 }
 
+#[cfg(test)]
+#[test]
+fn tree_sync_rejects_a_stage_without_observed_identity() {
+    let fixture = tempfile::tempdir().expect("fixture");
+    let filesystem = crate::LocalFileSystem::host().expect("host filesystem");
+    let parent = filesystem
+        .open_directory_with_options(fixture.path(), &crate::options::LocalDirectoryOpenOptions::new())
+        .expect("parent authority");
+    let mut stage = parent
+        .create_staged_directory(&crate::options::LocalTempDirectoryOptions::new())
+        .expect("stage");
+    let identity = stage.identity.clone();
+    assert!(identity.is_some(), "the fixture stage should have an observed identity");
+
+    stage.identity = None;
+    let error = stage
+        .sync_tree_with_options(&parent, &LocalListOptions::new())
+        .expect_err("tree synchronization requires an observed stage identity");
+    assert_eq!(LocalFileErrorKind::Unsupported, error.kind());
+    assert_eq!(LocalFileOperation::Metadata, error.operation());
+
+    stage.identity = identity;
+    stage.cleanup().expect("cleanup stage");
+}
+
 #[cfg(all(test, target_os = "linux"))]
 mod owner_policy_sync_order_tests {
     use std::ffi::OsStr;
