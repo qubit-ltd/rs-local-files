@@ -219,9 +219,12 @@ fn test_filesystem_rename_and_directory_listing_entry_points() {
     std::fs::write(&source, b"payload").expect("source fixture");
 
     let _outcome = filesystem.rename(&source, &destination).expect("rename");
-    let entries = filesystem
-        .list(&directory)
-        .expect("list directory")
+    let entries = filesystem.list(&directory).expect("list directory");
+    let root = std::hint::black_box(
+        crate::LocalDirectoryWalker::root as for<'a> fn(&'a crate::LocalDirectoryWalker) -> &'a Path,
+    );
+    assert_eq!(directory, root(&entries), "walker exposes its bound traversal root");
+    let entries = entries
         .collect::<crate::LocalResult<Vec<_>>>()
         .expect("collect entries");
 
@@ -229,5 +232,86 @@ fn test_filesystem_rename_and_directory_listing_entry_points() {
     assert_eq!(
         b"payload",
         std::fs::read(destination).expect("renamed bytes").as_slice()
+    );
+}
+
+#[test]
+fn test_temp_directory_persist_entry_points_publish_contents() {
+    use crate::options::LocalTempDirectoryOptions;
+
+    let fixture = tempfile::tempdir().expect("fixture");
+    let filesystem = LocalFileSystem::host().expect("host filesystem");
+
+    let first_target = fixture.path().join("persisted-directory-default");
+    let first = filesystem
+        .create_temp_directory_with_options(&LocalTempDirectoryOptions::new().with_parent(fixture.path()))
+        .expect("first temporary directory");
+    std::fs::write(first.path().join("payload"), b"default").expect("write first payload");
+    let first_outcome = first.persist(&first_target).expect("default directory persist");
+    assert_eq!(first_target, first_outcome.path());
+    assert_eq!(
+        b"default",
+        std::fs::read(first_target.join("payload"))
+            .expect("published payload")
+            .as_slice()
+    );
+
+    let second_target = fixture.path().join("persisted-directory-options");
+    let second = filesystem
+        .create_temp_directory_with_options(&LocalTempDirectoryOptions::new().with_parent(fixture.path()))
+        .expect("second temporary directory");
+    std::fs::write(second.path().join("payload"), b"options").expect("write second payload");
+    let second_outcome = second
+        .persist_with(&second_target, LocalPersistOptions::new())
+        .expect("directory persist with options");
+    assert_eq!(second_target, second_outcome.path());
+    assert_eq!(
+        b"options",
+        std::fs::read(second_target.join("payload"))
+            .expect("published payload")
+            .as_slice()
+    );
+
+    let third = filesystem
+        .create_temp_directory_with_options(&LocalTempDirectoryOptions::new().with_parent(fixture.path()))
+        .expect("third temporary directory");
+    std::fs::write(third.path().join("payload"), b"relative").expect("write third payload");
+    let third_outcome = third
+        .persist_at(
+            fixture.path(),
+            Path::new("persisted-directory-relative"),
+            LocalPersistOptions::new(),
+        )
+        .expect("directory persist at explicit base");
+    assert_eq!(
+        fixture.path().join("persisted-directory-relative"),
+        third_outcome.path()
+    );
+    assert_eq!(
+        b"relative",
+        std::fs::read(third_outcome.path().join("payload"))
+            .expect("published relative payload")
+            .as_slice()
+    );
+}
+
+#[test]
+fn test_host_current_directory_failure_preserves_existing_directory() {
+    let mut filesystem = LocalFileSystem::host().expect("host filesystem");
+    let original = filesystem.current_directory().expect("current directory");
+    let missing = original.join("codex-rlf9-current-directory-missing");
+
+    let error = filesystem
+        .set_current_directory(&missing)
+        .expect_err("missing host directory must fail");
+
+    assert_eq!(std::io::ErrorKind::NotFound, error.io_error_kind());
+    assert_eq!(crate::LocalFileOperation::SetCurrentDirectory, error.operation());
+    assert_eq!(Some(missing.as_path()), error.path());
+    assert_eq!(
+        original,
+        filesystem
+            .current_directory()
+            .expect("current directory remains unchanged")
     );
 }

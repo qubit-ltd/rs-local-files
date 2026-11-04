@@ -38,6 +38,10 @@ use crate::local_file_system_validation::validate_rename_options;
 use crate::local_file_system_validation::validate_temp_options;
 use crate::local_file_system_validation::validate_write_options;
 
+fn rename_options_error(error: LocalFileError, current_directory: Option<&Path>) -> LocalFileError {
+    with_current_directory(error, current_directory)
+}
+
 impl LocalFileSystem {
     /// Returns the namespace kind interpreted by this instance.
     ///
@@ -294,8 +298,9 @@ impl LocalFileSystem {
     /// Returns `RequirementNotMet` for statically unavailable guarantees.
     /// The previously installed options remain unchanged on error.
     pub fn set_default_rename_options(&mut self, options: LocalRenameOptions) -> LocalResult<()> {
-        validate_rename_options(&options, self.capabilities(), LocalFileOperation::Configure)
-            .map_err(|error| with_current_directory(error, self.current_directory.virtual_path()))?;
+        if let Err(error) = validate_rename_options(&options, self.capabilities(), LocalFileOperation::Configure) {
+            return Err(rename_options_error(error, self.current_directory.virtual_path()));
+        }
         self.defaults.rename = options;
         Ok(())
     }
@@ -448,6 +453,23 @@ mod tests {
             .expect("temp-directory defaults");
         #[cfg(feature = "test-support")]
         let _filesystem = filesystem.with_test_faults(None);
+    }
+
+    #[test]
+    fn rename_configuration_errors_include_the_current_directory() {
+        let current_directory = std::path::Path::new("/workspace");
+        let error = super::rename_options_error(
+            crate::LocalFileError::new(
+                crate::LocalFileErrorKind::RequirementNotMet,
+                crate::LocalFileOperation::Configure,
+            ),
+            Some(current_directory),
+        );
+
+        assert_eq!(Some(current_directory), error.current_directory());
+        assert_eq!(None, error.path());
+        assert_eq!(crate::LocalFileOperation::Configure, error.operation());
+        assert_eq!(crate::LocalFileErrorKind::RequirementNotMet, error.kind());
     }
 
     #[test]

@@ -537,6 +537,11 @@ impl LocalDirectoryWalker {
 
 /// Returns whether traversal needs per-directory names for budget admission
 /// or duplicate suppression after reopening a directory reader.
+#[cfg(feature = "test-support")]
+fn inner_deadline_fault_is_active(deadline: Option<Instant>, now: Instant) -> bool {
+    deadline.is_some_and(|deadline| now >= deadline) && crate::local::test_support_enabled("walker-deadline-inner")
+}
+
 fn needs_seen_names(options: &LocalListOptions) -> bool {
     let explicit_name_budget = options.max_seen_name_bytes().is_some();
     let can_descend = options.recursive() && options.max_depth().is_none_or(|max_depth| max_depth > 1);
@@ -605,9 +610,7 @@ impl LocalDirectoryWalker {
                     )));
                 }
                 #[cfg(feature = "test-support")]
-                if self.deadline.is_some_and(|deadline| Instant::now() >= deadline)
-                    && crate::local::test_support_enabled("walker-deadline-inner")
-                {
+                if inner_deadline_fault_is_active(self.deadline, Instant::now()) {
                     return Some(Err(walk_io_error(
                         &self.root,
                         std::io::Error::other("test instrumentation observed an unchecked deadline"),
@@ -1227,6 +1230,23 @@ mod seen_name_cache_tests {
     use crate::LocalDirectoryReopenPolicy;
     use crate::LocalListOptions;
     use crate::LocalSymlinkPolicy;
+
+    #[cfg(feature = "test-support")]
+    #[test]
+    fn test_inner_deadline_guard_detects_expiration_deterministically() {
+        let _fault = crate::test_support::install_test_fault("walker-deadline-inner")
+            .expect("inner deadline fault should install");
+        let now = Instant::now();
+
+        assert!(super::inner_deadline_fault_is_active(
+            Some(now - std::time::Duration::from_nanos(1)),
+            now
+        ));
+        assert!(!super::inner_deadline_fault_is_active(
+            Some(now + std::time::Duration::from_secs(1)),
+            now
+        ));
+    }
 
     #[test]
     fn test_default_host_and_rooted_walkers_do_not_allocate_seen_name_sets() {

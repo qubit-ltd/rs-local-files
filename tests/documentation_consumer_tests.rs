@@ -9,6 +9,8 @@
 use std::fs;
 use std::path::Path;
 use std::process::Command;
+use std::sync::Mutex;
+use std::sync::MutexGuard;
 
 use tempfile::tempdir;
 
@@ -44,8 +46,20 @@ const SENTINEL: &str = "QUBIT_LOCAL_FILES_DOCUMENTATION_CONSUMER_SENTINEL";
 const CONSUMER_LOCK: &str = include_str!("fixtures/documentation_consumer/Cargo.lock");
 const INTRO_CONSUMER_LOCK: &str = include_str!("fixtures/documentation_consumer/introductory.Cargo.lock");
 
+// These tests invoke nested Cargo builds. Keeping them in one process-wide
+// critical section avoids competing consumer builds and their temporary output
+// trees when the test harness runs this integration binary in parallel.
+static DOCUMENTATION_CONSUMER_LOCK: Mutex<()> = Mutex::new(());
+
+fn lock_documentation_consumer() -> MutexGuard<'static, ()> {
+    DOCUMENTATION_CONSUMER_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
 #[test]
 fn documented_conditional_write_runs_as_a_consumer_without_a_digest_feature() {
+    let _guard = lock_documentation_consumer();
     let crate_path = Path::new(env!("CARGO_MANIFEST_DIR"))
         .canonicalize()
         .expect("the tested crate path is canonicalized");
@@ -135,6 +149,7 @@ fn documented_conditional_write_runs_as_a_consumer_without_a_digest_feature() {
 
 #[test]
 fn documented_failed_seal_cleanup_retains_owner_for_retry() {
+    let _guard = lock_documentation_consumer();
     let crate_path = Path::new(env!("CARGO_MANIFEST_DIR"))
         .canonicalize()
         .expect("the tested crate path is canonicalized");
@@ -271,6 +286,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {{
 
 #[test]
 fn documented_inspection_cleanup_retains_owner_for_retry() {
+    let _guard = lock_documentation_consumer();
     let crate_path = Path::new(env!("CARGO_MANIFEST_DIR"))
         .canonicalize()
         .expect("the tested crate path is canonicalized");
@@ -442,6 +458,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {{
 
 #[test]
 fn documented_tree_sync_compiles_with_introductory_dependencies() {
+    let _guard = lock_documentation_consumer();
     let crate_path = Path::new(env!("CARGO_MANIFEST_DIR"))
         .canonicalize()
         .expect("the tested crate path is canonicalized");
@@ -501,6 +518,7 @@ fn documented_tree_sync_compiles_with_introductory_dependencies() {
 #[cfg(target_os = "linux")]
 #[test]
 fn documented_readonly_stage_recovery_preserves_destination() {
+    let _guard = lock_documentation_consumer();
     let crate_path = Path::new(env!("CARGO_MANIFEST_DIR"))
         .canonicalize()
         .expect("the tested crate path is canonicalized");
@@ -569,6 +587,7 @@ fn documented_readonly_stage_recovery_preserves_destination() {
 
 #[test]
 fn documented_export_runs_twice_in_existing_output_directory() {
+    let _guard = lock_documentation_consumer();
     let crate_path = Path::new(env!("CARGO_MANIFEST_DIR"))
         .canonicalize()
         .expect("the tested crate path is canonicalized");
