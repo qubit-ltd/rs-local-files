@@ -78,7 +78,14 @@ impl WindowsRootedStagedFile {
         }
         self.file.take();
         if self.armed {
-            remove_rooted_entry(&self.root, Path::new(""), &self.path)?;
+            match remove_rooted_entry(&self.root, Path::new(""), &self.path) {
+                Ok(()) => {}
+                // The staging name can be removed by another actor before
+                // abort. Treat that state as completed cleanup, matching the
+                // idempotent behavior of the Unix rooted staging guard.
+                Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+                Err(error) => return Err(error),
+            }
             self.armed = false;
         }
         Ok(())
