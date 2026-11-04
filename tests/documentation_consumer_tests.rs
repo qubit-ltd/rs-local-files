@@ -57,6 +57,30 @@ fn lock_documentation_consumer() -> MutexGuard<'static, ()> {
         .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
+fn diagnose_generated_consumer_lock(project: &Path, reviewed_lock: &str) {
+    if std::env::var_os("QUBIT_LOCAL_FILES_DIAGNOSE_CONSUMER_LOCK").is_none() {
+        return;
+    }
+    let output = Command::new("cargo")
+        .arg("generate-lockfile")
+        .arg("--offline")
+        .arg("--manifest-path")
+        .arg(project.join("Cargo.toml"))
+        .current_dir(project)
+        .output()
+        .expect("diagnostic lockfile generation starts");
+    let generated = fs::read_to_string(project.join("Cargo.lock"))
+        .unwrap_or_else(|error| format!("<could not read generated lockfile: {error}>"));
+    eprintln!(
+        "consumer lock diagnostic (generate-lockfile --offline: {}):\nstdout:\n{}\nstderr:\n{}\nreviewed lock:\n{}\ngenerated lock:\n{}",
+        output.status,
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr),
+        reviewed_lock,
+        generated,
+    );
+}
+
 #[test]
 fn documented_conditional_write_runs_as_a_consumer_without_a_digest_feature() {
     let _guard = lock_documentation_consumer();
@@ -128,13 +152,15 @@ fn documented_conditional_write_runs_as_a_consumer_without_a_digest_feature() {
             .env(SENTINEL, &sentinel)
             .output()
             .expect("consumer cargo process starts");
-        assert!(
-            status.status.success(),
-            "{language} consumer failed with {}\nstdout:\n{}\nstderr:\n{}",
-            status.status,
-            String::from_utf8_lossy(&status.stdout),
-            String::from_utf8_lossy(&status.stderr)
-        );
+        if !status.status.success() {
+            diagnose_generated_consumer_lock(&project, &consumer_lock);
+            panic!(
+                "{language} consumer failed with {}\nstdout:\n{}\nstderr:\n{}",
+                status.status,
+                String::from_utf8_lossy(&status.stdout),
+                String::from_utf8_lossy(&status.stderr)
+            );
+        }
         assert_eq!(
             fs::read_to_string(project.join("Cargo.lock")).expect("consumer lock remains readable"),
             consumer_lock,
@@ -505,13 +531,15 @@ fn documented_tree_sync_compiles_with_introductory_dependencies() {
             .env_remove("CARGO_BUILD_TARGET")
             .output()
             .expect("consumer cargo process starts");
-        assert!(
-            status.status.success(),
-            "{language} tree sync consumer failed with {}\nstdout:\n{}\nstderr:\n{}",
-            status.status,
-            String::from_utf8_lossy(&status.stdout),
-            String::from_utf8_lossy(&status.stderr)
-        );
+        if !status.status.success() {
+            diagnose_generated_consumer_lock(&project, &consumer_lock);
+            panic!(
+                "{language} tree sync consumer failed with {}\nstdout:\n{}\nstderr:\n{}",
+                status.status,
+                String::from_utf8_lossy(&status.stdout),
+                String::from_utf8_lossy(&status.stderr)
+            );
+        }
     }
 }
 

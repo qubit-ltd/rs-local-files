@@ -97,6 +97,7 @@ jobs:
         if [ "$RUNNER_OS" = Windows ]; then
           export TEMP="$RUNNER_TEMP"
           export TMP="$RUNNER_TEMP"
+          export QUBIT_LOCAL_FILES_DIAGNOSE_CONSUMER_LOCK=1
         fi
         export QUBIT_LOCAL_FILES_REQUIRE_SYMLINKS=1
         run_named_test() {

@@ -289,7 +289,8 @@ fn test_required_privacy_reopen_reports_mode_mismatch_context() {
         .expect("stage");
     let name = Path::new(stage.relative_name()).to_path_buf();
     let expected = stage.identity().expect("stage identity").clone();
-    let expected_path = scratch.path().join(&name);
+    let expected_path =
+        fs::canonicalize(scratch.path().join(&name)).expect("stage path is canonicalized for diagnostic comparison");
     drop(stage.retain_in_place());
     fs::set_permissions(&expected_path, fs::Permissions::from_mode(0o755)).expect("set public mode");
 
