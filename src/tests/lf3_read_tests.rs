@@ -89,7 +89,7 @@ fn lf3_read_snapshot_returns_same_handle_observations() {
 }
 
 #[test]
-fn lf3_read_snapshot_match_requires_identity_and_stable_platform_details() {
+fn test_lf3_read_snapshot_match_requires_identity_and_stable_platform_details() {
     use crate::observation::LocalFileObservation;
     use crate::observation::LocalNativeFileDetails;
     #[cfg(unix)]

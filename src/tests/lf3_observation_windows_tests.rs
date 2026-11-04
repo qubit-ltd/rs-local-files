@@ -62,7 +62,7 @@ fn lf3_native_windows_observes_directories_and_read_only_handles() {
 
 #[cfg(windows)]
 #[test]
-fn lf3_native_windows_optional_io_failure_preserves_source_and_required_classification() {
+fn test_lf3_native_windows_optional_io_failure_preserves_source_and_required_classification() {
     use std::error::Error;
     use std::sync::atomic::AtomicU32;
     use std::sync::atomic::Ordering;
@@ -105,7 +105,7 @@ fn lf3_native_windows_optional_io_failure_preserves_source_and_required_classifi
         FAILED_CLASS.store(class as u32, Ordering::Relaxed);
         let optional = query_native_with(file.as_file(), LocalObservationRequirement::Optional, query)
             .expect_err("optional native I/O failure must be reported");
-        assert_eq!(optional.kind(), LocalFileErrorKind::Io);
+        assert_eq!(optional.kind(), LocalFileErrorKind::PermissionDenied);
         assert!(matches!(
             optional.typed_source(),
             Some(LocalFileErrorSource::Io(source)) if source.raw_os_error() == Some(ERROR_ACCESS_DENIED as i32)
@@ -120,7 +120,7 @@ fn lf3_native_windows_optional_io_failure_preserves_source_and_required_classifi
 
 #[cfg(windows)]
 #[test]
-fn lf3_native_windows_optional_explicitly_unsupported_query_keeps_metadata() {
+fn test_lf3_native_windows_optional_explicitly_unsupported_query_keeps_metadata() {
     use std::sync::atomic::AtomicU32;
     use std::sync::atomic::Ordering;
 

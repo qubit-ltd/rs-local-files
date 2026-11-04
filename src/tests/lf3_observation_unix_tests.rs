@@ -33,7 +33,7 @@ fn lf3_native_unix_refreshes_same_handle() {
 }
 
 #[test]
-fn lf3_native_unix_optional_io_failure_preserves_source() {
+fn test_lf3_native_unix_optional_io_failure_preserves_source() {
     let directory = tempfile::tempdir().expect("temporary directory should be created");
     let path = directory.path().join("observed");
     std::fs::write(&path, b"data").expect("fixture should be written");
