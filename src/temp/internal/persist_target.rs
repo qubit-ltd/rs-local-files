@@ -184,9 +184,8 @@ mod tests {
         let file = fixture.path().join("file");
         std::fs::write(&file, b"base file").expect("file base");
 
-        let directory = std::fs::File::open(fixture.path()).expect("open fixture");
         let backend = LocalTempResourceBackend::Host(HostTempResourceBackend {
-            identity: TempEntryIdentity::from_file(&directory).expect("directory identity"),
+            identity: TempEntryIdentity::from_path(fixture.path()).expect("directory identity"),
             sandbox_path: fixture.path().to_path_buf(),
         });
         validate_persist_base(&backend, fixture.path(), LocalSymlinkPolicy::Reject).expect("directory base");

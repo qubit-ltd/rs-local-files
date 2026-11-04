@@ -33,16 +33,28 @@ use crate::LocalPersistMethod;
 /// let temporary = filesystem.create_temp_file_with_options(
 ///     &LocalTempFileOptions::new().with_parent(fixture.path()),
 /// )?;
-/// let outcome = temporary.keep()?;
-/// assert!(outcome.path().is_absolute());
-/// let _achieved_guarantees = (outcome.atomic(), outcome.durable());
-/// if outcome.cleanup_state() == LocalPersistCleanupState::Complete {
-///     assert!(outcome.cleanup_error().is_none());
-///     std::fs::remove_file(outcome.path())?;
-/// } else {
-///     // Publication succeeded. Return these facts to the application's recovery
-///     // flow instead of publishing again or deleting a sandbox by path alone.
-///     assert!(outcome.cleanup_error().is_some());
+/// let persistence = temporary.keep();
+/// #[cfg(target_os = "freebsd")]
+/// {
+///     let failure = persistence.expect_err("FreeBSD is temporarily unsupported for persistence");
+///     assert_eq!(
+///         failure.error().kind(),
+///         qubit_local_files::error::LocalFileErrorKind::Unsupported,
+///     );
+/// }
+/// #[cfg(not(target_os = "freebsd"))]
+/// {
+///     let outcome = persistence?;
+///     assert!(outcome.path().is_absolute());
+///     let _achieved_guarantees = (outcome.atomic(), outcome.durable());
+///     if outcome.cleanup_state() == LocalPersistCleanupState::Complete {
+///         assert!(outcome.cleanup_error().is_none());
+///         std::fs::remove_file(outcome.path())?;
+///     } else {
+///         // Publication succeeded. Return these facts to the application's recovery
+///         // flow instead of publishing again or deleting a sandbox by path alone.
+///         assert!(outcome.cleanup_error().is_some());
+///     }
 /// }
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```

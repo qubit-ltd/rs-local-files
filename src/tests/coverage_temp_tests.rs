@@ -9,6 +9,7 @@
 use std::io::IoSlice;
 use std::io::Seek;
 use std::io::SeekFrom;
+use std::path::Component;
 use std::path::Path;
 
 use crate::LocalFileSystem;
@@ -91,16 +92,24 @@ fn test_rooted_temp_file_reports_namespace_path_without_native_path() {
         .create_temp_file_with_options(&LocalTempFileOptions::new())
         .expect("rooted temporary file");
 
-    assert!(temporary.path().is_absolute());
-    assert!(temporary.creation_parent().is_absolute());
+    assert_rooted_namespace_absolute(temporary.path());
+    assert_rooted_namespace_absolute(temporary.creation_parent());
+    assert!(temporary.path().starts_with(temporary.creation_parent()));
     let sealed = temporary
         .seal_with_options(&LocalSealOptions::new().with_file_sync(LocalFileSyncRequirement::NotRequired))
         .expect("seal rooted temporary file");
-    assert!(sealed.path().is_absolute());
+    assert_rooted_namespace_absolute(sealed.path());
     assert_eq!(sealed.native_path(), None);
     assert!(sealed.observation().is_ok());
     let mut sealed = sealed;
     sealed.cleanup().expect("cleanup rooted sealed file");
+}
+
+/// Rooted paths are absolute within the virtual namespace. On Windows they
+/// have a root directory without a native drive prefix, so `Path::is_absolute`
+/// is not the right assertion for this public path contract.
+fn assert_rooted_namespace_absolute(path: &Path) {
+    assert_eq!(path.components().next(), Some(Component::RootDir), "{path:?}");
 }
 
 #[test]

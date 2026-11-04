@@ -26,7 +26,9 @@ fn observed_reader_observation_failure_keeps_namespace_and_pwd_context() {
         .expect("host fixture under current directory");
     fs::write(host_fixture.path().join("item"), b"payload").expect("host payload");
     let host_absolute = LocalFileSystem::host().expect("host filesystem");
-    let absolute_path = fs::canonicalize(host_fixture.path().join("item")).expect("absolute item path");
+    // Host diagnostics use the resolved namespace spelling. On Windows this
+    // is a drive path, while `fs::canonicalize` returns the `\\?\` form.
+    let absolute_path = std::path::absolute(host_fixture.path().join("item")).expect("absolute item path");
 
     let host_relative_path = host_fixture
         .path()
@@ -114,7 +116,9 @@ fn test_observed_reader_post_open_failures_keep_context_and_source() {
         .expect("host fixture under current directory");
     fs::write(host_fixture.path().join("item"), b"payload").expect("host payload");
     let host = LocalFileSystem::host().expect("Host filesystem");
-    let absolute_path = fs::canonicalize(host_fixture.path().join("item")).expect("absolute item path");
+    // Match the namespace path stored in diagnostics; canonicalize adds the
+    // Windows extended-length prefix, which diagnostics intentionally omit.
+    let absolute_path = std::path::absolute(host_fixture.path().join("item")).expect("absolute item path");
     let relative_path = host_fixture
         .path()
         .strip_prefix(&cwd)
