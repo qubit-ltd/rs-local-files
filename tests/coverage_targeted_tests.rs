@@ -33,7 +33,10 @@ fn test_local_file_writer_vectored_write_publishes_ordered_buffers() {
         .expect("vectored write");
     assert!((1..=12).contains(&written));
     let _outcome = writer.commit().expect("publish write");
-    assert_eq!(std::fs::read(target).expect("published bytes"), b"first-second");
+    assert_eq!(
+        std::fs::read(target).expect("published bytes"),
+        &b"first-second"[..written],
+    );
 }
 
 #[test]

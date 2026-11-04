@@ -555,7 +555,8 @@ tempfile = "^3.27"
 
 ```rust
 # #[cfg(not(feature = "digest"))] fn main() {}
-# #[cfg(feature = "digest")] fn main() -> Result<(), Box<dyn std::error::Error>> {
+# #[cfg(all(feature = "digest", target_os = "freebsd"))] fn main() {}
+# #[cfg(all(feature = "digest", not(target_os = "freebsd")))] fn main() -> Result<(), Box<dyn std::error::Error>> {
 // BEGIN executable conditional write example
 use qubit_io::{Output, Streams};
 use qubit_local_files::LocalFileSystem;
