@@ -26,12 +26,15 @@ use qubit_local_files::directory::LocalResolutionPolicy;
 use qubit_local_files::directory::LocalResolutionScope;
 use qubit_local_files::error::LocalFileErrorKind;
 use qubit_local_files::error::LocalFileOperation;
+#[cfg(unix)]
 use qubit_local_files::error::LocalResourceKind;
+#[cfg(unix)]
 use qubit_local_files::options::LocalResolutionLimits;
 use qubit_local_files::options::LocalRootOpenOptions;
 use qubit_local_files::options::LocalWriteMode;
 use qubit_local_files::options::LocalWriteOptions;
 use qubit_local_files::options::LocalWritePrecondition;
+#[cfg(unix)]
 use sha2::Digest;
 
 #[derive(Debug)]
