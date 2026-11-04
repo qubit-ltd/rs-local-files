@@ -27,7 +27,7 @@ thread_local! {
 #[cfg(test)]
 type OwnerOpenFailureHook = Box<dyn FnOnce(&File, &OsStr) -> io::Result<()>>;
 
-#[cfg(test)]
+#[cfg(all(test, target_os = "linux"))]
 pub(crate) fn install_owner_open_failure_hook(hook: impl FnOnce(&File, &OsStr) -> io::Result<()> + 'static) {
     OWNER_OPEN_FAILURE_HOOK.with(|slot| {
         assert!(slot.borrow().is_none(), "owner open hook already installed");

@@ -287,7 +287,7 @@ impl LocalStagedDirectory {
 
     /// Scans the staged namespace and enforces the existing pre-mutation
     /// budgets.
-    #[cfg(test)]
+    #[cfg(all(test, target_os = "linux"))]
     fn collect_owner_policy_entries(
         &self,
         policy: &crate::policy::LocalOwnerAccessPolicy,
@@ -401,7 +401,7 @@ impl LocalStagedDirectory {
 
     /// Opens each observed entry and pins the identity before the first
     /// mutation.
-    #[cfg(test)]
+    #[cfg(all(test, target_os = "linux"))]
     fn open_and_pin_owner_policy_entries(
         &self,
         entries: &[OwnerPolicyEntry],
@@ -754,7 +754,7 @@ impl LocalStagedDirectory {
 
     /// Rewalks names and rechecks identities and final policy facts before
     /// syncing.
-    #[cfg(test)]
+    #[cfg(all(test, target_os = "linux"))]
     #[allow(clippy::too_many_arguments)]
     fn verify_owner_policy_entries(
         &mut self,

@@ -38,7 +38,9 @@ const TREE_SYNC_START: &str = "// BEGIN executable tree sync example";
 const TREE_SYNC_END: &str = "// END executable tree sync example";
 const EXPORT_START: &str = "// BEGIN executable export example";
 const EXPORT_END: &str = "// END executable export example";
+#[cfg(target_os = "linux")]
 const READONLY_RECOVERY_START: &str = "// BEGIN executable readonly stage recovery example";
+#[cfg(target_os = "linux")]
 const READONLY_RECOVERY_END: &str = "// END executable readonly stage recovery example";
 const SENTINEL: &str = "QUBIT_LOCAL_FILES_DOCUMENTATION_CONSUMER_SENTINEL";
 // Regenerate this fixture from the documented dependencies when they change.
