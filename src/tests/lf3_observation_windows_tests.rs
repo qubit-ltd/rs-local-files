@@ -62,7 +62,7 @@ fn lf3_native_windows_observes_directories_and_read_only_handles() {
 
 #[cfg(windows)]
 #[test]
-fn lf3_native_windows_optional_query_failure_keeps_metadata_and_required_keeps_source() {
+fn lf3_native_windows_optional_io_failure_preserves_source_and_required_classification() {
     use std::error::Error;
     use std::sync::atomic::AtomicU32;
     use std::sync::atomic::Ordering;
@@ -74,8 +74,8 @@ fn lf3_native_windows_optional_query_failure_keeps_metadata_and_required_keeps_s
     use windows_sys::Win32::Storage::FileSystem::FileIdInfo;
     use windows_sys::Win32::Storage::FileSystem::GetFileInformationByHandleEx;
 
-    use crate::LocalFileKind;
     use crate::error::LocalFileErrorKind;
+    use crate::error::LocalFileErrorSource;
     use crate::observation::windows::NativeQuery;
     use crate::observation::windows::query_native_with;
 
@@ -104,15 +104,67 @@ fn lf3_native_windows_optional_query_failure_keeps_metadata_and_required_keeps_s
     for class in [FileIdInfo, FileBasicInfo] {
         FAILED_CLASS.store(class as u32, Ordering::Relaxed);
         let optional = query_native_with(file.as_file(), LocalObservationRequirement::Optional, query)
-            .expect("optional native failure retains ordinary metadata");
-        assert_eq!(optional.metadata().kind(), LocalFileKind::File);
-        assert!(optional.identity().is_none());
-        assert!(optional.native_details().is_none());
+            .expect_err("optional native I/O failure must be reported");
+        assert_eq!(optional.kind(), LocalFileErrorKind::Io);
+        assert!(matches!(
+            optional.typed_source(),
+            Some(LocalFileErrorSource::Io(source)) if source.raw_os_error() == Some(ERROR_ACCESS_DENIED as i32)
+        ));
 
         let required = query_native_with(file.as_file(), LocalObservationRequirement::Required, query)
             .expect_err("required native failure must be reported");
         assert_eq!(required.kind(), LocalFileErrorKind::RequirementNotMet);
         assert!(required.source().is_some(), "native I/O source is retained");
+    }
+}
+
+#[cfg(windows)]
+#[test]
+fn lf3_native_windows_optional_explicitly_unsupported_query_keeps_metadata() {
+    use std::sync::atomic::AtomicU32;
+    use std::sync::atomic::Ordering;
+
+    use windows_sys::Win32::Foundation::ERROR_INVALID_PARAMETER;
+    use windows_sys::Win32::Foundation::ERROR_NOT_SUPPORTED;
+    use windows_sys::Win32::Foundation::SetLastError;
+    use windows_sys::Win32::Storage::FileSystem::FILE_INFO_BY_HANDLE_CLASS;
+    use windows_sys::Win32::Storage::FileSystem::FileIdInfo;
+    use windows_sys::Win32::Storage::FileSystem::GetFileInformationByHandleEx;
+
+    use crate::LocalFileKind;
+    use crate::observation::windows::NativeQuery;
+    use crate::observation::windows::query_native_with;
+
+    static ERROR_CODE: AtomicU32 = AtomicU32::new(ERROR_NOT_SUPPORTED);
+
+    unsafe extern "system" fn reject_file_id_info(
+        handle: windows_sys::Win32::Foundation::HANDLE,
+        class: FILE_INFO_BY_HANDLE_CLASS,
+        output: *mut std::ffi::c_void,
+        size: u32,
+    ) -> i32 {
+        if class == FileIdInfo {
+            // SAFETY: SetLastError records the error on this test thread.
+            unsafe { SetLastError(ERROR_CODE.load(Ordering::Relaxed)) };
+            0
+        } else {
+            // SAFETY: forwards the live handle and output buffer from query_info.
+            unsafe { GetFileInformationByHandleEx(handle, class, output, size) }
+        }
+    }
+
+    let file = tempfile::NamedTempFile::new().expect("create fixture");
+    for error_code in [ERROR_NOT_SUPPORTED, ERROR_INVALID_PARAMETER] {
+        ERROR_CODE.store(error_code, Ordering::Relaxed);
+        let observation = query_native_with(
+            file.as_file(),
+            LocalObservationRequirement::Optional,
+            reject_file_id_info as NativeQuery,
+        )
+        .expect("an explicitly unsupported optional fact should be omitted");
+        assert_eq!(observation.metadata().kind(), LocalFileKind::File);
+        assert!(observation.identity().is_none());
+        assert!(observation.native_details().is_none());
     }
 }
 

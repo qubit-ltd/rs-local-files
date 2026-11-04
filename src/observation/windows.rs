@@ -51,8 +51,10 @@ pub(crate) fn query_native(file: &File, requirement: LocalObservationRequirement
 /// Runs a supplied native query function, primarily to exercise failure paths.
 ///
 /// Metadata failure is returned as an I/O error regardless of requirement. A
-/// failed native facts query is omitted for `Optional` and returned as
-/// `RequirementNotMet` for `Required`.
+/// Explicitly unsupported native facts are omitted for `Optional`. Other
+/// native query failures are returned as I/O errors. `Required` returns
+/// `RequirementNotMet` for native query failures or unavailable facts while
+/// retaining the underlying I/O source when present.
 pub(crate) fn query_native_with(
     file: &File,
     requirement: LocalObservationRequirement,
@@ -64,10 +66,13 @@ pub(crate) fn query_native_with(
     let normalized = LocalFileMetadata::from_native(&metadata);
     let handle = file.as_raw_handle();
 
+    let mut failed_class = None;
     let native = (|| -> io::Result<_> {
         let mut id = FILE_ID_INFO::default();
+        failed_class = Some(FileIdInfo);
         query_info(query, handle, FileIdInfo, &mut id)?;
         let mut basic = FILE_BASIC_INFO::default();
+        failed_class = Some(FileBasicInfo);
         query_info(query, handle, FileBasicInfo, &mut basic)?;
         Ok((id, basic))
     })();
@@ -84,11 +89,29 @@ pub(crate) fn query_native_with(
                 Some(LocalNativeFileDetails::from_windows(details)),
             ))
         }
-        Err(_error) if requirement == LocalObservationRequirement::Optional => {
+        Err(error)
+            if requirement == LocalObservationRequirement::Optional
+                && explicitly_unsupported(&error, failed_class == Some(FileIdInfo)) =>
+        {
             Ok(LocalFileObservation::from_parts(normalized, None, None))
+        }
+        Err(error) if requirement == LocalObservationRequirement::Optional => {
+            Err(LocalFileError::from_io(LocalFileOperation::Metadata, None, None, error))
         }
         Err(error) => Err(LocalFileError::from_io(LocalFileOperation::Metadata, None, None, error)
             .with_kind(LocalFileErrorKind::RequirementNotMet)),
+    }
+}
+
+fn explicitly_unsupported(error: &io::Error, querying_file_id: bool) -> bool {
+    match error.raw_os_error() {
+        Some(code) => {
+            code == windows_sys::Win32::Foundation::ERROR_NOT_SUPPORTED as i32
+                || code == windows_sys::Win32::Foundation::ERROR_INVALID_FUNCTION as i32
+                || (querying_file_id
+                    && code == windows_sys::Win32::Foundation::ERROR_INVALID_PARAMETER as i32)
+        }
+        None => false,
     }
 }
 

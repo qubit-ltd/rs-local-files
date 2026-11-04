@@ -22,9 +22,11 @@ use crate::observation::LocalObservationRequirement;
 /// fails with `RequirementNotMet`, while `Optional` returns an observation
 /// without native identity or timestamp details.
 ///
-/// `Optional` permits a failed native identity/timestamp query to be omitted;
-/// it does not suppress failure to obtain the handle's normalized metadata.
-/// `Required` returns an error when required native facts are unavailable.
+/// Under `Optional`, unavailable native identity/timestamp facts may be omitted.
+/// Errors from attempted native queries are returned as I/O errors unless the
+/// platform explicitly classifies the error as unsupported. Failure to obtain
+/// normalized metadata is always returned. `Required` returns an error when
+/// required native facts cannot be queried or are unavailable.
 ///
 /// # Parameters
 ///
@@ -38,8 +40,10 @@ use crate::observation::LocalObservationRequirement;
 ///
 /// # Errors
 ///
-/// Returns a metadata I/O error if normalized metadata cannot be read. Returns
-/// an error if required native facts cannot be queried or are unavailable.
+/// Returns an I/O error if normalized metadata cannot be read. Under
+/// `Optional`, also returns an I/O error when a native query fails for a reason
+/// other than explicit lack of support. Returns an error if required native
+/// facts cannot be queried or are unavailable.
 pub(crate) fn query_observation(
     file: &File,
     requirement: LocalObservationRequirement,

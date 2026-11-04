@@ -33,17 +33,18 @@ fn lf3_native_unix_refreshes_same_handle() {
 }
 
 #[test]
-fn lf3_native_unix_optional_extension_failure_keeps_metadata() {
+fn lf3_native_unix_optional_io_failure_preserves_source() {
     let directory = tempfile::tempdir().expect("temporary directory should be created");
     let path = directory.path().join("observed");
     std::fs::write(&path, b"data").expect("fixture should be written");
     let file = File::open(&path).expect("fixture should be opened");
-    let observation = query_native_with(&file, Optional, |_| Err(io::Error::from_raw_os_error(libc::EIO)))
-        .expect("optional native extension failure should preserve metadata");
+    let error = query_native_with(&file, Optional, |_| Err(io::Error::from_raw_os_error(libc::EIO)))
+        .expect_err("optional native I/O failure should be reported");
 
-    assert_eq!(observation.metadata().len(), 4);
-    assert!(observation.identity().is_none());
-    assert!(observation.native_details().is_none());
+    assert_eq!(error.kind(), LocalFileErrorKind::Io);
+    assert!(
+        matches!(error.typed_source(), Some(LocalFileErrorSource::Io(source)) if source.raw_os_error() == Some(libc::EIO))
+    );
 }
 
 #[test]

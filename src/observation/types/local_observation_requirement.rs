@@ -13,7 +13,7 @@
 /// extension; normalized metadata remains required independently. Security
 /// observation uses it for each selected filesystem, access, or link-count
 /// fact. `Optional` still attempts native queries and omits facts only under
-/// that entry point's documented unsupported or query-failure rules. `Required`
+/// that entry point's documented unsupported-fact rules. `Required`
 /// reports incomplete requested facts as `RequirementNotMet`. Error kinds and
 /// retained native error sources can differ by entry point and platform.
 ///

@@ -83,10 +83,7 @@ where
             }
         }
         Err(error) => {
-            if requirement == LocalObservationRequirement::Required {
-                return Err(LocalFileError::from_io(LocalFileOperation::Metadata, None, None, error));
-            }
-            (None, None)
+            return Err(LocalFileError::from_io(LocalFileOperation::Metadata, None, None, error));
         }
     };
 
