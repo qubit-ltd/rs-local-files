@@ -10,7 +10,6 @@
 
 use std::fs::File;
 use std::io;
-use std::path::Path;
 use std::path::PathBuf;
 
 use super::remove_rooted_entry_if_same_file;
