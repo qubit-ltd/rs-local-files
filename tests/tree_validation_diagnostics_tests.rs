@@ -43,7 +43,8 @@ fn make_stage(
     let stage = parent
         .create_staged_directory(&LocalTempDirectoryOptions::new())
         .expect("stage");
-    let diagnostic_root = fixture.path().join(stage.relative_name());
+    let diagnostic_root = std::fs::canonicalize(fixture.path().join(stage.relative_name()))
+        .expect("stage diagnostic root is canonicalized");
     (fixture, filesystem, stage, diagnostic_root)
 }
 
@@ -59,8 +60,14 @@ fn write_file(stage: &mut qubit_local_files::directory::LocalStagedDirectory, pa
 
 fn assert_requirement(error: &qubit_local_files::LocalFileError, expected_path: &Path, reason: &str) {
     assert_eq!(error.kind(), LocalFileErrorKind::RequirementNotMet);
-    assert_eq!(error.path(), Some(expected_path));
+    assert_same_path(error.path(), expected_path);
     assert!(error.reason().expect("reason").contains(reason));
+}
+
+fn assert_same_path(actual: Option<&Path>, expected: &Path) {
+    let actual = actual.expect("diagnostic path exists").components().collect::<Vec<_>>();
+    let expected = expected.components().collect::<Vec<_>>();
+    assert_eq!(actual, expected);
 }
 
 #[test]
@@ -102,7 +109,7 @@ fn diagnostics_cover_host_and_rooted_exact_set_failures() {
             .verify_entries(&duplicate, &LocalTreeValidationOptions::new())
             .expect_err("duplicate expected path");
         assert_eq!(error.kind(), LocalFileErrorKind::InvalidOptions);
-        assert_eq!(error.path(), Some(root.join("same").as_path()));
+        assert_same_path(error.path(), &root.join("same"));
         assert!(error.reason().expect("reason").contains("duplicate"));
         stage.cleanup().expect("cleanup");
     }
@@ -124,7 +131,7 @@ fn diagnostics_include_depth_and_name_budget_facts() {
             )
             .expect_err("depth exceeded");
         assert_eq!(error.kind(), LocalFileErrorKind::ResourceLimit);
-        assert_eq!(error.path(), Some(root.join("deep/file").as_path()));
+        assert_same_path(error.path(), &root.join("deep/file"));
         let facts = error.resource_limit_error().expect("depth facts");
         assert_eq!(facts.resource(), LocalResourceKind::Depth);
         assert_eq!(facts.limit(), 1);
@@ -142,7 +149,7 @@ fn diagnostics_include_depth_and_name_budget_facts() {
             )
             .expect_err("expected name-byte preflight exceeded");
         assert_eq!(error.kind(), LocalFileErrorKind::ResourceLimit);
-        assert_eq!(error.path(), Some(root.join("long").as_path()));
+        assert_same_path(error.path(), &root.join("long"));
         let facts = error.resource_limit_error().expect("name-byte facts");
         assert_eq!(facts.resource(), LocalResourceKind::SeenNameBytes);
         assert_eq!(facts.limit(), 3);
@@ -164,7 +171,7 @@ fn validation_deadline_overflow_is_reported_as_resource_limit() {
         )
         .expect_err("unrepresentable validation deadline");
     assert_eq!(error.kind(), LocalFileErrorKind::ResourceLimit);
-    assert_eq!(error.path(), Some(root.as_path()));
+    assert_same_path(error.path(), &root);
     assert!(error.reason().expect("reason").contains("deadline overflowed"));
     stage.cleanup().expect("cleanup");
 }
@@ -285,7 +292,7 @@ fn owner_access_policy_failures_include_root_and_entry_paths() {
                 .with_owner_access_policy(LocalOwnerAccessPolicy::new().with_unix_modes(root_mode ^ 0o100, 0o644)),
         )
         .expect_err("unexpected root access mode");
-    assert_eq!(root_error.path(), Some(root.as_path()));
+    assert_same_path(root_error.path(), &root);
     assert!(root_error.reason().expect("root reason").contains("owner-access"));
     stage.cleanup().expect("cleanup root stage");
 
@@ -305,7 +312,7 @@ fn owner_access_policy_failures_include_root_and_entry_paths() {
                 .with_owner_access_policy(LocalOwnerAccessPolicy::new().with_unix_modes(root_mode, file_mode ^ 0o100)),
         )
         .expect_err("unexpected file access mode");
-    assert_eq!(entry_error.path(), Some(root.join("private-file").as_path()));
+    assert_same_path(entry_error.path(), &root.join("private-file"));
     assert!(entry_error.reason().expect("entry reason").contains("owner-access"));
     stage.cleanup().expect("cleanup entry stage");
 }
