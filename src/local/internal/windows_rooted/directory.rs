@@ -305,6 +305,22 @@ pub(crate) fn remove_rooted_entry(root: &File, _diagnostic_root: &Path, path: &L
     delete_rooted_entry(root, path)
 }
 
+/// Removes a rooted entry only when the current no-follow name still has the
+/// identity observed through the caller's retained handle.
+pub(crate) fn remove_rooted_entry_if_same_file(
+    root: &File,
+    path: &LocalRelativePath,
+    expected: &Metadata,
+) -> Result<bool> {
+    let entry = open_entry_no_follow(root, path, DELETE | FILE_READ_ATTRIBUTES | SYNCHRONIZE, FILE_OPEN, 0)?;
+    let actual = Metadata::from_open_file(&entry)?;
+    if !expected.is_same_file(&actual) {
+        return Ok(false);
+    }
+    delete_open_entry(&entry)?;
+    Ok(true)
+}
+
 /// Removes one no-follow handle after checking the requested entry type.
 pub(crate) fn remove_rooted_entry_typed(
     root: &File,

@@ -13,8 +13,9 @@ use std::io;
 use std::path::Path;
 use std::path::PathBuf;
 
-use super::remove_rooted_entry;
+use super::remove_rooted_entry_if_same_file;
 use crate::LocalRelativePath;
+use crate::rooted::Metadata;
 
 /// Owns a Windows rooted staging file and removes its name unless disarmed.
 #[must_use = "discarding an armed staging file triggers best-effort cleanup"]
@@ -76,10 +77,14 @@ impl WindowsRootedStagedFile {
                 file.set_permissions(permissions)?;
             }
         }
-        self.file.take();
         if self.armed {
-            match remove_rooted_entry(&self.root, Path::new(""), &self.path) {
-                Ok(()) => {}
+            let file = self
+                .file
+                .as_ref()
+                .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "armed staging file has no handle"))?;
+            let expected = Metadata::from_open_file(file)?;
+            match remove_rooted_entry_if_same_file(&self.root, &self.path, &expected) {
+                Ok(_) => {}
                 // The staging name can be removed by another actor before
                 // abort. Treat that state as completed cleanup, matching the
                 // idempotent behavior of the Unix rooted staging guard.
@@ -88,6 +93,7 @@ impl WindowsRootedStagedFile {
             }
             self.armed = false;
         }
+        self.file.take();
         Ok(())
     }
 

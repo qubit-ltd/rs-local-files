@@ -260,6 +260,8 @@ pub(crate) use windows_rooted::read_rooted_symlink_metadata;
 #[cfg(windows)]
 pub(crate) use windows_rooted::remove_rooted_entry;
 #[cfg(windows)]
+pub(crate) use windows_rooted::remove_rooted_entry_if_same_file;
+#[cfg(windows)]
 pub(crate) use windows_rooted::remove_rooted_entry_typed;
 #[cfg(windows)]
 pub(crate) use windows_rooted::remove_rooted_owned_read_only_file;
