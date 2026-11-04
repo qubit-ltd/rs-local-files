@@ -20,6 +20,7 @@ use qubit_local_files::options::LocalTempDirectoryOptions;
 use qubit_local_files::options::LocalTreePublishOptions;
 use qubit_local_files::outcome::LocalFileKind;
 use qubit_local_files::outcome::LocalTreeMutationState;
+#[cfg(unix)]
 use qubit_local_files::policy::LocalOwnerAccessPolicy;
 
 fn make_stage(
