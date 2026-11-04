@@ -242,6 +242,7 @@ fn test_rooted_temp_collision_stops_when_sandbox_cleanup_fails() {
     }
 }
 
+#[cfg(unix)]
 #[test]
 fn test_rooted_temp_recovery_uses_retained_root_authority() {
     let fixture = tempdir().expect("fixture should be created");
@@ -269,6 +270,33 @@ fn test_rooted_temp_recovery_uses_retained_root_authority() {
     assert_eq!(1, parent_entries(&moved_root).len(), "only the sentinel should remain");
 }
 
+#[cfg(windows)]
+#[test]
+fn test_rooted_temp_recovery_cleans_through_retained_root_authority() {
+    let fixture = tempdir().expect("fixture should be created");
+    let root = fixture.path().join("root");
+    fs::create_dir(&root).expect("root should be created");
+    fs::write(root.join("sentinel"), b"keep").expect("sentinel should be written");
+    let filesystem = LocalFileSystem::rooted(&root).expect("rooted filesystem should open");
+    let fault = install_test_fault("rooted-temp-file-open-cleanup").expect("fault should install");
+    let error = filesystem
+        .create_temp_file_with_options(&LocalTempFileOptions::new())
+        .expect_err("injected file creation should fail");
+    drop(fault);
+
+    let (_, recovery) = error.into_temp_recovery_parts();
+    let mut recovery = recovery.expect("recovery owner should remain attached");
+    recovery
+        .cleanup()
+        .expect("cleanup should use retained parent authority");
+    assert_eq!(
+        b"keep".as_slice(),
+        fs::read(root.join("sentinel")).expect("sentinel should remain")
+    );
+    assert_eq!(1, parent_entries(&root).len(), "only the sentinel should remain");
+}
+
+#[cfg(unix)]
 #[test]
 fn test_rooted_temp_recovery_rejects_replaced_sandbox_name() {
     let parent = tempdir().expect("parent should be created");
@@ -290,6 +318,35 @@ fn test_rooted_temp_recovery_rejects_replaced_sandbox_name() {
 
     assert!(recovery.cleanup().is_err(), "replacement identity must fail closed");
     assert!(moved.is_dir(), "original object should remain at its new name");
+    assert!(
+        parent.path().join(&sandbox).is_dir(),
+        "replacement object should remain"
+    );
+}
+
+#[cfg(windows)]
+#[test]
+fn test_rooted_temp_recovery_does_not_delete_replacement_sandbox() {
+    let parent = tempdir().expect("parent should be created");
+    let filesystem = LocalFileSystem::rooted(parent.path()).expect("rooted filesystem should open");
+    let fault = install_test_fault("rooted-temp-file-open-cleanup").expect("fault should install");
+    let error = filesystem
+        .create_temp_file_with_options(&LocalTempFileOptions::new())
+        .expect_err("injected file creation should fail");
+    drop(fault);
+    let (_, recovery) = error.into_temp_recovery_parts();
+    let mut recovery = recovery.expect("recovery owner should remain attached");
+    let sandbox = parent_entries(parent.path())
+        .into_iter()
+        .find(|entry| entry.starts_with("sandbox-"))
+        .expect("sandbox should remain after injected cleanup failure");
+    let moved = parent.path().join("moved-original");
+    fs::rename(parent.path().join(&sandbox), &moved).expect("original sandbox should be renamed");
+    fs::create_dir(parent.path().join(&sandbox)).expect("replacement sandbox should be created");
+
+    recovery
+        .cleanup()
+        .expect("cleanup should remove the retained object by its handle");
     assert!(
         parent.path().join(&sandbox).is_dir(),
         "replacement object should remain"
