@@ -24,6 +24,7 @@ mod unix {
 
     use libc::geteuid;
     use libc::getuid;
+    #[cfg(target_os = "linux")]
     use libc::setresuid;
     use qubit_local_files::LocalFileSystem;
     use qubit_local_files::directory::LocalDirectoryHandle;
