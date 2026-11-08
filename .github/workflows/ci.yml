@@ -139,7 +139,7 @@ jobs:
           run_named_test rooted_windows_symlink_tests test_rooted_link_copy_ignores_replacement_diagnostic_root
           run_named_test rooted_windows_symlink_tests test_rooted_copy_preserves_link_to_existing_external_file
           run_named_test rooted_windows_symlink_tests test_rooted_copy_uses_actual_reparse_target_instead_of_display_name
-          run_named_test resolution_contract_tests opening_root_target_hook_sees_and_can_reject_raw_nt_substitute_name
+          run_named_test resolution_contract_tests test_opening_root_target_hook_sees_and_can_reject_raw_nt_substitute_name
           run_named_test --lib tests::rooted_copy_deadline_tests::test_rooted_link_kind_deadline_keeps_existing_file
           run_named_test windows_rooted_staging_cleanup_tests test_rooted_staging_abort_preserves_competitor_at_old_name
           run_named_test windows_rooted_staging_cleanup_tests test_rooted_staging_drop_preserves_competitor_at_old_name

@@ -87,6 +87,28 @@ jobs:
           persist-credentials: false
       - name: Install MSRV
         run: rustup toolchain install 1.94 --profile minimal
+      - name: Record native Windows test environment
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $os = Get-CimInstance Win32_OperatingSystem
+          $volume = Get-Volume -FilePath $env:GITHUB_WORKSPACE
+          $partition = Get-Partition -DriveLetter $volume.DriveLetter
+          $disk = Get-Disk -Number $partition.DiskNumber
+          Write-Output 'Windows OS:'
+          $os | Select-Object Caption, Version, BuildNumber | ConvertTo-Json -Compress
+          Write-Output 'Workspace volume and disk:'
+          [pscustomobject]@{ DriveLetter = $volume.DriveLetter; FileSystemType = $volume.FileSystemType; DriveType = $volume.DriveType; DiskNumber = $disk.Number; BusType = $disk.BusType; FriendlyName = $disk.FriendlyName; PartitionStyle = $disk.PartitionStyle } | ConvertTo-Json -Compress
+          Write-Output 'Runner identity:'
+          whoami
+          Write-Output 'Workspace ACL:'
+          icacls $env:GITHUB_WORKSPACE
+          Write-Output 'Runner temp ACL:'
+          icacls $env:RUNNER_TEMP
+          Write-Output 'Rust toolchain:'
+          rustc +1.94.0 --version --verbose
+          cargo +1.94.0 --version
       # Enable remotely only after platform, manager and CI tools are distributable.
       - name: Run shared conditional suites
         working-directory: ci-root/rs-local-files
@@ -150,13 +172,17 @@ jobs:
               fi
               ;;
             Windows)
+              run_tests --locked --test windows_rooted_staging_cleanup_tests -- --nocapture
+              run_tests --locked --all-features --test windows_rooted_staging_cleanup_tests -- --nocapture
+              run_tests --locked --test local_temp_file_tests test_windows_sealed_cleanup_ -- --nocapture
+              run_tests --locked --all-features --test local_temp_file_tests test_windows_sealed_cleanup_ -- --nocapture
               run_named_test rooted_windows_symlink_tests test_windows_symlink_fixture_preflight
               run_named_test rooted_windows_symlink_tests test_rooted_copy_preserves_dangling_link_after_root_rename
               run_named_test rooted_windows_symlink_tests test_rooted_copy_preserves_dangling_directory_link_kind
               run_named_test rooted_windows_symlink_tests test_rooted_link_copy_ignores_replacement_diagnostic_root
               run_named_test rooted_windows_symlink_tests test_rooted_copy_preserves_link_to_existing_external_file
               run_named_test rooted_windows_symlink_tests test_rooted_copy_uses_actual_reparse_target_instead_of_display_name
-              run_named_test resolution_contract_tests opening_root_target_hook_sees_and_can_reject_raw_nt_substitute_name
+              run_named_test resolution_contract_tests test_opening_root_target_hook_sees_and_can_reject_raw_nt_substitute_name
               run_tests --locked --lib lf_review_stage_cleanup_
               run_tests --locked --lib lf_review_tree_
               run_tests --locked --all-features --lib lf3_privacy_windows_
