@@ -20,6 +20,7 @@ use super::LocalUnixPlatform;
 ///
 /// ```
 /// use qubit_local_files::LocalFileSystem;
+/// use qubit_local_files::error::LocalFileErrorKind;
 /// use qubit_local_files::observation::LocalSecurityObservationOptions;
 /// use qubit_local_files::options::LocalDirectoryOpenOptions;
 ///
@@ -29,11 +30,18 @@ use super::LocalUnixPlatform;
 /// let directory = filesystem.open_directory_with_options(
 ///     fixture.path(), &LocalDirectoryOpenOptions::new(),
 /// )?;
-/// let security = directory.security_observation(&LocalSecurityObservationOptions::new())?;
-/// if let Some(unix) = security.filesystem().and_then(|value| value.unix()) {
-///     let _platform = unix.platform();
-///     let _type_id = unix.type_id();
-///     let _type_name = unix.type_name();
+/// match directory.security_observation(&LocalSecurityObservationOptions::new()) {
+///     Ok(security) => {
+///         if let Some(unix) = security.filesystem().and_then(|value| value.unix()) {
+///             let _platform = unix.platform();
+///             let _type_id = unix.type_id();
+///             let _type_name = unix.type_name();
+///         }
+///     }
+///     Err(error) if error.kind() == LocalFileErrorKind::PermissionDenied => {
+///         eprintln!("The current account cannot query filesystem details: {error}");
+///     }
+///     Err(error) => return Err(error.into()),
 /// }
 /// # Ok(())
 /// # }

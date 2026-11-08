@@ -21,6 +21,7 @@ use super::LocalWindowsFileSystemObservation;
 ///
 /// ```
 /// use qubit_local_files::LocalFileSystem;
+/// use qubit_local_files::error::LocalFileErrorKind;
 /// use qubit_local_files::observation::LocalFileSystemObservation;
 /// use qubit_local_files::observation::LocalSecurityObservationOptions;
 /// use qubit_local_files::options::LocalDirectoryOpenOptions;
@@ -32,12 +33,19 @@ use super::LocalWindowsFileSystemObservation;
 ///     fixture.path(), &LocalDirectoryOpenOptions::new(),
 /// )?;
 /// let options = LocalSecurityObservationOptions::new();
-/// let security = directory.security_observation(&options)?;
-/// let filesystem_observation: Option<&LocalFileSystemObservation> = security.filesystem();
-/// if let Some(filesystem) = filesystem_observation {
-///     let _locality = filesystem.locality();
-///     let _unix_details = filesystem.unix();
-///     let _windows_details = filesystem.windows();
+/// match directory.security_observation(&options) {
+///     Ok(security) => {
+///         let filesystem_observation: Option<&LocalFileSystemObservation> = security.filesystem();
+///         if let Some(filesystem) = filesystem_observation {
+///             let _locality = filesystem.locality();
+///             let _unix_details = filesystem.unix();
+///             let _windows_details = filesystem.windows();
+///         }
+///     }
+///     Err(error) if error.kind() == LocalFileErrorKind::PermissionDenied => {
+///         eprintln!("The current account cannot query filesystem details: {error}");
+///     }
+///     Err(error) => return Err(error.into()),
 /// }
 /// # Ok(())
 /// # }
