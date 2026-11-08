@@ -45,6 +45,34 @@ fn writer_indexed_range_flush_and_owned_adapter_preserve_staging() {
 }
 
 #[test]
+fn test_inherent_single_buffer_write_preserves_count_and_terminal_state() {
+    let directory = tempdir().expect("temporary directory should be created");
+    let path = directory.path().join("target");
+    let filesystem = LocalFileSystem::host().expect("host filesystem should open");
+    let mut writer = filesystem.open_writer(&path).expect("writer should open");
+
+    assert_eq!(3, writer.write_vectored(&[IoSlice::new(b"abc")]).unwrap());
+    assert_eq!(0, writer.write_vectored(&[IoSlice::new(b"")]).unwrap());
+    let outcome = writer.commit().expect("commit should publish staged bytes");
+    assert_eq!(3, outcome.bytes_written());
+    assert_eq!(b"abc", std::fs::read(&path).unwrap().as_slice());
+
+    let terminal_path = directory.path().join("terminal");
+    let mut closed = filesystem
+        .open_writer(&terminal_path)
+        .expect("terminal-state writer should open");
+    let _outcome = closed.abort().expect("abort should close writer");
+    assert_eq!(
+        ErrorKind::BrokenPipe,
+        closed.write_vectored(&[IoSlice::new(b"")]).unwrap_err().kind()
+    );
+    assert_eq!(
+        ErrorKind::BrokenPipe,
+        closed.write_vectored(&[IoSlice::new(b"x")]).unwrap_err().kind()
+    );
+}
+
+#[test]
 fn owned_standard_adapter_returns_writer_for_commit() {
     let directory = tempdir().expect("temporary directory should be created");
     let path = directory.path().join("target");

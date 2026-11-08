@@ -515,6 +515,10 @@ impl LocalFileWriter {
                 "local file writer is not open",
             ));
         }
+        if let [buffer] = buffers {
+            let slices = [&buffer[..]];
+            return qubit_io::Output::write_vectored(self, &slices);
+        }
         let slices = crate::vectored::byte_slices(buffers)?;
         qubit_io::Output::write_vectored(self, &slices)
     }

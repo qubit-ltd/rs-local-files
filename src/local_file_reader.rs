@@ -132,8 +132,9 @@ impl LocalFileReader {
     /// returned. Other platforms use the underlying vectored input
     /// operation. The adapter allocates a vector of borrowed slice
     /// descriptors for every non-empty call; it does not copy buffer
-    /// contents. Failure to reserve those descriptors is returned as
-    /// `OutOfMemory` before file I/O begins.
+    /// contents. Multi-buffer requests adapt their descriptors in a temporary
+    /// vector; a single-buffer request uses a stack descriptor. Backend
+    /// allocations are outside this adapter guarantee.
     ///
     /// # Parameters
     ///
@@ -147,10 +148,15 @@ impl LocalFileReader {
     /// # Errors
     ///
     /// Returns an underlying read error when no bytes were read, or
-    /// `OutOfMemory` if the adapter cannot allocate its slice descriptors.
+    /// `OutOfMemory` if the multi-buffer adapter cannot allocate its slice
+    /// descriptors.
     pub fn read_vectored(&mut self, buffers: &mut [IoSliceMut<'_>]) -> io::Result<usize> {
         if buffers.iter().all(|buffer| buffer.is_empty()) {
             return Ok(0);
+        }
+        if let [buffer] = buffers {
+            let mut slices = [&mut buffer[..]];
+            return qubit_io::Input::read_vectored(self, &mut slices);
         }
         let mut slices = crate::vectored::byte_slices_mut(buffers)?;
         qubit_io::Input::read_vectored(self, &mut slices)

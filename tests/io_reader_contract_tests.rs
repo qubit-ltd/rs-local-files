@@ -134,6 +134,29 @@ fn inherent_vectored_read_preserves_nonzero_file_offset() {
 }
 
 #[test]
+fn test_inherent_single_buffer_read_handles_offset_eof_and_empty_inputs() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("source");
+    std::fs::write(&path, b"012345").unwrap();
+    let filesystem = LocalFileSystem::host().unwrap();
+    let mut reader = filesystem.open_reader(&path).unwrap();
+    reader.seek(SeekFrom::Start(3)).unwrap();
+
+    let mut output = [b'!'; 3];
+    let mut buffers = [IoSliceMut::new(&mut output)];
+    assert_eq!(reader.read_vectored(&mut buffers).unwrap(), 3);
+    assert_eq!(&output, b"345");
+
+    let mut eof = [0; 1];
+    let mut buffers = [IoSliceMut::new(&mut eof)];
+    assert_eq!(reader.read_vectored(&mut buffers).unwrap(), 0);
+
+    let mut empty = [IoSliceMut::new(&mut [])];
+    assert_eq!(reader.read_vectored(&mut empty).unwrap(), 0);
+    assert_eq!(reader.read_vectored(&mut []).unwrap(), 0);
+}
+
+#[test]
 fn read_prefix_keeps_limit_and_zero_limit_behavior() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("source");
