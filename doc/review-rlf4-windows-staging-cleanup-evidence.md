@@ -1,6 +1,6 @@
 # RLF4 Windows staging and sealed cleanup evidence
 
-## Current status (2026-11-08)
+## Review baseline status (2026-11-08)
 
 **待验证 / unverified at the implementation revision.** This review is running on Linux, not Windows. No native Windows command was run in this worktree. Windows rename/delete sharing behavior, volume type, relevant account permissions, current-revision execution count, and current native logs are **未取得 / not obtained**. No implementation defect is inferred from the absence of this evidence.
 
@@ -17,9 +17,9 @@
 
 Git history contains `5147bb05d26ea3ddf3364a1e2f9304f2b876dc29`, adding three Windows-gated staging cleanup tests and an evidence note. That note explicitly says the native Windows tests were not run and reports zero executions because the host was Linux. It names `rooted_staging_abort_preserves_competitor_at_old_name`, `rooted_staging_drop_preserves_competitor_at_old_name`, and `rooted_staging_failed_commit_cleanup_preserves_competitor_at_old_name`. This is evidence of a test addition and a pending state, not a Windows pass.
 
-The current workflow configures those staging tests on Windows. At this revision, their function names use a `test_` prefix; the historical Git record uses the unprefixed names. The workflow helper tries both exact names and requires one test body to execute successfully, so it supports either tree. Configuration does not establish that a run occurred. The current relevant sealed cleanup cases in `tests/local_temp_file_tests.rs` include `windows_sealed_cleanup_required_private_rooted`, `windows_sealed_cleanup_drop_removes_owned_entry`, `windows_sealed_cleanup_rejects_replacement`, and fallback cleanup/retry cases. Their current native execution results are未取得.
+The review-baseline workflow configured those staging tests on Windows. At that revision, their function names use a `test_` prefix; the historical Git record uses the unprefixed names. The workflow helper tries both exact names and requires one test body to execute successfully, so it supports either tree. Configuration alone did not establish that a run occurred. The relevant sealed cleanup cases in `tests/local_temp_file_tests.rs` include `windows_sealed_cleanup_required_private_rooted`, `windows_sealed_cleanup_drop_removes_owned_entry`, `windows_sealed_cleanup_rejects_replacement`, and fallback cleanup/retry cases. Their native results are recorded below.
 
-## Native verification still needed
+## Native verification requested at review time
 
 On native Windows with a recorded local volume and fixture permissions, the workflow's staging commands are:
 
@@ -29,7 +29,7 @@ cargo test --locked --test windows_rooted_staging_cleanup_tests test_rooted_stag
 cargo test --locked --test windows_rooted_staging_cleanup_tests test_rooted_staging_failed_commit_cleanup_preserves_competitor_at_old_name -- --exact --nocapture
 ```
 
-Repeat each with `--all-features`. List and run selected `windows_sealed_cleanup_*` tests from `local_temp_file_tests` in both feature configurations as well. Retain full logs and actual execution counts. A fixture blocked by Windows sharing or permissions must be recorded as such and classified before drawing a product conclusion. Until then, staging cleanup and sealed cleanup remain待验证.
+Repeat each with `--all-features`. List and run selected `windows_sealed_cleanup_*` tests from `local_temp_file_tests` in both feature configurations as well. Retain full logs and actual execution counts. A fixture blocked by Windows sharing or permissions must be recorded as such and classified before drawing a product conclusion. This describes the evidence still needed at the review baseline; the implementation evidence below records that these tests subsequently ran.
 
 ## Existing native CI result for the review baseline
 
@@ -43,4 +43,20 @@ The GitHub Actions run for the exact review baseline `b15ac95bd3a81b18c0457aef80
 
 ## Lockfile diagnosis and correction
 
-The repository's path-dependency pin maps `../rs-redact` to commit `04f4bef3ac9a391cc220438918dcb1451a1963a6`, whose package version is `0.10.0`. The committed root and fuzz lockfiles and three external-consumer lock fixtures instead recorded the path package as `0.10.1`. The repository CI helper's pinned checkout and `--locked`/`--frozen` builds exposed this mismatch: Cargo required a lock update before it could build. This implementation aligns those five lock records with the declared pinned path package (`0.10.0`); it does not change a Cargo.toml dependency declaration or add/upgrade a dependency. Full local `ci-check.sh` passes with the corrected lockfiles. A new native Windows Actions run is still needed to confirm the hosted job now reaches the Windows tests.
+The repository's path-dependency pin maps `../rs-redact` to commit `04f4bef3ac9a391cc220438918dcb1451a1963a6`, whose package version is `0.10.0`. The committed root and fuzz lockfiles and three external-consumer lock fixtures instead recorded the path package as `0.10.1`. The repository CI helper's pinned checkout and `--locked`/`--frozen` builds exposed this mismatch: Cargo required a lock update before it could build. This implementation aligns those five lock records with the declared pinned path package (`0.10.0`); it does not change a Cargo.toml dependency declaration or add/upgrade a dependency. Full local `ci-check.sh` passes with the corrected lockfiles, and the native Windows run below confirms that the hosted job reached and passed the target tests.
+
+## Current implementation evidence (2026-11-08)
+
+The implementation revision `251e103bd9c60bf749e60453e688cf9ac4bde6f2` completed the native Windows test job and the Windows CI verification job successfully in [Rust CI run 42508087870](https://github.com/qubit-ltd/rs-local-files/actions/runs/42508087870). The conditional-write native Windows job recorded the runner environment before executing the targeted tests. The full Windows verification job also passed its additional-platform Clippy checks, additional verification commands, documentation tests, README dependency-version check, and strict all-features documentation generation.
+
+- Native test job: [Windows conditional-write job](https://github.com/qubit-ltd/rs-local-files/actions/runs/42508087870/job/128814983611).
+- Full Windows verification job: [Windows verify job](https://github.com/qubit-ltd/rs-local-files/actions/runs/42508087870/job/128814983552).
+- OS: Microsoft Windows Server 2025 Datacenter, version 10.0.26100 (build 26100).
+- Volume: `D:`; NTFS, fixed disk; disk 1, SAS, Microsoft Virtual Disk, MBR.
+- Account: `runnervmm7ud1\runneradmin`. Workspace and temporary-directory ACL output recorded full control for Administrators and SYSTEM, inherited CREATOR OWNER full control, and BUILTIN Users read/execute plus add-subdirectory/write-data access.
+- Rust: `rustc 1.94.0 (4a4ef493e 2026-03-02)`, target `x86_64-pc-windows-msvc`.
+- Staging cleanup: all three exact tests listed in “Native verification requested at review time” ran and passed in the default and `--all-features` configurations (3/3 in each configuration).
+- Sealed cleanup: the selected `windows_sealed_cleanup_*` tests ran and passed in both configurations (7/7 default; 11/11 all-features).
+- Result: the targeted staging and sealed cleanup tests passed on the recorded native Windows environment. The workflow job logs above contain the recorded environment and command/test output.
+
+The full workflow's final Windows verify job passed, including its documentation and cross-platform lint steps. At the time this evidence was recorded, the other jobs in the same run had passed or were still completing; the run page is the authoritative record of the overall workflow conclusion.
