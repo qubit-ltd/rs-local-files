@@ -163,6 +163,35 @@ fn test_tree_sync_rejects_a_stage_without_observed_identity() {
     stage.cleanup().expect("cleanup stage");
 }
 
+#[cfg(test)]
+#[test]
+fn test_not_required_file_sync_skips_depth_limit_for_nonempty_stage() {
+    let fixture = tempfile::tempdir().expect("fixture");
+    let filesystem = crate::LocalFileSystem::host().expect("host filesystem");
+    let parent = filesystem
+        .open_directory_with_options(fixture.path(), &crate::options::LocalDirectoryOpenOptions::new())
+        .expect("parent authority");
+    let mut stage = parent
+        .create_staged_directory(&crate::options::LocalTempDirectoryOptions::new())
+        .expect("stage");
+    let mut payload = &b"payload"[..];
+    stage
+        .write_file_new(Path::new("payload"), &mut payload, 32)
+        .expect("write staged payload");
+
+    let limits = LocalListOptions::new().with_max_depth(0);
+    let synced = stage
+        .sync_files_with_options(&limits, LocalFileSyncRequirement::NotRequired)
+        .expect("NotRequired skips traversal even when the stage is nonempty");
+    assert!(!synced, "no files are synchronized when the requirement is NotRequired");
+
+    let error = stage
+        .sync_files_with_options(&limits, LocalFileSyncRequirement::Required)
+        .expect_err("Required enforces the depth limit on the same staged file");
+    assert_eq!(LocalFileErrorKind::ResourceLimit, error.kind());
+    stage.cleanup().expect("cleanup stage");
+}
+
 #[cfg(all(test, target_os = "linux"))]
 mod owner_policy_sync_order_tests {
     use std::ffi::OsStr;
