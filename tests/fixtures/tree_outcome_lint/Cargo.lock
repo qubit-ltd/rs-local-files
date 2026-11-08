@@ -89,7 +89,7 @@ dependencies = [
 
 [[package]]
 name = "qubit-redact"
-version = "0.10.1"
+version = "0.10.0"
 dependencies = [
  "qubit-budget",
 ]

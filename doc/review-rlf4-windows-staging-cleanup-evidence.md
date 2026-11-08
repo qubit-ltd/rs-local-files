@@ -30,3 +30,17 @@ cargo test --locked --test windows_rooted_staging_cleanup_tests test_rooted_stag
 ```
 
 Repeat each with `--all-features`. List and run selected `windows_sealed_cleanup_*` tests from `local_temp_file_tests` in both feature configurations as well. Retain full logs and actual execution counts. A fixture blocked by Windows sharing or permissions must be recorded as such and classified before drawing a product conclusion. Until then, staging cleanup and sealed cleanup remain待验证.
+
+## Existing native CI result for the review baseline
+
+The GitHub Actions run for the exact review baseline `b15ac95bd3a81b18c0457aef80f5745ef27bd142` is [run 42491360435](https://github.com/qubit-ltd/rs-local-files/actions/runs/42491360435), workflow `Rust CI`, event `push`, dated 2026-11-08. Its `rust-ci / verify (windows-latest)` job used hosted runner `GitHub Actions 1000094458` and ran the Windows verification orchestration. The job failed during its initial build suite before the extra script could invoke any target staging tests: Cargo reported `cannot update the lock file ... Cargo.lock because --locked was passed to prevent this`; the orchestrator reported `cargo build --locked --workspace --all-targets --all-features failed`. The log identifies Microsoft Windows Server 2025 build 10.0.26100, image `windows-2025-vs2026` version `20261103.298.1`, Rust target `x86_64-pc-windows-msvc`, and the hosted `runneradmin` account context. It does not establish the volume type or fixture permissions, and contains no execution results for the staging or sealed cleanup tests. Therefore this run is evidence that a current-SHA Windows job started, but it is not test evidence for RLF-003. No implementation defect is inferred from this infrastructure/build failure.
+
+- Run: <https://github.com/qubit-ltd/rs-local-files/actions/runs/42491360435>
+- Job: <https://github.com/qubit-ltd/rs-local-files/actions/runs/42491360435/job/128764239694>
+- Environment: Windows Server 2025 (10.0.26100), `windows-2025-vs2026` image, Rust `x86_64-pc-windows-msvc`, hosted `runneradmin` context; volume type and fixture permissions not recorded.
+- Result: no target tests executed; Windows behavior remains unverified.
+- Remaining environment: a successful native Windows run with OS build, local volume type, relevant account permissions, feature sets, exact executed test names/counts, and complete logs.
+
+## Lockfile diagnosis and correction
+
+The repository's path-dependency pin maps `../rs-redact` to commit `04f4bef3ac9a391cc220438918dcb1451a1963a6`, whose package version is `0.10.0`. The committed root and fuzz lockfiles and three external-consumer lock fixtures instead recorded the path package as `0.10.1`. The repository CI helper's pinned checkout and `--locked`/`--frozen` builds exposed this mismatch: Cargo required a lock update before it could build. This implementation aligns those five lock records with the declared pinned path package (`0.10.0`); it does not change a Cargo.toml dependency declaration or add/upgrade a dependency. Full local `ci-check.sh` passes with the corrected lockfiles. A new native Windows Actions run is still needed to confirm the hosted job now reaches the Windows tests.

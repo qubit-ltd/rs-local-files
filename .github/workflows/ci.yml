@@ -97,6 +97,7 @@ jobs:
         if [ "$RUNNER_OS" = Windows ]; then
           export TEMP="$RUNNER_TEMP"
           export TMP="$RUNNER_TEMP"
+          powershell.exe -NoProfile -NonInteractive -Command '$ErrorActionPreference = "Stop"; $os = Get-CimInstance Win32_OperatingSystem; $volume = Get-Volume -FilePath $env:GITHUB_WORKSPACE; $partition = Get-Partition -DriveLetter $volume.DriveLetter; $disk = Get-Disk -Number $partition.DiskNumber; Write-Output "Windows OS:"; $os | Select-Object Caption, Version, BuildNumber | ConvertTo-Json -Compress; Write-Output "Workspace volume and disk:"; [pscustomobject]@{ DriveLetter = $volume.DriveLetter; FileSystemType = $volume.FileSystemType; DriveType = $volume.DriveType; DiskNumber = $disk.Number; BusType = $disk.BusType; FriendlyName = $disk.FriendlyName; PartitionStyle = $disk.PartitionStyle } | ConvertTo-Json -Compress; Write-Output "Runner identity:"; whoami; Write-Output "Workspace ACL:"; icacls $env:GITHUB_WORKSPACE; Write-Output "Runner temp ACL:"; icacls $env:RUNNER_TEMP'
         fi
         export QUBIT_LOCAL_FILES_REQUIRE_SYMLINKS=1
         run_named_test() {
