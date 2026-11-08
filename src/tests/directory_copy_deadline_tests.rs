@@ -20,7 +20,7 @@ use crate::options::LocalDirectoryOpenOptions;
 use crate::tests::rooted::support::resolution_observation_tests;
 
 #[test]
-fn directory_copy_deadline_covers_handle_path_prevalidation() {
+fn test_directory_copy_deadline_covers_handle_path_prevalidation() {
     let fixture = tempfile::tempdir().expect("fixture should exist");
     fs::write(fixture.path().join("source"), b"source").expect("source should exist");
     let handle = LocalFileSystem::rooted(fixture.path())
@@ -50,7 +50,7 @@ fn directory_copy_deadline_covers_handle_path_prevalidation() {
 }
 
 #[test]
-fn copy_started_at_helper_does_not_restart_an_expired_budget() {
+fn test_copy_started_at_helper_does_not_restart_an_expired_budget() {
     let fixture = tempfile::tempdir().expect("fixture should exist");
     fs::write(fixture.path().join("source"), b"source").expect("source should exist");
     let filesystem = LocalFileSystem::rooted(fixture.path()).expect("rooted filesystem should open");

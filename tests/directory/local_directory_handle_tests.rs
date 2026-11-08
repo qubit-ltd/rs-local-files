@@ -39,7 +39,7 @@ fn populated_directory() -> (tempfile::TempDir, LocalDirectoryHandle) {
 }
 
 #[test]
-fn directory_handle_observes_entries_and_opens_bound_readers() {
+fn test_directory_handle_observes_entries_and_opens_bound_readers() {
     let (_fixture, directory) = populated_directory();
 
     assert_eq!(
@@ -131,7 +131,7 @@ fn directory_handle_observes_entries_and_opens_bound_readers() {
 }
 
 #[test]
-fn directory_handle_creates_writes_and_copies_with_options() {
+fn test_directory_handle_creates_writes_and_copies_with_options() {
     let (fixture, directory) = populated_directory();
     let created = directory
         .create_directory_with_options(Path::new("created"), &LocalCreateDirectoryOptions::new())
@@ -163,7 +163,7 @@ fn directory_handle_creates_writes_and_copies_with_options() {
 }
 
 #[test]
-fn directory_handle_copy_deadline_zero_preserves_destination_and_parent() {
+fn test_directory_handle_copy_deadline_zero_preserves_destination_and_parent() {
     let (fixture, directory) = populated_directory();
     std::fs::write(fixture.path().join("existing"), b"original").expect("existing destination should be written");
 
@@ -181,7 +181,10 @@ fn directory_handle_copy_deadline_zero_preserves_destination_and_parent() {
     assert_eq!(failure.error().operation(), LocalFileOperation::Copy);
     assert_eq!(failure.error().io_error_kind(), std::io::ErrorKind::TimedOut);
     assert_eq!(failure.partial_stats().files(), 0);
-    assert_eq!(std::fs::read(fixture.path().join("existing")).unwrap(), b"original");
+    assert_eq!(
+        std::fs::read(fixture.path().join("existing")).expect("existing destination should remain readable"),
+        b"original"
+    );
 
     let failure = directory
         .copy_with_options(

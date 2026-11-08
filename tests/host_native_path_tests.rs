@@ -11,13 +11,13 @@ use std::fs;
 use std::path::Path;
 
 use qubit_io::Output;
-#[cfg(windows)]
-mod support;
-
 use qubit_local_files::LocalFileSystem;
 use qubit_local_files::error::LocalFileErrorKind;
 #[cfg(unix)]
 use qubit_local_files::policy::LocalSymlinkPolicy;
+
+#[cfg(windows)]
+mod support;
 
 /// Returned listing paths retain the requested spelling, including macOS's
 /// canonical /private/var prefix rather than an invented /var alias.

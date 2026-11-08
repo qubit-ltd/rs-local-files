@@ -198,6 +198,13 @@ pub(super) fn copy_symlink(
 
 /// Maps native publication facts plus prior destination removal into the
 /// strongest end-to-end copy state.
+///
+/// # Parameters
+///
+/// - `state`: Describes the native destination state after link creation
+///   failed.
+/// - `replaced_existing`: Indicates whether the previous destination was
+///   removed before publication was attempted.
 fn publication_failure_stage(state: RootedSymlinkCreateFailureState, replaced_existing: bool) -> Stage {
     match state {
         RootedSymlinkCreateFailureState::Unchanged if replaced_existing => Stage::PublishSymlinkPartially,

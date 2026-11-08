@@ -37,7 +37,6 @@ impl LocalRenameOptions {
     }
 
     /// Returns the requested durability.
-    #[must_use = "inspect the requested durability"]
     #[inline]
     pub const fn durability(&self) -> LocalDurabilityRequirement {
         self.durability
@@ -50,6 +49,10 @@ impl LocalRenameOptions {
     }
 
     /// Sets the required durability.
+    ///
+    /// # Parameters
+    ///
+    /// * `requirement` - Durability level to require for the rename operation.
     pub const fn with_durability(mut self, requirement: LocalDurabilityRequirement) -> Self {
         self.durability = requirement;
         self

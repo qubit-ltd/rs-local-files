@@ -54,7 +54,7 @@ pub(crate) fn run_read_hook() {
 /// Its [`Debug`] output reports the byte length and observations without
 /// including the snapshot body.
 ///
-/// # Example
+/// # Examples
 ///
 /// ```no_run
 /// use qubit_io::Output;
@@ -86,6 +86,16 @@ pub struct LocalFileSnapshot {
 }
 
 impl std::fmt::Debug for LocalFileSnapshot {
+    /// Formats the snapshot without exposing its potentially sensitive bytes.
+    ///
+    /// # Parameters
+    ///
+    /// * `formatter` - Destination formatter supplied by the formatting caller.
+    ///
+    /// # Returns
+    ///
+    /// Returns the formatter result after writing the byte length and both
+    /// observations.
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter
             .debug_struct("LocalFileSnapshot")
@@ -98,23 +108,40 @@ impl std::fmt::Debug for LocalFileSnapshot {
 
 impl LocalFileSnapshot {
     /// Creates a snapshot value after the read path has completed its checks.
+    ///
+    /// # Parameters
+    ///
+    /// * `bytes` - Bytes returned by the bounded read.
+    /// * `before` - Observation taken from the opened file before reading.
+    /// * `after` - Observation taken from the same opened file after reading.
+    ///
+    /// The caller must already have verified that the observations and byte
+    /// count satisfy the snapshot policy.
     pub(crate) const fn new(bytes: Vec<u8>, before: LocalFileObservation, after: LocalFileObservation) -> Self {
         Self { bytes, before, after }
     }
 
     /// Returns the collected bytes without copying them.
+    #[must_use]
+    #[inline]
     pub fn bytes(&self) -> &[u8] {
         &self.bytes
     }
     /// Consumes the snapshot and returns its bytes, dropping both observations.
+    #[must_use]
+    #[inline]
     pub fn into_bytes(self) -> Vec<u8> {
         self.bytes
     }
     /// Returns the observation taken before reading the bytes.
+    #[must_use]
+    #[inline]
     pub const fn before(&self) -> &LocalFileObservation {
         &self.before
     }
     /// Returns the observation taken after reading the bytes.
+    #[must_use]
+    #[inline]
     pub const fn after(&self) -> &LocalFileObservation {
         &self.after
     }
@@ -125,6 +152,17 @@ impl LocalFileSnapshot {
 ///
 /// Identity, length, and native timestamps must all be available and equal;
 /// missing identity or native details therefore returns `false`.
+///
+/// # Parameters
+///
+/// * `before` - Observation taken before the read.
+/// * `after` - Observation taken after the read.
+/// * `count` - Number of bytes returned by the read.
+///
+/// # Returns
+///
+/// Returns `true` only when identity, length, native timestamps, and byte count
+/// agree; otherwise returns `false`.
 pub(crate) fn observations_match(before: &LocalFileObservation, after: &LocalFileObservation, count: u64) -> bool {
     match (before.identity(), after.identity()) {
         (Some(left), Some(right)) if left == right => {}
@@ -140,6 +178,16 @@ pub(crate) fn observations_match(before: &LocalFileObservation, after: &LocalFil
 }
 
 /// Compares the timestamp fields belonging to the same native platform.
+///
+/// # Parameters
+///
+/// * `left` - Native details from the earlier observation.
+/// * `right` - Native details from the later observation.
+///
+/// # Returns
+///
+/// Returns `true` when both values contain matching timestamp details for the
+/// same supported platform; otherwise returns `false`.
 fn native_match(left: &LocalNativeFileDetails, right: &LocalNativeFileDetails) -> bool {
     if let (Some(a), Some(b)) = (left.unix(), right.unix()) {
         return a.modified_seconds() == b.modified_seconds()

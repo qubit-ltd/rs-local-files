@@ -6,6 +6,16 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 
+use std::io::Read;
+use std::io::Seek;
+use std::io::Write;
+
+use qubit_io::ByteInput;
+use qubit_io::ByteOutput;
+use qubit_io::Input;
+use qubit_io::Output;
+use qubit_io::StdRead;
+use qubit_io::StdWrite;
 use qubit_local_files::LocalFileReader;
 use qubit_local_files::LocalFileWriter;
 use qubit_local_files::LocalTempFile;
@@ -24,20 +34,20 @@ macro_rules! assert_not_impl {
     };
 }
 
-assert_not_impl!(LocalFileReader, std::io::Read);
-assert_not_impl!(LocalFileReader, std::io::Write);
-assert_not_impl!(LocalFileReader, qubit_io::Output);
-assert_not_impl!(LocalFileWriter, std::io::Write);
-assert_not_impl!(LocalFileWriter, std::io::Read);
-assert_not_impl!(LocalFileWriter, qubit_io::Input);
-assert_not_impl!(LocalTempFile, std::io::Write);
-assert_not_impl!(LocalTempFile, std::io::Read);
-assert_not_impl!(LocalTempFile, qubit_io::Input);
+assert_not_impl!(LocalFileReader, Read);
+assert_not_impl!(LocalFileReader, Write);
+assert_not_impl!(LocalFileReader, Output);
+assert_not_impl!(LocalFileWriter, Write);
+assert_not_impl!(LocalFileWriter, Read);
+assert_not_impl!(LocalFileWriter, Input);
+assert_not_impl!(LocalTempFile, Write);
+assert_not_impl!(LocalTempFile, Read);
+assert_not_impl!(LocalTempFile, Input);
 
 #[test]
-fn native_handles_satisfy_byte_traits() {
-    fn input<T: qubit_io::ByteInput>() {}
-    fn output<T: qubit_io::ByteOutput>() {}
+fn test_native_handles_implement_byte_traits() {
+    fn input<T: ByteInput>() {}
+    fn output<T: ByteOutput>() {}
 
     input::<LocalFileReader>();
     output::<LocalFileWriter>();
@@ -45,12 +55,12 @@ fn native_handles_satisfy_byte_traits() {
 }
 
 #[test]
-fn adapters_supply_standard_traits_and_seek() {
-    fn reader<T: std::io::Read + std::io::Seek>() {}
-    fn writer<T: std::io::Write>() {}
-    fn seek_writer<T: std::io::Write + std::io::Seek>() {}
+fn test_standard_io_adapters_provide_read_write_and_seek() {
+    fn reader<T: Read + Seek>() {}
+    fn writer<T: Write>() {}
+    fn seek_writer<T: Write + Seek>() {}
 
-    reader::<qubit_io::StdRead<LocalFileReader>>();
-    writer::<qubit_io::StdWrite<LocalFileWriter>>();
-    seek_writer::<qubit_io::StdWrite<LocalTempFile>>();
+    reader::<StdRead<LocalFileReader>>();
+    writer::<StdWrite<LocalFileWriter>>();
+    seek_writer::<StdWrite<LocalTempFile>>();
 }

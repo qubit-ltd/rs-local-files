@@ -19,6 +19,11 @@ use std::path::PathBuf;
 /// the existing parent is a directory. Returns `InvalidInput` for a target
 /// without a parent, `NotADirectory` for a non-directory parent, or a native
 /// inspection/creation error. Created ancestors remain after later failures.
+///
+/// # Parameters
+///
+/// - `target`: Host path whose parent is prepared.
+/// - `create_parent`: Whether missing ancestors may be created.
 #[inline]
 pub(crate) fn host(target: &Path, create_parent: bool) -> io::Result<Vec<PathBuf>> {
     let parent = target
@@ -43,6 +48,12 @@ pub(crate) fn host(target: &Path, create_parent: bool) -> io::Result<Vec<PathBuf
 /// the parent directory without following its final link. A direct child uses
 /// the retained root. Returns path-validation, native traversal/creation, or
 /// `NotADirectory` errors. Successfully created ancestors are not rolled back.
+///
+/// # Parameters
+///
+/// - `root`: Retained authority used to inspect or create parent directories.
+/// - `target`: Root-relative target whose parent is prepared.
+/// - `create_parent`: Whether missing ancestors may be created.
 #[inline]
 pub(crate) fn rooted(
     root: &crate::rooted::Root,

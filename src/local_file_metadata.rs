@@ -95,7 +95,6 @@ impl LocalFileMetadata {
     }
 
     /// Returns the normalized entry kind.
-    #[must_use = "the normalized entry kind should be inspected"]
     #[inline]
     pub const fn kind(&self) -> LocalFileKind {
         self.kind
@@ -118,6 +117,10 @@ impl LocalFileMetadata {
     }
 
     /// Returns the access time, or `None` when unavailable.
+    ///
+    /// # Returns
+    ///
+    /// The entry's access time when the platform exposes it; otherwise `None`.
     #[cfg_attr(coverage, inline(never))]
     #[cfg_attr(not(coverage), inline)]
     pub const fn accessed_at(&self) -> Option<SystemTime> {
@@ -125,6 +128,11 @@ impl LocalFileMetadata {
     }
 
     /// Returns the modification time, or `None` when unavailable.
+    ///
+    /// # Returns
+    ///
+    /// The entry's modification time when the platform exposes it; otherwise
+    /// `None`.
     #[cfg_attr(coverage, inline(never))]
     #[cfg_attr(not(coverage), inline)]
     pub const fn modified_at(&self) -> Option<SystemTime> {
@@ -132,6 +140,11 @@ impl LocalFileMetadata {
     }
 
     /// Returns the creation time, or `None` when unavailable.
+    ///
+    /// # Returns
+    ///
+    /// The entry's creation time when the platform exposes it; otherwise
+    /// `None`.
     #[cfg_attr(coverage, inline(never))]
     #[cfg_attr(not(coverage), inline)]
     pub const fn created_at(&self) -> Option<SystemTime> {
@@ -139,7 +152,6 @@ impl LocalFileMetadata {
     }
 
     /// Returns permissions observed with this metadata value.
-    #[must_use = "the observed permissions should be inspected"]
     #[cfg_attr(coverage, inline(never))]
     #[cfg_attr(not(coverage), inline)]
     pub const fn permissions(&self) -> LocalFilePermissions {

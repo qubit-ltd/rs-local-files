@@ -34,6 +34,36 @@ impl LocalStagedDirectory {
     /// caller. Any `cleanup_error` reports a failed attempt to remove this
     /// write's staging file; it is distinct from private temporary recovery.
     /// Cleaning the whole stage may remove other files already created there.
+    ///
+    /// # Type Parameters
+    ///
+    /// `S` is the input type implementing [`ByteInput`]. Unsized inputs such as
+    /// byte slices are accepted through the mutable reference.
+    ///
+    /// # Parameters
+    ///
+    /// * `relative` is the path beneath the stage and must satisfy the
+    ///   directory's checked-path rules.
+    /// * `input` supplies bytes; bytes already consumed cannot be restored on
+    ///   failure.
+    /// * `maximum` is the greatest number of bytes accepted from `input`.
+    ///
+    /// # Returns
+    ///
+    /// The observation of the newly created file, including its identity when
+    /// the platform provides one.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if path validation, file creation, reading, writing,
+    /// committing, observation, or stage ownership recording fails. A failed
+    /// write may include an additional cleanup error while leaving the stage
+    /// responsible for recovery.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the stage has lost its cleanup owner before recording the
+    /// newly created entry.
     pub fn write_file_new<S: ByteInput + ?Sized>(
         &mut self,
         relative: &Path,
@@ -118,6 +148,33 @@ impl LocalStagedDirectory {
         Ok(observation)
     }
 
+    /// Creates a new file through retained native directory authority when
+    /// privacy or owner-access settings require a private write path.
+    ///
+    /// The created entry remains owned by the stage after success. Failures
+    /// before identity is known retain explicit recovery responsibility;
+    /// failures after identity is known attempt identity-checked cleanup.
+    ///
+    /// # Type Parameters
+    ///
+    /// `S` is the input type implementing [`ByteInput`]; unsized inputs are
+    /// accepted through the mutable reference.
+    ///
+    /// # Parameters
+    ///
+    /// * `relative` is the validated path beneath the stage.
+    /// * `input` supplies the bytes to write; consumed bytes cannot be restored
+    ///   if the write fails.
+    /// * `maximum` is the greatest number of bytes accepted from `input`.
+    ///
+    /// # Returns
+    ///
+    /// The observation of the newly created file after the write completes.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if path validation, parent authority acquisition,
+    /// creation, observation, reading, writing, or final observation fails.
     fn write_private_file_new<S: ByteInput + ?Sized>(
         &self,
         relative: &Path,
@@ -255,6 +312,26 @@ impl LocalStagedDirectory {
         crate::observation::query::query_observation(&file, crate::observation::LocalObservationRequirement::Required)
     }
 
+    /// Creates missing parent directories with the configured owner policy and
+    /// verifies that existing entries are owner-accessible directories.
+    ///
+    /// Each component is opened relative to retained directory authority so a
+    /// failed verification does not transfer ownership of existing entries.
+    ///
+    /// # Parameters
+    ///
+    /// * `parent_relative` is the relative parent path whose components are
+    ///   created or verified under the retained owner-access policy.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if a parent authority cannot be cloned, a component
+    /// cannot be created or opened as a directory, or owner access cannot be
+    /// verified.
+    ///
+    /// # Panics
+    ///
+    /// Panics if called without a retained owner-access policy.
     fn ensure_owner_parent_directories(&self, parent_relative: &Path) -> LocalResult<()> {
         let policy = self.owner_access_policy.as_ref().expect("owner policy checked");
         let mut path = PathBuf::new();
@@ -347,6 +424,17 @@ impl LocalStagedDirectory {
     }
 }
 
+/// Aborts a failed staged write while preserving both its original cause and
+/// any cleanup failure produced by the abort attempt.
+///
+/// # Parameters
+///
+/// * `writer` is the staged writer whose pending file should be aborted.
+/// * `cause` is the original write failure to preserve.
+///
+/// # Returns
+///
+/// The original cause, with any abort failure attached as a cleanup error.
 fn abort_failed_stage_write(writer: &mut crate::writer::LocalFileWriter, cause: LocalFileError) -> LocalFileError {
     match writer.abort() {
         Ok(_) => cause,
@@ -354,6 +442,17 @@ fn abort_failed_stage_write(writer: &mut crate::writer::LocalFileWriter, cause: 
     }
 }
 
+/// Converts a failed commit into its primary error and aborts any retry writer
+/// retained by the commit failure.
+///
+/// # Parameters
+///
+/// * `error` is the failed commit and may retain a writer that can be aborted.
+///
+/// # Returns
+///
+/// The primary commit error, with a retry-writer abort failure attached when
+/// aborting the retained writer fails.
 fn abort_failed_stage_commit(error: crate::writer::LocalFileCommitError) -> LocalFileError {
     let (cause, _, retry) = error.into_parts();
     match retry {
@@ -453,6 +552,7 @@ mod commit_cleanup_tests {
 
 #[cfg(all(test, unix))]
 mod native_write_failure_tests {
+    use std::os::unix::fs::MetadataExt;
     use std::path::Path;
 
     use crate::LocalFileErrorKind;
@@ -613,7 +713,6 @@ mod native_write_failure_tests {
         assert_eq!(error.kind(), LocalFileErrorKind::Io);
         assert_eq!(error.operation(), LocalFileOperation::OpenRoot);
         assert_eq!(error.path(), Some(Path::new("nested")));
-        use std::os::unix::fs::MetadataExt;
         assert_eq!(
             std::fs::metadata(&path).expect("unchanged directory").ino(),
             before.ino()

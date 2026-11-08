@@ -17,7 +17,7 @@ use qubit_local_files::options::LocalObservedReadOptions;
 use qubit_local_files::options::LocalPathBindingOptions;
 
 #[test]
-fn observed_reader_rejects_unrepresentable_binding_deadline() {
+fn test_observed_reader_rejects_unrepresentable_binding_deadline() {
     assert!(std::time::Instant::now().checked_add(Duration::MAX).is_none());
     let fixture = tempfile::tempdir().expect("fixture directory should be created");
     std::fs::write(fixture.path().join("item"), b"payload").expect("fixture file should be written");
@@ -62,7 +62,7 @@ fn observed_reader_rejects_unrepresentable_binding_deadline() {
 }
 
 #[test]
-fn child_directory_open_rejects_unrepresentable_binding_deadline() {
+fn test_child_directory_open_rejects_unrepresentable_binding_deadline() {
     assert!(std::time::Instant::now().checked_add(Duration::MAX).is_none());
     let fixture = tempfile::tempdir().expect("fixture directory should be created");
     std::fs::create_dir(fixture.path().join("child")).expect("child directory should be created");
@@ -90,7 +90,7 @@ fn child_directory_open_rejects_unrepresentable_binding_deadline() {
 }
 
 #[test]
-fn directory_handle_acquisition_rejects_unrepresentable_binding_deadline() {
+fn test_directory_handle_acquisition_rejects_unrepresentable_binding_deadline() {
     assert!(std::time::Instant::now().checked_add(Duration::MAX).is_none());
     let fixture = tempfile::tempdir().expect("fixture directory should be created");
     let filesystem = LocalFileSystem::rooted(fixture.path()).expect("rooted filesystem should open");
@@ -114,7 +114,7 @@ fn directory_handle_acquisition_rejects_unrepresentable_binding_deadline() {
 }
 
 #[test]
-fn fixed_directory_reader_accepts_finite_authority_and_reader_deadlines() {
+fn test_fixed_directory_reader_accepts_finite_authority_and_reader_deadlines() {
     let fixture = tempfile::tempdir().expect("fixture directory should be created");
     std::fs::write(fixture.path().join("item"), b"payload").expect("fixture file should be written");
     let filesystem = LocalFileSystem::rooted(fixture.path()).expect("rooted filesystem should open");

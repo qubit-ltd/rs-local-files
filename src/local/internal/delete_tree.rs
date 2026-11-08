@@ -27,6 +27,11 @@ use crate::error::LocalFileEffectState;
 /// cooperative deadline check; an in-flight filesystem call cannot be
 /// interrupted.
 ///
+/// # Type Parameters
+///
+/// * `B` supplies the path, metadata, and directory-reader types together with
+///   the filesystem operations used by the traversal.
+///
 /// # Parameters
 ///
 /// * `backend` provides filesystem operations and path conversion for this

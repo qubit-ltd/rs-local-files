@@ -7,6 +7,8 @@
 // =============================================================================
 
 use std::fs;
+#[cfg(unix)]
+use std::os::unix::fs::symlink;
 use std::path::Path;
 use std::path::PathBuf;
 
@@ -136,8 +138,6 @@ fn test_creation_parent_is_a_snapshot_after_close_and_keep() {
 #[test]
 #[cfg(unix)]
 fn test_creation_parent_uses_the_active_namespace_for_alias_parents() {
-    use std::os::unix::fs::symlink;
-
     let directory = tempdir().expect("temporary root should be created");
     fs::create_dir(directory.path().join("real")).expect("real parent should be created");
     symlink("real", directory.path().join("alias")).expect("parent alias should be created");

@@ -27,6 +27,7 @@ use crate::rooted_local_file_system::resolve_rooted_path;
 struct NoopPolicy(Arc<std::sync::atomic::AtomicUsize>);
 
 impl LocalResolutionPolicy for NoopPolicy {
+    #[inline]
     fn validate_component(
         &self,
         _: &OsStr,
@@ -37,6 +38,7 @@ impl LocalResolutionPolicy for NoopPolicy {
         Ok(())
     }
 
+    #[inline]
     fn validate_symlink_target(&self, _: &std::path::Path, _: LocalResolutionScope) -> crate::LocalResult<()> {
         Ok(())
     }
@@ -46,6 +48,7 @@ impl LocalResolutionPolicy for NoopPolicy {
 struct RejectPolicy;
 
 impl LocalResolutionPolicy for RejectPolicy {
+    #[inline]
     fn validate_component(
         &self,
         component: &OsStr,
@@ -61,6 +64,7 @@ impl LocalResolutionPolicy for RejectPolicy {
         Ok(())
     }
 
+    #[inline]
     fn validate_symlink_target(&self, _: &std::path::Path, _: LocalResolutionScope) -> crate::LocalResult<()> {
         Ok(())
     }
@@ -237,4 +241,64 @@ fn test_complete_resolver_contextualizes_pending_budget_errors() {
         crate::LocalResourceKind::PendingResolutionBytes,
         error.resource_limit_error().expect("typed resource facts").resource()
     );
+}
+
+#[cfg(unix)]
+#[test]
+fn test_symlink_expansion_accounts_for_retained_resolved_prefix() {
+    use std::os::unix::fs::symlink;
+    use std::path::Path;
+
+    use crate::LocalFileErrorKind;
+    use crate::LocalResourceKind;
+
+    let fixture = tempfile::tempdir().expect("root fixture should exist");
+    fs::create_dir_all(fixture.path().join("a/b")).expect("target prefix should exist");
+    fs::write(fixture.path().join("a/b/ccc"), b"payload").expect("target file should exist");
+    symlink("b/ccc", fixture.path().join("a/l")).expect("relative link should exist");
+    let unrestricted = Root::open(fixture.path()).expect("root authority should open");
+    // Each input and target fits separately, but the retained `a` makes resolution
+    // exceed either limit.
+    let cases = [
+        (
+            LocalResolutionLimits::new().with_max_actual_components(2),
+            LocalResourceKind::ResolvedComponents,
+            2,
+            3,
+        ),
+        (
+            LocalResolutionLimits::new().with_max_resolved_path_bytes(7),
+            LocalResourceKind::ResolvedPathBytes,
+            7,
+            8,
+        ),
+    ];
+    for (limits, resource, limit, observed) in cases {
+        let root = Root::from_directory_authority_with_contract(
+            unrestricted.try_clone_authority().expect("authority should clone"),
+            unrestricted.path().to_path_buf(),
+            ResolutionContract::unrestricted().tightened(limits),
+        );
+        let path = Path::new("a/l");
+        let error = resolve_rooted_path(
+            &root,
+            path,
+            LocalSymlinkPolicy::FollowWithinScope,
+            true,
+            LocalFileOperation::List,
+        )
+        .expect_err("retained prefix and expanded target must share the resolved budget");
+        assert_eq!(error.kind(), LocalFileErrorKind::ResourceLimit);
+        assert_eq!(error.operation(), LocalFileOperation::List);
+        assert_eq!(error.path(), Some(path));
+        let facts = error
+            .resource_limit_error()
+            .expect("resolution failure must preserve budget facts");
+        assert_eq!(facts.resource(), resource);
+        assert_eq!(facts.limit(), limit);
+        assert_eq!(facts.remaining(), 0);
+        assert_eq!(facts.requested(), 1);
+        assert_eq!(facts.observed(), Some(observed));
+        assert!(!facts.overflowed());
+    }
 }

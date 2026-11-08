@@ -63,12 +63,35 @@ use super::LocalFileSystemObservation;
 /// ```
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LocalSecurityObservation {
+    /// Native identity of the retained object, when the platform reports one.
     identity: Option<super::LocalFileIdentity>,
+    /// Filesystem classification and native details, when the query succeeds.
     filesystem: Option<LocalFileSystemObservation>,
+    /// Platform access-control facts, when the query succeeds.
     access: Option<LocalAccessObservation>,
+    /// Native hard-link count, when the platform reports one.
     link_count: Option<u64>,
 }
 impl LocalSecurityObservation {
+    /// Combines the independently obtained security facts for one retained
+    /// object.
+    ///
+    /// Platform query backends use this constructor after checking that the
+    /// retained handle still refers to the expected object. Each absent value
+    /// represents an unavailable or unsupported fact; this value does not make
+    /// the observations atomic or guarantee future permissions.
+    ///
+    /// # Parameters
+    ///
+    /// - `identity`: Native object identity, or `None` when unavailable.
+    /// - `filesystem`: Filesystem facts, or `None` when unavailable.
+    /// - `access`: Access-control facts, or `None` when unavailable.
+    /// - `link_count`: Native link count, or `None` when unavailable.
+    ///
+    /// # Returns
+    ///
+    /// An observation containing the supplied facts without additional queries.
+    #[inline]
     pub(crate) const fn new(
         identity: Option<super::LocalFileIdentity>,
         filesystem: Option<LocalFileSystemObservation>,
@@ -83,6 +106,13 @@ impl LocalSecurityObservation {
         }
     }
     /// Returns the object's identity when the platform supplied it.
+    ///
+    /// # Returns
+    ///
+    /// `Some(identity)` contains the native object identity; `None` means the
+    /// platform did not provide one.
+    #[must_use]
+    #[inline]
     pub const fn identity(&self) -> Option<&super::LocalFileIdentity> {
         self.identity.as_ref()
     }
@@ -90,6 +120,13 @@ impl LocalSecurityObservation {
     ///
     /// `None` means this fact is unsupported or unavailable; an optional
     /// requirement does not skip the query.
+    ///
+    /// # Returns
+    ///
+    /// `Some(filesystem)` contains the observed filesystem facts; `None` means
+    /// they were unavailable or unsupported.
+    #[must_use]
+    #[inline]
     pub const fn filesystem(&self) -> Option<&LocalFileSystemObservation> {
         self.filesystem.as_ref()
     }
@@ -98,6 +135,13 @@ impl LocalSecurityObservation {
     /// `None` means the platform does not provide these facts under the
     /// selected query requirements; permission and malformed-data failures
     /// are returned by the observation operation as errors.
+    ///
+    /// # Returns
+    ///
+    /// `Some(access)` contains observed access-control facts; `None` means the
+    /// selected query did not provide them.
+    #[must_use]
+    #[inline]
     pub const fn access(&self) -> Option<&LocalAccessObservation> {
         self.access.as_ref()
     }
@@ -105,6 +149,13 @@ impl LocalSecurityObservation {
     ///
     /// `None` means the native query is unsupported or unavailable; optional
     /// requirements still attempt the query.
+    ///
+    /// # Returns
+    ///
+    /// `Some(count)` is the native link count; `None` means it was unavailable
+    /// or unsupported.
+    #[must_use]
+    #[inline]
     pub const fn link_count(&self) -> Option<u64> {
         self.link_count
     }

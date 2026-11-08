@@ -6,6 +6,15 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 /// Requested final access policy for a staged directory tree.
+///
+/// # Examples
+///
+/// ```
+/// use qubit_local_files::policy::LocalTreeFinalAccess;
+///
+/// let access = LocalTreeFinalAccess::CurrentUserOnly;
+/// assert_ne!(access, LocalTreeFinalAccess::Preserve);
+/// ```
 #[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub enum LocalTreeFinalAccess {

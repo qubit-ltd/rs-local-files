@@ -10,6 +10,18 @@ use std::fs::File;
 use std::path::Path;
 use std::path::PathBuf;
 
+use super::tree_recovery::LocalTreeRetainedResource;
+use crate::LocalFileError;
+use crate::LocalFileErrorKind;
+use crate::LocalFileOperation;
+use crate::directory::LocalDirectoryHandle;
+use crate::error::LocalResult;
+use crate::observation::LocalFileIdentity;
+#[cfg(unix)]
+use crate::options::LocalDirectoryOpenOptions;
+use crate::options::LocalTempCleanupLimits;
+use crate::options::LocalTempDirectoryOptions;
+
 #[cfg(all(test, unix))]
 impl LocalStagedDirectory {
     pub(crate) fn test_review_tree_sync_orders_files_directories_root_and_parent() {
@@ -31,18 +43,6 @@ pub(crate) fn install_stage_created_hook(hook: impl FnOnce(&Path) + 'static) -> 
     crate::directory::LocalDirectoryHandle::install_stage_created_hook(hook)
 }
 
-use super::tree_recovery::LocalTreeRetainedResource;
-use crate::LocalFileError;
-use crate::LocalFileErrorKind;
-use crate::LocalFileOperation;
-use crate::directory::LocalDirectoryHandle;
-use crate::error::LocalResult;
-use crate::observation::LocalFileIdentity;
-#[cfg(unix)]
-use crate::options::LocalDirectoryOpenOptions;
-use crate::options::LocalTempCleanupLimits;
-use crate::options::LocalTempDirectoryOptions;
-
 const MAX_OWNER_POLICY_ENTRY_HANDLES: usize = 256;
 
 /// A temporary directory retained under a fixed parent authority.
@@ -58,7 +58,8 @@ const MAX_OWNER_POLICY_ENTRY_HANDLES: usize = 256;
 /// # Examples
 ///
 /// ```no_run
-/// use qubit_local_files::options::{LocalDirectoryOpenOptions, LocalTempDirectoryOptions};
+/// use qubit_local_files::options::LocalDirectoryOpenOptions;
+/// use qubit_local_files::options::LocalTempDirectoryOptions;
 /// use qubit_local_files::LocalFileSystem;
 ///
 /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -89,6 +90,11 @@ pub struct LocalStagedDirectory {
 }
 
 impl std::fmt::Debug for LocalStagedDirectory {
+    /// Formats stage state without exposing its potentially sensitive path.
+    ///
+    /// # Parameters
+    ///
+    /// - `formatter`: Destination for the debug representation.
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter
             .debug_struct("LocalStagedDirectory")
@@ -105,16 +111,36 @@ impl std::fmt::Debug for LocalStagedDirectory {
     }
 }
 
+// Implements staged-directory observation, cleanup, and access policies.
 #[path = "local_staged_directory/access.rs"]
 mod access;
+#[path = "local_staged_directory/internal/mod.rs"]
+mod internal;
+// Implements publishing and publication recovery for staged directories.
 #[path = "local_staged_directory/publish.rs"]
 mod publish;
+// Implements staged file and tree synchronization operations.
 #[path = "local_staged_directory/sync.rs"]
 mod sync;
+// Implements writes into the retained staged-directory authority.
 #[path = "local_staged_directory/write.rs"]
 mod write;
 
 impl LocalStagedDirectory {
+    /// Builds a stage from its retained cleanup owner and open directory
+    /// authority.
+    ///
+    /// The captured identity and access policy remain associated with the stage
+    /// for later validation and publication.
+    ///
+    /// # Parameters
+    ///
+    /// - `owner`: Retained resource responsible for cleanup.
+    /// - `directory`: Open authority for operations beneath the stage root.
+    /// - `relative_name`: Stage name relative to its creating parent.
+    /// - `identity`: Captured root identity, when available.
+    /// - `private`: Whether private access settings were used.
+    /// - `owner_access_policy`: Optional owner policy retained with the stage.
     pub(crate) fn new(
         owner: LocalTreeRetainedResource,
         directory: LocalDirectoryHandle,
@@ -132,16 +158,25 @@ impl LocalStagedDirectory {
             owner_access_policy,
         }
     }
-    pub(in crate::directory) fn validate_owner_policy(
-        policy: &crate::policy::LocalOwnerAccessPolicy,
-    ) -> LocalResult<()> {
-        super::staged::validate_owner_policy(policy)
-    }
-
+    /// Generates a stage name using the configured prefix and suffix.
+    ///
+    /// # Parameters
+    ///
+    /// - `options`: Prefix and suffix configuration for the generated name.
     pub(in crate::directory) fn stage_name(options: &LocalTempDirectoryOptions) -> LocalResult<std::ffi::OsString> {
         super::staged::stage_name(options)
     }
 
+    /// Creates the stage root beneath its retained parent authority.
+    ///
+    /// When an owner policy is supplied, creation applies that policy;
+    /// otherwise the directory uses the platform's private defaults.
+    ///
+    /// # Parameters
+    ///
+    /// - `parent`: Fixed authority beneath which the stage is created.
+    /// - `name`: Single stage name relative to `parent`.
+    /// - `owner_policy`: Optional access policy applied to the new directory.
     pub(in crate::directory) fn create_stage_directory(
         parent: &crate::rooted::Root,
         name: &OsStr,
@@ -150,40 +185,65 @@ impl LocalStagedDirectory {
         super::staged::create_stage_directory(parent, name, owner_policy)
     }
 
+    /// Returns the fixed authority for this stage.
+    #[must_use]
+    #[inline]
+    pub fn directory(&self) -> &LocalDirectoryHandle {
+        self.directory.as_ref().expect("stage authority is open")
+    }
+    /// Returns the stage name relative to its creating parent authority.
+    #[must_use]
+    #[inline]
+    pub fn relative_name(&self) -> &OsStr {
+        self.relative_name.as_os_str()
+    }
+    /// Returns the captured native identity, or `None` when the platform did
+    /// not provide one.
+    #[inline]
+    pub fn identity(&self) -> Option<&LocalFileIdentity> {
+        self.identity.as_ref()
+    }
+    /// Returns the exact owner policy retained for this stage, or `None` when
+    /// no owner access policy was configured.
+    #[inline]
+    pub const fn owner_access_policy(&self) -> Option<&crate::policy::LocalOwnerAccessPolicy> {
+        self.owner_access_policy.as_ref()
+    }
+    /// Sets the limits used by explicit cleanup and the final Drop attempt.
+    ///
+    /// # Parameters
+    ///
+    /// - `limits`: Resource ceilings applied to cleanup attempts.
+    pub fn set_cleanup_limits(&mut self, limits: LocalTempCleanupLimits) {
+        if let Some(owner) = &mut self.owner {
+            owner.set_cleanup_limits(limits);
+        }
+    }
+
+    /// Rejects owner access policies that cannot be represented by this
+    /// platform.
+    ///
+    /// # Parameters
+    ///
+    /// - `policy`: Access policy whose native permission bits are validated.
+    pub(in crate::directory) fn validate_owner_policy(
+        policy: &crate::policy::LocalOwnerAccessPolicy,
+    ) -> LocalResult<()> {
+        super::staged::validate_owner_policy(policy)
+    }
+
+    /// Enables cleanup after the reopened stage has passed validation.
     pub(in crate::directory) fn arm_after_reopen_validation(&mut self) {
         self.owner
             .as_mut()
             .expect("reopened stage cleanup owner is present")
             .arm_after_reopen_validation();
     }
-
-    /// Returns the fixed authority for this stage.
-    pub fn directory(&self) -> &LocalDirectoryHandle {
-        self.directory.as_ref().expect("stage authority is open")
-    }
-    /// Returns the stage name relative to its creating parent authority.
-    pub fn relative_name(&self) -> &OsStr {
-        self.relative_name.as_os_str()
-    }
-    /// Returns the captured native identity, or `None` when the platform did
-    /// not provide one.
-    pub fn identity(&self) -> Option<&LocalFileIdentity> {
-        self.identity.as_ref()
-    }
-    /// Returns the exact owner policy retained for this stage, or `None` when
-    /// no owner access policy was configured.
-    pub const fn owner_access_policy(&self) -> Option<&crate::policy::LocalOwnerAccessPolicy> {
-        self.owner_access_policy.as_ref()
-    }
-    /// Sets the limits used by explicit cleanup and the final Drop attempt.
-    pub fn set_cleanup_limits(&mut self, limits: LocalTempCleanupLimits) {
-        if let Some(owner) = &mut self.owner {
-            owner.set_cleanup_limits(limits);
-        }
-    }
 }
 
 impl Drop for LocalStagedDirectory {
+    /// Closes the stage handle before triggering the owner's final cleanup
+    /// attempt.
     fn drop(&mut self) {
         // Close the child authority before the owner attempts namespace cleanup.
         drop(self.directory.take());
@@ -191,6 +251,16 @@ impl Drop for LocalStagedDirectory {
     }
 }
 
+/// Opens a tree entry relative to the stage's fixed directory authority.
+///
+/// Directory entries are returned as cloned root handles; file entries are
+/// validated as relative paths before opening.
+///
+/// # Parameters
+///
+/// - `stage`: Stage whose fixed directory authority is used for traversal.
+/// - `relative`: Entry path beneath the stage root.
+/// - `kind`: Expected kind, which selects directory or file opening behavior.
 #[cfg(unix)]
 pub(in crate::directory) fn open_unix_tree_entry(
     stage: &LocalStagedDirectory,
@@ -234,6 +304,15 @@ pub(in crate::directory) fn open_unix_tree_entry(
         })
 }
 
+/// Opens an entry beneath the stage by walking from the retained Windows owner.
+///
+/// Handle-relative opens keep the operation bound to the owner authority.
+///
+/// # Parameters
+///
+/// - `stage`: Stage whose retained owner authority anchors traversal.
+/// - `relative`: Entry path beneath the stage root.
+/// - `kind`: Expected kind, which selects directory or file opening behavior.
 #[cfg(windows)]
 pub(in crate::directory) fn open_windows_tree_entry(
     stage: &LocalStagedDirectory,
@@ -243,6 +322,16 @@ pub(in crate::directory) fn open_windows_tree_entry(
     open_windows_tree_entry_with_sync(stage, relative, kind, false)
 }
 
+/// Opens an entry using the Windows access mode required for tree syncing.
+///
+/// File entries receive the sync-specific open mode while directory traversal
+/// keeps the ordinary directory access mode.
+///
+/// # Parameters
+///
+/// - `stage`: Stage whose retained owner authority anchors traversal.
+/// - `relative`: Entry path beneath the stage root.
+/// - `kind`: Expected kind, which selects directory or file opening behavior.
 #[cfg(windows)]
 pub(in crate::directory) fn open_windows_tree_entry_for_sync(
     stage: &LocalStagedDirectory,
@@ -252,6 +341,16 @@ pub(in crate::directory) fn open_windows_tree_entry_for_sync(
     open_windows_tree_entry_with_sync(stage, relative, kind, true)
 }
 
+/// Walks a Windows stage path and optionally requests sync-capable file access.
+///
+/// Path components are opened relative to retained handles.
+///
+/// # Parameters
+///
+/// - `stage`: Stage whose retained owner authority anchors traversal.
+/// - `relative`: Entry path beneath the stage root.
+/// - `kind`: Expected kind of the final entry.
+/// - `for_sync`: Whether file access must support the tree sync operation.
 #[cfg(windows)]
 fn open_windows_tree_entry_with_sync(
     stage: &LocalStagedDirectory,
@@ -290,10 +389,18 @@ fn open_windows_tree_entry_with_sync(
     Ok(current)
 }
 
+/// Constructs the stable resource-limit error used by bounded tree operations.
 fn resource_limit() -> LocalFileError {
     LocalFileError::new(LocalFileErrorKind::ResourceLimit, LocalFileOperation::Read)
 }
 
+/// Checks that the configured owner policy contains only supported access bits.
+///
+/// Policies are validated against the native masks for the current platform.
+///
+/// # Parameters
+///
+/// - `policy`: Access policy whose native permission bits are validated.
 pub(in crate::directory) fn validate_owner_policy(policy: &crate::policy::LocalOwnerAccessPolicy) -> LocalResult<()> {
     #[cfg(unix)]
     if let Some((directory, file)) = policy.unix_modes() {
@@ -321,6 +428,12 @@ pub(in crate::directory) fn validate_owner_policy(policy: &crate::policy::LocalO
     ))
 }
 
+/// Generates a randomized stage name and maps invalid options to the crate's
+/// stable invalid-options error kind.
+///
+/// # Parameters
+///
+/// - `options`: Prefix and suffix configuration for the generated name.
 pub(in crate::directory) fn stage_name(options: &LocalTempDirectoryOptions) -> LocalResult<std::ffi::OsString> {
     crate::local::try_random_file_name("qubit-stage-", options.prefix(), options.suffix())
         .map(Into::into)
@@ -335,6 +448,14 @@ pub(in crate::directory) fn stage_name(options: &LocalTempDirectoryOptions) -> L
         })
 }
 
+/// Creates a private directory under a cloned parent authority.
+///
+/// On injected test-support failure, the opened entry is retained for cleanup.
+///
+/// # Parameters
+///
+/// - `parent`: Authority to clone before creating the directory.
+/// - `name`: Single entry name beneath `parent`.
 fn create_private_directory(
     parent: &crate::rooted::Root,
     name: &OsStr,
@@ -389,6 +510,14 @@ fn create_private_directory(
     Ok(result)
 }
 
+/// Creates a stage directory with private defaults or the supplied owner
+/// policy.
+///
+/// # Parameters
+///
+/// - `parent`: Authority beneath which the stage is created.
+/// - `name`: Single stage name relative to `parent`.
+/// - `policy`: Optional owner access policy; `None` selects private defaults.
 pub(in crate::directory) fn create_stage_directory(
     parent: &crate::rooted::Root,
     name: &OsStr,
@@ -418,6 +547,12 @@ pub(in crate::directory) fn create_stage_directory(
     }
 }
 
+/// Creates a private file relative to its already-open parent directory handle.
+///
+/// # Parameters
+///
+/// - `parent`: Open authority for the containing directory.
+/// - `name`: Single file name relative to `parent`.
 fn create_private_file(parent: &File, name: &OsStr) -> Result<File, crate::temp::types::NativePrivateCreateError> {
     #[cfg(unix)]
     {
@@ -437,6 +572,13 @@ fn create_private_file(parent: &File, name: &OsStr) -> Result<File, crate::temp:
     }
 }
 
+/// Creates a stage file with the configured owner policy or private defaults.
+///
+/// # Parameters
+///
+/// - `parent`: Open authority for the containing directory.
+/// - `name`: Single file name relative to `parent`.
+/// - `policy`: Optional owner access policy; `None` selects private defaults.
 fn create_stage_file(
     parent: &File,
     name: &OsStr,
@@ -464,6 +606,17 @@ fn create_stage_file(
     }
 }
 
+/// Cleans up a partially created private file and preserves recovery ownership
+/// if cleanup itself fails.
+///
+/// # Parameters
+///
+/// - `cause`: Original error that caused cleanup to be attempted.
+/// - `parent`: Open authority for the file's containing directory.
+/// - `name`: Single file name relative to `parent`.
+/// - `file`: Handle to the partially created file.
+/// - `identity`: Captured identity used to guard cleanup, when available.
+/// - `path`: Diagnostic path included in recovery information.
 fn cleanup_partial_private_file(
     cause: LocalFileError,
     parent: File,

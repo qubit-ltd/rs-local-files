@@ -14,6 +14,11 @@ use crate::LocalResult;
 use crate::observation::LocalSourceVerification;
 use crate::observation::reader::ReaderPathBinding;
 
+/// Retains the name and identity needed to verify an observed file binding.
+///
+/// Verification reopens the captured path through the same filesystem policy
+/// and reports whether it still resolves to the original object. The binding
+/// keeps the reader options and limits used for that resolution.
 pub(crate) struct PathBinding {
     /// Namespace used to resolve the captured source name during verification.
     filesystem: LocalFileSystem,
@@ -29,6 +34,11 @@ pub(crate) struct PathBinding {
 }
 
 impl std::fmt::Debug for PathBinding {
+    /// Formats the binding while redacting its captured path.
+    ///
+    /// # Parameters
+    ///
+    /// * `formatter` — destination that receives the redacted debug fields.
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter
             .debug_struct("PathBinding")
@@ -43,6 +53,14 @@ impl std::fmt::Debug for PathBinding {
 
 impl PathBinding {
     /// Captures the inputs needed to re-resolve and compare a source binding.
+    ///
+    /// # Parameters
+    ///
+    /// * `filesystem` — filesystem namespace used for later path resolution.
+    /// * `path` — namespace-absolute path to resolve again.
+    /// * `identity` — identity observed when the reader was opened.
+    /// * `observed_options` — reader options to reuse during resolution.
+    /// * `options` — path-binding limits and deadline policy.
     pub(crate) fn new(
         filesystem: LocalFileSystem,
         path: PathBuf,
@@ -66,8 +84,22 @@ impl ReaderPathBinding for PathBinding {
         self.options.deadline()
     }
 
-    /// Reopens the captured name under the original filesystem and compares
-    /// the resulting identity with the initially observed identity.
+    /// Reopens the captured name and compares its identity with the original.
+    ///
+    /// # Parameters
+    ///
+    /// * `deadline` — optional cooperative deadline for this verification.
+    ///
+    /// # Returns
+    ///
+    /// `Unchanged` if the original identity is still resolved, `Changed` if a
+    /// different identity is resolved, or `Missing` if the name no longer
+    /// exists. Other resolution failures are returned as errors.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if path resolution fails for a reason other than the
+    /// captured name being absent, or if the verification deadline expires.
     fn verify_until(&self, deadline: Option<Instant>) -> LocalResult<LocalSourceVerification> {
         let result = self.filesystem.open_observed_reader_with_binding_deadline(
             &self.path,
@@ -106,7 +138,7 @@ mod tests {
     use crate::options::LocalPathBindingOptions;
 
     #[test]
-    fn path_binding_reopen_obeys_verification_deadline() {
+    fn test_path_binding_reopen_obeys_verification_deadline() {
         let directory = tempfile::tempdir().expect("fixture should exist");
         std::fs::write(directory.path().join("source"), b"source").expect("source should exist");
         let filesystem = LocalFileSystem::rooted(directory.path()).expect("root should open");

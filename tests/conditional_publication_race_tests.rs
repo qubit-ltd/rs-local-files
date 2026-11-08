@@ -10,37 +10,6 @@
 
 mod support;
 
-mod conditional {
-    use qubit_io::Input;
-    use qubit_local_files::LocalFileSystem;
-    use qubit_local_files::policy::LocalSymlinkPolicy;
-
-    pub fn host() -> LocalFileSystem {
-        let mut filesystem = LocalFileSystem::host().expect("host filesystem");
-        filesystem
-            .set_symlink_policy(LocalSymlinkPolicy::Reject)
-            .expect("reject symlinks");
-        filesystem
-    }
-
-    pub fn read_candidate(error: &qubit_local_files::error::LocalConditionalCommitError) -> Vec<u8> {
-        let candidate = error.candidate().expect("verified candidate copy");
-        read_recovery(candidate)
-    }
-
-    pub fn read_recovery(file: &qubit_local_files::recovery::LocalRecoveryFile) -> Vec<u8> {
-        let mut reader = file.open_reader().expect("open recovery file through retained access");
-        let mut bytes = Vec::new();
-        let mut buffer = [0_u8; 128];
-        loop {
-            match reader.read(&mut buffer).expect("read candidate") {
-                0 => return bytes,
-                count => bytes.extend_from_slice(&buffer[..count]),
-            }
-        }
-    }
-}
-
 use qubit_io::Output;
 use qubit_local_files::error::LocalFileOperation;
 use qubit_local_files::options::LocalWriteMode;
@@ -54,7 +23,9 @@ use qubit_local_files::test_support::TestFaultPoint;
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 use sha2::Digest;
 use sha2::Sha256;
-use support::conditional_temp_directory::tempdir;
+
+use self::support::conditional;
+use self::support::conditional_temp_directory::tempdir;
 
 #[test]
 fn test_conditional_hooks_debug_output_only_exposes_checkpoint() {
@@ -70,7 +41,7 @@ fn test_conditional_hooks_debug_output_only_exposes_checkpoint() {
 }
 
 #[test]
-fn absent_race_preserves_late_file_and_independent_candidate_copy() {
+fn test_absent_race_preserves_late_file_and_independent_candidate_copy() {
     let directory = tempdir().unwrap();
     let path = directory.path().join("target");
     let competitor = path.clone();
@@ -94,7 +65,7 @@ fn absent_race_preserves_late_file_and_independent_candidate_copy() {
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 #[test]
-fn after_precheck_inode_content_change_is_detected_and_restored() {
+fn test_after_precheck_inode_content_change_is_detected_and_restored() {
     let directory = tempdir().unwrap();
     let path = directory.path().join("target");
     std::fs::write(&path, b"A").unwrap();
@@ -119,7 +90,7 @@ fn after_precheck_inode_content_change_is_detected_and_restored() {
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 #[test]
-fn same_contents_on_a_new_inode_remain_eligible_for_content_publish() {
+fn test_same_contents_on_a_new_inode_remain_eligible_for_content_publish() {
     let directory = tempdir().unwrap();
     let path = directory.path().join("target");
     let replacement = directory.path().join("replacement");
@@ -149,7 +120,7 @@ fn same_contents_on_a_new_inode_remain_eligible_for_content_publish() {
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 #[test]
-fn aba_back_to_expected_contents_is_allowed_by_content_condition() {
+fn test_aba_back_to_expected_contents_is_allowed_by_content_condition() {
     let directory = tempdir().unwrap();
     let path = directory.path().join("target");
     std::fs::write(&path, b"A").unwrap();
@@ -176,7 +147,7 @@ fn aba_back_to_expected_contents_is_allowed_by_content_condition() {
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 #[test]
-fn symlink_replacement_after_precheck_is_not_followed_or_overwritten() {
+fn test_symlink_replacement_after_precheck_is_not_followed_or_overwritten() {
     let directory = tempdir().unwrap();
     let path = directory.path().join("target");
     let external = directory.path().join("external");
@@ -222,7 +193,7 @@ fn symlink_replacement_after_precheck_is_not_followed_or_overwritten() {
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 #[test]
-fn after_publish_change_is_never_overwritten_during_recovery() {
+fn test_after_publish_change_is_never_overwritten_during_recovery() {
     let directory = tempdir().unwrap();
     let path = directory.path().join("target");
     std::fs::write(&path, b"A").unwrap();
@@ -253,7 +224,7 @@ fn after_publish_change_is_never_overwritten_during_recovery() {
 }
 
 #[test]
-fn hooks_are_instance_local_and_shared_by_clones() {
+fn test_hooks_are_instance_local_and_shared_by_clones() {
     let directory = tempdir().unwrap();
     let first_path = directory.path().join("first");
     let second_path = directory.path().join("second");
@@ -284,7 +255,7 @@ fn hooks_are_instance_local_and_shared_by_clones() {
 }
 
 #[test]
-fn another_instance_does_not_consume_configured_hook() {
+fn test_another_instance_does_not_consume_configured_hook() {
     let directory = tempdir().unwrap();
     let target = directory.path().join("target");
     let calls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
@@ -311,7 +282,7 @@ fn another_instance_does_not_consume_configured_hook() {
 }
 
 #[test]
-fn conditional_hooks_and_existing_test_faults_survive_core_reconfiguration() {
+fn test_conditional_hooks_and_existing_test_faults_survive_core_reconfiguration() {
     let directory = tempdir().unwrap();
     let existing = directory.path().join("existing");
     let target = directory.path().join("target");

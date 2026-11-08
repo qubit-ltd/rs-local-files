@@ -5,9 +5,17 @@
 //
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
+use std::fmt::Debug;
+use std::fmt::Formatter;
+use std::fmt::Result as FmtResult;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+/// Retains the identity and reopening contract for a directory binding.
+///
+/// The anchor keeps both the diagnostic path and the original opening recipe
+/// so a later binding check can resolve the same authority under the original
+/// resolution limits and symlink policy. Its debug output redacts both paths.
 #[derive(Clone)]
 pub(crate) struct BindingAnchor {
     /// Diagnostic path associated with the retained identity.
@@ -25,8 +33,13 @@ pub(crate) struct BindingAnchor {
     pub(crate) symlink_policy: crate::LocalSymlinkPolicy,
 }
 
-impl std::fmt::Debug for BindingAnchor {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl Debug for BindingAnchor {
+    /// Formats the retained binding details while redacting path information.
+    ///
+    /// # Parameters
+    ///
+    /// * `formatter` - Receives the debug representation without either path.
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> FmtResult {
         formatter
             .debug_struct("BindingAnchor")
             .field("path", &crate::local_file_system::redacted_path(&self.path))

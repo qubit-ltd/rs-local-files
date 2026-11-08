@@ -23,6 +23,22 @@ use crate::LocalCopyDirStats;
 /// scheduler charges each descendant exactly once before backend processing.
 /// Only this function changes the stack. A backend may return one child frame.
 ///
+/// # Type Parameters
+///
+/// - `B`: Backend that supplies platform-specific entry operations and owns the
+///   frame and entry types used during traversal.
+///
+/// # Parameters
+///
+/// - `backend`: Mutable backend used to read, process, and finish directory
+///   frames.
+/// - `root_frame`: Already-opened root directory frame; its entry is charged by
+///   the caller.
+/// - `stats`: Accumulated copy statistics, updated as backend operations
+///   complete.
+/// - `budget`: Mutable limits and deadline state used to check and charge
+///   descendant work.
+///
 /// # Errors
 ///
 /// Returns the backend failure, preserving already-applied statistics, or a

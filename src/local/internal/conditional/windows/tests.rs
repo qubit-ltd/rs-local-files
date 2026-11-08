@@ -57,7 +57,7 @@ fn symlink_fixture_may_skip(required: bool, kind: io::ErrorKind) -> bool {
 }
 
 #[test]
-fn conditional_windows_symlink_fixture_skip_policy() {
+fn test_conditional_windows_symlink_fixture_skip_policy() {
     for (required, kind, expected_skip) in [
         (false, io::ErrorKind::PermissionDenied, true),
         (true, io::ErrorKind::PermissionDenied, false),
@@ -71,7 +71,7 @@ fn conditional_windows_symlink_fixture_skip_policy() {
 }
 
 #[test]
-fn conditional_windows_candidate_reopen_rejects_replaced_name() {
+fn test_conditional_windows_candidate_reopen_rejects_replaced_name() {
     let directory = tempfile::tempdir().expect("fixture directory should be created");
     let target = directory.path().join("target");
     let namespace =
@@ -95,7 +95,7 @@ fn conditional_windows_candidate_reopen_rejects_replaced_name() {
 }
 
 #[test]
-fn conditional_windows_combined_receipt_error_keeps_native_error_source() {
+fn test_conditional_windows_combined_receipt_error_keeps_native_error_source() {
     use std::error::Error;
 
     let native = io::Error::from_raw_os_error(1177);
@@ -116,7 +116,7 @@ fn conditional_windows_combined_receipt_error_keeps_native_error_source() {
 }
 
 #[test]
-fn conditional_windows_receipt_errors_are_indeterminate() {
+fn test_conditional_windows_receipt_errors_are_indeterminate() {
     assert_eq!(
         receipt_publication(None, true, false, true),
         LocalConditionalPublicationState::Indeterminate,
@@ -125,7 +125,7 @@ fn conditional_windows_receipt_errors_are_indeterminate() {
 }
 
 #[test]
-fn conditional_windows_optional_entry_observation_propagates_non_not_found() {
+fn test_conditional_windows_optional_entry_observation_propagates_non_not_found() {
     let error = super::observe_optional_entry::<()>(|| {
         Err(io::Error::new(
             io::ErrorKind::PermissionDenied,
@@ -137,7 +137,7 @@ fn conditional_windows_optional_entry_observation_propagates_non_not_found() {
 }
 
 #[test]
-fn conditional_windows_private_entry_guard_removes_only_original_identity() {
+fn test_conditional_windows_private_entry_guard_removes_only_original_identity() {
     let directory = tempfile::tempdir().expect("fixture directory should be created");
     let target = directory.path().join("target");
     let namespace =
@@ -178,7 +178,7 @@ fn conditional_windows_private_entry_guard_removes_only_original_identity() {
 }
 
 #[test]
-fn conditional_windows_candidate_copy_keeps_original_handle_identity() {
+fn test_conditional_windows_candidate_copy_keeps_original_handle_identity() {
     let directory = tempfile::tempdir().expect("fixture directory should be created");
     let target = directory.path().join("target");
     let mut backend = WindowsConditionalBackend::open_host(&target, &options(LocalWriteMode::CreateOrReplace))
@@ -362,7 +362,7 @@ fn add_explicit_everyone_read(path: &Path) {
 }
 
 #[test]
-fn conditional_windows_private_candidate_and_copies_have_private_dacls() {
+fn test_conditional_windows_private_candidate_and_copies_have_private_dacls() {
     let directory = tempfile::tempdir().expect("fixture directory should be created");
     let target = directory.path().join("target");
     let original_parent_dacl = dacl_bytes(directory.path());
@@ -427,7 +427,7 @@ fn conditional_windows_private_candidate_and_copies_have_private_dacls() {
 }
 
 #[test]
-fn conditional_windows_host_content_replacement_retains_then_cleans_backup() {
+fn test_conditional_windows_host_content_replacement_retains_then_cleans_backup() {
     let directory = tempfile::tempdir().expect("fixture directory should be created");
     let target = directory.path().join("target");
     fs::write(&target, b"A").expect("old target should be written");
@@ -456,7 +456,7 @@ fn conditional_windows_host_content_replacement_retains_then_cleans_backup() {
 }
 
 #[test]
-fn conditional_windows_host_content_preserves_destination_acl() {
+fn test_conditional_windows_host_content_preserves_destination_acl() {
     let directory = tempfile::tempdir().expect("fixture directory should be created");
     let target = directory.path().join("target");
     fs::write(&target, b"A").expect("old target should be written");
@@ -492,7 +492,7 @@ fn conditional_windows_host_content_preserves_destination_acl() {
 }
 
 #[test]
-fn conditional_windows_required_durability_fails_before_publication() {
+fn test_conditional_windows_required_durability_fails_before_publication() {
     let directory = tempfile::tempdir().expect("fixture directory should be created");
     let target = directory.path().join("target");
     fs::write(&target, b"A").expect("old target should be written");
@@ -510,7 +510,7 @@ fn conditional_windows_required_durability_fails_before_publication() {
 }
 
 #[test]
-fn conditional_windows_absent_race_never_overwrites_late_target() {
+fn test_conditional_windows_absent_race_never_overwrites_late_target() {
     let directory = tempfile::tempdir().expect("fixture directory should be created");
     let target = directory.path().join("target");
     let mut backend = WindowsConditionalBackend::open_host(&target, &options(LocalWriteMode::CreateNew))
@@ -537,7 +537,7 @@ fn conditional_windows_absent_race_never_overwrites_late_target() {
 }
 
 #[test]
-fn conditional_windows_publish_checkpoint_failure_keeps_copy_and_cleans_candidate() {
+fn test_conditional_windows_publish_checkpoint_failure_keeps_copy_and_cleans_candidate() {
     let directory = tempfile::tempdir().expect("fixture directory should be created");
     let target = directory.path().join("target");
     fs::write(&target, b"A").expect("old target should be written");
@@ -579,7 +579,7 @@ fn conditional_windows_publish_checkpoint_failure_keeps_copy_and_cleans_candidat
 }
 
 #[test]
-fn conditional_windows_rooted_content_is_explicitly_unsupported() {
+fn test_conditional_windows_rooted_content_is_explicitly_unsupported() {
     let directory = tempfile::tempdir().expect("fixture directory should be created");
     let target = directory.path().join("target");
     fs::write(&target, b"A").expect("old target should be written");
@@ -607,7 +607,7 @@ fn conditional_windows_rooted_content_is_explicitly_unsupported() {
 }
 
 #[test]
-fn conditional_windows_rooted_absent_uses_handle_relative_no_replace() {
+fn test_conditional_windows_rooted_absent_uses_handle_relative_no_replace() {
     let directory = tempfile::tempdir().expect("fixture directory should be created");
     let target = directory.path().join("target");
     let root = crate::local::internal::open_root_directory(directory.path()).expect("root should open");
@@ -635,7 +635,7 @@ fn conditional_windows_rooted_absent_uses_handle_relative_no_replace() {
 }
 
 #[test]
-fn conditional_windows_reparse_target_is_rejected() {
+fn test_conditional_windows_reparse_target_is_rejected() {
     use std::os::windows::fs::symlink_file;
 
     let directory = tempfile::tempdir().expect("fixture directory should be created");
@@ -669,7 +669,7 @@ fn conditional_windows_reparse_target_is_rejected() {
 }
 
 #[test]
-fn conditional_windows_sharing_conflict_preserves_candidate_and_target() {
+fn test_conditional_windows_sharing_conflict_preserves_candidate_and_target() {
     let directory = tempfile::tempdir().expect("fixture directory should be created");
     let target = directory.path().join("target");
     fs::write(&target, b"A").expect("old target should be written");
@@ -715,7 +715,7 @@ fn conditional_windows_sharing_conflict_preserves_candidate_and_target() {
 
 #[test]
 #[allow(clippy::permissions_set_readonly_false)]
-fn conditional_windows_read_only_target_conflict_preserves_candidate_and_target() {
+fn test_conditional_windows_read_only_target_conflict_preserves_candidate_and_target() {
     let directory = tempfile::tempdir().expect("fixture directory should be created");
     let target = directory.path().join("target");
     fs::write(&target, b"A").expect("old target should be written");
@@ -747,7 +747,7 @@ fn conditional_windows_read_only_target_conflict_preserves_candidate_and_target(
 }
 
 #[test]
-fn conditional_windows_rollback_preparation_failure_observes_current_publication() {
+fn test_conditional_windows_rollback_preparation_failure_observes_current_publication() {
     for replace_installed in [false, true] {
         let directory = tempfile::tempdir().expect("fixture directory should be created");
         let target = directory.path().join("target");
@@ -788,7 +788,7 @@ fn conditional_windows_rollback_preparation_failure_observes_current_publication
 }
 
 #[test]
-fn conditional_windows_rollback_container_failure_preserves_published_state() {
+fn test_conditional_windows_rollback_container_failure_preserves_published_state() {
     let directory = tempfile::tempdir().expect("fixture directory should be created");
     let target = directory.path().join("target");
     fs::write(&target, b"A").expect("old target should be written");
@@ -821,7 +821,7 @@ fn conditional_windows_rollback_container_failure_preserves_published_state() {
 }
 
 #[test]
-fn conditional_windows_replacefile_partial_codes_are_classified() {
+fn test_conditional_windows_replacefile_partial_codes_are_classified() {
     assert_eq!(
         classify_replace_failure(Some(1175)),
         ReplaceFailure::UnableToRemoveReplaced
@@ -838,7 +838,7 @@ fn conditional_windows_replacefile_partial_codes_are_classified() {
 }
 
 #[test]
-fn conditional_windows_partial_1177_receipt_reports_installed_and_displaced_entries() {
+fn test_conditional_windows_partial_1177_receipt_reports_installed_and_displaced_entries() {
     let directory = tempfile::tempdir().expect("fixture directory should be created");
     let target = directory.path().join("target");
     fs::write(&target, b"A").expect("old target should be written");
@@ -873,7 +873,7 @@ fn conditional_windows_partial_1177_receipt_reports_installed_and_displaced_entr
 }
 
 #[test]
-fn conditional_windows_partial_1177_receipt_retains_every_visible_object() {
+fn test_conditional_windows_partial_1177_receipt_retains_every_visible_object() {
     let directory = tempfile::tempdir().expect("fixture directory should be created");
     let target = directory.path().join("target");
     fs::write(&target, b"A").expect("old target should be written");
@@ -910,7 +910,7 @@ fn conditional_windows_partial_1177_receipt_retains_every_visible_object() {
 }
 
 #[test]
-fn conditional_windows_recovery_container_collision_does_not_reuse_existing_directory() {
+fn test_conditional_windows_recovery_container_collision_does_not_reuse_existing_directory() {
     let directory = tempfile::tempdir().expect("fixture directory should be created");
     let target = directory.path().join("target");
     let namespace =
@@ -943,7 +943,7 @@ fn conditional_windows_recovery_container_collision_does_not_reuse_existing_dire
 }
 
 #[test]
-fn conditional_windows_recovery_container_exhausts_collision_retries() {
+fn test_conditional_windows_recovery_container_exhausts_collision_retries() {
     let directory = tempfile::tempdir().expect("fixture directory should be created");
     let target = directory.path().join("target");
     let namespace =
@@ -965,7 +965,7 @@ fn conditional_windows_recovery_container_exhausts_collision_retries() {
 }
 
 #[test]
-fn conditional_windows_recovery_container_name_error_does_not_retry() {
+fn test_conditional_windows_recovery_container_name_error_does_not_retry() {
     let directory = tempfile::tempdir().expect("fixture directory should be created");
     let target = directory.path().join("target");
     let namespace =
@@ -982,7 +982,7 @@ fn conditional_windows_recovery_container_name_error_does_not_retry() {
 }
 
 #[test]
-fn conditional_windows_failed_container_verification_cleans_bound_directory() {
+fn test_conditional_windows_failed_container_verification_cleans_bound_directory() {
     let directory = tempfile::tempdir().expect("fixture directory should be created");
     let target = directory.path().join("target");
     let namespace =
@@ -1022,7 +1022,7 @@ fn conditional_windows_failed_container_verification_cleans_bound_directory() {
 }
 
 #[test]
-fn conditional_windows_recovery_container_name_cannot_be_replaced_while_owned() {
+fn test_conditional_windows_recovery_container_name_cannot_be_replaced_while_owned() {
     let directory = tempfile::tempdir().expect("fixture directory should be created");
     let target = directory.path().join("target");
     let namespace =
@@ -1046,7 +1046,7 @@ fn conditional_windows_recovery_container_name_cannot_be_replaced_while_owned() 
 }
 
 #[test]
-fn conditional_windows_recovery_container_cleanup_refuses_non_empty_directory() {
+fn test_conditional_windows_recovery_container_cleanup_refuses_non_empty_directory() {
     let directory = tempfile::tempdir().expect("fixture directory should be created");
     let target = directory.path().join("target");
     let namespace =
@@ -1066,7 +1066,7 @@ fn conditional_windows_recovery_container_cleanup_refuses_non_empty_directory() 
 }
 
 #[test]
-fn conditional_windows_failed_empty_container_cleanup_reports_its_path() {
+fn test_conditional_windows_failed_empty_container_cleanup_reports_its_path() {
     let directory = tempfile::tempdir().expect("fixture directory should be created");
     let target = directory.path().join("target");
     fs::write(&target, b"A").expect("target should be written");

@@ -6,12 +6,16 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 
+use std::fmt::Debug;
+use std::fmt::Formatter;
+use std::fmt::Result;
 use std::path::Path;
 use std::path::PathBuf;
 
 use crate::LocalFileReader;
 use crate::LocalResult;
 use crate::local::conditional::RecoveryAccess;
+use crate::local_file_system::redacted_path;
 use crate::recovery::LocalRecoveryFileRole;
 
 /// Read-only access to a file retained for recovery after a conditional write.
@@ -22,26 +26,31 @@ use crate::recovery::LocalRecoveryFileRole;
 /// The owner must arrange any eventual deletion using an authorized filesystem
 /// operation after inspecting the recovery role and publication state.
 ///
-/// # Example
+/// # Examples
 ///
 /// A failed conditional write can return a recovery handle whose permission
 /// remains usable even if no diagnostic path is available:
 ///
 /// ```
+/// use std::error::Error;
+/// use std::fs;
+///
 /// use qubit_io::Output;
+/// use qubit_io::Streams;
 /// use qubit_local_files::LocalFileSystem;
 /// use qubit_local_files::options::LocalWriteMode;
 /// use qubit_local_files::options::LocalWriteOptions;
 /// use qubit_local_files::options::LocalWritePrecondition;
+/// use qubit_local_files::policy::LocalSymlinkPolicy;
 /// use qubit_local_files::recovery::LocalRecoveryFileRole;
 /// use sha2::Sha256;
 /// use tempfile::tempdir;
 ///
 /// let directory = tempdir()?;
 /// let target = directory.path().canonicalize()?.join("model");
-/// std::fs::write(&target, b"old")?;
+/// fs::write(&target, b"old")?;
 /// let mut filesystem = LocalFileSystem::host()?;
-/// filesystem.set_symlink_policy(qubit_local_files::policy::LocalSymlinkPolicy::Reject)?;
+/// filesystem.set_symlink_policy(LocalSymlinkPolicy::Reject)?;
 /// let mut writer = filesystem.open_conditional_writer::<Sha256>(
 ///     &target,
 ///     LocalWritePrecondition::Absent,
@@ -56,26 +65,41 @@ use crate::recovery::LocalRecoveryFileRole;
 /// }
 /// let mut reader = recovery.open_reader()?;
 /// let mut bytes = Vec::new();
-/// qubit_io::Streams::copy_input_to_output(&mut reader, &mut bytes)?;
+/// Streams::copy_input_to_output(&mut reader, &mut bytes)?;
 /// assert_eq!(bytes, b"new");
-/// # Ok::<(), Box<dyn std::error::Error>>(())
+/// # Ok::<(), Box<dyn Error>>(())
 /// ```
 #[must_use]
 pub struct LocalRecoveryFile {
+    /// Identifies the file's role in the conditional write attempt.
     role: LocalRecoveryFileRole,
+    /// Stores the path used to describe the retained entry in its namespace.
     namespace_path: PathBuf,
+    /// Stores an optional path for diagnostics; it does not grant file access.
     diagnostic_path: Option<PathBuf>,
+    /// Retains the permission needed to read the observed file entry.
     access: Box<dyn RecoveryAccess>,
 }
 
-impl std::fmt::Debug for LocalRecoveryFile {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl Debug for LocalRecoveryFile {
+    /// Formats the recovery role and redacted path metadata without exposing
+    /// paths.
+    ///
+    /// # Parameters
+    ///
+    /// * `f` is the formatter receiving the redacted representation.
+    ///
+    /// # Returns
+    ///
+    /// `Ok(())` when formatting succeeds.
+    ///
+    /// # Errors
+    ///
+    /// Returns the formatter's error if writing the representation fails.
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result {
         f.debug_struct("LocalRecoveryFile")
             .field("role", &self.role)
-            .field(
-                "namespace_path",
-                &crate::local_file_system::redacted_path(&self.namespace_path),
-            )
+            .field("namespace_path", &redacted_path(&self.namespace_path))
             .field("has_diagnostic_path", &self.diagnostic_path.is_some())
             .finish_non_exhaustive()
     }
@@ -84,6 +108,18 @@ impl std::fmt::Debug for LocalRecoveryFile {
 impl LocalRecoveryFile {
     /// Creates a recovery handle from an observed entry and its retained
     /// access.
+    ///
+    /// # Parameters
+    ///
+    /// * `role` identifies the entry's role in the conditional write attempt.
+    /// * `namespace_path` is the path used for diagnostics and user guidance.
+    /// * `diagnostic_path` is `Some` when a display path was captured, or
+    ///   `None` when no such path is available; neither value grants access.
+    /// * `access` retains the permission used to read the observed entry.
+    ///
+    /// # Returns
+    ///
+    /// A handle that retains the entry description and read permission.
     pub(crate) fn new(
         role: LocalRecoveryFileRole,
         namespace_path: PathBuf,
@@ -99,12 +135,22 @@ impl LocalRecoveryFile {
     }
 
     /// Returns the retained file's role in the conditional write attempt.
+    ///
+    /// # Returns
+    ///
+    /// The protocol role assigned to the retained file.
+    #[inline]
     pub const fn role(&self) -> LocalRecoveryFileRole {
         self.role
     }
 
     /// Returns the file's namespace path for diagnostics and user guidance.
+    ///
+    /// # Returns
+    ///
+    /// The path that identifies the retained entry in its namespace.
     #[must_use]
+    #[inline]
     pub fn namespace_path(&self) -> &Path {
         &self.namespace_path
     }
@@ -114,12 +160,22 @@ impl LocalRecoveryFile {
     /// `None` reports that no display path was captured. It does not affect
     /// the retained read permission and must not be used as a reason to access
     /// the file by another path.
+    ///
+    /// # Returns
+    ///
+    /// `Some(path)` when a diagnostic path was captured, or `None` when it
+    /// was unavailable.
+    #[inline]
     pub fn diagnostic_path(&self) -> Option<&Path> {
         self.diagnostic_path.as_deref()
     }
 
     /// Opens a reader after verifying that the retained entry still identifies
     /// the same file.
+    ///
+    /// # Returns
+    ///
+    /// A reader backed by the retained permission for the verified entry.
     ///
     /// # Errors
     ///
@@ -128,129 +184,5 @@ impl LocalRecoveryFile {
     /// is informational and does not authorize access.
     pub fn open_reader(&self) -> LocalResult<LocalFileReader> {
         self.access.open_reader()
-    }
-}
-
-#[cfg(test)]
-mod conditional_types_tests {
-    use std::fs::File;
-    use std::path::PathBuf;
-
-    use qubit_io::Streams;
-    use tempfile::tempdir;
-
-    use crate::LocalFileError;
-    use crate::LocalFileOperation;
-    use crate::LocalFileReader;
-    use crate::LocalResult;
-    use crate::local::conditional::ConditionalEntry;
-    use crate::local::conditional::RecoveryAccess;
-    use crate::recovery::LocalRecoveryFileRole;
-
-    #[derive(Debug)]
-    struct FakeRecoveryAccess {
-        path: PathBuf,
-    }
-
-    impl RecoveryAccess for FakeRecoveryAccess {
-        fn open_reader(&self) -> LocalResult<LocalFileReader> {
-            let file = File::open(&self.path).map_err(|error| {
-                LocalFileError::from_io(LocalFileOperation::OpenReader, Some(self.path.clone()), None, error)
-            })?;
-            LocalFileReader::from_file(file).map_err(|error| {
-                LocalFileError::from_io(LocalFileOperation::OpenReader, Some(self.path.clone()), None, error)
-            })
-        }
-
-        fn sync_file(&self) -> std::io::Result<()> {
-            std::fs::OpenOptions::new()
-                .read(true)
-                .write(true)
-                .open(&self.path)?
-                .sync_all()
-        }
-    }
-
-    #[test]
-    fn recovery_file_drop_keeps_file_and_reader_works() {
-        let directory = tempdir().expect("create temporary directory");
-        let path = directory.path().join("recovery");
-        std::fs::write(&path, b"candidate B").expect("write recovery content");
-        let entry = ConditionalEntry::new(
-            LocalRecoveryFileRole::CandidateCopy,
-            path.clone(),
-            Some(path.clone()),
-            Box::new(FakeRecoveryAccess { path: path.clone() }),
-        );
-
-        let recovery = entry.into_recovery(LocalRecoveryFileRole::CandidateCopy);
-        assert_eq!(recovery.role(), LocalRecoveryFileRole::CandidateCopy);
-        assert_eq!(recovery.namespace_path(), path);
-        assert_eq!(recovery.diagnostic_path(), Some(path.as_path()));
-        let mut reader = recovery.open_reader().expect("open retained recovery file");
-        let mut contents = Vec::new();
-        Streams::copy_input_to_output(&mut reader, &mut contents).expect("read recovery content");
-        assert_eq!(contents, b"candidate B");
-        drop(recovery);
-
-        assert_eq!(std::fs::read(path).expect("recovery file remains"), b"candidate B");
-    }
-
-    #[test]
-    fn recovery_access_reports_removal_and_sync_preserves_existing_content() {
-        let directory = tempdir().expect("fixture");
-        let path = directory.path().join("retained");
-        std::fs::write(&path, b"candidate").expect("retained candidate");
-        let access = FakeRecoveryAccess { path: path.clone() };
-        access.sync_file().expect("retained file synchronization");
-        std::fs::remove_file(&path).expect("external entry removal");
-        let error = access.open_reader().expect_err("removed recovery entry must fail");
-        assert_eq!(error.operation(), LocalFileOperation::OpenReader);
-        assert_eq!(error.io_error_kind(), std::io::ErrorKind::NotFound);
-        assert_eq!(error.path(), Some(path.as_path()));
-        assert_eq!(
-            access.sync_file().expect_err("removed entry cannot sync").kind(),
-            std::io::ErrorKind::NotFound
-        );
-    }
-
-    #[test]
-    fn recovery_reader_initialization_failure_preserves_role_paths_and_source() {
-        use crate::tests::native_io_fault_tests::NativeIoFaultGuard;
-        use crate::tests::native_io_fault_tests::NativeIoPoint;
-
-        let fixture = tempdir().expect("fixture");
-        let native = fixture.path().join("retained");
-        std::fs::write(&native, b"candidate").expect("retained candidate");
-        let entry = ConditionalEntry::new(
-            LocalRecoveryFileRole::CandidateCopy,
-            PathBuf::from("/logical/retained"),
-            None,
-            Box::new(FakeRecoveryAccess { path: native.clone() }),
-        );
-        let recovery = entry.into_recovery(LocalRecoveryFileRole::CandidateCopy);
-        let fault = NativeIoFaultGuard::fail_on(NativeIoPoint::ReaderMetadata, 1);
-        let error = recovery
-            .open_reader()
-            .expect_err("recovery reader initialization fails");
-        assert!(fault.fired());
-        assert_eq!(error.operation(), LocalFileOperation::OpenReader);
-        assert_eq!(error.path(), Some(native.as_path()));
-        assert_eq!(error.io_error_kind(), std::io::ErrorKind::Other);
-        assert!(error.to_string().contains("injected native I/O contract failure"));
-        assert_eq!(recovery.role(), LocalRecoveryFileRole::CandidateCopy);
-        assert_eq!(recovery.namespace_path(), std::path::Path::new("/logical/retained"));
-        assert_eq!(recovery.diagnostic_path(), None);
-        assert_eq!(std::fs::read(&native).expect("retained source unchanged"), b"candidate");
-        drop(fault);
-        let mut reader = recovery.open_reader().expect("retry recovery reader");
-        let mut bytes = Vec::new();
-        Streams::copy_input_to_output(&mut reader, &mut bytes).expect("retry recovery bytes");
-        assert_eq!(bytes, b"candidate");
-        drop(recovery);
-        assert_eq!(
-            std::fs::read(&native).expect("dropping recovery never deletes source"),
-            b"candidate"
-        );
     }
 }

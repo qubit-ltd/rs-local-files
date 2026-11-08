@@ -30,6 +30,17 @@ pub struct DirectoryReader {
 impl DirectoryReader {
     /// Opens a lazy reader for the already-opened root directory.
     ///
+    /// # Parameters
+    ///
+    /// - `root`: Open directory handle used as the enumeration authority.
+    /// - `diagnostic_root`: Root path used only to report I/O errors.
+    ///
+    /// # Returns
+    ///
+    /// A reader that yields immediate root children on demand.
+    ///
+    /// # Errors
+    ///
     /// Returns an I/O error when the root cannot be enumerated.
     pub(crate) fn open_root(root: &File, diagnostic_root: &Path) -> Result<Self> {
         #[cfg(unix)]
@@ -51,6 +62,18 @@ impl DirectoryReader {
     }
 
     /// Opens a lazy reader for a validated descendant directory.
+    ///
+    /// # Parameters
+    ///
+    /// - `root`: Open root handle that bounds descendant traversal.
+    /// - `diagnostic_root`: Root path used only to report I/O errors.
+    /// - `path`: Validated path of the descendant directory to enumerate.
+    ///
+    /// # Returns
+    ///
+    /// A reader that yields immediate descendant children on demand.
+    ///
+    /// # Errors
     ///
     /// Returns an I/O error when secure traversal or enumeration cannot be
     /// performed.
@@ -79,8 +102,15 @@ impl DirectoryReader {
 
     /// Produces the next immediate child from the open directory.
     ///
-    /// Returns `Ok(None)` once the directory is exhausted, and returns an I/O
-    /// error when native enumeration or metadata inspection fails.
+    /// # Returns
+    ///
+    /// Returns `Ok(Some(entry))` for the next child and `Ok(None)` when the
+    /// directory is exhausted.
+    ///
+    /// # Errors
+    ///
+    /// Returns an I/O error when native enumeration or metadata inspection
+    /// fails.
     pub fn next_entry(&mut self) -> Result<Option<Entry>> {
         #[cfg(unix)]
         {
@@ -107,6 +137,16 @@ impl DirectoryReader {
 
     /// Produces the next child while retaining whether a failure belongs to a
     /// consumed entry.
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(Some(entry))` for the next child and `Ok(None)` when the
+    /// directory is exhausted.
+    ///
+    /// # Errors
+    ///
+    /// Returns a contextual error when enumeration or metadata inspection
+    /// fails; entry errors retain the consumed child name.
     pub(crate) fn next_entry_with_context(&mut self) -> std::result::Result<Option<Entry>, RootedDirectoryReadError> {
         #[cfg(unix)]
         {
@@ -136,6 +176,15 @@ impl DirectoryReader {
     }
 
     /// Duplicates the directory handle retained by this reader.
+    ///
+    /// # Returns
+    ///
+    /// A duplicate handle to the directory being enumerated.
+    ///
+    /// # Errors
+    ///
+    /// Returns an I/O error if the operating system cannot duplicate the
+    /// directory handle.
     pub(crate) fn try_clone_directory(&self) -> Result<File> {
         self.inner.try_clone_directory()
     }

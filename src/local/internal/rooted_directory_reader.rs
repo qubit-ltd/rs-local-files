@@ -52,7 +52,14 @@ pub(crate) struct RootedDirectoryReader {
 impl RootedDirectoryReader {
     /// Duplicates the directory handle retained by this reader.
     ///
+    /// # Returns
+    ///
+    /// The duplicated directory handle.
+    ///
+    /// # Errors
+    ///
     /// Returns an I/O error if the underlying handle cannot be duplicated.
+    #[inline]
     pub(crate) fn try_clone_directory(&self) -> std::io::Result<File> {
         self.directory.try_clone()
     }

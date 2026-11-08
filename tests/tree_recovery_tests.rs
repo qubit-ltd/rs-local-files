@@ -9,6 +9,7 @@
 use std::error::Error;
 use std::ffi::OsStr;
 
+use qubit_local_files::LocalFileError;
 use qubit_local_files::LocalFileSystem;
 use qubit_local_files::LocalTreePublishError;
 use qubit_local_files::options::LocalDirectoryOpenOptions;
@@ -36,7 +37,7 @@ fn test_recovery_error_publish_source_retains_same_cause_and_owners() {
 
     assert_eq!(LocalTreePublication::NotPublished, failure.publication());
     let source = Error::source(&failure)
-        .and_then(|source| source.downcast_ref::<qubit_local_files::LocalFileError>())
+        .and_then(|source| source.downcast_ref::<LocalFileError>())
         .expect("standard source should be the structured cause");
     assert!(std::ptr::eq(source, failure.cause()));
     let (_, stage, retained) = failure.into_parts();

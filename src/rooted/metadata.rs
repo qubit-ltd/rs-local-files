@@ -145,6 +145,12 @@ impl Metadata {
     }
 
     /// Builds rooted metadata from Windows metadata and handle identity.
+    ///
+    /// # Parameters
+    ///
+    /// * `metadata` - Metadata observed from the opened file handle.
+    /// * `device_id` - Native volume identity, when available.
+    /// * `file_id` - Native file identity within its volume, when available.
     #[cfg(windows)]
     fn from_windows_metadata(metadata: &fs::Metadata, device_id: Option<u64>, file_id: Option<u64>) -> Self {
         let file_type = metadata.file_type();
@@ -185,6 +191,11 @@ impl Metadata {
 
     /// Returns the last access time, or `None` when the platform did not
     /// provide one.
+    ///
+    /// # Returns
+    ///
+    /// The access timestamp, or `None` when the operating system did not report
+    /// it.
     #[inline]
     pub const fn accessed_at(&self) -> Option<SystemTime> {
         self.accessed_at
@@ -192,6 +203,11 @@ impl Metadata {
 
     /// Returns the last modification time, or `None` when the platform did not
     /// provide one.
+    ///
+    /// # Returns
+    ///
+    /// The modification timestamp, or `None` when the operating system did not
+    /// report it.
     #[inline]
     pub const fn modified_at(&self) -> Option<SystemTime> {
         self.modified_at
@@ -199,6 +215,11 @@ impl Metadata {
 
     /// Returns the creation time, or `None` when the platform did not provide
     /// one.
+    ///
+    /// # Returns
+    ///
+    /// The creation timestamp, or `None` when the operating system did not
+    /// report it.
     #[inline]
     pub const fn created_at(&self) -> Option<SystemTime> {
         self.created_at
@@ -212,6 +233,10 @@ impl Metadata {
     }
 
     /// Returns whether two metadata values identify the same native entry.
+    ///
+    /// # Parameters
+    ///
+    /// * `other` - The metadata value to compare with this one.
     #[must_use]
     #[inline]
     pub const fn is_same_file(&self, other: &Self) -> bool {
@@ -223,6 +248,10 @@ impl Metadata {
     }
 
     /// Returns a stable native entry identity when the platform supplied one.
+    ///
+    /// # Returns
+    ///
+    /// The device and file identifiers, or `None` when either is unavailable.
     #[inline]
     pub const fn native_identity(&self) -> Option<(u64, u64)> {
         match (self.device_id, self.file_id) {
@@ -233,6 +262,18 @@ impl Metadata {
 }
 
 /// Converts a platform-native mode into portable permission bits.
+///
+/// # Type Parameters
+///
+/// * `T` - Native mode representation convertible to `u32`.
+///
+/// # Parameters
+///
+/// * `mode` - Native mode bits to limit to permission and special bits.
+///
+/// # Returns
+///
+/// The permission and special bits from `mode`.
 #[cfg(unix)]
 #[must_use]
 #[inline]
@@ -244,6 +285,18 @@ where
 }
 
 /// Converts a platform-native identity field into the portable representation.
+///
+/// # Type Parameters
+///
+/// * `T` - Native identity representation convertible to `u64`.
+///
+/// # Parameters
+///
+/// * `value` - Native identity value to convert.
+///
+/// # Returns
+///
+/// The identity as `u64`, or `None` if conversion fails.
 #[cfg(unix)]
 #[inline]
 fn native_id<T>(value: T) -> Option<u64>
@@ -254,6 +307,18 @@ where
 }
 
 /// Classifies one platform-native `st_mode` value.
+///
+/// # Type Parameters
+///
+/// * `T` - Native mode representation supporting bitwise type classification.
+///
+/// # Parameters
+///
+/// * `mode` - Native mode bits to classify.
+///
+/// # Returns
+///
+/// The portable entry kind represented by the native file-type bits.
 #[cfg(unix)]
 #[inline]
 fn entry_kind_from_mode<T>(mode: T) -> EntryKind
@@ -287,6 +352,10 @@ where
 /// - `seconds`: Signed whole seconds relative to the Unix epoch.
 /// - `nanoseconds`: Non-negative fractional part, strictly below one billion.
 ///   `N` permits the native platform's integer representation.
+///
+/// # Type Parameters
+///
+/// * `N` - Native fractional-nanosecond representation convertible to `i128`.
 ///
 /// # Returns
 ///
@@ -327,6 +396,15 @@ where
 }
 
 /// Extracts portable timestamps from Linux and Android `stat` values.
+///
+/// # Parameters
+///
+/// * `status` - Native Linux or Android status value containing timestamps.
+///
+/// # Returns
+///
+/// Access and modification timestamps when representable; creation time is
+/// `None` because these layouts do not expose it.
 #[cfg(any(target_os = "linux", target_os = "android"))]
 #[inline]
 fn stat_times(status: &libc::stat) -> (Option<SystemTime>, Option<SystemTime>, Option<SystemTime>) {
@@ -338,6 +416,15 @@ fn stat_times(status: &libc::stat) -> (Option<SystemTime>, Option<SystemTime>, O
 }
 
 /// Extracts portable timestamps from Apple and FreeBSD `stat` values.
+///
+/// # Parameters
+///
+/// * `status` - Native Apple or FreeBSD status value containing timestamps.
+///
+/// # Returns
+///
+/// Each representable access, modification, and creation timestamp, with
+/// `None` for any unavailable or out-of-range value.
 #[cfg(any(target_os = "macos", target_os = "ios", target_os = "freebsd"))]
 #[inline]
 fn stat_times(status: &libc::stat) -> (Option<SystemTime>, Option<SystemTime>, Option<SystemTime>) {

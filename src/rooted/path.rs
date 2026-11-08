@@ -7,5 +7,9 @@
 // =============================================================================
 //! Validated rooted paths.
 
-/// A non-empty path containing only normal relative components.
+/// A validated relative path accepted by rooted filesystem operations.
+///
+/// The path must be non-empty and contain only normal relative components.
+/// Use [`Path::new`] to validate candidate input before passing it to a
+/// [`super::Root`].
 pub type Path = crate::local::LocalRelativePath;

@@ -6,12 +6,27 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 use std::io;
+#[cfg(unix)]
+use std::os::fd::AsRawFd;
+#[cfg(unix)]
+use std::os::unix::ffi::OsStrExt;
+#[cfg(windows)]
+use std::os::windows::io::AsRawHandle;
 use std::path::Path;
 use std::path::PathBuf;
 
-pub(crate) use super::internal::NativePrivateCreateError;
-pub(crate) use super::internal::NativePrivateEntry;
+#[cfg(windows)]
+use windows_sys::Win32::Storage::FileSystem::FILE_DISPOSITION_INFO;
+#[cfg(windows)]
+use windows_sys::Win32::Storage::FileSystem::FileDispositionInfo;
+#[cfg(windows)]
+use windows_sys::Win32::Storage::FileSystem::SetFileInformationByHandle;
+
+use super::internal::NativePrivateEntry;
 use super::internal::RecoveryResource;
+use crate::LocalFileError;
+use crate::LocalFileErrorKind;
+use crate::LocalFileOperation;
 use crate::observation::LocalFileIdentity;
 
 /// Owns a private temporary object left behind by a failed operation.
@@ -67,8 +82,12 @@ use crate::observation::LocalFileIdentity;
 /// ```
 #[derive(Debug)]
 pub struct LocalTempRecovery {
+    /// Diagnostic path associated with the retained resource.
     path: PathBuf,
+    /// Identity observed when ownership was established, if available.
     identity: Option<LocalFileIdentity>,
+    /// Cleanup authority retained until cleanup succeeds or ownership
+    /// transfers.
     resource: Option<RecoveryResource>,
 }
 
@@ -78,6 +97,15 @@ impl LocalTempRecovery {
     /// The path remains diagnostic; cleanup uses the file owner's retained
     /// authority and identity. The returned recovery value retries cleanup on
     /// explicit calls and makes one best-effort attempt when dropped.
+    ///
+    /// # Parameters
+    ///
+    /// * `resource` — live temporary-file owner whose cleanup responsibility is
+    ///   transferred.
+    ///
+    /// # Returns
+    ///
+    /// A recovery owner retaining the file and its current identity.
     pub(crate) fn from_file(resource: super::LocalTempFile) -> Self {
         let path = resource.path().to_path_buf();
         let identity = resource.current_identity();
@@ -92,6 +120,15 @@ impl LocalTempRecovery {
     ///
     /// `path` is stored for diagnostics and error context. Deletion still
     /// requires the retained parent/name, open object, and matching identity.
+    ///
+    /// # Parameters
+    ///
+    /// * `path` — diagnostic path associated with the native entry.
+    /// * `entry` — retained native handles, name, and observed identity.
+    ///
+    /// # Returns
+    ///
+    /// A recovery owner for the native entry.
     pub(crate) fn from_native(path: PathBuf, entry: NativePrivateEntry) -> Self {
         let entry_path = path.clone();
         Self {
@@ -106,6 +143,15 @@ impl LocalTempRecovery {
     ///
     /// Entry order is cleanup order. Successfully removed entries are released
     /// even if a later entry fails; the owner then retains only the remainder.
+    ///
+    /// # Parameters
+    ///
+    /// * `path` — diagnostic path associated with every entry.
+    /// * `entries` — native entries in cleanup order.
+    ///
+    /// # Returns
+    ///
+    /// A recovery owner retaining the entries in cleanup order.
     pub(crate) fn from_native_entries(path: PathBuf, entries: Vec<NativePrivateEntry>) -> Self {
         let identity = entries.first().and_then(|entry| entry.identity.clone());
         let entries = entries.into_iter().map(|entry| (path.clone(), entry)).collect();
@@ -120,6 +166,16 @@ impl LocalTempRecovery {
     ///
     /// The entry paths do not grant access; each native entry's retained parent
     /// handle and identity determine whether cleanup may remove it.
+    ///
+    /// # Parameters
+    ///
+    /// * `path` — primary diagnostic path for this recovery owner.
+    /// * `entries` — diagnostic path and retained native entry pairs in cleanup
+    ///   order.
+    ///
+    /// # Returns
+    ///
+    /// A recovery owner retaining each entry and its diagnostic path.
     pub(crate) fn from_native_entries_with_paths(path: PathBuf, entries: Vec<(PathBuf, NativePrivateEntry)>) -> Self {
         let identity = entries.first().and_then(|(_, entry)| entry.identity.clone());
         Self {
@@ -129,26 +185,37 @@ impl LocalTempRecovery {
         }
     }
 
-    /// Combines two native recovery owners, preserving their cleanup order.
+    /// Returns the diagnostic namespace path.
     ///
-    /// Returns both original owners unchanged if either contains a live-file
-    /// resource, since only native entry lists can be combined.
-    pub(crate) fn append_native_owner(mut self, mut other: Self) -> Result<Self, (Self, Self)> {
-        let Some(RecoveryResource::Native(mut other_entries)) = other.resource.take() else {
-            return Err((self, other));
-        };
-        let Some(RecoveryResource::Native(entries)) = self.resource.as_mut() else {
-            other.resource = Some(RecoveryResource::Native(other_entries));
-            return Err((self, other));
-        };
-        entries.append(&mut other_entries);
-        Ok(self)
+    /// The borrowed path is context for diagnostics only and does not keep the
+    /// retained resource alive or grant authority to remove it.
+    #[must_use]
+    #[inline]
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    /// Returns the native identity when it was established, or `None` when
+    /// cleanup cannot verify the object identity and therefore refuses to
+    /// delete the entry by path alone.
+    ///
+    /// # Returns
+    ///
+    /// The observed identity, or `None` when identity verification is
+    /// unavailable.
+    #[inline]
+    pub fn identity(&self) -> Option<&LocalFileIdentity> {
+        self.identity.as_ref()
     }
 
     /// Returns the live file resource, if this owner contains one.
     ///
     /// Taking the resource transfers cleanup responsibility to the caller;
     /// native-entry recovery cannot be converted into a `LocalTempFile`.
+    ///
+    /// # Returns
+    ///
+    /// The live file owner when present; native-entry recovery returns `None`.
     pub(crate) fn into_file(mut self) -> Option<super::LocalTempFile> {
         match self.resource.take()? {
             RecoveryResource::LiveFile(file) => Some(*file),
@@ -156,16 +223,6 @@ impl LocalTempRecovery {
         }
     }
 
-    /// Returns the diagnostic namespace path.
-    pub fn path(&self) -> &Path {
-        &self.path
-    }
-    /// Returns the native identity when it was established, or `None` when
-    /// cleanup cannot verify the object identity and therefore refuses to
-    /// delete the entry by path alone.
-    pub fn identity(&self) -> Option<&LocalFileIdentity> {
-        self.identity.as_ref()
-    }
     /// Removes retained objects only when their identities are known and
     /// still match.
     ///
@@ -182,6 +239,15 @@ impl LocalTempRecovery {
     /// operation fails. An error can therefore be returned after partial
     /// cleanup; keep this owner to retain responsibility for any remaining
     /// resources and decide whether to retry.
+    ///
+    /// # Parameters
+    ///
+    /// * `self` — recovery owner whose retained resources are cleaned in order.
+    ///
+    /// # Returns
+    ///
+    /// `Ok(())` when all retained resources are released; otherwise returns the
+    /// first cleanup error and retains resources that were not removed.
     pub fn cleanup(&mut self) -> crate::LocalResult<()> {
         let Some(resource) = self.resource.as_mut() else {
             return Ok(());
@@ -215,27 +281,65 @@ impl LocalTempRecovery {
         }
         result
     }
+
+    /// Combines two native recovery owners, preserving their cleanup order.
+    ///
+    /// Returns both original owners unchanged if either contains a live-file
+    /// resource, since only native entry lists can be combined.
+    ///
+    /// # Parameters
+    ///
+    /// * `self` — first native owner, whose entries remain before the other's.
+    /// * `other` — second owner to append when it also contains native entries.
+    ///
+    /// # Returns
+    ///
+    /// `Ok` contains the combined owner. `Err` returns both owners unchanged if
+    /// either contains a live-file resource.
+    ///
+    /// # Errors
+    ///
+    /// Returns both owners when either contains a live-file resource, because
+    /// only native-entry resources can be combined.
+    pub(crate) fn append_native_owner(mut self, mut other: Self) -> Result<Self, (Self, Self)> {
+        let Some(RecoveryResource::Native(mut other_entries)) = other.resource.take() else {
+            return Err((self, other));
+        };
+        let Some(RecoveryResource::Native(entries)) = self.resource.as_mut() else {
+            other.resource = Some(RecoveryResource::Native(other_entries));
+            return Err((self, other));
+        };
+        entries.append(&mut other_entries);
+        Ok(self)
+    }
 }
 
-/// Removes one retained native entry only after validating both retained-handle
-/// identity and the no-follow identity/type currently named by its parent.
+/// Validates a retained native entry before its name can be removed.
 ///
-/// `path` is diagnostic context only. A missing identity, replaced name,
-/// mismatched type, or failed observation prevents deletion; on success the
-/// retained handle is released. Unix uses parent-relative `fstatat` and
-/// `unlinkat`, so owner-read permission is not an extra prerequisite.
-fn cleanup_native_entry(entry: &mut NativePrivateEntry, path: &Path) -> crate::LocalResult<()> {
-    use crate::LocalFileError;
-    use crate::LocalFileErrorKind;
-    use crate::LocalFileOperation;
-
-    if entry.file.is_none() {
+/// # Parameters
+///
+/// * `entry` — retained native authority and expected identity to validate.
+/// * `path` — diagnostic context attached to observation errors.
+///
+/// # Returns
+///
+/// The retained file and expected identity after the opened object still
+/// matches the identity and object kind recorded for the entry.
+///
+/// # Errors
+///
+/// Returns an error if the retained file or identity is missing, observation
+/// fails, or the observed identity or object kind no longer matches.
+fn validate_native_entry<'a>(
+    entry: &'a NativePrivateEntry,
+    path: &Path,
+) -> crate::LocalResult<(&'a std::fs::File, &'a LocalFileIdentity)> {
+    let Some(file) = entry.file.as_ref() else {
         return Err(
             LocalFileError::new(LocalFileErrorKind::RequirementNotMet, LocalFileOperation::Cleanup)
                 .with_path(path.to_path_buf()),
         );
-    }
-    let file = entry.file.as_ref().expect("checked native recovery file");
+    };
     let Some(expected) = entry.identity.as_ref() else {
         return Err(
             LocalFileError::new(LocalFileErrorKind::RequirementNotMet, LocalFileOperation::Cleanup)
@@ -256,10 +360,39 @@ fn cleanup_native_entry(entry: &mut NativePrivateEntry, path: &Path) -> crate::L
             LocalFileOperation::Cleanup,
         ));
     }
+    Ok((file, expected))
+}
+
+/// Removes one validated entry through its retained native authority.
+///
+/// Unix uses parent-relative `fstatat` and `unlinkat`, so owner-read
+/// permission is not an extra prerequisite. `path` supplies diagnostic
+/// context if the platform removal operation fails.
+///
+/// # Parameters
+///
+/// * `entry` — retained parent handle, name, and expected object kind.
+/// * `path` — diagnostic context attached to removal errors.
+/// * `file` — retained handle whose identity was validated.
+/// * `expected` — identity validated against the retained handle.
+///
+/// # Returns
+///
+/// `Ok(())` when the entry is safely removed.
+///
+/// # Errors
+///
+/// Returns an error when the platform removal operation fails.
+fn remove_native_entry(
+    entry: &NativePrivateEntry,
+    path: &Path,
+    file: &std::fs::File,
+    expected: &LocalFileIdentity,
+) -> crate::LocalResult<()> {
+    #[cfg(unix)]
+    let _ = file;
     #[cfg(unix)]
     {
-        use std::os::fd::AsRawFd;
-        use std::os::unix::ffi::OsStrExt;
         let name = std::ffi::CString::new(entry.name.as_bytes())
             .map_err(|_| LocalFileError::new(LocalFileErrorKind::InvalidPath, LocalFileOperation::Cleanup))?;
         let mut named_metadata = std::mem::MaybeUninit::<libc::stat>::uninit();
@@ -308,11 +441,7 @@ fn cleanup_native_entry(entry: &mut NativePrivateEntry, path: &Path) -> crate::L
     }
     #[cfg(windows)]
     {
-        use std::os::windows::io::AsRawHandle;
-
-        use windows_sys::Win32::Storage::FileSystem::FILE_DISPOSITION_INFO;
-        use windows_sys::Win32::Storage::FileSystem::FileDispositionInfo;
-        use windows_sys::Win32::Storage::FileSystem::SetFileInformationByHandle;
+        let _ = (entry, expected);
         let disposition = FILE_DISPOSITION_INFO { DeleteFile: true };
         let removed = unsafe {
             SetFileInformationByHandle(
@@ -333,22 +462,48 @@ fn cleanup_native_entry(entry: &mut NativePrivateEntry, path: &Path) -> crate::L
     }
     #[cfg(not(any(unix, windows)))]
     {
-        let _ = (file, expected, path);
+        let _ = (entry, file, expected, path);
         return Err(LocalFileError::new(
             LocalFileErrorKind::RequirementNotMet,
             LocalFileOperation::Cleanup,
         ));
     }
+    Ok(())
+}
+
+/// Removes one retained native entry after checking its identity and type.
+///
+/// Validation is kept separate from platform deletion so a name is never
+/// removed solely because it occupies the expected path.
+///
+/// # Parameters
+///
+/// * `entry` — retained native authority and expected identity to validate and
+///   release.
+/// * `path` — diagnostic context attached to cleanup errors.
+///
+/// # Returns
+///
+/// `Ok(())` when the entry is safely removed; otherwise returns the cleanup
+/// failure.
+///
+/// # Errors
+///
+/// Returns an error when identity validation or the platform removal fails.
+fn cleanup_native_entry(entry: &mut NativePrivateEntry, path: &Path) -> crate::LocalResult<()> {
+    let (file, expected) = validate_native_entry(entry, path)?;
+    remove_native_entry(entry, path, file, expected)?;
     entry.file.take();
     Ok(())
 }
 
 impl Drop for LocalTempRecovery {
+    /// Makes one best-effort cleanup attempt when the owner is dropped.
+    ///
+    /// Any cleanup error is intentionally discarded because `Drop` cannot
+    /// return it; callers that need to inspect or retry failures should call
+    /// [`LocalTempRecovery::cleanup`] before dropping the value.
     fn drop(&mut self) {
         let _ = self.cleanup();
     }
 }
-
-#[cfg(all(test, unix))]
-#[path = "local_temp_recovery/recovery_cleanup_tests.rs"]
-mod recovery_cleanup_tests;

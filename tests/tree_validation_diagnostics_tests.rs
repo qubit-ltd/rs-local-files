@@ -9,7 +9,9 @@
 use std::path::Path;
 use std::path::PathBuf;
 
+use qubit_local_files::LocalFileError;
 use qubit_local_files::LocalFileSystem;
+use qubit_local_files::directory::LocalStagedDirectory;
 use qubit_local_files::directory::LocalTreeEntry;
 use qubit_local_files::directory::LocalTreeValidationOptions;
 use qubit_local_files::error::LocalFileErrorKind;
@@ -23,14 +25,7 @@ use qubit_local_files::outcome::LocalTreeMutationState;
 #[cfg(unix)]
 use qubit_local_files::policy::LocalOwnerAccessPolicy;
 
-fn make_stage(
-    rooted: bool,
-) -> (
-    tempfile::TempDir,
-    LocalFileSystem,
-    qubit_local_files::directory::LocalStagedDirectory,
-    PathBuf,
-) {
+fn make_stage(rooted: bool) -> (tempfile::TempDir, LocalFileSystem, LocalStagedDirectory, PathBuf) {
     let fixture = tempfile::tempdir().expect("fixture");
     let filesystem = if rooted {
         LocalFileSystem::rooted(fixture.path()).expect("Rooted filesystem")
@@ -52,13 +47,13 @@ fn entry(path: &str, kind: LocalFileKind) -> LocalTreeEntry {
     LocalTreeEntry::new(PathBuf::from(path), kind).expect("valid expected entry")
 }
 
-fn write_file(stage: &mut qubit_local_files::directory::LocalStagedDirectory, path: &str) {
+fn write_file(stage: &mut LocalStagedDirectory, path: &str) {
     stage
         .write_file_new(Path::new(path), &mut &b"x"[..], 1)
         .expect("file write");
 }
 
-fn assert_requirement(error: &qubit_local_files::LocalFileError, expected_path: &Path, reason: &str) {
+fn assert_requirement(error: &LocalFileError, expected_path: &Path, reason: &str) {
     assert_eq!(error.kind(), LocalFileErrorKind::RequirementNotMet);
     assert_same_path(error.path(), expected_path);
     assert!(error.reason().expect("reason").contains(reason));
@@ -87,7 +82,7 @@ fn normalize_diagnostic_path(path: &Path) -> PathBuf {
 }
 
 #[test]
-fn diagnostics_cover_host_and_rooted_exact_set_failures() {
+fn test_diagnostics_cover_host_and_rooted_exact_set_failures() {
     for rooted in [false, true] {
         let (_fixture, _filesystem, mut stage, root) = make_stage(rooted);
         write_file(&mut stage, "extra");
@@ -132,7 +127,7 @@ fn diagnostics_cover_host_and_rooted_exact_set_failures() {
 }
 
 #[test]
-fn diagnostics_include_depth_and_name_budget_facts() {
+fn test_diagnostics_include_depth_and_name_budget_facts() {
     for rooted in [false, true] {
         let (_fixture, _filesystem, mut stage, root) = make_stage(rooted);
         std::fs::create_dir(root.join("deep")).expect("nested directory");
@@ -177,7 +172,7 @@ fn diagnostics_include_depth_and_name_budget_facts() {
 }
 
 #[test]
-fn validation_deadline_overflow_is_reported_as_resource_limit() {
+fn test_validation_deadline_overflow_is_reported_as_resource_limit() {
     let (_fixture, _filesystem, stage, root) = make_stage(false);
     let error = stage
         .verify_entries(
@@ -193,7 +188,7 @@ fn validation_deadline_overflow_is_reported_as_resource_limit() {
 }
 
 #[test]
-fn validation_reports_entry_budget_and_walker_start_failures() {
+fn test_validation_reports_entry_budget_and_walker_start_failures() {
     let (_fixture, _filesystem, mut stage, _root) = make_stage(false);
     write_file(&mut stage, "entry");
 
@@ -227,7 +222,7 @@ fn validation_reports_entry_budget_and_walker_start_failures() {
 }
 
 #[test]
-fn publish_validation_diagnostic_preserves_state_and_recovery() {
+fn test_publish_validation_diagnostic_preserves_state_and_recovery() {
     let (_fixture, filesystem, mut stage, root) = make_stage(false);
     write_file(&mut stage, "extra");
     let parent = filesystem
@@ -252,7 +247,7 @@ fn publish_validation_diagnostic_preserves_state_and_recovery() {
 
 #[cfg(unix)]
 #[test]
-fn rejected_symlink_has_entry_diagnostic() {
+fn test_rejected_symlink_has_entry_diagnostic() {
     use std::os::unix::fs::symlink;
 
     let (_fixture, _filesystem, stage, root) = make_stage(false);
@@ -269,7 +264,7 @@ fn rejected_symlink_has_entry_diagnostic() {
 
 #[cfg(unix)]
 #[test]
-fn hard_link_and_special_entry_failures_have_context() {
+fn test_hard_link_and_special_entry_failures_have_context() {
     let (fixture, _filesystem, mut stage, root) = make_stage(false);
     write_file(&mut stage, "linked");
     std::fs::hard_link(root.join("linked"), fixture.path().join("outside-link")).expect("external hard link");
@@ -296,7 +291,7 @@ fn hard_link_and_special_entry_failures_have_context() {
 
 #[cfg(target_os = "linux")]
 #[test]
-fn owner_access_policy_failures_include_root_and_entry_paths() {
+fn test_owner_access_policy_failures_include_root_and_entry_paths() {
     use std::os::unix::fs::PermissionsExt;
 
     let (_fixture, _filesystem, stage, root) = make_stage(false);
@@ -335,7 +330,7 @@ fn owner_access_policy_failures_include_root_and_entry_paths() {
 
 #[cfg(all(unix, not(target_os = "linux")))]
 #[test]
-fn owner_access_policy_reports_unsupported_acl_backend() {
+fn test_owner_access_policy_reports_unsupported_acl_backend() {
     let (_fixture, _filesystem, stage, root) = make_stage(false);
     let error = stage
         .verify_entries(

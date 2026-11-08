@@ -99,6 +99,9 @@ impl LocalPersistOptions {
     }
 
     /// Enables recursive creation of a missing target parent.
+    ///
+    /// # Returns
+    /// Updated persistence options that create missing target parents.
     #[inline]
     pub const fn with_create_parent(mut self) -> Self {
         self.create_parent = true;
@@ -106,6 +109,13 @@ impl LocalPersistOptions {
     }
 
     /// Sets the required persistence durability.
+    ///
+    /// # Parameters
+    /// `durability` selects whether synchronization is required, preferred,
+    /// or not requested for the persistence operation.
+    ///
+    /// # Returns
+    /// Updated persistence options with the selected durability requirement.
     #[inline]
     pub const fn with_durability(mut self, durability: LocalDurabilityRequirement) -> Self {
         self.durability = durability;

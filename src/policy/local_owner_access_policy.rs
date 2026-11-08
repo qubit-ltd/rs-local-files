@@ -62,11 +62,18 @@
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 #[must_use]
 pub struct LocalOwnerAccessPolicy {
+    /// Exact Unix directory and file modes, when configured.
     unix_modes: Option<(u32, u32)>,
+    /// Exact Windows directory and file access masks, when configured.
     windows_masks: Option<(u32, u32)>,
 }
 impl LocalOwnerAccessPolicy {
     /// Creates an unconfigured policy without implicit permission presets.
+    ///
+    /// # Returns
+    ///
+    /// A policy with neither Unix modes nor Windows masks configured.
+    #[inline]
     pub const fn new() -> Self {
         Self {
             unix_modes: None,
@@ -75,6 +82,19 @@ impl LocalOwnerAccessPolicy {
     }
     /// Sets exact Unix directory and file modes; only owner `rwx` bits are
     /// valid.
+    ///
+    /// # Parameters
+    ///
+    /// * `directory_mode` - Exact permission mode for directories; only the
+    ///   owner's read, write, and execute bits are accepted by policy
+    ///   validation.
+    /// * `file_mode` - Exact permission mode for files; only the owner's read,
+    ///   write, and execute bits are accepted by policy validation.
+    ///
+    /// # Returns
+    ///
+    /// This policy with the Unix modes configured.
+    #[inline]
     pub const fn with_unix_modes(mut self, directory_mode: u32, file_mode: u32) -> Self {
         self.unix_modes = Some((directory_mode, file_mode));
         self
@@ -92,14 +112,42 @@ impl LocalOwnerAccessPolicy {
     /// The consuming owner-policy operation validates the masks before it
     /// mutates any native object and reports invalid values as
     /// [`crate::error::LocalFileErrorKind::InvalidOptions`].
+    ///
+    /// # Parameters
+    ///
+    /// * `directory_mask` - Requested access rights for directories, limited to
+    ///   the supported file-specific and standard object rights.
+    /// * `file_mask` - Requested access rights for files, limited to the
+    ///   supported file-specific and standard object rights.
+    ///
+    /// # Returns
+    ///
+    /// This policy with the Windows masks configured.
+    #[inline]
     pub const fn with_windows_masks(mut self, directory_mask: u32, file_mask: u32) -> Self {
         self.windows_masks = Some((directory_mask, file_mask));
         self
     }
+    /// Returns the configured exact Unix directory and file modes for
+    /// platform-specific policy application.
+    ///
+    /// # Returns
+    ///
+    /// `Some((directory_mode, file_mode))` when Unix modes are configured, or
+    /// `None` when no Unix modes have been set.
+    #[inline]
     #[cfg(unix)]
     pub(crate) const fn unix_modes(&self) -> Option<(u32, u32)> {
         self.unix_modes
     }
+    /// Returns the configured Windows directory and file access masks for
+    /// platform-specific policy application.
+    ///
+    /// # Returns
+    ///
+    /// `Some((directory_mask, file_mask))` when Windows masks are configured,
+    /// or `None` when no Windows masks have been set.
+    #[inline]
     #[cfg(windows)]
     pub(crate) const fn windows_masks(&self) -> Option<(u32, u32)> {
         self.windows_masks

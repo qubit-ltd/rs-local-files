@@ -19,6 +19,28 @@ use crate::LocalResult;
 use crate::LocalSymlinkPolicy;
 
 impl RootedLocalFileSystem {
+    /// Resolves a rooted path to its virtual absolute form after validating the
+    /// final entry through the opened root authority.
+    ///
+    /// An empty path and a path resolving to the root both inspect the retained
+    /// root. Other paths inspect the final entry without following its link;
+    /// `symlink_policy` applies while resolving intermediate components.
+    ///
+    /// # Parameters
+    ///
+    /// - `path`: Relative descendant path, or an empty path for the opened
+    ///   root.
+    /// - `symlink_policy`: Policy applied while resolving intermediate path
+    ///   components.
+    ///
+    /// # Returns
+    ///
+    /// A normalized absolute path rooted at `/` in the virtual namespace.
+    ///
+    /// # Errors
+    ///
+    /// Returns `LocalFileError` when path resolution or native metadata
+    /// inspection fails.
     pub(crate) fn canonicalize_virtual(
         &self,
         path: &Path,
@@ -56,8 +78,25 @@ impl RootedLocalFileSystem {
         Ok(absolute)
     }
 
-    /// Reads metadata for the final target after applying the selected link
-    /// policy.
+    /// Reads metadata for the final entry after applying the selected link
+    /// policy to intermediate path components.
+    ///
+    /// # Parameters
+    ///
+    /// - `path`: Relative descendant path, or an empty path for the opened
+    ///   root.
+    /// - `symlink_policy`: Policy applied while resolving intermediate path
+    ///   components.
+    ///
+    /// # Returns
+    ///
+    /// Metadata for the opened root or the final entry, with the final entry's
+    /// link left un-followed.
+    ///
+    /// # Errors
+    ///
+    /// Returns `LocalFileError` when path resolution or native metadata
+    /// inspection fails.
     pub(crate) fn target_metadata(
         &self,
         path: &Path,

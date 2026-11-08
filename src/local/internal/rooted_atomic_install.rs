@@ -28,6 +28,10 @@ use crate::LocalAtomicDestinationState;
 /// * `destination` - Final entry name relative to the staging parent.
 /// * `destination_existed` - Whether a regular destination existed initially.
 ///
+/// # Returns
+///
+/// Returns `Ok(())` after the staging file is installed at the destination.
+///
 /// # Errors
 ///
 /// Returns the native installation error paired with the most precise safe

@@ -356,7 +356,7 @@ fn test_required_private_windows_host_io_contract() {
 /// sandbox.
 #[cfg(windows)]
 #[test]
-fn windows_sealed_cleanup_platform_default_host() {
+fn test_windows_sealed_cleanup_platform_default_host() {
     let parent = tempdir().expect("Host fixture should be created");
     let mut temporary = LocalFileSystem::host()
         .expect("Host filesystem should open")
@@ -393,7 +393,7 @@ fn windows_sealed_cleanup_platform_default_host() {
 /// file and sandbox.
 #[cfg(windows)]
 #[test]
-fn windows_sealed_cleanup_drop_removes_host_entry() {
+fn test_windows_sealed_cleanup_drop_removes_host_entry() {
     let parent = tempdir().expect("Host fixture should be created");
     let mut temporary = LocalFileSystem::host()
         .expect("Host filesystem should open")
@@ -426,7 +426,7 @@ fn windows_sealed_cleanup_drop_removes_host_entry() {
 /// Verifies Host cleanup preserves a replacement entry at the temporary path.
 #[cfg(windows)]
 #[test]
-fn windows_sealed_cleanup_host_rejects_replacement() {
+fn test_windows_sealed_cleanup_host_rejects_replacement() {
     let parent = tempdir().expect("Host fixture should be created");
     let mut temporary = LocalFileSystem::host()
         .expect("Host filesystem should open")
@@ -509,7 +509,7 @@ fn test_required_private_windows_rooted_io_contract() {
 /// Verifies PlatformDefault Rooted sealed cleanup removes the file and sandbox.
 #[cfg(windows)]
 #[test]
-fn windows_sealed_cleanup_platform_default_rooted() {
+fn test_windows_sealed_cleanup_platform_default_rooted() {
     let root = tempdir().expect("Rooted fixture should be created");
     let filesystem = LocalFileSystem::rooted(root.path()).expect("Rooted filesystem should open");
     let mut temporary = filesystem
@@ -540,7 +540,7 @@ fn windows_sealed_cleanup_platform_default_rooted() {
 /// Verifies Required-private Rooted sealing and cleanup complete end to end.
 #[cfg(windows)]
 #[test]
-fn windows_sealed_cleanup_required_private_rooted() {
+fn test_windows_sealed_cleanup_required_private_rooted() {
     let root = tempdir().expect("Rooted fixture should be created");
     let filesystem = LocalFileSystem::rooted(root.path()).expect("Rooted filesystem should open");
     let mut temporary = filesystem
@@ -572,9 +572,9 @@ fn windows_sealed_cleanup_required_private_rooted() {
 /// removed.
 #[cfg(all(windows, feature = "test-support"))]
 #[test]
-fn windows_sealed_cleanup_retries_sandbox_removal() {
+fn test_windows_sealed_cleanup_retries_sandbox_removal() {
     run_in_test_fault_process(
-        "windows_sealed_cleanup_retries_sandbox_removal",
+        "test_windows_sealed_cleanup_retries_sandbox_removal",
         "temp-file-sandbox-remove",
         || {
             let root = tempdir().expect("Rooted fixture should be created");
@@ -613,7 +613,7 @@ fn windows_sealed_cleanup_retries_sandbox_removal() {
 /// Verifies dropping a sealed Rooted owner removes its owned read-only entry.
 #[cfg(windows)]
 #[test]
-fn windows_sealed_cleanup_drop_removes_owned_entry() {
+fn test_windows_sealed_cleanup_drop_removes_owned_entry() {
     let root = tempdir().expect("Rooted fixture should be created");
     let filesystem = LocalFileSystem::rooted(root.path()).expect("Rooted filesystem should open");
     let mut temporary = filesystem
@@ -652,7 +652,7 @@ fn windows_sealed_cleanup_drop_removes_owned_entry() {
 /// Verifies sealed Rooted cleanup preserves a replacement entry.
 #[cfg(windows)]
 #[test]
-fn windows_sealed_cleanup_rejects_replacement() {
+fn test_windows_sealed_cleanup_rejects_replacement() {
     let root = tempdir().expect("Rooted fixture should be created");
     let filesystem = LocalFileSystem::rooted(root.path()).expect("Rooted filesystem should open");
     let mut temporary = filesystem
@@ -689,7 +689,7 @@ fn windows_sealed_cleanup_rejects_replacement() {
 /// failed delete and leaves the owned file available for retry.
 #[cfg(all(windows, feature = "test-support"))]
 #[test]
-fn windows_sealed_cleanup_fallback_restores_attributes_and_retries() {
+fn test_windows_sealed_cleanup_fallback_restores_attributes_and_retries() {
     let root = tempdir().expect("Rooted fixture should be created");
     let filesystem = LocalFileSystem::rooted(root.path()).expect("Rooted filesystem should open");
     let mut temporary = filesystem
@@ -732,7 +732,7 @@ fn windows_sealed_cleanup_fallback_restores_attributes_and_retries() {
 /// Rooted entry when extended disposition is unavailable.
 #[cfg(all(windows, feature = "test-support"))]
 #[test]
-fn windows_sealed_cleanup_fallback_removes_read_only_entry() {
+fn test_windows_sealed_cleanup_fallback_removes_read_only_entry() {
     let root = tempdir().expect("Rooted fixture should be created");
     let filesystem = LocalFileSystem::rooted(root.path()).expect("Rooted filesystem should open");
     let mut temporary = filesystem
@@ -761,7 +761,7 @@ fn windows_sealed_cleanup_fallback_removes_read_only_entry() {
 /// causes while preserving cleanup ownership for a later retry.
 #[cfg(all(windows, feature = "test-support"))]
 #[test]
-fn windows_sealed_cleanup_fallback_reports_restore_failure_and_retries() {
+fn test_windows_sealed_cleanup_fallback_reports_restore_failure_and_retries() {
     let root = tempdir().expect("Rooted fixture should be created");
     let filesystem = LocalFileSystem::rooted(root.path()).expect("Rooted filesystem should open");
     let mut temporary = filesystem

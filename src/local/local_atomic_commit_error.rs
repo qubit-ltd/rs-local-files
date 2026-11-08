@@ -58,7 +58,8 @@ impl<T> LocalAtomicCommitError<T> {
     /// # Returns
     ///
     /// The failure produced by the commit attempt.
-    #[must_use]
+    #[must_use = "the atomic-write failure should be inspected"]
+    #[inline]
     pub const fn error(&self) -> &LocalAtomicWriteError {
         &self.error
     }
@@ -69,6 +70,7 @@ impl<T> LocalAtomicCommitError<T> {
     ///
     /// `Some` for a pre-installation failure that permits retry or explicit
     /// abort, or `None` after installation began.
+    #[inline]
     pub fn writer(&self) -> Option<&T> {
         self.writer.as_deref()
     }
@@ -79,6 +81,7 @@ impl<T> LocalAtomicCommitError<T> {
     ///
     /// `Some` for a pre-installation failure that permits additional staging
     /// writes, retry, or explicit abort, or `None` after installation began.
+    #[inline]
     pub fn writer_mut(&mut self) -> Option<&mut T> {
         self.writer.as_deref_mut()
     }
@@ -102,10 +105,15 @@ impl<T> LocalAtomicCommitError<T> {
     /// * `finalize_writer` - Finalizes a retained writer and enriches its
     ///   structured failure with any cleanup error.
     ///
+    /// # Type Parameters
+    ///
+    /// * `F` - One-shot callback that finalizes the retained writer.
+    ///
     /// # Returns
     ///
     /// The finalized writer failure when recovery remained available, or the
     /// original terminal failure when no writer was retained.
+    #[must_use = "the finalized atomic-write failure should be handled"]
     #[inline]
     pub fn into_final_error_with<F>(self, finalize_writer: F) -> LocalAtomicWriteError
     where
@@ -121,6 +129,10 @@ impl<T> LocalAtomicCommitError<T> {
 
 impl<T> Display for LocalAtomicCommitError<T> {
     /// Formats the structured atomic-write failure and recovery availability.
+    ///
+    /// # Parameters
+    ///
+    /// * `formatter` - Destination receiving the formatted failure details.
     fn fmt(&self, formatter: &mut Formatter<'_>) -> FmtResult {
         if self.writer.is_some() {
             write!(formatter, "{}; staging writer retained", self.error)

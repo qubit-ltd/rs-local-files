@@ -5,7 +5,7 @@
 //
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
-//! Rooted-path validation and metadata conversion helpers.
+//! Rooted-path validation and I/O error-context helpers.
 
 use std::io;
 use std::path::Path;
@@ -46,6 +46,43 @@ pub(crate) fn rooted_path(path: &Path, operation: LocalFileOperation) -> LocalRe
             error,
         )),
     }
+}
+
+/// Converts descriptor-relative metadata to the unified metadata type.
+///
+/// # Parameters
+///
+/// * `metadata` - Metadata obtained from a rooted descriptor-relative lookup.
+///
+/// # Returns
+///
+/// Unified local metadata with the entry kind, size, timestamps, and
+/// permissions copied from the rooted representation.
+#[inline]
+pub(crate) fn rooted_metadata(metadata: crate::rooted::Metadata) -> LocalFileMetadata {
+    let kind = match metadata.kind() {
+        crate::rooted::EntryKind::File => LocalFileKind::File,
+        crate::rooted::EntryKind::Directory => LocalFileKind::Directory,
+        crate::rooted::EntryKind::Symlink => LocalFileKind::Symlink,
+        #[cfg(unix)]
+        crate::rooted::EntryKind::Fifo => LocalFileKind::Fifo,
+        #[cfg(unix)]
+        crate::rooted::EntryKind::Socket => LocalFileKind::Socket,
+        #[cfg(unix)]
+        crate::rooted::EntryKind::BlockDevice => LocalFileKind::BlockDevice,
+        #[cfg(unix)]
+        crate::rooted::EntryKind::CharDevice => LocalFileKind::CharDevice,
+        crate::rooted::EntryKind::Other => LocalFileKind::Other,
+    };
+    let permissions = metadata.permissions();
+    LocalFileMetadata::from_parts(
+        kind,
+        metadata.size(),
+        metadata.accessed_at(),
+        metadata.modified_at(),
+        metadata.created_at(),
+        LocalFilePermissions::new(permissions.is_read_only(), permissions.unix_mode()),
+    )
 }
 
 /// Reports whether a rooted destination currently names a real directory.
@@ -184,43 +221,6 @@ pub(crate) fn temp_candidate(
     }
 }
 
-/// Converts descriptor-relative metadata to the unified metadata type.
-///
-/// # Parameters
-///
-/// * `metadata` - Metadata obtained from a rooted descriptor-relative lookup.
-///
-/// # Returns
-///
-/// Unified local metadata with the entry kind, size, timestamps, and
-/// permissions copied from the rooted representation.
-#[inline]
-pub(crate) fn rooted_metadata(metadata: crate::rooted::Metadata) -> LocalFileMetadata {
-    let kind = match metadata.kind() {
-        crate::rooted::EntryKind::File => LocalFileKind::File,
-        crate::rooted::EntryKind::Directory => LocalFileKind::Directory,
-        crate::rooted::EntryKind::Symlink => LocalFileKind::Symlink,
-        #[cfg(unix)]
-        crate::rooted::EntryKind::Fifo => LocalFileKind::Fifo,
-        #[cfg(unix)]
-        crate::rooted::EntryKind::Socket => LocalFileKind::Socket,
-        #[cfg(unix)]
-        crate::rooted::EntryKind::BlockDevice => LocalFileKind::BlockDevice,
-        #[cfg(unix)]
-        crate::rooted::EntryKind::CharDevice => LocalFileKind::CharDevice,
-        crate::rooted::EntryKind::Other => LocalFileKind::Other,
-    };
-    let permissions = metadata.permissions();
-    LocalFileMetadata::from_parts(
-        kind,
-        metadata.size(),
-        metadata.accessed_at(),
-        metadata.modified_at(),
-        metadata.created_at(),
-        LocalFilePermissions::new(permissions.is_read_only(), permissions.unix_mode()),
-    )
-}
-
 /// Adds rooted operation and descendant context to a native I/O failure.
 ///
 /// # Parameters
@@ -236,41 +236,4 @@ pub(crate) fn rooted_metadata(metadata: crate::rooted::Metadata) -> LocalFileMet
 #[inline]
 pub(crate) fn rooted_io_error(operation: LocalFileOperation, path: &Path, error: io::Error) -> LocalFileError {
     LocalFileError::from_io(operation, Some(path.to_path_buf()), None, error)
-}
-
-#[cfg(test)]
-mod invalid_parent_and_affix_tests {
-    use std::path::Path;
-
-    use crate::LocalFileErrorKind;
-    use crate::LocalFileOperation;
-    use crate::rooted::Root;
-
-    #[test]
-    fn test_rooted_temp_parent_rejects_parent_traversal_with_original_context() {
-        let fixture = tempfile::tempdir().expect("root fixture should exist");
-        let root = Root::open(fixture.path()).expect("root authority should open");
-        let path = Path::new("../outside");
-
-        let error = super::validate_rooted_temp_parent(&root, path, LocalFileOperation::Metadata)
-            .expect_err("temporary parent must stay within root");
-
-        assert_eq!(error.kind(), LocalFileErrorKind::InvalidPath);
-        assert_eq!(error.operation(), LocalFileOperation::Metadata);
-        assert_eq!(error.path(), Some(path));
-    }
-
-    #[test]
-    fn test_rooted_temp_candidate_classifies_invalid_affix_as_invalid_options() {
-        let parent = Path::new("temp-parent");
-        for (prefix, suffix) in [(Some("bad/prefix"), None), (None, Some("bad/suffix"))] {
-            let error = super::temp_candidate(parent, prefix, suffix, LocalFileOperation::Metadata)
-                .expect_err("an affix may not introduce additional path components");
-
-            assert_eq!(error.kind(), LocalFileErrorKind::InvalidOptions);
-            assert_eq!(error.operation(), LocalFileOperation::Metadata);
-            assert_eq!(error.path(), Some(parent));
-            assert_eq!(error.io_error_kind(), std::io::ErrorKind::InvalidInput);
-        }
-    }
 }

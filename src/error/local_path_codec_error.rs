@@ -41,6 +41,18 @@ pub enum LocalPathCodecError {
 
 impl fmt::Display for LocalPathCodecError {
     /// Formats the canonical path codec failure for diagnostics.
+    ///
+    /// # Parameters
+    ///
+    /// - `formatter`: Destination that receives the formatted failure message.
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(())` when the message is written successfully.
+    ///
+    /// # Errors
+    ///
+    /// Returns the formatting error if writing to `formatter` fails.
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::InvalidEscape { offset } => {

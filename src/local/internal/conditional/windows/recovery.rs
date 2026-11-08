@@ -7,23 +7,7 @@
 // =============================================================================
 //! Native ReplaceFileW failure classes used alongside observed receipts.
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(super) enum ReplaceFailure {
-    UnableToRemoveReplaced,
-    UnableToMoveReplacement,
-    UnableToMoveReplacementAfterBackup,
-    Other,
-}
+mod replace_failure;
 
-pub(super) fn classify_replace_failure(raw_os_error: Option<i32>) -> ReplaceFailure {
-    match raw_os_error.map(|code| code as u32) {
-        Some(windows_sys::Win32::Foundation::ERROR_UNABLE_TO_REMOVE_REPLACED) => ReplaceFailure::UnableToRemoveReplaced,
-        Some(windows_sys::Win32::Foundation::ERROR_UNABLE_TO_MOVE_REPLACEMENT) => {
-            ReplaceFailure::UnableToMoveReplacement
-        }
-        Some(windows_sys::Win32::Foundation::ERROR_UNABLE_TO_MOVE_REPLACEMENT_2) => {
-            ReplaceFailure::UnableToMoveReplacementAfterBackup
-        }
-        _ => ReplaceFailure::Other,
-    }
-}
+pub(super) use replace_failure::ReplaceFailure;
+pub(super) use replace_failure::classify_replace_failure;

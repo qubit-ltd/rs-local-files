@@ -11,6 +11,7 @@
 
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
+use std::os::unix::fs::symlink;
 use std::path::Path;
 
 use qubit_local_files::LocalFileSystem;
@@ -132,8 +133,6 @@ fn test_rooted_type_conflict_skip_does_not_report_metadata_preservation() {
 
 #[test]
 fn test_host_symlink_skip_does_not_report_metadata_preservation() {
-    use std::os::unix::fs::symlink;
-
     let fixture = tempdir().expect("fixture should exist");
     let link_target = fixture.path().join("link-target");
     let source = fixture.path().join("source-link");

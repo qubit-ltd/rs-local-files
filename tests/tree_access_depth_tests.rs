@@ -54,7 +54,7 @@ fn clear_readonly_attribute(path: &Path) {
 }
 
 #[test]
-fn lf_n02_empty_tree_at_zero_depth_is_allowed() {
+fn test_empty_tree_is_allowed_at_zero_depth() {
     let fixture = tempfile::tempdir().expect("fixture");
     let fs = LocalFileSystem::host().expect("host filesystem");
     let parent = fs
@@ -77,7 +77,7 @@ fn lf_n02_empty_tree_at_zero_depth_is_allowed() {
 }
 
 #[test]
-fn lf_n02_nonempty_tree_zero_depth_fails_without_partial_permission_changes() {
+fn test_nonempty_tree_at_zero_depth_fails_without_partial_permission_changes() {
     #[cfg(unix)]
     assert_ne!(
         unsafe { libc::geteuid() },
@@ -130,7 +130,7 @@ fn lf_n02_nonempty_tree_zero_depth_fails_without_partial_permission_changes() {
 }
 
 #[test]
-fn lf_n02_depth_boundary_is_inclusive_for_both_access_policies() {
+fn test_depth_boundary_is_inclusive_for_both_access_policies() {
     for (nested, maximum) in [(false, 1), (true, 2)] {
         for policy in [
             LocalTreeFinalAccess::CurrentUserOnly,
@@ -157,7 +157,7 @@ fn lf_n02_depth_boundary_is_inclusive_for_both_access_policies() {
 }
 
 #[test]
-fn lf_n02_over_depth_nested_tree_fails_before_any_permission_change() {
+fn test_over_depth_nested_tree_fails_before_permission_changes() {
     for policy in [
         LocalTreeFinalAccess::CurrentUserOnly,
         LocalTreeFinalAccess::ReadOnlyCurrentUser,

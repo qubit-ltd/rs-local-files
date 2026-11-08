@@ -8,6 +8,8 @@
 
 use std::fs;
 #[cfg(unix)]
+use std::os::unix::fs::symlink;
+#[cfg(unix)]
 use std::path::Path;
 use std::path::PathBuf;
 
@@ -28,8 +30,6 @@ use tempfile::tempdir;
 #[cfg(unix)]
 #[test]
 fn test_host_list_follows_symlink_before_parent_component() {
-    use std::os::unix::fs::symlink;
-
     let directory = tempdir().expect("fixture directory should exist");
     let root = fs::canonicalize(directory.path()).expect("fixture root should resolve");
     fs::create_dir_all(root.join("work/data")).expect("lexical directory should exist");
@@ -74,8 +74,6 @@ fn test_host_list_follows_symlink_before_parent_component() {
 #[cfg(unix)]
 #[test]
 fn test_host_list_through_directory_symlink_preserves_namespace_root() {
-    use std::os::unix::fs::symlink;
-
     let directory = tempdir().expect("fixture directory should exist");
     let real = directory.path().join("real");
     let alias = directory.path().join("alias");
@@ -325,8 +323,6 @@ fn test_local_directory_walker_continue_discards_reopen_error_frame() {
 #[cfg(unix)]
 #[test]
 fn test_local_directory_walker_follows_links_by_default_on_host() {
-    use std::os::unix::fs::symlink;
-
     let directory = tempdir().expect("temporary directory should be created");
     let outside = tempdir().expect("outside directory should be created");
     fs::write(outside.path().join("secret"), b"x").expect("outside file should be written");
@@ -348,8 +344,6 @@ fn test_local_directory_walker_follows_links_by_default_on_host() {
 #[cfg(unix)]
 #[test]
 fn test_local_directory_walker_can_reject_symlinks_per_operation() {
-    use std::os::unix::fs::symlink;
-
     let directory = tempdir().expect("temporary directory should be created");
     let outside = tempdir().expect("outside directory should be created");
     let directory_path = fs::canonicalize(directory.path()).expect("temporary directory path should be canonicalized");

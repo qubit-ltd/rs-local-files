@@ -11,6 +11,17 @@
 /// # Type Parameters
 ///
 /// - `T`: The expected content digest when using [`Self::Content`].
+///
+/// # Examples
+///
+/// ```
+/// use qubit_local_files::options::LocalWritePrecondition;
+/// use sha2::{Digest, Sha256};
+///
+/// let expected = Sha256::digest(b"current content");
+/// let precondition = LocalWritePrecondition::Content(expected);
+/// assert!(matches!(precondition, LocalWritePrecondition::Content(_)));
+/// ```
 #[must_use]
 #[non_exhaustive]
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -18,7 +29,10 @@ pub enum LocalWritePrecondition<T> {
     /// Publish only when the destination does not exist.
     Absent,
     /// Publish only when the destination content has the expected digest.
-    Content(T),
+    Content(
+        /// Digest the destination must match before the write can be published.
+        T,
+    ),
 }
 
 #[cfg(test)]
@@ -29,7 +43,7 @@ mod conditional_types_tests {
     use super::LocalWritePrecondition;
 
     #[test]
-    fn conditional_types_keep_full_digest() {
+    fn test_content_precondition_keeps_full_digest() {
         let expected = Sha256::digest(b"A");
         let condition = LocalWritePrecondition::Content(expected);
         assert!(matches!(condition, LocalWritePrecondition::Content(value) if value == Sha256::digest(b"A")));

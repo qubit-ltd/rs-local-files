@@ -21,6 +21,23 @@ use crate::error::LocalFileOperation;
 /// Returns `Ok(None)` when no duration is configured. An unrepresentable
 /// duration returns `InvalidOptions` and retains the supplied operation and
 /// optional path in the error context.
+///
+/// # Parameters
+///
+/// - `started_at`: Monotonic instant from which the duration is measured.
+/// - `duration`: Optional maximum duration; `None` leaves the deadline unset.
+/// - `operation`: Operation recorded if the deadline cannot be represented.
+/// - `path`: Optional path recorded with an overflow error.
+///
+/// # Returns
+///
+/// Returns `Ok(None)` when `duration` is `None`, or `Ok(Some(deadline))` when
+/// the duration can be added to `started_at`.
+///
+/// # Errors
+///
+/// Returns an `InvalidOptions` error when the monotonic clock cannot represent
+/// the resulting deadline. The error retains `operation` and `path`.
 pub(crate) fn checked_path_binding_deadline(
     started_at: Instant,
     duration: Option<Duration>,
@@ -39,55 +56,4 @@ pub(crate) fn checked_path_binding_deadline(
             })
         })
         .transpose()
-}
-
-#[cfg(test)]
-mod tests {
-    use std::time::Duration;
-    use std::time::Instant;
-
-    use super::checked_path_binding_deadline;
-    use crate::error::LocalFileErrorKind;
-    use crate::error::LocalFileOperation;
-
-    #[test]
-    fn test_checked_path_binding_deadline_values_and_overflow() {
-        let started_at = Instant::now();
-        assert_eq!(
-            checked_path_binding_deadline(started_at, None, LocalFileOperation::Metadata, None)
-                .expect("no limit is accepted"),
-            None
-        );
-        assert_eq!(
-            checked_path_binding_deadline(started_at, Some(Duration::ZERO), LocalFileOperation::Metadata, None,)
-                .expect("zero duration is representable"),
-            Some(started_at)
-        );
-        assert!(
-            checked_path_binding_deadline(
-                started_at,
-                Some(Duration::from_secs(1)),
-                LocalFileOperation::Metadata,
-                None,
-            )
-            .expect("finite duration is representable")
-            .is_some()
-        );
-        assert!(started_at.checked_add(Duration::MAX).is_none());
-        let path = std::path::Path::new("item");
-        let error = checked_path_binding_deadline(
-            started_at,
-            Some(Duration::MAX),
-            LocalFileOperation::Metadata,
-            Some(path),
-        )
-        .expect_err("overflow is rejected");
-        assert_eq!(error.kind(), LocalFileErrorKind::InvalidOptions);
-        assert_eq!(error.operation(), LocalFileOperation::Metadata);
-        assert_eq!(error.path(), Some(path));
-        assert_eq!(
-            error.reason(),
-            Some("path binding deadline exceeds the monotonic clock range")
-        );
-    }
 }

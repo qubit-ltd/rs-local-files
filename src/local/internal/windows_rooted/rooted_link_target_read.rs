@@ -11,10 +11,17 @@
 pub(crate) enum RootedLinkTargetRead {
     /// The bounded raw target and reparse flags, before namespace
     /// normalization.
-    Target(super::rooted_link_target::RootedLinkTarget),
+    Target(
+        /// The bounded raw target and its native reparse flags.
+        super::rooted_link_target::RootedLinkTarget,
+    ),
     /// The raw target exceeds the limit; this is its observed UTF-16 byte
     /// length.
-    Exceeded(usize),
+    Exceeded(
+        /// The target's raw UTF-16 byte length, measured before path
+        /// conversion.
+        usize,
+    ),
 }
 // =============================================================================
 //    Copyright (c) 2026 Haixing Hu.

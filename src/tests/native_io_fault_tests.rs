@@ -68,6 +68,8 @@ impl NativeIoFaultGuard {
         }
     }
 
+    #[must_use]
+    #[inline]
     pub(crate) fn fired(&self) -> bool {
         PLAN.with(|plan| plan.borrow().as_ref().is_some_and(|plan| plan.fired))
     }

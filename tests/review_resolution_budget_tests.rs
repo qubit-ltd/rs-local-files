@@ -34,7 +34,7 @@ fn assert_pending_byte_limit(error: &qubit_local_files::LocalFileError, limit: u
 
 #[cfg(unix)]
 #[test]
-fn pending_current_steps_use_the_native_component_byte_budget() {
+fn test_pending_current_steps_use_the_native_component_byte_budget() {
     use std::os::unix::fs::symlink;
 
     let fixture = tempfile::tempdir().expect("fixture should be created");
@@ -56,7 +56,7 @@ fn pending_current_steps_use_the_native_component_byte_budget() {
 
 #[cfg(windows)]
 #[test]
-fn pending_current_steps_use_the_native_component_byte_budget() {
+fn test_pending_current_steps_use_the_native_component_byte_budget() {
     let fixture = tempfile::tempdir().expect("fixture should be created");
     std::fs::write(fixture.path().join("x"), b"x").expect("target file should be created");
     create_current_steps_reparse_link(&fixture.path().join("l"));
@@ -195,7 +195,7 @@ fn create_current_steps_reparse_link(link: &Path) {
 
 #[cfg(unix)]
 #[test]
-fn pending_parent_steps_use_three_native_bytes_each() {
+fn test_pending_parent_steps_use_three_native_bytes_each() {
     use std::os::unix::fs::symlink;
 
     let fixture = tempfile::tempdir().expect("fixture should be created");
@@ -213,7 +213,7 @@ fn pending_parent_steps_use_three_native_bytes_each() {
 
 #[cfg(windows)]
 #[test]
-fn pending_parent_steps_use_six_native_bytes_each() {
+fn test_pending_parent_steps_use_six_native_bytes_each() {
     use std::os::windows::fs::symlink_dir;
 
     let fixture = tempfile::tempdir().expect("fixture should be created");

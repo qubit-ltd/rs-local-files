@@ -66,6 +66,11 @@ impl LocalTempCleanupLimits {
 
     /// Sets the limit for entry depth, with the requested directory at depth
     /// zero.
+    ///
+    /// # Parameters
+    ///
+    /// * `limit` - Maximum descendant depth; the requested directory is depth
+    ///   zero.
     pub const fn with_max_depth(mut self, limit: usize) -> Self {
         self.max_depth = Some(limit);
         self
@@ -86,6 +91,11 @@ impl LocalTempCleanupLimits {
 
     /// Sets the limit for discovered entries, including the requested
     /// directory.
+    ///
+    /// # Parameters
+    ///
+    /// * `limit` - Maximum number of discovered entries, counting the requested
+    ///   directory.
     pub const fn with_max_entries(mut self, limit: usize) -> Self {
         self.max_entries = Some(limit);
         self
@@ -105,6 +115,11 @@ impl LocalTempCleanupLimits {
     }
 
     /// Sets the limit for encoded native bytes retained by pending paths.
+    ///
+    /// # Parameters
+    ///
+    /// * `limit` - Maximum number of native encoded bytes retained by queued
+    ///   paths.
     pub const fn with_max_pending_path_bytes(mut self, limit: usize) -> Self {
         self.max_pending_path_bytes = Some(limit);
         self
@@ -123,6 +138,10 @@ impl LocalTempCleanupLimits {
     }
 
     /// Sets the cooperative elapsed-time limit for recursive deletion.
+    ///
+    /// # Parameters
+    ///
+    /// * `limit` - Maximum cooperative elapsed time for one cleanup attempt.
     pub const fn with_deadline(mut self, limit: Duration) -> Self {
         self.deadline = Some(limit);
         self

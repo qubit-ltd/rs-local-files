@@ -32,6 +32,10 @@ use crate::capability::SizeLimit;
 /// Windows reports component capacity in UTF-16 code units. No fixed complete
 /// path limit is claimed for handle-relative NT traversal.
 ///
+/// # Parameters
+///
+/// * `file` — an open handle on the volume to inspect.
+///
 /// # Errors
 ///
 /// Returns the native volume-information error when the opened handle cannot
@@ -57,6 +61,10 @@ pub(crate) fn probe_windows_limits(file: &File) -> Result<LocalFileSystemLimits>
 }
 
 /// Queries total, free, and caller-available capacity from an opened handle.
+///
+/// # Parameters
+///
+/// * `file` — an open handle on the volume to inspect.
 ///
 /// # Errors
 ///
@@ -84,6 +92,13 @@ pub(crate) fn probe_windows_space(file: &File) -> Result<LocalFileSystemSpace> {
 /// `output_length` bytes and the selected `information_class`; the native call
 /// retains no pointers. Returns `InvalidInput` if the length exceeds `u32`,
 /// or the converted native query error.
+///
+/// # Parameters
+///
+/// * `file` — the open handle passed to the native query.
+/// * `output` — aligned, writable storage for the requested information.
+/// * `output_length` — the storage length in bytes; it must fit in `u32`.
+/// * `information_class` — the native information class to query.
 fn query_volume_information(
     file: &File,
     output: *mut core::ffi::c_void,
@@ -113,6 +128,19 @@ fn query_volume_information(
 }
 
 /// Converts signed allocation units into bytes without overflow.
+///
+/// # Parameters
+///
+/// * `units` — the signed native allocation-unit count; negative values are
+///   unavailable.
+/// * `bytes_per_allocation_unit` — the allocation-unit size in bytes, or `None`
+///   when that size cannot be computed.
+///
+/// # Returns
+///
+/// `Some(bytes)` contains the checked byte count. `None` indicates a negative
+/// count, an unavailable unit size, or multiplication overflow.
+#[inline]
 fn allocation_bytes(units: i64, bytes_per_allocation_unit: Option<u64>) -> Option<u64> {
     let units = u64::try_from(units).ok()?;
     let unit_bytes = bytes_per_allocation_unit?;

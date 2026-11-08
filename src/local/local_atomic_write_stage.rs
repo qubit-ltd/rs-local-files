@@ -7,19 +7,10 @@
 // =============================================================================
 //! Atomic-write failure stages.
 
-/// Stage at which an atomic write failed.
+/// Internal stage at which an atomic write failed.
 ///
-/// Additional stages may be added as durability behavior evolves. Downstream
-/// matches must retain a wildcard arm.
-///
-/// # Examples
-///
-/// ```ignore
-/// use qubit_local_files::LocalAtomicWriteStage;
-///
-/// let stage = LocalAtomicWriteStage::ReplaceDestination;
-/// assert_eq!(stage, LocalAtomicWriteStage::ReplaceDestination);
-/// ```
+/// Additional stages may be added as durability behavior evolves, so matches
+/// in the crate should retain a wildcard arm.
 #[must_use]
 #[non_exhaustive]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

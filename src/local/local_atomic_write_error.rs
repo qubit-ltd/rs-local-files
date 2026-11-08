@@ -102,8 +102,9 @@ impl LocalAtomicWriteError {
     /// Returns the same-directory staging path, when one was created.
     ///
     /// # Returns
-    /// Staging path retained for diagnostics. The entry is not guaranteed to
-    /// exist after a completed replacement or a successful cleanup.
+    /// `Some` contains the path when a staging file was created; `None` means
+    /// no staging path had been created. The entry is not guaranteed to exist
+    /// after a completed replacement or a successful cleanup.
     #[must_use]
     #[inline]
     pub fn temporary_path(&self) -> Option<&Path> {
@@ -125,7 +126,8 @@ impl LocalAtomicWriteError {
     /// Returns the secondary staging cleanup error, when cleanup failed.
     ///
     /// # Returns
-    /// Cleanup error without replacing the primary source error.
+    /// `Some` contains the cleanup error when staging removal failed; `None`
+    /// means cleanup did not fail.
     #[must_use]
     #[inline]
     pub fn cleanup_error(&self) -> Option<&io::Error> {
@@ -136,7 +138,9 @@ impl LocalAtomicWriteError {
     /// failed after the destination had already been published.
     ///
     /// # Returns
-    /// Parent synchronization error without replacing the primary source error.
+    /// `Some` contains the synchronization error when syncing the published
+    /// destination's parent chain failed; `None` means synchronization did not
+    /// fail.
     #[must_use]
     #[inline]
     pub fn parent_sync_error(&self) -> Option<&io::Error> {
@@ -165,10 +169,12 @@ impl LocalAtomicWriteError {
 
     /// Consumes this error and returns staging cleanup details with its source.
     ///
-    /// Returns the optional staging path, optional cleanup error, and primary
-    /// I/O error in that order. The stage, destination state, and parent-sync
-    /// error are discarded; inspect them before consuming the error if needed.
-    #[must_use]
+    /// # Returns
+    /// The optional staging path, optional cleanup error, and primary I/O error
+    /// in that order. Either optional value is `None` when that detail is not
+    /// available. The stage, destination state, and parent-sync error are
+    /// discarded; inspect them before consuming the error if needed.
+    #[must_use = "the staging details and primary error should be handled"]
     #[inline]
     pub fn into_staging_parts(self) -> (Option<PathBuf>, Option<io::Error>, io::Error) {
         (self.temporary_path, self.cleanup_error, self.source)
@@ -177,8 +183,8 @@ impl LocalAtomicWriteError {
     /// Attaches a staging cleanup failure.
     ///
     /// # Parameters
-    /// - `cleanup_error`: Secondary error raised while removing the staging
-    ///   path.
+    /// - `cleanup_error`: `Some` is the secondary error raised while removing
+    ///   the staging path; `None` records that cleanup did not fail.
     ///
     /// # Returns
     /// This atomic-write error enriched with cleanup context.
@@ -192,8 +198,9 @@ impl LocalAtomicWriteError {
     /// Attaches a parent synchronization failure.
     ///
     /// # Parameters
-    /// - `parent_sync_error`: Secondary error raised while synchronizing a
-    ///   published destination's parent chain.
+    /// - `parent_sync_error`: `Some` is the secondary error raised while
+    ///   synchronizing a published destination's parent chain; `None` records
+    ///   that synchronization did not fail.
     ///
     /// # Returns
     /// This atomic-write error enriched with parent synchronization context.
@@ -207,6 +214,13 @@ impl LocalAtomicWriteError {
 
 impl Display for LocalAtomicWriteError {
     /// Formats the failed stage, destination state, and source error.
+    ///
+    /// # Parameters
+    /// - `formatter`: Receives the formatted error representation.
+    ///
+    /// # Returns
+    /// `Ok(())` after formatting succeeds, or the formatter's error if writing
+    /// the representation fails.
     fn fmt(&self, formatter: &mut Formatter<'_>) -> FmtResult {
         write!(
             formatter,
@@ -239,6 +253,9 @@ impl Display for LocalAtomicWriteError {
 
 impl Error for LocalAtomicWriteError {
     /// Returns the retained native I/O error.
+    ///
+    /// # Returns
+    /// `Some` containing the retained source error.
     #[inline]
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         Some(self.source_error())

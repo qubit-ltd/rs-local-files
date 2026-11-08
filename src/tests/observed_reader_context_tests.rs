@@ -6,11 +6,15 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 
+use std::env;
 use std::fs;
+use std::io::ErrorKind;
 use std::path::Path;
+use std::path::absolute;
 
 use crate::LocalFileOperation;
 use crate::LocalFileSystem;
+use crate::error::LocalFileErrorSource;
 use crate::options::LocalDirectoryOpenOptions;
 use crate::options::LocalObservedReadOptions;
 use crate::options::LocalPathBindingOptions;
@@ -18,8 +22,8 @@ use crate::tests::native_io_fault_tests::NativeIoFaultGuard;
 use crate::tests::native_io_fault_tests::NativeIoPoint;
 
 #[test]
-fn observed_reader_observation_failure_keeps_namespace_and_pwd_context() {
-    let cwd = std::env::current_dir().expect("process current directory");
+fn test_observed_reader_observation_failure_keeps_namespace_and_pwd_context() {
+    let cwd = env::current_dir().expect("process current directory");
     let host_fixture = tempfile::Builder::new()
         .prefix("observed-reader-context-")
         .tempdir_in(&cwd)
@@ -28,7 +32,7 @@ fn observed_reader_observation_failure_keeps_namespace_and_pwd_context() {
     let host_absolute = LocalFileSystem::host().expect("host filesystem");
     // Host diagnostics use the resolved namespace spelling. On Windows this
     // is a drive path, while `fs::canonicalize` returns the `\\?\` form.
-    let absolute_path = std::path::absolute(host_fixture.path().join("item")).expect("absolute item path");
+    let absolute_path = absolute(host_fixture.path().join("item")).expect("absolute item path");
 
     let host_relative_path = host_fixture
         .path()
@@ -70,7 +74,7 @@ fn observed_reader_observation_failure_keeps_namespace_and_pwd_context() {
         assert_eq!(error.operation(), LocalFileOperation::OpenReader);
         assert_eq!(error.path(), Some(expected_path));
         assert_eq!(error.current_directory(), expected_pwd);
-        assert_eq!(error.io_error_kind(), std::io::ErrorKind::Other);
+        assert_eq!(error.io_error_kind(), ErrorKind::Other);
         assert!(error.to_string().contains("injected native I/O contract failure"));
     }
 
@@ -86,7 +90,7 @@ fn observed_reader_observation_failure_keeps_namespace_and_pwd_context() {
 }
 
 #[test]
-fn fixed_observed_reader_open_failure_keeps_handle_namespace_context() {
+fn test_fixed_observed_reader_open_failure_keeps_handle_namespace_context() {
     let fixture = tempfile::tempdir().expect("rooted fixture");
     fs::create_dir(fixture.path().join("work")).expect("work directory");
     fs::write(fixture.path().join("work/item"), b"payload").expect("payload");
@@ -104,12 +108,12 @@ fn fixed_observed_reader_open_failure_keeps_handle_namespace_context() {
     assert_eq!(error.operation(), LocalFileOperation::OpenReader);
     assert_eq!(error.path(), Some(fixture.path().join("work/item").as_path()));
     assert_eq!(error.current_directory(), None);
-    assert_eq!(error.io_error_kind(), std::io::ErrorKind::Other);
+    assert_eq!(error.io_error_kind(), ErrorKind::Other);
 }
 
 #[test]
 fn test_observed_reader_post_open_failures_keep_context_and_source() {
-    let cwd = std::env::current_dir().expect("process current directory");
+    let cwd = env::current_dir().expect("process current directory");
     let host_fixture = tempfile::Builder::new()
         .prefix("observed-reader-post-open-")
         .tempdir_in(&cwd)
@@ -118,7 +122,7 @@ fn test_observed_reader_post_open_failures_keep_context_and_source() {
     let host = LocalFileSystem::host().expect("Host filesystem");
     // Match the namespace path stored in diagnostics; canonicalize adds the
     // Windows extended-length prefix, which diagnostics intentionally omit.
-    let absolute_path = std::path::absolute(host_fixture.path().join("item")).expect("absolute item path");
+    let absolute_path = absolute(host_fixture.path().join("item")).expect("absolute item path");
     let relative_path = host_fixture
         .path()
         .strip_prefix(&cwd)
@@ -203,11 +207,8 @@ fn test_observed_reader_post_open_failures_keep_context_and_source() {
         );
         assert_eq!(error.path(), Some(expected_path.as_path()));
         assert_eq!(error.current_directory(), expected_pwd.as_deref());
-        assert_eq!(error.io_error_kind(), std::io::ErrorKind::Other);
+        assert_eq!(error.io_error_kind(), ErrorKind::Other);
         assert!(error.to_string().contains("injected native I/O contract failure"));
-        assert!(matches!(
-            error.typed_source(),
-            Some(crate::error::LocalFileErrorSource::Io(_))
-        ));
+        assert!(matches!(error.typed_source(), Some(LocalFileErrorSource::Io(_))));
     }
 }

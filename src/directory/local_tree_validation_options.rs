@@ -76,6 +76,11 @@ impl LocalTreeValidationOptions {
     /// verification invalid and return `InvalidOptions`. The paths are indexed
     /// by borrowed references; their encoded bytes count toward the logical
     /// path budget before indexing begins.
+    ///
+    /// # Parameters
+    ///
+    /// * `entries` — The exact paths and entry kinds expected in the observed
+    ///   tree.
     pub fn with_exact_entries(mut self, entries: Vec<LocalTreeEntry>) -> Self {
         self.exact_entries = Some(entries);
         self
@@ -96,11 +101,20 @@ impl LocalTreeValidationOptions {
         self
     }
     /// Requires current-user-only access where the platform can verify it.
+    ///
+    /// # Parameters
+    ///
+    /// * `privacy` — The required privacy level applied to the tree entries.
     pub const fn with_privacy(mut self, privacy: LocalPrivacyRequirement) -> Self {
         self.privacy = privacy;
         self
     }
     /// Requires every entry to match an exact owner access policy.
+    ///
+    /// # Parameters
+    ///
+    /// * `policy` — The owner access requirements every observed entry must
+    ///   satisfy.
     pub const fn with_owner_access_policy(mut self, policy: LocalOwnerAccessPolicy) -> Self {
         self.owner_access_policy = Some(policy);
         self
@@ -112,6 +126,11 @@ impl LocalTreeValidationOptions {
     /// with `ResourceLimit`. The seen-name byte limit counts expected encoded
     /// paths first and then observed encoded paths; it is not a total heap
     /// memory limit.
+    ///
+    /// # Parameters
+    ///
+    /// * `limits` — The path, depth, and entry budgets used during
+    ///   complete-tree validation.
     pub const fn with_limits(mut self, limits: LocalListOptions) -> Self {
         self.limits = limits;
         self
@@ -148,6 +167,7 @@ impl LocalTreeValidationOptions {
 }
 
 impl Default for LocalTreeValidationOptions {
+    /// Creates options with the same publication defaults as `new`.
     fn default() -> Self {
         Self::new()
     }

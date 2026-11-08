@@ -17,10 +17,17 @@ use super::namespace::Namespace;
 use super::namespace::file_identity;
 use super::private_entry_setup_error::PrivateEntrySetupError;
 
+/// Retains the created file handle and identity while private-entry setup runs.
+///
+/// Dropping an armed guard attempts best-effort cleanup only when the namespace
+/// entry still refers to the file captured from the retained handle.
 #[derive(Debug)]
 pub(super) struct PrivateEntryGuard<'a> {
+    /// Namespace used to verify and remove the created entry.
     namespace: &'a Namespace,
+    /// Open handle whose identity authorizes cleanup.
     file: &'a mut File,
+    /// Diagnostic path included if setup and cleanup both fail.
     path: PathBuf,
     /// Identity captured from the created file handle before namespace cleanup.
     identity: Option<FileIdentity>,
@@ -29,6 +36,23 @@ pub(super) struct PrivateEntryGuard<'a> {
 }
 
 impl<'a> PrivateEntryGuard<'a> {
+    /// Creates an armed guard and records the identity of the open file.
+    ///
+    /// # Parameters
+    ///
+    /// * `namespace` — namespace in which the private entry was created.
+    /// * `name` — entry name used to build its diagnostic path.
+    /// * `file` — retained open handle whose identity is captured.
+    ///
+    /// # Returns
+    ///
+    /// Returns the guard when identity capture succeeds. If capture fails,
+    /// returns the error together with the still-armed guard so cleanup remains
+    /// possible during error handling.
+    ///
+    /// # Errors
+    ///
+    /// Returns an I/O error if the file identity cannot be read.
     pub(super) fn new(namespace: &'a Namespace, name: &OsStr, file: &'a mut File) -> Result<Self, (io::Error, Self)> {
         let mut guard = Self {
             namespace,
@@ -48,12 +72,22 @@ impl<'a> PrivateEntryGuard<'a> {
 
     /// Relinquishes cleanup responsibility after verification or successful
     /// cleanup.
+    #[inline]
     pub(super) fn disarm(&mut self) {
         self.armed = false;
     }
 
-    /// Combines a setup error with cleanup failure and keeps Drop armed on
-    /// failure.
+    /// Combines a setup error with cleanup failure and keeps Drop armed when
+    /// cleanup fails.
+    ///
+    /// # Parameters
+    ///
+    /// * `primary` — error that caused setup to stop.
+    ///
+    /// # Returns
+    ///
+    /// Returns `primary` if cleanup succeeds; otherwise returns an error that
+    /// retains both failures and the diagnostic entry path.
     pub(super) fn finish_with(&mut self, primary: io::Error) -> io::Error {
         let cleanup = self.cleanup();
         if cleanup.is_ok() {
@@ -75,6 +109,27 @@ impl<'a> PrivateEntryGuard<'a> {
         }
     }
 
+    /// Borrows the retained handle for identity checks and entry verification.
+    ///
+    /// # Returns
+    ///
+    /// Returns the mutable borrow tied to this guard's lifetime.
+    #[inline]
+    pub(super) fn file_mut(&mut self) -> &mut File {
+        self.file
+    }
+
+    /// Removes the entry only if it still matches the identity captured from
+    /// the retained file handle.
+    ///
+    /// # Returns
+    ///
+    /// Returns success after identity-checked removal.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when identity is unavailable or the namespace cannot
+    /// verify and remove the matching entry.
     fn cleanup(&self) -> io::Result<()> {
         let Some(identity) = self.identity else {
             return Err(io::Error::new(
@@ -84,13 +139,10 @@ impl<'a> PrivateEntryGuard<'a> {
         };
         self.namespace.delete_created_private(self.file, Some(identity))
     }
-
-    pub(super) fn file_mut(&mut self) -> &mut File {
-        self.file
-    }
 }
 
 impl Drop for PrivateEntryGuard<'_> {
+    /// Attempts identity-checked best-effort cleanup while the guard is armed.
     fn drop(&mut self) {
         if !self.armed {
             return;

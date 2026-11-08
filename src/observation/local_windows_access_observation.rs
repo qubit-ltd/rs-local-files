@@ -58,17 +58,44 @@ use super::LocalWindowsAceObservation;
 /// The fields describe observations, not a guarantee of future access.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LocalWindowsAccessObservation {
+    /// Owner SID observed in the security descriptor, in string form.
     owner_sid: String,
+    /// Whether the owner SID matched the effective principal at query time.
     owner_is_current_user: bool,
+    /// Whether the security descriptor contains a DACL.
     dacl_present: bool,
+    /// Whether a present DACL is NULL rather than an empty ACL.
     dacl_is_null: bool,
+    /// Whether inheritance is protected on the observed DACL.
     dacl_protected: bool,
+    /// Whether the observed ACL structure passed validation.
     acl_valid: bool,
+    /// ACE observations in native descriptor order.
     aces: Vec<LocalWindowsAceObservation>,
 }
 impl LocalWindowsAccessObservation {
+    /// Builds access facts from a Windows security descriptor query.
+    ///
+    /// The supplied values retain the query's observations; they do not
+    /// represent an authorization decision or guarantee future access.
+    ///
+    /// # Parameters
+    ///
+    /// - `owner_sid`: Owner SID in string form.
+    /// - `owner_is_current_user`: Whether it matched the effective principal.
+    /// - `dacl_present`: Whether the descriptor contains a DACL.
+    /// - `dacl_is_null`: Whether the present DACL is NULL.
+    /// - `dacl_protected`: Whether DACL inheritance is protected.
+    /// - `acl_valid`: Whether the ACL structure passed validation.
+    /// - `aces`: ACE facts in native descriptor order.
+    ///
+    /// # Returns
+    ///
+    /// An observation containing the supplied descriptor facts.
     #[cfg(windows)]
     #[allow(dead_code)] // Consumed when T04 connects Windows security queries.
+    #[must_use]
+    #[inline]
     pub(crate) fn new(
         owner_sid: String,
         owner_is_current_user: bool,
@@ -89,36 +116,50 @@ impl LocalWindowsAccessObservation {
         }
     }
     /// Returns the owner SID in string form.
+    #[must_use]
+    #[inline]
     pub fn owner_sid(&self) -> &str {
         &self.owner_sid
     }
     /// Returns whether the owner SID matched the effective principal at query
     /// time (thread token, or process token only when no thread token exists).
     /// This is not an access authorization result.
+    #[must_use]
+    #[inline]
     pub const fn owner_is_current_user(&self) -> bool {
         self.owner_is_current_user
     }
     /// Returns whether the security descriptor has a DACL. `false`
     /// distinguishes an absent DACL from both a NULL DACL and an empty ACL.
+    #[must_use]
+    #[inline]
     pub const fn dacl_present(&self) -> bool {
         self.dacl_present
     }
     /// Returns whether a present DACL is NULL. A NULL DACL is distinct from an
     /// absent DACL and from a present, empty ACL.
+    #[must_use]
+    #[inline]
     pub const fn dacl_is_null(&self) -> bool {
         self.dacl_is_null
     }
     /// Returns whether DACL inheritance is protected; this is independent of
     /// whether the ACL structure is valid.
+    #[must_use]
+    #[inline]
     pub const fn dacl_protected(&self) -> bool {
         self.dacl_protected
     }
     /// Returns whether the DACL structure passed validation. This reports
     /// structural validity, not the result of evaluating ACE permissions.
+    #[must_use]
+    #[inline]
     pub const fn acl_valid(&self) -> bool {
         self.acl_valid
     }
     /// Returns ACEs in native descriptor order.
+    #[must_use]
+    #[inline]
     pub fn aces(&self) -> &[LocalWindowsAceObservation] {
         &self.aces
     }

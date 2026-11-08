@@ -10,6 +10,10 @@ use super::LocalFileError;
 
 /// Result type used by local filesystem operations.
 ///
+/// # Type Parameters
+///
+/// - `T`: Value returned when the local filesystem operation succeeds.
+///
 /// # Examples
 ///
 /// ```

@@ -8,8 +8,14 @@
 //! Concrete local filesystem APIs and their private implementation.
 
 mod internal;
+#[cfg(unix)]
+#[cfg(test)]
+pub(crate) use internal::clear_nonblocking;
 #[cfg(feature = "digest")]
 pub(crate) use internal::conditional;
+#[cfg(unix)]
+#[cfg(test)]
+pub(crate) use internal::open_with_nonblocking_retry;
 #[cfg(feature = "test-support")]
 pub use internal::test_fault_guard::TestFaultGuard;
 pub(crate) use internal::test_support::fault_error as test_fault_error;
@@ -68,6 +74,14 @@ pub(crate) use internal::RootedDirectoryReader;
 pub(crate) use internal::RootedLinkTargetRead;
 pub(crate) use internal::RootedSymlinkCreateError;
 pub(crate) use internal::RootedSymlinkCreateFailureState;
+#[cfg(test)]
+pub(crate) use internal::absolute_path;
+#[cfg(test)]
+pub(crate) use internal::add_path_context;
+#[cfg(test)]
+pub(crate) use internal::canonicalize_existing_prefix;
+#[cfg(test)]
+pub(crate) use internal::clean_dir_path;
 pub(crate) use internal::copy_dir_all_with_paths;
 pub(crate) use internal::copy_dir_all_with_paths_scoped;
 pub(crate) use internal::copy_failure_indeterminate;
@@ -86,6 +100,8 @@ pub(crate) use internal::create_rooted_temp_child;
 pub(crate) use internal::create_temp_dir_in_dir_with_affixes;
 pub use internal::decide_copy_destination;
 pub(crate) use internal::directory_mutation_error;
+#[cfg(test)]
+pub(crate) use internal::ensure_parent_path;
 pub(crate) use internal::ensure_parent_path_with_sync_dirs;
 pub(crate) use internal::ensure_required_directory_durability;
 pub(crate) use internal::internal_copy_options;
@@ -122,6 +138,8 @@ pub(crate) use internal::read_rooted_link;
 pub(crate) use internal::read_rooted_link_limited;
 #[cfg(any(unix, windows))]
 pub(crate) use internal::read_rooted_symlink_metadata;
+#[cfg(test)]
+pub(crate) use internal::remove_any_path;
 pub(crate) use internal::remove_directory_tree;
 pub(crate) use internal::remove_host_non_directory;
 #[cfg(all(any(unix, windows), feature = "test-support"))]

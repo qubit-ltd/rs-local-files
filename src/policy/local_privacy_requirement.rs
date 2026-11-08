@@ -6,6 +6,15 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 /// Requested privacy when creating a temporary resource.
+///
+/// # Examples
+///
+/// ```
+/// use qubit_local_files::policy::LocalPrivacyRequirement;
+///
+/// let requirement = LocalPrivacyRequirement::Required;
+/// assert_ne!(requirement, LocalPrivacyRequirement::PlatformDefault);
+/// ```
 #[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub enum LocalPrivacyRequirement {

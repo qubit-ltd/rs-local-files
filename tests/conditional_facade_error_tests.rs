@@ -22,17 +22,19 @@ use qubit_local_files::options::LocalWritePrecondition;
 use qubit_local_files::policy::LocalDurabilityRequirement;
 use qubit_local_files::policy::LocalSymlinkPolicy;
 use sha2::Digest;
+use sha2::Sha256;
+use sha2::digest::Output;
 
 fn compare_facades(
     filesystem: &LocalFileSystem,
     directory: &LocalDirectoryHandle,
     relative: &Path,
-    precondition: LocalWritePrecondition<sha2::digest::Output<sha2::Sha256>>,
+    precondition: LocalWritePrecondition<Output<Sha256>>,
     options: &LocalWriteOptions,
     expected: LocalFileErrorKind,
 ) {
-    let filesystem_result = filesystem.open_conditional_writer::<sha2::Sha256>(relative, precondition.clone(), options);
-    let directory_result = directory.open_conditional_writer::<sha2::Sha256>(relative, precondition, options);
+    let filesystem_result = filesystem.open_conditional_writer::<Sha256>(relative, precondition.clone(), options);
+    let directory_result = directory.open_conditional_writer::<Sha256>(relative, precondition, options);
     let filesystem_error = filesystem_result.expect_err("filesystem facade should reject statically");
     let directory_error = directory_result.expect_err("directory facade should reject statically");
 
@@ -44,7 +46,7 @@ fn compare_facades(
 }
 
 #[test]
-fn conditional_facades_share_static_errors_without_creating_resources() {
+fn test_conditional_facades_share_static_errors_without_creating_resources() {
     let fixture = tempfile::tempdir().expect("fixture");
     let mut filesystem = LocalFileSystem::rooted(fixture.path()).expect("rooted filesystem");
     filesystem
@@ -74,7 +76,7 @@ fn conditional_facades_share_static_errors_without_creating_resources() {
         &filesystem,
         &directory,
         missing_parent,
-        LocalWritePrecondition::Content(sha2::Sha256::digest(b"expected")),
+        LocalWritePrecondition::Content(Sha256::digest(b"expected")),
         &LocalWriteOptions::new(LocalWriteMode::CreateNew),
         LocalFileErrorKind::InvalidOptions,
     );
@@ -84,7 +86,7 @@ fn conditional_facades_share_static_errors_without_creating_resources() {
         &filesystem,
         &directory,
         missing_parent,
-        LocalWritePrecondition::Content(sha2::Sha256::digest(b"expected")),
+        LocalWritePrecondition::Content(Sha256::digest(b"expected")),
         &LocalWriteOptions::new(LocalWriteMode::CreateOrReplace),
         LocalFileErrorKind::Unsupported,
     );

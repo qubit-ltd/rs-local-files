@@ -6,9 +6,25 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 
+#[cfg(all(feature = "test-support", unix))]
+use std::env::current_exe;
+#[cfg(all(feature = "test-support", unix))]
+use std::env::var_os;
 use std::error::Error as StdError;
+#[cfg(all(feature = "test-support", unix))]
+use std::ffi::OsStr;
 use std::fs;
+#[cfg(all(feature = "test-support", unix))]
+use std::io::ErrorKind;
 use std::io::IoSlice;
+#[cfg(unix)]
+use std::os::unix::fs::symlink;
+#[cfg(unix)]
+use std::path::Path;
+#[cfg(all(feature = "test-support", unix))]
+use std::path::PathBuf;
+#[cfg(all(feature = "test-support", unix))]
+use std::process::Command;
 
 use qubit_io::Output;
 use qubit_local_files::LocalFileSystem;
@@ -42,7 +58,7 @@ fn test_local_file_writer_retries_transient_stream_errors() {
             }
             .expect("filesystem should open");
             let target = if rooted {
-                std::path::PathBuf::from("payload")
+                PathBuf::from("payload")
             } else {
                 directory.path().join("payload")
             };
@@ -50,7 +66,7 @@ fn test_local_file_writer_retries_transient_stream_errors() {
             let _fault = install_test_fault(fault).expect("fault should install");
             if fault == "local-writer-would-block" {
                 let error = writer.write(b"payload").expect_err("initial write should block");
-                assert_eq!(std::io::ErrorKind::WouldBlock, error.kind());
+                assert_eq!(ErrorKind::WouldBlock, error.kind());
             }
             Output::write_fully(&mut writer, b"payload").expect("transient failure should be retryable");
             assert_eq!(None, writer.failure_state());
@@ -108,8 +124,6 @@ fn test_local_file_writer_stream_failure_preserves_publication_certainty() {
 #[cfg(unix)]
 #[test]
 fn test_local_file_writer_preserves_logical_diagnostic_path() {
-    use std::os::unix::fs::symlink;
-
     let directory = tempdir().expect("temporary directory should be created");
     let target = directory.path().join("target");
     let link = directory.path().join("link");
@@ -470,8 +484,6 @@ fn test_local_file_writer_abort_accepts_missing_host_staging_file() {
 #[cfg(all(feature = "test-support", unix))]
 #[test]
 fn test_abort_failure_rejects_stream_and_commit() {
-    use std::path::Path;
-
     for rooted in [false, true] {
         for operation in ["write", "trait_vectored", "inherent_vectored", "flush", "commit"] {
             let directory = tempdir().expect("fixture should exist");
@@ -496,13 +508,13 @@ fn test_abort_failure_rejects_stream_and_commit() {
             match operation {
                 "write" => {
                     assert_eq!(
-                        std::io::ErrorKind::BrokenPipe,
+                        ErrorKind::BrokenPipe,
                         writer.write(b"C").expect_err("write must fail").kind()
                     );
                 }
                 "trait_vectored" => {
                     assert_eq!(
-                        std::io::ErrorKind::BrokenPipe,
+                        ErrorKind::BrokenPipe,
                         Output::write_vectored(&mut writer, &[b"C"])
                             .expect_err("trait vectored write must fail")
                             .kind()
@@ -510,7 +522,7 @@ fn test_abort_failure_rejects_stream_and_commit() {
                 }
                 "inherent_vectored" => {
                     assert_eq!(
-                        std::io::ErrorKind::BrokenPipe,
+                        ErrorKind::BrokenPipe,
                         writer
                             .write_vectored(&[IoSlice::new(b"C")])
                             .expect_err("inherent vectored write must fail")
@@ -519,7 +531,7 @@ fn test_abort_failure_rejects_stream_and_commit() {
                 }
                 "flush" => {
                     assert_eq!(
-                        std::io::ErrorKind::BrokenPipe,
+                        ErrorKind::BrokenPipe,
                         writer.flush().expect_err("flush must fail").kind()
                     );
                 }
@@ -573,8 +585,6 @@ fn test_abort_failure_rejects_stream_and_commit() {
 #[cfg(unix)]
 #[test]
 fn test_local_file_writer_rooted_sessions_report_commit_and_abort_outcomes() {
-    use std::path::Path;
-
     let directory = tempdir().expect("temporary directory should be created");
     let rooted = LocalFileSystem::rooted(directory.path()).expect("rooted filesystem should open");
 
@@ -618,8 +628,6 @@ fn test_local_file_writer_rooted_sessions_report_commit_and_abort_outcomes() {
 #[cfg(unix)]
 #[test]
 fn test_local_file_writer_rooted_prepublication_failure_retains_writer() {
-    use std::path::Path;
-
     let directory = tempdir().expect("temporary directory should be created");
     let target = directory.path().join("payload");
     fs::write(&target, b"existing").expect("existing rooted payload should be written");
@@ -656,16 +664,16 @@ where
 {
     const TEST_FAULT_ENV: &str = "QUBIT_LOCAL_FILES_TEST_FAULT";
     const TEST_FAULT_CHILD_ENV: &str = "QUBIT_LOCAL_FILES_TEST_FAULT_CHILD";
-    if std::env::var_os(TEST_FAULT_ENV).is_some_and(|selected| selected == std::ffi::OsStr::new(fault)) {
+    if var_os(TEST_FAULT_ENV).is_some_and(|selected| selected == OsStr::new(fault)) {
         let _fault = install_test_fault(fault).expect("test fault controller should install");
         action();
         return;
     }
-    if std::env::var_os(TEST_FAULT_CHILD_ENV).is_some() {
+    if var_os(TEST_FAULT_CHILD_ENV).is_some() {
         return;
     }
-    let executable = std::env::current_exe().expect("coverage test executable should be available");
-    let status = std::process::Command::new(executable)
+    let executable = current_exe().expect("coverage test executable should be available");
+    let status = Command::new(executable)
         .arg("--exact")
         .arg(test_name)
         .arg("--nocapture")
@@ -1004,7 +1012,7 @@ fn test_local_file_writer_recovery_sync_success_is_durable() {
             }
             .expect("filesystem should open");
             let target = if rooted {
-                std::path::PathBuf::from("payload")
+                PathBuf::from("payload")
             } else {
                 directory.path().join("payload")
             };
@@ -1061,7 +1069,7 @@ fn test_local_file_writer_recovery_sync_failure_obeys_durability() {
                 }
                 .expect("filesystem should open");
                 let target = if rooted {
-                    std::path::PathBuf::from("payload")
+                    PathBuf::from("payload")
                 } else {
                     directory.path().join("payload")
                 };
@@ -1198,7 +1206,7 @@ fn test_append_required_sync_failure_tracks_accepted_bytes() {
                 }
                 .expect("filesystem should open");
                 let target = if rooted {
-                    std::path::PathBuf::from("payload")
+                    PathBuf::from("payload")
                 } else {
                     directory.path().join("payload")
                 };

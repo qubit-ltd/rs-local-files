@@ -8,6 +8,7 @@
 //! Rooted metadata-operation regression tests.
 
 use std::fs;
+use std::path::Path;
 
 use qubit_local_files::LocalFileSystem;
 use qubit_local_files::outcome::LocalFileKind;
@@ -21,7 +22,7 @@ fn test_rooted_metadata_operation_reads_relative_file() {
     let filesystem = LocalFileSystem::rooted(directory.path()).expect("rooted filesystem should open");
 
     let metadata = filesystem
-        .metadata(std::path::Path::new("payload"))
+        .metadata(Path::new("payload"))
         .expect("rooted metadata should read relative file");
     assert_eq!(LocalFileKind::File, metadata.kind());
 }

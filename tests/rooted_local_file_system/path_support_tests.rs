@@ -7,6 +7,8 @@
 // =============================================================================
 
 use std::fs;
+#[cfg(unix)]
+use std::os::unix::fs::symlink;
 use std::path::Path;
 
 use qubit_local_files::LocalFileSystem;
@@ -101,8 +103,6 @@ fn test_rooted_path_support_rejects_escape_paths() {
 #[cfg(unix)]
 #[test]
 fn test_rooted_path_support_reports_symlink_metadata() {
-    use std::os::unix::fs::symlink;
-
     let directory = tempdir().expect("temporary directory should be created");
     fs::write(directory.path().join("target"), b"payload").expect("link target should be written");
     symlink("target", directory.path().join("link")).expect("symbolic link should be created");

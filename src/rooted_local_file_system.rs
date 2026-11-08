@@ -6,16 +6,19 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 
-// Implements rooted file and directory copy operations.
+// Opens rooted backends for conditional file writes.
 #[cfg(feature = "digest")]
 mod conditional;
+// Implements rooted file and directory copy operations.
 mod copy;
 // Implements rooted deletion operations.
 mod delete;
 // Implements rooted directory operations.
 mod directory;
+// Implements construction from an already opened root authority.
 #[path = "rooted_local_file_system/fixed_directory.rs"]
 mod fixed_directory;
+mod internal;
 mod temp_sandbox_cleanup_error;
 // Implements rooted metadata, reader, and writer operations.
 #[path = "rooted_local_file_system/io.rs"]
@@ -29,10 +32,10 @@ mod path_support;
 mod rename;
 // Describes rooted path-resolution steps.
 mod resolution_step;
+// Defines behavior at the rooted resolver's parent boundary.
+mod root_parent_behavior;
 // Provides rooted authority and validation helpers.
 mod support;
-// Tracks rooted symbolic-link identity state.
-mod symlink_identity;
 // Implements rooted temporary-resource operations.
 mod temp;
 
@@ -48,7 +51,7 @@ pub(crate) use path_support::rooted_path;
 pub(crate) use path_support::rooted_temp_parent;
 pub(crate) use path_support::temp_candidate;
 pub(crate) use path_support::validate_rooted_temp_parent;
-pub(crate) use support::RootParentBehavior;
+pub(crate) use root_parent_behavior::RootParentBehavior;
 pub(crate) use support::resolve_host_root_path_with_component_policy_and_budget;
 pub(crate) use support::resolve_rooted_path;
 pub(crate) use support::resolve_rooted_path_allow_root;
@@ -125,10 +128,32 @@ impl RootedLocalFileSystem {
     /// Returns `LocalFileError` when the directory cannot be bound and opened
     /// securely or the current platform lacks rooted primitives.
     #[allow(dead_code)] // Preserved as the public unrestricted-opening API.
+    #[inline]
     pub fn open(path: &Path) -> LocalResult<Self> {
         Self::open_with_options(path, &crate::options::LocalRootOpenOptions::new())
     }
 
+    /// Opens a rooted authority using the configured path limits and symlink
+    /// policy.
+    ///
+    /// The options are translated into the resolution contract used for the
+    /// opened root; the resulting authority retains that contract for later
+    /// rooted operations.
+    ///
+    /// # Parameters
+    ///
+    /// - `path`: Native directory path to anchor.
+    /// - `options`: Root-open limits and optional resolution and symlink
+    ///   policies.
+    ///
+    /// # Returns
+    ///
+    /// A rooted authority bound to the opened directory.
+    ///
+    /// # Errors
+    ///
+    /// Returns the root-opening error when the path cannot be securely opened
+    /// or the selected policy cannot be applied.
     pub(crate) fn open_with_options(path: &Path, options: &crate::options::LocalRootOpenOptions) -> LocalResult<Self> {
         let mut contract = crate::resolution::ResolutionContract::unrestricted().tightened(options.limits());
         if let Some(policy) = options.resolution_policy() {
@@ -143,6 +168,27 @@ impl RootedLocalFileSystem {
         )
     }
 
+    /// Opens a rooted authority with an explicit resolution contract and
+    /// symlink policy.
+    ///
+    /// This entry point is used when an enclosing operation has already
+    /// resolved the policy that must govern the root and its later accesses.
+    ///
+    /// # Parameters
+    ///
+    /// - `path`: Native directory path to anchor.
+    /// - `contract`: Resolution limits and policy to retain on the authority.
+    /// - `policy`: Symlink behavior allowed while resolving the requested root.
+    ///
+    /// # Returns
+    ///
+    /// A rooted authority bound to the opened directory.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the root cannot be opened under the contract or the
+    /// policy is not supported for opening a root.
+    #[inline]
     pub(crate) fn open_with_contract(
         path: &Path,
         contract: crate::resolution::ResolutionContract,
@@ -151,6 +197,27 @@ impl RootedLocalFileSystem {
         Self::open_with_contract_and_deadline(path, contract, policy, None)
     }
 
+    /// Opens a rooted authority while enforcing the enclosing operation
+    /// deadline.
+    ///
+    /// Deadline checks surround native path resolution and authority creation;
+    /// cross-scope symlink following is rejected for rooted authorities.
+    ///
+    /// # Parameters
+    ///
+    /// - `path`: Native directory path to anchor.
+    /// - `contract`: Resolution limits and policy to retain on the authority.
+    /// - `policy`: Symlink behavior used to resolve the requested root.
+    /// - `deadline`: Optional absolute deadline for completing root resolution.
+    ///
+    /// # Returns
+    ///
+    /// A rooted authority bound to the opened directory.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the deadline expires, the path cannot be securely
+    /// opened, or the policy is unsupported for opening a root.
     pub(crate) fn open_with_contract_and_deadline(
         path: &Path,
         contract: crate::resolution::ResolutionContract,
@@ -312,11 +379,41 @@ impl RootedLocalFileSystem {
     /// Validates that a normalized backend path resolves to a directory.
     /// Propagates path/policy and native inspection errors; a resolved
     /// non-directory returns a structured type-conflict error.
+    ///
+    /// # Parameters
+    ///
+    /// - `path`: Normalized path relative to this rooted authority.
+    /// - `symlink_policy`: Policy applied while resolving the path.
+    ///
+    /// # Returns
+    ///
+    /// `Ok(())` when the resolved entry is a directory.
+    ///
+    /// # Errors
+    ///
+    /// Returns the resolution or native inspection error, or a type-conflict
+    /// error when the resolved entry is not a directory.
+    #[inline]
     pub(crate) fn validate_directory(&self, path: &Path, symlink_policy: LocalSymlinkPolicy) -> LocalResult<()> {
         self.validate_directory_until(path, symlink_policy, None)
     }
 
     /// Validates a directory while enforcing an enclosing operation deadline.
+    ///
+    /// # Parameters
+    ///
+    /// - `path`: Normalized path relative to this rooted authority.
+    /// - `symlink_policy`: Policy applied while resolving the path.
+    /// - `deadline`: Optional absolute deadline for completing validation.
+    ///
+    /// # Returns
+    ///
+    /// `Ok(())` when the resolved entry is a directory before the deadline.
+    ///
+    /// # Errors
+    ///
+    /// Returns the resolution or native inspection error, a type-conflict
+    /// error for a non-directory entry, or a deadline error.
     pub(crate) fn validate_directory_until(
         &self,
         path: &Path,
@@ -330,6 +427,20 @@ impl RootedLocalFileSystem {
     /// entry or ancestor.
     /// Propagates path/policy, native open, and capability-probe errors. A
     /// successfully probed but unavailable limit is represented as unknown.
+    ///
+    /// # Parameters
+    ///
+    /// - `path`: Path whose nearest existing rooted entry is inspected.
+    /// - `symlink_policy`: Policy applied while resolving the path.
+    ///
+    /// # Returns
+    ///
+    /// The path limits observed for the nearest existing entry or ancestor.
+    ///
+    /// # Errors
+    ///
+    /// Returns path-resolution, symlink-policy, native-open, or
+    /// capability-probe errors.
     pub(crate) fn limits_at(
         &self,
         path: &Path,
@@ -346,6 +457,21 @@ impl RootedLocalFileSystem {
     /// ancestor.
     /// Propagates path/policy, native open, and capacity-probe errors. The
     /// returned observation does not reserve space for a later operation.
+    ///
+    /// # Parameters
+    ///
+    /// - `path`: Path whose nearest existing rooted entry is inspected.
+    /// - `symlink_policy`: Policy applied while resolving the path.
+    ///
+    /// # Returns
+    ///
+    /// The dynamic space observation for the nearest existing entry or
+    /// ancestor.
+    ///
+    /// # Errors
+    ///
+    /// Returns path-resolution, symlink-policy, native-open, or capacity-probe
+    /// errors.
     pub(crate) fn space_at(
         &self,
         path: &Path,
@@ -361,6 +487,21 @@ impl RootedLocalFileSystem {
     /// Opens the nearest existing entry for a capability probe.
     /// Falls back to parents only for `NotFound`. Returns other path/policy or
     /// native errors, including rejection of non-file/non-directory entries.
+    ///
+    /// # Parameters
+    ///
+    /// - `path`: Path to probe, falling back to its nearest existing ancestor.
+    /// - `symlink_policy`: Policy applied while resolving the path and
+    ///   ancestors.
+    ///
+    /// # Returns
+    ///
+    /// An opened file handle for the nearest existing entry or rooted ancestor.
+    ///
+    /// # Errors
+    ///
+    /// Returns path-resolution, symlink-policy, native-open, or entry-type
+    /// errors.
     fn open_nearest_probe(&self, path: &Path, symlink_policy: LocalSymlinkPolicy) -> LocalResult<std::fs::File> {
         if path.as_os_str().is_empty() {
             return match self.root.open_probe_root() {
@@ -393,115 +534,5 @@ impl RootedLocalFileSystem {
                 }
             }
         }
-    }
-}
-
-#[cfg(all(test, unix))]
-mod deleted_cwd_constructor_tests {
-    use std::fs;
-    use std::path::Path;
-    use std::process::Command;
-
-    use super::RootedLocalFileSystem;
-    use crate::LocalFileOperation;
-    use crate::LocalFileSystem;
-    use crate::LocalSymlinkPolicy;
-    use crate::options::LocalDirectoryOpenOptions;
-    use crate::resolution::ResolutionContract;
-    use crate::tests::native_io_fault_tests::NativeIoFaultGuard;
-    use crate::tests::native_io_fault_tests::NativeIoPoint;
-
-    #[test]
-    fn test_deleted_process_cwd_preserves_constructor_and_pair_operation_context() {
-        const CHILD: &str = "RS_LOCAL_FILES_DELETED_CWD_CONSTRUCTOR_CHILD";
-        const TEST: &str = "rooted_local_file_system::deleted_cwd_constructor_tests::test_deleted_process_cwd_preserves_constructor_and_pair_operation_context";
-        if std::env::var_os(CHILD).is_none() {
-            let output = Command::new(std::env::current_exe().expect("test executable should be available"))
-                .args(["--exact", TEST, "--test-threads=1", "--nocapture"])
-                .env(CHILD, "1")
-                .output()
-                .expect("isolated child test should start");
-            assert!(
-                output.status.success(),
-                "isolated child failed: stdout={} stderr={}",
-                String::from_utf8_lossy(&output.stdout),
-                String::from_utf8_lossy(&output.stderr)
-            );
-            assert!(String::from_utf8_lossy(&output.stdout).contains("DELETED_CWD_CONSTRUCTORS_COMPLETE"));
-            return;
-        }
-
-        let original = std::env::current_dir().expect("child's original cwd should be available");
-        let fixture = tempfile::tempdir().expect("disposable fixture should exist");
-        let cwd = fixture.path().join("removed-current-directory");
-        fs::create_dir(&cwd).expect("disposable cwd should exist");
-        let host = LocalFileSystem::host().expect("Host construction should not query cwd");
-        std::env::set_current_dir(&cwd).expect("only this child should enter the disposable cwd");
-        fs::remove_dir(&cwd).expect("only the empty disposable child cwd should be removed");
-
-        let requested = Path::new(".");
-        let root_result = RootedLocalFileSystem::open_with_contract(
-            requested,
-            ResolutionContract::unrestricted(),
-            LocalSymlinkPolicy::FollowWithinScope,
-        );
-        let directory_result = host.open_directory_with_options(requested, &LocalDirectoryOpenOptions::new());
-        let source = Path::new("relative-source");
-        let target = Path::new("relative-target");
-        let copy_result = host.copy(source, target);
-        let rename_result = host.rename(source, target);
-        // Restore a live cwd before assertions and automatic fixture cleanup.
-        std::env::set_current_dir(&original).expect("child should restore its original cwd");
-
-        let root_error = root_result.expect_err("opening a relative root requires a readable process cwd");
-        let directory_error = directory_result.expect_err("opening a relative Host directory requires a readable cwd");
-        for error in [&root_error, &directory_error] {
-            assert_eq!(error.operation(), LocalFileOperation::OpenRoot);
-            assert_eq!(error.path(), Some(requested));
-            assert_eq!(error.io_error_kind(), std::io::ErrorKind::NotFound);
-            assert!(error.io_error().is_some());
-        }
-
-        let copy = copy_result.expect_err("relative copy operands require a process cwd snapshot");
-        let rename = rename_result.expect_err("relative rename operands require a process cwd snapshot");
-        for (error, operation) in [
-            (copy.error(), LocalFileOperation::Copy),
-            (rename.error(), LocalFileOperation::Rename),
-        ] {
-            assert_eq!(error.operation(), operation);
-            assert_eq!(error.path(), Some(source));
-            assert_eq!(error.target(), Some(target));
-            assert_eq!(error.current_directory(), None);
-            assert_eq!(error.io_error_kind(), std::io::ErrorKind::NotFound);
-        }
-        println!("DELETED_CWD_CONSTRUCTORS_COMPLETE");
-    }
-
-    #[test]
-    fn test_native_root_constructor_cursor_failure_retains_requested_root() {
-        let path = Path::new("/");
-        // Opening the native root has no relative components, so the first cursor is
-        // constructor-owned.
-        let guard = NativeIoFaultGuard::fail_on(NativeIoPoint::OpenCursor, 1);
-        let error = RootedLocalFileSystem::open_with_contract(
-            path,
-            ResolutionContract::unrestricted(),
-            LocalSymlinkPolicy::FollowWithinScope,
-        )
-        .expect_err("the root constructor must propagate cursor creation failure");
-
-        assert!(guard.fired());
-        assert_eq!(error.operation(), LocalFileOperation::OpenRoot);
-        assert_eq!(error.path(), Some(path));
-        assert_eq!(error.io_error_kind(), std::io::ErrorKind::Other);
-        assert_eq!(
-            error
-                .io_error()
-                .expect("native cursor source should survive")
-                .to_string(),
-            "injected native I/O contract failure"
-        );
-        drop(guard);
-        RootedLocalFileSystem::open(path).expect("dropping the fault guard should restore normal root construction");
     }
 }

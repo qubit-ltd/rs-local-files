@@ -18,6 +18,17 @@ use windows_sys::Win32::Storage::FileSystem::ReplaceFileW;
 use super::namespace::Namespace;
 
 /// Calls `ReplaceFileW` with a nonempty same-volume backup path.
+///
+/// # Parameters
+///
+/// * `target` is the existing destination path.
+/// * `replacement` is the candidate file path.
+/// * `backup` is the path where the displaced target is retained.
+///
+/// # Errors
+///
+/// Returns an error if a path contains an interior NUL or the Windows API
+/// fails.
 pub(super) fn replace_with_backup(target: &Path, replacement: &Path, backup: &Path) -> io::Result<()> {
     let target = wide_path(target.as_os_str())?;
     let replacement = wide_path(replacement.as_os_str())?;
@@ -43,6 +54,16 @@ pub(super) fn replace_with_backup(target: &Path, replacement: &Path, backup: &Pa
 }
 
 /// Installs a candidate only when the destination name is absent.
+///
+/// # Parameters
+///
+/// * `namespace` identifies the destination and its publication scope.
+/// * `candidate` is the candidate's private filename.
+///
+/// # Errors
+///
+/// Returns an error if path conversion or publication fails, including when
+/// the destination already exists.
 pub(super) fn install_absent(namespace: &Namespace, candidate: &OsStr) -> io::Result<()> {
     if namespace.is_rooted() {
         return namespace.rename(candidate, namespace.target_name(), false);
@@ -60,6 +81,18 @@ pub(super) fn install_absent(namespace: &Namespace, candidate: &OsStr) -> io::Re
     }
 }
 
+/// Encodes an operating-system path as a NUL-terminated UTF-16 buffer.
+///
+/// Interior NUL code units are rejected because Windows path APIs treat NUL as
+/// the end of a path.
+///
+/// # Parameters
+///
+/// * `value` is the path to encode.
+///
+/// # Errors
+///
+/// Returns `InvalidInput` if the encoded path contains an interior NUL.
 fn wide_path(value: &OsStr) -> io::Result<Vec<u16>> {
     let units: Vec<u16> = value.encode_wide().collect();
     if units.contains(&0) {

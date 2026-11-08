@@ -11,7 +11,6 @@ pub(crate) mod binding;
 mod binding_anchor;
 #[path = "local_component_policy.rs"]
 mod component_policy;
-mod conditional;
 mod directory_path_binding;
 #[path = "local_directory_handle.rs"]
 mod handle;
@@ -27,7 +26,6 @@ mod path_binding;
 #[path = "local_staged_directory.rs"]
 mod staged;
 #[cfg(all(test, unix))]
-pub(crate) use handle::install_component_policy_checkpoint;
 #[cfg(test)]
 pub(crate) use staged::fail_tree_sync_after;
 #[cfg(test)]
@@ -43,6 +41,8 @@ mod tree_validation;
 
 pub use component_policy::LocalComponentPolicy;
 pub use handle::LocalDirectoryHandle;
+#[cfg(all(test, unix))]
+pub(crate) use handle::install_component_policy_checkpoint;
 pub(crate) use handle::retain_directory_chain;
 pub use local_resolution_origin::LocalResolutionOrigin;
 pub use local_resolution_policy::LocalResolutionPolicy;

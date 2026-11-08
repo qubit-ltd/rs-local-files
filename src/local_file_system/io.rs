@@ -9,8 +9,10 @@
 
 use std::path::PathBuf;
 
+use qubit_io::ByteInput;
+use qubit_io::Input;
+
 use super::HostLocalFileSystem;
-use super::Input;
 use super::LocalFileError;
 use super::LocalFileErrorKind;
 use super::LocalFileKind;
@@ -51,6 +53,15 @@ impl LocalFileSystem {
     /// Windows Host scope rejects path binding because drive-root ancestor
     /// traversal is not available for that namespace.
     ///
+    /// # Parameters
+    ///
+    /// - `path`: Namespace path to resolve and open.
+    /// - `options`: Observation, read, and optional path-binding policy.
+    ///
+    /// # Returns
+    ///
+    /// An observed reader for the resolved file.
+    ///
     /// # Errors
     /// Returns path resolution, native open, observation, and binding-limit
     /// errors. A finite effective resolution budget on Host is unsupported.
@@ -84,6 +95,643 @@ impl LocalFileSystem {
         )
     }
 
+    /// Opens a reader using this instance's default reader options.
+    ///
+    /// Returns the owned reader or error described by
+    /// [`Self::open_reader_with_options`].
+    ///
+    /// # Parameters
+    ///
+    /// - `path`: Namespace path of the regular file to open.
+    ///
+    /// # Returns
+    ///
+    /// An owned reader for the opened regular file.
+    ///
+    /// # Errors
+    ///
+    /// Returns path-resolution, policy, type, or native opening errors.
+    pub fn open_reader(&self, path: &Path) -> LocalResult<LocalFileReader> {
+        self.open_reader_with_options(path, &self.defaults.read)
+    }
+
+    /// Opens a reader using one complete explicit options value.
+    ///
+    /// Requires a regular file after applying this instance's symlink policy.
+    /// Returns path-resolution, type, or native open errors, including retry
+    /// timeout failures. The returned reader owns the opened native handle.
+    ///
+    /// # Parameters
+    ///
+    /// - `path`: Namespace path of the regular file to open.
+    /// - `options`: Complete reader policy for this operation.
+    ///
+    /// # Returns
+    ///
+    /// An owned reader for the opened regular file.
+    ///
+    /// # Errors
+    ///
+    /// Returns path-resolution, policy, type, timeout, or native opening
+    /// errors.
+    pub fn open_reader_with_options(&self, path: &Path, options: &LocalReadOptions) -> LocalResult<LocalFileReader> {
+        let symlink_policy = self.read_symlink_policy(options, None);
+        validate_scope_symlink_policy(self.scope(), symlink_policy, LocalFileOperation::OpenReader, Some(path))?;
+        let resolver = self.resolver_for(path, LocalFileOperation::OpenReader)?;
+        let resolved = resolve_operation_path(&resolver, path, LocalFileOperation::OpenReader)?;
+        self.open_resolved_reader(
+            &resolved,
+            options,
+            LocalFileOperation::OpenReader,
+            resolver.current_directory(),
+        )
+    }
+
+    /// Opens a writer using this instance's default writer options.
+    ///
+    /// Returns the owned writer or error described by
+    /// [`Self::open_writer_with_options`].
+    ///
+    /// # Parameters
+    ///
+    /// - `path`: Namespace path of the file to create or append.
+    ///
+    /// # Returns
+    ///
+    /// An owned writer configured with this instance's default options.
+    ///
+    /// # Errors
+    ///
+    /// Returns path-resolution, validation, or native preparation errors.
+    pub fn open_writer(&self, path: &Path) -> LocalResult<LocalFileWriter> {
+        self.open_writer_with_options(path, &self.defaults.write)
+    }
+
+    /// Opens a writer using one complete explicit options value.
+    ///
+    /// Create modes return an unpublished staging writer; append opens an
+    /// existing regular file directly. Returns path, type, requirement, or
+    /// native preparation errors. Requested parent creation may remain after
+    /// an error. Commit or abort a staging writer explicitly when its final
+    /// publication or cleanup result must be observed.
+    ///
+    /// # Parameters
+    ///
+    /// - `path`: Namespace path of the file to create or append.
+    /// - `options`: Complete writer policy for this operation.
+    ///
+    /// # Returns
+    ///
+    /// An owned writer configured with `options`.
+    ///
+    /// # Errors
+    ///
+    /// Returns path-resolution, validation, or native preparation errors.
+    pub fn open_writer_with_options(&self, path: &Path, options: &LocalWriteOptions) -> LocalResult<LocalFileWriter> {
+        validate_write_options(options, self.capabilities(), LocalFileOperation::OpenWriter).map_err(|error| {
+            with_current_directory(
+                error.with_path(path.to_path_buf()),
+                self.current_directory.virtual_path(),
+            )
+        })?;
+        let resolver = self.resolver_for(path, LocalFileOperation::OpenWriter)?;
+        let resolved = resolve_operation_path(&resolver, path, LocalFileOperation::OpenWriter)?;
+        self.reject_root_operand(&resolved, LocalFileOperation::OpenWriter, resolver.current_directory())?;
+        reject_directory_qualified_file(&resolved, LocalFileOperation::OpenWriter, resolver.current_directory())?;
+        match &self.core.namespace {
+            LocalNamespace::Host => HostLocalFileSystem::open_writer_with_policy(
+                resolved.authority_relative(),
+                options,
+                self.symlink_policy,
+            ),
+            LocalNamespace::Rooted(rooted) => {
+                rooted.open_writer(resolved.authority_relative(), options, self.symlink_policy)
+            }
+        }
+        .map(|writer| {
+            writer.bind_namespace(
+                resolved.namespace_absolute().to_path_buf(),
+                resolver.current_directory().map(Path::to_path_buf),
+            )
+        })
+        .map_err(|error| {
+            operation_error(
+                error,
+                LocalFileOperation::OpenWriter,
+                resolved.namespace_absolute(),
+                None,
+                resolver.current_directory(),
+            )
+        })
+    }
+
+    /// Reads metadata for the final target while honoring this filesystem's
+    /// link policy.
+    ///
+    /// Returns file or directory metadata. Link rejection, missing targets,
+    /// resolution errors, and native metadata failures are returned as
+    /// `LocalFileError` with metadata-operation context.
+    ///
+    /// # Parameters
+    ///
+    /// - `path`: Namespace path whose final target metadata is requested.
+    ///
+    /// # Returns
+    ///
+    /// Metadata for the followed target entry.
+    ///
+    /// # Errors
+    ///
+    /// Returns resolution, symlink-policy, or native metadata errors.
+    pub fn target_metadata(&self, path: &Path) -> LocalResult<LocalFileMetadata> {
+        let resolver = self.resolver_for(path, LocalFileOperation::Metadata)?;
+        let resolved = resolve_operation_path(&resolver, path, LocalFileOperation::Metadata)?;
+        let metadata = match &self.core.namespace {
+            LocalNamespace::Host => {
+                let entry =
+                    HostLocalFileSystem::metadata_with_policy(resolved.authority_relative(), self.symlink_policy)
+                        .map_err(|error| {
+                            operation_error(
+                                error,
+                                LocalFileOperation::Metadata,
+                                resolved.namespace_absolute(),
+                                None,
+                                resolver.current_directory(),
+                            )
+                        })?;
+                if entry.kind() == LocalFileKind::Symlink && !self.symlink_policy.follows() {
+                    return Err(operation_error(
+                        LocalFileError::new(LocalFileErrorKind::Unsupported, LocalFileOperation::Metadata)
+                            .with_reason("target metadata requires following a symbolic link"),
+                        LocalFileOperation::Metadata,
+                        resolved.namespace_absolute(),
+                        None,
+                        resolver.current_directory(),
+                    ));
+                }
+                if entry.kind() == LocalFileKind::Symlink && self.symlink_policy.follows() {
+                    std::fs::metadata(resolved.authority_relative())
+                        .map(|metadata| LocalFileMetadata::from_native(&metadata))
+                        .map_err(|error| {
+                            LocalFileError::from_io(
+                                LocalFileOperation::Metadata,
+                                Some(resolved.namespace_absolute().to_path_buf()),
+                                None,
+                                error,
+                            )
+                        })
+                } else {
+                    Ok(entry)
+                }
+            }
+            LocalNamespace::Rooted(rooted) => {
+                rooted.target_metadata(resolved.authority_relative(), self.symlink_policy)
+            }
+        }
+        .map_err(|error| {
+            operation_error(
+                error,
+                LocalFileOperation::Metadata,
+                resolved.namespace_absolute(),
+                None,
+                resolver.current_directory(),
+            )
+        })?;
+        if resolved.directory_required() && metadata.kind() != LocalFileKind::Directory {
+            return Err(operation_error(
+                LocalFileError::new(LocalFileErrorKind::NotDirectory, LocalFileOperation::Metadata),
+                LocalFileOperation::Metadata,
+                resolved.namespace_absolute(),
+                None,
+                resolver.current_directory(),
+            ));
+        }
+        Ok(metadata)
+    }
+
+    /// Resolves an existing operand to its namespace coordinate.
+    ///
+    /// Host results are native canonical paths; Rooted results are virtual
+    /// absolute paths and do not grant authority for a later operation.
+    /// Returns path-policy, missing-target, or native resolution errors.
+    ///
+    /// # Parameters
+    ///
+    /// - `path`: Existing namespace path to resolve.
+    ///
+    /// # Returns
+    ///
+    /// The namespace coordinate of the existing operand.
+    ///
+    /// # Errors
+    ///
+    /// Returns path-policy, missing-target, or native resolution errors.
+    pub fn canonicalize(&self, path: &Path) -> LocalResult<std::path::PathBuf> {
+        let resolver = self.resolver_for(path, LocalFileOperation::Metadata)?;
+        let resolved = resolve_operation_path(&resolver, path, LocalFileOperation::Metadata)?;
+        let canonical = match &self.core.namespace {
+            LocalNamespace::Host => {
+                let entry =
+                    HostLocalFileSystem::metadata_with_policy(resolved.authority_relative(), self.symlink_policy)
+                        .map_err(|error| {
+                            operation_error(
+                                error,
+                                LocalFileOperation::Metadata,
+                                resolved.namespace_absolute(),
+                                None,
+                                resolver.current_directory(),
+                            )
+                        })?;
+                if entry.kind() == LocalFileKind::Symlink && !self.symlink_policy.follows() {
+                    return Err(operation_error(
+                        LocalFileError::new(LocalFileErrorKind::Unsupported, LocalFileOperation::Metadata)
+                            .with_reason("canonicalization requires following a symbolic link"),
+                        LocalFileOperation::Metadata,
+                        resolved.namespace_absolute(),
+                        None,
+                        resolver.current_directory(),
+                    ));
+                }
+                std::fs::canonicalize(resolved.authority_relative()).map_err(|source| {
+                    LocalFileError::from_io(
+                        LocalFileOperation::Metadata,
+                        Some(resolved.namespace_absolute().to_path_buf()),
+                        None,
+                        source,
+                    )
+                })
+            }
+            LocalNamespace::Rooted(rooted) => {
+                rooted.canonicalize_virtual(resolved.authority_relative(), self.symlink_policy)
+            }
+        }
+        .map_err(|error| {
+            operation_error(
+                error,
+                LocalFileOperation::Metadata,
+                resolved.namespace_absolute(),
+                None,
+                resolver.current_directory(),
+            )
+        })?;
+        if resolved.directory_required() {
+            let metadata = match &self.core.namespace {
+                LocalNamespace::Host => std::fs::metadata(resolved.authority_relative())
+                    .map(|metadata| LocalFileMetadata::from_native(&metadata))
+                    .map_err(|error| {
+                        LocalFileError::from_io(
+                            LocalFileOperation::Metadata,
+                            Some(resolved.namespace_absolute().to_path_buf()),
+                            None,
+                            error,
+                        )
+                    }),
+                LocalNamespace::Rooted(rooted) => {
+                    rooted.target_metadata(resolved.authority_relative(), self.symlink_policy)
+                }
+            }
+            .map_err(|error| {
+                operation_error(
+                    error,
+                    LocalFileOperation::Metadata,
+                    resolved.namespace_absolute(),
+                    None,
+                    resolver.current_directory(),
+                )
+            })?;
+            if metadata.kind() != LocalFileKind::Directory {
+                return Err(operation_error(
+                    LocalFileError::new(LocalFileErrorKind::NotDirectory, LocalFileOperation::Metadata),
+                    LocalFileOperation::Metadata,
+                    resolved.namespace_absolute(),
+                    None,
+                    resolver.current_directory(),
+                ));
+            }
+        }
+        Ok(canonical)
+    }
+
+    /// Reads a regular file completely using the filesystem's reader defaults.
+    ///
+    /// # Parameters
+    ///
+    /// - `path`: Namespace path of the regular file to read.
+    ///
+    /// # Returns
+    ///
+    /// All bytes read from the file.
+    ///
+    /// # Errors
+    ///
+    /// Returns path-resolution, opening, or reading errors.
+    pub fn read_all(&self, path: &Path) -> LocalResult<Vec<u8>> {
+        self.read_all_with_options(path, &LocalReadAllOptions::new())
+    }
+
+    /// Reads a regular file completely with an optional byte limit.
+    ///
+    /// Returns `ResourceLimit` when the observed length or bytes read exceed
+    /// the configured maximum. Other open/read failures retain structured
+    /// operation context; partial bytes are discarded.
+    ///
+    /// # Parameters
+    ///
+    /// - `path`: Namespace path of the regular file to read.
+    /// - `options`: Reader overrides and optional maximum byte count.
+    ///
+    /// # Returns
+    ///
+    /// All bytes read from the file.
+    ///
+    /// # Errors
+    ///
+    /// Returns path-resolution, opening, reading, or byte-limit errors.
+    pub fn read_all_with_options(&self, path: &Path, options: &LocalReadAllOptions) -> LocalResult<Vec<u8>> {
+        self.read_all_with_context(path, options, |bytes, _, _| Ok(bytes))
+    }
+
+    /// Reads a complete UTF-8 text file using the filesystem's reader defaults.
+    ///
+    /// # Parameters
+    ///
+    /// - `path`: Namespace path of the UTF-8 file to read.
+    ///
+    /// # Returns
+    ///
+    /// The file contents decoded as UTF-8.
+    ///
+    /// # Errors
+    ///
+    /// Returns path-resolution, opening, reading, or UTF-8 decoding errors.
+    pub fn read_text(&self, path: &Path) -> LocalResult<String> {
+        self.read_text_with_options(path, &LocalReadAllOptions::new())
+    }
+
+    /// Reads a complete UTF-8 text file with an optional byte limit.
+    ///
+    /// Returns `InvalidEncoding` with the original UTF-8 conversion error
+    /// when the complete file is not valid UTF-8.
+    ///
+    /// # Parameters
+    ///
+    /// - `path`: Namespace path of the UTF-8 file to read.
+    /// - `options`: Reader overrides and optional maximum byte count.
+    ///
+    /// # Returns
+    ///
+    /// The file contents decoded as UTF-8.
+    ///
+    /// # Errors
+    ///
+    /// Returns path-resolution, opening, reading, byte-limit, or UTF-8 decoding
+    /// errors.
+    pub fn read_text_with_options(&self, path: &Path, options: &LocalReadAllOptions) -> LocalResult<String> {
+        self.read_all_with_context(path, options, |bytes, absolute, pwd| {
+            String::from_utf8(bytes).map_err(|source| {
+                with_current_directory(
+                    LocalFileError::from_utf8(LocalFileOperation::Read, Some(absolute.to_path_buf()), source),
+                    pwd,
+                )
+            })
+        })
+    }
+
+    /// Reads bytes while checking same-handle observations before and after.
+    ///
+    /// This detects observed identity, size, or native timestamp changes; it
+    /// does not provide an atomic snapshot against adversarial concurrent I/O.
+    /// Returns `ChangedDuringRead` when the observations do not match.
+    ///
+    /// # Parameters
+    ///
+    /// - `path`: Namespace path of the file to observe and read.
+    /// - `options`: Snapshot limits and reader policy.
+    ///
+    /// # Returns
+    ///
+    /// A snapshot containing the bytes and before/after observations.
+    ///
+    /// # Errors
+    ///
+    /// Returns path-resolution, opening, observation, byte-limit, or
+    /// changed-during-read errors.
+    pub fn read_consistent_with_options(
+        &self,
+        path: &Path,
+        options: &LocalSnapshotOptions,
+    ) -> LocalResult<crate::LocalFileSnapshot> {
+        let symlink_policy = self.read_symlink_policy(options.read_options(), options.symlink_policy());
+        validate_scope_symlink_policy(self.scope(), symlink_policy, LocalFileOperation::Read, Some(path))?;
+        let resolver = self.resolver_for(path, LocalFileOperation::Read)?;
+        let resolved = resolve_operation_path(&resolver, path, LocalFileOperation::Read)?;
+        let reader = self.open_resolved_reader_with_policy(
+            &resolved,
+            options.read_options(),
+            LocalFileOperation::Read,
+            resolver.current_directory(),
+            symlink_policy,
+        )?;
+        let mut observed = LocalObservedReader::from_reader(reader, LocalObservationRequirement::Required)
+            .map_err(|error| {
+                operation_error(
+                    error,
+                    LocalFileOperation::Read,
+                    resolved.namespace_absolute(),
+                    None,
+                    resolver.current_directory(),
+                )
+            })?
+            .bind_error_context(
+                resolved.namespace_absolute().to_path_buf(),
+                resolver.current_directory().map(Path::to_path_buf),
+            );
+        let before = observed.observation().clone();
+        if before.metadata().len() > options.max_bytes() {
+            return Err(operation_error(
+                LocalFileError::new(LocalFileErrorKind::ResourceLimit, LocalFileOperation::Read),
+                LocalFileOperation::Read,
+                resolved.namespace_absolute(),
+                None,
+                resolver.current_directory(),
+            ));
+        }
+        let bytes = observed.read_to_end_limited(options.max_bytes()).map_err(|error| {
+            operation_error(
+                error,
+                LocalFileOperation::Read,
+                resolved.namespace_absolute(),
+                None,
+                resolver.current_directory(),
+            )
+        })?;
+        #[cfg(test)]
+        crate::observation::snapshot::run_read_hook();
+        let after = observed.observe_now().map_err(|error| {
+            operation_error(
+                error,
+                LocalFileOperation::Read,
+                resolved.namespace_absolute(),
+                None,
+                resolver.current_directory(),
+            )
+        })?;
+        if !crate::observation::snapshot::observations_match(&before, &after, bytes.len() as u64) {
+            return Err(operation_error(
+                LocalFileError::new(LocalFileErrorKind::ChangedDuringRead, LocalFileOperation::Read),
+                LocalFileOperation::Read,
+                resolved.namespace_absolute(),
+                None,
+                resolver.current_directory(),
+            ));
+        }
+        Ok(crate::LocalFileSnapshot::new(bytes, before, after))
+    }
+
+    /// Reads final-entry metadata without following the final symlink.
+    ///
+    /// Returns resolution, policy, or native metadata errors. A
+    /// directory-qualified operand returns `NotDirectory` unless the observed
+    /// final entry is a real directory.
+    ///
+    /// # Parameters
+    ///
+    /// - `path`: Namespace path whose final entry metadata is requested.
+    ///
+    /// # Returns
+    ///
+    /// Metadata for the final directory entry without following its symlink.
+    ///
+    /// # Errors
+    ///
+    /// Returns resolution, symlink-policy, or native metadata errors.
+    pub fn metadata(&self, path: &Path) -> LocalResult<LocalFileMetadata> {
+        let resolver = self.resolver_for(path, LocalFileOperation::Metadata)?;
+        let resolved = resolve_operation_path(&resolver, path, LocalFileOperation::Metadata)?;
+        self.core.fail_if_requested(TestFaultPoint::Metadata).map_err(|error| {
+            with_current_directory(
+                LocalFileError::from_io(LocalFileOperation::Metadata, Some(path.to_path_buf()), None, error),
+                resolver.current_directory(),
+            )
+        })?;
+        let metadata = match &self.core.namespace {
+            LocalNamespace::Host => {
+                HostLocalFileSystem::metadata_with_policy(resolved.authority_relative(), self.symlink_policy)
+            }
+            LocalNamespace::Rooted(rooted) => rooted.metadata(resolved.authority_relative(), self.symlink_policy),
+        }
+        .map_err(|error| {
+            operation_error(
+                error,
+                LocalFileOperation::Metadata,
+                resolved.namespace_absolute(),
+                None,
+                resolver.current_directory(),
+            )
+        })?;
+        if resolved.directory_required() && metadata.kind() != LocalFileKind::Directory {
+            let error = LocalFileError::new(LocalFileErrorKind::NotDirectory, LocalFileOperation::Metadata)
+                .with_path(resolved.namespace_absolute().to_path_buf());
+            return Err(with_current_directory(error, resolver.current_directory()));
+        }
+        Ok(metadata)
+    }
+
+    /// Reads at most `max_bytes` using the default reader options.
+    ///
+    /// Returns the prefix or error described by
+    /// [`Self::read_prefix_with_options`].
+    ///
+    /// # Parameters
+    ///
+    /// - `path`: Namespace path of the file to read.
+    /// - `max_bytes`: Maximum number of bytes to return.
+    ///
+    /// # Returns
+    ///
+    /// At most `max_bytes` from the beginning of the file.
+    ///
+    /// # Errors
+    ///
+    /// Returns path-resolution, opening, reading, or allocation-limit errors.
+    pub fn read_prefix(&self, path: &Path, max_bytes: usize) -> LocalResult<Vec<u8>> {
+        self.read_prefix_with_options(path, max_bytes, &self.defaults.read)
+    }
+
+    /// Reads at most `max_bytes` using one complete explicit options value.
+    ///
+    /// Stops at the byte limit or EOF and returns an owned byte vector. A zero
+    /// limit still resolves and opens the source. Returns the opening errors
+    /// of [`Self::open_reader_with_options`] or a subsequent read error;
+    /// interrupted reads are retried and partial bytes are discarded on error.
+    ///
+    /// # Parameters
+    ///
+    /// - `path`: Namespace path of the file to read.
+    /// - `max_bytes`: Maximum number of bytes to return.
+    /// - `options`: Complete reader policy for this operation.
+    ///
+    /// # Returns
+    ///
+    /// At most `max_bytes` from the beginning of the file.
+    ///
+    /// # Errors
+    ///
+    /// Returns path-resolution, opening, reading, or allocation-limit errors.
+    pub fn read_prefix_with_options(
+        &self,
+        path: &Path,
+        max_bytes: usize,
+        options: &LocalReadOptions,
+    ) -> LocalResult<Vec<u8>> {
+        let symlink_policy = self.read_symlink_policy(options, None);
+        validate_scope_symlink_policy(self.scope(), symlink_policy, LocalFileOperation::Read, Some(path))?;
+        let resolver = self.resolver_for(path, LocalFileOperation::Read)?;
+        let resolved = resolve_operation_path(&resolver, path, LocalFileOperation::Read)?;
+        let error_path = resolved.namespace_absolute().to_path_buf();
+        let mut reader = self.open_resolved_reader(
+            &resolved,
+            options,
+            LocalFileOperation::Read,
+            resolver.current_directory(),
+        )?;
+        if max_bytes == 0 {
+            return Ok(Vec::new());
+        }
+        collect_prefix_with_reserver(&mut reader, max_bytes, |output, additional| {
+            try_reserve_prefix(output, additional)
+        })
+        .map_err(|error| {
+            operation_error(
+                error,
+                LocalFileOperation::Read,
+                &error_path,
+                None,
+                resolver.current_directory(),
+            )
+        })
+    }
+
+    /// Opens an observed reader using caller-computed binding limits and
+    /// deadline.
+    ///
+    /// The reader does not attach a new path binding; callers use this entry
+    /// point when the enclosing authority owns binding verification.
+    ///
+    /// # Parameters
+    ///
+    /// - `path`: Namespace path to resolve and open.
+    /// - `options`: Observation and read policy.
+    /// - `limits`: Binding limits selected by the enclosing authority.
+    /// - `deadline`: Binding deadline computed by the enclosing authority.
+    ///
+    /// # Returns
+    ///
+    /// An observed reader without an attached path binding.
+    ///
+    /// # Errors
+    ///
+    /// Returns path-resolution, opening, observation, or binding-limit errors.
     pub(crate) fn open_observed_reader_with_binding_deadline(
         &self,
         path: &Path,
@@ -102,6 +750,24 @@ impl LocalFileSystem {
     }
 
     /// Opens an observed reader using an existing fixed-directory authority.
+    ///
+    /// # Parameters
+    ///
+    /// - `original`: Path used to retain the directory binding.
+    /// - `request_path`: Path to resolve relative to the fixed authority.
+    /// - `component_policy`: Policy for traversed path components.
+    /// - `options`: Observation, read, and optional path-binding policy.
+    /// - `authority_binding_deadline`: Optional deadline imposed by the
+    ///   authority.
+    ///
+    /// # Returns
+    ///
+    /// An observed reader bound to the fixed directory authority.
+    ///
+    /// # Errors
+    ///
+    /// Returns path-resolution, opening, observation, binding-limit, or
+    /// deadline errors.
     pub(crate) fn open_observed_reader_fixed(
         &self,
         original: &Path,
@@ -137,6 +803,25 @@ impl LocalFileSystem {
     }
 
     /// Reopens a fixed-relative source during path-binding verification.
+    ///
+    /// # Parameters
+    ///
+    /// - `original`: Original path whose binding is being checked.
+    /// - `request_path`: Path to reopen relative to the fixed authority.
+    /// - `component_policy`: Policy for traversed path components.
+    /// - `options`: Observation and read policy for the reopened handle.
+    /// - `deadline`: Previously computed reader binding deadline.
+    /// - `authority_binding_deadline`: Optional deadline imposed by the
+    ///   authority.
+    ///
+    /// # Returns
+    ///
+    /// An observed reader reopened under the supplied deadline.
+    ///
+    /// # Errors
+    ///
+    /// Returns path-resolution, opening, observation, binding-limit, or
+    /// deadline errors.
     pub(crate) fn open_observed_reader_fixed_with_deadline(
         &self,
         original: &Path,
@@ -170,7 +855,139 @@ impl LocalFileSystem {
             authority_binding_deadline,
         )
     }
+    /// Selects the outer override, then the reader option, then the instance
+    /// default.
+    ///
+    /// # Parameters
+    ///
+    /// - `options`: Reader options whose symlink policy is the second choice.
+    /// - `outer_override`: Higher-priority policy selected by the enclosing
+    ///   operation.
+    ///
+    /// # Returns
+    ///
+    /// The first available policy in the order outer override, reader option,
+    /// then this filesystem's default.
+    #[inline]
+    pub(crate) const fn read_symlink_policy(
+        &self,
+        options: &LocalReadOptions,
+        outer_override: Option<LocalSymlinkPolicy>,
+    ) -> LocalSymlinkPolicy {
+        match outer_override {
+            Some(policy) => policy,
+            None => match options.symlink_policy() {
+                Some(policy) => policy,
+                None => self.symlink_policy,
+            },
+        }
+    }
 
+    /// Resolves a fixed-relative source under the retained Rooted authority.
+    ///
+    /// Namespace paths are already resolved by the caller and return `None`.
+    /// Fixed-relative paths validate their relative form, clone the authority,
+    /// debit their original bytes, then resolve components under the same
+    /// deadline and mutable binding budget.
+    ///
+    /// # Parameters
+    ///
+    /// - `path_mode`: Source path and component policy to resolve.
+    /// - `resolution`: Effective resolution contract selected by the caller.
+    /// - `symlink_policy`: Policy applied while traversing the fixed path.
+    /// - `binding_deadline`: Deadline shared with the enclosing operation.
+    /// - `path_budget`: Remaining path-byte budget, updated during resolution.
+    ///
+    /// # Returns
+    ///
+    /// A resolved path for fixed-relative sources, or `None` for namespace
+    /// paths.
+    ///
+    /// # Errors
+    ///
+    /// Returns invalid-state, invalid-path, authority-cloning, or
+    /// path-resolution errors without changing their operation context.
+    fn resolve_fixed_observed_path(
+        &self,
+        path_mode: &ObservedReadPath<'_>,
+        resolution: &crate::resolution::ResolutionContract,
+        symlink_policy: LocalSymlinkPolicy,
+        binding_deadline: Option<std::time::Instant>,
+        path_budget: &mut Option<crate::directory::binding::PathBindingBudget>,
+    ) -> LocalResult<Option<PathBuf>> {
+        Ok(match path_mode {
+            ObservedReadPath::Namespace(_) => None,
+            ObservedReadPath::FixedRelative {
+                original,
+                component_policy,
+                ..
+            } => {
+                if original.is_absolute() || original.has_root() {
+                    return Err(
+                        LocalFileError::new(LocalFileErrorKind::InvalidPath, LocalFileOperation::OpenReader)
+                            .with_path(original.to_path_buf()),
+                    );
+                }
+                let LocalNamespace::Rooted(rooted) = &self.core.namespace else {
+                    return Err(LocalFileError::new(
+                        LocalFileErrorKind::InvalidState,
+                        LocalFileOperation::OpenRoot,
+                    ));
+                };
+                let source_root = rooted.root_authority();
+                let authority = Root::from_directory_authority_with_contract(
+                    source_root.try_clone_authority().map_err(|source| {
+                        LocalFileError::from_io(
+                            LocalFileOperation::OpenRoot,
+                            Some(source_root.path().to_path_buf()),
+                            None,
+                            source,
+                        )
+                    })?,
+                    source_root.path().to_path_buf(),
+                    resolution.clone(),
+                );
+                if let Some(budget) = path_budget.as_mut() {
+                    budget.debit(original.as_os_str().len(), LocalFileOperation::OpenReader, original)?;
+                }
+                Some(
+                    crate::rooted_local_file_system::resolve_rooted_path_allow_root_with_component_policy_and_budget(
+                        &authority,
+                        original,
+                        symlink_policy,
+                        true,
+                        LocalFileOperation::OpenReader,
+                        component_policy,
+                        binding_deadline,
+                        path_budget.as_mut(),
+                    )?,
+                )
+            }
+        })
+    }
+
+    /// Resolves, opens, and optionally binds an observed reader for either
+    /// namespace paths or fixed-relative paths.
+    ///
+    /// # Parameters
+    ///
+    /// - `path_mode`: Namespace or fixed-relative source path and component
+    ///   policy.
+    /// - `options`: Observation and read policy.
+    /// - `binding_options`: Optional limits used to retain the path binding.
+    /// - `binding_deadline`: Effective deadline for path resolution and
+    ///   binding.
+    /// - `attach_binding`: Whether to attach a binding to the returned reader.
+    /// - `authority_binding_deadline`: Optional enclosing-authority deadline.
+    ///
+    /// # Returns
+    ///
+    /// An observed reader for the resolved file.
+    ///
+    /// # Errors
+    ///
+    /// Returns path-resolution, opening, observation, binding-limit, or
+    /// deadline errors.
     fn open_observed_reader_with_binding_limits(
         &self,
         path_mode: ObservedReadPath<'_>,
@@ -207,59 +1024,15 @@ impl LocalFileSystem {
         let mut path_budget =
             binding_options.map(|limits| crate::directory::binding::PathBindingBudget::new(limits.max_path_bytes()));
         check_binding_deadline(binding_deadline, path)?;
-        let fixed_resolved = (|| -> LocalResult<Option<PathBuf>> {
-            Ok(match &path_mode {
-                ObservedReadPath::Namespace(_) => None,
-                ObservedReadPath::FixedRelative {
-                    original,
-                    component_policy,
-                    ..
-                } => {
-                    if original.is_absolute() || original.has_root() {
-                        return Err(LocalFileError::new(
-                            LocalFileErrorKind::InvalidPath,
-                            LocalFileOperation::OpenReader,
-                        )
-                        .with_path(original.to_path_buf()));
-                    }
-                    let LocalNamespace::Rooted(rooted) = &self.core.namespace else {
-                        return Err(LocalFileError::new(
-                            LocalFileErrorKind::InvalidState,
-                            LocalFileOperation::OpenRoot,
-                        ));
-                    };
-                    let source_root = rooted.root_authority();
-                    let authority = Root::from_directory_authority_with_contract(
-                        source_root.try_clone_authority().map_err(|source| {
-                            LocalFileError::from_io(
-                                LocalFileOperation::OpenRoot,
-                                Some(source_root.path().to_path_buf()),
-                                None,
-                                source,
-                            )
-                        })?,
-                        source_root.path().to_path_buf(),
-                        resolution.clone(),
-                    );
-                    if let Some(budget) = path_budget.as_mut() {
-                        budget.debit(original.as_os_str().len(), LocalFileOperation::OpenReader, original)?;
-                    }
-                    Some(
-                    crate::rooted_local_file_system::resolve_rooted_path_allow_root_with_component_policy_and_budget(
-                        &authority,
-                        original,
-                        symlink_policy,
-                        true,
-                        LocalFileOperation::OpenReader,
-                        component_policy,
-                        binding_deadline,
-                        path_budget.as_mut(),
-                    )?,
-                )
-                }
-            })
-        })()
-        .map_err(|error| operation_error(error, LocalFileOperation::OpenReader, request_path, None, None))?;
+        let fixed_resolved = self
+            .resolve_fixed_observed_path(
+                &path_mode,
+                &resolution,
+                symlink_policy,
+                binding_deadline,
+                &mut path_budget,
+            )
+            .map_err(|error| operation_error(error, LocalFileOperation::OpenReader, request_path, None, None))?;
         let operation_path = fixed_resolved.as_deref().unwrap_or(path);
         let resolver = self.resolver_for(operation_path, LocalFileOperation::OpenReader)?;
         let resolved = resolve_operation_path(&resolver, operation_path, LocalFileOperation::OpenReader)?;
@@ -406,132 +1179,26 @@ impl LocalFileSystem {
                 binding_deadline,
             )?;
             check_binding_deadline(binding_deadline, path)?;
-            let mut observed = LocalObservedReader::from_reader(reader, options.native_observation())?
+            let observed = LocalObservedReader::from_reader(reader, options.native_observation())?
                 .bind_error_context(error_path.clone(), error_current_directory.clone());
-            if attach_binding {
-                if let ObservedReadPath::FixedRelative {
-                    original,
-                    component_policy,
-                    ..
-                } = &path_mode
-                {
-                    if binding_options.is_some() {
-                        let identity = observed.observation().identity().cloned().ok_or_else(|| {
-                            LocalFileError::new(LocalFileErrorKind::Unsupported, LocalFileOperation::Metadata)
-                        })?;
-                        observed = observed.with_binding(Box::new(crate::directory::DirectoryReaderPathBinding::new(
-                            self.clone(),
-                            original.to_path_buf(),
-                            request_path.to_path_buf(),
-                            (*component_policy).clone(),
-                            *options,
-                            identity,
-                            authority_binding_deadline,
-                        )));
-                    }
-                    check_binding_deadline(binding_deadline, original)?;
-                    return Ok(observed);
-                }
-                let Some(binding_options) = binding_options else {
-                    check_binding_deadline(binding_deadline, path)?;
-                    return Ok(observed);
-                };
-                check_binding_deadline(binding_deadline, resolved.namespace_absolute())?;
-                let identity = observed.observation().identity().cloned().ok_or_else(|| {
-                    LocalFileError::new(LocalFileErrorKind::Unsupported, LocalFileOperation::Metadata)
-                })?;
-                let parent_path = resolved.authority_relative().parent().unwrap_or_else(|| Path::new(""));
-                let (parent_root, parent_anchors) = match &self.core.namespace {
-                    LocalNamespace::Host => {
-                        let host_root = Root::open(Path::new("/"))
-                            .map_err(|source| {
-                                LocalFileError::from_io(
-                                    LocalFileOperation::OpenRoot,
-                                    Some(parent_path.to_path_buf()),
-                                    None,
-                                    source,
-                                )
-                            })?
-                            .with_resolution_contract(resolution.clone());
-                        let relative_parent = parent_path.strip_prefix("/").unwrap_or(parent_path);
-                        let policy = if symlink_policy == LocalSymlinkPolicy::FollowAcrossScope {
-                            LocalSymlinkPolicy::FollowWithinScope
-                        } else {
-                            symlink_policy
-                        };
-                        let allow_all = crate::directory::LocalComponentPolicy::allow_all();
-                        let relative_parent = crate::rooted_local_file_system::resolve_rooted_path_allow_root_with_component_policy_and_budget(
-                        &host_root, relative_parent, policy, true, LocalFileOperation::OpenRoot, &allow_all,
-                        binding_deadline, path_budget.as_mut(),
-                    )?;
-                        check_binding_deadline(binding_deadline, &relative_parent)?;
-                        let diagnostic_parent = Path::new("/").join(&relative_parent);
-                        let (root, _, anchors) = crate::directory::retain_directory_chain(
-                            &host_root,
-                            &relative_parent,
-                            &diagnostic_parent,
-                            Some(namespace_absolute.parent().unwrap_or(Path::new("/"))),
-                            true,
-                            Some(&binding_options),
-                            path_budget.as_mut(),
-                            policy,
-                            resolver_started,
-                        )?;
-                        (root, anchors.unwrap_or_default())
-                    }
-                    LocalNamespace::Rooted(rooted) => {
-                        let source_root = rooted.root_authority();
-                        let working_root = Root::from_directory_authority_with_contract(
-                            source_root.try_clone_authority().map_err(|source| {
-                                LocalFileError::from_io(
-                                    LocalFileOperation::OpenRoot,
-                                    Some(resolved.namespace_absolute().to_path_buf()),
-                                    None,
-                                    source,
-                                )
-                            })?,
-                            source_root.path().to_path_buf(),
-                            resolution.clone(),
-                        );
-                        let allow_all = crate::directory::LocalComponentPolicy::allow_all();
-                        let resolved_parent = crate::rooted_local_file_system::resolve_rooted_path_allow_root_with_component_policy_and_budget(
-                        &working_root, parent_path, symlink_policy, true, LocalFileOperation::OpenRoot,
-                        &allow_all, binding_deadline, path_budget.as_mut(),
-                    )?;
-                        check_binding_deadline(binding_deadline, &resolved_parent)?;
-                        let diagnostic_parent = rooted.diagnostic_path().join(&resolved_parent);
-                        let recipe_parent = rooted
-                            .diagnostic_path()
-                            .join(authority_path.parent().unwrap_or_else(|| Path::new("")));
-                        let (root, _, anchors) = crate::directory::retain_directory_chain(
-                            &working_root,
-                            &resolved_parent,
-                            &diagnostic_parent,
-                            Some(&recipe_parent),
-                            true,
-                            Some(&binding_options),
-                            path_budget.as_mut(),
-                            symlink_policy,
-                            resolver_started,
-                        )?;
-                        (root, anchors.unwrap_or_default())
-                    }
-                };
-                drop(parent_root);
-                check_binding_deadline(binding_deadline, resolved.namespace_absolute())?;
-                observed = observed.with_binding(Box::new(PathBinding::new(
-                    self.clone(),
-                    resolved.namespace_absolute().to_path_buf(),
-                    identity,
-                    *options,
-                    binding_options,
-                )));
-                observed = observed.with_binding(Box::new(DirectoryPathBinding::new(
-                    parent_anchors,
-                    binding_options.deadline(),
-                )));
-            }
-            check_binding_deadline(binding_deadline, path)?;
+            let observed = self.attach_observed_reader_binding(
+                observed,
+                &path_mode,
+                path,
+                request_path,
+                &resolved,
+                &namespace_absolute,
+                authority_path,
+                options,
+                binding_options,
+                attach_binding,
+                binding_deadline,
+                authority_binding_deadline,
+                &resolution,
+                &mut path_budget,
+                symlink_policy,
+                resolver_started,
+            )?;
             Ok(observed)
         })();
         result.map_err(|error| {
@@ -545,183 +1212,277 @@ impl LocalFileSystem {
         })
     }
 
-    /// Reads metadata for the final target while honoring this filesystem's
-    /// link policy.
+    /// Attaches fixed-relative or namespace pathname checks to an observed
+    /// reader.
     ///
-    /// Returns file or directory metadata. Link rejection, missing targets,
-    /// resolution errors, and native metadata failures are returned as
-    /// `LocalFileError` with metadata-operation context.
-    pub fn target_metadata(&self, path: &Path) -> LocalResult<LocalFileMetadata> {
-        let resolver = self.resolver_for(path, LocalFileOperation::Metadata)?;
-        let resolved = resolve_operation_path(&resolver, path, LocalFileOperation::Metadata)?;
-        let metadata = match &self.core.namespace {
-            LocalNamespace::Host => {
-                let entry =
-                    HostLocalFileSystem::metadata_with_policy(resolved.authority_relative(), self.symlink_policy)
-                        .map_err(|error| {
-                            operation_error(
-                                error,
-                                LocalFileOperation::Metadata,
-                                resolved.namespace_absolute(),
-                                None,
-                                resolver.current_directory(),
-                            )
-                        })?;
-                if entry.kind() == LocalFileKind::Symlink && !self.symlink_policy.follows() {
-                    return Err(operation_error(
+    /// Fixed-directory sources retain their original recipe. Namespace sources
+    /// retain both the file binding and parent-directory anchors. When callers
+    /// own verification, the reader is returned without installing a binding.
+    ///
+    /// # Parameters
+    ///
+    /// - `observed`: Reader and same-handle observation to augment.
+    /// - `path_mode`: Namespace or fixed-relative source interpretation.
+    /// - `path`: Original path used for deadline checks and diagnostics.
+    /// - `request_path`: Path coordinate associated with the source request.
+    /// - `resolved`: Resolved namespace path and authority-relative operand.
+    /// - `namespace_absolute`: Absolute namespace path used to retain
+    ///   authorities.
+    /// - `authority_path`: Namespace path relative to the authority root.
+    /// - `options`: Observation and read policy captured by the binding.
+    /// - `binding_options`: Optional limits selecting whether a binding is
+    ///   attached.
+    /// - `attach_binding`: Whether this reader owns path-binding verification.
+    /// - `binding_deadline`: Effective deadline shared by all binding stages.
+    /// - `authority_binding_deadline`: Optional fixed-authority deadline.
+    /// - `resolution`: Effective contract used for authority-relative rechecks.
+    /// - `path_budget`: Remaining shared path-byte budget, updated by
+    ///   retention.
+    /// - `symlink_policy`: Policy used to resolve and recheck the path.
+    /// - `resolver_started`: Start time for retained directory-chain limits.
+    ///
+    /// # Returns
+    ///
+    /// The reader with the selected path binding attached, if requested.
+    ///
+    /// # Errors
+    ///
+    /// Returns unsupported identity, path-binding, resource-limit, deadline, or
+    /// authority-retention errors.
+    #[allow(clippy::too_many_arguments)]
+    fn attach_observed_reader_binding(
+        &self,
+        mut observed: LocalObservedReader,
+        path_mode: &ObservedReadPath<'_>,
+        path: &Path,
+        request_path: &Path,
+        resolved: &LocalNamespacePath,
+        namespace_absolute: &Path,
+        authority_path: &Path,
+        options: &LocalObservedReadOptions,
+        binding_options: Option<crate::options::LocalPathBindingOptions>,
+        attach_binding: bool,
+        binding_deadline: Option<std::time::Instant>,
+        authority_binding_deadline: Option<std::time::Duration>,
+        resolution: &crate::resolution::ResolutionContract,
+        path_budget: &mut Option<crate::directory::binding::PathBindingBudget>,
+        symlink_policy: LocalSymlinkPolicy,
+        resolver_started: std::time::Instant,
+    ) -> LocalResult<LocalObservedReader> {
+        if attach_binding {
+            if let ObservedReadPath::FixedRelative {
+                original,
+                component_policy,
+                ..
+            } = path_mode
+            {
+                if binding_options.is_some() {
+                    let identity = observed.observation().identity().cloned().ok_or_else(|| {
                         LocalFileError::new(LocalFileErrorKind::Unsupported, LocalFileOperation::Metadata)
-                            .with_reason("target metadata requires following a symbolic link"),
-                        LocalFileOperation::Metadata,
-                        resolved.namespace_absolute(),
-                        None,
-                        resolver.current_directory(),
-                    ));
+                    })?;
+                    observed = observed.with_binding(Box::new(crate::directory::DirectoryReaderPathBinding::new(
+                        self.clone(),
+                        original.to_path_buf(),
+                        request_path.to_path_buf(),
+                        (*component_policy).clone(),
+                        *options,
+                        identity,
+                        authority_binding_deadline,
+                    )));
                 }
-                if entry.kind() == LocalFileKind::Symlink && self.symlink_policy.follows() {
-                    std::fs::metadata(resolved.authority_relative())
-                        .map(|metadata| LocalFileMetadata::from_native(&metadata))
-                        .map_err(|error| {
-                            LocalFileError::from_io(
-                                LocalFileOperation::Metadata,
-                                Some(resolved.namespace_absolute().to_path_buf()),
-                                None,
-                                error,
-                            )
-                        })
-                } else {
-                    Ok(entry)
-                }
+                check_binding_deadline(binding_deadline, original)?;
+                return Ok(observed);
             }
-            LocalNamespace::Rooted(rooted) => {
-                rooted.target_metadata(resolved.authority_relative(), self.symlink_policy)
-            }
+            let Some(binding_options) = binding_options else {
+                check_binding_deadline(binding_deadline, path)?;
+                return Ok(observed);
+            };
+            check_binding_deadline(binding_deadline, resolved.namespace_absolute())?;
+            let identity =
+                observed.observation().identity().cloned().ok_or_else(|| {
+                    LocalFileError::new(LocalFileErrorKind::Unsupported, LocalFileOperation::Metadata)
+                })?;
+            let parent_anchors = self.retain_observed_parent_anchors(
+                resolved,
+                namespace_absolute,
+                authority_path,
+                &binding_options,
+                resolution,
+                binding_deadline,
+                path_budget,
+                symlink_policy,
+                resolver_started,
+            )?;
+            check_binding_deadline(binding_deadline, resolved.namespace_absolute())?;
+            observed = observed.with_binding(Box::new(PathBinding::new(
+                self.clone(),
+                resolved.namespace_absolute().to_path_buf(),
+                identity,
+                *options,
+                binding_options,
+            )));
+            observed = observed.with_binding(Box::new(DirectoryPathBinding::new(
+                parent_anchors,
+                binding_options.deadline(),
+            )));
         }
-        .map_err(|error| {
-            operation_error(
-                error,
-                LocalFileOperation::Metadata,
-                resolved.namespace_absolute(),
-                None,
-                resolver.current_directory(),
-            )
-        })?;
-        if resolved.directory_required() && metadata.kind() != LocalFileKind::Directory {
-            return Err(operation_error(
-                LocalFileError::new(LocalFileErrorKind::NotDirectory, LocalFileOperation::Metadata),
-                LocalFileOperation::Metadata,
-                resolved.namespace_absolute(),
-                None,
-                resolver.current_directory(),
-            ));
-        }
-        Ok(metadata)
+        check_binding_deadline(binding_deadline, path)?;
+        Ok(observed)
     }
 
-    /// Resolves an existing operand to its namespace coordinate.
+    /// Retains the directory chain that verifies a namespace reader binding.
     ///
-    /// Host results are native canonical paths; Rooted results are virtual
-    /// absolute paths and do not grant authority for a later operation.
-    /// Returns path-policy, missing-target, or native resolution errors.
-    pub fn canonicalize(&self, path: &Path) -> LocalResult<std::path::PathBuf> {
-        let resolver = self.resolver_for(path, LocalFileOperation::Metadata)?;
-        let resolved = resolve_operation_path(&resolver, path, LocalFileOperation::Metadata)?;
-        let canonical = match &self.core.namespace {
+    /// Host readers resolve from the host root with cross-scope links reduced
+    /// to within-scope traversal. Rooted readers retain their existing root
+    /// authority and policy. Both paths share the caller's deadline and byte
+    /// budget, and return anchors only after the parent chain is retained.
+    ///
+    /// # Parameters
+    ///
+    /// - `resolved`: Resolved reader operand and authority-relative path.
+    /// - `namespace_absolute`: Absolute diagnostic path for the operand.
+    /// - `authority_path`: Absolute namespace path relative to the authority
+    ///   root.
+    /// - `binding_options`: Limits used when retaining the directory chain.
+    /// - `resolution`: Resolution contract shared by temporary authorities.
+    /// - `binding_deadline`: Deadline shared with reader opening and binding.
+    /// - `path_budget`: Remaining binding path bytes, updated as paths resolve.
+    /// - `symlink_policy`: Policy governing component traversal.
+    /// - `resolver_started`: Start time used by the retained-chain limits.
+    ///
+    /// # Returns
+    ///
+    /// The retained parent-directory anchors in verification order.
+    ///
+    /// # Errors
+    ///
+    /// Returns authority, path-resolution, resource-limit, deadline, or native
+    /// I/O errors from retaining the parent chain.
+    #[allow(clippy::too_many_arguments)]
+    fn retain_observed_parent_anchors(
+        &self,
+        resolved: &LocalNamespacePath,
+        namespace_absolute: &Path,
+        authority_path: &Path,
+        binding_options: &crate::options::LocalPathBindingOptions,
+        resolution: &crate::resolution::ResolutionContract,
+        binding_deadline: Option<std::time::Instant>,
+        path_budget: &mut Option<crate::directory::binding::PathBindingBudget>,
+        symlink_policy: LocalSymlinkPolicy,
+        resolver_started: std::time::Instant,
+    ) -> LocalResult<Vec<crate::directory::binding::BindingAnchor>> {
+        let parent_path = resolved.authority_relative().parent().unwrap_or_else(|| Path::new(""));
+        let (parent_root, anchors) = match &self.core.namespace {
             LocalNamespace::Host => {
-                let entry =
-                    HostLocalFileSystem::metadata_with_policy(resolved.authority_relative(), self.symlink_policy)
-                        .map_err(|error| {
-                            operation_error(
-                                error,
-                                LocalFileOperation::Metadata,
-                                resolved.namespace_absolute(),
-                                None,
-                                resolver.current_directory(),
-                            )
-                        })?;
-                if entry.kind() == LocalFileKind::Symlink && !self.symlink_policy.follows() {
-                    return Err(operation_error(
-                        LocalFileError::new(LocalFileErrorKind::Unsupported, LocalFileOperation::Metadata)
-                            .with_reason("canonicalization requires following a symbolic link"),
-                        LocalFileOperation::Metadata,
-                        resolved.namespace_absolute(),
-                        None,
-                        resolver.current_directory(),
-                    ));
-                }
-                std::fs::canonicalize(resolved.authority_relative()).map_err(|source| {
-                    LocalFileError::from_io(
-                        LocalFileOperation::Metadata,
-                        Some(resolved.namespace_absolute().to_path_buf()),
-                        None,
-                        source,
-                    )
-                })
+                let host_root = Root::open(Path::new("/"))
+                    .map_err(|source| {
+                        LocalFileError::from_io(
+                            LocalFileOperation::OpenRoot,
+                            Some(parent_path.to_path_buf()),
+                            None,
+                            source,
+                        )
+                    })?
+                    .with_resolution_contract(resolution.clone());
+                let relative_parent = parent_path.strip_prefix("/").unwrap_or(parent_path);
+                let policy = if symlink_policy == LocalSymlinkPolicy::FollowAcrossScope {
+                    LocalSymlinkPolicy::FollowWithinScope
+                } else {
+                    symlink_policy
+                };
+                let allow_all = crate::directory::LocalComponentPolicy::allow_all();
+                let relative_parent =
+                    crate::rooted_local_file_system::resolve_rooted_path_allow_root_with_component_policy_and_budget(
+                        &host_root,
+                        relative_parent,
+                        policy,
+                        true,
+                        LocalFileOperation::OpenRoot,
+                        &allow_all,
+                        binding_deadline,
+                        path_budget.as_mut(),
+                    )?;
+                check_binding_deadline(binding_deadline, &relative_parent)?;
+                let diagnostic_parent = Path::new("/").join(&relative_parent);
+                let (root, _, anchors) = crate::directory::retain_directory_chain(
+                    &host_root,
+                    &relative_parent,
+                    &diagnostic_parent,
+                    Some(namespace_absolute.parent().unwrap_or(Path::new("/"))),
+                    true,
+                    Some(binding_options),
+                    path_budget.as_mut(),
+                    policy,
+                    resolver_started,
+                )?;
+                (root, anchors.unwrap_or_default())
             }
             LocalNamespace::Rooted(rooted) => {
-                rooted.canonicalize_virtual(resolved.authority_relative(), self.symlink_policy)
-            }
-        }
-        .map_err(|error| {
-            operation_error(
-                error,
-                LocalFileOperation::Metadata,
-                resolved.namespace_absolute(),
-                None,
-                resolver.current_directory(),
-            )
-        })?;
-        if resolved.directory_required() {
-            let metadata = match &self.core.namespace {
-                LocalNamespace::Host => std::fs::metadata(resolved.authority_relative())
-                    .map(|metadata| LocalFileMetadata::from_native(&metadata))
-                    .map_err(|error| {
+                let source_root = rooted.root_authority();
+                let working_root = Root::from_directory_authority_with_contract(
+                    source_root.try_clone_authority().map_err(|source| {
                         LocalFileError::from_io(
-                            LocalFileOperation::Metadata,
+                            LocalFileOperation::OpenRoot,
                             Some(resolved.namespace_absolute().to_path_buf()),
                             None,
-                            error,
+                            source,
                         )
-                    }),
-                LocalNamespace::Rooted(rooted) => {
-                    rooted.target_metadata(resolved.authority_relative(), self.symlink_policy)
-                }
+                    })?,
+                    source_root.path().to_path_buf(),
+                    resolution.clone(),
+                );
+                let allow_all = crate::directory::LocalComponentPolicy::allow_all();
+                let resolved_parent =
+                    crate::rooted_local_file_system::resolve_rooted_path_allow_root_with_component_policy_and_budget(
+                        &working_root,
+                        parent_path,
+                        symlink_policy,
+                        true,
+                        LocalFileOperation::OpenRoot,
+                        &allow_all,
+                        binding_deadline,
+                        path_budget.as_mut(),
+                    )?;
+                check_binding_deadline(binding_deadline, &resolved_parent)?;
+                let diagnostic_parent = rooted.diagnostic_path().join(&resolved_parent);
+                let recipe_parent = rooted
+                    .diagnostic_path()
+                    .join(authority_path.parent().unwrap_or_else(|| Path::new("")));
+                let (root, _, anchors) = crate::directory::retain_directory_chain(
+                    &working_root,
+                    &resolved_parent,
+                    &diagnostic_parent,
+                    Some(&recipe_parent),
+                    true,
+                    Some(binding_options),
+                    path_budget.as_mut(),
+                    symlink_policy,
+                    resolver_started,
+                )?;
+                (root, anchors.unwrap_or_default())
             }
-            .map_err(|error| {
-                operation_error(
-                    error,
-                    LocalFileOperation::Metadata,
-                    resolved.namespace_absolute(),
-                    None,
-                    resolver.current_directory(),
-                )
-            })?;
-            if metadata.kind() != LocalFileKind::Directory {
-                return Err(operation_error(
-                    LocalFileError::new(LocalFileErrorKind::NotDirectory, LocalFileOperation::Metadata),
-                    LocalFileOperation::Metadata,
-                    resolved.namespace_absolute(),
-                    None,
-                    resolver.current_directory(),
-                ));
-            }
-        }
-        Ok(canonical)
+        };
+        drop(parent_root);
+        check_binding_deadline(binding_deadline, resolved.namespace_absolute())?;
+        Ok(anchors)
     }
 
-    /// Reads a regular file completely using the filesystem's reader defaults.
-    pub fn read_all(&self, path: &Path) -> LocalResult<Vec<u8>> {
-        self.read_all_with_options(path, &LocalReadAllOptions::new())
-    }
-
-    /// Reads a regular file completely with an optional byte limit.
+    /// Reads the file and passes its bytes and resolved path context to
+    /// `finish`.
     ///
-    /// Returns `ResourceLimit` when the observed length or bytes read exceed
-    /// the configured maximum. Other open/read failures retain structured
-    /// operation context; partial bytes are discarded.
-    pub fn read_all_with_options(&self, path: &Path, options: &LocalReadAllOptions) -> LocalResult<Vec<u8>> {
-        self.read_all_with_context(path, options, |bytes, _, _| Ok(bytes))
-    }
-
+    /// The callback runs only after the complete bounded read succeeds and can
+    /// preserve namespace and PWD context when converting the result.
+    ///
+    /// # Type Parameters
+    ///
+    /// - `T`: Result type produced by the conversion callback.
+    ///
+    /// # Parameters
+    ///
+    /// - `path`: Namespace path of the regular file to read.
+    /// - `options`: Reader overrides and optional maximum byte count.
+    /// - `finish`: Conversion applied to the complete bytes and resolved
+    ///   context.
     fn read_all_with_context<T>(
         &self,
         path: &Path,
@@ -764,170 +1525,28 @@ impl LocalFileSystem {
         finish(bytes, resolved.namespace_absolute(), resolver.current_directory())
     }
 
-    /// Reads a complete UTF-8 text file using the filesystem's reader defaults.
-    pub fn read_text(&self, path: &Path) -> LocalResult<String> {
-        self.read_text_with_options(path, &LocalReadAllOptions::new())
-    }
-
-    /// Reads a complete UTF-8 text file with an optional byte limit.
-    ///
-    /// Returns `InvalidEncoding` with the original UTF-8 conversion error
-    /// when the complete file is not valid UTF-8.
-    pub fn read_text_with_options(&self, path: &Path, options: &LocalReadAllOptions) -> LocalResult<String> {
-        self.read_all_with_context(path, options, |bytes, absolute, pwd| {
-            String::from_utf8(bytes).map_err(|source| {
-                with_current_directory(
-                    LocalFileError::from_utf8(LocalFileOperation::Read, Some(absolute.to_path_buf()), source),
-                    pwd,
-                )
-            })
-        })
-    }
-
-    /// Reads bytes while checking same-handle observations before and after.
-    ///
-    /// This detects observed identity, size, or native timestamp changes; it
-    /// does not provide an atomic snapshot against adversarial concurrent I/O.
-    /// Returns `ChangedDuringRead` when the observations do not match.
-    pub fn read_consistent_with_options(
-        &self,
-        path: &Path,
-        options: &LocalSnapshotOptions,
-    ) -> LocalResult<crate::LocalFileSnapshot> {
-        let symlink_policy = self.read_symlink_policy(options.read_options(), options.symlink_policy());
-        validate_scope_symlink_policy(self.scope(), symlink_policy, LocalFileOperation::Read, Some(path))?;
-        let resolver = self.resolver_for(path, LocalFileOperation::Read)?;
-        let resolved = resolve_operation_path(&resolver, path, LocalFileOperation::Read)?;
-        let reader = self.open_resolved_reader_with_policy(
-            &resolved,
-            options.read_options(),
-            LocalFileOperation::Read,
-            resolver.current_directory(),
-            symlink_policy,
-        )?;
-        let mut observed = LocalObservedReader::from_reader(reader, LocalObservationRequirement::Required)
-            .map_err(|error| {
-                operation_error(
-                    error,
-                    LocalFileOperation::Read,
-                    resolved.namespace_absolute(),
-                    None,
-                    resolver.current_directory(),
-                )
-            })?
-            .bind_error_context(
-                resolved.namespace_absolute().to_path_buf(),
-                resolver.current_directory().map(Path::to_path_buf),
-            );
-        let before = observed.observation().clone();
-        if before.metadata().len() > options.max_bytes() {
-            return Err(operation_error(
-                LocalFileError::new(LocalFileErrorKind::ResourceLimit, LocalFileOperation::Read),
-                LocalFileOperation::Read,
-                resolved.namespace_absolute(),
-                None,
-                resolver.current_directory(),
-            ));
-        }
-        let bytes = observed.read_to_end_limited(options.max_bytes()).map_err(|error| {
-            operation_error(
-                error,
-                LocalFileOperation::Read,
-                resolved.namespace_absolute(),
-                None,
-                resolver.current_directory(),
-            )
-        })?;
-        #[cfg(test)]
-        crate::observation::snapshot::run_read_hook();
-        let after = observed.observe_now().map_err(|error| {
-            operation_error(
-                error,
-                LocalFileOperation::Read,
-                resolved.namespace_absolute(),
-                None,
-                resolver.current_directory(),
-            )
-        })?;
-        if !crate::observation::snapshot::observations_match(&before, &after, bytes.len() as u64) {
-            return Err(operation_error(
-                LocalFileError::new(LocalFileErrorKind::ChangedDuringRead, LocalFileOperation::Read),
-                LocalFileOperation::Read,
-                resolved.namespace_absolute(),
-                None,
-                resolver.current_directory(),
-            ));
-        }
-        Ok(crate::LocalFileSnapshot::new(bytes, before, after))
-    }
-
-    /// Reads final-entry metadata without following the final symlink.
-    ///
-    /// Returns resolution, policy, or native metadata errors. A
-    /// directory-qualified operand returns `NotDirectory` unless the observed
-    /// final entry is a real directory.
-    pub fn metadata(&self, path: &Path) -> LocalResult<LocalFileMetadata> {
-        let resolver = self.resolver_for(path, LocalFileOperation::Metadata)?;
-        let resolved = resolve_operation_path(&resolver, path, LocalFileOperation::Metadata)?;
-        self.core.fail_if_requested(TestFaultPoint::Metadata).map_err(|error| {
-            with_current_directory(
-                LocalFileError::from_io(LocalFileOperation::Metadata, Some(path.to_path_buf()), None, error),
-                resolver.current_directory(),
-            )
-        })?;
-        let metadata = match &self.core.namespace {
-            LocalNamespace::Host => {
-                HostLocalFileSystem::metadata_with_policy(resolved.authority_relative(), self.symlink_policy)
-            }
-            LocalNamespace::Rooted(rooted) => rooted.metadata(resolved.authority_relative(), self.symlink_policy),
-        }
-        .map_err(|error| {
-            operation_error(
-                error,
-                LocalFileOperation::Metadata,
-                resolved.namespace_absolute(),
-                None,
-                resolver.current_directory(),
-            )
-        })?;
-        if resolved.directory_required() && metadata.kind() != LocalFileKind::Directory {
-            let error = LocalFileError::new(LocalFileErrorKind::NotDirectory, LocalFileOperation::Metadata)
-                .with_path(resolved.namespace_absolute().to_path_buf());
-            return Err(with_current_directory(error, resolver.current_directory()));
-        }
-        Ok(metadata)
-    }
-
-    /// Opens a reader using this instance's default reader options.
-    ///
-    /// Returns the owned reader or error described by
-    /// [`Self::open_reader_with_options`].
-    pub fn open_reader(&self, path: &Path) -> LocalResult<LocalFileReader> {
-        self.open_reader_with_options(path, &self.defaults.read)
-    }
-
-    /// Opens a reader using one complete explicit options value.
-    ///
-    /// Requires a regular file after applying this instance's symlink policy.
-    /// Returns path-resolution, type, or native open errors, including retry
-    /// timeout failures. The returned reader owns the opened native handle.
-    pub fn open_reader_with_options(&self, path: &Path, options: &LocalReadOptions) -> LocalResult<LocalFileReader> {
-        let symlink_policy = self.read_symlink_policy(options, None);
-        validate_scope_symlink_policy(self.scope(), symlink_policy, LocalFileOperation::OpenReader, Some(path))?;
-        let resolver = self.resolver_for(path, LocalFileOperation::OpenReader)?;
-        let resolved = resolve_operation_path(&resolver, path, LocalFileOperation::OpenReader)?;
-        self.open_resolved_reader(
-            &resolved,
-            options,
-            LocalFileOperation::OpenReader,
-            resolver.current_directory(),
-        )
-    }
-
     /// Opens an already-bound operand without querying the process PWD again.
     ///
     /// Returns an opened regular-file reader or a structured opening error
     /// carrying the same namespace path and PWD snapshot as the caller.
+    ///
+    /// # Parameters
+    ///
+    /// - `resolved`: Namespace coordinate and authority-relative operand.
+    /// - `options`: Reader policy for the opened file.
+    /// - `operation`: Operation recorded in any structured error.
+    /// - `current_directory`: PWD snapshot associated with the original
+    ///   resolution. The supplied current-directory snapshot is reused for
+    ///   errors, avoiding a second process PWD lookup for relative Host
+    ///   operations.
+    ///
+    /// # Returns
+    ///
+    /// An owned reader for the resolved regular file.
+    ///
+    /// # Errors
+    ///
+    /// Returns policy, type, resolution, or native opening errors.
     fn open_resolved_reader(
         &self,
         resolved: &LocalNamespacePath,
@@ -939,20 +1558,25 @@ impl LocalFileSystem {
         self.open_resolved_reader_with_policy(resolved, options, operation, current_directory, symlink_policy)
     }
 
-    pub(crate) const fn read_symlink_policy(
-        &self,
-        options: &LocalReadOptions,
-        outer_override: Option<LocalSymlinkPolicy>,
-    ) -> LocalSymlinkPolicy {
-        match outer_override {
-            Some(policy) => policy,
-            None => match options.symlink_policy() {
-                Some(policy) => policy,
-                None => self.symlink_policy,
-            },
-        }
-    }
-
+    /// Opens a resolved operand after applying the selected symlink policy.
+    ///
+    /// # Parameters
+    ///
+    /// - `resolved`: Namespace coordinate and authority-relative operand.
+    /// - `options`: Reader policy for the opened file.
+    /// - `operation`: Operation recorded in any structured error.
+    /// - `current_directory`: PWD snapshot associated with the original
+    ///   resolution.
+    /// - `symlink_policy`: Policy governing the final symlink.
+    ///
+    /// # Returns
+    ///
+    /// An owned reader for the resolved regular file.
+    ///
+    /// # Errors
+    ///
+    /// Returns policy, type, resolution, or native opening errors.
+    #[inline]
     fn open_resolved_reader_with_policy(
         &self,
         resolved: &LocalNamespacePath,
@@ -972,6 +1596,28 @@ impl LocalFileSystem {
         )
     }
 
+    /// Opens a resolved operand with optional resolution and binding
+    /// constraints.
+    ///
+    /// # Parameters
+    ///
+    /// - `resolved`: Namespace coordinate and authority-relative operand.
+    /// - `options`: Reader policy for the opened file.
+    /// - `operation`: Operation recorded in any structured error.
+    /// - `current_directory`: PWD snapshot associated with the original
+    ///   resolution.
+    /// - `symlink_policy`: Policy governing the final symlink.
+    /// - `resolution`: Optional authority resolution contract.
+    /// - `deadline`: Optional path-binding deadline.
+    ///
+    /// # Returns
+    ///
+    /// An owned reader for the resolved regular file.
+    ///
+    /// # Errors
+    ///
+    /// Returns policy, path-type, resolution, or native opening errors with
+    /// the supplied operation and path context.
     #[allow(clippy::too_many_arguments)]
     fn open_resolved_reader_with_policy_and_contract(
         &self,
@@ -1007,109 +1653,19 @@ impl LocalFileSystem {
         }
         .map_err(|error| operation_error(error, operation, resolved.namespace_absolute(), None, current_directory))
     }
-
-    /// Reads at most `max_bytes` using the default reader options.
-    ///
-    /// Returns the prefix or error described by
-    /// [`Self::read_prefix_with_options`].
-    pub fn read_prefix(&self, path: &Path, max_bytes: usize) -> LocalResult<Vec<u8>> {
-        self.read_prefix_with_options(path, max_bytes, &self.defaults.read)
-    }
-
-    /// Reads at most `max_bytes` using one complete explicit options value.
-    ///
-    /// Stops at the byte limit or EOF and returns an owned byte vector. A zero
-    /// limit still resolves and opens the source. Returns the opening errors
-    /// of [`Self::open_reader_with_options`] or a subsequent read error;
-    /// interrupted reads are retried and partial bytes are discarded on error.
-    pub fn read_prefix_with_options(
-        &self,
-        path: &Path,
-        max_bytes: usize,
-        options: &LocalReadOptions,
-    ) -> LocalResult<Vec<u8>> {
-        let symlink_policy = self.read_symlink_policy(options, None);
-        validate_scope_symlink_policy(self.scope(), symlink_policy, LocalFileOperation::Read, Some(path))?;
-        let resolver = self.resolver_for(path, LocalFileOperation::Read)?;
-        let resolved = resolve_operation_path(&resolver, path, LocalFileOperation::Read)?;
-        let error_path = resolved.namespace_absolute().to_path_buf();
-        let mut reader = self.open_resolved_reader(
-            &resolved,
-            options,
-            LocalFileOperation::Read,
-            resolver.current_directory(),
-        )?;
-        if max_bytes == 0 {
-            return Ok(Vec::new());
-        }
-        collect_prefix_with_reserver(&mut reader, max_bytes, |output, additional| {
-            try_reserve_prefix(output, additional)
-        })
-        .map_err(|error| {
-            operation_error(
-                error,
-                LocalFileOperation::Read,
-                &error_path,
-                None,
-                resolver.current_directory(),
-            )
-        })
-    }
-
-    /// Opens a writer using this instance's default writer options.
-    ///
-    /// Returns the owned writer or error described by
-    /// [`Self::open_writer_with_options`].
-    pub fn open_writer(&self, path: &Path) -> LocalResult<LocalFileWriter> {
-        self.open_writer_with_options(path, &self.defaults.write)
-    }
-
-    /// Opens a writer using one complete explicit options value.
-    ///
-    /// Create modes return an unpublished staging writer; append opens an
-    /// existing regular file directly. Returns path, type, requirement, or
-    /// native preparation errors. Requested parent creation may remain after
-    /// an error. Commit or abort a staging writer explicitly when its final
-    /// publication or cleanup result must be observed.
-    pub fn open_writer_with_options(&self, path: &Path, options: &LocalWriteOptions) -> LocalResult<LocalFileWriter> {
-        validate_write_options(options, self.capabilities(), LocalFileOperation::OpenWriter).map_err(|error| {
-            with_current_directory(
-                error.with_path(path.to_path_buf()),
-                self.current_directory.virtual_path(),
-            )
-        })?;
-        let resolver = self.resolver_for(path, LocalFileOperation::OpenWriter)?;
-        let resolved = resolve_operation_path(&resolver, path, LocalFileOperation::OpenWriter)?;
-        self.reject_root_operand(&resolved, LocalFileOperation::OpenWriter, resolver.current_directory())?;
-        reject_directory_qualified_file(&resolved, LocalFileOperation::OpenWriter, resolver.current_directory())?;
-        match &self.core.namespace {
-            LocalNamespace::Host => HostLocalFileSystem::open_writer_with_policy(
-                resolved.authority_relative(),
-                options,
-                self.symlink_policy,
-            ),
-            LocalNamespace::Rooted(rooted) => {
-                rooted.open_writer(resolved.authority_relative(), options, self.symlink_policy)
-            }
-        }
-        .map(|writer| {
-            writer.bind_namespace(
-                resolved.namespace_absolute().to_path_buf(),
-                resolver.current_directory().map(Path::to_path_buf),
-            )
-        })
-        .map_err(|error| {
-            operation_error(
-                error,
-                LocalFileOperation::OpenWriter,
-                resolved.namespace_absolute(),
-                None,
-                resolver.current_directory(),
-            )
-        })
-    }
 }
 
+/// Detects a trailing separator or final `.` or `..` component that requires a
+/// directory.
+///
+/// # Parameters
+///
+/// - `path`: Operand to inspect without normalizing it.
+///
+/// # Returns
+///
+/// Whether the operand names a directory-qualified path.
+#[must_use]
 fn has_directory_qualification(path: &Path) -> bool {
     #[cfg(unix)]
     {
@@ -1139,6 +1695,17 @@ fn has_directory_qualification(path: &Path) -> bool {
     }
 }
 
+/// Reserves prefix-buffer capacity and maps allocation failure through an I/O
+/// error.
+///
+/// # Parameters
+///
+/// - `output`: Buffer whose capacity is increased.
+/// - `additional`: Additional capacity requested.
+///
+/// # Errors
+///
+/// Returns an I/O error when the requested capacity cannot be reserved.
 fn try_reserve_prefix(output: &mut Vec<u8>, additional: usize) -> std::io::Result<()> {
     #[cfg(test)]
     if tests::should_fail_prefix_reserve() {
@@ -1147,9 +1714,31 @@ fn try_reserve_prefix(output: &mut Vec<u8>, additional: usize) -> std::io::Resul
     output.try_reserve(additional).map_err(std::io::Error::other)
 }
 
+/// Collects at most `maximum` bytes, retrying interrupted reads and discarding
+/// partial output on error.
+///
+/// # Type Parameters
+///
+/// - `S`: Byte input supplying the prefix data.
+/// - `F`: Reservation strategy invoked before bytes are appended.
+///
+/// # Parameters
+///
+/// - `input`: Input stream to read.
+/// - `maximum`: Maximum number of bytes to collect.
+/// - `reserve`: Capacity reservation strategy used before extending the output.
+///
+/// # Returns
+///
+/// The collected prefix, up to `maximum` bytes.
+///
+/// # Errors
+///
+/// Returns `ResourceLimit` when reservation fails, or an I/O error when reading
+/// fails.
 fn collect_prefix_with_reserver<S, F>(input: &mut S, maximum: usize, mut reserve: F) -> LocalResult<Vec<u8>>
 where
-    S: qubit_io::ByteInput + ?Sized,
+    S: ByteInput + ?Sized,
     F: FnMut(&mut Vec<u8>, usize) -> std::io::Result<()>,
 {
     let mut result = Vec::new();
@@ -1188,6 +1777,16 @@ where
     Ok(result)
 }
 
+/// Returns a timeout error when the supplied binding deadline has expired.
+///
+/// # Parameters
+///
+/// - `deadline`: Optional monotonic deadline to check.
+/// - `path`: Path attached to a timeout error.
+///
+/// # Errors
+///
+/// Returns a timeout error when `deadline` has expired.
 fn check_binding_deadline(deadline: Option<std::time::Instant>, path: &Path) -> LocalResult<()> {
     if deadline.is_some_and(|deadline| std::time::Instant::now() >= deadline) {
         return Err(LocalFileError::from_io(
@@ -1205,18 +1804,14 @@ mod tests {
     use std::cell::Cell;
     use std::io::Cursor;
     use std::path::Path;
-    use std::time::Duration;
 
     use super::LocalFileSystem;
     use super::collect_prefix_with_reserver;
     use super::operation_error;
-    use crate::directory::LocalComponentPolicy;
     use crate::error::LocalFileError;
     use crate::error::LocalFileErrorKind;
     use crate::error::LocalFileErrorSource;
     use crate::error::LocalFileOperation;
-    use crate::options::LocalObservedReadOptions;
-    use crate::options::LocalPathBindingOptions;
 
     thread_local! {
         static PREFIX_RESERVE_FAILURE_AFTER: Cell<Option<usize>> = const { Cell::new(None) };
@@ -1257,7 +1852,7 @@ mod tests {
     }
 
     #[test]
-    fn prefix_allocation_failure_keeps_host_absolute_context() {
+    fn test_prefix_allocation_failure_keeps_host_absolute_context() {
         let directory = tempfile::tempdir().expect("fixture should exist");
         let path = directory.path().join("file");
         std::fs::write(&path, b"payload").expect("file should exist");
@@ -1266,7 +1861,7 @@ mod tests {
     }
 
     #[test]
-    fn prefix_allocation_failure_keeps_host_relative_context() {
+    fn test_prefix_allocation_failure_keeps_host_relative_context() {
         if std::env::var_os("QUBIT_PREFIX_RELATIVE_CHILD").is_some() {
             let filesystem = LocalFileSystem::host().expect("Host should open");
             let directory = std::env::current_dir().expect("child PWD should be readable");
@@ -1286,7 +1881,7 @@ mod tests {
             .env("QUBIT_PREFIX_RELATIVE_CHILD", "1")
             .args([
                 "--exact",
-                "local_file_system::io::tests::prefix_allocation_failure_keeps_host_relative_context",
+                "local_file_system::io::tests::test_prefix_allocation_failure_keeps_host_relative_context",
                 "--nocapture",
             ])
             .output()
@@ -1295,7 +1890,7 @@ mod tests {
         assert!(
             output.status.success()
                 && stdout.contains("running 1 test")
-                && stdout.contains("prefix_allocation_failure_keeps_host_relative_context ... ok"),
+                && stdout.contains("test_prefix_allocation_failure_keeps_host_relative_context ... ok"),
             "isolated relative-path test must execute and pass; status: {}; stdout: {}; stderr: {}",
             output.status,
             stdout,
@@ -1304,7 +1899,7 @@ mod tests {
     }
 
     #[test]
-    fn prefix_allocation_failure_keeps_rooted_virtual_context() {
+    fn test_prefix_allocation_failure_keeps_rooted_virtual_context() {
         let directory = tempfile::tempdir().expect("fixture should exist");
         std::fs::write(directory.path().join("file"), b"payload").expect("file should exist");
         let filesystem = LocalFileSystem::rooted(directory.path()).expect("Rooted should open");
@@ -1317,7 +1912,7 @@ mod tests {
     }
 
     #[test]
-    fn prefix_allocation_failure_before_first_chunk_is_resource_limit() {
+    fn test_prefix_allocation_failure_before_first_chunk_is_resource_limit() {
         let mut input = Cursor::new(b"payload");
         let error = collect_prefix_with_reserver(&mut input, 8, |_, _| Err(std::io::Error::other("reserve failure")))
             .expect_err("first reserve should fail");
@@ -1335,7 +1930,7 @@ mod tests {
     }
 
     #[test]
-    fn prefix_allocation_failure_after_chunk_discards_partial_bytes() {
+    fn test_prefix_allocation_failure_after_chunk_discards_partial_bytes() {
         let mut input = Cursor::new(vec![b'x'; 8193]);
         let mut reserves = 0;
         let error = collect_prefix_with_reserver(&mut input, 8193, |output, additional| {
@@ -1351,7 +1946,7 @@ mod tests {
     }
 
     #[test]
-    fn prefix_collection_preserves_eof_limit_short_read_and_interrupted_behavior() {
+    fn test_prefix_collection_preserves_eof_limit_short_read_and_interrupted_behavior() {
         struct ShortReader {
             input: Cursor<&'static [u8]>,
             interrupt_next: bool,
@@ -1380,7 +1975,7 @@ mod tests {
     }
 
     #[test]
-    fn read_operation_context_preserves_typed_observation_source() {
+    fn test_read_operation_context_preserves_typed_observation_source() {
         let error = LocalFileError::from_io(
             LocalFileOperation::Metadata,
             Some(Path::new("native-path").to_path_buf()),
@@ -1406,62 +2001,5 @@ mod tests {
                 if source.kind() == std::io::ErrorKind::Other
                     && source.to_string() == "observation-source-sentinel"
         ));
-    }
-
-    #[test]
-    fn fixed_reader_rejects_overflow_when_authority_and_reader_deadlines_are_maximum() {
-        assert!(std::time::Instant::now().checked_add(Duration::MAX).is_none());
-        let fixture = tempfile::tempdir().expect("fixture directory should be created");
-        std::fs::write(fixture.path().join("item"), b"payload").expect("fixture file should be written");
-        let filesystem = LocalFileSystem::rooted(fixture.path()).expect("rooted filesystem should open");
-        let path = Path::new("item");
-        let options = LocalObservedReadOptions::new()
-            .with_path_binding(LocalPathBindingOptions::new().with_deadline(Duration::MAX));
-
-        let error = filesystem
-            .open_observed_reader_fixed(
-                path,
-                path,
-                &LocalComponentPolicy::allow_all(),
-                &options,
-                Some(Duration::MAX),
-            )
-            .expect_err("combined unrepresentable deadlines should be rejected");
-
-        assert_eq!(error.kind(), LocalFileErrorKind::InvalidOptions);
-        assert_eq!(error.operation(), LocalFileOperation::OpenReader);
-        assert_eq!(error.path(), Some(path));
-        assert_eq!(
-            error.reason(),
-            Some("path binding deadline exceeds the monotonic clock range")
-        );
-    }
-
-    #[test]
-    fn fixed_reader_uses_the_smaller_authority_or_reader_deadline() {
-        let fixture = tempfile::tempdir().expect("fixture directory should be created");
-        std::fs::write(fixture.path().join("item"), b"payload").expect("fixture file should be written");
-        let filesystem = LocalFileSystem::rooted(fixture.path()).expect("rooted filesystem should open");
-        let path = Path::new("item");
-        let open_fixed = |reader_deadline, authority_deadline| {
-            let options = LocalObservedReadOptions::new()
-                .with_path_binding(LocalPathBindingOptions::new().with_deadline(reader_deadline));
-            filesystem.open_observed_reader_fixed(
-                path,
-                path,
-                &LocalComponentPolicy::allow_all(),
-                &options,
-                Some(authority_deadline),
-            )
-        };
-
-        for (reader_deadline, authority_deadline) in [
-            (Duration::ZERO, Duration::from_secs(5)),
-            (Duration::from_secs(5), Duration::ZERO),
-        ] {
-            let error = open_fixed(reader_deadline, authority_deadline)
-                .expect_err("the smaller zero deadline should expire immediately");
-            assert_eq!(error.io_error_kind(), std::io::ErrorKind::TimedOut);
-        }
     }
 }

@@ -59,7 +59,7 @@ fn recovery_entry_bytes(entry: &super::super::ConditionalEntry) -> Vec<u8> {
 }
 
 #[test]
-fn conditional_unix_candidate_setup_failures_cleanup_or_report_the_candidate() {
+fn test_conditional_unix_candidate_setup_failures_cleanup_or_report_the_candidate() {
     for (point, expected_residue) in [
         (test_support::FailurePoint::GuardIdentityMetadata, true),
         (test_support::FailurePoint::CandidateMetadata, false),
@@ -93,7 +93,7 @@ fn conditional_unix_candidate_setup_failures_cleanup_or_report_the_candidate() {
 }
 
 #[test]
-fn conditional_unix_candidate_copy_registration_failure_cleans_copy() {
+fn test_conditional_unix_candidate_copy_registration_failure_cleans_copy() {
     let directory = tempfile::tempdir().expect("fixture directory should be created");
     let target = directory.path().join("target");
     let mut backend =
@@ -117,7 +117,7 @@ fn conditional_unix_candidate_copy_registration_failure_cleans_copy() {
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 #[test]
-fn conditional_unix_content_exchange_publishes_candidate_and_returns_old_bytes() {
+fn test_conditional_unix_content_exchange_publishes_candidate_and_returns_old_bytes() {
     let directory = tempfile::tempdir().expect("fixture directory should be created");
     let target = directory.path().join("target");
     fs::write(&target, b"A").expect("initial target should be written");
@@ -235,7 +235,7 @@ fn test_conditional_unknown_candidate_does_not_authorize_not_published() {
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 #[test]
-fn conditional_unix_exchange_identity_state_matrix_preserves_error_and_receipts() {
+fn test_conditional_unix_exchange_identity_state_matrix_preserves_error_and_receipts() {
     use crate::outcome::LocalConditionalPublicationState;
     use crate::recovery::LocalRecoveryFileRole;
 
@@ -349,7 +349,7 @@ fn conditional_unix_exchange_identity_state_matrix_preserves_error_and_receipts(
 }
 
 #[test]
-fn conditional_unix_absent_install_does_not_overwrite_a_racing_creator() {
+fn test_conditional_unix_absent_install_does_not_overwrite_a_racing_creator() {
     let directory = tempfile::tempdir().expect("fixture directory should be created");
     let target = directory.path().join("target");
     let mut backend =
@@ -369,7 +369,7 @@ fn conditional_unix_absent_install_does_not_overwrite_a_racing_creator() {
 }
 
 #[test]
-fn conditional_unix_required_durability_publishes_with_nested_parents() {
+fn test_conditional_unix_required_durability_publishes_with_nested_parents() {
     use crate::policy::LocalDurabilityRequirement;
 
     let directory = tempfile::tempdir().expect("fixture directory should be created");
@@ -390,7 +390,7 @@ fn conditional_unix_required_durability_publishes_with_nested_parents() {
 }
 
 #[test]
-fn conditional_unix_absent_precheck_race_keeps_the_racing_file() {
+fn test_conditional_unix_absent_precheck_race_keeps_the_racing_file() {
     let directory = tempfile::tempdir().expect("fixture directory should be created");
     let target = directory.path().join("target");
     let mut backend =
@@ -425,7 +425,7 @@ fn conditional_unix_absent_precheck_race_keeps_the_racing_file() {
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 #[test]
-fn conditional_unix_rooted_parent_rename_keeps_the_open_namespace() {
+fn test_conditional_unix_rooted_parent_rename_keeps_the_open_namespace() {
     let directory = tempfile::tempdir().expect("fixture directory should be created");
     let root_path = directory.path().join("root");
     let moved_path = directory.path().join("moved-root");
@@ -463,7 +463,7 @@ fn conditional_unix_rooted_parent_rename_keeps_the_open_namespace() {
 }
 
 #[test]
-fn conditional_unix_precheck_same_inode_rewrite_is_detected_and_retained() {
+fn test_conditional_unix_precheck_same_inode_rewrite_is_detected_and_retained() {
     let directory = tempfile::tempdir().expect("fixture directory should be created");
     let target = directory.path().join("target");
     fs::write(&target, b"A").expect("initial target should be written");
@@ -498,7 +498,7 @@ fn conditional_unix_precheck_same_inode_rewrite_is_detected_and_retained() {
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 #[test]
-fn conditional_unix_precheck_replacement_inode_with_matching_content_can_publish() {
+fn test_conditional_unix_precheck_replacement_inode_with_matching_content_can_publish() {
     let directory = tempfile::tempdir().expect("fixture directory should be created");
     let target = directory.path().join("target");
     fs::write(&target, b"A").expect("initial target should be written");
@@ -534,7 +534,7 @@ fn conditional_unix_precheck_replacement_inode_with_matching_content_can_publish
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 #[test]
-fn conditional_unix_preserves_read_only_mode_and_handles_empty_and_large_candidates() {
+fn test_conditional_unix_preserves_read_only_mode_and_handles_empty_and_large_candidates() {
     use std::os::unix::fs::PermissionsExt;
     let directory = tempfile::tempdir().expect("fixture directory should be created");
     let target = directory.path().join("target");
@@ -584,7 +584,7 @@ fn conditional_unix_preserves_read_only_mode_and_handles_empty_and_large_candida
 }
 
 #[test]
-fn conditional_unix_prepublication_error_retains_candidate_and_copy_after_error_drop() {
+fn test_conditional_unix_prepublication_error_retains_candidate_and_copy_after_error_drop() {
     let directory = tempfile::tempdir().expect("fixture directory should be created");
     let target = directory.path().join("target");
     fs::write(&target, b"A").expect("initial target should be written");
@@ -635,7 +635,7 @@ fn conditional_unix_prepublication_error_retains_candidate_and_copy_after_error_
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 #[test]
-fn conditional_unix_rollback_window_replacement_is_not_exchanged_or_reported_restored() {
+fn test_conditional_unix_rollback_window_replacement_is_not_exchanged_or_reported_restored() {
     let directory = tempfile::tempdir().expect("fixture directory should be created");
     let target = directory.path().join("target");
     fs::write(&target, b"A").expect("initial target should be written");
@@ -708,7 +708,7 @@ fn conditional_unix_rollback_window_replacement_is_not_exchanged_or_reported_res
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 #[test]
-fn conditional_unix_rollback_exchange_window_reports_actual_namespace_receipts() {
+fn test_conditional_unix_rollback_exchange_window_reports_actual_namespace_receipts() {
     let directory = tempfile::tempdir().expect("fixture directory should be created");
     let target = directory.path().join("target");
     fs::write(&target, b"A").expect("initial target should be written");

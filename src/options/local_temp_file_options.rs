@@ -13,6 +13,17 @@ use std::path::PathBuf;
 use crate::policy::LocalPrivacyRequirement;
 
 /// Options for creating a cleanup-owned temporary file.
+///
+/// # Examples
+///
+/// ```
+/// use qubit_local_files::options::LocalTempFileOptions;
+/// use qubit_local_files::policy::LocalPrivacyRequirement;
+///
+/// let options = LocalTempFileOptions::new()
+///     .with_privacy(LocalPrivacyRequirement::Required);
+/// assert_eq!(options.privacy(), LocalPrivacyRequirement::Required);
+/// ```
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[must_use = "temporary file options have no effect unless they are used"]
 pub struct LocalTempFileOptions {
@@ -82,12 +93,17 @@ impl LocalTempFileOptions {
     }
 
     /// Returns the requested creation privacy.
+    #[must_use]
     #[inline]
     pub const fn privacy(&self) -> LocalPrivacyRequirement {
         self.privacy
     }
 
-    /// Sets the requested creation privacy.
+    /// Sets the privacy requirement for the newly created file.
+    ///
+    /// # Parameters
+    ///
+    /// - `requirement`: Privacy level requested from the owning filesystem.
     #[inline]
     pub const fn with_privacy(mut self, requirement: LocalPrivacyRequirement) -> Self {
         self.privacy = requirement;

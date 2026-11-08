@@ -14,12 +14,19 @@ use std::io;
 /// An I/O failure classified by whether its directory cursor advanced to a
 /// child.
 pub(crate) struct RootedDirectoryReadError {
+    /// The original I/O failure, preserved for the caller to handle or return.
     error: io::Error,
+    /// The child whose inspection failed, or `None` when reading the stream
+    /// itself failed before a child could be identified.
     entry_name: Option<OsString>,
 }
 
 impl RootedDirectoryReadError {
     /// Creates an error from directory-stream reading or record parsing.
+    ///
+    /// # Parameters
+    ///
+    /// * `error` - The original failure to preserve for the directory reader.
     pub(crate) fn stream(error: io::Error) -> Self {
         Self {
             error,
@@ -29,6 +36,11 @@ impl RootedDirectoryReadError {
 
     /// Creates an error while inspecting a child after advancing the directory
     /// cursor.
+    ///
+    /// # Parameters
+    ///
+    /// * `name` - The child name associated with the failed inspection.
+    /// * `error` - The original failure to preserve for the directory reader.
     pub(crate) fn entry(name: OsString, error: io::Error) -> Self {
         Self {
             error,

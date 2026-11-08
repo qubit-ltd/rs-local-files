@@ -84,7 +84,7 @@ fn assert_cleanup_result(directory: &Path, old_staging_name: &Path, moved_stagin
 /// Aborting a renamed Rooted staging entry preserves a competitor at its old
 /// name.
 #[test]
-fn rooted_staging_abort_preserves_competitor_at_old_name() {
+fn test_rooted_staging_abort_preserves_competitor_at_old_name() {
     let directory = tempdir().expect("temporary directory should be created");
     let sentinel = directory.path().join("sentinel");
     fs::write(&sentinel, SENTINEL_BYTES).expect("sentinel should be written");
@@ -105,7 +105,7 @@ fn rooted_staging_abort_preserves_competitor_at_old_name() {
 /// Dropping a renamed Rooted staging entry preserves a competitor at its old
 /// name.
 #[test]
-fn rooted_staging_drop_preserves_competitor_at_old_name() {
+fn test_rooted_staging_drop_preserves_competitor_at_old_name() {
     let directory = tempdir().expect("temporary directory should be created");
     let sentinel = directory.path().join("sentinel");
     fs::write(&sentinel, SENTINEL_BYTES).expect("sentinel should be written");
@@ -125,7 +125,7 @@ fn rooted_staging_drop_preserves_competitor_at_old_name() {
 /// Cleaning up a retained writer after a CreateNew conflict preserves the
 /// old-name competitor.
 #[test]
-fn rooted_staging_failed_commit_cleanup_preserves_competitor_at_old_name() {
+fn test_rooted_staging_failed_commit_cleanup_preserves_competitor_at_old_name() {
     let directory = tempdir().expect("temporary directory should be created");
     let sentinel = directory.path().join("sentinel");
     let target = directory.path().join("target");

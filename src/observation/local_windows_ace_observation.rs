@@ -15,11 +15,23 @@
 /// # Examples
 ///
 /// ```
-/// use qubit_local_files::observation::LocalWindowsAceObservation;
+/// use qubit_local_files::observation::{
+///     LocalObservedReader, LocalObservationRequirement, LocalSecurityObservationOptions,
+/// };
 ///
-/// fn inspect(entry: &LocalWindowsAceObservation) -> (u8, Option<u32>) {
-///     (entry.ace_type(), entry.access_mask())
+/// fn inspect(reader: &LocalObservedReader) -> Result<(), qubit_local_files::error::LocalFileError> {
+///     let options = LocalSecurityObservationOptions::new()
+///         .with_access(LocalObservationRequirement::Optional);
+///     let facts = reader.security_observation(&options)?;
+///     if let Some(access) = facts.access().and_then(|access| access.windows()) {
+///         for ace in access.aces() {
+///             let _native_type = ace.ace_type();
+///             let _mask = ace.access_mask();
+///         }
+///     }
+///     Ok(())
 /// }
+/// # fn main() {}
 /// ```
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LocalWindowsAceObservation {
@@ -40,6 +52,23 @@ pub struct LocalWindowsAceObservation {
     is_decoded: bool,
 }
 impl LocalWindowsAceObservation {
+    /// Creates an observation from native ACE facts collected by the Windows
+    /// decoder.
+    ///
+    /// The optional mask and trustee fields remain absent when the ACE form
+    /// does not expose them or decoding cannot provide them. `is_decoded`
+    /// records whether the supported ACE type and trustee facts were fully
+    /// decoded.
+    ///
+    /// # Parameters
+    ///
+    /// * `ace_type` and `flags` are the native ACE header bytes.
+    /// * `native_size` is the ACE's size in bytes.
+    /// * `access_mask` and `trustee_sid` contain decoded facts when available.
+    /// * `trustee_is_current_user` is `Some` only when the trustee could be
+    ///   compared with the current principal.
+    /// * `is_decoded` indicates whether this ACE's supported facts were fully
+    ///   decoded.
     #[cfg(windows)]
     #[allow(dead_code)] // Constructed while T04 decodes Windows ACEs.
     pub(crate) const fn new(
@@ -62,33 +91,40 @@ impl LocalWindowsAceObservation {
         }
     }
     /// Returns the native ACE type byte.
+    #[inline]
     pub const fn ace_type(&self) -> u8 {
         self.ace_type
     }
     /// Returns the native ACE flags byte.
+    #[inline]
     pub const fn flags(&self) -> u8 {
         self.flags
     }
     /// Returns the native ACE size in bytes.
+    #[inline]
     pub const fn native_size(&self) -> u16 {
         self.native_size
     }
     /// Returns a decoded access mask when the ACE type exposes one, or `None`
     /// for ACE forms without an access mask.
+    #[inline]
     pub const fn access_mask(&self) -> Option<u32> {
         self.access_mask
     }
     /// Returns the trustee SID when it was decoded, or `None` when the ACE
     /// form has no trustee SID or decoding was unavailable.
+    #[inline]
     pub fn trustee_sid(&self) -> Option<&str> {
         self.trustee_sid.as_deref()
     }
     /// Returns whether the trustee is the current principal, or `None` when
     /// the trustee could not be compared.
+    #[inline]
     pub const fn trustee_is_current_user(&self) -> Option<bool> {
         self.trustee_is_current_user
     }
     /// Returns whether the ACE type and trustee were fully decoded.
+    #[inline]
     pub const fn is_decoded(&self) -> bool {
         self.is_decoded
     }

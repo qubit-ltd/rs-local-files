@@ -34,9 +34,14 @@ impl LocalFileSystem {
     /// Returns the walker or opening error described by
     /// [`Self::list_with_options`].
     ///
+    /// # Parameters
+    ///
+    /// * `path` — directory path to enumerate.
+    ///
     /// # Errors
     ///
     /// Returns path-resolution or initial directory-open errors.
+    #[inline]
     pub fn list(&self, path: &Path) -> LocalResult<LocalDirectoryWalker> {
         self.list_with_options(path, &self.defaults.list)
     }
@@ -47,10 +52,16 @@ impl LocalFileSystem {
     /// errors. The returned walker owns traversal state; subsequent I/O and
     /// budget failures are yielded during iteration.
     ///
+    /// # Parameters
+    ///
+    /// * `path` — directory path to enumerate.
+    /// * `options` — complete listing policy for opening and traversing it.
+    ///
     /// # Errors
     ///
     /// Returns path-resolution, invalid-option, or initial directory-open
     /// errors. Later traversal failures are yielded by the walker.
+    #[inline]
     pub fn list_with_options(&self, path: &Path, options: &LocalListOptions) -> LocalResult<LocalDirectoryWalker> {
         self.list_with_options_started_at(path, options, super::Instant::now())
     }
@@ -59,6 +70,12 @@ impl LocalFileSystem {
     ///
     /// The instant is captured by the public facade before path binding so a
     /// configured deadline includes validation and resolution work.
+    ///
+    /// # Parameters
+    ///
+    /// * `path` — directory path to enumerate.
+    /// * `options` — complete listing policy.
+    /// * `started_at` — instant used to account for the operation deadline.
     pub(crate) fn list_with_options_started_at(
         &self,
         path: &Path,
@@ -114,9 +131,14 @@ impl LocalFileSystem {
     /// Returns the creation outcome or error described by
     /// [`Self::create_directory_with_options`].
     ///
+    /// # Parameters
+    ///
+    /// * `path` — directory path to create.
+    ///
     /// # Errors
     ///
     /// Returns path-resolution, conflict, type, or native creation errors.
+    #[inline]
     pub fn create_directory(&self, path: &Path) -> LocalResult<LocalCreateDirectoryOutcome> {
         self.create_directory_with_options(path, &self.defaults.create_directory)
     }
@@ -128,6 +150,11 @@ impl LocalFileSystem {
     /// root. Returns resolution, conflict, type, or native creation errors.
     /// Recursive creation may leave ancestors behind after a later failure;
     /// inspect the error's effect state.
+    ///
+    /// # Parameters
+    ///
+    /// * `path` — directory path to create.
+    /// * `options` — creation and existing-directory policy.
     ///
     /// # Errors
     ///
@@ -174,9 +201,14 @@ impl LocalFileSystem {
     /// Returns the deletion outcome or error described by
     /// [`Self::delete_file_with_options`].
     ///
+    /// # Parameters
+    ///
+    /// * `path` — non-directory entry path to remove.
+    ///
     /// # Errors
     ///
     /// Returns path, type, requirement, budget, or native deletion errors.
+    #[inline]
     pub fn delete_file(&self, path: &Path) -> LocalResult<LocalDeleteOutcome> {
         self.delete_file_with_options(path, &self.defaults.delete)
     }
@@ -187,6 +219,11 @@ impl LocalFileSystem {
     /// Returns path, type, requirement, budget, or native deletion errors.
     /// The scope root and directory-qualified operands are rejected.
     /// `missing_ok` controls whether an absent entry is a successful no-op.
+    ///
+    /// # Parameters
+    ///
+    /// * `path` — non-directory entry path to remove.
+    /// * `options` — deletion and missing-entry policy.
     ///
     /// # Errors
     ///
@@ -226,10 +263,15 @@ impl LocalFileSystem {
     /// Returns the deletion outcome or error described by
     /// [`Self::delete_directory_with_options`].
     ///
+    /// # Parameters
+    ///
+    /// * `path` — directory path to remove.
+    ///
     /// # Errors
     ///
     /// Returns resolution, type, requirement, budget, enumeration, or native
     /// removal errors.
+    #[inline]
     pub fn delete_directory(&self, path: &Path) -> LocalResult<LocalDeleteOutcome> {
         self.delete_directory_with_options(path, &self.defaults.delete)
     }
@@ -241,6 +283,11 @@ impl LocalFileSystem {
     /// `missing_ok` controls absence. Returns resolution, type, requirement,
     /// budget, enumeration, or native removal errors. Recursive deletion is
     /// not transactional; inspect the error's effect state after failure.
+    ///
+    /// # Parameters
+    ///
+    /// * `path` — directory path to remove.
+    /// * `options` — recursion, deadline, and missing-entry policy.
     ///
     /// # Errors
     ///
@@ -258,6 +305,12 @@ impl LocalFileSystem {
     ///
     /// The captured time keeps deadline enforcement deterministic for callers
     /// that need to inject or reuse the beginning of an operation.
+    ///
+    /// # Parameters
+    ///
+    /// * `path` — directory path to remove.
+    /// * `options` — recursion, deadline, and missing-entry policy.
+    /// * `started_at` — instant from which the operation deadline is measured.
     fn delete_directory_with_options_started_at(
         &self,
         path: &Path,

@@ -33,6 +33,17 @@ use crate::local::decide_copy_destination;
 /// removal, creation, policy-conflict, and counter-overflow failures retain
 /// the statistics accumulated so far; earlier mutations are not rolled back.
 ///
+/// # Parameters
+///
+/// * `root` - Open authority for destination inspection and mutation.
+/// * `source` - Source path recorded in any structured failure.
+/// * `destination` - Destination directory to prepare beneath `root`.
+/// * `options` - Conflict policies that control merging, skipping, and
+///   replacement.
+/// * `statistics` - Mutable progress counters updated after successful
+///   operations.
+/// * `budget` - Deadline and resource budget for destination operations.
+///
 /// # Errors
 ///
 /// Returns a structured copy error when destination inspection or a namespace
@@ -237,6 +248,15 @@ pub(super) fn prepare_directory(
 ///
 /// Returns `None` for a missing entry and propagates other native failures.
 ///
+/// # Parameters
+///
+/// * `root` - Open authority used for descriptor-relative inspection.
+/// * `path` - Destination path whose final link is not followed.
+///
+/// # Returns
+///
+/// `Some(metadata)` when the entry exists, or `None` when it is absent.
+///
 /// # Errors
 ///
 /// Returns the native I/O error when inspecting the path fails for a reason
@@ -250,6 +270,18 @@ pub(super) fn optional_metadata(root: &Root, path: &Path) -> io::Result<Option<M
 }
 
 /// Adds an exact statistic or reports overflow.
+///
+/// # Parameters
+///
+/// * `value` - Current statistic value.
+/// * `addition` - Amount to add using checked `u64` arithmetic.
+/// * `source` - Source path recorded in an overflow error.
+/// * `destination` - Destination path recorded in an overflow error.
+/// * `statistics` - Progress snapshot retained in an overflow error.
+///
+/// # Returns
+///
+/// The sum when it fits in `u64`.
 ///
 /// # Errors
 ///
@@ -280,7 +312,20 @@ pub(super) fn checked_add(
     })
 }
 
-/// Creates one structured rooted-copy error.
+/// Creates a structured rooted-copy error with the operation context and
+/// progress snapshot needed by callers to identify the failed stage.
+///
+/// # Parameters
+///
+/// * `stage` - Copy stage at which the operation failed.
+/// * `source` - Source path associated with the operation.
+/// * `destination` - Destination path associated with the operation.
+/// * `statistics` - Progress accumulated before the failure.
+/// * `source_error` - Underlying I/O cause retained by the structured error.
+///
+/// # Returns
+///
+/// A structured error containing the supplied context and cause.
 #[inline]
 pub(super) fn error(
     stage: Stage,

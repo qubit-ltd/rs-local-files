@@ -124,6 +124,10 @@ mod platform_codec {
     /// Accepts either hexadecimal case; the public decoder checks canonical
     /// spelling after decoding. Returns `InvalidEscape` with the byte offset
     /// for an incomplete escape or a non-hexadecimal digit.
+    ///
+    /// # Parameters
+    ///
+    /// - `text`: Escaped text to decode into bytes.
     fn decode_escaped_bytes(text: &str) -> Result<Vec<u8>, LocalPathCodecError> {
         let bytes = text.as_bytes();
         let mut decoded = Vec::with_capacity(bytes.len());
@@ -149,6 +153,10 @@ mod platform_codec {
     }
 
     /// Converts one ASCII hexadecimal digit to its nibble value.
+    ///
+    /// # Parameters
+    ///
+    /// - `byte`: ASCII byte to interpret as a hexadecimal digit.
     #[inline]
     fn uppercase_hex(byte: u8) -> Option<u8> {
         match byte {
@@ -160,6 +168,11 @@ mod platform_codec {
     }
 
     /// Appends an uppercase percent escape for one native byte.
+    ///
+    /// # Parameters
+    ///
+    /// - `text`: Output buffer receiving the escape.
+    /// - `byte`: Native byte to encode.
     #[inline]
     fn push_escaped_byte(text: &mut String, byte: u8) {
         const HEX: &[u8; 16] = b"0123456789ABCDEF";
@@ -169,6 +182,11 @@ mod platform_codec {
     }
 
     /// Appends a scalar in canonical form, escaping percent and controls.
+    ///
+    /// # Parameters
+    ///
+    /// - `text`: Output buffer receiving the scalar or its escapes.
+    /// - `scalar`: Unicode scalar to append.
     fn push_scalar(text: &mut String, scalar: char) {
         if scalar == '%' || scalar.is_control() {
             for byte in scalar.to_string().bytes() {
@@ -193,6 +211,10 @@ mod platform_codec {
         use crate::LocalPathCodecError;
 
         /// Decodes canonical bytes to a Unix native component.
+        ///
+        /// # Parameters
+        ///
+        /// - `text`: Canonical escaped text to decode.
         pub(crate) fn decode_canonical_text(text: &str) -> Result<OsString, LocalPathCodecError> {
             let bytes = decode_escaped_bytes(text)?;
             if bytes.contains(&0) {
@@ -203,6 +225,10 @@ mod platform_codec {
 
         /// Encodes a Unix native component while preserving invalid UTF-8
         /// bytes.
+        ///
+        /// # Parameters
+        ///
+        /// - `native`: Native component whose bytes should be encoded.
         pub(crate) fn encode_native_text<'a>(native: &'a OsStr) -> Result<Cow<'a, str>, LocalPathCodecError> {
             let bytes = native.as_bytes();
             if bytes.contains(&0) {
@@ -258,6 +284,10 @@ mod platform_codec {
         use crate::LocalPathCodecError;
 
         /// Decodes canonical WTF-8 bytes to a Windows native component.
+        ///
+        /// # Parameters
+        ///
+        /// - `text`: Canonical escaped text to decode.
         pub(crate) fn decode_canonical_text(text: &str) -> Result<OsString, LocalPathCodecError> {
             let bytes = decode_escaped_bytes(text)?;
             let units = decode_wtf8(&bytes)?;
@@ -269,6 +299,10 @@ mod platform_codec {
 
         /// Encodes a Windows native component while preserving unpaired
         /// surrogate code units as escaped WTF-8 bytes.
+        ///
+        /// # Parameters
+        ///
+        /// - `native`: Native component whose UTF-16 units should be encoded.
         pub(crate) fn encode_native_text<'a>(native: &'a OsStr) -> Result<Cow<'a, str>, LocalPathCodecError> {
             let units = native.encode_wide().collect::<Vec<_>>();
             if units.contains(&0) {
@@ -289,6 +323,10 @@ mod platform_codec {
         }
 
         /// Decodes UTF-8 plus WTF-8 surrogate sequences into UTF-16 units.
+        ///
+        /// # Parameters
+        ///
+        /// - `bytes`: Decoded bytes to interpret as UTF-8 or WTF-8.
         fn decode_wtf8(bytes: &[u8]) -> Result<Vec<u16>, LocalPathCodecError> {
             let mut units = Vec::with_capacity(bytes.len());
             let mut index = 0;
@@ -319,6 +357,11 @@ mod platform_codec {
         }
 
         /// Returns a surrogate represented by a WTF-8 sequence at `index`.
+        ///
+        /// # Parameters
+        ///
+        /// - `bytes`: Byte sequence containing a possible surrogate encoding.
+        /// - `index`: Offset at which the three-byte sequence begins.
         fn wtf8_surrogate_at(bytes: &[u8], index: usize) -> Option<(u16, usize)> {
             let first = *bytes.get(index)?;
             let second = *bytes.get(index + 1)?;
@@ -331,6 +374,10 @@ mod platform_codec {
         }
 
         /// Encodes one unpaired UTF-16 surrogate as its three WTF-8 bytes.
+        ///
+        /// # Parameters
+        ///
+        /// - `surrogate`: Unpaired UTF-16 surrogate to encode.
         #[must_use]
         #[inline]
         fn wtf8_surrogate_bytes(surrogate: u16) -> [u8; 3] {
@@ -351,12 +398,20 @@ mod platform_codec {
         use crate::LocalPathCodecError;
 
         /// Reports that this platform has no supported reversible codec.
+        ///
+        /// # Parameters
+        ///
+        /// - `_text`: Canonical escaped text, unused on unsupported platforms.
         #[inline]
         pub(crate) fn decode_canonical_text(_text: &str) -> Result<OsString, LocalPathCodecError> {
             Err(LocalPathCodecError::UnsupportedNativeEncoding)
         }
 
         /// Reports that this platform has no supported reversible codec.
+        ///
+        /// # Parameters
+        ///
+        /// - `_native`: Native component, unused on unsupported platforms.
         #[inline]
         pub(crate) fn encode_native_text<'a>(_native: &'a OsStr) -> Result<Cow<'a, str>, LocalPathCodecError> {
             Err(LocalPathCodecError::UnsupportedNativeEncoding)

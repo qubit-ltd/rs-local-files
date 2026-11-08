@@ -35,16 +35,6 @@ struct DescriptorExhaustion {
 }
 
 impl DescriptorExhaustion {
-    fn release_slots(&mut self, count: usize) {
-        assert!(
-            self.files.len() >= count,
-            "fixture should own enough filler descriptors"
-        );
-        for _ in 0..count {
-            drop(self.files.pop().expect("reserved descriptor should exist"));
-        }
-    }
-
     fn new() -> Self {
         let mut original = libc::rlimit {
             rlim_cur: 0,
@@ -73,6 +63,16 @@ impl DescriptorExhaustion {
             }
         }
         exhaustion
+    }
+
+    fn release_slots(&mut self, count: usize) {
+        assert!(
+            self.files.len() >= count,
+            "fixture should own enough filler descriptors"
+        );
+        for _ in 0..count {
+            drop(self.files.pop().expect("reserved descriptor should exist"));
+        }
     }
 }
 

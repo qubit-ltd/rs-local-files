@@ -29,6 +29,21 @@ use super::internal::test_support;
 /// parent. Returns the first native I/O error; when test fault injection is
 /// enabled, the configured synchronization scenarios return that error before
 /// performing any synchronization.
+///
+/// # Parameters
+///
+/// * `parent` is the final parent directory whose entry must be persisted.
+/// * `parent_dirs_to_sync` contains newly created ancestors, ordered from the
+///   closest parent toward the root.
+///
+/// # Returns
+///
+/// `Ok(())` when all directories are synchronized, or the first I/O error.
+///
+/// # Errors
+///
+/// Returns an I/O error if fault injection is active or synchronizing any
+/// directory fails.
 #[cfg(unix)]
 pub(super) fn sync_rooted_parent_chain(parent: &File, parent_dirs_to_sync: &[File]) -> io::Result<()> {
     #[cfg(feature = "test-support")]
@@ -52,6 +67,23 @@ pub(super) fn sync_rooted_parent_chain(parent: &File, parent_dirs_to_sync: &[Fil
 /// On failure, the error retains the stage, destination path, optional staging
 /// path, known destination state, and original I/O error. Successful values
 /// pass through unchanged.
+///
+/// # Type Parameters
+///
+/// * `T` is the successful value carried by the native I/O result.
+///
+/// # Parameters
+///
+/// * `result` is the native operation result to convert.
+/// * `stage` identifies the atomic-write stage associated with a failure.
+/// * `path` is the destination path involved in the operation.
+/// * `temporary_path` is the optional staging path associated with the failure.
+/// * `destination_state` records the known state of the destination.
+///
+/// # Returns
+///
+/// Returns the successful value unchanged, or an atomic-write error that
+/// retains the operation context and source error.
 #[cfg(any(unix, windows))]
 #[inline]
 pub(super) fn map_atomic_error<T>(
@@ -74,6 +106,15 @@ pub(super) fn map_atomic_error<T>(
 }
 
 /// Creates a structured unsupported rooted atomic-write error.
+///
+/// # Parameters
+///
+/// * `path` is the destination path that the unsupported operation targeted.
+///
+/// # Returns
+///
+/// Returns an atomic-write error describing the unsupported operation and
+/// leaving the destination state marked unchanged.
 #[cfg(not(unix))]
 #[must_use = "the unsupported atomic-write error should be returned or handled"]
 #[inline]

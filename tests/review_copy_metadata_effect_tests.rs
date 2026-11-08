@@ -46,7 +46,7 @@ fn rooted_path(rooted: bool, absolute: &Path, relative: &str) -> PathBuf {
 }
 
 #[test]
-fn empty_directory_merge_reports_applied_permissions_for_both_backends() {
+fn test_empty_directory_merge_reports_applied_permissions_for_both_backends() {
     for rooted in [false, true] {
         let fixture = tempdir().expect("fixture");
         let source = fixture.path().join("source");
@@ -79,7 +79,7 @@ fn empty_directory_merge_reports_applied_permissions_for_both_backends() {
 }
 
 #[test]
-fn all_leaf_conflicts_skipped_still_report_directory_permissions() {
+fn test_all_leaf_conflicts_skipped_still_report_directory_permissions() {
     for rooted in [false, true] {
         let fixture = tempdir().expect("fixture");
         let source = fixture.path().join("source");
@@ -119,7 +119,7 @@ fn all_leaf_conflicts_skipped_still_report_directory_permissions() {
 }
 
 #[test]
-fn directory_permissions_remain_unchanged_when_not_requested() {
+fn test_directory_permissions_remain_unchanged_when_not_requested() {
     for rooted in [false, true] {
         let fixture = tempdir().expect("fixture");
         let source = fixture.path().join("source");
@@ -149,7 +149,7 @@ fn directory_permissions_remain_unchanged_when_not_requested() {
 }
 
 #[test]
-fn later_depth_failure_preserves_earlier_directory_permission_effect() {
+fn test_later_depth_failure_preserves_earlier_directory_permission_effect() {
     for rooted in [false, true] {
         let fixture = tempdir().expect("fixture");
         let source = fixture.path().join("source");
@@ -213,7 +213,7 @@ fn later_depth_failure_preserves_earlier_directory_permission_effect() {
 
 #[cfg(feature = "test-support")]
 #[test]
-fn rooted_permission_failure_keeps_metadata_effect_indeterminate() {
+fn test_rooted_permission_failure_keeps_metadata_effect_indeterminate() {
     let fixture = tempdir().expect("fixture");
     let source = fixture.path().join("source");
     let target = fixture.path().join("target");

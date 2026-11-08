@@ -6,6 +6,15 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 /// Kind of precondition used for conditional publication.
+///
+/// # Examples
+///
+/// ```
+/// use qubit_local_files::capability::LocalConditionalKind;
+///
+/// let kind = LocalConditionalKind::Content;
+/// assert_eq!(kind, LocalConditionalKind::Content);
+/// ```
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub enum LocalConditionalKind {

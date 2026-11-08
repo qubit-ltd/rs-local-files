@@ -18,7 +18,7 @@ use qubit_local_files::options::LocalTreeValidationOptions;
 use qubit_local_files::outcome::LocalFileKind;
 
 #[test]
-fn lf3_tree_observer_streams_created_entry() {
+fn test_tree_observer_streams_created_entry() {
     let fixture = tempfile::tempdir().expect("fixture should exist");
     let fs = LocalFileSystem::host().expect("host filesystem should open");
     let parent = fs
@@ -46,7 +46,7 @@ fn lf3_tree_observer_streams_created_entry() {
 }
 
 #[test]
-fn lf_review_tree_finite_depth_accepts_complete_shallow_tree() {
+fn test_finite_depth_accepts_complete_shallow_tree() {
     let fixture = tempfile::tempdir().expect("fixture");
     let fs = LocalFileSystem::host().expect("Host");
     let parent = fs
@@ -66,7 +66,7 @@ fn lf_review_tree_finite_depth_accepts_complete_shallow_tree() {
 }
 
 #[test]
-fn lf_review_tree_depth_zero_and_boundary() {
+fn test_tree_validation_handles_depth_zero_and_boundary() {
     let fixture = tempfile::tempdir().expect("fixture");
     let fs = LocalFileSystem::host().expect("Host");
     let parent = fs
@@ -106,7 +106,7 @@ fn lf_review_tree_depth_zero_and_boundary() {
 }
 
 #[test]
-fn lf_review_tree_duplicate_expected_paths_are_invalid_options() {
+fn test_duplicate_expected_paths_are_invalid_options() {
     let fixture = tempfile::tempdir().expect("fixture");
     let fs = LocalFileSystem::host().expect("Host");
     let parent = fs
@@ -134,7 +134,7 @@ fn lf_review_tree_duplicate_expected_paths_are_invalid_options() {
 }
 
 #[test]
-fn lf_review_tree_zero_deadline_and_entry_limit_fail() {
+fn test_zero_deadline_and_entry_limit_reject_tree() {
     let fixture = tempfile::tempdir().expect("fixture");
     let fs = LocalFileSystem::host().expect("Host");
     let parent = fs
@@ -159,7 +159,7 @@ fn lf_review_tree_zero_deadline_and_entry_limit_fail() {
 }
 
 #[test]
-fn lf_review_tree_observer_depth_still_limits_display() {
+fn test_observer_depth_limits_displayed_entries() {
     let fixture = tempfile::tempdir().expect("fixture");
     let fs = LocalFileSystem::host().expect("Host");
     let parent = fs

@@ -69,11 +69,25 @@ pub struct LocalDirectoryOpenOptions {
 
 impl LocalDirectoryOpenOptions {
     /// Creates options that inherit the filesystem's symlink policy.
+    ///
+    /// # Returns
+    ///
+    /// Options with no overrides or additional restrictions.
+    #[inline]
     pub fn new() -> Self {
         Self::default()
     }
 
     /// Sets the symlink policy used by operations through the handle.
+    ///
+    /// # Parameters
+    ///
+    /// - `policy`: Policy override for operations through this handle.
+    ///
+    /// # Returns
+    ///
+    /// The updated options, with the override replacing the enclosing default.
+    #[inline]
     pub fn with_symlink_policy(mut self, policy: LocalSymlinkPolicy) -> Self {
         self.symlink_policy = Some(policy);
         self
@@ -85,12 +99,32 @@ impl LocalDirectoryOpenOptions {
     /// handle's denied names. This does not filter names discovered during
     /// recursive listing or copying, or provide isolation from concurrent
     /// namespace changes.
+    ///
+    /// # Parameters
+    ///
+    /// - `policy`: Additional exact-name restrictions for supplied path
+    ///   components.
+    ///
+    /// # Returns
+    ///
+    /// The updated options with the supplied component policy.
+    #[inline]
     pub fn with_component_policy(mut self, policy: LocalComponentPolicy) -> Self {
         self.component_policy = policy;
         self
     }
 
     /// Enables retaining a binding for the handle's opening path.
+    ///
+    /// # Parameters
+    ///
+    /// - `options`: Limits and constraints for retaining and rechecking the
+    ///   opening path.
+    ///
+    /// # Returns
+    ///
+    /// The updated options with path binding enabled.
+    #[inline]
     pub fn with_path_binding(mut self, options: LocalPathBindingOptions) -> Self {
         self.path_binding = Some(options);
         self
@@ -100,37 +134,66 @@ impl LocalDirectoryOpenOptions {
     ///
     /// When opening a child from an existing handle, the limits are combined
     /// with the handle's limits and can only make resolution more restrictive.
+    ///
+    /// # Parameters
+    ///
+    /// - `limits`: Additional caps for native path resolution work.
+    ///
+    /// # Returns
+    ///
+    /// The updated options with the supplied resolution limits.
+    #[inline]
     pub fn with_resolution_limits(mut self, limits: LocalResolutionLimits) -> Self {
         self.resolution_limits = Some(limits);
         self
     }
+
     /// Adds a pure component and symlink-target validation policy.
     ///
     /// The policy is combined with policies from an enclosing handle, so all
     /// policies must accept each component or target that is resolved.
+    ///
+    /// # Parameters
+    ///
+    /// - `policy`: Pure validation hooks for resolved components and symlink
+    ///   targets.
+    ///
+    /// # Returns
+    ///
+    /// The updated options with the additional validation policy.
+    #[inline]
     pub fn with_resolution_policy(mut self, policy: Arc<dyn LocalResolutionPolicy>) -> Self {
         self.resolution_policy = Some(policy);
         self
     }
 
     /// Returns the symlink override; `None` inherits the filesystem policy.
+    #[inline]
     pub(crate) const fn symlink_policy(&self) -> Option<LocalSymlinkPolicy> {
         self.symlink_policy
     }
+
     /// Returns additional path-component restrictions without performing I/O.
+    #[inline]
     pub(crate) fn component_policy(&self) -> &LocalComponentPolicy {
         &self.component_policy
     }
+
     /// Returns optional binding limits; `None` disables opening-path binding.
+    #[inline]
     pub(crate) const fn path_binding(&self) -> Option<&LocalPathBindingOptions> {
         self.path_binding.as_ref()
     }
+
     /// Returns additional limits; `None` adds no constraint to enclosing
     /// limits.
+    #[inline]
     pub(crate) const fn resolution_limits(&self) -> Option<LocalResolutionLimits> {
         self.resolution_limits
     }
+
     /// Returns the optional policy handle; `None` adds no validation policy.
+    #[inline]
     pub(crate) fn resolution_policy(&self) -> Option<&Arc<dyn LocalResolutionPolicy>> {
         self.resolution_policy.as_ref()
     }

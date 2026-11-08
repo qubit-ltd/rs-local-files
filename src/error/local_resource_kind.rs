@@ -57,6 +57,15 @@ pub enum LocalResourceKind {
 
 impl fmt::Display for LocalResourceKind {
     /// Formats the resource dimension for human-readable diagnostics.
+    ///
+    /// # Parameters
+    ///
+    /// - `formatter`: Receives the formatted resource-dimension label.
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(())` when the label is written, or the formatter's error
+    /// if writing fails.
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Depth => formatter.write_str("depth"),

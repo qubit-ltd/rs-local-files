@@ -22,6 +22,17 @@ use crate::writer::internal::LocalCommitSyncObserver;
 /// `attempt` performs backend-specific native operations. `staging_is_open`
 /// identifies whether a failed attempt can still be retried or aborted.
 ///
+/// # Type Parameters
+///
+/// - `W` is the backend writer retained when staging remains open.
+/// - `R` is the backend's successful publication result.
+///
+/// # Parameters
+///
+/// - `writer` is consumed for the publication attempt.
+/// - `attempt` performs the backend-specific commit operation.
+/// - `staging_is_open` determines whether failed staging can be recovered.
+///
 /// # Returns
 ///
 /// The backend's achieved durability flag after a successful publication.
@@ -46,6 +57,18 @@ pub(crate) fn commit_recoverably<W, R>(
 ///
 /// Unchanged destinations retain a cleanup error. Once publication may have
 /// changed the destination, `abandon` releases backend staging state instead.
+///
+/// # Type Parameters
+///
+/// - `W` is the backend writer whose staging state is finalized.
+///
+/// # Parameters
+///
+/// - `writer` is consumed while applying cleanup or abandonment.
+/// - `error` describes the failed commit and destination state.
+/// - `cleanup` removes staging when the destination is unchanged.
+/// - `abandon` releases staging after publication may have changed the
+///   destination.
 pub(crate) fn finalize_failed_commit<W>(
     mut writer: W,
     error: LocalAtomicWriteError,
@@ -64,6 +87,14 @@ pub(crate) fn finalize_failed_commit<W>(
 ///
 /// `map_required_error` supplies backend-specific path and publication context
 /// for a required synchronization failure.
+///
+/// # Parameters
+///
+/// - `file` is the staging file whose contents may need synchronization.
+/// - `durability` is the requested commit durability.
+/// - `file_sync` is the backend's file synchronization requirement.
+/// - `observer` records the attempted file synchronization when present.
+/// - `map_required_error` contextualizes a required synchronization failure.
 ///
 /// # Returns
 ///
@@ -99,6 +130,15 @@ pub(crate) fn synchronize_staging_file(
     }
 }
 
+/// Synchronizes a staging file and records the attempt when an observer exists.
+///
+/// In test-support builds, the named fault can simulate an I/O failure before
+/// the operating system synchronization call.
+///
+/// # Parameters
+///
+/// - `file` is the staging file whose contents are synchronized.
+/// - `observer` records the synchronization attempt when present.
 fn sync_file(file: &File, observer: Option<&LocalCommitSyncObserver>) -> io::Result<()> {
     if let Some(observer) = observer {
         observer.record_file_sync();
@@ -123,6 +163,7 @@ mod tests {
     use crate::LocalAtomicWriteStage;
     use crate::LocalDurabilityRequirement;
     use crate::policy::LocalFileSyncRequirement;
+
     fn write_error(state: LocalAtomicDestinationState) -> LocalAtomicWriteError {
         LocalAtomicWriteError::new(
             LocalAtomicWriteStage::ReplaceDestination,

@@ -21,11 +21,20 @@ use crate::observation::LocalFileIdentity;
 /// succeed.
 #[derive(Debug)]
 pub(crate) struct NativePrivateEntry {
+    /// Keeps the containing directory open so cleanup can address the entry
+    /// relative to that stable directory handle.
     #[cfg_attr(windows, allow(dead_code))]
     pub(crate) parent: Arc<File>,
+    /// Stores the entry's native name relative to `parent`, without converting
+    /// it to a potentially lossy UTF-8 representation.
     #[cfg_attr(windows, allow(dead_code))]
     pub(crate) name: OsString,
+    /// Retains an open handle to the created object when the creation path
+    /// obtained one; it can be absent when opening the object failed.
     pub(crate) file: Option<Arc<File>>,
+    /// Records the object's observed identity when it was available, allowing
+    /// cleanup to avoid removing a replacement entry.
     pub(crate) identity: Option<LocalFileIdentity>,
+    /// Indicates whether cleanup must remove a directory rather than a file.
     pub(crate) directory: bool,
 }

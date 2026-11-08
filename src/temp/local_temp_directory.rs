@@ -111,6 +111,12 @@ pub struct LocalTempDirectory {
 }
 
 impl std::fmt::Debug for LocalTempDirectory {
+    /// Formats the redacted path, authority state, and retained cleanup limits.
+    ///
+    /// Formatting performs no filesystem I/O.
+    ///
+    /// # Parameters
+    /// * `f` — formatter receiving the debug representation.
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("LocalTempDirectory")
             .field("path", &crate::local_file_system::redacted_path(&self.core.path))
@@ -125,6 +131,20 @@ impl LocalTempDirectory {
     /// Captures identity without following the final link. Native inspection
     /// failure leaves cleanup of the created directory and sandbox to the
     /// caller.
+    ///
+    /// # Parameters
+    /// * `path` — created directory path whose identity is captured.
+    /// * `sandbox_path` — private parent sandbox removed after resource
+    ///   cleanup.
+    /// * `symlink_policy` — policy retained for later path resolution.
+    /// * `cleanup_limits` — limits used by explicit and Drop cleanup attempts.
+    ///
+    /// # Returns
+    /// A cleanup guard bound to the host directory and its captured identity.
+    ///
+    /// # Errors
+    /// Returns the native inspection error if the created directory's identity
+    /// cannot be captured.
     #[inline]
     pub(crate) fn host(
         path: PathBuf,
@@ -149,6 +169,20 @@ impl LocalTempDirectory {
     /// Requires a previously validated authority-relative `path`. Native
     /// inspection failure leaves cleanup of the created directory and sandbox
     /// to the caller through the retained `root` authority.
+    ///
+    /// # Parameters
+    /// * `root` — authority used for rooted inspection and cleanup.
+    /// * `path` — validated authority-relative path of the created directory.
+    /// * `sandbox_path` — authority-relative private sandbox path.
+    /// * `symlink_policy` — policy retained for later path resolution.
+    /// * `cleanup_limits` — limits used by explicit and Drop cleanup attempts.
+    ///
+    /// # Returns
+    /// A cleanup guard bound to the rooted directory and its captured identity.
+    ///
+    /// # Errors
+    /// Returns an I/O error if the retained root cannot inspect the created
+    /// directory.
     #[inline]
     pub(crate) fn rooted(
         root: Arc<crate::rooted::Root>,
@@ -181,6 +215,18 @@ impl LocalTempDirectory {
     ///
     /// Its cleanup identity comes from that handle rather than a later lookup
     /// by the diagnostic path.
+    ///
+    /// # Parameters
+    /// * `root` — authority used for rooted cleanup.
+    /// * `path` — authority-relative diagnostic path of the created directory.
+    /// * `sandbox_path` — authority-relative private sandbox path.
+    /// * `file` — open handle returned by native directory creation.
+    /// * `symlink_policy` — policy retained for later path resolution.
+    /// * `cleanup_limits` — limits used by explicit and Drop cleanup attempts.
+    ///
+    /// # Returns
+    /// A cleanup guard bound to the rooted directory and handle-derived
+    /// identity.
     ///
     /// # Errors
     /// Returns an I/O error if the retained handle cannot be inspected.
@@ -246,20 +292,23 @@ impl LocalTempDirectory {
 
     /// Returns the current source authority, independently of earlier
     /// publication.
-    #[must_use = "inspect the source authority before choosing a recovery action"]
     #[inline]
     pub const fn source_state(&self) -> LocalTempSourceState {
         self.core.source_state()
     }
 
     /// Returns the limits retained for each explicit or Drop cleanup attempt.
-    #[must_use = "inspect the limits retained for explicit and automatic cleanup"]
+    #[inline]
     pub const fn cleanup_limits(&self) -> LocalTempCleanupLimits {
         self.cleanup_limits
     }
 
     /// Replaces the retained cleanup limits without performing I/O.
     /// The next cleanup or Drop starts a fresh budget using `limits`.
+    ///
+    /// # Parameters
+    /// * `limits` — replacement limits retained for each cleanup attempt.
+    #[inline]
     pub fn set_cleanup_limits(&mut self, limits: LocalTempCleanupLimits) {
         self.cleanup_limits = limits;
     }
@@ -276,6 +325,14 @@ impl LocalTempDirectory {
     /// are cooperative; an in-flight native call is not interrupted. Children
     /// are not sorted, and queued paths still require memory. Concurrent new
     /// children cause an error without an automatic rescan.
+    ///
+    /// # Returns
+    /// `Ok(())` when the resource and its sandbox have been released.
+    ///
+    /// # Errors
+    /// Returns a structured cleanup error when authority verification, tree
+    /// removal, deadline checks, or sandbox removal fails. Completed deletions
+    /// are not rolled back.
     pub fn cleanup(&mut self) -> LocalResult<()> {
         let started_at = Instant::now();
         self.ensure_cleanup_safe().map_err(|error| {
@@ -318,6 +375,16 @@ impl LocalTempDirectory {
     /// Resolves one normal child component below this directory.
     /// Performs no I/O or existence check. Returns `InvalidInput` unless
     /// `child` is exactly one validated normal relative component.
+    ///
+    /// # Parameters
+    /// * `child` — one normal relative path component below this directory.
+    ///
+    /// # Returns
+    /// The joined path without checking whether the child exists.
+    ///
+    /// # Errors
+    /// Returns `InvalidInput` if `child` is empty, rooted, prefixed, contains
+    /// multiple components, or includes a non-normal component or native NUL.
     pub fn child(&self, child: &Path) -> Result<PathBuf> {
         let relative = LocalRelativePath::new(child)?;
         if relative.as_path().components().count() != 1 {
@@ -332,6 +399,15 @@ impl LocalTempDirectory {
     /// Resolves a normal relative descendant below this directory.
     /// Performs no I/O or existence check. Returns a relative-path validation
     /// error for empty input, roots, prefixes, dots, parents, or native NUL.
+    ///
+    /// # Parameters
+    /// * `descendant` — nonempty normal relative path below this directory.
+    ///
+    /// # Returns
+    /// The joined path without checking whether the descendant exists.
+    ///
+    /// # Errors
+    /// Returns the relative-path validation error when the input is invalid.
     #[inline]
     pub fn descendant(&self, descendant: &Path) -> Result<PathBuf> {
         let relative = LocalRelativePath::new(descendant)?;
@@ -342,6 +418,15 @@ impl LocalTempDirectory {
     /// private sandbox.
     /// Uses the default no-replacement policy of [`Self::persist_with`], with
     /// the same publication outcome and resource-retaining failure contract.
+    ///
+    /// # Returns
+    /// The publication outcome, or an error retaining this resource if
+    /// publication fails.
+    ///
+    /// # Errors
+    /// Returns a structured persistence error retaining this resource if
+    /// target resolution or publication fails. A later sandbox cleanup error
+    /// is stored in the successful outcome.
     #[inline]
     pub fn keep(self) -> std::result::Result<LocalPersistOutcome, LocalPersistError<Self>> {
         let requested_target = self.core.path.clone();
@@ -372,6 +457,18 @@ impl LocalTempDirectory {
     /// Persists the directory without replacement through its creating
     /// authority.
     /// Uses [`Self::persist_with`] with default options and the same errors.
+    ///
+    /// # Parameters
+    /// * `target` — nonempty namespace-absolute destination path.
+    ///
+    /// # Returns
+    /// The publication outcome, or an error retaining this resource if
+    /// publication fails.
+    ///
+    /// # Errors
+    /// Returns a structured persistence error retaining this resource if
+    /// target resolution or publication fails. A later sandbox cleanup error
+    /// is stored in the successful outcome.
     #[inline]
     pub fn persist(
         self,
@@ -396,6 +493,18 @@ impl LocalTempDirectory {
     /// failures retain the resource, stage, and publication certainty in
     /// `LocalPersistError`. Created parents are not rolled back; inspect the
     /// failure state before retry or cleanup.
+    ///
+    /// # Parameters
+    /// * `target` — nonempty namespace-absolute destination path.
+    /// * `options` — replacement, parent-creation, and durability policy.
+    ///
+    /// # Returns
+    /// The achieved publication guarantees, or an error retaining this
+    /// resource.
+    ///
+    /// # Errors
+    /// Returns a structured error for invalid targets, failed synchronization,
+    /// path resolution, parent creation, policy checks, or native installation.
     #[inline]
     pub fn persist_with(
         self,
@@ -413,6 +522,21 @@ impl LocalTempDirectory {
     /// never reads the process PWD. Invalid parameters return `ResolveTarget`
     /// before source synchronization or closing. Other stages and publication
     /// guarantees match [`Self::persist_with`]. Errors retain the resource.
+    ///
+    /// # Parameters
+    /// * `base` — existing namespace-absolute directory used to resolve
+    ///   `target`.
+    /// * `target` — nonempty relative destination path.
+    /// * `options` — replacement, parent-creation, and durability policy.
+    ///
+    /// # Returns
+    /// The achieved publication guarantees, or an error retaining this
+    /// resource.
+    ///
+    /// # Errors
+    /// Returns a structured error when validation, resolution, or publication
+    /// fails; the error also records the supplied base as the current
+    /// directory.
     pub fn persist_at(
         self,
         base: &Path,
@@ -427,6 +551,17 @@ impl LocalTempDirectory {
     /// diagnostics. Returns a contextual path-resolution error on invalid
     /// namespace input; consuming failure drops this guard and attempts
     /// cleanup.
+    ///
+    /// # Parameters
+    /// * `resolver` — resolver that binds public paths and records namespace
+    ///   context from creation.
+    ///
+    /// # Returns
+    /// This resource with namespace-bound paths.
+    ///
+    /// # Errors
+    /// Returns a contextual path-resolution error; failure drops the resource
+    /// and attempts cleanup.
     pub(crate) fn bind_namespace(mut self, resolver: LocalPathResolver) -> LocalResult<Self> {
         self.core
             .bind_namespace(resolver, LocalFileOperation::CreateTempDirectory)?;
@@ -437,6 +572,21 @@ impl LocalTempDirectory {
     /// Implements the ownership, guarantee, and failure contract of
     /// [`Self::persist_with`], using only the retained authority and explicit
     /// base.
+    ///
+    /// # Parameters
+    /// * `target` — destination path to resolve through the retained authority.
+    /// * `base` — optional explicit namespace-absolute base for relative
+    ///   targets.
+    /// * `options` — replacement, parent-creation, and durability policy.
+    ///
+    /// # Returns
+    /// The achieved publication guarantees, or an error retaining this
+    /// resource.
+    ///
+    /// # Errors
+    /// Returns a structured persistence error retaining this resource if target
+    /// preparation or publication fails. A later sandbox cleanup error is
+    /// stored in the successful outcome.
     fn persist_with_path(
         mut self,
         target: &Path,
@@ -651,6 +801,17 @@ impl LocalTempDirectory {
     /// path.
     /// Rechecks identity before recursive removal and propagates inspection or
     /// removal errors. Earlier deletions remain after a later failure.
+    ///
+    /// # Parameters
+    /// * `started_at` — start instant shared by deletion's cooperative
+    ///   deadline.
+    ///
+    /// # Returns
+    /// `Ok(())` after resource-tree removal.
+    ///
+    /// # Errors
+    /// Returns a contextual cleanup error if identity verification or removal
+    /// fails; earlier successful deletions remain in effect.
     #[inline]
     fn remove_resource(&mut self, started_at: Instant) -> LocalResult<()> {
         self.ensure_identity_matches().map_err(|error| {
@@ -703,6 +864,17 @@ impl LocalTempDirectory {
     }
 
     /// Builds a persistence failure with the resource's creation-time PWD.
+    ///
+    /// # Parameters
+    /// * `error` — underlying failure to retain.
+    /// * `requested_target` — destination as requested by the caller.
+    /// * `resolved_target` — namespace target when resolution reached that
+    ///   point.
+    /// * `stage` — persistence stage at which the failure occurred.
+    /// * `publication` — certainty about whether publication occurred.
+    ///
+    /// # Returns
+    /// A structured persistence error that owns this resource for recovery.
     fn persist_error(
         self,
         error: Error,
@@ -718,6 +890,12 @@ impl LocalTempDirectory {
     }
 
     /// Attaches the resource's creation-time PWD to a structured error.
+    ///
+    /// # Parameters
+    /// * `error` — error to enrich with creation-time namespace context.
+    ///
+    /// # Returns
+    /// The same error with the resource's creation-time PWD attached.
     fn contextualize_error(&self, error: LocalFileError) -> LocalFileError {
         self.core.contextualize_error(error)
     }
@@ -739,6 +917,13 @@ impl LocalTempDirectory {
     }
 
     /// Records whether a failed native install proves the source remains owned.
+    ///
+    /// # Parameters
+    /// * `error` — native installation error used to classify publication
+    ///   state.
+    ///
+    /// # Returns
+    /// The publication certainty inferred from the native failure.
     #[inline]
     fn record_native_persist_failure(&mut self, error: &Error) -> LocalPersistFailureState {
         self.core.record_native_persist_failure(error)

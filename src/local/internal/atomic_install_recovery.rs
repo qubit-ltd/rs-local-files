@@ -38,6 +38,10 @@ pub(crate) struct AtomicInstallRecovery<'a> {
 /// path-based cleanup and synchronization, while rooted writers use opened
 /// directory descriptors. This function only owns the shared state machine.
 ///
+/// # Type Parameters
+///
+/// * `S` - Backend-specific staging state used by the recovery callbacks.
+///
 /// `S` is the backend's retained staging state. Known-present staging is
 /// cleaned through `cleanup_staging`; indeterminate staging is disarmed
 /// instead. Parent synchronization is attempted only when the destination is
@@ -183,7 +187,7 @@ mod tests {
     }
 
     #[test]
-    fn recovery_durability_matrix_tracks_cleanup_and_sync() {
+    fn test_recovery_tracks_cleanup_and_sync_for_each_durability_requirement() {
         for (durability, cleanup, state, sync, expected, cleanup_calls, sync_calls) in [
             (
                 LocalDurabilityRequirement::NotRequired,

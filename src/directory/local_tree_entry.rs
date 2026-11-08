@@ -49,6 +49,13 @@ impl LocalTreeEntry {
     /// paths and `InvalidOptions` for kinds other than file, directory, and
     /// symbolic link.
     ///
+    /// # Parameters
+    ///
+    /// * `relative_path` - Candidate path relative to the staged directory
+    ///   root; it must contain only normal relative components.
+    /// * `kind` - Expected entry kind; only files, directories, and symbolic
+    ///   links are accepted.
+    ///
     /// # Errors
     ///
     /// Returns `InvalidPath` when `relative_path` is empty, absolute, or has
@@ -81,6 +88,7 @@ impl LocalTreeEntry {
 
     /// Returns this entry's path relative to the staged directory.
     #[must_use]
+    #[inline]
     pub fn relative_path(&self) -> &Path {
         &self.relative_path
     }

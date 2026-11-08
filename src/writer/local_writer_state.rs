@@ -8,6 +8,24 @@
 // Covered by writer integration tests.
 
 /// Lifecycle state of a native writer publication session.
+///
+/// # Examples
+///
+/// ```
+/// use qubit_io::Output;
+/// use tempfile::tempdir;
+///
+/// use qubit_local_files::LocalFileSystem;
+/// use qubit_local_files::outcome::LocalWriterState;
+///
+/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+/// let directory = tempdir()?;
+/// let filesystem = LocalFileSystem::host()?;
+/// let writer = filesystem.open_writer(&directory.path().join("output.txt"))?;
+/// assert_eq!(writer.state(), LocalWriterState::Open);
+/// # Ok(())
+/// # }
+/// ```
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 #[must_use]
 pub enum LocalWriterState {

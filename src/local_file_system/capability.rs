@@ -39,6 +39,12 @@ impl LocalFileSystem {
 
     /// Observes path limits at the requested path or nearest existing ancestor.
     ///
+    /// # Parameters
+    ///
+    /// - `path`: Path whose filesystem authority supplies the observations.
+    ///
+    /// # Errors
+    ///
     /// Returns namespace-resolution, symlink-policy, handle-open, or native
     /// probe errors. Unsupported individual limits remain unknown in the
     /// returned observation.
@@ -71,6 +77,12 @@ impl LocalFileSystem {
     }
 
     /// Observes dynamic filesystem capacity at a path or existing ancestor.
+    ///
+    /// # Parameters
+    ///
+    /// - `path`: Path whose filesystem authority supplies the observations.
+    ///
+    /// # Errors
     ///
     /// Returns namespace-resolution, symlink-policy, handle-open, or native
     /// probe errors. Capacity is a snapshot and does not reserve free space.
@@ -108,6 +120,21 @@ impl LocalFileSystem {
 ///
 /// Retries missing paths at their parent. Other resolution, open, or supplied
 /// `probe` errors are returned with capability-operation context.
+///
+/// # Type Parameters
+///
+/// - `T`: Value produced by the capability probe.
+///
+/// # Parameters
+///
+/// - `path`: Resolved namespace path to probe.
+/// - `symlink_policy`: Policy applied while resolving the host path.
+/// - `probe`: Operation that observes the opened file or directory.
+///
+/// # Errors
+///
+/// Returns path-resolution, open, and probe errors with capability-operation
+/// context.
 fn host_probe<T>(
     path: &LocalNamespacePath,
     symlink_policy: LocalSymlinkPolicy,
@@ -152,6 +179,14 @@ fn host_probe<T>(
 /// Opens a Host file or directory for handle-based capability probing.
 ///
 /// Returns native metadata or handle-open errors.
+///
+/// # Parameters
+///
+/// - `path`: Host path to open for capability probing.
+///
+/// # Errors
+///
+/// Returns native metadata and handle-open errors.
 fn open_host_probe(path: &Path) -> std::io::Result<fs::File> {
     let metadata = fs::symlink_metadata(path)?;
     if metadata.is_dir() {

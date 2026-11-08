@@ -67,6 +67,14 @@ pub struct LocalFileObservation {
 
 impl LocalFileObservation {
     /// Constructs an observation from facts collected from one native handle.
+    ///
+    /// # Parameters
+    ///
+    /// - `metadata`: normalized metadata collected from the retained handle.
+    /// - `identity`: native object identity, when the platform supplied it.
+    /// - `native_details`: platform-specific facts collected from that handle,
+    ///   when available.
+    #[inline]
     pub(crate) const fn from_parts(
         metadata: LocalFileMetadata,
         identity: Option<LocalFileIdentity>,
@@ -83,6 +91,12 @@ impl LocalFileObservation {
     ///
     /// Metadata is present for every successfully created observation, even
     /// when native identity or timestamp details are unavailable.
+    ///
+    /// # Returns
+    ///
+    /// A borrow of the normalized metadata retained by this observation.
+    #[must_use = "the normalized metadata should be inspected"]
+    #[inline]
     pub const fn metadata(&self) -> &LocalFileMetadata {
         &self.metadata
     }
@@ -91,6 +105,13 @@ impl LocalFileObservation {
     ///
     /// `None` means identity was unavailable; it is not evidence that the
     /// observed name was missing.
+    ///
+    /// # Returns
+    ///
+    /// The opaque identity when available, or `None` when the platform did not
+    /// supply one.
+    #[must_use]
+    #[inline]
     pub const fn identity(&self) -> Option<&LocalFileIdentity> {
         self.identity.as_ref()
     }
@@ -98,6 +119,13 @@ impl LocalFileObservation {
     /// Returns native details gathered from the same handle, when available.
     ///
     /// `None` means the native query did not supply platform-specific facts.
+    ///
+    /// # Returns
+    ///
+    /// The native details when available, or `None` when the query did not
+    /// supply platform-specific facts.
+    #[must_use]
+    #[inline]
     pub const fn native_details(&self) -> Option<&LocalNativeFileDetails> {
         self.native_details.as_ref()
     }

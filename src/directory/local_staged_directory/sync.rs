@@ -15,9 +15,18 @@ use std::path::PathBuf;
 use std::time::Instant;
 
 use super::LocalStagedDirectory;
+use super::internal::tree_sync_budget::TreeSyncBudget;
 use super::resource_limit;
+use crate::LocalFileError;
+use crate::LocalFileErrorKind;
+use crate::LocalFileOperation;
+use crate::directory::LocalDirectoryHandle;
+use crate::error::LocalResult;
+#[cfg(test)]
+use crate::observation::LocalFileIdentity;
+use crate::options::LocalListOptions;
+use crate::policy::LocalFileSyncRequirement;
 #[cfg(all(test, unix))]
-#[path = "sync_order_tests.rs"]
 mod sync_order_tests;
 
 #[cfg(test)]
@@ -32,7 +41,7 @@ pub(super) enum OwnerPolicySyncEvent {
 #[cfg(test)]
 thread_local! {
     static TREE_SYNC_FAILURE_AFTER: Cell<Option<usize>> = const { Cell::new(None) };
-    static TREE_SYNC_TEST_EXPIRED: Cell<bool> = const { Cell::new(false) };
+    pub(super) static TREE_SYNC_TEST_EXPIRED: Cell<bool> = const { Cell::new(false) };
     static TREE_SYNC_EXPIRE_AFTER_FILE: Cell<bool> = const { Cell::new(false) };
     static TREE_SYNC_EXPIRE_AFTER_DIRECTORY: Cell<bool> = const { Cell::new(false) };
     static TREE_SYNC_EXPIRE_AFTER_ROOT: Cell<bool> = const { Cell::new(false) };
@@ -84,73 +93,22 @@ pub(super) fn test_review_tree_sync_stops_after_nested_directory_failure() {
     sync_order_tests::test_review_tree_sync_stops_after_nested_directory_failure();
 }
 
-use crate::LocalFileError;
-use crate::LocalFileErrorKind;
-use crate::LocalFileOperation;
-use crate::directory::LocalDirectoryHandle;
-use crate::error::LocalResult;
-#[cfg(test)]
-use crate::observation::LocalFileIdentity;
-use crate::options::LocalListOptions;
-use crate::policy::LocalFileSyncRequirement;
-
-#[derive(Debug)]
-struct TreeSyncBudget(Option<Instant>);
-
-impl TreeSyncBudget {
-    fn new(started_at: Instant, limits: &LocalListOptions) -> LocalResult<Self> {
-        let deadline = limits
-            .deadline()
-            .map(|duration| {
-                started_at
-                    .checked_add(duration)
-                    .ok_or_else(|| LocalFileError::new(LocalFileErrorKind::InvalidOptions, LocalFileOperation::Commit))
-            })
-            .transpose()?;
-        Ok(Self(deadline))
-    }
-
-    fn check(&self, path: &Path) -> LocalResult<()> {
-        #[cfg(test)]
-        let test_expired = TREE_SYNC_TEST_EXPIRED.with(Cell::get);
-        #[cfg(not(test))]
-        let test_expired = false;
-        if test_expired || self.0.is_some_and(|deadline| Instant::now() >= deadline) {
-            return Err(LocalFileError::from_io(
-                LocalFileOperation::Commit,
-                Some(path.to_path_buf()),
-                None,
-                std::io::Error::new(std::io::ErrorKind::TimedOut, "tree synchronization deadline exceeded"),
-            ));
-        }
-        Ok(())
-    }
-}
-
 #[cfg(all(test, unix))]
 #[test]
-fn tree_sync_deadline_stops_after_file_sync() {
+fn test_tree_sync_deadline_stops_after_file_sync() {
     sync_order_tests::test_tree_sync_deadline_stops_after_file_sync();
 }
 
 #[cfg(all(test, unix))]
 #[test]
-fn tree_sync_deadline_stops_before_parent_sync() {
+fn test_tree_sync_deadline_stops_before_parent_sync() {
     sync_order_tests::test_tree_sync_deadline_stops_before_parent_sync();
 }
 
 #[cfg(all(test, unix))]
 #[test]
-fn tree_sync_deadline_zero_rejects_at_entry() {
+fn test_tree_sync_deadline_zero_rejects_at_entry() {
     sync_order_tests::test_tree_sync_deadline_zero_rejects_at_entry();
-}
-
-#[cfg(test)]
-#[test]
-fn tree_sync_deadline_rejects_checked_add_overflow() {
-    let limits = LocalListOptions::new().with_deadline(std::time::Duration::MAX);
-    let error = TreeSyncBudget::new(Instant::now(), &limits).expect_err("deadline overflow is invalid");
-    assert_eq!(error.kind(), LocalFileErrorKind::InvalidOptions);
 }
 
 #[cfg(test)]
@@ -170,39 +128,19 @@ fn expire_tree_sync_after_collection_if_scheduled() {
 
 #[cfg(all(test, unix))]
 #[test]
-fn tree_sync_deadline_expires_after_collection_before_directory_sync() {
+fn test_tree_sync_deadline_expires_after_collection_before_directory_sync() {
     sync_order_tests::test_tree_sync_deadline_expires_after_collection_before_directory_sync();
 }
 
 #[cfg(all(test, unix))]
 #[test]
-fn tree_sync_deadline_stops_after_directory_sync() {
+fn test_tree_sync_deadline_stops_after_directory_sync() {
     sync_order_tests::test_tree_sync_deadline_stops_after_directory_sync();
-}
-
-#[test]
-fn tree_sync_not_required_does_not_traverse_under_expired_deadline() {
-    let fixture = tempfile::tempdir().expect("fixture");
-    let filesystem = crate::LocalFileSystem::host().expect("host filesystem");
-    let parent = filesystem
-        .open_directory_with_options(fixture.path(), &crate::options::LocalDirectoryOpenOptions::new())
-        .expect("parent authority");
-    let stage = parent
-        .create_staged_directory(&crate::options::LocalTempDirectoryOptions::new())
-        .expect("stage");
-    let result = stage
-        .sync_tree_files(
-            &LocalListOptions::new().with_deadline(std::time::Duration::ZERO),
-            LocalFileSyncRequirement::NotRequired,
-        )
-        .expect("NotRequired must not traverse or check a deadline");
-    assert!(!result);
-    stage.cleanup().expect("cleanup stage");
 }
 
 #[cfg(test)]
 #[test]
-fn tree_sync_rejects_a_stage_without_observed_identity() {
+fn test_tree_sync_rejects_a_stage_without_observed_identity() {
     let fixture = tempfile::tempdir().expect("fixture");
     let filesystem = crate::LocalFileSystem::host().expect("host filesystem");
     let parent = filesystem
@@ -249,7 +187,7 @@ mod owner_policy_sync_order_tests {
     }
 
     #[test]
-    fn owner_policy_publish_syncs_the_applied_identity_after_access_verification() {
+    fn test_owner_policy_publish_syncs_the_applied_identity_after_access_verification() {
         let scratch = tempfile::tempdir().expect("scratch directory");
         let parent = LocalFileSystem::host()
             .expect("host filesystem")
@@ -296,8 +234,122 @@ mod owner_policy_sync_order_tests {
 }
 
 impl LocalStagedDirectory {
+    /// Synchronizes every regular file currently contained in this staged
+    /// directory.
+    ///
+    /// The stage remains unpublished. `limits` bounds tree traversal, and a
+    /// depth limit that would truncate the tree is reported as an error. With
+    /// `Required`, a file synchronization failure is an error; with
+    /// `Preferred`, the method returns `false` when a file could not be synced.
+    /// `NotRequired` performs no file synchronization and returns `false`.
+    /// This method does not synchronize the parent namespace.
+    /// A deadline is measured from this call's entry. Use
+    /// [`Self::sync_tree_with_options`] to synchronize descendant directories,
+    /// the stage root, and its creating parent under one shared deadline.
+    ///
+    /// # Parameters
+    /// `limits` bounds the traversal and provides the optional deadline.
+    /// `requirement` controls how file synchronization failures are handled.
+    ///
+    /// # Returns
+    /// Returns `false` when syncing is not required, otherwise whether every
+    /// file was synced.
+    ///
+    /// # Errors
+    /// Returns an error when the staged tree cannot be completely traversed,
+    /// its contents change during observation, a resource limit is exceeded,
+    /// or a required file synchronization fails.
+    ///
+    /// # Panics
+    /// Panics if the staged directory handle has already been closed.
+    #[inline]
+    pub fn sync_files_with_options(
+        &self,
+        limits: &LocalListOptions,
+        requirement: LocalFileSyncRequirement,
+    ) -> LocalResult<bool> {
+        self.sync_tree_files(limits, requirement)
+    }
+
+    /// Synchronizes this stage's files, directories, root, and creating parent.
+    ///
+    /// Files are synchronized first, followed by descendant directories from
+    /// deepest to shallowest, the staged root, and finally `parent`. The stage
+    /// remains unpublished. `limits` bounds every tree traversal; a depth
+    /// limit that would truncate the tree is an error. This operation requires
+    /// all requested handle synchronizations to succeed.
+    /// Synchronization is a durability operation only; publication remains a
+    /// separate explicit step, so a successfully synchronized stage is still
+    /// cleanup-owned and unpublished.
+    /// One cooperative deadline, when configured, starts at this call's entry
+    /// and covers both tree traversals and every file, directory, root, and
+    /// parent synchronization. It cannot cancel an operating-system call
+    /// already in progress.
+    ///
+    /// # Parameters
+    /// `parent` is the creating directory authority that must still name this
+    /// stage. `limits` bounds both traversals and supplies the optional
+    /// shared deadline.
+    ///
+    /// # Returns
+    /// Returns `Ok(())` after every requested file and directory
+    /// synchronization succeeds.
+    ///
+    /// # Errors
+    /// Returns an error when the parent no longer names this stage, the staged
+    /// tree cannot be completely traversed, an entry changes during the
+    /// operation, a resource limit is exceeded, or any file/directory sync
+    /// fails.
+    ///
+    /// # Panics
+    /// Panics if the staged directory handle has already been closed.
+    pub fn sync_tree_with_options(&self, parent: &LocalDirectoryHandle, limits: &LocalListOptions) -> LocalResult<()> {
+        let started_at = Instant::now();
+        let budget = TreeSyncBudget::new(started_at, limits)?;
+        budget.check(self.directory().diagnostic_path())?;
+        let expected_stage_identity = self
+            .identity
+            .as_ref()
+            .ok_or_else(|| LocalFileError::new(LocalFileErrorKind::Unsupported, LocalFileOperation::Metadata))?;
+        let stage_name = Path::new(&self.relative_name);
+        let parent_entry = parent.observe_entry(stage_name)?;
+        if parent_entry.identity() != Some(expected_stage_identity) {
+            return Err(
+                LocalFileError::new(LocalFileErrorKind::ChangedDuringRead, LocalFileOperation::Metadata)
+                    .with_path(parent.diagnostic_path().join(stage_name)),
+            );
+        }
+
+        budget.check(parent.diagnostic_path())?;
+
+        self.sync_tree_files_started_at(limits, LocalFileSyncRequirement::Required, started_at)?;
+        budget.check(self.directory().diagnostic_path())?;
+
+        let directories = self.collect_tree_sync_directories(limits, started_at, &budget)?;
+
+        self.sync_tree_directories(directories, &budget)?;
+
+        self.sync_tree_root_and_parent(parent, &budget, expected_stage_identity)?;
+        Ok(())
+    }
+
     /// Synchronizes stage files under the caller's requirement and traversal
     /// limits.
+    ///
+    /// # Parameters
+    /// `limits` bounds traversal and supplies the optional deadline.
+    /// `requirement` selects required, preferred, or skipped file syncing.
+    ///
+    /// # Returns
+    /// Returns whether every requested file synchronization completed.
+    ///
+    /// # Errors
+    /// Returns an error when traversal, observation, configured limits, the
+    /// deadline, or a required file synchronization fails.
+    ///
+    /// # Panics
+    /// Panics if the staged directory handle has already been closed.
+    #[inline]
     pub(in crate::directory) fn sync_tree_files(
         &self,
         limits: &LocalListOptions,
@@ -308,6 +360,21 @@ impl LocalStagedDirectory {
 
     /// Synchronizes regular files using a deadline shared with a later tree
     /// pass.
+    ///
+    /// # Parameters
+    /// `limits` bounds traversal and supplies the optional deadline.
+    /// `requirement` selects required, preferred, or skipped file syncing.
+    /// `started_at` is the instant shared by the file and directory passes.
+    ///
+    /// # Returns
+    /// Returns whether every requested file synchronization completed.
+    ///
+    /// # Errors
+    /// Returns an error when deadline construction, traversal, observation,
+    /// configured limits, or a required file synchronization fails.
+    ///
+    /// # Panics
+    /// Panics if the staged directory handle has already been closed.
     fn sync_tree_files_started_at(
         &self,
         limits: &LocalListOptions,
@@ -441,73 +508,19 @@ impl LocalStagedDirectory {
         Ok(synced)
     }
 
-    /// Synchronizes every regular file currently contained in this staged
-    /// directory.
+    /// Collects descendant directory identities while enforcing tree limits.
     ///
-    /// The stage remains unpublished. `limits` bounds tree traversal, and a
-    /// depth limit that would truncate the tree is reported as an error. With
-    /// `Required`, a file synchronization failure is an error; with
-    /// `Preferred`, the method returns `false` when a file could not be synced.
-    /// `NotRequired` performs no file synchronization and returns `false`.
-    /// This method does not synchronize the parent namespace.
-    /// A deadline is measured from this call's entry. Use
-    /// [`Self::sync_tree_with_options`] to synchronize descendant directories,
-    /// the stage root, and its creating parent under one shared deadline.
-    ///
-    /// # Errors
-    /// Returns an error when the staged tree cannot be completely traversed,
-    /// its contents change during observation, a resource limit is exceeded,
-    /// or a required file synchronization fails.
-    pub fn sync_files_with_options(
+    /// # Parameters
+    /// `limits` supplies traversal limits for the staged tree.
+    /// `started_at` is the shared start instant used to enforce the operation
+    /// deadline. `budget` checks the same cooperative deadline during
+    /// collection.
+    fn collect_tree_sync_directories(
         &self,
         limits: &LocalListOptions,
-        requirement: LocalFileSyncRequirement,
-    ) -> LocalResult<bool> {
-        self.sync_tree_files(limits, requirement)
-    }
-
-    /// Synchronizes this stage's files, directories, root, and creating parent.
-    ///
-    /// Files are synchronized first, followed by descendant directories from
-    /// deepest to shallowest, the staged root, and finally `parent`. The stage
-    /// remains unpublished. `limits` bounds every tree traversal; a depth
-    /// limit that would truncate the tree is an error. This operation requires
-    /// all requested handle synchronizations to succeed.
-    /// Synchronization is a durability operation only; publication remains a
-    /// separate explicit step, so a successfully synchronized stage is still
-    /// cleanup-owned and unpublished.
-    /// One cooperative deadline, when configured, starts at this call's entry
-    /// and covers both tree traversals and every file, directory, root, and
-    /// parent synchronization. It cannot cancel an operating-system call
-    /// already in progress.
-    ///
-    /// # Errors
-    /// Returns an error when the parent no longer names this stage, the staged
-    /// tree cannot be completely traversed, an entry changes during the
-    /// operation, a resource limit is exceeded, or any file/directory sync
-    /// fails.
-    pub fn sync_tree_with_options(&self, parent: &LocalDirectoryHandle, limits: &LocalListOptions) -> LocalResult<()> {
-        let started_at = Instant::now();
-        let budget = TreeSyncBudget::new(started_at, limits)?;
-        budget.check(self.directory().diagnostic_path())?;
-        let expected_stage_identity = self
-            .identity
-            .as_ref()
-            .ok_or_else(|| LocalFileError::new(LocalFileErrorKind::Unsupported, LocalFileOperation::Metadata))?;
-        let stage_name = Path::new(&self.relative_name);
-        let parent_entry = parent.observe_entry(stage_name)?;
-        if parent_entry.identity() != Some(expected_stage_identity) {
-            return Err(
-                LocalFileError::new(LocalFileErrorKind::ChangedDuringRead, LocalFileOperation::Metadata)
-                    .with_path(parent.diagnostic_path().join(stage_name)),
-            );
-        }
-
-        budget.check(parent.diagnostic_path())?;
-
-        self.sync_tree_files_started_at(limits, LocalFileSyncRequirement::Required, started_at)?;
-        budget.check(self.directory().diagnostic_path())?;
-
+        started_at: Instant,
+        budget: &TreeSyncBudget,
+    ) -> LocalResult<Vec<(std::path::PathBuf, crate::observation::LocalFileIdentity)>> {
         let traversal = limits
             .with_recursive()
             .without_max_depth()
@@ -542,7 +555,20 @@ impl LocalStagedDirectory {
         budget.check(self.directory().diagnostic_path())?;
         directories.sort_by_key(|(path, _)| std::cmp::Reverse(path.components().count()));
         budget.check(self.directory().diagnostic_path())?;
+        Ok(directories)
+    }
 
+    /// Reopens and synchronizes collected directories deepest-first.
+    ///
+    /// # Parameters
+    /// `directories` contains relative paths and identities captured during
+    /// traversal. `budget` checks the shared cooperative deadline before
+    /// and after each synchronization.
+    fn sync_tree_directories(
+        &self,
+        directories: Vec<(std::path::PathBuf, crate::observation::LocalFileIdentity)>,
+        budget: &TreeSyncBudget,
+    ) -> LocalResult<()> {
         for (relative, expected_identity) in directories {
             budget.check(&self.directory().diagnostic_path().join(&relative))?;
             let directory = self
@@ -587,7 +613,24 @@ impl LocalStagedDirectory {
             })?;
             budget.check(&self.directory().diagnostic_path().join(&relative))?;
         }
+        Ok(())
+    }
 
+    /// Synchronizes the stage root and then its creating parent.
+    ///
+    /// # Parameters
+    /// `parent` is the creating directory authority to synchronize after the
+    /// stage root. `budget` checks the shared cooperative deadline
+    /// throughout both synchronizations. `expected_stage_identity` is the
+    /// identity previously observed for the stage root.
+    fn sync_tree_root_and_parent(
+        &self,
+        parent: &LocalDirectoryHandle,
+        budget: &TreeSyncBudget,
+        expected_stage_identity: &crate::observation::LocalFileIdentity,
+    ) -> LocalResult<()> {
+        #[cfg(not(all(test, unix)))]
+        let _ = expected_stage_identity;
         budget.check(self.directory().diagnostic_path())?;
         #[cfg(all(test, unix))]
         sync_order_tests::record_sync_event(sync_order_tests::SyncEvent {
@@ -657,172 +700,5 @@ impl LocalStagedDirectory {
         })?;
         budget.check(parent.diagnostic_path())?;
         Ok(())
-    }
-}
-
-#[cfg(all(test, unix))]
-mod native_sync_failure_tests {
-    use std::path::Path;
-
-    use crate::LocalFileErrorKind;
-    use crate::LocalFileOperation;
-    use crate::LocalFileSystem;
-    use crate::options::LocalDirectoryOpenOptions;
-    use crate::options::LocalListOptions;
-    use crate::options::LocalTempDirectoryOptions;
-    use crate::policy::LocalFileSyncRequirement;
-    use crate::tests::native_io_fault_tests::NativeIoFaultGuard;
-    use crate::tests::native_io_fault_tests::NativeIoPoint;
-
-    #[test]
-    fn test_sync_observation_failures_are_never_downgraded_to_preferred_sync() {
-        for requirement in [LocalFileSyncRequirement::Preferred, LocalFileSyncRequirement::Required] {
-            let fixture = tempfile::tempdir().expect("fixture");
-            let parent = LocalFileSystem::host()
-                .expect("host")
-                .open_directory_with_options(fixture.path(), &LocalDirectoryOpenOptions::new())
-                .expect("parent");
-            let mut stage = parent
-                .create_staged_directory(&LocalTempDirectoryOptions::new())
-                .expect("stage");
-            stage
-                .write_file_new(Path::new("payload"), &mut &b"payload"[..], 32)
-                .expect("payload");
-            let path = stage.directory().diagnostic_path().join("payload");
-            let guard = NativeIoFaultGuard::fail_on(NativeIoPoint::Observation, 1);
-            let error = stage
-                .sync_tree_files(&LocalListOptions::new(), requirement)
-                .expect_err("an unobserved source cannot be synchronized safely");
-            assert!(guard.fired());
-            assert_eq!(error.kind(), LocalFileErrorKind::Io);
-            assert_eq!(error.operation(), LocalFileOperation::Metadata);
-            assert_eq!(
-                error.io_error().expect("native cause").to_string(),
-                "injected native I/O contract failure"
-            );
-            assert_eq!(error.path(), None);
-            assert_eq!(std::fs::read(&path).expect("source is unchanged"), b"payload");
-            drop(guard);
-            assert!(
-                stage
-                    .sync_tree_files(&LocalListOptions::new(), requirement)
-                    .expect("retry sync")
-            );
-            stage.cleanup().expect("cleanup after retry");
-        }
-    }
-    #[cfg(target_os = "linux")]
-    #[test]
-    fn test_tree_sync_native_observation_failures_preserve_source_and_allow_retry() {
-        for occurrence in [1, 2, 3] {
-            let fixture = tempfile::tempdir().expect("fixture");
-            let parent = LocalFileSystem::host()
-                .expect("host")
-                .open_directory_with_options(fixture.path(), &LocalDirectoryOpenOptions::new())
-                .expect("parent");
-            let policy = crate::policy::LocalOwnerAccessPolicy::new().with_unix_modes(0o700, 0o600);
-            let mut stage = parent
-                .create_staged_directory(&LocalTempDirectoryOptions::new().with_owner_access_policy(policy))
-                .expect("owner-policy stage");
-            stage
-                .write_file_new(Path::new("nested/payload"), &mut &b"payload"[..], 32)
-                .expect("nested payload");
-            let path = stage.directory().diagnostic_path().join("nested/payload");
-            let limits = LocalListOptions::new().with_max_depth(4).with_max_seen_name_bytes(4096);
-            // The file handle, nested directory handle, and final parent
-            // handle are observed in this order during a complete tree sync.
-            let guard = NativeIoFaultGuard::fail_on(NativeIoPoint::Observation, occurrence);
-            let error = stage
-                .sync_tree_with_options(&parent, &limits)
-                .expect_err("native observation failure must stop the synchronization phase");
-            assert!(guard.fired());
-            assert_eq!(error.kind(), LocalFileErrorKind::Io);
-            assert_eq!(error.operation(), LocalFileOperation::Metadata);
-            assert_eq!(
-                error.io_error().expect("native cause").to_string(),
-                "injected native I/O contract failure"
-            );
-            assert_eq!(std::fs::read(&path).expect("source remains intact"), b"payload");
-            drop(guard);
-            stage
-                .sync_tree_with_options(&parent, &limits)
-                .expect("bounded sync retries after transient native failure");
-            stage.cleanup().expect("cleanup stage after synchronization retry");
-        }
-    }
-    #[cfg(target_os = "linux")]
-    #[test]
-    fn test_tree_native_sync_failures_preserve_exact_failed_path_and_allow_cleanup() {
-        for occurrence in 1..=4 {
-            let fixture = tempfile::tempdir().expect("fixture");
-            let parent = LocalFileSystem::host()
-                .expect("host")
-                .open_directory_with_options(fixture.path(), &LocalDirectoryOpenOptions::new())
-                .expect("parent");
-            let policy = crate::policy::LocalOwnerAccessPolicy::new().with_unix_modes(0o700, 0o600);
-            let mut stage = parent
-                .create_staged_directory(&LocalTempDirectoryOptions::new().with_owner_access_policy(policy))
-                .expect("owner-policy stage");
-            stage
-                .write_file_new(Path::new("nested/payload"), &mut &b"payload"[..], 32)
-                .expect("nested payload");
-            let stage_path = stage.directory().diagnostic_path().to_path_buf();
-            let expected_path = match occurrence {
-                1 => stage_path.join("nested/payload"),
-                2 => stage_path.join("nested"),
-                3 => stage_path.clone(),
-                _ => fixture.path().to_path_buf(),
-            };
-            let guard = NativeIoFaultGuard::fail_on(NativeIoPoint::SyncAll, occurrence);
-            let error = stage
-                .sync_tree_with_options(&parent, &LocalListOptions::new())
-                .expect_err("each required native sync failure must abort the current phase");
-            assert!(guard.fired());
-            assert_eq!(error.kind(), LocalFileErrorKind::Io);
-            assert_eq!(error.operation(), LocalFileOperation::Commit);
-            assert_eq!(error.path(), Some(expected_path.as_path()));
-            assert_eq!(
-                error.io_error().expect("native cause").to_string(),
-                "injected native I/O contract failure"
-            );
-            assert_eq!(
-                std::fs::read(stage_path.join("nested/payload")).expect("preserved source"),
-                b"payload"
-            );
-            drop(guard);
-            stage
-                .sync_tree_with_options(&parent, &LocalListOptions::new())
-                .expect("retry failed synchronization");
-            stage.cleanup().expect("cleanup after sync retry");
-        }
-    }
-
-    #[test]
-    fn test_preferred_native_file_sync_failure_reports_unsynced_without_losing_owner() {
-        let fixture = tempfile::tempdir().expect("fixture");
-        let parent = LocalFileSystem::host()
-            .expect("host")
-            .open_directory_with_options(fixture.path(), &LocalDirectoryOpenOptions::new())
-            .expect("parent");
-        let mut stage = parent
-            .create_staged_directory(&LocalTempDirectoryOptions::new())
-            .expect("stage");
-        stage
-            .write_file_new(Path::new("payload"), &mut &b"payload"[..], 32)
-            .expect("payload");
-        let guard = NativeIoFaultGuard::fail_on(NativeIoPoint::SyncAll, 1);
-        assert!(
-            !stage
-                .sync_tree_files(&LocalListOptions::new(), LocalFileSyncRequirement::Preferred)
-                .expect("preferred synchronization permits an unsynced file")
-        );
-        assert!(guard.fired());
-        drop(guard);
-        assert!(
-            stage
-                .sync_tree_files(&LocalListOptions::new(), LocalFileSyncRequirement::Required)
-                .expect("retry required synchronization")
-        );
-        stage.cleanup().expect("cleanup retryable source");
     }
 }

@@ -6,6 +6,8 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 
+use std::io;
+
 use qubit_local_files::LocalFileError;
 use qubit_local_files::error::LocalFileErrorKind;
 use qubit_local_files::error::LocalFileOperation;
@@ -15,7 +17,7 @@ fn error(reason: &'static str) -> LocalFileError {
 }
 
 #[test]
-fn public_append_retains_primary_and_nested_order() {
+fn test_public_append_retains_primary_and_nested_order() {
     let error = error("primary")
         .with_additional_cleanup_error(error("first"))
         .with_additional_cleanup_error(error("second").with_cleanup_error(error("third")));
@@ -29,7 +31,7 @@ fn public_append_retains_primary_and_nested_order() {
 }
 
 #[test]
-fn replacing_cleanup_error_keeps_its_existing_replacement_semantics() {
+fn test_replacing_cleanup_error_keeps_its_existing_replacement_semantics() {
     let error = error("primary")
         .with_cleanup_error(error("old"))
         .with_cleanup_error(error("new"));
@@ -38,9 +40,50 @@ fn replacing_cleanup_error_keeps_its_existing_replacement_semantics() {
     assert_eq!(error.cleanup_error().and_then(LocalFileError::reason), Some("new"));
 }
 
+#[test]
+fn test_additional_cleanup_error_appends_without_replacing_existing_chain() {
+    let primary = LocalFileError::from_io(
+        LocalFileOperation::Read,
+        Some("primary".into()),
+        None,
+        io::Error::other("primary failure"),
+    );
+    let first_cleanup = LocalFileError::from_io(
+        LocalFileOperation::Abort,
+        Some("first cleanup".into()),
+        None,
+        io::Error::other("first cleanup failure"),
+    );
+    let second_cleanup = LocalFileError::from_io(
+        LocalFileOperation::Abort,
+        Some("second cleanup".into()),
+        None,
+        io::Error::other("second cleanup failure"),
+    );
+
+    let error = primary
+        .with_cleanup_error(first_cleanup)
+        .with_additional_cleanup_error(second_cleanup);
+
+    assert_eq!(
+        Some("primary failure"),
+        error.io_error().map(ToString::to_string).as_deref()
+    );
+    let first = error.cleanup_error().expect("first cleanup remains");
+    assert_eq!(
+        Some("first cleanup failure"),
+        first.io_error().map(ToString::to_string).as_deref()
+    );
+    let second = first.cleanup_error().expect("second cleanup is appended");
+    assert_eq!(
+        Some("second cleanup failure"),
+        second.io_error().map(ToString::to_string).as_deref()
+    );
+}
+
 #[cfg(feature = "test-support")]
 #[test]
-fn appended_recovery_owner_remains_extractable_and_cleanable() {
+fn test_appended_recovery_owner_remains_extractable_and_cleanable() {
     use qubit_local_files::LocalFileSystem;
     use qubit_local_files::options::LocalTempFileOptions;
     use qubit_local_files::test_support::install_test_fault;

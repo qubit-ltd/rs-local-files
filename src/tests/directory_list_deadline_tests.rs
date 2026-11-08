@@ -36,7 +36,7 @@ fn handle_with_child(binding: Option<Duration>) -> (tempfile::TempDir, LocalDire
 }
 
 #[test]
-fn list_deadline_rejects_before_path_prevalidation() {
+fn test_list_deadline_rejects_before_path_prevalidation() {
     let (_fixture, handle) = handle_with_child(None);
     resolution_observation_tests::reset();
     let _clock = resolution_observation_tests::DeadlineClockGuard::expire_after(0);
@@ -57,7 +57,7 @@ fn list_deadline_rejects_before_path_prevalidation() {
 }
 
 #[test]
-fn list_started_at_does_not_restart_an_expired_budget() {
+fn test_list_started_at_does_not_restart_an_expired_budget() {
     let (_fixture, handle) = handle_with_child(None);
     let started_at = Instant::now() - Duration::from_secs(60);
 
@@ -74,7 +74,7 @@ fn list_started_at_does_not_restart_an_expired_budget() {
 }
 
 #[test]
-fn list_deadline_overflow_is_invalid_options_before_resolution() {
+fn test_list_deadline_overflow_is_invalid_options_before_resolution() {
     let (_fixture, handle) = handle_with_child(None);
     resolution_observation_tests::reset();
 
@@ -93,7 +93,7 @@ fn list_deadline_overflow_is_invalid_options_before_resolution() {
 }
 
 #[test]
-fn list_uses_earlier_operation_or_binding_deadline() {
+fn test_list_uses_earlier_operation_or_binding_deadline() {
     for (operation, binding) in [
         (Duration::from_secs(20), Duration::from_secs(60)),
         (Duration::from_secs(60), Duration::from_secs(20)),
@@ -119,7 +119,7 @@ fn list_uses_earlier_operation_or_binding_deadline() {
 }
 
 #[test]
-fn list_deadline_expiring_during_resolution_stops_additional_io() {
+fn test_list_deadline_expiring_during_resolution_stops_additional_io() {
     let (_fixture, handle) = handle_with_child(None);
     resolution_observation_tests::reset();
     let _clock = resolution_observation_tests::DeadlineClockGuard::expire_after(2);
@@ -139,7 +139,7 @@ fn list_deadline_expiring_during_resolution_stops_additional_io() {
 }
 
 #[test]
-fn list_without_deadline_succeeds() {
+fn test_list_without_deadline_succeeds() {
     let (_fixture, handle) = handle_with_child(None);
 
     let walker = handle
@@ -151,7 +151,7 @@ fn list_without_deadline_succeeds() {
 
 #[cfg(feature = "test-support")]
 #[test]
-fn list_entry_read_failure_is_returned_by_the_walker() {
+fn test_list_entry_read_failure_is_returned_by_the_walker() {
     let fixture = tempfile::tempdir().expect("fixture should exist");
     fs::write(fixture.path().join("entry"), b"payload").expect("entry should exist");
     let filesystem = LocalFileSystem::host().expect("host filesystem");

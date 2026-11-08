@@ -16,6 +16,7 @@ use std::io;
 use super::RootedSymlinkCreateFailureState;
 
 /// Failure from rooted symbolic-link publication and optional rollback.
+#[must_use = "the publication and cleanup failures must be handled"]
 #[derive(Debug)]
 pub(crate) struct RootedSymlinkCreateError {
     /// Strongest destination state proven after publication and rollback.
@@ -28,6 +29,18 @@ pub(crate) struct RootedSymlinkCreateError {
 
 impl RootedSymlinkCreateError {
     /// Creates a failure with the strongest proven namespace state.
+    ///
+    /// # Parameters
+    ///
+    /// - `state` is the strongest destination state proven after publication
+    ///   and rollback.
+    /// - `primary` is the native error that prevented symbolic-link
+    ///   publication.
+    /// - `cleanup` is an optional native error from placeholder rollback.
+    ///
+    /// # Returns
+    ///
+    /// The error retaining the publication state and both native failures.
     pub(crate) const fn new(
         state: RootedSymlinkCreateFailureState,
         primary: io::Error,
@@ -41,6 +54,15 @@ impl RootedSymlinkCreateError {
     }
 
     /// Decomposes this failure into publication state and native errors.
+    ///
+    /// # Parameters
+    ///
+    /// - `self` transfers ownership of the retained state and errors.
+    ///
+    /// # Returns
+    ///
+    /// The publication state, primary failure, and optional cleanup failure.
+    #[must_use = "the retained publication and cleanup errors must be handled"]
     pub(crate) fn into_parts(self) -> (RootedSymlinkCreateFailureState, io::Error, Option<io::Error>) {
         (self.state, self.primary, self.cleanup)
     }
@@ -48,6 +70,18 @@ impl RootedSymlinkCreateError {
 
 impl Display for RootedSymlinkCreateError {
     /// Formats the proven publication state and retained native failures.
+    ///
+    /// # Parameters
+    ///
+    /// - `formatter` receives the formatted state and failure details.
+    ///
+    /// # Returns
+    ///
+    /// The result of writing the error description.
+    ///
+    /// # Errors
+    ///
+    /// Returns the formatting error if writing to `formatter` fails.
     fn fmt(&self, formatter: &mut Formatter<'_>) -> FmtResult {
         write!(
             formatter,
@@ -63,6 +97,11 @@ impl Display for RootedSymlinkCreateError {
 
 impl Error for RootedSymlinkCreateError {
     /// Returns the primary native publication failure.
+    ///
+    /// # Returns
+    ///
+    /// `Some` contains the primary publication error; this implementation
+    /// never returns `None`.
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         Some(&self.primary)
     }

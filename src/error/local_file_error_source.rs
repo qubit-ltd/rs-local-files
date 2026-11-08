@@ -61,7 +61,18 @@ pub enum LocalFileErrorSource {
     ),
 }
 
+/// Formats the source while keeping invalid input bytes out of diagnostic
+/// output.
 impl fmt::Debug for LocalFileErrorSource {
+    /// Formats the retained source metadata and error details.
+    ///
+    /// # Parameters
+    ///
+    /// - `formatter`: Destination for the debug representation.
+    ///
+    /// # Returns
+    ///
+    /// `Ok(())` when formatting succeeds, or the formatter's error otherwise.
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::InvalidEncoding(error) => formatter
@@ -79,6 +90,14 @@ impl fmt::Debug for LocalFileErrorSource {
 
 impl fmt::Display for LocalFileErrorSource {
     /// Formats the retained typed failure source.
+    ///
+    /// # Parameters
+    ///
+    /// - `formatter`: Destination for the source's display representation.
+    ///
+    /// # Returns
+    ///
+    /// `Ok(())` when formatting succeeds, or the formatter's error otherwise.
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::InvalidEncoding(error) => error.fmt(formatter),
@@ -92,6 +111,15 @@ impl fmt::Display for LocalFileErrorSource {
 
 impl Error for LocalFileErrorSource {
     /// Returns the concrete I/O, codec, or resource-limit error retained here.
+    ///
+    /// # Parameters
+    ///
+    /// - `self`: Source whose underlying error is exposed.
+    ///
+    /// # Returns
+    ///
+    /// The retained underlying error, or `None` when the source does not expose
+    /// a nested error.
     #[inline]
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {

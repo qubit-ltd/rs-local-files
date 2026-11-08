@@ -8,30 +8,30 @@
 
 #![deny(unused_must_use)]
 
-fn relay(
-    outcome: qubit_local_files::outcome::LocalTreePublishOutcome,
-) -> qubit_local_files::outcome::LocalTreePublishOutcome {
+use qubit_local_files::directory::LocalTreeValidationOptions;
+use qubit_local_files::outcome::LocalTreePublishOutcome;
+
+fn relay(outcome: LocalTreePublishOutcome) -> LocalTreePublishOutcome {
     outcome
 }
 
 #[cfg(feature = "drop-result")]
-fn discard(outcome: qubit_local_files::outcome::LocalTreePublishOutcome) {
+fn discard(outcome: LocalTreePublishOutcome) {
     relay(outcome);
 }
 
 #[cfg(feature = "drop-validation-options")]
 fn discard_validation_options() {
-    qubit_local_files::directory::LocalTreeValidationOptions::new()
-        .with_reject_symlinks();
+    LocalTreeValidationOptions::new().with_reject_symlinks();
 }
 
 #[cfg(not(feature = "drop-validation-options"))]
 fn consume_validation_options() {
-    let _options = qubit_local_files::directory::LocalTreeValidationOptions::new().with_reject_symlinks();
+    let _options = LocalTreeValidationOptions::new().with_reject_symlinks();
 }
 
 #[cfg(not(feature = "drop-result"))]
-fn inspect(outcome: qubit_local_files::outcome::LocalTreePublishOutcome) {
+fn inspect(outcome: LocalTreePublishOutcome) {
     let _ = (outcome.durable(), outcome.file_synced(), outcome.access_state());
 }
 

@@ -15,6 +15,8 @@ use std::path::PathBuf;
 #[cfg(unix)]
 use std::time::Duration;
 
+use qubit_io::Output;
+
 use super::internal::AtomicInstallRecovery;
 use super::internal::LocalAtomicPublicationMode;
 #[cfg(unix)]
@@ -44,8 +46,19 @@ use crate::LocalAtomicWriteError;
 use crate::LocalAtomicWriteOptions;
 use crate::LocalAtomicWriteStage;
 use crate::LocalDurabilityRequirement;
+#[cfg(feature = "test-support")]
+use crate::local::test_fault_error;
 use crate::options::LocalWriteMetadataPolicy;
 use crate::policy::LocalFileSyncRequirement;
+#[cfg(windows)]
+use crate::rooted::EntryKind;
+#[cfg(windows)]
+use crate::rooted::Metadata;
+#[cfg(test)]
+use crate::tests::native_io_fault_tests::NativeIoPoint;
+#[cfg(test)]
+use crate::tests::native_io_fault_tests::check as check_native_io_fault;
+use crate::vectored::byte_slices;
 use crate::writer::internal::LocalCommitSyncObserver;
 use crate::writer::internal::LocalCommitSyncOutcome;
 
@@ -101,6 +114,7 @@ pub(crate) struct LocalAtomicWriter {
     destination_is_regular: bool,
     /// Durability requested for this publication.
     durability: LocalDurabilityRequirement,
+    /// Requirement for synchronizing staged file contents.
     file_sync: LocalFileSyncRequirement,
     /// Optional limit for retrying a nonblocking destination open.
     #[cfg(unix)]
@@ -235,6 +249,22 @@ impl LocalAtomicWriter {
         self.commit_recoverable_with_sync(None).map(|outcome| outcome.durable)
     }
 
+    /// Commits the staged file and reports synchronization observations.
+    ///
+    /// The observer, when present, receives synchronization events as they
+    /// occur. This method takes ownership of the writer; a recoverable failure
+    /// retains it in the returned error.
+    ///
+    /// # Parameters
+    /// - `observer`: Optional receiver for file and parent-directory sync
+    ///   events.
+    ///
+    /// # Returns
+    /// The commit outcome, including whether requested durability completed.
+    ///
+    /// # Errors
+    /// Returns the writer with a recoverable error when publication did not
+    /// begin, or a terminal error when destination state may have changed.
     pub(crate) fn commit_recoverable_with_sync(
         self,
         observer: Option<&LocalCommitSyncObserver>,
@@ -250,6 +280,9 @@ impl LocalAtomicWriter {
     ///
     /// The destination remains unchanged. If explicit cleanup fails, the
     /// caller can retry; the internal guard attempts cleanup again on drop.
+    ///
+    /// # Returns
+    /// `Ok(())` when the temporary file is removed.
     ///
     /// # Errors
     /// Returns a structured cleanup error when the temporary file cannot be
@@ -269,6 +302,12 @@ impl LocalAtomicWriter {
     }
 
     /// Runs one commit attempt without consuming recoverable staging state.
+    ///
+    /// # Parameters
+    /// - `observer`: Optional receiver for synchronization events.
+    ///
+    /// # Returns
+    /// The observed synchronization outcome for this commit attempt.
     ///
     /// # Errors
     ///
@@ -376,6 +415,9 @@ impl LocalAtomicWriter {
     ///
     /// * `destination` - Observed destination, or `None` for a new file.
     ///
+    /// # Returns
+    /// `Ok(())` when metadata copying is unnecessary or succeeds.
+    ///
     /// # Errors
     ///
     /// Returns a structured metadata-application error while retaining staging
@@ -403,6 +445,9 @@ impl LocalAtomicWriter {
 
     /// Rejects an existing destination without strict metadata support.
     ///
+    /// # Returns
+    /// `Ok(())` when there is no existing destination to preserve.
+    ///
     /// # Errors
     ///
     /// Returns a structured unsupported metadata-application error while
@@ -425,6 +470,14 @@ impl LocalAtomicWriter {
     }
 
     /// Synchronizes staged contents and metadata before installation.
+    ///
+    /// # Parameters
+    /// - `observer`: Optional receiver for the staging-file sync event.
+    ///
+    /// # Returns
+    /// `true` when the requested staging-file synchronization completed;
+    /// otherwise `false` when synchronization was not requested or was
+    /// optional and unavailable.
     ///
     /// # Errors
     ///
@@ -457,6 +510,9 @@ impl LocalAtomicWriter {
     ///
     /// * `destination` - Observed destination, or `None` for a new file.
     ///
+    /// # Returns
+    /// `Ok(())` when the observed destination still has the same identity.
+    ///
     /// # Errors
     ///
     /// Returns the structured namespace-race error produced by the identity
@@ -474,6 +530,10 @@ impl LocalAtomicWriter {
     }
 
     /// Verifies that an existing non-Unix destination remains present.
+    ///
+    /// # Returns
+    /// `Ok(())` when the destination still satisfies the observed presence
+    /// contract.
     ///
     /// # Errors
     ///
@@ -515,6 +575,12 @@ impl LocalAtomicWriter {
     }
 
     /// Installs staging and synchronizes the destination parent chain.
+    ///
+    /// # Parameters
+    /// - `observer`: Optional receiver for the parent-directory sync event.
+    ///
+    /// # Returns
+    /// Whether the parent chain was synchronized when durability was requested.
     ///
     /// # Errors
     ///
@@ -575,35 +641,95 @@ impl LocalAtomicWriter {
 
 impl LocalAtomicWriter {
     /// Writes bytes from multiple buffers into the private staging file.
+    ///
+    /// # Parameters
+    /// - `buffers`: Ordered byte slices to write.
+    ///
+    /// # Returns
+    /// The number of bytes accepted. A successful write can be short; it does
+    /// not roll back bytes accepted before a later error.
+    ///
+    /// # Errors
+    /// Returns an error if vectored input conversion or staging output fails.
     #[inline]
     #[allow(dead_code)]
     pub(crate) fn write_vectored(&mut self, buffers: &[io::IoSlice<'_>]) -> io::Result<usize> {
-        let slices = crate::vectored::byte_slices(buffers)?;
-        qubit_io::Output::write_vectored(self, &slices)
+        let slices = byte_slices(buffers)?;
+        Output::write_vectored(self, &slices)
     }
 }
 
-impl qubit_io::Output for LocalAtomicWriter {
+impl Output for LocalAtomicWriter {
+    /// The byte type accepted by this writer.
     type Item = u8;
 
+    /// Writes from the supplied byte slices into the staging file.
+    ///
+    /// # Parameters
+    /// - `buffers`: Ordered byte slices to write.
+    ///
+    /// # Returns
+    /// The number of bytes accepted from the requested range. A successful
+    /// call may be short and leaves any accepted prefix in staging.
+    ///
+    /// # Errors
+    /// Returns an error when the staging file cannot accept the bytes.
     fn write_vectored(&mut self, buffers: &[&[u8]]) -> io::Result<usize> {
-        qubit_io::Output::write_vectored(self.staged_file.file_mut(), buffers)
+        Output::write_vectored(self.staged_file.file_mut(), buffers)
     }
 
+    /// Writes a range of `input` into the staging file without checking bounds.
+    ///
+    /// # Parameters
+    /// - `input`: Source byte slice.
+    /// - `index`: First byte to write.
+    /// - `count`: Number of bytes to write.
+    ///
+    /// # Returns
+    /// The number of bytes accepted from the requested range. A successful
+    /// call can be short and leaves any accepted prefix in staging.
+    ///
+    /// # Errors
+    /// Returns an error when the staging file cannot accept the bytes.
+    ///
+    /// # Safety
+    /// `index + count` must not overflow and must be within `input`.
     unsafe fn write_unchecked(&mut self, input: &[u8], index: usize, count: usize) -> io::Result<usize> {
         #[cfg(test)]
-        crate::tests::native_io_fault_tests::check(crate::tests::native_io_fault_tests::NativeIoPoint::FileWrite)?;
-        qubit_io::Output::write(self.staged_file.file_mut(), &input[index..index + count])
+        check_native_io_fault(NativeIoPoint::FileWrite)?;
+        Output::write(self.staged_file.file_mut(), &input[index..index + count])
     }
 
     /// Flushes userspace data into the private staging file.
+    ///
+    /// # Returns
+    /// `Ok(())` after the staging file's userspace buffer is flushed.
+    ///
+    /// # Errors
+    /// Returns the staging file's flush error.
     #[inline]
     fn flush(&mut self) -> io::Result<()> {
-        qubit_io::Output::flush(self.staged_file.file_mut())
+        Output::flush(self.staged_file.file_mut())
     }
 }
 
 /// Adds atomic-write context to a native I/O result.
+///
+/// # Type Parameters
+/// - `T`: Successful value preserved from the native result.
+///
+/// # Parameters
+/// - `result`: Native operation result to contextualize.
+/// - `stage`: Atomic-write stage associated with the operation.
+/// - `path`: User-visible destination path.
+/// - `temporary_path`: Optional staging path associated with the operation.
+/// - `destination_state`: Destination state known when the error occurred.
+///
+/// # Returns
+/// The successful value, or a structured error retaining the supplied context.
+///
+/// # Errors
+/// Returns a contextualized atomic-write error when the native operation fails.
 #[inline]
 fn with_atomic_context<T>(
     result: io::Result<T>,
@@ -618,25 +744,48 @@ fn with_atomic_context<T>(
 }
 
 /// Synchronizes the destination and every newly created parent entry.
+///
+/// # Parameters
+/// - `path`: Destination whose containing directory must be synchronized.
+/// - `parent_dirs_to_sync`: Newly created ancestor directories, ordered from
+///   nearest to farthest from the destination.
+///
+/// # Returns
+/// `Ok(())` after all required directory sync operations complete.
+///
+/// # Errors
+/// Returns the first native synchronization error.
 fn sync_atomic_parent_chain(path: &Path, parent_dirs_to_sync: &[PathBuf]) -> io::Result<()> {
     #[cfg(feature = "test-support")]
     if test_support::is_enabled("atomic-install-unlink-recover-sync")
         || test_support::is_enabled("atomic-install-unlink-persistent-sync")
         || test_support::is_enabled("atomic-install-unlink-indeterminate-sync")
     {
-        return Err(crate::local::test_fault_error());
+        return Err(test_fault_error());
     }
     sync_parent_dir(path)?;
     for directory in parent_dirs_to_sync.iter().rev() {
         #[cfg(feature = "test-support")]
         if test_support::is_enabled("atomic-writer-created-parent-sync") {
-            return Err(crate::local::test_fault_error());
+            return Err(test_fault_error());
         }
         sync_parent_dir(directory)?;
     }
     Ok(())
 }
 
+/// Records a parent-sync event and synchronizes the destination parent chain.
+///
+/// # Parameters
+/// - `path`: Destination whose containing directory must be synchronized.
+/// - `parent_dirs_to_sync`: Newly created ancestor directories to synchronize.
+/// - `observer`: Optional receiver notified before synchronization begins.
+///
+/// # Returns
+/// `Ok(())` after all required directory sync operations complete.
+///
+/// # Errors
+/// Returns the first native synchronization error.
 fn sync_atomic_parent_chain_observed(
     path: &Path,
     parent_dirs_to_sync: &[PathBuf],
@@ -652,6 +801,18 @@ fn sync_atomic_parent_chain_observed(
 /// A missing entry returns `(false, false)`; a regular file returns
 /// `(true, true)`; an allowed final-link replacement returns `(true, false)`.
 /// Other kinds return `InvalidInput`, and native inspection failures propagate.
+///
+/// # Parameters
+/// - `path`: Destination entry to inspect without following its final link.
+/// - `replace_target_symlink`: Whether a final symbolic-link entry is allowed.
+///
+/// # Returns
+/// A tuple of destination existence and whether existing metadata must be
+/// preserved.
+///
+/// # Errors
+/// Returns `InvalidInput` for unsupported entry kinds and propagates inspection
+/// errors other than `NotFound`.
 fn existing_file_metadata(path: &Path, replace_target_symlink: bool) -> io::Result<(bool, bool)> {
     match fs::symlink_metadata(path) {
         Ok(metadata) if metadata.file_type().is_file() => Ok((true, true)),
@@ -672,8 +833,18 @@ fn existing_file_metadata(path: &Path, replace_target_symlink: bool) -> io::Resu
 /// entry. The returned handle pins the observed file through the commit-time
 /// check; the subsequent path-based installation still has a check/install
 /// race.
+///
+/// # Parameters
+/// - `path`: Windows destination entry to observe.
+///
+/// # Returns
+/// The opened entry handle and its stable metadata identity.
+///
+/// # Errors
+/// Returns native open/identity errors, or `InvalidInput` for non-regular
+/// entries.
 #[cfg(windows)]
-fn observe_windows_atomic_destination(path: &Path) -> io::Result<(fs::File, crate::rooted::Metadata)> {
+fn observe_windows_atomic_destination(path: &Path) -> io::Result<(fs::File, Metadata)> {
     use std::os::windows::fs::OpenOptionsExt;
 
     use windows_sys::Win32::Storage::FileSystem::FILE_FLAG_BACKUP_SEMANTICS;
@@ -687,43 +858,12 @@ fn observe_windows_atomic_destination(path: &Path) -> io::Result<(fs::File, crat
         .share_mode(FILE_SHARE_DELETE | FILE_SHARE_READ | FILE_SHARE_WRITE)
         .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_BACKUP_SEMANTICS)
         .open(path)?;
-    let metadata = crate::rooted::Metadata::from_open_file(&file)?;
-    if metadata.kind() != crate::rooted::EntryKind::File {
+    let metadata = Metadata::from_open_file(&file)?;
+    if metadata.kind() != EntryKind::File {
         return Err(io::Error::new(
             ErrorKind::InvalidInput,
             "atomic destination must remain a regular file",
         ));
     }
     Ok((file, metadata))
-}
-
-#[cfg(test)]
-mod output_range_tests {
-    use tempfile::tempdir;
-
-    use super::LocalAtomicWriter;
-    use crate::LocalAtomicWriteOptions;
-    use crate::LocalDurabilityRequirement;
-
-    #[test]
-    fn local_atomic_writer_output_range_preserves_sentinels() {
-        let directory = tempdir().expect("temporary directory should be created");
-        let destination = directory.path().join("target");
-        let options = LocalAtomicWriteOptions::new().with_durability(LocalDurabilityRequirement::NotRequired);
-        let mut writer = LocalAtomicWriter::new(&destination, options).expect("atomic writer should open");
-        // SAFETY: 2..5 is a valid input range.
-        assert_eq!(
-            3,
-            unsafe { qubit_io::Output::write_unchecked(&mut writer, b"!!xyz!!", 2, 3) }.unwrap()
-        );
-        // SAFETY: 7..7 is a valid empty input range.
-        assert_eq!(
-            0,
-            unsafe { qubit_io::Output::write_unchecked(&mut writer, b"1234567", 7, 0) }.unwrap()
-        );
-        writer
-            .commit_recoverable_with_durability()
-            .expect("atomic writer should commit");
-        assert_eq!(b"xyz", std::fs::read(destination).unwrap().as_slice());
-    }
 }

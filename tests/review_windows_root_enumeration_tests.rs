@@ -48,7 +48,7 @@ fn root_walkers(rooted: &LocalFileSystem) -> (LocalDirectoryWalker, LocalDirecto
 }
 
 #[test]
-fn rooted_root_enumerators_have_independent_cursors_across_native_batches() {
+fn test_rooted_root_enumerators_have_independent_cursors_across_native_batches() {
     let fixture = tempdir().expect("temporary root should be created");
     let descendant_path = fixture.path().join("descendant");
     fs::create_dir(&descendant_path).expect("descendant fixture should be created");

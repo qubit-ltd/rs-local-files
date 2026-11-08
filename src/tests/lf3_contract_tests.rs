@@ -13,7 +13,7 @@ use crate::policy::LocalFileSyncRequirement;
 use crate::policy::LocalPrivacyRequirement;
 
 #[test]
-fn lf3_contract_defaults_preserve_old_guarantees() {
+fn test_lf3_contract_defaults_preserve_old_guarantees() {
     let options = LocalWriteOptions::new(LocalWriteMode::CreateNew);
     assert_eq!(options.file_sync(), LocalFileSyncRequirement::NotRequired);
     assert_eq!(options.durability(), LocalDurabilityRequirement::NotRequired);
@@ -21,7 +21,7 @@ fn lf3_contract_defaults_preserve_old_guarantees() {
 }
 
 #[test]
-fn lf3_contract_byte_traits_accept_unsized_values() {
+fn test_lf3_contract_byte_traits_accept_unsized_values() {
     fn accepts_input<R: qubit_io::ByteInput + ?Sized>(_reader: &mut R) {}
     fn accepts_output<W: qubit_io::ByteOutput + ?Sized>(_writer: &mut W) {}
 
@@ -32,7 +32,7 @@ fn lf3_contract_byte_traits_accept_unsized_values() {
 }
 
 #[test]
-fn lf3_contract_privacy_defaults_and_copy_configuration() {
+fn test_lf3_contract_privacy_defaults_and_copy_configuration() {
     let file_options = crate::options::LocalTempFileOptions::new();
     let directory_options = crate::options::LocalTempDirectoryOptions::new();
     assert_eq!(file_options.privacy(), LocalPrivacyRequirement::PlatformDefault);
@@ -48,7 +48,7 @@ fn lf3_contract_privacy_defaults_and_copy_configuration() {
 }
 
 #[test]
-fn lf3_contract_read_options_keep_explicit_budgets_and_snapshot_limit() {
+fn test_lf3_contract_read_options_keep_explicit_budgets_and_snapshot_limit() {
     use crate::options::LocalObservedReadOptions;
     use crate::options::LocalPathBindingOptions;
     use crate::options::LocalReadAllOptions;
@@ -82,7 +82,7 @@ fn lf3_contract_read_options_keep_explicit_budgets_and_snapshot_limit() {
 }
 
 #[test]
-fn lf3_contract_invalid_encoding_retains_utf8_source() {
+fn test_lf3_contract_invalid_encoding_retains_utf8_source() {
     use crate::error::LocalFileError;
     use crate::error::LocalFileErrorKind;
     use crate::error::LocalFileOperation;
@@ -98,7 +98,7 @@ fn lf3_contract_invalid_encoding_retains_utf8_source() {
 }
 
 #[test]
-fn lf3_contract_configuration_edit_uses_utf8_snapshot_and_fixed_writer() {
+fn test_lf3_contract_configuration_edit_uses_utf8_snapshot_and_fixed_writer() {
     use std::path::Path;
 
     use crate::LocalFileSystem;
@@ -141,7 +141,7 @@ fn lf3_contract_configuration_edit_uses_utf8_snapshot_and_fixed_writer() {
 }
 
 #[test]
-fn lf3_contract_shared_cache_uses_private_sealed_native_file() {
+fn test_lf3_contract_shared_cache_uses_private_sealed_native_file() {
     use std::io::Write;
 
     use crate::LocalFileSystem;
@@ -181,7 +181,7 @@ fn lf3_contract_shared_cache_uses_private_sealed_native_file() {
 
 #[cfg(unix)]
 #[test]
-fn lf3_contract_directory_backup_preserves_links_until_strictly_rejected() {
+fn test_lf3_contract_directory_backup_preserves_links_until_strictly_rejected() {
     use std::path::PathBuf;
 
     use crate::LocalFileKind;
@@ -241,7 +241,7 @@ fn lf3_contract_directory_backup_preserves_links_until_strictly_rejected() {
 
 #[cfg(unix)]
 #[test]
-fn lf3_contract_component_policy_does_not_isolate_copy_from_ancestor_replacement() {
+fn test_lf3_contract_component_policy_does_not_isolate_copy_from_ancestor_replacement() {
     use std::path::Path;
     use std::sync::Arc;
     use std::sync::Barrier;

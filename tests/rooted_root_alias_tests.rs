@@ -27,7 +27,7 @@ mod unix {
     /// Uses aliases to the virtual root as explicit and default temp parents,
     /// while preserving Reject and boundary-escape behavior.
     #[test]
-    fn temp_parents_and_probes_accept_root_aliases_within_policy() {
+    fn test_temp_parents_and_probes_accept_root_aliases_within_policy() {
         let directory = tempdir().expect("temporary root should be created");
         fs::create_dir(directory.path().join("child")).expect("child directory should be created");
         symlink(".", directory.path().join("alias")).expect("relative root alias should be created");
@@ -94,7 +94,7 @@ mod unix {
     /// Dotted directory operands and a final link remain rejected at their own
     /// path boundary.
     #[test]
-    fn directory_qualified_alias_and_final_link_operands_are_rejected() {
+    fn test_directory_qualified_alias_and_final_link_operands_are_rejected() {
         let directory = tempdir().expect("temporary root should be created");
         fs::write(directory.path().join("sentinel"), b"keep").expect("sentinel should be written");
         symlink(".", directory.path().join("alias")).expect("root alias should be created");
@@ -131,7 +131,7 @@ mod unix {
     /// Literal virtual-root operands are rejected before any removal or persist
     /// publication.
     #[test]
-    fn virtual_root_operands_are_rejected_for_removal_and_persistence() {
+    fn test_virtual_root_operands_are_rejected_for_removal_and_persistence() {
         let directory = tempdir().expect("temporary root should be created");
         fs::write(directory.path().join("sentinel"), b"keep").expect("sentinel should be written");
         let rooted = LocalFileSystem::rooted(directory.path()).expect("root authority should open");

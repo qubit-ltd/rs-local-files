@@ -6,22 +6,38 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 
+use std::fmt::Debug;
+use std::fmt::Formatter;
+use std::fmt::Result as FmtResult;
 use std::io;
 use std::sync::Arc;
 use std::sync::Mutex;
 
 use super::TestConditionalPoint;
 
+/// Callback owned by a test hook and consumed at most once.
 type TestAction = Box<dyn FnOnce() -> io::Result<()> + Send>;
 
 /// One-shot action attached to one conditional publication boundary.
+#[must_use = "conditional hooks must be attached to a publication operation"]
 pub struct TestConditionalHooks {
+    /// Publication boundary where the callback is invoked.
     point: TestConditionalPoint,
+    /// Shared storage that takes the callback when it is first invoked.
     action: Arc<Mutex<Option<TestAction>>>,
 }
 
-impl std::fmt::Debug for TestConditionalHooks {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl Debug for TestConditionalHooks {
+    /// Formats the hook's publication point without exposing its callback.
+    ///
+    /// # Parameters
+    ///
+    /// * `formatter` - Destination that receives the debug representation.
+    ///
+    /// # Errors
+    ///
+    /// Returns the formatter's error if writing the debug representation fails.
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> FmtResult {
         formatter
             .debug_struct("TestConditionalHooks")
             .field("point", &self.point)
@@ -30,7 +46,20 @@ impl std::fmt::Debug for TestConditionalHooks {
 }
 
 impl TestConditionalHooks {
-    /// Runs `action` once when `point` is reached.
+    /// Creates a hook that runs `action` once when `point` is reached.
+    ///
+    /// # Type Parameters
+    ///
+    /// * `F` - A sendable, one-shot callback that returns an I/O result.
+    ///
+    /// # Parameters
+    ///
+    /// * `point` - Publication boundary that triggers the callback.
+    /// * `action` - Callback invoked at that boundary.
+    ///
+    /// # Returns
+    ///
+    /// A hook storing the callback in shared, one-shot state.
     pub fn once<F>(point: TestConditionalPoint, action: F) -> Self
     where
         F: FnOnce() -> io::Result<()> + Send + 'static,
@@ -41,45 +70,14 @@ impl TestConditionalHooks {
         }
     }
 
+    /// Returns the checkpoint and shared callback state for backend
+    /// installation.
+    ///
+    /// # Returns
+    ///
+    /// The publication point and the mutex-protected, one-shot callback slot.
+    #[must_use]
     pub(crate) fn into_parts(self) -> (TestConditionalPoint, Arc<Mutex<Option<TestAction>>>) {
         (self.point, self.action)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use std::io;
-
-    use super::TestConditionalHooks;
-    use crate::test_support::TestConditionalPoint;
-
-    #[test]
-    fn test_debug_shows_hook_point_without_exposing_action() {
-        let hooks = TestConditionalHooks::once(TestConditionalPoint::BeforePublish, || Ok::<(), io::Error>(()));
-
-        let debug = format!("{hooks:?}");
-        assert!(debug.contains("BeforePublish"));
-        assert!(!debug.contains("action"));
-    }
-
-    #[test]
-    fn test_hook_parts_preserve_point_and_run_the_action_once() {
-        let calls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
-        let action_calls = std::sync::Arc::clone(&calls);
-        let hooks = TestConditionalHooks::once(TestConditionalPoint::AfterPublish, move || {
-            action_calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-            Ok::<(), io::Error>(())
-        });
-
-        let (point, action) = hooks.into_parts();
-        assert_eq!(TestConditionalPoint::AfterPublish, point);
-        let run = action
-            .lock()
-            .expect("hook lock should be available")
-            .take()
-            .expect("action should exist");
-        run().expect("hook action should succeed");
-        assert_eq!(1, calls.load(std::sync::atomic::Ordering::SeqCst));
-        assert!(action.lock().expect("hook lock should be available").is_none());
     }
 }

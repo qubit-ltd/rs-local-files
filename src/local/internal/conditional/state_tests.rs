@@ -20,7 +20,7 @@ mod conditional_state_tests {
     use crate::options::LocalWritePrecondition;
 
     #[test]
-    fn conditional_hooks_debug_output_hides_actions() {
+    fn test_conditional_hooks_debug_output_hides_actions() {
         let hooks = super::super::hooks::ConditionalHooks::default();
         assert_eq!("ConditionalHooks { .. }", format!("{hooks:?}"));
     }
@@ -55,43 +55,42 @@ mod conditional_state_tests {
     }
 
     #[test]
-    fn conditional_state_copy_precedes_publication() {
-        let backend = super::super::fake_backend::FakeBackend::new(b"A", b"B");
+    fn test_conditional_state_copy_precedes_publication() {
+        let backend = super::super::fake_backend_tests::FakeBackend::new(b"A", b"B");
         let events = backend.events();
         let result = super::super::commit::commit_conditional::<Sha256, _>(
             backend,
             LocalWritePrecondition::Content(Sha256::digest(b"A")),
-            super::super::fake_backend::required_options(),
+            super::super::fake_backend_tests::required_options(),
             1,
         )
         .unwrap();
         let events = events.borrow();
         let copy = events
             .iter()
-            .position(|event| *event == super::super::fake_backend::Event::VerifyCopy)
+            .position(|event| *event == super::super::fake_backend_tests::Event::VerifyCopy)
             .unwrap();
         let publish = events
             .iter()
-            .position(|event| *event == super::super::fake_backend::Event::Publish)
+            .position(|event| *event == super::super::fake_backend_tests::Event::Publish)
             .unwrap();
         assert!(copy < publish);
         assert_eq!(result.digest(), &Sha256::digest(b"B"));
     }
 
     #[test]
-    fn conditional_state_flush_failure_reports_prepare_stage() {
+    fn test_conditional_state_flush_failure_reports_prepare_stage() {
         use super::super::ConditionalHooks;
         use super::super::ConditionalPoint;
 
-        let backend = super::super::fake_backend::FakeBackend::new(b"A", b"B").with_hooks(ConditionalHooks::fail_once(
-            ConditionalPoint::Flush,
-            std::io::ErrorKind::PermissionDenied,
-        ));
+        let backend = super::super::fake_backend_tests::FakeBackend::new(b"A", b"B").with_hooks(
+            ConditionalHooks::fail_once(ConditionalPoint::Flush, std::io::ErrorKind::PermissionDenied),
+        );
         let (_lease, target_path) = backend.target_observer();
         let error = super::super::commit::commit_conditional::<Sha256, _>(
             backend,
             LocalWritePrecondition::Content(Sha256::digest(b"A")),
-            super::super::fake_backend::required_options(),
+            super::super::fake_backend_tests::required_options(),
             1,
         )
         .expect_err("flush failure must stop before candidate verification");
@@ -107,7 +106,7 @@ mod conditional_state_tests {
     }
 
     #[test]
-    fn conditional_state_prepublication_checkpoints_fail_closed_with_recovery_copy() {
+    fn test_conditional_state_prepublication_checkpoints_fail_closed_with_recovery_copy() {
         use super::super::ConditionalHooks;
         use super::super::ConditionalPoint;
 
@@ -129,13 +128,13 @@ mod conditional_state_tests {
                 crate::error::LocalConditionalWriteStage::Publish,
             ),
         ] {
-            let backend = super::super::fake_backend::FakeBackend::new(b"A", b"B")
+            let backend = super::super::fake_backend_tests::FakeBackend::new(b"A", b"B")
                 .with_hooks(ConditionalHooks::fail_once(point, std::io::ErrorKind::PermissionDenied));
             let (_lease, target_path) = backend.target_observer();
             let error = super::super::commit::commit_conditional::<Sha256, _>(
                 backend,
                 LocalWritePrecondition::Content(Sha256::digest(b"A")),
-                super::super::fake_backend::required_options(),
+                super::super::fake_backend_tests::required_options(),
                 1,
             )
             .expect_err("a failed prepublication checkpoint must prevent publishing");
@@ -155,19 +154,18 @@ mod conditional_state_tests {
     }
 
     #[test]
-    fn conditional_state_postpublication_checkpoint_error_transfers_native_receipts() {
+    fn test_conditional_state_postpublication_checkpoint_error_transfers_native_receipts() {
         use super::super::ConditionalHooks;
         use super::super::ConditionalPoint;
 
-        let backend = super::super::fake_backend::FakeBackend::new(b"A", b"B").with_hooks(ConditionalHooks::fail_once(
-            ConditionalPoint::AfterPublish,
-            std::io::ErrorKind::Other,
-        ));
+        let backend = super::super::fake_backend_tests::FakeBackend::new(b"A", b"B").with_hooks(
+            ConditionalHooks::fail_once(ConditionalPoint::AfterPublish, std::io::ErrorKind::Other),
+        );
         let (_lease, target_path) = backend.target_observer();
         let error = super::super::commit::commit_conditional::<Sha256, _>(
             backend,
             LocalWritePrecondition::Content(Sha256::digest(b"A")),
-            super::super::fake_backend::required_options(),
+            super::super::fake_backend_tests::required_options(),
             1,
         )
         .expect_err("failure after native publication must preserve its receipts");
@@ -189,19 +187,19 @@ mod conditional_state_tests {
     }
 
     #[test]
-    fn conditional_state_displaced_and_rollback_checkpoints_preserve_recovery() {
+    fn test_conditional_state_displaced_and_rollback_checkpoints_preserve_recovery() {
         use super::super::ConditionalHookAction;
         use super::super::ConditionalHooks;
         use super::super::ConditionalPoint;
 
-        let displaced_backend = super::super::fake_backend::FakeBackend::new(b"A", b"B").with_hooks(
+        let displaced_backend = super::super::fake_backend_tests::FakeBackend::new(b"A", b"B").with_hooks(
             ConditionalHooks::fail_once(ConditionalPoint::VerifyDisplaced, std::io::ErrorKind::Other),
         );
         let (_lease, target_path) = displaced_backend.target_observer();
         let error = super::super::commit::commit_conditional::<Sha256, _>(
             displaced_backend,
             LocalWritePrecondition::Content(Sha256::digest(b"A")),
-            super::super::fake_backend::required_options(),
+            super::super::fake_backend_tests::required_options(),
             1,
         )
         .expect_err("displaced-entry verification failure must retain both entries");
@@ -231,12 +229,12 @@ mod conditional_state_tests {
                 ),
                 (point, ConditionalHookAction::Fail(std::io::ErrorKind::PermissionDenied)),
             ]);
-            let backend = super::super::fake_backend::FakeBackend::new(b"A", b"B").with_hooks(hooks);
+            let backend = super::super::fake_backend_tests::FakeBackend::new(b"A", b"B").with_hooks(hooks);
             let (_lease, target_path) = backend.target_observer();
             let error = super::super::commit::commit_conditional::<Sha256, _>(
                 backend,
                 LocalWritePrecondition::Content(Sha256::digest(b"A")),
-                super::super::fake_backend::required_options(),
+                super::super::fake_backend_tests::required_options(),
                 1,
             )
             .expect_err("rollback checkpoint failure must retain recovery entries");
@@ -271,12 +269,12 @@ mod conditional_state_tests {
 
     #[cfg(feature = "test-support")]
     #[test]
-    fn conditional_state_failed_rollback_keeps_original_displaced_role() {
+    fn test_conditional_state_failed_rollback_keeps_original_displaced_role() {
         use super::super::ConditionalHooks;
         use crate::test_support::TestConditionalHooks;
         use crate::test_support::TestConditionalPoint;
 
-        let backend = super::super::fake_backend::FakeBackend::new(b"A", b"B");
+        let backend = super::super::fake_backend_tests::FakeBackend::new(b"A", b"B");
         let (lease, target_path) = backend.target_observer();
         let displaced_path = lease.path().join("old");
         let displaced_for_hook = displaced_path.clone();
@@ -297,7 +295,7 @@ mod conditional_state_tests {
         let error = super::super::commit::commit_conditional::<Sha256, _>(
             backend.with_hooks(hooks),
             LocalWritePrecondition::Content(Sha256::digest(b"A")),
-            super::super::fake_backend::required_options(),
+            super::super::fake_backend_tests::required_options(),
             1,
         )
         .expect_err("a failed rollback keeps the original displaced receipt");
@@ -318,14 +316,14 @@ mod conditional_state_tests {
     }
 
     #[test]
-    fn conditional_state_candidate_copy_backend_error_has_no_copy() {
-        let backend = super::super::fake_backend::FakeBackend::new(b"A", b"B")
+    fn test_conditional_state_candidate_copy_backend_error_has_no_copy() {
+        let backend = super::super::fake_backend_tests::FakeBackend::new(b"A", b"B")
             .fail_candidate_copy_once(std::io::ErrorKind::PermissionDenied);
         let (_lease, target_path) = backend.target_observer();
         let error = super::super::commit::commit_conditional::<Sha256, _>(
             backend,
             LocalWritePrecondition::Content(Sha256::digest(b"A")),
-            super::super::fake_backend::required_options(),
+            super::super::fake_backend_tests::required_options(),
             1,
         )
         .expect_err("candidate-copy creation error must fail before publication");
@@ -345,14 +343,14 @@ mod conditional_state_tests {
     }
 
     #[test]
-    fn conditional_state_absent_precheck_io_error_is_not_target_missing() {
-        let backend = super::super::fake_backend::FakeBackend::new(b"A", b"B")
+    fn test_conditional_state_absent_precheck_io_error_is_not_target_missing() {
+        let backend = super::super::fake_backend_tests::FakeBackend::new(b"A", b"B")
             .fail_target_open_once(std::io::ErrorKind::PermissionDenied);
         let (_lease, target_path) = backend.target_observer();
         let error = super::super::commit::commit_conditional::<Sha256, _>(
             backend,
             LocalWritePrecondition::Absent,
-            super::super::fake_backend::required_options(),
+            super::super::fake_backend_tests::required_options(),
             1,
         )
         .expect_err("non-NotFound target-open failure must be classified as I/O");
@@ -368,13 +366,13 @@ mod conditional_state_tests {
     }
 
     #[test]
-    fn conditional_state_content_publish_without_displaced_receipt_is_indeterminate() {
-        let backend = super::super::fake_backend::FakeBackend::new(b"A", b"B").omit_displaced_receipt_once();
+    fn test_conditional_state_content_publish_without_displaced_receipt_is_indeterminate() {
+        let backend = super::super::fake_backend_tests::FakeBackend::new(b"A", b"B").omit_displaced_receipt_once();
         let (_lease, target_path) = backend.target_observer();
         let error = super::super::commit::commit_conditional::<Sha256, _>(
             backend,
             LocalWritePrecondition::Content(Sha256::digest(b"A")),
-            super::super::fake_backend::required_options(),
+            super::super::fake_backend_tests::required_options(),
             1,
         )
         .expect_err("content publication requires a receipt for the displaced target");
@@ -397,7 +395,7 @@ mod conditional_state_tests {
     }
 
     #[test]
-    fn conditional_state_preferred_metadata_sync_failure_only_downgrades_durability() {
+    fn test_conditional_state_preferred_metadata_sync_failure_only_downgrades_durability() {
         use super::super::ConditionalHookAction;
         use super::super::ConditionalHooks;
         use super::super::ConditionalPoint;
@@ -416,7 +414,7 @@ mod conditional_state_tests {
                 ConditionalHookAction::Fail(std::io::ErrorKind::PermissionDenied),
             ),
         ]);
-        let backend = super::super::fake_backend::FakeBackend::new(b"A", b"B").with_hooks(hooks);
+        let backend = super::super::fake_backend_tests::FakeBackend::new(b"A", b"B").with_hooks(hooks);
         let (_lease, target_path) = backend.target_observer();
         let outcome = super::super::commit::commit_conditional::<Sha256, _>(
             backend,
@@ -432,13 +430,13 @@ mod conditional_state_tests {
     }
 
     #[test]
-    fn conditional_state_native_receipt_and_identity_failures_keep_all_recovery_entries() {
-        let backend = super::super::fake_backend::FakeBackend::new(b"A", b"B").omit_installed_receipt_once();
+    fn test_conditional_state_native_receipt_and_identity_failures_keep_all_recovery_entries() {
+        let backend = super::super::fake_backend_tests::FakeBackend::new(b"A", b"B").omit_installed_receipt_once();
         let (_lease, target_path) = backend.target_observer();
         let error = super::super::commit::commit_conditional::<Sha256, _>(
             backend,
             LocalWritePrecondition::Content(Sha256::digest(b"A")),
-            super::super::fake_backend::required_options(),
+            super::super::fake_backend_tests::required_options(),
             1,
         )
         .expect_err("publication without an installed receipt is indeterminate");
@@ -454,14 +452,14 @@ mod conditional_state_tests {
         }));
 
         for backend in [
-            super::super::fake_backend::FakeBackend::new(b"A", b"B").fail_displaced_verify_once(),
-            super::super::fake_backend::FakeBackend::new(b"A", b"B").fail_candidate_identity_once(),
+            super::super::fake_backend_tests::FakeBackend::new(b"A", b"B").fail_displaced_verify_once(),
+            super::super::fake_backend_tests::FakeBackend::new(b"A", b"B").fail_candidate_identity_once(),
         ] {
             let (_lease, target_path) = backend.target_observer();
             let error = super::super::commit::commit_conditional::<Sha256, _>(
                 backend,
                 LocalWritePrecondition::Content(Sha256::digest(b"A")),
-                super::super::fake_backend::required_options(),
+                super::super::fake_backend_tests::required_options(),
                 1,
             )
             .expect_err("native receipt verification errors must preserve recovery entries");
@@ -478,13 +476,14 @@ mod conditional_state_tests {
     }
 
     #[test]
-    fn conditional_state_digest_readback_errors_keep_published_receipts() {
-        let backend = super::super::fake_backend::FakeBackend::new(b"A", b"B").remove_displaced_after_verify_once();
+    fn test_conditional_state_digest_readback_errors_keep_published_receipts() {
+        let backend =
+            super::super::fake_backend_tests::FakeBackend::new(b"A", b"B").remove_displaced_after_verify_once();
         let (_lease, target_path) = backend.target_observer();
         let error = super::super::commit::commit_conditional::<Sha256, _>(
             backend,
             LocalWritePrecondition::Content(Sha256::digest(b"A")),
-            super::super::fake_backend::required_options(),
+            super::super::fake_backend_tests::required_options(),
             1,
         )
         .expect_err("displaced digest readback failure must be indeterminate");
@@ -505,12 +504,13 @@ mod conditional_state_tests {
                 .any(|file| { file.role() == crate::recovery::LocalRecoveryFileRole::Displaced })
         );
 
-        let backend = super::super::fake_backend::FakeBackend::new(b"A", b"B").remove_installed_after_identity_once();
+        let backend =
+            super::super::fake_backend_tests::FakeBackend::new(b"A", b"B").remove_installed_after_identity_once();
         let (_lease, target_path) = backend.target_observer();
         let error = super::super::commit::commit_conditional::<Sha256, _>(
             backend,
             LocalWritePrecondition::Content(Sha256::digest(b"A")),
-            super::super::fake_backend::required_options(),
+            super::super::fake_backend_tests::required_options(),
             1,
         )
         .expect_err("installed digest readback failure must be indeterminate");
@@ -533,7 +533,7 @@ mod conditional_state_tests {
     }
 
     #[test]
-    fn conditional_state_preferred_published_sync_failure_returns_durable_false() {
+    fn test_conditional_state_preferred_published_sync_failure_returns_durable_false() {
         use super::super::ConditionalHooks;
         use super::super::ConditionalPoint;
         use crate::options::LocalWriteMode;
@@ -544,10 +544,9 @@ mod conditional_state_tests {
         let options = LocalWriteOptions::new(LocalWriteMode::CreateOrReplace)
             .with_atomicity(LocalAtomicityRequirement::Required)
             .with_durability(LocalDurabilityRequirement::Preferred);
-        let backend = super::super::fake_backend::FakeBackend::new(b"A", b"B").with_hooks(ConditionalHooks::fail_once(
-            ConditionalPoint::SyncInstalled,
-            std::io::ErrorKind::PermissionDenied,
-        ));
+        let backend = super::super::fake_backend_tests::FakeBackend::new(b"A", b"B").with_hooks(
+            ConditionalHooks::fail_once(ConditionalPoint::SyncInstalled, std::io::ErrorKind::PermissionDenied),
+        );
         let (_lease, target_path) = backend.target_observer();
         let outcome = super::super::commit::commit_conditional::<Sha256, _>(
             backend,
@@ -564,13 +563,13 @@ mod conditional_state_tests {
     }
 
     #[test]
-    fn conditional_state_precondition_failure_retains_candidate_copy() {
-        let backend = super::super::fake_backend::FakeBackend::new(b"A", b"B");
+    fn test_conditional_state_precondition_failure_retains_candidate_copy() {
+        let backend = super::super::fake_backend_tests::FakeBackend::new(b"A", b"B");
         let (_lease, target_path) = backend.target_observer();
         let error = super::super::commit::commit_conditional::<Sha256, _>(
             backend,
             LocalWritePrecondition::Content(Sha256::digest(b"other")),
-            super::super::fake_backend::required_options(),
+            super::super::fake_backend_tests::required_options(),
             1,
         )
         .expect_err("mismatched content precondition must fail");
@@ -593,12 +592,12 @@ mod conditional_state_tests {
     }
 
     #[test]
-    fn conditional_state_supports_digest_without_clone() {
-        let backend = super::super::fake_backend::FakeBackend::new(b"A", b"B");
+    fn test_conditional_state_supports_digest_without_clone() {
+        let backend = super::super::fake_backend_tests::FakeBackend::new(b"A", b"B");
         let result = super::super::commit::commit_conditional::<NoCloneSha256, _>(
             backend,
             LocalWritePrecondition::Content(NoCloneSha256::digest(b"A")),
-            super::super::fake_backend::required_options(),
+            super::super::fake_backend_tests::required_options(),
             1,
         )
         .expect("non-Clone digest commits");
@@ -606,21 +605,22 @@ mod conditional_state_tests {
     }
 
     #[test]
-    fn conditional_state_copy_verification_failure_retains_partial_copy() {
+    fn test_conditional_state_copy_verification_failure_retains_partial_copy() {
         use super::super::ConditionalHookAction;
         use super::super::ConditionalHooks;
         use super::super::ConditionalPoint;
 
-        let backend =
-            super::super::fake_backend::FakeBackend::new(b"A", b"B").with_hooks(ConditionalHooks::sequence(vec![(
+        let backend = super::super::fake_backend_tests::FakeBackend::new(b"A", b"B").with_hooks(
+            ConditionalHooks::sequence(vec![(
                 ConditionalPoint::CandidateCopyCreated,
                 ConditionalHookAction::CorruptCandidateCopy(b"broken".to_vec()),
-            )]));
+            )]),
+        );
         let (_lease, target_path) = backend.target_observer();
         let error = super::super::commit::commit_conditional::<Sha256, _>(
             backend,
             LocalWritePrecondition::Content(Sha256::digest(b"A")),
-            super::super::fake_backend::required_options(),
+            super::super::fake_backend_tests::required_options(),
             1,
         )
         .expect_err("damaged copy must not publish");
@@ -644,21 +644,22 @@ mod conditional_state_tests {
     }
 
     #[test]
-    fn conditional_state_candidate_copy_digest_mismatch_retains_corrupt_copy() {
+    fn test_conditional_state_candidate_copy_digest_mismatch_retains_corrupt_copy() {
         use super::super::ConditionalHookAction;
         use super::super::ConditionalHooks;
         use super::super::ConditionalPoint;
 
-        let backend =
-            super::super::fake_backend::FakeBackend::new(b"A", b"B").with_hooks(ConditionalHooks::sequence(vec![(
+        let backend = super::super::fake_backend_tests::FakeBackend::new(b"A", b"B").with_hooks(
+            ConditionalHooks::sequence(vec![(
                 ConditionalPoint::CandidateCopyCreated,
                 ConditionalHookAction::CorruptCandidateCopy(b"damaged".to_vec()),
-            )]));
+            )]),
+        );
         let (_lease, target_path) = backend.target_observer();
         let error = super::super::commit::commit_conditional::<Sha256, _>(
             backend,
             LocalWritePrecondition::Content(Sha256::digest(b"A")),
-            super::super::fake_backend::required_options(),
+            super::super::fake_backend_tests::required_options(),
             1,
         )
         .expect_err("digest-mismatched candidate copy must not publish");
@@ -682,18 +683,17 @@ mod conditional_state_tests {
     }
 
     #[test]
-    fn conditional_state_prepublication_sync_failure_preserves_verified_copy() {
+    fn test_conditional_state_prepublication_sync_failure_preserves_verified_copy() {
         use super::super::ConditionalHooks;
         use super::super::ConditionalPoint;
 
-        let backend = super::super::fake_backend::FakeBackend::new(b"A", b"B").with_hooks(ConditionalHooks::fail_once(
-            ConditionalPoint::SyncCandidate,
-            std::io::ErrorKind::PermissionDenied,
-        ));
+        let backend = super::super::fake_backend_tests::FakeBackend::new(b"A", b"B").with_hooks(
+            ConditionalHooks::fail_once(ConditionalPoint::SyncCandidate, std::io::ErrorKind::PermissionDenied),
+        );
         let error = super::super::commit::commit_conditional::<Sha256, _>(
             backend,
             LocalWritePrecondition::Content(Sha256::digest(b"A")),
-            super::super::fake_backend::required_options(),
+            super::super::fake_backend_tests::required_options(),
             1,
         )
         .expect_err("required candidate sync failure must stop publication");
@@ -704,7 +704,7 @@ mod conditional_state_tests {
     }
 
     #[test]
-    fn conditional_state_postpublication_sync_failure_transfers_every_entry() {
+    fn test_conditional_state_postpublication_sync_failure_transfers_every_entry() {
         use super::super::ConditionalHookAction;
         use super::super::ConditionalHooks;
         use super::super::ConditionalPoint;
@@ -716,12 +716,12 @@ mod conditional_state_tests {
                 ConditionalHookAction::Fail(std::io::ErrorKind::PermissionDenied),
             ),
         ]);
-        let backend = super::super::fake_backend::FakeBackend::new(b"A", b"B").with_hooks(hooks);
+        let backend = super::super::fake_backend_tests::FakeBackend::new(b"A", b"B").with_hooks(hooks);
         let (_lease, target_path) = backend.target_observer();
         let error = super::super::commit::commit_conditional::<Sha256, _>(
             backend,
             LocalWritePrecondition::Content(Sha256::digest(b"A")),
-            super::super::fake_backend::required_options(),
+            super::super::fake_backend_tests::required_options(),
             1,
         )
         .expect_err("required postpublication namespace sync must fail");
@@ -749,19 +749,18 @@ mod conditional_state_tests {
     }
 
     #[test]
-    fn conditional_state_installed_file_sync_failure_retains_published_entries() {
+    fn test_conditional_state_installed_file_sync_failure_retains_published_entries() {
         use super::super::ConditionalHooks;
         use super::super::ConditionalPoint;
 
-        let backend = super::super::fake_backend::FakeBackend::new(b"A", b"B").with_hooks(ConditionalHooks::fail_once(
-            ConditionalPoint::SyncInstalled,
-            std::io::ErrorKind::PermissionDenied,
-        ));
+        let backend = super::super::fake_backend_tests::FakeBackend::new(b"A", b"B").with_hooks(
+            ConditionalHooks::fail_once(ConditionalPoint::SyncInstalled, std::io::ErrorKind::PermissionDenied),
+        );
         let (_lease, target_path) = backend.target_observer();
         let error = super::super::commit::commit_conditional::<Sha256, _>(
             backend,
             LocalWritePrecondition::Content(Sha256::digest(b"A")),
-            super::super::fake_backend::required_options(),
+            super::super::fake_backend_tests::required_options(),
             1,
         )
         .expect_err("required installed-file sync must fail");
@@ -783,19 +782,18 @@ mod conditional_state_tests {
     }
 
     #[test]
-    fn conditional_state_save_complete_cleanup_failure_returns_success_and_retains_files() {
+    fn test_conditional_state_save_complete_cleanup_failure_returns_success_and_retains_files() {
         use super::super::ConditionalHooks;
         use super::super::ConditionalPoint;
 
-        let backend = super::super::fake_backend::FakeBackend::new(b"A", b"B").with_hooks(ConditionalHooks::fail_once(
-            ConditionalPoint::SaveComplete,
-            std::io::ErrorKind::PermissionDenied,
-        ));
+        let backend = super::super::fake_backend_tests::FakeBackend::new(b"A", b"B").with_hooks(
+            ConditionalHooks::fail_once(ConditionalPoint::SaveComplete, std::io::ErrorKind::PermissionDenied),
+        );
         let (_lease, target_path) = backend.target_observer();
         let outcome = super::super::commit::commit_conditional::<Sha256, _>(
             backend,
             LocalWritePrecondition::Content(Sha256::digest(b"A")),
-            super::super::fake_backend::required_options(),
+            super::super::fake_backend_tests::required_options(),
             1,
         )
         .expect("post-save cleanup failure must remain successful");
@@ -811,7 +809,7 @@ mod conditional_state_tests {
     }
 
     #[test]
-    fn conditional_state_postpublication_race_rolls_back_once_and_retains_files() {
+    fn test_conditional_state_postpublication_race_rolls_back_once_and_retains_files() {
         use super::super::ConditionalHookAction;
         use super::super::ConditionalHooks;
         use super::super::ConditionalPoint;
@@ -820,11 +818,11 @@ mod conditional_state_tests {
             ConditionalPoint::Publish,
             ConditionalHookAction::ReplaceTarget(b"R".to_vec()),
         )]);
-        let backend = super::super::fake_backend::FakeBackend::new(b"A", b"B").with_hooks(hooks);
+        let backend = super::super::fake_backend_tests::FakeBackend::new(b"A", b"B").with_hooks(hooks);
         let error = super::super::commit::commit_conditional::<Sha256, _>(
             backend,
             LocalWritePrecondition::Content(Sha256::digest(b"A")),
-            super::super::fake_backend::required_options(),
+            super::super::fake_backend_tests::required_options(),
             1,
         )
         .expect_err("post-publication conflict must be reported");
@@ -856,7 +854,7 @@ mod conditional_state_tests {
     }
 
     #[test]
-    fn conditional_state_in_place_candidate_change_blocks_rollback() {
+    fn test_conditional_state_in_place_candidate_change_blocks_rollback() {
         use super::super::ConditionalHookAction;
         use super::super::ConditionalHooks;
         use super::super::ConditionalPoint;
@@ -868,13 +866,13 @@ mod conditional_state_tests {
                 ConditionalHookAction::OverwriteTargetInPlace(b"C".to_vec()),
             ),
         ]);
-        let backend = super::super::fake_backend::FakeBackend::new(b"A", b"B").with_hooks(hooks);
+        let backend = super::super::fake_backend_tests::FakeBackend::new(b"A", b"B").with_hooks(hooks);
         let (_lease, target_path) = backend.target_observer();
         let events = backend.events();
         let error = super::super::commit::commit_conditional::<Sha256, _>(
             backend,
             LocalWritePrecondition::Content(Sha256::digest(b"A")),
-            super::super::fake_backend::required_options(),
+            super::super::fake_backend_tests::required_options(),
             1,
         )
         .expect_err("changed installed bytes must fail rollback precheck");
@@ -898,12 +896,16 @@ mod conditional_state_tests {
         assert!(error.recovery_files().iter().any(|file| {
             file.role() == crate::recovery::LocalRecoveryFileRole::Displaced && recovery_bytes(file) == b"A"
         }));
-        assert!(!events.borrow().contains(&super::super::fake_backend::Event::Rollback));
+        assert!(
+            !events
+                .borrow()
+                .contains(&super::super::fake_backend_tests::Event::Rollback)
+        );
         assert_eq!(error.error().kind(), crate::LocalFileErrorKind::DataCorruption);
     }
 
     #[test]
-    fn conditional_state_late_target_change_is_preserved_without_rollback() {
+    fn test_conditional_state_late_target_change_is_preserved_without_rollback() {
         use super::super::ConditionalHookAction;
         use super::super::ConditionalHooks;
         use super::super::ConditionalPoint;
@@ -912,12 +914,12 @@ mod conditional_state_tests {
             ConditionalPoint::VerifyInstalled,
             ConditionalHookAction::ReplaceTarget(b"C".to_vec()),
         )]);
-        let backend = super::super::fake_backend::FakeBackend::new(b"A", b"B").with_hooks(hooks);
+        let backend = super::super::fake_backend_tests::FakeBackend::new(b"A", b"B").with_hooks(hooks);
         let (_lease, target_path) = backend.target_observer();
         let error = super::super::commit::commit_conditional::<Sha256, _>(
             backend,
             LocalWritePrecondition::Content(Sha256::digest(b"A")),
-            super::super::fake_backend::required_options(),
+            super::super::fake_backend_tests::required_options(),
             1,
         )
         .expect_err("late competing target must not be overwritten by rollback");
@@ -944,16 +946,16 @@ mod conditional_state_tests {
     }
 
     #[test]
-    fn conditional_state_partial_native_failure_restores_and_preserves_source() {
+    fn test_conditional_state_partial_native_failure_restores_and_preserves_source() {
         use super::super::ConditionalHooks;
 
-        let backend = super::super::fake_backend::FakeBackend::new(b"A", b"B")
+        let backend = super::super::fake_backend_tests::FakeBackend::new(b"A", b"B")
             .with_hooks(ConditionalHooks::partial_publish_once());
         let (_lease, target_path) = backend.target_observer();
         let error = super::super::commit::commit_conditional::<Sha256, _>(
             backend,
             LocalWritePrecondition::Content(Sha256::digest(b"A")),
-            super::super::fake_backend::required_options(),
+            super::super::fake_backend_tests::required_options(),
             1,
         )
         .expect_err("native error after publication remains an error");
@@ -975,7 +977,7 @@ mod conditional_state_tests {
     }
 
     #[test]
-    fn conditional_state_rollback_failure_keeps_both_namespaces_recoverable() {
+    fn test_conditional_state_rollback_failure_keeps_both_namespaces_recoverable() {
         use super::super::ConditionalHookAction;
         use super::super::ConditionalHooks;
         use super::super::ConditionalPoint;
@@ -990,12 +992,12 @@ mod conditional_state_tests {
                 ConditionalHookAction::Fail(std::io::ErrorKind::PermissionDenied),
             ),
         ]);
-        let backend = super::super::fake_backend::FakeBackend::new(b"A", b"B").with_hooks(hooks);
+        let backend = super::super::fake_backend_tests::FakeBackend::new(b"A", b"B").with_hooks(hooks);
         let (_lease, target_path) = backend.target_observer();
         let error = super::super::commit::commit_conditional::<Sha256, _>(
             backend,
             LocalWritePrecondition::Content(Sha256::digest(b"A")),
-            super::super::fake_backend::required_options(),
+            super::super::fake_backend_tests::required_options(),
             1,
         )
         .expect_err("failed rollback must keep recovery state");
@@ -1024,14 +1026,15 @@ mod conditional_state_tests {
 
     #[cfg(feature = "test-support")]
     #[test]
-    fn conditional_state_partial_rollback_failure_runs_hook_before_receipts() {
+    fn test_conditional_state_partial_rollback_failure_runs_hook_before_receipts() {
         use super::super::ConditionalHookAction;
         use super::super::ConditionalHooks;
         use super::super::ConditionalPoint;
         use crate::test_support::TestConditionalHooks;
         use crate::test_support::TestConditionalPoint;
 
-        let backend = super::super::fake_backend::FakeBackend::new(b"A", b"B").fail_after_first_rollback_rename_once();
+        let backend =
+            super::super::fake_backend_tests::FakeBackend::new(b"A", b"B").fail_after_first_rollback_rename_once();
         let (_lease, target_path) = backend.target_observer();
         let hook_target = target_path.clone();
         let hooks = ConditionalHooks::sequence(vec![(
@@ -1052,7 +1055,7 @@ mod conditional_state_tests {
         let error = super::super::commit::commit_conditional::<Sha256, _>(
             backend,
             LocalWritePrecondition::Content(Sha256::digest(b"A")),
-            super::super::fake_backend::required_options(),
+            super::super::fake_backend_tests::required_options(),
             1,
         )
         .expect_err("partial rollback failure must preserve recovery state");
@@ -1084,7 +1087,7 @@ mod conditional_state_tests {
     }
 
     #[test]
-    fn conditional_state_rollback_sync_failure_is_err_and_restored() {
+    fn test_conditional_state_rollback_sync_failure_is_err_and_restored() {
         use super::super::ConditionalHookAction;
         use super::super::ConditionalHooks;
         use super::super::ConditionalPoint;
@@ -1099,12 +1102,12 @@ mod conditional_state_tests {
                 ConditionalHookAction::Fail(std::io::ErrorKind::PermissionDenied),
             ),
         ]);
-        let backend = super::super::fake_backend::FakeBackend::new(b"A", b"B").with_hooks(hooks);
+        let backend = super::super::fake_backend_tests::FakeBackend::new(b"A", b"B").with_hooks(hooks);
         let (_lease, target_path) = backend.target_observer();
         let error = super::super::commit::commit_conditional::<Sha256, _>(
             backend,
             LocalWritePrecondition::Content(Sha256::digest(b"A")),
-            super::super::fake_backend::required_options(),
+            super::super::fake_backend_tests::required_options(),
             1,
         )
         .expect_err("required rollback sync failure must be an error");
@@ -1126,7 +1129,7 @@ mod conditional_state_tests {
     }
 
     #[test]
-    fn conditional_state_rollback_verification_failure_transfers_actual_names() {
+    fn test_conditional_state_rollback_verification_failure_transfers_actual_names() {
         use super::super::ConditionalHookAction;
         use super::super::ConditionalHooks;
         use super::super::ConditionalPoint;
@@ -1141,12 +1144,12 @@ mod conditional_state_tests {
                 ConditionalHookAction::Fail(std::io::ErrorKind::PermissionDenied),
             ),
         ]);
-        let backend = super::super::fake_backend::FakeBackend::new(b"A", b"B").with_hooks(hooks);
+        let backend = super::super::fake_backend_tests::FakeBackend::new(b"A", b"B").with_hooks(hooks);
         let (_lease, target_path) = backend.target_observer();
         let error = super::super::commit::commit_conditional::<Sha256, _>(
             backend,
             LocalWritePrecondition::Content(Sha256::digest(b"A")),
-            super::super::fake_backend::required_options(),
+            super::super::fake_backend_tests::required_options(),
             1,
         )
         .expect_err("rollback verification failure remains an error");
@@ -1171,19 +1174,18 @@ mod conditional_state_tests {
     }
 
     #[test]
-    fn conditional_state_postpublication_readback_failure_retains_all_entries() {
+    fn test_conditional_state_postpublication_readback_failure_retains_all_entries() {
         use super::super::ConditionalHooks;
         use super::super::ConditionalPoint;
 
-        let backend = super::super::fake_backend::FakeBackend::new(b"A", b"B").with_hooks(ConditionalHooks::fail_once(
-            ConditionalPoint::VerifyInstalled,
-            std::io::ErrorKind::PermissionDenied,
-        ));
+        let backend = super::super::fake_backend_tests::FakeBackend::new(b"A", b"B").with_hooks(
+            ConditionalHooks::fail_once(ConditionalPoint::VerifyInstalled, std::io::ErrorKind::PermissionDenied),
+        );
         let (_lease, target_path) = backend.target_observer();
         let error = super::super::commit::commit_conditional::<Sha256, _>(
             backend,
             LocalWritePrecondition::Content(Sha256::digest(b"A")),
-            super::super::fake_backend::required_options(),
+            super::super::fake_backend_tests::required_options(),
             1,
         )
         .expect_err("installed readback failure must fail closed");
@@ -1217,19 +1219,18 @@ mod conditional_state_tests {
     }
 
     #[test]
-    fn conditional_state_cleanup_failure_is_reported_on_success() {
+    fn test_conditional_state_cleanup_failure_is_reported_on_success() {
         use super::super::ConditionalHooks;
         use super::super::ConditionalPoint;
 
-        let backend = super::super::fake_backend::FakeBackend::new(b"A", b"B").with_hooks(ConditionalHooks::fail_once(
-            ConditionalPoint::CleanupOld,
-            std::io::ErrorKind::PermissionDenied,
-        ));
+        let backend = super::super::fake_backend_tests::FakeBackend::new(b"A", b"B").with_hooks(
+            ConditionalHooks::fail_once(ConditionalPoint::CleanupOld, std::io::ErrorKind::PermissionDenied),
+        );
         let (_lease, target_path) = backend.target_observer();
         let outcome = super::super::commit::commit_conditional::<Sha256, _>(
             backend,
             LocalWritePrecondition::Content(Sha256::digest(b"A")),
-            super::super::fake_backend::required_options(),
+            super::super::fake_backend_tests::required_options(),
             1,
         )
         .expect("post-save cleanup failure must remain success");
@@ -1249,16 +1250,15 @@ mod conditional_state_tests {
     }
 
     #[test]
-    fn conditional_state_not_required_skips_cleanup_sync_checkpoint_and_namespace_sync() {
+    fn test_conditional_state_not_required_skips_cleanup_sync_checkpoint_and_namespace_sync() {
         use super::super::ConditionalHooks;
         use super::super::ConditionalPoint;
         use crate::options::LocalWriteMode;
         use crate::options::LocalWriteOptions;
 
-        let backend = super::super::fake_backend::FakeBackend::new(b"A", b"B").with_hooks(ConditionalHooks::fail_once(
-            ConditionalPoint::CleanupSync,
-            std::io::ErrorKind::PermissionDenied,
-        ));
+        let backend = super::super::fake_backend_tests::FakeBackend::new(b"A", b"B").with_hooks(
+            ConditionalHooks::fail_once(ConditionalPoint::CleanupSync, std::io::ErrorKind::PermissionDenied),
+        );
         let sync_calls = backend.namespace_sync_observer();
         let (_lease, target_path) = backend.target_observer();
         let outcome = super::super::commit::commit_conditional::<Sha256, _>(
@@ -1277,7 +1277,7 @@ mod conditional_state_tests {
     }
 
     #[test]
-    fn conditional_state_preferred_and_required_cleanup_sync_remains_best_effort() {
+    fn test_conditional_state_preferred_and_required_cleanup_sync_remains_best_effort() {
         use super::super::ConditionalHookAction;
         use super::super::ConditionalHooks;
         use super::super::ConditionalPoint;
@@ -1293,7 +1293,7 @@ mod conditional_state_tests {
             let options = LocalWriteOptions::new(LocalWriteMode::CreateOrReplace)
                 .with_atomicity(LocalAtomicityRequirement::Required)
                 .with_durability(durability);
-            let backend = super::super::fake_backend::FakeBackend::new(b"A", b"B");
+            let backend = super::super::fake_backend_tests::FakeBackend::new(b"A", b"B");
             let baseline_sync_calls = backend.namespace_sync_observer();
             let baseline = super::super::commit::commit_conditional::<Sha256, _>(
                 backend,
@@ -1305,7 +1305,7 @@ mod conditional_state_tests {
             assert_eq!(baseline_sync_calls.get(), 3, "{durability:?} sync baseline");
             assert!(baseline.cleanup_errors().is_empty());
 
-            let checkpoint_backend = super::super::fake_backend::FakeBackend::new(b"A", b"B").with_hooks(
+            let checkpoint_backend = super::super::fake_backend_tests::FakeBackend::new(b"A", b"B").with_hooks(
                 ConditionalHooks::fail_once(ConditionalPoint::CleanupSync, std::io::ErrorKind::PermissionDenied),
             );
             let checkpoint_sync_calls = checkpoint_backend.namespace_sync_observer();
@@ -1330,7 +1330,7 @@ mod conditional_state_tests {
                     ConditionalHookAction::Fail(std::io::ErrorKind::PermissionDenied),
                 ),
             ]);
-            let sync_backend = super::super::fake_backend::FakeBackend::new(b"A", b"B").with_hooks(sync_hooks);
+            let sync_backend = super::super::fake_backend_tests::FakeBackend::new(b"A", b"B").with_hooks(sync_hooks);
             let sync_calls = sync_backend.namespace_sync_observer();
             let (_lease, sync_target) = sync_backend.target_observer();
             let sync_outcome = super::super::commit::commit_conditional::<Sha256, _>(
@@ -1348,16 +1348,15 @@ mod conditional_state_tests {
     }
 
     #[test]
-    fn conditional_state_not_required_still_reports_real_cleanup_failure() {
+    fn test_conditional_state_not_required_still_reports_real_cleanup_failure() {
         use super::super::ConditionalHooks;
         use super::super::ConditionalPoint;
         use crate::options::LocalWriteMode;
         use crate::options::LocalWriteOptions;
 
-        let backend = super::super::fake_backend::FakeBackend::new(b"A", b"B").with_hooks(ConditionalHooks::fail_once(
-            ConditionalPoint::CleanupOld,
-            std::io::ErrorKind::PermissionDenied,
-        ));
+        let backend = super::super::fake_backend_tests::FakeBackend::new(b"A", b"B").with_hooks(
+            ConditionalHooks::fail_once(ConditionalPoint::CleanupOld, std::io::ErrorKind::PermissionDenied),
+        );
         let (_lease, target_path) = backend.target_observer();
         let outcome = super::super::commit::commit_conditional::<Sha256, _>(
             backend,
@@ -1377,19 +1376,18 @@ mod conditional_state_tests {
     }
 
     #[test]
-    fn conditional_state_cleanup_sync_failure_after_copy_delete_is_reported_as_ok() {
+    fn test_conditional_state_cleanup_sync_failure_after_copy_delete_is_reported_as_ok() {
         use super::super::ConditionalHooks;
         use super::super::ConditionalPoint;
 
-        let backend = super::super::fake_backend::FakeBackend::new(b"A", b"B").with_hooks(ConditionalHooks::fail_once(
-            ConditionalPoint::CleanupSync,
-            std::io::ErrorKind::PermissionDenied,
-        ));
+        let backend = super::super::fake_backend_tests::FakeBackend::new(b"A", b"B").with_hooks(
+            ConditionalHooks::fail_once(ConditionalPoint::CleanupSync, std::io::ErrorKind::PermissionDenied),
+        );
         let (_lease, target_path) = backend.target_observer();
         let outcome = super::super::commit::commit_conditional::<Sha256, _>(
             backend,
             LocalWritePrecondition::Content(Sha256::digest(b"A")),
-            super::super::fake_backend::required_options(),
+            super::super::fake_backend_tests::required_options(),
             1,
         )
         .expect("cleanup directory sync failure cannot undo save");
@@ -1403,13 +1401,13 @@ mod conditional_state_tests {
     }
 
     #[test]
-    fn conditional_state_absent_precondition_rejects_existing_target() {
-        let backend = super::super::fake_backend::FakeBackend::new(b"A", b"B");
+    fn test_conditional_state_absent_precondition_rejects_existing_target() {
+        let backend = super::super::fake_backend_tests::FakeBackend::new(b"A", b"B");
         let (_lease, target_path) = backend.target_observer();
         let error = super::super::commit::commit_conditional::<Sha256, _>(
             backend,
             LocalWritePrecondition::Absent,
-            super::super::fake_backend::required_options(),
+            super::super::fake_backend_tests::required_options(),
             1,
         )
         .expect_err("existing target violates absence precondition");
@@ -1427,12 +1425,12 @@ mod conditional_state_tests {
     }
 
     #[test]
-    fn conditional_state_absent_publish_uses_atomic_rename_and_detects_race() {
+    fn test_conditional_state_absent_publish_uses_atomic_rename_and_detects_race() {
         use super::super::ConditionalHookAction;
         use super::super::ConditionalHooks;
         use super::super::ConditionalPoint;
 
-        let backend = super::super::fake_backend::FakeBackend::new(b"A", b"B");
+        let backend = super::super::fake_backend_tests::FakeBackend::new(b"A", b"B");
         backend.remove_target();
         let (_lease, target_path) = backend.target_observer();
         let hooks = ConditionalHooks::sequence(vec![(
@@ -1442,7 +1440,7 @@ mod conditional_state_tests {
         let error = super::super::commit::commit_conditional::<Sha256, _>(
             backend.with_hooks(hooks),
             LocalWritePrecondition::Absent,
-            super::super::fake_backend::required_options(),
+            super::super::fake_backend_tests::required_options(),
             1,
         )
         .expect_err("publish must reject a target created after precheck");
@@ -1459,14 +1457,14 @@ mod conditional_state_tests {
     }
 
     #[test]
-    fn conditional_state_absent_success_reports_atomic_rename() {
-        let backend = super::super::fake_backend::FakeBackend::new(b"A", b"B");
+    fn test_conditional_state_absent_success_reports_atomic_rename() {
+        let backend = super::super::fake_backend_tests::FakeBackend::new(b"A", b"B");
         backend.remove_target();
         let (_lease, target_path) = backend.target_observer();
         let outcome = super::super::commit::commit_conditional::<Sha256, _>(
             backend,
             LocalWritePrecondition::Absent,
-            super::super::fake_backend::required_options(),
+            super::super::fake_backend_tests::required_options(),
             1,
         )
         .expect("absent target is installed");
@@ -1479,13 +1477,13 @@ mod conditional_state_tests {
     }
 
     #[test]
-    fn conditional_state_missing_content_target_is_classified_and_copy_retained() {
-        let backend = super::super::fake_backend::FakeBackend::new(b"A", b"B");
+    fn test_conditional_state_missing_content_target_is_classified_and_copy_retained() {
+        let backend = super::super::fake_backend_tests::FakeBackend::new(b"A", b"B");
         backend.remove_target();
         let error = super::super::commit::commit_conditional::<Sha256, _>(
             backend,
             LocalWritePrecondition::Content(Sha256::digest(b"A")),
-            super::super::fake_backend::required_options(),
+            super::super::fake_backend_tests::required_options(),
             1,
         )
         .expect_err("missing content precondition target must fail");
@@ -1505,19 +1503,20 @@ mod conditional_state_tests {
     }
 
     #[test]
-    fn conditional_state_copy_creation_failure_has_no_false_candidate_copy() {
+    fn test_conditional_state_copy_creation_failure_has_no_false_candidate_copy() {
         use super::super::ConditionalHooks;
         use super::super::ConditionalPoint;
 
-        let backend = super::super::fake_backend::FakeBackend::new(b"A", b"B").with_hooks(ConditionalHooks::fail_once(
-            ConditionalPoint::PrepareCandidateCopy,
-            std::io::ErrorKind::PermissionDenied,
-        ));
+        let backend =
+            super::super::fake_backend_tests::FakeBackend::new(b"A", b"B").with_hooks(ConditionalHooks::fail_once(
+                ConditionalPoint::PrepareCandidateCopy,
+                std::io::ErrorKind::PermissionDenied,
+            ));
         let (_lease, target_path) = backend.target_observer();
         let error = super::super::commit::commit_conditional::<Sha256, _>(
             backend,
             LocalWritePrecondition::Content(Sha256::digest(b"A")),
-            super::super::fake_backend::required_options(),
+            super::super::fake_backend_tests::required_options(),
             1,
         )
         .expect_err("candidate-copy setup failure must abort");
@@ -1534,7 +1533,7 @@ mod conditional_state_tests {
     }
 
     #[test]
-    fn conditional_state_partial_copy_failure_transfers_staged_entry() {
+    fn test_conditional_state_partial_copy_failure_transfers_staged_entry() {
         use super::super::ConditionalHookAction;
         use super::super::ConditionalHooks;
         use super::super::ConditionalPoint;
@@ -1543,12 +1542,12 @@ mod conditional_state_tests {
             ConditionalPoint::PrepareCandidateCopy,
             ConditionalHookAction::PartialCandidateCopy(b"partial".to_vec()),
         )]);
-        let backend = super::super::fake_backend::FakeBackend::new(b"A", b"B").with_hooks(hooks);
+        let backend = super::super::fake_backend_tests::FakeBackend::new(b"A", b"B").with_hooks(hooks);
         let (_lease, target_path) = backend.target_observer();
         let error = super::super::commit::commit_conditional::<Sha256, _>(
             backend,
             LocalWritePrecondition::Content(Sha256::digest(b"A")),
-            super::super::fake_backend::required_options(),
+            super::super::fake_backend_tests::required_options(),
             1,
         )
         .expect_err("partial copy failure must not publish");
@@ -1571,7 +1570,7 @@ mod conditional_state_tests {
     }
 
     #[test]
-    fn conditional_state_required_prepublication_sync_failures_are_fail_closed() {
+    fn test_conditional_state_required_prepublication_sync_failures_are_fail_closed() {
         use super::super::ConditionalHooks;
         use super::super::ConditionalPoint;
 
@@ -1580,13 +1579,13 @@ mod conditional_state_tests {
             ConditionalPoint::SyncEntry,
             ConditionalPoint::SyncNamespace,
         ] {
-            let backend = super::super::fake_backend::FakeBackend::new(b"A", b"B")
+            let backend = super::super::fake_backend_tests::FakeBackend::new(b"A", b"B")
                 .with_hooks(ConditionalHooks::fail_once(point, std::io::ErrorKind::PermissionDenied));
             let (_lease, target_path) = backend.target_observer();
             let error = super::super::commit::commit_conditional::<Sha256, _>(
                 backend,
                 LocalWritePrecondition::Content(Sha256::digest(b"A")),
-                super::super::fake_backend::required_options(),
+                super::super::fake_backend_tests::required_options(),
                 1,
             )
             .expect_err("every required prepublication sync must be enforced");
@@ -1602,7 +1601,7 @@ mod conditional_state_tests {
     }
 
     #[test]
-    fn conditional_state_preferred_sync_failure_downgrades_durability_only() {
+    fn test_conditional_state_preferred_sync_failure_downgrades_durability_only() {
         use super::super::ConditionalHooks;
         use super::super::ConditionalPoint;
         use crate::options::LocalWriteMode;
@@ -1613,10 +1612,9 @@ mod conditional_state_tests {
         let options = LocalWriteOptions::new(LocalWriteMode::CreateOrReplace)
             .with_atomicity(LocalAtomicityRequirement::Required)
             .with_durability(LocalDurabilityRequirement::Preferred);
-        let backend = super::super::fake_backend::FakeBackend::new(b"A", b"B").with_hooks(ConditionalHooks::fail_once(
-            ConditionalPoint::SyncCandidate,
-            std::io::ErrorKind::PermissionDenied,
-        ));
+        let backend = super::super::fake_backend_tests::FakeBackend::new(b"A", b"B").with_hooks(
+            ConditionalHooks::fail_once(ConditionalPoint::SyncCandidate, std::io::ErrorKind::PermissionDenied),
+        );
         let outcome = super::super::commit::commit_conditional::<Sha256, _>(
             backend,
             LocalWritePrecondition::Content(Sha256::digest(b"A")),
@@ -1630,19 +1628,18 @@ mod conditional_state_tests {
     }
 
     #[test]
-    fn conditional_state_copy_cleanup_failure_returns_ok_with_candidate_copy_retained() {
+    fn test_conditional_state_copy_cleanup_failure_returns_ok_with_candidate_copy_retained() {
         use super::super::ConditionalHooks;
         use super::super::ConditionalPoint;
 
-        let backend = super::super::fake_backend::FakeBackend::new(b"A", b"B").with_hooks(ConditionalHooks::fail_once(
-            ConditionalPoint::CleanupCopy,
-            std::io::ErrorKind::PermissionDenied,
-        ));
+        let backend = super::super::fake_backend_tests::FakeBackend::new(b"A", b"B").with_hooks(
+            ConditionalHooks::fail_once(ConditionalPoint::CleanupCopy, std::io::ErrorKind::PermissionDenied),
+        );
         let (_lease, target_path) = backend.target_observer();
         let outcome = super::super::commit::commit_conditional::<Sha256, _>(
             backend,
             LocalWritePrecondition::Content(Sha256::digest(b"A")),
-            super::super::fake_backend::required_options(),
+            super::super::fake_backend_tests::required_options(),
             1,
         )
         .expect("post-save candidate-copy cleanup failure remains success");

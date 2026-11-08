@@ -14,8 +14,13 @@
 /// ```
 /// use qubit_local_files::capability::SizeLimit;
 ///
-/// assert_eq!(SizeLimit::Maximum(255), SizeLimit::Maximum(255));
-/// assert_ne!(SizeLimit::Unknown, SizeLimit::VariesByPath);
+/// let limit = SizeLimit::Maximum(255);
+/// let description = match limit {
+///     SizeLimit::Maximum(bytes) => format!("at most {bytes} bytes"),
+///     SizeLimit::VariesByPath => String::from("depends on the path"),
+///     SizeLimit::Unknown => String::from("unavailable"),
+/// };
+/// assert_eq!(description, "at most 255 bytes");
 /// ```
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 #[must_use]

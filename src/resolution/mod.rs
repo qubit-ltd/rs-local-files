@@ -9,4 +9,5 @@
 pub(crate) mod internal;
 pub(crate) use internal::ResolutionContract;
 pub(crate) mod native_tokens;
+pub(crate) mod resolution_session;
 pub(crate) mod session;

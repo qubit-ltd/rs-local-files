@@ -7,6 +7,7 @@
 // =============================================================================
 // Keep path package dependency graphs in sync with the parent lock while
 // adopting registry source/checksum data for the same pinned version.
+#[must_use]
 pub(crate) fn lock_with_parent_sources(consumer: &str, parent: &str) -> String {
     const PACKAGE: &str = "\n[[package]]\n";
     let mut entries = consumer.split(PACKAGE).map(str::to_owned).collect::<Vec<_>>();
@@ -106,7 +107,7 @@ fn lock_array<'a>(entry: &'a str, name: &str) -> Option<&'a str> {
 }
 
 #[test]
-fn consumer_lock_adopts_path_dependencies_and_packaged_sources_for_same_versions() {
+fn test_consumer_lock_adopts_path_dependencies_and_packaged_sources_for_same_versions() {
     let base_consumer = "version = 4\n\n[[package]]\nname = \"qubit-local-files\"\nversion = \"0.5.0\"\ndependencies = [\"qubit-redact\"]\n\n[[package]]\nname = \"qubit-redact\"\nversion = \"0.10.0\"\ndependencies = [\"qubit-budget 0.9.0\"]\n";
     let source =
         "source = \"registry+https://github.com/rust-lang/crates.io-index\"\nchecksum = \"reviewed-checksum\"\n";

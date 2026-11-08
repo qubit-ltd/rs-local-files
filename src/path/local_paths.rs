@@ -46,6 +46,10 @@ pub struct LocalPaths {
 
 impl LocalPaths {
     /// Creates path operations for the process-visible host namespace.
+    ///
+    /// # Returns
+    ///
+    /// A path operations value bound to the host namespace.
     #[inline]
     pub const fn host() -> Self {
         Self {
@@ -55,6 +59,10 @@ impl LocalPaths {
     }
 
     /// Creates path operations for virtual namespace-absolute Rooted paths.
+    ///
+    /// # Returns
+    ///
+    /// A path operations value bound to the Rooted namespace.
     #[inline]
     pub const fn rooted() -> Self {
         Self {
@@ -64,6 +72,10 @@ impl LocalPaths {
     }
 
     /// Returns the namespace interpreted by this path object.
+    ///
+    /// # Returns
+    ///
+    /// The filesystem scope selected when this value was constructed.
     #[must_use = "inspect the path namespace"]
     #[inline]
     pub const fn scope(&self) -> LocalFileSystemScope {
@@ -71,6 +83,10 @@ impl LocalPaths {
     }
 
     /// Returns the native filename policy for this path namespace.
+    ///
+    /// # Returns
+    ///
+    /// The native filename policy associated with this scope.
     #[must_use = "inspect the filename policy"]
     #[inline]
     pub const fn file_names(&self) -> LocalFileNames {
@@ -82,6 +98,17 @@ impl LocalPaths {
     /// Host paths are absolute and omit an artificial root marker. Rooted
     /// paths are virtual namespace-absolute, with an empty component sequence
     /// representing `/`.
+    ///
+    /// # Parameters
+    ///
+    /// - `components`: Canonical escaped-byte components to decode in this
+    ///   object's filesystem scope.
+    ///
+    /// # Returns
+    ///
+    /// The decoded native path.
+    ///
+    /// # Errors
     ///
     /// Returns a typed codec error for invalid canonical text, `InvalidPath`
     /// for unsafe component shapes or an invalid Windows drive, and
@@ -105,6 +132,16 @@ impl LocalPaths {
     /// Rooted input must be virtual namespace-absolute and `/` encodes as an
     /// empty sequence. Performs no I/O.
     ///
+    /// # Parameters
+    ///
+    /// - `path`: Native path to encode in this object's filesystem scope.
+    ///
+    /// # Returns
+    ///
+    /// The canonical escaped-byte components for the path.
+    ///
+    /// # Errors
+    ///
     /// Returns `InvalidPath` for relative paths, raw dot components, or a
     /// Rooted native prefix; `Unsupported` for Windows UNC/device authorities
     /// or unsupported platforms; and a typed codec error for native NUL or
@@ -118,6 +155,16 @@ impl LocalPaths {
 }
 
 /// Encodes one Rooted virtual namespace-absolute path.
+///
+/// # Parameters
+///
+/// - `path`: Native path to encode as Rooted canonical components.
+///
+/// # Returns
+///
+/// The encoded canonical components.
+///
+/// # Errors
 ///
 /// Returns `InvalidPath` for a missing root, native prefix, or raw dot
 /// component, and propagates typed native component codec failures.
@@ -549,6 +596,15 @@ fn has_raw_dot_component(path: &Path) -> bool {
 }
 
 /// Detects raw dot components on unsupported native targets.
+///
+/// # Parameters
+///
+/// - `_path`: Native path ignored because this target has no supported native
+///   path representation.
+///
+/// # Returns
+///
+/// Always `false`; unsupported targets do not inspect raw path components.
 #[cfg(not(any(unix, windows)))]
 #[inline]
 const fn has_raw_dot_component(_path: &Path) -> bool {

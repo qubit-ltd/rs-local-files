@@ -57,10 +57,22 @@ use super::LocalWindowsAccessObservation;
 /// [`super::LocalObservedReader::security_observation`]: super::LocalObservedReader::security_observation
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LocalAccessObservation {
+    /// Unix access facts when supplied by the platform query.
     unix: Option<LocalUnixAccessObservation>,
+    /// Windows access facts when supplied by the platform query.
     windows: Option<LocalWindowsAccessObservation>,
 }
 impl LocalAccessObservation {
+    /// Combines the platform-specific access facts produced by a security
+    /// query.
+    ///
+    /// A platform may provide only one observation or neither; this constructor
+    /// does not infer authorization from absent or present facts.
+    ///
+    /// # Parameters
+    ///
+    /// * `unix` — Unix access facts, or `None` when unavailable.
+    /// * `windows` — Windows access facts, or `None` when unavailable.
     #[allow(dead_code)] // Constructed by the platform query backends in T03/T04.
     pub(crate) const fn new(
         unix: Option<LocalUnixAccessObservation>,
@@ -70,11 +82,21 @@ impl LocalAccessObservation {
     }
     /// Returns Unix access facts when observed on Unix, or `None` on other
     /// platforms where these facts are not available.
+    ///
+    /// # Returns
+    ///
+    /// `Some` contains the Unix facts; `None` means they were not available in
+    /// this observation.
     pub const fn unix(&self) -> Option<&LocalUnixAccessObservation> {
         self.unix.as_ref()
     }
     /// Returns Windows access facts when observed on Windows, or `None` on
     /// other platforms where these facts are not available.
+    ///
+    /// # Returns
+    ///
+    /// `Some` contains the Windows facts; `None` means they were not available
+    /// in this observation.
     pub const fn windows(&self) -> Option<&LocalWindowsAccessObservation> {
         self.windows.as_ref()
     }

@@ -14,6 +14,8 @@ use std::io::Result;
 use std::path::Path;
 use std::path::PathBuf;
 
+use super::staged_identity::StagedIdentity;
+
 /// Owns a staging file until its filesystem commit succeeds.
 ///
 /// Dropping an armed guard closes the file handle and best-effort removes its
@@ -30,14 +32,14 @@ pub(crate) struct StagedFile {
     identity: Option<StagedIdentity>,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum StagedIdentity {
-    #[cfg(unix)]
-    Unix(u64, u64),
-    #[cfg(windows)]
-    Windows(u32, u64),
-}
-
+/// Captures the platform file identity used to authorize staging-path removal.
+///
+/// # Parameters
+/// - `file`: Open handle for the staging file whose identity is captured.
+///
+/// # Returns
+/// The captured platform identity, or `None` when it cannot be read.
+#[must_use]
 fn file_identity(file: &File) -> Option<StagedIdentity> {
     #[cfg(unix)]
     {
@@ -51,6 +53,14 @@ fn file_identity(file: &File) -> Option<StagedIdentity> {
     }
 }
 
+/// Reads the current regular-file identity without following a symlink.
+///
+/// # Parameters
+/// - `path`: Filesystem path whose current regular-file identity is checked.
+///
+/// # Returns
+/// `Ok(None)` when the path is absent or not a regular file, `Ok(Some(_))` for
+/// its identity, or an I/O error other than absence.
 fn path_identity(path: &Path) -> std::io::Result<Option<StagedIdentity>> {
     let metadata = match fs::symlink_metadata(path) {
         Ok(metadata) => metadata,
@@ -79,7 +89,16 @@ fn path_identity(path: &Path) -> std::io::Result<Option<StagedIdentity>> {
     }
 }
 
+/// Reads the volume and file index from a live Windows file handle.
+///
+/// # Parameters
+/// - `file`: Live handle for the file whose Windows identity is read.
+///
+/// # Returns
+/// The volume and file index, or `None` when the operating system cannot
+/// provide handle information.
 #[cfg(windows)]
+#[must_use]
 fn windows_file_identity(file: &File) -> Option<(u32, u64)> {
     use std::os::windows::io::AsRawHandle;
 
@@ -175,8 +194,12 @@ impl StagedFile {
     ///
     /// Cleanup remains armed when removal fails so the caller can retry.
     ///
+    /// # Returns
+    /// `Ok(())` when the staging path is removed or no longer exists.
+    ///
     /// # Errors
-    /// Returns the I/O error reported while removing the staging path.
+    /// Returns an I/O error when identity lookup fails, the path identifies a
+    /// different file, removal fails, or a test cleanup fault is injected.
     pub(crate) fn cleanup(&mut self) -> Result<()> {
         self.close();
         if let Some(path) = self.path.as_ref() {

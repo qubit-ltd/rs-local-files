@@ -36,13 +36,28 @@ use crate::LocalTempFile;
 ///     }
 /// }
 /// ```
+#[must_use = "inspect the sealing failure or recover its retained temporary file"]
 #[derive(Debug)]
 pub struct LocalTempSealError {
+    /// Original sealing failure, including the retained temporary-file recovery
+    /// owner.
     cause: LocalFileError,
+    /// Access state observed when sealing failed; it does not consume the
+    /// retained owner.
     access_state: LocalTempAccessState,
 }
 
 impl LocalTempSealError {
+    /// Pairs the sealing cause with the access state observed by the sealing
+    /// operation.
+    ///
+    /// The cause must retain the temporary-file recovery owner so callers can
+    /// recover it.
+    ///
+    /// # Parameters
+    ///
+    /// * `cause` — the sealing failure that retains the temporary file.
+    /// * `access_state` — the access state observed when sealing failed.
     pub(crate) const fn new(cause: LocalFileError, access_state: LocalTempAccessState) -> Self {
         Self { cause, access_state }
     }
@@ -72,12 +87,21 @@ impl LocalTempSealError {
 }
 
 impl std::fmt::Display for LocalTempSealError {
+    /// Formats a concise sealing-failure message followed by the underlying
+    /// cause.
+    ///
+    /// # Parameters
+    ///
+    /// * `formatter` — the destination formatter supplied by the formatting
+    ///   framework.
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(formatter, "temporary file sealing failed: {}", self.cause)
     }
 }
 
 impl std::error::Error for LocalTempSealError {
+    /// Exposes the original filesystem error as the standard error-chain
+    /// source.
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         Some(&self.cause)
     }

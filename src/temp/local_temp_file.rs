@@ -136,11 +136,18 @@ pub struct LocalTempFile {
     core: LocalTempResourceCore,
     /// Open file handle until closed or source authority is invalidated.
     file: Option<File>,
+    /// Access mode controlling writes after sealing begins.
     access_state: LocalTempAccessState,
+    /// Identity observed on the original open handle, when available.
     file_identity: Option<crate::observation::LocalFileIdentity>,
 }
 
 impl std::fmt::Debug for LocalTempFile {
+    /// Formats only namespace-safe state without exposing the native path.
+    ///
+    /// # Parameters
+    ///
+    /// `f` is the formatter that receives the redacted state representation.
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("LocalTempFile")
             .field("path", &crate::local_file_system::redacted_path(self.path()))
@@ -156,6 +163,21 @@ impl LocalTempFile {
     /// Takes ownership of `file` and captures its identity. Native inspection
     /// failures close the handle; the caller remains responsible for removing
     /// the already-created file and sandbox when construction fails.
+    ///
+    /// # Parameters
+    ///
+    /// `path` is the bound file path; `sandbox_path` identifies its cleanup
+    /// directory; `file` is the newly created open handle; `symlink_policy`
+    /// governs later target resolution.
+    ///
+    /// # Returns
+    ///
+    /// A guard bound to the supplied host path, sandbox, and open handle.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the new handle's native identity cannot be
+    /// inspected.
     #[inline]
     pub(crate) fn host(
         path: PathBuf,
@@ -188,6 +210,21 @@ impl LocalTempFile {
     /// Takes ownership of `file` and captures identity through that handle.
     /// On native inspection failure, the caller must clean the already-created
     /// resource and sandbox through `root`; the file handle is dropped.
+    ///
+    /// # Parameters
+    ///
+    /// `root` retains rooted authority; `path` is the rooted file path;
+    /// `sandbox_path` identifies its cleanup directory; `file` is the new open
+    /// handle; `symlink_policy` governs later target resolution.
+    ///
+    /// # Returns
+    ///
+    /// A guard bound to the supplied root authority, path, sandbox, and handle.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the new handle's rooted identity cannot be
+    /// inspected.
     #[inline]
     pub(crate) fn rooted(
         root: Arc<crate::rooted::Root>,
@@ -241,6 +278,10 @@ impl LocalTempFile {
     /// the resource's lifetime and does not prove that the directory still
     /// exists or is accessible. Querying it performs no I/O.
     ///
+    /// # Returns
+    ///
+    /// The creation-time namespace-absolute parent directory.
+    ///
     /// # Examples
     ///
     /// ```no_run
@@ -265,10 +306,53 @@ impl LocalTempFile {
     /// # Returns
     ///
     /// The source lifecycle state, including whether cleanup remains required.
-    #[must_use = "inspect the source authority before choosing a recovery action"]
     #[inline]
     pub const fn source_state(&self) -> LocalTempSourceState {
         self.core.source_state()
+    }
+
+    /// Returns the mutable open file handle, or an error after [`Self::close`]
+    /// or when source authority no longer permits file operations.
+    ///
+    /// # Returns
+    ///
+    /// A mutable reference to the writable open file handle.
+    ///
+    /// # Errors
+    ///
+    /// Returns the underlying authority error, or `BrokenPipe` when the handle
+    /// has already been closed.
+    #[inline]
+    pub fn as_file_mut(&mut self) -> Result<&mut File> {
+        if self.access_state != LocalTempAccessState::Writable {
+            return Err(Error::new(
+                ErrorKind::PermissionDenied,
+                "temporary file is not writable",
+            ));
+        }
+        self.core.ensure_publishable()?;
+        self.file.as_mut().ok_or_else(closed_file_error)
+    }
+
+    /// Writes vectored bytes to the still-open temporary file.
+    ///
+    /// # Parameters
+    ///
+    /// `buffers` contains the byte slices to write in order.
+    ///
+    /// # Returns
+    ///
+    /// The number of bytes written, or an I/O error.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the handle is closed, authority is invalid, or
+    /// the vectored write fails.
+    #[inline]
+    pub fn write_vectored(&mut self, buffers: &[IoSlice<'_>]) -> Result<usize> {
+        self.as_file_mut()?;
+        let slices = crate::vectored::byte_slices(buffers)?;
+        Output::write_vectored(self, &slices)
     }
 
     /// Closes the file I/O handle while retaining cleanup and persistence
@@ -282,23 +366,16 @@ impl LocalTempFile {
         drop(self.file.take());
     }
 
-    pub(crate) fn current_identity(&self) -> Option<crate::observation::LocalFileIdentity> {
-        self.file.as_ref().and_then(|file| {
-            crate::observation::query::query_observation(
-                file,
-                crate::observation::LocalObservationRequirement::Optional,
-            )
-            .ok()
-            .and_then(|observation| observation.identity().cloned())
-        })
-    }
-
     /// Removes the entry through the authority retained at creation time.
     ///
     /// Closes the I/O handle first. Returns a structured error when identity
     /// inspection, entry removal, or empty-sandbox removal fails, or namespace
     /// certainty makes cleanup unsafe. A sandbox-only failure can be retried;
     /// success is idempotent. This does not undo an already-published file.
+    ///
+    /// # Returns
+    ///
+    /// `Ok(())` after releasing the file and sandbox, or the cleanup error.
     ///
     /// # Errors
     ///
@@ -454,25 +531,6 @@ impl LocalTempFile {
         self.persist_with_path(target.as_ref(), None, options)
     }
 
-    /// Returns the mutable open file handle, or an error after [`Self::close`]
-    /// or when source authority no longer permits file operations.
-    ///
-    /// # Errors
-    ///
-    /// Returns the underlying authority error, or `BrokenPipe` when the handle
-    /// has already been closed.
-    #[inline]
-    pub fn as_file_mut(&mut self) -> Result<&mut File> {
-        if self.access_state != LocalTempAccessState::Writable {
-            return Err(Error::new(
-                ErrorKind::PermissionDenied,
-                "temporary file is not writable",
-            ));
-        }
-        self.core.ensure_publishable()?;
-        self.file.as_mut().ok_or_else(closed_file_error)
-    }
-
     /// Seals this temporary file and returns an owner without write access.
     ///
     /// This consumes the writer owner. If sealing fails, the returned error
@@ -486,6 +544,10 @@ impl LocalTempFile {
     /// It does not synchronize the containing directory or promise namespace
     /// durability. A successful seal removes the public write handle, but it
     /// does not make the file an immutable snapshot against other processes.
+    ///
+    /// # Parameters
+    ///
+    /// `options` selects the file synchronization requirement.
     ///
     /// # Example
     ///
@@ -509,6 +571,17 @@ impl LocalTempFile {
     /// # Ok(())
     /// # }
     /// ```
+    ///
+    /// # Returns
+    ///
+    /// A sealed owner with a read-only handle, or an error retaining the
+    /// original resource for recovery.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if identity verification, synchronization, access
+    /// restriction, or read-only reopen fails. The error retains the resource
+    /// and reports the access state that may already have taken effect.
     pub fn seal_with_options(
         mut self,
         options: &LocalSealOptions,
@@ -623,7 +696,7 @@ impl LocalTempFile {
                     .with_temp_recovery(super::LocalTempRecovery::from_file(self));
             return Err(LocalTempSealError::new(cause, state));
         }
-        Ok(LocalSealedTempFile { resource: self })
+        Ok(LocalSealedTempFile::new(self))
     }
 
     /// Persists a relative target against an explicit namespace-absolute base.
@@ -661,19 +734,74 @@ impl LocalTempFile {
             .map_err(|error| error.with_current_directory(base.to_path_buf()))
     }
 
+    /// Queries the identity of the currently open handle without requiring it.
+    ///
+    /// Returns `None` when the handle is closed or optional native inspection
+    /// is unavailable.
+    ///
+    /// # Returns
+    ///
+    /// `Some(identity)` when optional inspection obtains an identity, or
+    /// `None` when the handle is closed or inspection is unavailable.
+    pub(crate) fn current_identity(&self) -> Option<crate::observation::LocalFileIdentity> {
+        self.file.as_ref().and_then(|file| {
+            crate::observation::query::query_observation(
+                file,
+                crate::observation::LocalObservationRequirement::Optional,
+            )
+            .ok()
+            .and_then(|observation| observation.identity().cloned())
+        })
+    }
+
     /// Binds public paths and records the creating filesystem PWD for
     /// diagnostics. Returns a contextual path-resolution error on invalid
     /// namespace input; consuming failure drops this guard and attempts
     /// cleanup.
+    ///
+    /// # Parameters
+    ///
+    /// `resolver` supplies the namespace authority and path context to bind.
+    ///
+    /// # Returns
+    ///
+    /// The guard bound to the supplied namespace context.
+    ///
+    /// # Errors
+    ///
+    /// Returns a contextual resolution error when namespace input is invalid.
     pub(crate) fn bind_namespace(mut self, resolver: LocalPathResolver) -> LocalResult<Self> {
         self.core.bind_namespace(resolver, LocalFileOperation::CreateTempFile)?;
         Ok(self)
+    }
+
+    /// Returns the authority-local sandbox path used for cleanup diagnostics.
+    ///
+    /// # Returns
+    ///
+    /// The sandbox path in the retained authority's namespace.
+    #[inline]
+    fn cleanup_path(&self) -> PathBuf {
+        self.core.cleanup_path()
     }
 
     /// Persists the file to a resolved public-API target path.
     /// Implements the ownership, guarantee, and failure contract of
     /// [`Self::persist_with`], using only the retained authority and explicit
     /// base.
+    ///
+    /// # Parameters
+    ///
+    /// `target` is the requested destination. `base` is an optional explicit
+    /// namespace-absolute directory. `options` selects publication behavior.
+    ///
+    /// # Returns
+    ///
+    /// The result of persistence through the bound authority.
+    ///
+    /// # Errors
+    ///
+    /// Returns a staged persistence error retaining this resource.
     fn persist_with_path(
         self,
         target: &Path,
@@ -686,15 +814,24 @@ impl LocalTempFile {
     /// Persists after running `before_reopen` at the closed-source reopen
     /// boundary. The public persistence path supplies a no-op action.
     ///
+    /// # Type Parameters
+    ///
+    /// `F` is a one-shot action invoked at the closed-source reopen boundary.
+    ///
     /// # Parameters
-    /// - `target`: Requested publication target.
-    /// - `base`: Optional explicit namespace base.
-    /// - `options`: Publication and durability policy.
-    /// - `before_reopen`: One-shot action run after source identity precheck
-    ///   and before opening a closed source through its authority.
+    ///
+    /// `target` is the requested publication target. `base` is an optional
+    /// explicit namespace base. `options` selects publication and durability
+    /// policy. `before_reopen` runs after source identity precheck and before
+    /// opening a closed source through its authority.
     ///
     /// # Returns
     /// The persistence outcome or a recoverable error retaining this resource.
+    ///
+    /// # Errors
+    ///
+    /// Returns a staged persistence error while retaining this resource; the
+    /// source may have been closed and publication may have completed.
     fn persist_with_path_before_reopen<F>(
         mut self,
         target: &Path,
@@ -964,16 +1101,23 @@ impl LocalTempFile {
     /// native open/sync errors. A closed file is reopened through its backend.
     /// Runs an action between source-path precheck and closed-handle reopen.
     ///
+    /// # Type Parameters
+    ///
+    /// `F` is a one-shot action invoked before reopening a closed source.
+    ///
     /// # Parameters
-    /// - `durability`: Requested source durability behavior.
-    /// - `before_reopen`: One-shot action run only when the source handle is
-    ///   closed and the backend is about to reopen the source.
+    ///
+    /// `durability` selects whether synchronization is skipped, preferred, or
+    /// required. `before_reopen` runs once before reopening a closed source.
     ///
     /// # Returns
-    /// Whether source synchronization succeeded.
+    ///
+    /// `true` when synchronization succeeds, or `false` when skipped or when
+    /// preferred durability cannot be achieved.
     ///
     /// # Errors
-    /// Returns required synchronization or source-identity failures.
+    ///
+    /// Returns required synchronization, reopen, or source-identity failures.
     fn synchronize_source_before_reopen<F>(
         &self,
         durability: LocalDurabilityRequirement,
@@ -1039,7 +1183,9 @@ impl LocalTempFile {
     /// Validates the reopened handle before applying the sync fallback.
     ///
     /// # Parameters
-    /// - `file`: The candidate handle to validate and synchronize.
+    ///
+    /// `file` is the candidate handle to validate and synchronize.
+    /// `durability` selects whether synchronization is preferred or required.
     ///
     /// # Returns
     /// `true` after synchronization, or `false` only when a preferred
@@ -1082,6 +1228,14 @@ impl LocalTempFile {
     /// path.
     /// Rechecks identity before removal and propagates inspection/removal
     /// errors. An identity mismatch marks namespace state indeterminate.
+    ///
+    /// # Returns
+    ///
+    /// `Ok(())` after removing the owned file entry.
+    ///
+    /// # Errors
+    ///
+    /// Returns an identity inspection or native removal error.
     #[inline]
     fn remove_resource(&mut self) -> Result<()> {
         self.ensure_identity_matches()?;
@@ -1104,6 +1258,14 @@ impl LocalTempFile {
 
     /// Removes the now-empty private sandbox.
     /// Propagates native removal errors, including a non-empty sandbox.
+    ///
+    /// # Returns
+    ///
+    /// `Ok(())` after removing the empty sandbox.
+    ///
+    /// # Errors
+    ///
+    /// Returns a native error when the sandbox cannot be removed.
     fn release_sandbox(&self) -> Result<()> {
         #[cfg(feature = "test-support")]
         if crate::local::take_test_support("temp-file-sandbox-remove") {
@@ -1112,12 +1274,17 @@ impl LocalTempFile {
         self.core.release_sandbox()
     }
 
-    /// Returns the authority-local sandbox path used for cleanup diagnostics.
-    fn cleanup_path(&self) -> PathBuf {
-        self.core.cleanup_path()
-    }
-
     /// Builds a persistence failure with the resource's creation-time PWD.
+    ///
+    /// # Parameters
+    ///
+    /// `error` is the failure cause; `requested_target` and `resolved_target`
+    /// record destination context; `stage` identifies the failed operation;
+    /// `publication` records whether installation may have occurred.
+    ///
+    /// # Returns
+    ///
+    /// A persistence error retaining this resource and its publication state.
     fn persist_error(
         self,
         error: Error,
@@ -1140,12 +1307,29 @@ impl LocalTempFile {
     }
 
     /// Attaches the resource's creation-time PWD to a structured error.
+    ///
+    /// # Parameters
+    ///
+    /// `error` is the structured failure to contextualize with the creation
+    /// namespace.
+    ///
+    /// # Returns
+    ///
+    /// The error augmented with the creation-time namespace context.
     fn contextualize_error(&self, error: LocalFileError) -> LocalFileError {
         self.core.contextualize_error(error)
     }
 
     /// Rejects namespace cleanup after an indeterminate native publication
     /// attempt.
+    ///
+    /// # Returns
+    ///
+    /// `Ok(())` when cleanup is safe to attempt.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when publication state makes cleanup unsafe.
     #[inline]
     fn ensure_cleanup_safe(&self) -> Result<()> {
         self.core.ensure_cleanup_safe()
@@ -1155,6 +1339,15 @@ impl LocalTempFile {
     /// A mismatch marks the state indeterminate and returns `InvalidInput`;
     /// failed identity inspection also marks the state indeterminate while
     /// preserving its native error.
+    ///
+    /// # Returns
+    ///
+    /// `Ok(())` when the retained path still identifies the original file.
+    ///
+    /// # Errors
+    ///
+    /// Returns an identity mismatch or inspection error and marks the source
+    /// state indeterminate.
     fn ensure_identity_matches(&mut self) -> Result<()> {
         let result = self.core.ensure_identity_matches();
         if self.core.state == LocalTempResourceState::Indeterminate {
@@ -1164,6 +1357,15 @@ impl LocalTempFile {
     }
 
     /// Records whether a failed native install proves the source remains owned.
+    ///
+    /// # Parameters
+    ///
+    /// `error` is the native installation failure used to infer publication
+    /// certainty.
+    ///
+    /// # Returns
+    ///
+    /// The publication state supported by the native error.
     #[inline]
     fn record_native_persist_failure(&mut self, error: &Error) -> LocalPersistFailureState {
         self.core.record_native_persist_failure(error)
@@ -1171,6 +1373,20 @@ impl LocalTempFile {
 }
 
 /// Synchronizes both Host rename parents and every created destination parent.
+///
+/// # Parameters
+///
+/// `source` and `target` are the rename endpoints. `created_parents` lists
+/// destination directories created for publication. `durability` selects the
+/// synchronization requirement.
+///
+/// # Returns
+///
+/// Whether every required parent synchronization succeeded.
+///
+/// # Errors
+///
+/// Returns a native synchronization error when durability is required.
 fn synchronize_host_publication(
     source: &Path,
     target: &Path,
@@ -1188,6 +1404,20 @@ fn synchronize_host_publication(
 }
 
 /// Synchronizes both Rooted rename parents and the destination ancestor chain.
+///
+/// # Parameters
+///
+/// `root` supplies authority; `source` and `target` are rooted rename
+/// endpoints. `durability` selects the synchronization requirement.
+///
+/// # Returns
+///
+/// Whether every required parent synchronization succeeded.
+///
+/// # Errors
+///
+/// Returns a native synchronization or rooted-path validation error when
+/// durability is required.
 fn synchronize_rooted_publication(
     root: &crate::rooted::Root,
     source: &LocalRelativePath,
@@ -1215,6 +1445,21 @@ fn synchronize_rooted_publication(
 /// Applies preferred or required policy to one destination synchronization.
 /// Returns false without calling `synchronize` for `NotRequired`; preferred
 /// mode reports native failure as false, while required mode propagates it.
+///
+/// # Parameters
+///
+/// `durability` selects the synchronization requirement. `synchronize` runs
+/// the destination synchronization operation once when required by policy.
+///
+/// # Returns
+///
+/// `false` when synchronization is skipped or preferred synchronization
+/// fails; otherwise `true`.
+///
+/// # Errors
+///
+/// Returns the synchronization error in required mode or an injected test
+/// failure when test support requests one.
 fn synchronize_destination(
     durability: LocalDurabilityRequirement,
     synchronize: impl FnOnce() -> Result<()>,
@@ -1231,24 +1476,43 @@ fn synchronize_destination(
     }
 }
 
-impl LocalTempFile {
-    /// Writes vectored bytes to the still-open temporary file.
-    #[inline]
-    pub fn write_vectored(&mut self, buffers: &[IoSlice<'_>]) -> Result<usize> {
-        self.as_file_mut()?;
-        let slices = crate::vectored::byte_slices(buffers)?;
-        Output::write_vectored(self, &slices)
-    }
-}
-
 impl Output for LocalTempFile {
+    /// The byte type accepted by this output.
     type Item = u8;
 
+    /// Writes the supplied byte slices to the open temporary file.
+    ///
+    /// # Parameters
+    ///
+    /// `buffers` contains the byte slices to write in order.
+    ///
+    /// # Returns
+    ///
+    /// The number of bytes written, or an I/O error.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the handle is closed, authority is invalid, or
+    /// the write fails.
     fn write_vectored(&mut self, buffers: &[&[u8]]) -> Result<usize> {
         Output::write_vectored(self.as_file_mut()?, buffers)
     }
 
     /// Writes the requested valid range to the still-open temporary file.
+    ///
+    /// # Parameters
+    ///
+    /// `input` is the source byte slice; `index` and `count` define the valid
+    /// range written to the file.
+    ///
+    /// # Returns
+    ///
+    /// The number of bytes written, or an I/O error.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the file handle is unavailable or the write
+    /// fails.
     ///
     /// # Safety
     ///
@@ -1260,6 +1524,15 @@ impl Output for LocalTempFile {
     }
 
     /// Flushes the still-open temporary file.
+    ///
+    /// # Returns
+    ///
+    /// `Ok(())` after flushing, or an I/O error.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the handle is closed, authority is invalid, or
+    /// flushing fails.
     #[inline]
     fn flush(&mut self) -> Result<()> {
         Output::flush(self.as_file_mut()?)
@@ -1268,6 +1541,19 @@ impl Output for LocalTempFile {
 
 impl Seek for LocalTempFile {
     /// Seeks the still-open temporary file.
+    ///
+    /// # Parameters
+    ///
+    /// `position` selects the new file cursor position.
+    ///
+    /// # Returns
+    ///
+    /// The resulting cursor position, or an I/O error.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the handle is closed, authority is invalid, or
+    /// the seek fails.
     #[inline]
     fn seek(&mut self, position: SeekFrom) -> Result<u64> {
         self.as_file_mut()?.seek(position)
@@ -1288,56 +1574,11 @@ fn closed_file_error() -> Error {
     Error::new(ErrorKind::BrokenPipe, "temporary file handle is closed")
 }
 
-/// A cleanup-owned temporary file with no public write handle.
-///
-/// Sealing removes this library owner's write access, but does not guarantee
-/// immutability against other processes or aliases. [`Self::observation`]
-/// reports the retained read-only handle; it is an observation, not a content
-/// version. [`Self::native_path`] is available only for Host authority and is
-/// provided for observation, not as a way to bypass the bound authority.
-/// After [`Self::cleanup`] closes the retained handle, `observation` returns an
-/// error.
-///
-/// # Example
-///
-/// ```no_run
-/// use qubit_io::Output;
-/// use qubit_local_files::{LocalFileSystem, LocalSealOptions};
-///
-/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-/// let filesystem = LocalFileSystem::host()?;
-/// let mut file = filesystem.create_temp_file()?;
-/// file.write_fully(b"sealed contents")?;
-/// let mut sealed = file.seal_with_options(&LocalSealOptions::default())?;
-/// let current = sealed.observation()?;
-/// let _ = current;
-/// sealed.cleanup()?;
-/// # Ok(())
-/// # }
-/// ```
-///
-/// The sealed owner does not implement [`qubit_io::ByteOutput`]:
-///
-/// ```compile_fail
-/// fn requires_output<T: qubit_io::ByteOutput>() {}
-/// requires_output::<qubit_local_files::LocalSealedTempFile>();
-/// ```
-///
-/// It also exposes no mutable native file handle:
-///
-/// ```compile_fail
-/// fn request_mutable_file(file: &mut qubit_local_files::LocalSealedTempFile) {
-///     let _ = file.as_file_mut();
-/// }
-/// ```
-#[must_use = "use explicit cleanup to observe errors; drop only attempts cleanup"]
-#[derive(Debug)]
-pub struct LocalSealedTempFile {
-    resource: LocalTempFile,
-}
-
+// Defines the sealed temporary-file owner and its lifecycle API.
 #[path = "local_sealed_temp_file.rs"]
 mod local_sealed_temp_file;
+
+pub use local_sealed_temp_file::LocalSealedTempFile;
 
 /// Builds the error used when the opened synchronization object is not source.
 #[must_use]
@@ -1381,7 +1622,7 @@ mod sync_identity_tests {
     }
 
     #[test]
-    fn closed_reopen_rejects_path_replacement_after_source_precheck() {
+    fn test_closed_reopen_rejects_path_replacement_after_source_precheck() {
         for rooted in [false, true] {
             for durability in [
                 LocalDurabilityRequirement::Required,
@@ -1456,7 +1697,7 @@ mod sync_identity_tests {
     }
 
     #[test]
-    fn preferred_closed_reopen_error_is_not_treated_as_sync_degradation() {
+    fn test_preferred_closed_reopen_error_is_not_treated_as_sync_degradation() {
         for rooted in [false, true] {
             let directory = tempfile::tempdir().expect("private parent should be created");
             let filesystem = if rooted {
@@ -1501,7 +1742,7 @@ mod sync_identity_tests {
     }
 
     #[test]
-    fn preferred_closed_identity_query_error_is_not_treated_as_sync_degradation() {
+    fn test_preferred_closed_identity_query_error_is_not_treated_as_sync_degradation() {
         for rooted in [false, true] {
             let directory = tempfile::tempdir().expect("private parent should be created");
             let filesystem = if rooted {
@@ -1555,7 +1796,7 @@ mod sync_identity_tests {
     }
 
     #[test]
-    fn verified_sync_failure_degrades_only_for_preferred() {
+    fn test_verified_sync_failure_degrades_only_for_preferred() {
         for durability in [
             LocalDurabilityRequirement::Required,
             LocalDurabilityRequirement::Preferred,
@@ -1588,7 +1829,7 @@ mod sync_identity_tests {
     }
 
     #[test]
-    fn closed_reopen_rejects_fifo_path_replacement_without_blocking() {
+    fn test_closed_reopen_rejects_fifo_path_replacement_without_blocking() {
         const CHILD: &str = "QUBIT_LF_REV_Q01_PERSIST_CHILD";
         const DURABILITY: &str = "QUBIT_LF_REV_Q01_PERSIST_DURABILITY";
         if let Some(parent) = std::env::var_os(CHILD) {
@@ -1645,7 +1886,7 @@ mod sync_identity_tests {
                 Command::new(test_executable)
                     .args([
                         "--exact",
-                        "temp::local_temp_file::sync_identity_tests::closed_reopen_rejects_fifo_path_replacement_without_blocking",
+                        "temp::local_temp_file::sync_identity_tests::test_closed_reopen_rejects_fifo_path_replacement_without_blocking",
                         "--nocapture",
                     ])
                     .env(CHILD, fixture.path())

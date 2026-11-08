@@ -45,6 +45,12 @@ pub(crate) fn validate_copy_source_kind(
 /// Directory trees cannot provide whole-operation atomicity or durability.
 /// Symbolic-link copying cannot provide whole-operation atomicity. File and
 /// link durability also depends on platform capabilities and synchronization.
+///
+/// # Parameters
+///
+/// - `source_kind`: Kind of source entry being copied.
+/// - `atomicity`: Atomicity guarantee requested by the operation.
+/// - `durability`: Durability guarantee requested by the operation.
 #[must_use]
 #[inline]
 pub(crate) fn copy_source_guarantee_unavailable(
@@ -57,6 +63,13 @@ pub(crate) fn copy_source_guarantee_unavailable(
 }
 
 /// Reports whether replacing a directory would violate required atomicity.
+///
+/// # Parameters
+///
+/// - `source_is_directory`: Whether the source entry is a directory.
+/// - `atomicity`: Atomicity guarantee requested by the operation.
+/// - `type_conflict`: Policy for replacing a destination of a different kind.
+/// - `target_is_directory`: Whether the existing destination is a directory.
 #[must_use]
 #[inline]
 pub(crate) fn copy_file_replace_requires_atomicity(

@@ -77,6 +77,23 @@ use crate::LocalResult;
 pub trait LocalResolutionPolicy: std::fmt::Debug + Send + Sync {
     /// Validates a normal component before the resolver performs metadata or
     /// open calls.
+    ///
+    /// # Parameters
+    ///
+    /// - `component`: Native path component supplied to the resolver.
+    /// - `scope`: Whether resolution is opening the authority root or a
+    ///   descendant.
+    /// - `origin`: Whether the component came from caller input or a followed
+    ///   symlink target.
+    ///
+    /// # Returns
+    ///
+    /// `Ok(())` when the component is accepted.
+    ///
+    /// # Errors
+    ///
+    /// Returns a structured local filesystem error when the component is
+    /// rejected.
     fn validate_component(
         &self,
         component: &OsStr,
@@ -85,5 +102,20 @@ pub trait LocalResolutionPolicy: std::fmt::Debug + Send + Sync {
     ) -> LocalResult<()>;
     /// Validates the unnormalized native target before the resolver interprets
     /// its components.
+    ///
+    /// # Parameters
+    ///
+    /// - `target`: Native symlink target, before component normalization.
+    /// - `scope`: Whether resolution is opening the authority root or a
+    ///   descendant.
+    ///
+    /// # Returns
+    ///
+    /// `Ok(())` when the target is accepted.
+    ///
+    /// # Errors
+    ///
+    /// Returns a structured local filesystem error when the target is
+    /// rejected.
     fn validate_symlink_target(&self, target: &Path, scope: LocalResolutionScope) -> LocalResult<()>;
 }

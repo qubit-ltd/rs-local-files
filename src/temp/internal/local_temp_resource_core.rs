@@ -50,6 +50,13 @@ pub(crate) struct LocalTempResourceCore {
 
 impl LocalTempResourceCore {
     /// Takes a successfully bound backend and its namespace path.
+    ///
+    /// # Parameters
+    /// - `path`: Namespace path identifying the temporary source.
+    /// - `creation_parent`: Namespace path of the parent used to create its
+    ///   sandbox.
+    /// - `backend`: Native authority and identity bound to the source.
+    /// - `symlink_policy`: Policy applied when validating persistence targets.
     pub(crate) fn new(
         path: PathBuf,
         creation_parent: PathBuf,
@@ -133,6 +140,9 @@ impl LocalTempResourceCore {
     /// Records an actual native rename failure and returns only its publication
     /// fact. A definite failure retains authority only after a fresh identity
     /// check; an uncertain rename permanently disables source operations.
+    ///
+    /// # Parameters
+    /// - `error`: Native error from the persistence attempt.
     pub(crate) fn record_native_persist_failure(&mut self, error: &Error) -> LocalPersistFailureState {
         let publication = LocalPersistFailureState::from_native_error(error.kind());
         if publication == LocalPersistFailureState::Indeterminate || self.ensure_identity_matches().is_err() {
@@ -163,6 +173,10 @@ impl LocalTempResourceCore {
     }
 
     /// Adds creation-time PWD context to a native operation failure.
+    ///
+    /// # Parameters
+    /// - `error`: Operation error to augment with the captured directory
+    ///   context.
     pub(crate) fn contextualize_error(&self, error: LocalFileError) -> LocalFileError {
         match &self.creation_current_directory {
             Some(directory) => error.with_current_directory(directory.clone()),
@@ -172,6 +186,13 @@ impl LocalTempResourceCore {
 
     /// Captures both explicitly established publication and current source
     /// facts. The wrapper attaches itself after this borrow ends.
+    ///
+    /// # Parameters
+    /// - `error`: Native cause of the failed persistence operation.
+    /// - `requested_target`: Target as requested by the caller.
+    /// - `resolved_target`: Resolved target, when resolution succeeded.
+    /// - `stage`: Persistence stage at which the operation failed.
+    /// - `publication`: Publication state established for this attempt.
     pub(crate) fn persist_error(
         &self,
         error: Error,
@@ -198,6 +219,10 @@ impl LocalTempResourceCore {
     /// Resolves the public source and retains PWD diagnostics. Resolution
     /// errors identify the creating operation; authority remains the
     /// original backend.
+    ///
+    /// # Parameters
+    /// - `resolver`: Resolver used to obtain namespace-absolute diagnostics.
+    /// - `operation`: Creating operation attached to any resolution error.
     pub(crate) fn bind_namespace(
         &mut self,
         resolver: LocalPathResolver,
@@ -245,6 +270,10 @@ impl LocalTempResourceCore {
     }
 
     /// Performs lexical target preparation without changing source authority.
+    ///
+    /// # Parameters
+    /// - `base`: Optional caller-provided base for resolving the target.
+    /// - `target`: Target path to prepare within the resource's namespace.
     pub(crate) fn prepare_target(&self, base: Option<&Path>, target: &Path) -> LocalResult<LocalNamespacePath> {
         prepare_persist_target(self.scope(), base, target)
     }
@@ -252,12 +281,19 @@ impl LocalTempResourceCore {
     /// Checks an explicit base through the retained authority and symlink
     /// policy. Native lookup and invalid-directory failures retain their
     /// path context.
+    ///
+    /// # Parameters
+    /// - `base`: Explicit base directory to validate through the bound
+    ///   authority.
     pub(crate) fn validate_base(&self, base: &Path) -> LocalResult<()> {
         validate_persist_base(&self.backend, base, self.symlink_policy)
     }
 }
 
 /// Converts an authority-relative path into public virtual absolute syntax.
+///
+/// # Parameters
+/// - `path`: Path relative to the retained authority.
 fn virtual_rooted_path(path: &Path) -> PathBuf {
     let mut result = PathBuf::from(std::path::MAIN_SEPARATOR_STR);
     result.push(path);

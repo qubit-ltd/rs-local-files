@@ -18,7 +18,7 @@ use qubit_local_files::options::LocalWriteOptions;
 use tempfile::tempdir;
 
 #[test]
-fn writer_indexed_range_flush_and_owned_adapter_preserve_staging() {
+fn test_writer_indexed_range_flush_and_owned_adapter_preserve_staging() {
     let directory = tempdir().expect("temporary directory should be created");
     let path = directory.path().join("target");
     let filesystem = LocalFileSystem::host().expect("host filesystem should open");
@@ -73,7 +73,7 @@ fn test_inherent_single_buffer_write_preserves_count_and_terminal_state() {
 }
 
 #[test]
-fn owned_standard_adapter_returns_writer_for_commit() {
+fn test_owned_standard_adapter_returns_writer_for_commit() {
     let directory = tempdir().expect("temporary directory should be created");
     let path = directory.path().join("target");
     let filesystem = LocalFileSystem::host().expect("host filesystem should open");
@@ -87,7 +87,7 @@ fn owned_standard_adapter_returns_writer_for_commit() {
 }
 
 #[test]
-fn rooted_writer_uses_virtual_absolute_path_and_publishes_range() {
+fn test_rooted_writer_uses_virtual_absolute_path_and_publishes_range() {
     let directory = tempdir().expect("temporary directory should be created");
     let filesystem = LocalFileSystem::rooted(directory.path()).expect("rooted filesystem should open");
     let path = Path::new(std::path::MAIN_SEPARATOR_STR).join("target");
@@ -106,7 +106,7 @@ fn rooted_writer_uses_virtual_absolute_path_and_publishes_range() {
 }
 
 #[test]
-fn rooted_abort_closes_writer_without_publishing() {
+fn test_rooted_abort_closes_writer_without_publishing() {
     let directory = tempdir().expect("temporary directory should be created");
     std::fs::write(directory.path().join("target"), b"old").unwrap();
     let filesystem = LocalFileSystem::rooted(directory.path()).expect("rooted filesystem should open");
@@ -127,7 +127,7 @@ fn rooted_abort_closes_writer_without_publishing() {
 }
 
 #[test]
-fn append_writer_counts_indexed_range() {
+fn test_append_writer_counts_indexed_range() {
     let directory = tempdir().expect("temporary directory should be created");
     let path = directory.path().join("target");
     std::fs::write(&path, b"old").expect("fixture should be written");
@@ -147,7 +147,7 @@ fn append_writer_counts_indexed_range() {
 }
 
 #[test]
-fn abort_and_drop_keep_staged_destination_unpublished() {
+fn test_abort_and_drop_keep_staged_destination_unpublished() {
     let directory = tempdir().expect("temporary directory should be created");
     let path = directory.path().join("target");
     std::fs::write(&path, b"old").expect("fixture should be written");
@@ -172,7 +172,7 @@ fn abort_and_drop_keep_staged_destination_unpublished() {
 
 #[cfg(feature = "test-support")]
 #[test]
-fn interrupted_and_would_block_remain_retryable_but_fatal_write_is_terminal() {
+fn test_interrupted_and_would_block_remain_retryable_but_fatal_write_is_terminal() {
     use qubit_local_files::test_support::install_test_fault;
 
     let directory = tempdir().unwrap();

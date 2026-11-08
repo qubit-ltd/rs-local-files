@@ -13,14 +13,33 @@ use std::fs::OpenOptions;
 use std::io::Error;
 use std::io::ErrorKind;
 use std::io::Result;
+#[cfg(windows)]
+use std::mem::size_of;
 #[cfg(unix)]
 use std::os::fd::AsRawFd;
+#[cfg(unix)]
+use std::os::unix::fs::OpenOptionsExt;
 #[cfg(windows)]
 use std::os::windows::fs::OpenOptionsExt;
 #[cfg(windows)]
 use std::os::windows::io::AsRawHandle;
 use std::path::Path;
 use std::time::Duration;
+
+#[cfg(unix)]
+use libc::O_NOFOLLOW;
+#[cfg(unix)]
+use libc::O_NONBLOCK;
+#[cfg(windows)]
+use windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_REPARSE_POINT;
+#[cfg(windows)]
+use windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_TAG_INFO;
+#[cfg(windows)]
+use windows_sys::Win32::Storage::FileSystem::FILE_FLAG_OPEN_REPARSE_POINT;
+#[cfg(windows)]
+use windows_sys::Win32::Storage::FileSystem::FileAttributeTagInfo;
+#[cfg(windows)]
+use windows_sys::Win32::Storage::FileSystem::GetFileInformationByHandleEx;
 
 use super::io_result_context::with_path_context;
 use super::path_operations::add_path_context;
@@ -78,22 +97,20 @@ fn reject_existing_non_file(path: &Path) -> Result<()> {
 #[cfg(unix)]
 #[inline]
 fn configure_nonblocking_open(options: &mut OpenOptions) {
-    use std::os::unix::fs::OpenOptionsExt;
-
     // This flag is only an open-time defense against a path concurrently being
     // replaced by a FIFO. Once handle metadata proves the object is a regular
     // file, it is cleared so the temporary defense does not become observable
     // state on the reader or writer returned to callers.
-    options.custom_flags(libc::O_NONBLOCK | libc::O_NOFOLLOW);
+    options.custom_flags(O_NONBLOCK | O_NOFOLLOW);
 }
 
-/// Opens the final Windows entry itself so validation cannot follow a racing
-/// name-surrogate reparse point.
+/// Opens the final Windows entry without following a reparse point.
+///
+/// # Parameters
+/// - `options`: Open options that must target the final directory entry.
 #[cfg(windows)]
 #[inline]
 fn configure_nonblocking_open(options: &mut OpenOptions) {
-    use windows_sys::Win32::Storage::FileSystem::FILE_FLAG_OPEN_REPARSE_POINT;
-
     options.custom_flags(FILE_FLAG_OPEN_REPARSE_POINT);
 }
 
@@ -205,18 +222,21 @@ fn prepare_opened_regular_file(
     with_path_context(clear_transient_nonblocking(file), restore_operation, path)
 }
 
-/// Rejects a name-surrogate reparse point observed on the opened handle.
-/// Returns `InvalidInput` for a forbidden reparse tag or a contextual native
-/// attribute-query error.
+/// Rejects an opened Windows handle whose reparse tag identifies a name
+/// surrogate.
+///
+/// # Parameters
+/// - `file`: Open handle whose reparse metadata is inspected.
+/// - `path`: Path used to contextualize any reported error.
+///
+/// # Returns
+/// `Ok(())` unless the handle identifies a name surrogate.
+///
+/// # Errors
+/// Returns `InvalidInput` for a name surrogate, or a contextual native error
+/// when the handle attributes cannot be queried.
 #[cfg(windows)]
 fn reject_opened_name_surrogate(file: &fs::File, path: &Path) -> Result<()> {
-    use std::mem::size_of;
-
-    use windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_REPARSE_POINT;
-    use windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_TAG_INFO;
-    use windows_sys::Win32::Storage::FileSystem::FileAttributeTagInfo;
-    use windows_sys::Win32::Storage::FileSystem::GetFileInformationByHandleEx;
-
     const IO_REPARSE_TAG_NAME_SURROGATE: u32 = 0x2000_0000;
     let mut attributes = FILE_ATTRIBUTE_TAG_INFO::default();
     // SAFETY: `file` owns a live handle and `attributes` is the matching

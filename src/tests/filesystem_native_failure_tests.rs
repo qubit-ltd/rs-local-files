@@ -41,7 +41,7 @@ fn assert_context(error: &LocalFileError, operation: LocalFileOperation, path: O
 }
 
 #[test]
-fn snapshot_observation_failures_keep_read_context_and_allow_retry() {
+fn test_snapshot_observation_failures_keep_read_context_and_allow_retry() {
     let (fixture, rooted) = rooted_fixture();
     let host = LocalFileSystem::host().expect("host filesystem");
     let native = fs::canonicalize(fixture.path().join("work/item")).expect("native path");
@@ -73,7 +73,7 @@ fn snapshot_observation_failures_keep_read_context_and_allow_retry() {
 }
 
 #[test]
-fn snapshot_and_prefix_native_read_failures_keep_context_and_discard_partial_data() {
+fn test_snapshot_and_prefix_native_read_failures_keep_context_and_discard_partial_data() {
     let (fixture, rooted) = rooted_fixture();
     let host = LocalFileSystem::host().expect("host filesystem");
     let native = fs::canonicalize(fixture.path().join("work/item")).expect("native path");
@@ -109,7 +109,7 @@ fn snapshot_and_prefix_native_read_failures_keep_context_and_discard_partial_dat
 
 #[cfg(not(windows))]
 #[test]
-fn host_binding_root_open_failure_keeps_the_failed_parent_coordinate() {
+fn test_host_binding_root_open_failure_keeps_the_failed_parent_coordinate() {
     let (fixture, _) = rooted_fixture();
     let filesystem = LocalFileSystem::host().expect("host filesystem");
     let native = fs::canonicalize(fixture.path().join("work/item")).expect("native path");
@@ -133,7 +133,7 @@ fn host_binding_root_open_failure_keeps_the_failed_parent_coordinate() {
 }
 
 #[test]
-fn rooted_reader_metadata_initialization_failure_preserves_reader_context() {
+fn test_rooted_reader_metadata_initialization_failure_preserves_reader_context() {
     let (fixture, filesystem) = rooted_fixture();
     let fault = NativeIoFaultGuard::fail_on(NativeIoPoint::ReaderMetadata, 1);
     let error = filesystem
@@ -155,7 +155,7 @@ fn rooted_reader_metadata_initialization_failure_preserves_reader_context() {
 }
 
 #[test]
-fn observed_reader_binding_authority_failures_keep_the_failing_phase_context() {
+fn test_observed_reader_binding_authority_failures_keep_the_failing_phase_context() {
     let (fixture, filesystem) = rooted_fixture();
     let options = LocalObservedReadOptions::new()
         .with_native_observation(LocalObservationRequirement::Required)
@@ -187,7 +187,7 @@ fn observed_reader_binding_authority_failures_keep_the_failing_phase_context() {
 }
 
 #[test]
-fn rooted_reader_and_metadata_failures_preserve_virtual_coordinates() {
+fn test_rooted_reader_and_metadata_failures_preserve_virtual_coordinates() {
     let (fixture, filesystem) = rooted_fixture();
     for reader_operation in [false, true] {
         let fault = NativeIoFaultGuard::fail_on(NativeIoPoint::EntryMetadata, 1);
@@ -221,7 +221,7 @@ fn rooted_reader_and_metadata_failures_preserve_virtual_coordinates() {
 }
 
 #[test]
-fn rooted_copy_destination_metadata_failures_preserve_both_operands_and_allow_retry() {
+fn test_rooted_copy_destination_metadata_failures_preserve_both_operands_and_allow_retry() {
     use crate::options::LocalCopyConflictPolicy;
     use crate::options::LocalCopyOptions;
     use crate::outcome::LocalCopyFailureState;
@@ -262,7 +262,7 @@ fn rooted_copy_destination_metadata_failures_preserve_both_operands_and_allow_re
 }
 
 #[test]
-fn rooted_copy_metadata_failure_matrix_preserves_sources_and_proven_destination_state() {
+fn test_rooted_copy_metadata_failure_matrix_preserves_sources_and_proven_destination_state() {
     use crate::options::LocalCopyConflictPolicy;
     use crate::options::LocalCopyOptions;
     use crate::options::LocalCopyTypeConflictPolicy;
@@ -401,7 +401,7 @@ fn rooted_copy_metadata_failure_matrix_preserves_sources_and_proven_destination_
 
 #[cfg(all(feature = "digest", any(target_os = "linux", target_os = "macos")))]
 #[test]
-fn conditional_authority_failure_keeps_writer_context_and_creates_no_staging() {
+fn test_conditional_authority_failure_keeps_writer_context_and_creates_no_staging() {
     use sha2::Digest;
     use sha2::Sha256;
 
@@ -453,7 +453,7 @@ fn conditional_authority_failure_keeps_writer_context_and_creates_no_staging() {
 
 #[cfg(feature = "test-support")]
 #[test]
-fn rooted_native_reader_open_failure_keeps_reader_context_and_source() {
+fn test_rooted_native_reader_open_failure_keeps_reader_context_and_source() {
     let (fixture, filesystem) = rooted_fixture();
     let fault = crate::test_support::install_test_fault("rooted-copy-source-open-native").expect("native open fault");
     let error = filesystem
@@ -473,7 +473,7 @@ fn rooted_native_reader_open_failure_keeps_reader_context_and_source() {
 
 #[cfg(unix)]
 #[test]
-fn host_dangling_final_link_errors_preserve_link_and_target_then_allow_retry() {
+fn test_host_dangling_final_link_errors_preserve_link_and_target_then_allow_retry() {
     let fixture = tempfile::tempdir().expect("fixture");
     let parent = fs::canonicalize(fixture.path()).expect("canonical fixture");
     let link = parent.join("link");
@@ -526,7 +526,7 @@ fn host_dangling_final_link_errors_preserve_link_and_target_then_allow_retry() {
 }
 
 #[test]
-fn rooted_directory_qualified_canonicalization_reports_each_root_metadata_failure() {
+fn test_rooted_directory_qualified_canonicalization_reports_each_root_metadata_failure() {
     let fixture = tempfile::tempdir().expect("fixture");
     let sentinel = fixture.path().join("sentinel");
     fs::write(&sentinel, CONTENT).expect("rooted user data");

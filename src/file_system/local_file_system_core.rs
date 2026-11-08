@@ -37,6 +37,20 @@ pub(crate) struct LocalFileSystemCore {
 }
 
 impl std::fmt::Debug for LocalFileSystemCore {
+    /// Formats the stable filesystem configuration while omitting test hooks
+    /// and effective resolution details that are not part of diagnostics.
+    ///
+    /// # Parameters
+    ///
+    /// - `formatter`: Destination for the debug representation.
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(())` after writing the representation.
+    ///
+    /// # Errors
+    ///
+    /// Returns the formatter's error if writing the representation fails.
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter
             .debug_struct("LocalFileSystemCore")

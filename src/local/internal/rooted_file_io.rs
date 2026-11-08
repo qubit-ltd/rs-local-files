@@ -131,6 +131,24 @@ pub(crate) fn read_rooted_symlink_metadata(
 /// `name` must be one validated component without NUL or path separators.
 /// Returns native no-follow metadata errors; an interior NUL violates the
 /// caller invariant and panics during conversion.
+///
+/// # Parameters
+///
+/// * `root` - Open directory descriptor that authorizes the lookup.
+/// * `name` - One validated child component to inspect without following links.
+///
+/// # Returns
+///
+/// The native metadata for the child entry.
+///
+/// # Errors
+///
+/// Returns the operating-system error reported by `fstatat`.
+///
+/// # Panics
+///
+/// Panics if `name` contains an interior NUL despite the validated-component
+/// invariant.
 pub(crate) fn read_rooted_component_metadata(root: &File, name: &OsStr) -> Result<libc::stat> {
     #[cfg(test)]
     crate::tests::rooted::support::resolution_observation_tests::record_native_metadata();
@@ -159,6 +177,20 @@ pub(crate) fn read_rooted_component_metadata(root: &File, name: &OsStr) -> Resul
 /// `name` has the same validated-component requirement as
 /// [`read_rooted_component_metadata`]. Returns native open or metadata errors,
 /// or `InvalidInput` when the opened handle is not a directory.
+///
+/// # Parameters
+///
+/// * `root` - Open directory descriptor that authorizes the lookup.
+/// * `name` - One validated child component to open without following links.
+///
+/// # Returns
+///
+/// An open handle for the verified child directory.
+///
+/// # Errors
+///
+/// Returns native open or metadata errors, or `InvalidInput` if the child is
+/// not a directory.
 pub(crate) fn open_rooted_component_directory(root: &File, name: &OsStr) -> Result<File> {
     let directory = open_directory_at(root, name)?;
     verify_opened_directory(&directory, "inspect rooted resolution directory", Path::new(name))?;
@@ -171,6 +203,22 @@ pub(crate) fn open_rooted_component_directory(root: &File, name: &OsStr) -> Resu
 /// Returns traversal, type, open, or descriptor-configuration errors. A
 /// positive retry timeout bounds nonblocking-open retries; the returned
 /// handle is restored to blocking mode.
+///
+/// # Parameters
+///
+/// * `root` - Open directory descriptor that authorizes the lookup.
+/// * `diagnostic_root` - Path used only to contextualize I/O errors.
+/// * `path` - Validated non-empty relative path to the regular file.
+/// * `options` - Reader configuration, including its nonblocking retry timeout.
+///
+/// # Returns
+///
+/// An owned blocking-mode handle for the opened regular file.
+///
+/// # Errors
+///
+/// Returns a contextual error when traversal, type validation, opening, or
+/// descriptor normalization fails.
 pub(crate) fn open_rooted_native_reader(
     root: &File,
     diagnostic_root: &Path,
@@ -198,6 +246,22 @@ pub(crate) fn open_rooted_native_reader(
 /// Returns traversal, type, open, descriptor-configuration, or truncation
 /// errors. Created parents or a newly created file can remain after failure.
 /// A positive retry timeout bounds nonblocking-open retries.
+///
+/// # Parameters
+///
+/// * `root` - Open directory descriptor that authorizes the lookup.
+/// * `diagnostic_root` - Path used only to contextualize I/O errors.
+/// * `path` - Validated non-empty relative target path.
+/// * `options` - Writer mode, parent-creation policy, and retry timeout.
+///
+/// # Returns
+///
+/// An owned blocking-mode handle for the opened regular file.
+///
+/// # Errors
+///
+/// Returns a contextual error when traversal, type validation, opening,
+/// descriptor normalization, or requested truncation fails.
 pub(crate) fn open_rooted_native_writer(
     root: &File,
     diagnostic_root: &Path,
@@ -247,6 +311,17 @@ pub(crate) fn open_rooted_native_writer(
 ///
 /// The parent is reopened solely through the root descriptor, so the
 /// synchronization remains within the established rooted authority.
+///
+/// # Parameters
+///
+/// * `root` - Open directory descriptor that authorizes the lookup.
+/// * `diagnostic_root` - Path used only to contextualize I/O errors.
+/// * `path` - Validated non-empty relative path whose parent directory is
+///   synchronized.
+///
+/// # Returns
+///
+/// `Ok(())` after synchronizing the parent directory.
 ///
 /// # Errors
 ///
@@ -574,6 +649,7 @@ fn rooted_open_result<T>(result: Result<T>, operation: &'static str, path: &Path
 ///
 /// A contextual error preserving ordinary kinds and making link denial
 /// deterministic across Unix implementations.
+#[must_use]
 fn rooted_open_error(error: Error, operation: &'static str, path: &Path) -> Error {
     let error = match error.raw_os_error() {
         Some(code) if code == libc::ELOOP || code == libc::ENOTDIR => Error::new(ErrorKind::InvalidInput, error),
@@ -592,6 +668,7 @@ fn rooted_open_error(error: Error, operation: &'static str, path: &Path) -> Erro
 /// # Returns
 ///
 /// An invalid-input error naming the required type.
+#[must_use]
 #[inline]
 pub(super) fn rooted_type_error(path: &Path, expected: &str) -> Error {
     Error::new(
@@ -612,7 +689,7 @@ mod tests {
     use crate::local::LocalRelativePath;
 
     #[test]
-    fn rooted_parent_sync_and_type_error_preserve_native_contracts() {
+    fn test_rooted_parent_sync_and_type_error_preserve_native_contracts() {
         let directory = tempdir().expect("temporary directory should be created");
         let target = directory.path().join("target");
         fs::write(&target, b"payload").expect("target should be written");

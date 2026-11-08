@@ -18,7 +18,7 @@ fn test_path_codec_error_is_a_typed_error_without_a_source() {
     let error = LocalPathCodecError::InvalidEscape { offset: 3 };
 
     assert!(Error::source(&error).is_none());
-    assert!(error.to_string().contains("3"));
+    assert_eq!(error.to_string(), "invalid path escape at byte offset 3");
 }
 
 /// Verifies the local error source retains a typed path codec failure.

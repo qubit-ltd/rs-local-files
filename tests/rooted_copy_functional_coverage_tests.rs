@@ -64,22 +64,31 @@ fn test_rooted_tree_copy_replaces_entry_kinds_and_preserves_directory_permission
     assert_eq!(
         b"nested",
         fs::read(target.join("directory-replaces-file/child"))
-            .unwrap()
+            .expect("copied nested file should be readable")
             .as_slice()
     );
     assert_eq!(
         b"replacement",
-        fs::read(target.join("file-replaces-directory")).unwrap().as_slice()
+        fs::read(target.join("file-replaces-directory"))
+            .expect("replacement file should be readable")
+            .as_slice()
     );
     assert_eq!(
         Path::new("file-replaces-directory"),
-        fs::read_link(target.join("link")).unwrap()
+        fs::read_link(target.join("link")).expect("copied symbolic link should be readable")
     );
-    assert_eq!(0o750, fs::metadata(&target).unwrap().permissions().mode() & 0o7777);
+    assert_eq!(
+        0o750,
+        fs::metadata(&target)
+            .expect("target directory metadata should be readable")
+            .permissions()
+            .mode()
+            & 0o7777
+    );
     assert_eq!(
         0o700,
         fs::metadata(target.join("directory-replaces-file"))
-            .unwrap()
+            .expect("copied nested directory metadata should be readable")
             .permissions()
             .mode()
             & 0o7777,
@@ -173,7 +182,12 @@ fn test_rooted_directory_copy_reports_failed_file_removal() {
         .expect_err("failed destination removal should fail directory preparation");
 
     assert_eq!(LocalFileErrorKind::Io, failure.error().kind());
-    assert_eq!(b"keep", fs::read(directory.path().join("target")).unwrap().as_slice());
+    assert_eq!(
+        b"keep",
+        fs::read(directory.path().join("target"))
+            .expect("destination file should remain readable")
+            .as_slice()
+    );
 }
 
 #[test]
@@ -241,7 +255,12 @@ fn test_rooted_symlink_copy_retains_file_destination_when_removal_fails() {
         .expect_err("failed destination removal should fail symlink replacement");
 
     assert_eq!(LocalFileErrorKind::Io, failure.error().kind());
-    assert_eq!(b"keep", fs::read(directory.path().join("target")).unwrap().as_slice());
+    assert_eq!(
+        b"keep",
+        fs::read(directory.path().join("target"))
+            .expect("destination file should remain readable")
+            .as_slice()
+    );
 }
 
 #[test]
@@ -317,7 +336,12 @@ fn test_rooted_file_copy_reports_content_failure_after_replacement() {
         .expect_err("injected content failure should fail the copy");
 
     assert_eq!(LocalFileErrorKind::Io, failure.error().kind());
-    assert_eq!(b"old", fs::read(directory.path().join("target")).unwrap().as_slice());
+    assert_eq!(
+        b"old",
+        fs::read(directory.path().join("target"))
+            .expect("original destination file should remain readable")
+            .as_slice()
+    );
 }
 
 #[test]

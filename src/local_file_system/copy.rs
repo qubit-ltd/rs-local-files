@@ -29,7 +29,19 @@ use super::with_current_directory;
 impl LocalFileSystem {
     /// Copies an entry using this instance's default copy options.
     ///
+    /// # Parameters
+    ///
+    /// - `source`: Path of the file, symbolic link, or directory tree to copy.
+    /// - `destination`: Path where the copied entry is published.
+    ///
+    /// # Returns
+    ///
     /// Returns the outcome or structured failure described by
+    /// [`Self::copy_with_options`].
+    ///
+    /// # Errors
+    ///
+    /// Returns the structured copy failure described by
     /// [`Self::copy_with_options`].
     #[inline]
     pub fn copy(&self, source: &Path, destination: &Path) -> LocalCopyResult {
@@ -43,6 +55,17 @@ impl LocalFileSystem {
     /// directory; `Auto` selects from the observed kind. Final links are
     /// copied as entries. A directory-qualified path requires tree mode.
     ///
+    /// # Parameters
+    ///
+    /// - `source`: Path of the file, symbolic link, or directory tree to copy.
+    /// - `destination`: Path where the copied entry is published.
+    /// - `options`: Complete copy policy, including source mode and resource
+    ///   limits.
+    ///
+    /// # Returns
+    ///
+    /// Returns the completed copy outcome.
+    ///
     /// # Errors
     ///
     /// Returns a structured failure for invalid paths/options, unsupported
@@ -55,11 +78,153 @@ impl LocalFileSystem {
         self.copy_with_options_started_at(source, destination, options, Instant::now())
     }
 
+    /// Renames an entry using this instance's default rename options.
+    ///
+    /// # Parameters
+    ///
+    /// - `source`: Path of the entry to rename.
+    /// - `destination`: New path for the entry.
+    ///
+    /// # Returns
+    ///
+    /// Returns the outcome or structured failure described by
+    /// [`Self::rename_with_options`].
+    ///
+    /// # Errors
+    ///
+    /// Returns the structured rename failure described by
+    /// [`Self::rename_with_options`].
+    #[inline]
+    pub fn rename(&self, source: &Path, destination: &Path) -> LocalRenameResult {
+        self.rename_with_options(source, destination, &self.defaults.rename)
+    }
+
+    /// Renames an entry using one complete explicit options value.
+    ///
+    /// Resolves both paths from one current-directory snapshot and preserves
+    /// final symbolic links as entries. The outcome reports the achieved
+    /// atomicity and durability.
+    ///
+    /// # Parameters
+    ///
+    /// - `source`: Path of the entry to rename.
+    /// - `destination`: New path for the entry.
+    /// - `options`: Complete rename policy, including overwrite and durability
+    ///   requirements.
+    ///
+    /// # Returns
+    ///
+    /// Returns the achieved rename outcome.
+    ///
+    /// # Errors
+    ///
+    /// Returns path, type, conflict, requirement, or native rename failures.
+    /// A post-publication synchronization failure can occur after the entry
+    /// moved; inspect the returned rename state before retrying.
+    #[allow(clippy::result_large_err)]
+    pub fn rename_with_options(
+        &self,
+        source: &Path,
+        destination: &Path,
+        options: &LocalRenameOptions,
+    ) -> LocalRenameResult {
+        crate::local_file_system_validation::validate_rename_options(
+            options,
+            self.capabilities(),
+            LocalFileOperation::Rename,
+        )
+        .map_err(|error| {
+            rename_failure_unchanged(with_current_directory(
+                error
+                    .with_path(source.to_path_buf())
+                    .with_target(destination.to_path_buf()),
+                self.current_directory.virtual_path(),
+            ))
+        })?;
+        let request_source = source;
+        let request_destination = destination;
+        let resolver = self
+            .resolver_for_pair(request_source, request_destination, LocalFileOperation::Rename)
+            .map_err(|error| rename_failure_unchanged(error.with_target(request_destination.to_path_buf())))?;
+        let source = resolve_operation_path(&resolver, request_source, LocalFileOperation::Rename)
+            .map_err(|error| rename_failure_unchanged(error.with_target(request_destination.to_path_buf())))?;
+        let destination =
+            resolve_operation_path(&resolver, request_destination, LocalFileOperation::Rename).map_err(|error| {
+                rename_failure_unchanged(
+                    error
+                        .with_path(request_source.to_path_buf())
+                        .with_target(request_destination.to_path_buf()),
+                )
+            })?;
+        self.reject_root_operand(&source, LocalFileOperation::Rename, resolver.current_directory())
+            .map_err(|error| {
+                rename_failure_unchanged(error.with_target(destination.namespace_absolute().to_path_buf()))
+            })?;
+        self.reject_root_operand(&destination, LocalFileOperation::Rename, resolver.current_directory())
+            .map_err(|error| {
+                rename_failure_unchanged(
+                    error
+                        .with_path(source.namespace_absolute().to_path_buf())
+                        .with_target(destination.namespace_absolute().to_path_buf()),
+                )
+            })?;
+        self.validate_directory_requirement(&source, LocalFileOperation::Rename, resolver.current_directory())
+            .map_err(|error| {
+                rename_failure_unchanged(error.with_target(destination.namespace_absolute().to_path_buf()))
+            })?;
+        self.validate_directory_requirement(&destination, LocalFileOperation::Rename, resolver.current_directory())
+            .map_err(|error| {
+                rename_failure_unchanged(
+                    error
+                        .with_path(source.namespace_absolute().to_path_buf())
+                        .with_target(destination.namespace_absolute().to_path_buf()),
+                )
+            })?;
+        let result = match &self.core.namespace {
+            LocalNamespace::Host => HostLocalFileSystem::rename_with_policy(
+                source.authority_relative(),
+                destination.authority_relative(),
+                options,
+                self.symlink_policy,
+            ),
+            LocalNamespace::Rooted(rooted) => rooted.rename(
+                source.authority_relative(),
+                destination.authority_relative(),
+                options,
+                self.symlink_policy,
+            ),
+        };
+        result.map_err(|failure| {
+            failure.remap_namespace(
+                source.namespace_absolute(),
+                destination.namespace_absolute(),
+                resolver.current_directory(),
+            )
+        })
+    }
+
     /// Copies using a start time captured by an enclosing operation.
     ///
     /// The supplied time anchors deadline enforcement for resolution, copy
     /// progress, and destination cleanup. Returns the same structured result
     /// as [`Self::copy_with_options`].
+    ///
+    /// # Parameters
+    ///
+    /// - `source`: Path of the entry to copy.
+    /// - `destination`: Path where the copied entry is published.
+    /// - `options`: Complete copy policy to apply.
+    /// - `started_at`: Start time used to enforce the operation deadline.
+    ///
+    /// # Returns
+    ///
+    /// Returns the completed copy outcome.
+    ///
+    /// # Errors
+    ///
+    /// Returns a structured failure for invalid paths/options or native I/O
+    /// failures. Copy failures may report partial publication and cleanup
+    /// state.
     #[allow(clippy::result_large_err)]
     pub(crate) fn copy_with_options_started_at(
         &self,
@@ -157,108 +322,6 @@ impl LocalFileSystem {
                 source.authority_relative(),
                 destination.authority_relative(),
                 self.scope() == LocalFileSystemScope::Rooted,
-                resolver.current_directory(),
-            )
-        })
-    }
-
-    /// Renames an entry using this instance's default rename options.
-    ///
-    /// Returns the outcome or structured failure described by
-    /// [`Self::rename_with_options`].
-    #[inline]
-    pub fn rename(&self, source: &Path, destination: &Path) -> LocalRenameResult {
-        self.rename_with_options(source, destination, &self.defaults.rename)
-    }
-
-    /// Renames an entry using one complete explicit options value.
-    ///
-    /// Resolves both paths from one current-directory snapshot and preserves
-    /// final symbolic links as entries. The outcome reports the achieved
-    /// atomicity and durability.
-    ///
-    /// # Errors
-    ///
-    /// Returns path, type, conflict, requirement, or native rename failures.
-    /// A post-publication synchronization failure can occur after the entry
-    /// moved; inspect the returned rename state before retrying.
-    #[allow(clippy::result_large_err)]
-    pub fn rename_with_options(
-        &self,
-        source: &Path,
-        destination: &Path,
-        options: &LocalRenameOptions,
-    ) -> LocalRenameResult {
-        crate::local_file_system_validation::validate_rename_options(
-            options,
-            self.capabilities(),
-            LocalFileOperation::Rename,
-        )
-        .map_err(|error| {
-            rename_failure_unchanged(with_current_directory(
-                error
-                    .with_path(source.to_path_buf())
-                    .with_target(destination.to_path_buf()),
-                self.current_directory.virtual_path(),
-            ))
-        })?;
-        let request_source = source;
-        let request_destination = destination;
-        let resolver = self
-            .resolver_for_pair(request_source, request_destination, LocalFileOperation::Rename)
-            .map_err(|error| rename_failure_unchanged(error.with_target(request_destination.to_path_buf())))?;
-        let source = resolve_operation_path(&resolver, request_source, LocalFileOperation::Rename)
-            .map_err(|error| rename_failure_unchanged(error.with_target(request_destination.to_path_buf())))?;
-        let destination =
-            resolve_operation_path(&resolver, request_destination, LocalFileOperation::Rename).map_err(|error| {
-                rename_failure_unchanged(
-                    error
-                        .with_path(request_source.to_path_buf())
-                        .with_target(request_destination.to_path_buf()),
-                )
-            })?;
-        self.reject_root_operand(&source, LocalFileOperation::Rename, resolver.current_directory())
-            .map_err(|error| {
-                rename_failure_unchanged(error.with_target(destination.namespace_absolute().to_path_buf()))
-            })?;
-        self.reject_root_operand(&destination, LocalFileOperation::Rename, resolver.current_directory())
-            .map_err(|error| {
-                rename_failure_unchanged(
-                    error
-                        .with_path(source.namespace_absolute().to_path_buf())
-                        .with_target(destination.namespace_absolute().to_path_buf()),
-                )
-            })?;
-        self.validate_directory_requirement(&source, LocalFileOperation::Rename, resolver.current_directory())
-            .map_err(|error| {
-                rename_failure_unchanged(error.with_target(destination.namespace_absolute().to_path_buf()))
-            })?;
-        self.validate_directory_requirement(&destination, LocalFileOperation::Rename, resolver.current_directory())
-            .map_err(|error| {
-                rename_failure_unchanged(
-                    error
-                        .with_path(source.namespace_absolute().to_path_buf())
-                        .with_target(destination.namespace_absolute().to_path_buf()),
-                )
-            })?;
-        let result = match &self.core.namespace {
-            LocalNamespace::Host => HostLocalFileSystem::rename_with_policy(
-                source.authority_relative(),
-                destination.authority_relative(),
-                options,
-                self.symlink_policy,
-            ),
-            LocalNamespace::Rooted(rooted) => rooted.rename(
-                source.authority_relative(),
-                destination.authority_relative(),
-                options,
-                self.symlink_policy,
-            ),
-        };
-        result.map_err(|failure| {
-            failure.remap_namespace(
-                source.namespace_absolute(),
-                destination.namespace_absolute(),
                 resolver.current_directory(),
             )
         })

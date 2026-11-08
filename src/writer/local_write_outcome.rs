@@ -121,6 +121,11 @@ impl LocalWriteOutcome {
     }
 
     /// Sets the achieved file synchronization state.
+    ///
+    /// # Parameters
+    ///
+    /// - `file_synced`: Whether file data and metadata synchronization
+    ///   completed.
     #[inline]
     pub(crate) const fn with_file_synced(mut self, file_synced: bool) -> Self {
         self.file_synced = file_synced;

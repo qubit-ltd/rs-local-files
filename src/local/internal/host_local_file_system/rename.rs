@@ -136,6 +136,10 @@ fn rename_io_error(source: &Path, target: &Path, error: io::Error) -> LocalFileE
 }
 
 /// Wraps a failure whose native rename effect cannot be proven.
+///
+/// # Parameters
+///
+/// - `error`: Failure whose publication effect is unknown.
 #[inline]
 fn rename_failure_indeterminate(error: LocalFileError) -> LocalRenameFailure {
     LocalRenameFailure::new(error, LocalRenameFailureState::Indeterminate)
@@ -162,6 +166,12 @@ pub(crate) fn sync_parent_directory(path: &Path) -> io::Result<()> {
 }
 
 /// Synchronizes every parent directory changed by a completed rename.
+///
+/// # Parameters
+///
+/// - `source`: Bound source path whose parent may need synchronization.
+/// - `target`: Bound destination path whose parent is synchronized when it
+///   differs.
 fn sync_rename_parents(source: &Path, target: &Path) -> io::Result<()> {
     sync_parent_directory(source)?;
     if source.parent() != target.parent() {
@@ -174,6 +184,10 @@ fn sync_rename_parents(source: &Path, target: &Path) -> io::Result<()> {
 ///
 /// Missing entries and non-directories return `false`. Other no-follow
 /// metadata errors are propagated.
+///
+/// # Parameters
+///
+/// - `path`: Destination entry inspected without following symbolic links.
 pub(crate) fn destination_is_directory(path: &Path) -> io::Result<bool> {
     match fs::symlink_metadata(path) {
         Ok(metadata) => Ok(metadata.file_type().is_dir()),

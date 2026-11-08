@@ -15,6 +15,8 @@ use super::super::tree_validation::LocalTreeEntry;
 use super::super::tree_validation::LocalTreeValidationOptions;
 use super::LocalStagedDirectory;
 use super::MAX_OWNER_POLICY_ENTRY_HANDLES;
+use super::internal::OwnerPolicyEntry;
+use super::internal::RetainedOwnerPolicyEntry;
 #[cfg(unix)]
 use super::open_unix_tree_entry;
 #[cfg(windows)]
@@ -36,19 +38,6 @@ use crate::error::LocalResult;
 use crate::observation::LocalFileObservation;
 use crate::options::LocalListOptions;
 use crate::policy::LocalFileSyncRequirement;
-
-type OwnerPolicyEntry = (
-    PathBuf,
-    crate::LocalFileKind,
-    Option<crate::observation::LocalFileIdentity>,
-);
-type RetainedOwnerPolicyEntry = (
-    PathBuf,
-    crate::LocalFileKind,
-    Option<crate::observation::LocalFileIdentity>,
-    std::fs::File,
-    bool,
-);
 
 #[cfg(test)]
 thread_local! {
@@ -74,6 +63,20 @@ fn reach_owner_policy_deadline_boundary(boundary: OwnerPolicyDeadlineBoundary, s
     });
 }
 
+/// Reports whether owner-policy work has consumed the configured elapsed-time
+/// budget.
+///
+/// The duration is measured from the operation's shared start instant so
+/// collection, mutation, verification, and synchronization use one deadline.
+///
+/// # Parameters
+///
+/// * `limits` — listing options containing the optional elapsed-time limit.
+/// * `started_at` — instant from which elapsed time is measured.
+///
+/// # Returns
+///
+/// Returns whether the configured elapsed-time budget has expired.
 fn owner_policy_deadline_exceeded(limits: &LocalListOptions, started_at: std::time::Instant) -> bool {
     limits.deadline().is_some_and(|deadline| {
         #[cfg(test)]
@@ -87,11 +90,6 @@ fn owner_policy_deadline_exceeded(limits: &LocalListOptions, started_at: std::ti
 }
 
 impl LocalStagedDirectory {
-    /// Observes the stage directory through its retained handle.
-    pub fn observation(&self) -> LocalResult<LocalFileObservation> {
-        self.directory().observe()
-    }
-
     /// Creates a lazy, recursive, entry-only observer using the supplied
     /// resource ceilings.
     ///
@@ -100,22 +98,36 @@ impl LocalStagedDirectory {
     /// supplied recursion and symlink policies do not change this behavior;
     /// resource ceilings, error policy, and listing depth still control
     /// this display-oriented observer.
+    ///
+    /// # Parameters
+    ///
+    /// * `options` — resource ceilings and listing behavior for the observer.
+    ///
+    /// # Returns
+    ///
+    /// Returns a lazy observer that yields entries under the retained stage
+    /// authority.
+    ///
+    /// # Errors
+    ///
+    /// Returns the listing setup error if the stage cannot open its initial
+    /// traversal resources.
     pub fn observe_tree_with_options(&self, options: &LocalListOptions) -> LocalResult<LocalTreeObserver> {
         self.observe_tree_with_options_started_at(options, std::time::Instant::now())
     }
 
-    pub(crate) fn observe_tree_with_options_started_at(
-        &self,
-        options: &LocalListOptions,
-        started_at: std::time::Instant,
-    ) -> LocalResult<LocalTreeObserver> {
-        let recursive = (*options)
-            .with_recursive()
-            .with_symlink_policy(crate::policy::LocalSymlinkPolicy::Reject);
-        let walker = self
-            .directory()
-            .list_with_options_started_at(Path::new("."), &recursive, started_at)?;
-        Ok(LocalTreeObserver::new(self.directory().clone(), walker))
+    /// Observes the stage directory through its retained handle.
+    ///
+    /// # Returns
+    ///
+    /// Returns the current root observation.
+    ///
+    /// # Errors
+    ///
+    /// Returns the metadata observation error if the retained handle cannot be
+    /// queried.
+    pub fn observation(&self) -> LocalResult<LocalFileObservation> {
+        self.directory().observe()
     }
 
     /// Validates the complete tree against an expected entry set and optional
@@ -141,6 +153,21 @@ impl LocalStagedDirectory {
     /// A successful return means the checked sequence of observations met the
     /// requested constraints. It does not make the observations atomic with
     /// respect to concurrent changes.
+    ///
+    /// # Parameters
+    ///
+    /// * `expected` — expected entry set; exact sets must contain unique paths.
+    /// * `options` — validation rules and resource limits.
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(())` when the checked observations satisfy the constraints.
+    ///
+    /// # Errors
+    ///
+    /// Returns `InvalidOptions` for repeated exact paths, `ResourceLimit` when
+    /// configured budgets are exceeded, or `RequirementNotMet` when a rule
+    /// or expected entry set is violated.
     pub fn verify_entries(&self, expected: &[LocalTreeEntry], options: &LocalTreeValidationOptions) -> LocalResult<()> {
         if options.exact_entries().is_some_and(|configured| configured != expected) {
             return Err(LocalFileError::new(
@@ -159,6 +186,14 @@ impl LocalStagedDirectory {
     /// authority is available. On Windows, restoring the DACL does not clear
     /// an existing `FILE_ATTRIBUTE_READONLY`. See the guide's read-only staged
     /// tree recovery example.
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(())` after the stage has been removed.
+    ///
+    /// # Errors
+    ///
+    /// Returns cleanup failures together with their owning resource context.
     pub fn cleanup(mut self) -> Result<(), LocalTreeCleanupError> {
         drop(self.directory.take());
         self.owner
@@ -169,12 +204,46 @@ impl LocalStagedDirectory {
 
     /// Explicitly gives up automatic cleanup and returns a path/identity
     /// recovery record.
+    ///
+    /// # Returns
+    ///
+    /// Returns the recorded namespace path and identity after cleanup ownership
+    /// has been relinquished.
+    #[must_use = "retain the recovery location so the staged data can still be found"]
     pub fn retain_in_place(mut self) -> LocalTreeRecoveryLocation {
         drop(self.directory.take());
         self.owner
             .take()
             .expect("staged directory retains its cleanup owner")
             .retain_in_place()
+    }
+
+    /// Builds the same lazy tree observer while preserving a caller's start
+    /// time.
+    ///
+    /// The shared instant makes deadline accounting include setup performed
+    /// before traversal begins.
+    ///
+    /// # Parameters
+    ///
+    /// * `options` — resource ceilings and listing behavior for the observer.
+    /// * `started_at` — instant from which the operation's elapsed budget runs.
+    ///
+    /// # Returns
+    ///
+    /// Returns a lazy observer rooted in the retained stage authority.
+    pub(crate) fn observe_tree_with_options_started_at(
+        &self,
+        options: &LocalListOptions,
+        started_at: std::time::Instant,
+    ) -> LocalResult<LocalTreeObserver> {
+        let recursive = (*options)
+            .with_recursive()
+            .with_symlink_policy(crate::policy::LocalSymlinkPolicy::Reject);
+        let walker = self
+            .directory()
+            .list_with_options_started_at(Path::new("."), &recursive, started_at)?;
+        Ok(LocalTreeObserver::new(self.directory().clone(), walker))
     }
 }
 impl LocalStagedDirectory {
@@ -184,6 +253,19 @@ impl LocalStagedDirectory {
     /// access after a read-only publication fails. On Windows, DACL changes do
     /// not clear an existing `FILE_ATTRIBUTE_READONLY`; see the guide's
     /// read-only staged tree recovery example for the supported recovery flow.
+    ///
+    /// # Parameters
+    ///
+    /// * `policy` — access policy to apply to ordinary stage entries.
+    ///
+    /// # Returns
+    ///
+    /// Returns the observed access outcome after applying the policy.
+    ///
+    /// # Errors
+    ///
+    /// Returns an access error with the best-known stage state if mutation or
+    /// verification cannot be completed.
     pub fn apply_access_policy(
         &mut self,
         policy: crate::policy::LocalTreeFinalAccess,
@@ -192,6 +274,20 @@ impl LocalStagedDirectory {
     }
 
     /// Applies an access policy using one bounded recursive tree observation.
+    ///
+    /// # Parameters
+    ///
+    /// * `policy` — access policy to apply to ordinary stage entries.
+    /// * `limits` — resource ceilings for the recursive observation.
+    ///
+    /// # Returns
+    ///
+    /// Returns the observed access outcome after applying the policy.
+    ///
+    /// # Errors
+    ///
+    /// Returns an access error with the best-known stage state if a resource
+    /// limit, mutation, synchronization, or verification fails.
     pub fn apply_access_policy_with_options(
         &mut self,
         policy: crate::policy::LocalTreeFinalAccess,
@@ -213,6 +309,21 @@ impl LocalStagedDirectory {
     /// the method returns `RequirementNotMet` before mutation. An empty
     /// stage can use a mode or mask that removes all access because its
     /// already-open root handle is sufficient for final verification.
+    ///
+    /// # Parameters
+    ///
+    /// * `policy` — exact owner permissions to apply and verify.
+    /// * `limits` — bounds for collection and final verification.
+    ///
+    /// # Returns
+    ///
+    /// Returns the applied access outcome, or an error carrying the best-known
+    /// access state when preparation, mutation, or verification fails.
+    ///
+    /// # Errors
+    ///
+    /// Returns an access error with the state preserved, mixed, indeterminate,
+    /// or applied at the point the operation stopped.
     pub fn apply_owner_access_policy_with_options(
         &mut self,
         policy: &crate::policy::LocalOwnerAccessPolicy,
@@ -222,6 +333,30 @@ impl LocalStagedDirectory {
             .map(|(outcome, _)| outcome)
     }
 
+    /// Applies an owner policy while carrying the synchronization state across
+    /// publication stages.
+    ///
+    /// This crate-internal entry point lets the staged publication flow avoid
+    /// repeating a sync already completed by its caller.
+    ///
+    /// # Parameters
+    ///
+    /// * `policy` — exact owner policy to validate and apply.
+    /// * `limits` — resource ceilings for every phase.
+    /// * `sync_requirement` — whether pinned regular files must be
+    ///   synchronized.
+    /// * `pre_synced` — whether an earlier publication phase already synced
+    ///   files.
+    ///
+    /// # Returns
+    ///
+    /// Returns the applied owner-policy outcome and whether required files are
+    /// synchronized.
+    ///
+    /// # Errors
+    ///
+    /// Returns an access error with the best-known stage state when a phase
+    /// fails or the shared deadline expires.
     pub(in crate::directory) fn apply_owner_access_policy_with_sync(
         &mut self,
         policy: &crate::policy::LocalOwnerAccessPolicy,
@@ -285,8 +420,16 @@ impl LocalStagedDirectory {
         ))
     }
 
-    /// Scans the staged namespace and enforces the existing pre-mutation
-    /// budgets.
+    /// Collects entries for tests using the ordinary owner-policy limits.
+    ///
+    /// This Linux test helper exposes the private preparation phase so tests
+    /// can mutate the namespace between collection and later phases.
+    ///
+    /// # Parameters
+    ///
+    /// * `policy` — policy used to determine entry ordering and traversal
+    ///   needs.
+    /// * `limits` — resource ceilings applied during collection.
     #[cfg(all(test, target_os = "linux"))]
     fn collect_owner_policy_entries(
         &self,
@@ -297,6 +440,26 @@ impl LocalStagedDirectory {
         self.collect_owner_policy_entries_started_at(policy, limits, std::time::Instant::now())
     }
 
+    /// Collects and orders stage entries while enforcing one shared deadline.
+    ///
+    /// Entry count, encoded name bytes, traversal depth, and allocation are
+    /// bounded before any access mutation begins.
+    ///
+    /// # Parameters
+    ///
+    /// * `policy` — policy whose traversal requirements are checked.
+    /// * `limits` — entry, byte, depth, and deadline limits.
+    /// * `started_at` — instant shared by all phases of the operation.
+    ///
+    /// # Returns
+    ///
+    /// Returns ordered observations, traversal options, the entry ceiling, and
+    /// whether the chosen directory policy prevents traversal.
+    ///
+    /// # Errors
+    ///
+    /// Returns an access error if observation fails, a resource ceiling is
+    /// exceeded, or a nonempty tree cannot be traversed under the policy.
     fn collect_owner_policy_entries_started_at(
         &self,
         policy: &crate::policy::LocalOwnerAccessPolicy,
@@ -399,8 +562,15 @@ impl LocalStagedDirectory {
         Ok((entries, traversal, maximum_entries, directory_mode_restricts_traversal))
     }
 
-    /// Opens each observed entry and pins the identity before the first
-    /// mutation.
+    /// Opens collected entries using default limits for phase-level tests.
+    ///
+    /// Tests use this helper to verify that stale names are rejected before
+    /// permissions change.
+    ///
+    /// # Parameters
+    ///
+    /// * `entries` — previously observed paths, kinds, and identities.
+    /// * `sync_requirement` — synchronization capability required of handles.
     #[cfg(all(test, target_os = "linux"))]
     fn open_and_pin_owner_policy_entries(
         &self,
@@ -415,6 +585,26 @@ impl LocalStagedDirectory {
         )
     }
 
+    /// Opens each collected entry and retains its identity-bound handle.
+    ///
+    /// The deadline and synchronization requirement apply to the full pinning
+    /// phase; a mismatch aborts before the first mutation.
+    ///
+    /// # Parameters
+    ///
+    /// * `entries` — previously observed paths, kinds, and identities.
+    /// * `sync_requirement` — required synchronization capability.
+    /// * `limits` — resource and elapsed-time bounds.
+    /// * `started_at` — instant shared by all phases of the operation.
+    ///
+    /// # Returns
+    ///
+    /// Returns handles pinned to each observed entry and its identity.
+    ///
+    /// # Errors
+    ///
+    /// Returns an access error if a deadline, handle, identity, or root binding
+    /// check fails before mutation begins.
     fn open_and_pin_owner_policy_entries_started_at(
         &self,
         entries: &[OwnerPolicyEntry],
@@ -562,8 +752,26 @@ impl LocalStagedDirectory {
         Ok(retained)
     }
 
-    /// Applies entry and root permissions, preserving the original mutation
-    /// order.
+    /// Mutates pinned entries and then the root, checking each identity
+    /// binding.
+    ///
+    /// The retained handles prevent later path replacement from redirecting
+    /// permission changes to a different entry.
+    ///
+    /// # Parameters
+    ///
+    /// * `policy` — exact owner policy to apply.
+    /// * `retained` — identity-pinned handles opened during preparation.
+    ///
+    /// # Returns
+    ///
+    /// Returns a handle to the root after child and root access have been
+    /// applied.
+    ///
+    /// # Errors
+    ///
+    /// Returns an access error carrying the best-known state if identity
+    /// checks or a permission mutation fails.
     fn apply_owner_policy_mutations(
         &mut self,
         policy: &crate::policy::LocalOwnerAccessPolicy,
@@ -754,6 +962,23 @@ impl LocalStagedDirectory {
 
     /// Rewalks names and rechecks identities and final policy facts before
     /// syncing.
+    ///
+    /// # Parameters
+    ///
+    /// * `policy` — policy whose resulting access facts must hold.
+    /// * `limits` — elapsed-time, depth, and traversal resource constraints.
+    /// * `entries` — original path, kind, and identity observations.
+    /// * `retained` — pinned handles used for identity and permission checks.
+    /// * `traversal` — bounded traversal options for the final namespace walk.
+    /// * `maximum_entries` — maximum accepted final entry count.
+    /// * `directory_mode_restricts_traversal` — whether the selected root mode
+    ///   prevents walking an empty tree after mutation.
+    /// * `root` — retained root handle whose identity and access are verified.
+    ///
+    /// # Returns
+    ///
+    /// Returns success only when the final namespace and all access facts
+    /// match the expected observations; otherwise reports an access error.
     #[cfg(all(test, target_os = "linux"))]
     #[allow(clippy::too_many_arguments)]
     fn verify_owner_policy_entries(
@@ -780,6 +1005,34 @@ impl LocalStagedDirectory {
         )
     }
 
+    /// Verifies the final namespace and permissions against the shared
+    /// deadline.
+    ///
+    /// It requires the original observations and pinned handles to distinguish
+    /// replacement, addition, removal, and permission changes.
+    ///
+    /// # Parameters
+    ///
+    /// * `policy` — exact owner permissions expected after mutation.
+    /// * `limits` — resource and elapsed-time bounds.
+    /// * `entries` — collected namespace observations.
+    /// * `retained` — handles pinned to those observations.
+    /// * `traversal` — options for rewalking the final namespace.
+    /// * `maximum_entries` — maximum allowed final entry count.
+    /// * `directory_mode_restricts_traversal` — whether final directory access
+    ///   prevents namespace traversal.
+    /// * `root` — retained root handle used for final access verification.
+    /// * `started_at` — instant shared by all phases of the operation.
+    ///
+    /// # Returns
+    ///
+    /// Returns success only when the final namespace, pinned entries, and root
+    /// satisfy the requested policy.
+    ///
+    /// # Errors
+    ///
+    /// Returns an access error when the deadline expires or any final identity,
+    /// namespace, or permission check fails.
     #[allow(clippy::too_many_arguments)]
     fn verify_owner_policy_entries_started_at(
         &mut self,
@@ -1065,6 +1318,27 @@ impl LocalStagedDirectory {
     }
 
     /// Synchronizes pinned regular files after successful policy verification.
+    ///
+    /// Optional synchronization records incomplete syncs; required
+    /// synchronization returns an error while preserving the applied state.
+    ///
+    /// # Parameters
+    ///
+    /// * `retained` — opened entries whose regular files may need syncing.
+    /// * `sync_requirement` — whether synchronization is optional or required.
+    /// * `file_synced` — whether earlier phases synchronized every required
+    ///   file.
+    /// * `limits` — elapsed-time bound for the synchronization phase.
+    /// * `started_at` — instant shared by all phases of the operation.
+    ///
+    /// # Returns
+    ///
+    /// Returns whether every required file has been synchronized.
+    ///
+    /// # Errors
+    ///
+    /// Returns an access error when the deadline expires or required
+    /// synchronization fails.
     fn sync_owner_policy_files(
         &self,
         retained: &[RetainedOwnerPolicyEntry],
@@ -1127,6 +1401,26 @@ impl LocalStagedDirectory {
         }
         Ok(file_synced)
     }
+    /// Applies ordinary access while preserving the caller's sync requirement.
+    ///
+    /// This crate-internal entry point is used by publication flows that share
+    /// one sync policy across multiple operations.
+    ///
+    /// # Parameters
+    ///
+    /// * `policy` — final access policy to apply.
+    /// * `limits` — resource ceilings for recursive observation.
+    /// * `sync_requirement` — whether changed files must be synchronized.
+    ///
+    /// # Returns
+    ///
+    /// Returns the applied access outcome and whether required files are
+    /// synchronized.
+    ///
+    /// # Errors
+    ///
+    /// Returns an access error with the best-known stage state if a phase
+    /// fails.
     pub(in crate::directory) fn apply_access_policy_with_sync(
         &mut self,
         policy: crate::policy::LocalTreeFinalAccess,
@@ -1152,46 +1446,9 @@ impl LocalStagedDirectory {
         }
         #[cfg(unix)]
         {
-            let mut entries = Vec::new();
-            let mut bytes = 0_usize;
-            let traversal = limits
-                .without_max_depth()
-                .with_error_policy(crate::options::LocalWalkErrorPolicy::FailFast);
-            let collect = (|| -> LocalResult<()> {
-                for item in self.observe_tree_with_options(&traversal)? {
-                    let item = item?;
-                    let depth = item.relative_path().components().count();
-                    bytes = bytes
-                        .checked_add(item.relative_path().as_os_str().as_encoded_bytes().len())
-                        .ok_or_else(resource_limit)?;
-                    if limits.max_seen_name_bytes().is_some_and(|maximum| bytes > maximum)
-                        || limits.max_depth().is_some_and(|maximum| depth > maximum)
-                    {
-                        return Err(resource_limit());
-                    }
-                    entries.try_reserve(1).map_err(|_| resource_limit())?;
-                    entries.push((
-                        item.relative_path().to_path_buf(),
-                        item.observation().metadata().kind(),
-                        item.observation().identity().cloned().ok_or_else(|| {
-                            LocalFileError::new(LocalFileErrorKind::Unsupported, LocalFileOperation::Metadata)
-                        })?,
-                    ));
-                }
-                Ok(())
-            })();
-            if let Err(cause) = collect {
-                return Err(super::super::tree_recovery::LocalTreeAccessError::new(
-                    cause,
-                    State::Indeterminate,
-                ));
-            }
-            entries.sort_by_key(|(path, kind, _)| {
-                (
-                    if *kind == crate::LocalFileKind::Directory { 1 } else { 0 },
-                    std::cmp::Reverse(path.components().count()),
-                )
-            });
+            let entries = self
+                .collect_unix_access_entries(limits)
+                .map_err(|cause| super::super::tree_recovery::LocalTreeAccessError::new(cause, State::Indeterminate))?;
             let mut applied = 0_usize;
             let mut synced = sync_requirement != LocalFileSyncRequirement::NotRequired;
             for (relative, kind, identity) in &entries {
@@ -1419,6 +1676,85 @@ impl LocalStagedDirectory {
         }
     }
 
+    /// Observes and orders Unix stage entries before any access mutation.
+    ///
+    /// The walk keeps the ordinary policy's unbounded-depth traversal while
+    /// enforcing the caller's explicit depth and encoded-name byte limits.
+    /// Each returned identity is captured before the caller rechecks and
+    /// opens the corresponding entry.
+    ///
+    /// # Parameters
+    ///
+    /// * `limits` — byte and depth ceilings for the observation pass.
+    ///
+    /// # Returns
+    ///
+    /// Returns paths, entry kinds, and captured identities ordered for access
+    /// mutation, with non-directories before directories and deeper paths
+    /// first.
+    ///
+    /// # Errors
+    ///
+    /// Returns the traversal error, a resource-limit error, or `Unsupported`
+    /// when an entry identity could not be observed.
+    #[cfg(unix)]
+    fn collect_unix_access_entries(
+        &self,
+        limits: &LocalListOptions,
+    ) -> LocalResult<Vec<(PathBuf, crate::LocalFileKind, crate::observation::LocalFileIdentity)>> {
+        let mut entries = Vec::new();
+        let mut bytes = 0_usize;
+        let traversal = limits
+            .without_max_depth()
+            .with_error_policy(crate::options::LocalWalkErrorPolicy::FailFast);
+        for item in self.observe_tree_with_options(&traversal)? {
+            let item = item?;
+            let depth = item.relative_path().components().count();
+            bytes = bytes
+                .checked_add(item.relative_path().as_os_str().as_encoded_bytes().len())
+                .ok_or_else(resource_limit)?;
+            if limits.max_seen_name_bytes().is_some_and(|maximum| bytes > maximum)
+                || limits.max_depth().is_some_and(|maximum| depth > maximum)
+            {
+                return Err(resource_limit());
+            }
+            entries.try_reserve(1).map_err(|_| resource_limit())?;
+            entries.push((
+                item.relative_path().to_path_buf(),
+                item.observation().metadata().kind(),
+                item.observation().identity().cloned().ok_or_else(|| {
+                    LocalFileError::new(LocalFileErrorKind::Unsupported, LocalFileOperation::Metadata)
+                })?,
+            ));
+        }
+        entries.sort_by_key(|(path, kind, _)| {
+            (
+                if *kind == crate::LocalFileKind::Directory { 1 } else { 0 },
+                std::cmp::Reverse(path.components().count()),
+            )
+        });
+        Ok(entries)
+    }
+
+    /// Applies the ordinary access policy through retained Windows handles.
+    ///
+    /// The namespace is observed before mutation and each opened handle is
+    /// checked before its permissions are changed.
+    ///
+    /// # Parameters
+    ///
+    /// * `policy` — final access policy to apply.
+    /// * `limits` — resource ceilings for recursive observation.
+    /// * `sync_requirement` — whether changed files must be synchronized.
+    ///
+    /// # Returns
+    ///
+    /// Returns the applied Windows access outcome and sync status.
+    ///
+    /// # Errors
+    ///
+    /// Returns an access error if collection, mutation, verification, or sync
+    /// fails.
     #[cfg(windows)]
     fn apply_windows_access_policy(
         &mut self,
@@ -2616,229 +2952,6 @@ mod owner_policy_checkpoint_tests {
                 reached.contains(&checkpoint),
                 "required prepared checkpoint was not reached: {checkpoint:?}"
             );
-        }
-    }
-
-    #[test]
-    fn test_remaining_owner_policy_validation_preserves_existing_state() {
-        let (scratch, mut stage, valid) = fixture(true);
-        let native = scratch.path().join(stage.relative_name());
-        stage
-            .apply_owner_access_policy_with_options(&valid, &LocalListOptions::new())
-            .expect("establish valid owner policy");
-        for invalid in [
-            LocalOwnerAccessPolicy::new(),
-            LocalOwnerAccessPolicy::new().with_windows_masks(0x001f_01ff, 0x001f_01ff),
-            LocalOwnerAccessPolicy::new().with_unix_modes(0o755, 0o600),
-            LocalOwnerAccessPolicy::new().with_unix_modes(0o700, 0o644),
-        ] {
-            let error = stage
-                .apply_owner_access_policy_with_options(&invalid, &LocalListOptions::new())
-                .expect_err("invalid platform owner policy must fail before touching stage state");
-            assert_eq!(LocalFileErrorKind::InvalidOptions, error.cause().kind());
-            assert_eq!(LocalFileOperation::ValidateName, error.cause().operation());
-            assert_eq!(LocalTreeAccessState::Preserved, error.access_state());
-            assert_eq!(Some(&valid), stage.owner_access_policy());
-            assert_eq!(
-                0o600,
-                fs::metadata(native.join("payload"))
-                    .expect("preserved file metadata")
-                    .permissions()
-                    .mode()
-                    & 0o777
-            );
-            assert_eq!(
-                0o700,
-                fs::metadata(&native)
-                    .expect("preserved root metadata")
-                    .permissions()
-                    .mode()
-                    & 0o777
-            );
-            assert_eq!(
-                b"original",
-                fs::read(native.join("payload")).expect("preserved data").as_slice()
-            );
-        }
-        stage
-            .apply_owner_access_policy_with_options(&valid, &LocalListOptions::new())
-            .expect("valid policy still succeeds");
-        stage.cleanup().expect("cleanup valid retained state");
-        assert!(!native.exists());
-    }
-
-    #[test]
-    fn test_remaining_access_name_byte_budget_exact_boundary_and_retry() {
-        use crate::policy::LocalTreeFinalAccess;
-        for owner in [false, true] {
-            let (scratch, mut stage, policy) = fixture(true);
-            let native = scratch.path().join(stage.relative_name());
-            fs::set_permissions(native.join("payload"), fs::Permissions::from_mode(0o644)).expect("initial file mode");
-            fs::set_permissions(&native, fs::Permissions::from_mode(0o755)).expect("initial root mode");
-            let limits = LocalListOptions::new().with_max_seen_name_bytes(6);
-            let result = if owner {
-                stage.apply_owner_access_policy_with_options(&policy, &limits)
-            } else {
-                stage.apply_access_policy_with_options(LocalTreeFinalAccess::CurrentUserOnly, &limits)
-            };
-            let error = result.expect_err("seven-byte payload name exceeds six-byte budget");
-            assert_eq!(LocalFileErrorKind::ResourceLimit, error.cause().kind());
-            assert_eq!(
-                if owner {
-                    LocalTreeAccessState::Preserved
-                } else {
-                    LocalTreeAccessState::Indeterminate
-                },
-                error.access_state()
-            );
-            assert_eq!(
-                0o644,
-                fs::metadata(native.join("payload"))
-                    .expect("pre-mutation file mode")
-                    .permissions()
-                    .mode()
-                    & 0o777
-            );
-            assert_eq!(
-                0o755,
-                fs::metadata(&native)
-                    .expect("pre-mutation root mode")
-                    .permissions()
-                    .mode()
-                    & 0o777
-            );
-            for budget in [7, 8] {
-                let limits = LocalListOptions::new().with_max_seen_name_bytes(budget);
-                let result = if owner {
-                    stage.apply_owner_access_policy_with_options(&policy, &limits)
-                } else {
-                    stage.apply_access_policy_with_options(LocalTreeFinalAccess::CurrentUserOnly, &limits)
-                }
-                .expect("inclusive budget permits full collection and final verification");
-                assert_eq!(
-                    if owner {
-                        LocalTreeAccessState::OwnerPolicyApplied
-                    } else {
-                        LocalTreeAccessState::CurrentUserOnly
-                    },
-                    result.access_state()
-                );
-                assert_eq!(
-                    b"original",
-                    fs::read(native.join("payload")).expect("data preserved").as_slice()
-                );
-                assert_eq!(
-                    0o600,
-                    fs::metadata(native.join("payload"))
-                        .expect("final file mode")
-                        .permissions()
-                        .mode()
-                        & 0o777
-                );
-                assert_eq!(
-                    0o700,
-                    fs::metadata(&native).expect("final root mode").permissions().mode() & 0o777
-                );
-            }
-            stage.cleanup().expect("cleanup after budget retry");
-            assert!(!native.exists());
-        }
-    }
-
-    #[test]
-    fn test_remaining_ordinary_access_root_clone_and_final_observation_failures() {
-        use crate::policy::LocalTreeFinalAccess;
-        use crate::tests::native_io_fault_tests::NativeIoFaultGuard;
-        use crate::tests::native_io_fault_tests::NativeIoPoint;
-
-        for policy in [
-            LocalTreeFinalAccess::CurrentUserOnly,
-            LocalTreeFinalAccess::ReadOnlyCurrentUser,
-        ] {
-            for (point, nth) in [(NativeIoPoint::CloneAuthority, 2), (NativeIoPoint::Observation, 3)] {
-                let (scratch, mut stage, _) = fixture(true);
-                let native = scratch.path().join(stage.relative_name());
-                fs::set_permissions(native.join("payload"), fs::Permissions::from_mode(0o644))
-                    .expect("initial file mode");
-                fs::set_permissions(&native, fs::Permissions::from_mode(0o755)).expect("initial root mode");
-                let fault = NativeIoFaultGuard::fail_on(point, nth);
-                let error = stage
-                    .apply_access_policy(policy)
-                    .expect_err("late native fault must prevent a confirmed access outcome");
-                assert!(fault.fired(), "selected root checkpoint must execute");
-                drop(fault);
-                assert_eq!(LocalFileErrorKind::Io, error.cause().kind());
-                assert_eq!(LocalFileOperation::Metadata, error.cause().operation());
-                assert_eq!(
-                    "injected native I/O contract failure",
-                    error.cause().io_error().expect("native source retained").to_string()
-                );
-                let read_only = policy == LocalTreeFinalAccess::ReadOnlyCurrentUser;
-                let expected_file_mode = if read_only { 0o400 } else { 0o600 };
-                let expected_root_mode = if read_only { 0o500 } else { 0o700 };
-                if point == NativeIoPoint::CloneAuthority {
-                    assert_eq!(LocalTreeAccessState::Mixed, error.access_state());
-                    assert_eq!(Some(native.as_path()), error.cause().path());
-                    assert_eq!(
-                        0o755,
-                        fs::metadata(&native)
-                            .expect("root not yet mutated")
-                            .permissions()
-                            .mode()
-                            & 0o777
-                    );
-                } else {
-                    assert_eq!(LocalTreeAccessState::Indeterminate, error.access_state());
-                    assert!(
-                        error.cause().path().is_none(),
-                        "same-handle observation carries no namespace path"
-                    );
-                    assert_eq!(
-                        expected_root_mode,
-                        fs::metadata(&native)
-                            .expect("root already mutated")
-                            .permissions()
-                            .mode()
-                            & 0o777
-                    );
-                }
-                assert_eq!(
-                    expected_file_mode,
-                    fs::metadata(native.join("payload"))
-                        .expect("child already mutated")
-                        .permissions()
-                        .mode()
-                        & 0o777
-                );
-                assert_eq!(
-                    b"original",
-                    fs::read(native.join("payload")).expect("original contents").as_slice()
-                );
-                let outcome = stage
-                    .apply_access_policy(policy)
-                    .expect("retry confirms requested access once native fault is dropped");
-                assert_eq!(
-                    if read_only {
-                        LocalTreeAccessState::ReadOnlyCurrentUser
-                    } else {
-                        LocalTreeAccessState::CurrentUserOnly
-                    },
-                    outcome.access_state()
-                );
-                assert_eq!(
-                    expected_root_mode,
-                    fs::metadata(&native)
-                        .expect("retried root metadata")
-                        .permissions()
-                        .mode()
-                        & 0o777
-                );
-                stage
-                    .apply_access_policy(LocalTreeFinalAccess::CurrentUserOnly)
-                    .expect("restore writable fixture before cleanup");
-                stage.cleanup().expect("cleanup retry owns original identity");
-                assert!(!native.exists());
-            }
         }
     }
 }

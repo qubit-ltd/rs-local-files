@@ -17,6 +17,9 @@ use super::native_private_entry::NativePrivateEntry;
 /// resource was retained by the creation helper.
 #[derive(Debug)]
 pub(crate) struct NativePrivateCreateError {
+    /// The operating-system failure reported by the unsuccessful creation step.
     pub(crate) source: io::Error,
+    /// The partially created entry retained for recovery, if creation succeeded
+    /// before a later step failed.
     pub(crate) retained: Option<NativePrivateEntry>,
 }

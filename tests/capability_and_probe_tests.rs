@@ -35,6 +35,7 @@ struct ProbeChild {
 
 #[cfg(unix)]
 impl ProbeChild {
+    /// Kills the child, waits for it, and records whether it was reaped.
     fn terminate_and_wait(&mut self) -> (std::io::Result<()>, std::io::Result<std::process::ExitStatus>) {
         let killed = self.child.kill();
         let waited = self.child.wait();

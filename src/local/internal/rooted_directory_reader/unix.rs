@@ -25,6 +25,12 @@ use crate::local::internal::rooted_directory_entry::stat_child;
 impl RootedDirectoryReader {
     /// Opens a reader over an already-authorized directory descriptor.
     ///
+    /// # Parameters
+    ///
+    /// * `directory` is the authorized descriptor retained for enumeration and
+    ///   child inspection.
+    /// * `diagnostic_path` is retained only to enrich native I/O errors.
+    ///
     /// Returns an I/O error when the descriptor cannot be duplicated for
     /// enumeration.
     pub(in crate::local::internal) fn open(directory: File, diagnostic_path: &Path) -> Result<Self> {

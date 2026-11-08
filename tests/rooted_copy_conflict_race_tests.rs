@@ -15,6 +15,7 @@ use qubit_local_files::LocalFileSystem;
 use qubit_local_files::error::LocalFileErrorKind;
 use qubit_local_files::options::LocalCopyConflictPolicy;
 use qubit_local_files::options::LocalCopyOptions;
+use qubit_local_files::options::LocalCopyTypeConflictPolicy;
 use qubit_local_files::outcome::LocalCopyFailureState;
 use qubit_local_files::test_support::install_test_fault;
 use tempfile::tempdir;
@@ -164,7 +165,7 @@ fn test_file_skip_policy_does_not_skip_a_directory_type_conflict() {
             Path::new("target"),
             &LocalCopyOptions::new()
                 .with_conflict(LocalCopyConflictPolicy::Skip)
-                .with_type_conflict(qubit_local_files::options::LocalCopyTypeConflictPolicy::Fail),
+                .with_type_conflict(LocalCopyTypeConflictPolicy::Fail),
         )
         .expect_err("file Skip must not override an explicit type-conflict Fail");
 
@@ -199,10 +200,3 @@ fn test_commit_cleanup_failure_is_not_converted_to_skip() {
     assert_eq!(SENTINEL, fs::read(directory.path().join("target")).unwrap().as_slice());
     assert!(failure.staging_path().is_some());
 }
-// =============================================================================
-//    Copyright (c) 2025 - 2026 Haixing Hu.
-
-//    SPDX-License-Identifier: Apache-2.0
-
-//    Licensed under the Apache License, Version 2.0.
-// =============================================================================

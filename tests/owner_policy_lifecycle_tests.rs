@@ -6,11 +6,6 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 
-// =============================================================================
-//    Copyright (c) 2026 Haixing Hu.
-//
-//    SPDX-License-Identifier: Apache-2.0
-// =============================================================================
 //! Owner access policies must be applied and retained throughout stage use.
 
 use std::fs;
@@ -20,20 +15,42 @@ use std::os::unix::fs::MetadataExt;
 use std::path::Path;
 
 use qubit_local_files::LocalFileSystem;
+use qubit_local_files::directory::LocalDirectoryHandle;
 #[cfg(target_os = "linux")]
 use qubit_local_files::directory::LocalTreeValidationOptions;
+use qubit_local_files::error::LocalFileErrorKind;
 #[cfg(target_os = "linux")]
 use qubit_local_files::observation::LocalObservationRequirement;
 #[cfg(target_os = "linux")]
 use qubit_local_files::observation::LocalSecurityObservationOptions;
+#[cfg(target_os = "linux")]
+use qubit_local_files::options::LocalCreateDirectoryOptions;
 use qubit_local_files::options::LocalDirectoryOpenOptions;
+#[cfg(target_os = "linux")]
+use qubit_local_files::options::LocalListOptions;
+#[cfg(target_os = "linux")]
+use qubit_local_files::options::LocalTempCleanupLimits;
 use qubit_local_files::options::LocalTempDirectoryOptions;
+#[cfg(target_os = "linux")]
+use qubit_local_files::options::LocalTreePublishOptions;
+#[cfg(target_os = "linux")]
+use qubit_local_files::outcome::LocalTreeAccessState;
+#[cfg(target_os = "linux")]
+use qubit_local_files::outcome::LocalTreeMutationState;
+#[cfg(target_os = "linux")]
+use qubit_local_files::outcome::LocalTreePublication;
+#[cfg(target_os = "linux")]
+use qubit_local_files::policy::LocalFileSyncRequirement;
 use qubit_local_files::policy::LocalOwnerAccessPolicy;
 #[cfg(target_os = "linux")]
 use qubit_local_files::policy::LocalPrivacyRequirement;
+#[cfg(target_os = "linux")]
+use qubit_local_files::policy::LocalTreeFinalAccess;
+#[cfg(all(feature = "test-support", target_os = "linux"))]
+use qubit_local_files::test_support::install_test_fault;
 use tempfile::TempDir;
 
-fn parent(scratch: &TempDir) -> qubit_local_files::directory::LocalDirectoryHandle {
+fn parent(scratch: &TempDir) -> LocalDirectoryHandle {
     LocalFileSystem::host()
         .expect("host filesystem")
         .open_directory_with_options(scratch.path(), &LocalDirectoryOpenOptions::new())
@@ -51,10 +68,7 @@ fn test_unix_owner_policy_is_unsupported_before_stage_creation() {
         .create_staged_directory(&LocalTempDirectoryOptions::new().with_owner_access_policy(policy))
         .expect_err("macOS does not provide the exact Unix owner ACL backend");
 
-    assert_eq!(
-        qubit_local_files::error::LocalFileErrorKind::Unsupported,
-        error.cause().kind()
-    );
+    assert_eq!(LocalFileErrorKind::Unsupported, error.cause().kind());
     assert_eq!(0, fs::read_dir(scratch.path()).expect("parent contents").count());
 }
 
@@ -74,12 +88,9 @@ fn test_macos_owner_policy_on_existing_stage_is_unsupported_without_permission_m
     let before_file = fs::metadata(&file).unwrap().permissions().mode();
     let policy = LocalOwnerAccessPolicy::new().with_unix_modes(0o700, 0o600);
     let error = stage
-        .apply_owner_access_policy_with_options(&policy, &qubit_local_files::options::LocalListOptions::new())
+        .apply_owner_access_policy_with_options(&policy, &LocalListOptions::new())
         .unwrap_err();
-    assert_eq!(
-        qubit_local_files::error::LocalFileErrorKind::Unsupported,
-        error.cause().kind()
-    );
+    assert_eq!(LocalFileErrorKind::Unsupported, error.cause().kind());
     assert_eq!(before_root, fs::metadata(&root).unwrap().permissions().mode());
     assert_eq!(before_file, fs::metadata(&file).unwrap().permissions().mode());
     assert_eq!(b"unchanged", fs::read(&file).unwrap().as_slice());
@@ -97,10 +108,7 @@ fn test_unix_only_owner_policy_is_invalid_before_stage_creation() {
         .create_staged_directory(&LocalTempDirectoryOptions::new().with_owner_access_policy(policy))
         .expect_err("Windows owner policies require native masks");
 
-    assert_eq!(
-        qubit_local_files::error::LocalFileErrorKind::InvalidOptions,
-        error.cause().kind()
-    );
+    assert_eq!(LocalFileErrorKind::InvalidOptions, error.cause().kind());
     assert_eq!(0, fs::read_dir(scratch.path()).expect("parent contents").count());
 }
 
@@ -191,12 +199,9 @@ fn test_owner_policy_transition_reports_policy_and_exact_modes() {
     for (directory_mode, file_mode) in [(0o700, 0o600), (0o500, 0o400), (0o700, 0o600)] {
         let policy = LocalOwnerAccessPolicy::new().with_unix_modes(directory_mode, file_mode);
         let outcome = stage
-            .apply_owner_access_policy_with_options(&policy, &qubit_local_files::options::LocalListOptions::new())
+            .apply_owner_access_policy_with_options(&policy, &LocalListOptions::new())
             .expect("apply exact owner policy");
-        assert_eq!(
-            qubit_local_files::outcome::LocalTreeAccessState::OwnerPolicyApplied,
-            outcome.access_state()
-        );
+        assert_eq!(LocalTreeAccessState::OwnerPolicyApplied, outcome.access_state());
         assert_eq!(Some(&policy), outcome.owner_access_policy());
         let root = scratch.path().join(stage.relative_name());
         assert_eq!(
@@ -218,8 +223,6 @@ fn test_owner_policy_transition_reports_policy_and_exact_modes() {
 #[test]
 fn test_owner_policy_final_verification_supports_explicit_large_limit() {
     use std::os::unix::fs::PermissionsExt;
-
-    use qubit_local_files::options::LocalListOptions;
 
     let scratch = tempfile::tempdir().expect("scratch directory");
     let parent = parent(&scratch);
@@ -266,22 +269,14 @@ fn test_invalid_owner_policy_is_rejected_before_stage_creation() {
     let error = parent
         .create_staged_directory(&LocalTempDirectoryOptions::new().with_owner_access_policy(invalid))
         .expect_err("group permissions are outside the owner policy contract");
-    assert_eq!(
-        qubit_local_files::error::LocalFileErrorKind::InvalidOptions,
-        error.cause().kind()
-    );
-    assert_eq!(
-        qubit_local_files::outcome::LocalTreeMutationState::NotStarted,
-        error.mutation_state()
-    );
+    assert_eq!(LocalFileErrorKind::InvalidOptions, error.cause().kind());
+    assert_eq!(LocalTreeMutationState::NotStarted, error.mutation_state());
     assert_eq!(0, fs::read_dir(scratch.path()).expect("parent contents").count());
 }
 
 #[cfg(all(feature = "test-support", target_os = "linux"))]
 #[test]
 fn test_owner_policy_failure_on_second_child_reports_mixed_and_retains_policy() {
-    use qubit_local_files::test_support::install_test_fault;
-
     let scratch = tempfile::tempdir().expect("scratch directory");
     let parent = parent(&scratch);
     let mut stage = parent
@@ -296,16 +291,13 @@ fn test_owner_policy_failure_on_second_child_reports_mixed_and_retains_policy() 
     let policy = LocalOwnerAccessPolicy::new().with_unix_modes(0o700, 0o400);
     let _fault = install_test_fault("owner-policy-apply").expect("fault selector");
     let error = stage
-        .apply_owner_access_policy_with_options(&policy, &qubit_local_files::options::LocalListOptions::new())
+        .apply_owner_access_policy_with_options(&policy, &LocalListOptions::new())
         .expect_err("second child application should fail");
-    assert_eq!(
-        qubit_local_files::outcome::LocalTreeAccessState::Mixed,
-        error.access_state()
-    );
+    assert_eq!(LocalTreeAccessState::Mixed, error.access_state());
     assert_eq!(Some(&policy), stage.owner_access_policy());
     drop(error);
     stage
-        .apply_owner_access_policy_with_options(&policy, &qubit_local_files::options::LocalListOptions::new())
+        .apply_owner_access_policy_with_options(&policy, &LocalListOptions::new())
         .expect("retry should apply and verify the configured policy");
     stage.cleanup().expect("cleanup after explicit retry");
 }
@@ -313,8 +305,6 @@ fn test_owner_policy_failure_on_second_child_reports_mixed_and_retains_policy() 
 #[cfg(all(feature = "test-support", target_os = "linux"))]
 #[test]
 fn test_owner_policy_identity_replacement_prevents_chmod() {
-    use qubit_local_files::test_support::install_test_fault;
-
     let scratch = tempfile::tempdir().expect("scratch directory");
     let parent = parent(&scratch);
     let mut stage = parent
@@ -330,21 +320,15 @@ fn test_owner_policy_identity_replacement_prevents_chmod() {
     let policy = LocalOwnerAccessPolicy::new().with_unix_modes(0o700, 0o400);
     let _fault = install_test_fault("owner-policy-replace-before-open").expect("replacement selector");
     let error = stage
-        .apply_owner_access_policy_with_options(&policy, &qubit_local_files::options::LocalListOptions::new())
+        .apply_owner_access_policy_with_options(&policy, &LocalListOptions::new())
         .expect_err("replacement identity must be detected before applying permissions");
-    assert_eq!(
-        qubit_local_files::error::LocalFileErrorKind::ChangedDuringRead,
-        error.cause().kind()
-    );
-    assert_eq!(
-        qubit_local_files::outcome::LocalTreeAccessState::Preserved,
-        error.access_state()
-    );
+    assert_eq!(LocalFileErrorKind::ChangedDuringRead, error.cause().kind());
+    assert_eq!(LocalTreeAccessState::Preserved, error.access_state());
     drop(error);
     fs::remove_file(&path).expect("remove injected replacement");
     fs::rename(&backup, &path).expect("restore original identity");
     stage
-        .apply_owner_access_policy_with_options(&policy, &qubit_local_files::options::LocalListOptions::new())
+        .apply_owner_access_policy_with_options(&policy, &LocalListOptions::new())
         .expect("original object remains eligible for policy application");
     stage.cleanup().expect("cleanup");
 }
@@ -352,8 +336,6 @@ fn test_owner_policy_identity_replacement_prevents_chmod() {
 #[cfg(all(feature = "test-support", target_os = "linux"))]
 #[test]
 fn test_owner_policy_replacement_fault_preserves_original_when_backup_name_is_blocked() {
-    use qubit_local_files::test_support::install_test_fault;
-
     let scratch = tempfile::tempdir().expect("scratch directory");
     let parent = parent(&scratch);
     let mut stage = parent
@@ -371,16 +353,10 @@ fn test_owner_policy_replacement_fault_preserves_original_when_backup_name_is_bl
     let policy = LocalOwnerAccessPolicy::new().with_unix_modes(0o700, 0o400);
     let _fault = install_test_fault("owner-policy-replace-before-open").expect("replacement selector");
     let error = stage
-        .apply_owner_access_policy_with_options(&policy, &qubit_local_files::options::LocalListOptions::new())
+        .apply_owner_access_policy_with_options(&policy, &LocalListOptions::new())
         .expect_err("failed backup rename must stop policy conversion");
-    assert_eq!(
-        qubit_local_files::outcome::LocalTreeAccessState::Preserved,
-        error.access_state()
-    );
-    assert_eq!(
-        qubit_local_files::error::LocalFileErrorKind::IsDirectory,
-        error.cause().kind()
-    );
+    assert_eq!(LocalTreeAccessState::Preserved, error.access_state());
+    assert_eq!(LocalFileErrorKind::IsDirectory, error.cause().kind());
     assert_eq!(
         b"original",
         fs::read(&path).expect("original payload remains").as_slice()
@@ -393,8 +369,6 @@ fn test_owner_policy_replacement_fault_preserves_original_when_backup_name_is_bl
 #[cfg(all(feature = "test-support", target_os = "linux"))]
 #[test]
 fn test_owner_policy_stage_replacement_fault_preserves_stage_when_backup_name_is_blocked() {
-    use qubit_local_files::test_support::install_test_fault;
-
     let scratch = tempfile::tempdir().expect("scratch directory");
     let parent = parent(&scratch);
     let mut stage = parent
@@ -413,13 +387,10 @@ fn test_owner_policy_stage_replacement_fault_preserves_stage_when_backup_name_is
     let policy = LocalOwnerAccessPolicy::new().with_unix_modes(0o700, 0o400);
     let _fault = install_test_fault("owner-policy-replace-stage-before-root").expect("replacement selector");
     let error = stage
-        .apply_owner_access_policy_with_options(&policy, &qubit_local_files::options::LocalListOptions::new())
+        .apply_owner_access_policy_with_options(&policy, &LocalListOptions::new())
         .expect_err("failed stage rename must stop root policy mutation");
-    assert_eq!(
-        qubit_local_files::outcome::LocalTreeAccessState::Mixed,
-        error.access_state()
-    );
-    assert_eq!(qubit_local_files::error::LocalFileErrorKind::Io, error.cause().kind());
+    assert_eq!(LocalTreeAccessState::Mixed, error.access_state());
+    assert_eq!(LocalFileErrorKind::Io, error.cause().kind());
     assert!(native.join("payload").is_file());
     drop(error);
     fs::remove_dir_all(&backup).expect("remove blocker");
@@ -429,8 +400,6 @@ fn test_owner_policy_stage_replacement_fault_preserves_stage_when_backup_name_is
 #[cfg(all(feature = "test-support", target_os = "linux"))]
 #[test]
 fn test_owner_policy_final_replacement_fault_reports_indeterminate_when_backup_name_is_blocked() {
-    use qubit_local_files::test_support::install_test_fault;
-
     let scratch = tempfile::tempdir().expect("scratch directory");
     let parent = parent(&scratch);
     let mut stage = parent
@@ -448,21 +417,15 @@ fn test_owner_policy_final_replacement_fault_reports_indeterminate_when_backup_n
     let policy = LocalOwnerAccessPolicy::new().with_unix_modes(0o700, 0o400);
     let _fault = install_test_fault("owner-policy-replace-before-final-verify").expect("replacement selector");
     let error = stage
-        .apply_owner_access_policy_with_options(&policy, &qubit_local_files::options::LocalListOptions::new())
+        .apply_owner_access_policy_with_options(&policy, &LocalListOptions::new())
         .expect_err("failed final binding replacement must report an indeterminate verification");
-    assert_eq!(
-        qubit_local_files::outcome::LocalTreeAccessState::Indeterminate,
-        error.access_state()
-    );
-    assert_eq!(
-        qubit_local_files::error::LocalFileErrorKind::IsDirectory,
-        error.cause().kind()
-    );
+    assert_eq!(LocalTreeAccessState::Indeterminate, error.access_state());
+    assert_eq!(LocalFileErrorKind::IsDirectory, error.cause().kind());
     assert!(path.is_file(), "the processed entry remains at its original name");
     drop(error);
     fs::remove_dir(&backup).expect("remove blocker");
     stage
-        .apply_owner_access_policy_with_options(&policy, &qubit_local_files::options::LocalListOptions::new())
+        .apply_owner_access_policy_with_options(&policy, &LocalListOptions::new())
         .expect("retry verifies the complete tree");
     stage.cleanup().expect("cleanup stage");
 }
@@ -470,8 +433,6 @@ fn test_owner_policy_final_replacement_fault_reports_indeterminate_when_backup_n
 #[cfg(all(feature = "test-support", target_os = "linux"))]
 #[test]
 fn test_owner_policy_root_insertion_fault_failure_keeps_tree_recoverable() {
-    use qubit_local_files::test_support::install_test_fault;
-
     let scratch = tempfile::tempdir().expect("scratch directory");
     let parent = parent(&scratch);
     let mut stage = parent
@@ -489,20 +450,14 @@ fn test_owner_policy_root_insertion_fault_failure_keeps_tree_recoverable() {
     let policy = LocalOwnerAccessPolicy::new().with_unix_modes(0o700, 0o600);
     let _fault = install_test_fault("owner-policy-add-root-entry-before-final-verify").expect("insertion selector");
     let error = stage
-        .apply_owner_access_policy_with_options(&policy, &qubit_local_files::options::LocalListOptions::new())
+        .apply_owner_access_policy_with_options(&policy, &LocalListOptions::new())
         .expect_err("failed insertion must be propagated");
-    assert_eq!(
-        qubit_local_files::outcome::LocalTreeAccessState::Indeterminate,
-        error.access_state()
-    );
-    assert_eq!(
-        qubit_local_files::error::LocalFileErrorKind::IsDirectory,
-        error.cause().kind()
-    );
+    assert_eq!(LocalTreeAccessState::Indeterminate, error.access_state());
+    assert_eq!(LocalFileErrorKind::IsDirectory, error.cause().kind());
     drop(error);
     fs::remove_dir(&added).expect("remove blocker");
     stage
-        .apply_owner_access_policy_with_options(&policy, &qubit_local_files::options::LocalListOptions::new())
+        .apply_owner_access_policy_with_options(&policy, &LocalListOptions::new())
         .expect("retry verifies the complete tree");
     stage.cleanup().expect("cleanup stage");
 }
@@ -510,9 +465,6 @@ fn test_owner_policy_root_insertion_fault_failure_keeps_tree_recoverable() {
 #[cfg(all(feature = "test-support", target_os = "linux"))]
 #[test]
 fn test_owner_policy_nested_insertion_fault_failure_keeps_tree_recoverable() {
-    use qubit_local_files::options::LocalCreateDirectoryOptions;
-    use qubit_local_files::test_support::install_test_fault;
-
     let scratch = tempfile::tempdir().expect("scratch directory");
     let parent = parent(&scratch);
     let mut stage = parent
@@ -534,20 +486,14 @@ fn test_owner_policy_nested_insertion_fault_failure_keeps_tree_recoverable() {
     let policy = LocalOwnerAccessPolicy::new().with_unix_modes(0o700, 0o600);
     let _fault = install_test_fault("owner-policy-add-nested-entry-before-final-verify").expect("insertion selector");
     let error = stage
-        .apply_owner_access_policy_with_options(&policy, &qubit_local_files::options::LocalListOptions::new())
+        .apply_owner_access_policy_with_options(&policy, &LocalListOptions::new())
         .expect_err("failed nested insertion must be propagated");
-    assert_eq!(
-        qubit_local_files::outcome::LocalTreeAccessState::Indeterminate,
-        error.access_state()
-    );
-    assert_eq!(
-        qubit_local_files::error::LocalFileErrorKind::IsDirectory,
-        error.cause().kind()
-    );
+    assert_eq!(LocalTreeAccessState::Indeterminate, error.access_state());
+    assert_eq!(LocalFileErrorKind::IsDirectory, error.cause().kind());
     drop(error);
     fs::remove_dir(&added).expect("remove blocker");
     stage
-        .apply_owner_access_policy_with_options(&policy, &qubit_local_files::options::LocalListOptions::new())
+        .apply_owner_access_policy_with_options(&policy, &LocalListOptions::new())
         .expect("retry verifies the complete tree");
     stage.cleanup().expect("cleanup stage");
 }
@@ -555,8 +501,6 @@ fn test_owner_policy_nested_insertion_fault_failure_keeps_tree_recoverable() {
 #[cfg(all(feature = "test-support", target_os = "linux"))]
 #[test]
 fn test_stage_identity_replacement_prevents_root_policy_mutation() {
-    use qubit_local_files::test_support::install_test_fault;
-
     let scratch = tempfile::tempdir().expect("scratch directory");
     let parent = parent(&scratch);
     let mut stage = parent
@@ -572,16 +516,10 @@ fn test_stage_identity_replacement_prevents_root_policy_mutation() {
     let policy = LocalOwnerAccessPolicy::new().with_unix_modes(0o700, 0o400);
     let _fault = install_test_fault("owner-policy-replace-stage-before-root").expect("replacement selector");
     let error = stage
-        .apply_owner_access_policy_with_options(&policy, &qubit_local_files::options::LocalListOptions::new())
+        .apply_owner_access_policy_with_options(&policy, &LocalListOptions::new())
         .expect_err("replaced stage name must block root policy mutation");
-    assert_eq!(
-        qubit_local_files::error::LocalFileErrorKind::ChangedDuringRead,
-        error.cause().kind()
-    );
-    assert_eq!(
-        qubit_local_files::outcome::LocalTreeAccessState::Mixed,
-        error.access_state()
-    );
+    assert_eq!(LocalFileErrorKind::ChangedDuringRead, error.cause().kind());
+    assert_eq!(LocalTreeAccessState::Mixed, error.access_state());
     drop(error);
     fs::remove_dir(&native).expect("remove injected replacement stage");
     fs::rename(&backup, &native).expect("restore original stage identity");
@@ -591,8 +529,6 @@ fn test_stage_identity_replacement_prevents_root_policy_mutation() {
 #[cfg(all(feature = "test-support", target_os = "linux"))]
 #[test]
 fn test_owner_policy_final_handle_check_detects_earlier_mode_change() {
-    use qubit_local_files::test_support::install_test_fault;
-
     let scratch = tempfile::tempdir().expect("scratch directory");
     let parent = parent(&scratch);
     let mut stage = parent
@@ -604,12 +540,9 @@ fn test_owner_policy_final_handle_check_detects_earlier_mode_change() {
     let policy = LocalOwnerAccessPolicy::new().with_unix_modes(0o700, 0o400);
     let _fault = install_test_fault("owner-policy-mutate-before-final-verify").expect("mode change selector");
     let error = stage
-        .apply_owner_access_policy_with_options(&policy, &qubit_local_files::options::LocalListOptions::new())
+        .apply_owner_access_policy_with_options(&policy, &LocalListOptions::new())
         .expect_err("the final retained-handle verification must catch later mode changes");
-    assert_eq!(
-        qubit_local_files::outcome::LocalTreeAccessState::Indeterminate,
-        error.access_state()
-    );
+    assert_eq!(LocalTreeAccessState::Indeterminate, error.access_state());
     assert_eq!(Some(&policy), stage.owner_access_policy());
     assert_eq!(
         0o600,
@@ -620,7 +553,7 @@ fn test_owner_policy_final_handle_check_detects_earlier_mode_change() {
     );
     drop(error);
     stage
-        .apply_owner_access_policy_with_options(&policy, &qubit_local_files::options::LocalListOptions::new())
+        .apply_owner_access_policy_with_options(&policy, &LocalListOptions::new())
         .expect("explicit retry restores exact policy");
     stage.cleanup().expect("cleanup after retry");
 }
@@ -628,8 +561,6 @@ fn test_owner_policy_final_handle_check_detects_earlier_mode_change() {
 #[cfg(all(feature = "test-support", target_os = "linux"))]
 #[test]
 fn test_owner_policy_final_check_detects_replaced_processed_entry() {
-    use qubit_local_files::test_support::install_test_fault;
-
     let scratch = tempfile::tempdir().expect("scratch directory");
     let parent = parent(&scratch);
     let mut stage = parent
@@ -645,18 +576,15 @@ fn test_owner_policy_final_check_detects_replaced_processed_entry() {
     let policy = LocalOwnerAccessPolicy::new().with_unix_modes(0o700, 0o400);
     let _fault = install_test_fault("owner-policy-replace-before-final-verify").expect("replacement selector");
     let error = stage
-        .apply_owner_access_policy_with_options(&policy, &qubit_local_files::options::LocalListOptions::new())
+        .apply_owner_access_policy_with_options(&policy, &LocalListOptions::new())
         .expect_err("final pathname binding must match the retained entry identity");
-    assert_eq!(
-        qubit_local_files::outcome::LocalTreeAccessState::Indeterminate,
-        error.access_state()
-    );
+    assert_eq!(LocalTreeAccessState::Indeterminate, error.access_state());
     assert_eq!(Some(&policy), stage.owner_access_policy());
     drop(error);
     fs::remove_file(&path).expect("remove injected replacement");
     fs::rename(&backup, &path).expect("restore original object");
     stage
-        .apply_owner_access_policy_with_options(&policy, &qubit_local_files::options::LocalListOptions::new())
+        .apply_owner_access_policy_with_options(&policy, &LocalListOptions::new())
         .expect("explicit retry restores exact tree policy");
     stage.cleanup().expect("cleanup");
 }
@@ -664,8 +592,6 @@ fn test_owner_policy_final_check_detects_replaced_processed_entry() {
 #[cfg(all(feature = "test-support", target_os = "linux"))]
 #[test]
 fn test_owner_policy_final_enumeration_detects_new_root_entry() {
-    use qubit_local_files::test_support::install_test_fault;
-
     let scratch = tempfile::tempdir().expect("scratch directory");
     let parent = parent(&scratch);
     let policy = LocalOwnerAccessPolicy::new().with_unix_modes(0o700, 0o600);
@@ -682,20 +608,14 @@ fn test_owner_policy_final_enumeration_detects_new_root_entry() {
     let _fault =
         install_test_fault("owner-policy-add-root-entry-before-final-verify").expect("root insertion selector");
     let error = stage
-        .apply_owner_access_policy_with_options(&policy, &qubit_local_files::options::LocalListOptions::new())
+        .apply_owner_access_policy_with_options(&policy, &LocalListOptions::new())
         .expect_err("final enumeration must include entries inserted after the preflight snapshot");
-    assert_eq!(
-        qubit_local_files::outcome::LocalTreeAccessState::Indeterminate,
-        error.access_state()
-    );
-    assert_eq!(
-        qubit_local_files::error::LocalFileErrorKind::ChangedDuringRead,
-        error.cause().kind()
-    );
+    assert_eq!(LocalTreeAccessState::Indeterminate, error.access_state());
+    assert_eq!(LocalFileErrorKind::ChangedDuringRead, error.cause().kind());
     assert!(added.exists(), "injected entry should remain available for recovery");
     drop(error);
     stage
-        .apply_owner_access_policy_with_options(&policy, &qubit_local_files::options::LocalListOptions::new())
+        .apply_owner_access_policy_with_options(&policy, &LocalListOptions::new())
         .expect("explicit retry applies policy to the complete current tree");
     stage.cleanup().expect("cleanup recovered tree");
 }
@@ -703,8 +623,6 @@ fn test_owner_policy_final_enumeration_detects_new_root_entry() {
 #[cfg(all(feature = "test-support", target_os = "linux"))]
 #[test]
 fn test_owner_policy_final_enumeration_detects_new_nested_entry() {
-    use qubit_local_files::test_support::install_test_fault;
-
     let scratch = tempfile::tempdir().expect("scratch directory");
     let parent = parent(&scratch);
     let policy = LocalOwnerAccessPolicy::new().with_unix_modes(0o700, 0o600);
@@ -721,23 +639,17 @@ fn test_owner_policy_final_enumeration_detects_new_nested_entry() {
     let _fault =
         install_test_fault("owner-policy-add-nested-entry-before-final-verify").expect("nested insertion selector");
     let error = stage
-        .apply_owner_access_policy_with_options(&policy, &qubit_local_files::options::LocalListOptions::new())
+        .apply_owner_access_policy_with_options(&policy, &LocalListOptions::new())
         .expect_err("recursive final enumeration must include nested insertions");
-    assert_eq!(
-        qubit_local_files::outcome::LocalTreeAccessState::Indeterminate,
-        error.access_state()
-    );
-    assert_eq!(
-        qubit_local_files::error::LocalFileErrorKind::ChangedDuringRead,
-        error.cause().kind()
-    );
+    assert_eq!(LocalTreeAccessState::Indeterminate, error.access_state());
+    assert_eq!(LocalFileErrorKind::ChangedDuringRead, error.cause().kind());
     assert!(
         added.exists(),
         "injected nested entry should remain available for recovery"
     );
     drop(error);
     stage
-        .apply_owner_access_policy_with_options(&policy, &qubit_local_files::options::LocalListOptions::new())
+        .apply_owner_access_policy_with_options(&policy, &LocalListOptions::new())
         .expect("explicit retry applies policy to the complete nested tree");
     stage.cleanup().expect("cleanup recovered tree");
 }
@@ -746,9 +658,6 @@ fn test_owner_policy_final_enumeration_detects_new_nested_entry() {
 #[test]
 fn test_publish_conflict_retains_stage_with_owner_policy() {
     use std::ffi::OsStr;
-
-    use qubit_local_files::options::LocalTreePublishOptions;
-    use qubit_local_files::policy::LocalTreeFinalAccess;
 
     let scratch = tempfile::tempdir().expect("scratch directory");
     fs::write(scratch.path().join("target"), b"existing").expect("conflict target");
@@ -767,14 +676,8 @@ fn test_publish_conflict_retains_stage_with_owner_policy() {
             &LocalTreePublishOptions::new().with_owner_access_policy(policy),
         )
         .expect_err("no-replace publication must retain stage on conflict");
-    assert_eq!(
-        qubit_local_files::outcome::LocalTreePublication::NotPublished,
-        error.publication()
-    );
-    assert_eq!(
-        qubit_local_files::outcome::LocalTreeAccessState::OwnerPolicyApplied,
-        error.access_state()
-    );
+    assert_eq!(LocalTreePublication::NotPublished, error.publication());
+    assert_eq!(LocalTreeAccessState::OwnerPolicyApplied, error.access_state());
     assert_eq!(Some(&policy), error.owner_access_policy());
     let mut stage = error.into_stage().expect("conflicted stage retained");
     assert_eq!(Some(&policy), stage.owner_access_policy());
@@ -788,10 +691,6 @@ fn test_publish_conflict_retains_stage_with_owner_policy() {
 #[test]
 fn test_required_sync_failure_retains_stage_and_policy_before_conversion() {
     use std::ffi::OsStr;
-
-    use qubit_local_files::options::LocalTreePublishOptions;
-    use qubit_local_files::policy::LocalFileSyncRequirement;
-    use qubit_local_files::test_support::install_test_fault;
 
     let scratch = tempfile::tempdir().expect("scratch directory");
     let parent = parent(&scratch);
@@ -812,14 +711,8 @@ fn test_required_sync_failure_retains_stage_and_policy_before_conversion() {
                 .with_file_sync(LocalFileSyncRequirement::Required),
         )
         .expect_err("required file sync failure must block policy transition and publication");
-    assert_eq!(
-        qubit_local_files::outcome::LocalTreeMutationState::NotStarted,
-        error.mutation_state()
-    );
-    assert_eq!(
-        qubit_local_files::outcome::LocalTreeAccessState::Preserved,
-        error.access_state()
-    );
+    assert_eq!(LocalTreeMutationState::NotStarted, error.mutation_state());
+    assert_eq!(LocalTreeAccessState::Preserved, error.access_state());
     assert_eq!(Some(&policy), error.owner_access_policy());
     let stage = error.into_stage().expect("stage retained");
     assert_eq!(Some(&policy), stage.owner_access_policy());
@@ -830,14 +723,6 @@ fn test_required_sync_failure_retains_stage_and_policy_before_conversion() {
 #[test]
 fn test_required_owner_policy_final_sync_failure_retains_changed_stage() {
     use std::ffi::OsStr;
-
-    use qubit_local_files::options::LocalTreePublishOptions;
-    use qubit_local_files::outcome::LocalTreeAccessState;
-    use qubit_local_files::outcome::LocalTreeMutationState;
-    use qubit_local_files::outcome::LocalTreePublication;
-    use qubit_local_files::policy::LocalFileSyncRequirement;
-    use qubit_local_files::policy::LocalTreeFinalAccess;
-    use qubit_local_files::test_support::install_test_fault;
 
     let scratch = tempfile::tempdir().expect("scratch directory");
     let parent = parent(&scratch);
@@ -862,7 +747,7 @@ fn test_required_owner_policy_final_sync_failure_retains_changed_stage() {
     assert_eq!(LocalTreeMutationState::Started, error.mutation_state());
     assert_eq!(LocalTreeAccessState::OwnerPolicyApplied, error.access_state());
     assert_eq!(LocalTreePublication::NotPublished, error.publication());
-    assert_eq!(qubit_local_files::error::LocalFileErrorKind::Io, error.cause().kind());
+    assert_eq!(LocalFileErrorKind::Io, error.cause().kind());
     assert!(!scratch.path().join("published").exists());
     let mut stage = error.into_stage().expect("changed stage retained");
     assert_eq!(0o500, fs::metadata(&native).expect("stage metadata").mode() & 0o777);
@@ -881,11 +766,6 @@ fn test_required_owner_policy_final_sync_failure_retains_changed_stage() {
 fn test_preferred_owner_policy_final_sync_failure_publishes_unsynced() {
     use std::ffi::OsStr;
     use std::os::unix::fs::PermissionsExt;
-
-    use qubit_local_files::options::LocalTreePublishOptions;
-    use qubit_local_files::outcome::LocalTreePublication;
-    use qubit_local_files::policy::LocalFileSyncRequirement;
-    use qubit_local_files::test_support::install_test_fault;
 
     let scratch = tempfile::tempdir().expect("scratch directory");
     let parent = parent(&scratch);
@@ -936,12 +816,6 @@ fn test_preferred_owner_policy_final_sync_failure_publishes_unsynced() {
 fn test_required_owner_policy_sync_capability_failure_preserves_access() {
     use std::ffi::OsStr;
 
-    use qubit_local_files::options::LocalTreePublishOptions;
-    use qubit_local_files::outcome::LocalTreeAccessState;
-    use qubit_local_files::outcome::LocalTreeMutationState;
-    use qubit_local_files::policy::LocalFileSyncRequirement;
-    use qubit_local_files::test_support::install_test_fault;
-
     let scratch = tempfile::tempdir().expect("scratch directory");
     let parent = parent(&scratch);
     let policy = LocalOwnerAccessPolicy::new().with_unix_modes(0o700, 0o400);
@@ -964,10 +838,7 @@ fn test_required_owner_policy_sync_capability_failure_preserves_access() {
         .expect_err("required sync capability must be established before access mutation");
     assert_eq!(LocalTreeMutationState::NotStarted, error.mutation_state());
     assert_eq!(LocalTreeAccessState::Preserved, error.access_state());
-    assert_eq!(
-        qubit_local_files::error::LocalFileErrorKind::Unsupported,
-        error.cause().kind()
-    );
+    assert_eq!(LocalFileErrorKind::Unsupported, error.cause().kind());
     assert_eq!(
         0o600,
         fs::metadata(native.join("payload")).expect("payload metadata").mode() & 0o777
@@ -984,11 +855,6 @@ fn test_required_owner_policy_sync_capability_failure_preserves_access() {
 fn test_preferred_owner_policy_sync_capability_failure_publishes_unsynced() {
     use std::ffi::OsStr;
     use std::os::unix::fs::PermissionsExt;
-
-    use qubit_local_files::options::LocalTreePublishOptions;
-    use qubit_local_files::outcome::LocalTreePublication;
-    use qubit_local_files::policy::LocalFileSyncRequirement;
-    use qubit_local_files::test_support::install_test_fault;
 
     let scratch = tempfile::tempdir().expect("scratch directory");
     let parent = parent(&scratch);
@@ -1026,10 +892,6 @@ fn test_required_owner_policy_sync_accepts_empty_tree() {
     use std::ffi::OsStr;
     use std::os::unix::fs::PermissionsExt;
 
-    use qubit_local_files::options::LocalTreePublishOptions;
-    use qubit_local_files::outcome::LocalTreePublication;
-    use qubit_local_files::policy::LocalFileSyncRequirement;
-
     let scratch = tempfile::tempdir().expect("scratch directory");
     let parent = parent(&scratch);
     let stage = parent
@@ -1056,10 +918,6 @@ fn test_required_owner_policy_sync_accepts_empty_tree() {
 fn test_publish_rechecks_source_identity_after_policy_conversion() {
     use std::ffi::OsStr;
 
-    use qubit_local_files::options::LocalTreePublishOptions;
-    use qubit_local_files::outcome::LocalTreePublication;
-    use qubit_local_files::test_support::install_test_fault;
-
     let scratch = tempfile::tempdir().expect("scratch directory");
     let parent = parent(&scratch);
     let policy = LocalOwnerAccessPolicy::new().with_unix_modes(0o700, 0o400);
@@ -1082,10 +940,7 @@ fn test_publish_rechecks_source_identity_after_policy_conversion() {
         )
         .expect_err("stage source replacement must block the rename");
     assert_eq!(LocalTreePublication::NotPublished, error.publication());
-    assert_eq!(
-        qubit_local_files::error::LocalFileErrorKind::ChangedDuringRead,
-        error.cause().kind()
-    );
+    assert_eq!(LocalFileErrorKind::ChangedDuringRead, error.cause().kind());
     assert!(
         parent
             .entry_metadata(Path::new("published"))
@@ -1101,8 +956,6 @@ fn test_publish_rechecks_source_identity_after_policy_conversion() {
 #[cfg(target_os = "linux")]
 #[test]
 fn test_cleanup_failure_retains_owner_policy_for_recovery() {
-    use qubit_local_files::options::LocalTempCleanupLimits;
-
     let scratch = tempfile::tempdir().expect("scratch directory");
     let parent = parent(&scratch);
     let policy = LocalOwnerAccessPolicy::new().with_unix_modes(0o700, 0o600);
@@ -1116,10 +969,7 @@ fn test_cleanup_failure_retains_owner_policy_for_recovery() {
     let error = stage
         .cleanup()
         .expect_err("zero cleanup budget should retain recovery owner");
-    assert_eq!(
-        qubit_local_files::outcome::LocalTreeMutationState::NotStarted,
-        error.mutation_state()
-    );
+    assert_eq!(LocalTreeMutationState::NotStarted, error.mutation_state());
     assert_eq!(Some(&policy), error.owner_access_policy());
     let mut resources = error.into_retained_resources();
     let mut resource = resources.pop().expect("cleanup recovery owner");
@@ -1137,7 +987,7 @@ fn test_empty_stage_accepts_zero_mode_root_policy() {
         .expect("stage");
     let zero = LocalOwnerAccessPolicy::new().with_unix_modes(0, 0);
     stage
-        .apply_owner_access_policy_with_options(&zero, &qubit_local_files::options::LocalListOptions::new())
+        .apply_owner_access_policy_with_options(&zero, &LocalListOptions::new())
         .expect("pre-opened empty stage can verify root policy without rewalking");
     assert_eq!(Some(&zero), stage.owner_access_policy());
     let native = scratch.path().join(stage.relative_name());
@@ -1159,16 +1009,10 @@ fn test_nonempty_stage_rejects_unsearchable_root_policy_before_mutation() {
         .expect("payload");
     let policy = LocalOwnerAccessPolicy::new().with_unix_modes(0, 0o400);
     let error = stage
-        .apply_owner_access_policy_with_options(&policy, &qubit_local_files::options::LocalListOptions::new())
+        .apply_owner_access_policy_with_options(&policy, &LocalListOptions::new())
         .expect_err("unsearchable nonempty root cannot support final name-binding verification");
-    assert_eq!(
-        qubit_local_files::error::LocalFileErrorKind::RequirementNotMet,
-        error.cause().kind()
-    );
-    assert_eq!(
-        qubit_local_files::outcome::LocalTreeAccessState::Preserved,
-        error.access_state()
-    );
+    assert_eq!(LocalFileErrorKind::RequirementNotMet, error.cause().kind());
+    assert_eq!(LocalTreeAccessState::Preserved, error.access_state());
     assert_eq!(Some(&policy), stage.owner_access_policy());
     assert_eq!(
         0o700,
@@ -1191,10 +1035,6 @@ fn test_nonempty_stage_rejects_unsearchable_root_policy_before_mutation() {
 #[test]
 fn test_owner_policy_depth_zero_rejects_before_permission_changes() {
     use std::os::unix::fs::PermissionsExt;
-
-    use qubit_local_files::error::LocalFileErrorKind;
-    use qubit_local_files::options::LocalListOptions;
-    use qubit_local_files::outcome::LocalTreeAccessState;
 
     let scratch = tempfile::tempdir().expect("scratch");
     let parent = parent(&scratch);
@@ -1219,8 +1059,6 @@ fn test_owner_policy_depth_zero_rejects_before_permission_changes() {
 #[cfg(target_os = "linux")]
 #[test]
 fn test_owner_policy_depth_zero_accepts_empty_tree() {
-    use qubit_local_files::options::LocalListOptions;
-
     let scratch = tempfile::tempdir().expect("scratch");
     let parent = parent(&scratch);
     let mut stage = parent
@@ -1245,8 +1083,6 @@ fn test_owner_policy_depth_zero_accepts_empty_tree() {
 #[cfg(target_os = "linux")]
 #[test]
 fn test_owner_policy_depth_one_accepts_direct_child() {
-    use qubit_local_files::options::LocalListOptions;
-
     let scratch = tempfile::tempdir().expect("scratch");
     let parent = parent(&scratch);
     let mut stage = parent
@@ -1274,10 +1110,6 @@ fn test_owner_policy_depth_one_accepts_direct_child() {
 fn test_owner_policy_depth_one_rejects_nested_leaf_before_permission_changes() {
     use std::os::unix::fs::PermissionsExt;
 
-    use qubit_local_files::options::LocalCreateDirectoryOptions;
-    use qubit_local_files::options::LocalListOptions;
-    use qubit_local_files::outcome::LocalTreeAccessState;
-
     let scratch = tempfile::tempdir().expect("scratch");
     let parent = parent(&scratch);
     let mut stage = parent
@@ -1297,10 +1129,7 @@ fn test_owner_policy_depth_one_rejects_nested_leaf_before_permission_changes() {
     let error = stage
         .apply_owner_access_policy_with_options(&policy, &LocalListOptions::new().with_max_depth(1))
         .expect_err("nested leaf exceeds depth one");
-    assert_eq!(
-        qubit_local_files::error::LocalFileErrorKind::ResourceLimit,
-        error.cause().kind()
-    );
+    assert_eq!(LocalFileErrorKind::ResourceLimit, error.cause().kind());
     assert_eq!(LocalTreeAccessState::Preserved, error.access_state());
     assert_eq!(
         0o700,
@@ -1335,16 +1164,10 @@ fn test_owner_policy_handle_budget_rejects_before_any_mutation() {
     }
     let policy = LocalOwnerAccessPolicy::new().with_unix_modes(0o700, 0o400);
     let error = stage
-        .apply_owner_access_policy_with_options(&policy, &qubit_local_files::options::LocalListOptions::new())
+        .apply_owner_access_policy_with_options(&policy, &LocalListOptions::new())
         .expect_err("more entries than the retained-handle budget must fail in preflight");
-    assert_eq!(
-        qubit_local_files::error::LocalFileErrorKind::ResourceLimit,
-        error.cause().kind()
-    );
-    assert_eq!(
-        qubit_local_files::outcome::LocalTreeAccessState::Preserved,
-        error.access_state()
-    );
+    assert_eq!(LocalFileErrorKind::ResourceLimit, error.cause().kind());
+    assert_eq!(LocalTreeAccessState::Preserved, error.access_state());
     assert_eq!(Some(&policy), stage.owner_access_policy());
     assert!(
         fs::read_dir(scratch.path().join(stage.relative_name()))
@@ -1358,10 +1181,6 @@ fn test_owner_policy_handle_budget_rejects_before_any_mutation() {
 #[test]
 fn test_publish_success_reports_applied_owner_policy() {
     use std::ffi::OsStr;
-
-    use qubit_local_files::options::LocalTreePublishOptions;
-    use qubit_local_files::outcome::LocalTreeAccessState;
-    use qubit_local_files::outcome::LocalTreePublication;
 
     let scratch = tempfile::tempdir().expect("scratch directory");
     let parent = parent(&scratch);
@@ -1396,11 +1215,6 @@ fn test_publish_success_reports_applied_owner_policy() {
 fn test_publish_owner_policy_conflict_is_rejected_before_mutation() {
     use std::ffi::OsStr;
 
-    use qubit_local_files::options::LocalTreePublishOptions;
-    use qubit_local_files::outcome::LocalTreeAccessState;
-    use qubit_local_files::outcome::LocalTreeMutationState;
-    use qubit_local_files::policy::LocalTreeFinalAccess;
-
     let scratch = tempfile::tempdir().expect("scratch directory");
     let parent = parent(&scratch);
     let policy = LocalOwnerAccessPolicy::new().with_unix_modes(0o700, 0o600);
@@ -1416,10 +1230,7 @@ fn test_publish_owner_policy_conflict_is_rejected_before_mutation() {
                 .with_access(LocalTreeFinalAccess::CurrentUserOnly),
         )
         .expect_err("conflicting access configuration must be rejected");
-    assert_eq!(
-        qubit_local_files::error::LocalFileErrorKind::InvalidOptions,
-        error.cause().kind()
-    );
+    assert_eq!(LocalFileErrorKind::InvalidOptions, error.cause().kind());
     assert_eq!(LocalTreeMutationState::NotStarted, error.mutation_state());
     assert_eq!(LocalTreeAccessState::Preserved, error.access_state());
     let stage = error.into_stage().expect("stage retained");

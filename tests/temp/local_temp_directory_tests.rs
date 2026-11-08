@@ -10,6 +10,8 @@
 use std::env;
 use std::fs;
 use std::io::ErrorKind;
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::path::PathBuf;
 #[cfg(not(windows))]
@@ -454,8 +456,6 @@ fn test_local_temp_directory_uses_private_cleanup_sandbox() {
     assert!(sandbox.is_dir());
     #[cfg(unix)]
     {
-        use std::os::unix::fs::PermissionsExt;
-
         assert_eq!(
             0o700,
             fs::metadata(&sandbox)

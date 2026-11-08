@@ -95,15 +95,27 @@ use crate::policy::LocalTreeFinalAccess;
 #[derive(Clone, Debug)]
 #[must_use]
 pub struct LocalTreePublishOptions {
+    /// Optional constraints checked against the staged tree before publication.
     validation: Option<LocalTreeValidationOptions>,
+    /// Durability requirement for the parent namespace update during
+    /// publication.
     durability: LocalDurabilityRequirement,
+    /// File-content synchronization requirement applied to regular staged
+    /// files.
     file_sync: LocalFileSyncRequirement,
+    /// Final access behavior requested for the staged tree.
     access: LocalTreeFinalAccess,
+    /// Optional exact owner permissions applied before publication.
     owner_access_policy: Option<LocalOwnerAccessPolicy>,
 }
 impl LocalTreePublishOptions {
     /// Creates no-replace options that preserve access and request no
     /// synchronization.
+    ///
+    /// # Returns
+    ///
+    /// A fresh options value with validation and owner access unset.
+    #[inline]
     pub const fn new() -> Self {
         Self {
             validation: None,
@@ -114,17 +126,44 @@ impl LocalTreePublishOptions {
         }
     }
     /// Validates the staged tree before any access or publication mutation.
+    ///
+    /// # Parameters
+    ///
+    /// * `validation` - Constraints to apply while validating the staged tree.
+    ///
+    /// # Returns
+    ///
+    /// These options with the supplied validation constraints stored.
+    #[inline]
     pub fn with_validation(mut self, validation: LocalTreeValidationOptions) -> Self {
         self.validation = Some(validation);
         self
     }
     /// Sets the requested parent namespace durability.
+    ///
+    /// # Parameters
+    ///
+    /// * `requirement` - Durability guarantee requested for publication.
+    ///
+    /// # Returns
+    ///
+    /// These options with the requested durability guarantee stored.
+    #[inline]
     pub const fn with_durability(mut self, requirement: LocalDurabilityRequirement) -> Self {
         self.durability = requirement;
         self
     }
     /// Sets the requested synchronization policy for regular files in the
     /// stage.
+    ///
+    /// # Parameters
+    ///
+    /// * `requirement` - Synchronization guarantee requested for staged files.
+    ///
+    /// # Returns
+    ///
+    /// These options with the requested file synchronization stored.
+    #[inline]
     pub const fn with_file_sync(mut self, requirement: LocalFileSyncRequirement) -> Self {
         self.file_sync = requirement;
         self
@@ -137,6 +176,15 @@ impl LocalTreePublishOptions {
     /// [`crate::directory::LocalStagedDirectory::publish_new`]
     /// returns `InvalidOptions` before mutation and returns the stage in its
     /// error.
+    ///
+    /// # Parameters
+    ///
+    /// * `access` - Final access policy to store for publication.
+    ///
+    /// # Returns
+    ///
+    /// These options with the requested final access policy stored.
+    #[inline]
     pub const fn with_access(mut self, access: LocalTreeFinalAccess) -> Self {
         self.access = access;
         self
@@ -148,27 +196,64 @@ impl LocalTreePublishOptions {
     /// with `Preserve`; [`crate::directory::LocalStagedDirectory::publish_new`]
     /// checks this before mutation and returns an `InvalidOptions` error
     /// with the stage retained when the values conflict.
+    ///
+    /// # Parameters
+    ///
+    /// * `policy` - Exact owner permissions to apply before publication.
+    ///
+    /// # Returns
+    ///
+    /// These options with the exact owner policy stored.
+    #[inline]
     pub const fn with_owner_access_policy(mut self, policy: LocalOwnerAccessPolicy) -> Self {
         self.owner_access_policy = Some(policy);
         self
     }
+    /// Returns the validation constraints, if publication validation was
+    /// requested.
+    ///
+    /// # Returns
+    ///
+    /// `Some` contains the configured constraints; `None` means no additional
+    /// tree validation was requested through these options.
+    #[inline]
     pub(crate) const fn validation(&self) -> Option<&LocalTreeValidationOptions> {
         self.validation.as_ref()
     }
+    /// Returns the durability guarantee requested for publication.
+    #[inline]
     pub(crate) const fn durability(&self) -> LocalDurabilityRequirement {
         self.durability
     }
+    /// Returns the file synchronization guarantee requested for staged files.
     pub(crate) const fn file_sync(&self) -> LocalFileSyncRequirement {
         self.file_sync
     }
+    /// Returns the final access behavior requested for the staged tree.
+    #[must_use]
+    #[inline]
     pub(crate) const fn access(&self) -> LocalTreeFinalAccess {
         self.access
     }
+    /// Returns the exact owner permissions, if configured.
+    ///
+    /// # Returns
+    ///
+    /// `Some` contains the configured owner policy; `None` means publication
+    /// will not apply an exact owner policy through these options.
+    #[inline]
     pub(crate) const fn owner_access_policy(&self) -> Option<&LocalOwnerAccessPolicy> {
         self.owner_access_policy.as_ref()
     }
 }
 impl Default for LocalTreePublishOptions {
+    /// Creates options with no extra validation, access changes, or
+    /// synchronization.
+    ///
+    /// # Returns
+    ///
+    /// Default publication options, equivalent to [`Self::new`].
+    #[inline]
     fn default() -> Self {
         Self::new()
     }

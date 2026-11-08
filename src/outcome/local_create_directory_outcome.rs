@@ -16,11 +16,12 @@
 ///
 /// ```
 /// use qubit_local_files::LocalFileSystem;
+/// use qubit_local_files::outcome::LocalCreateDirectoryOutcome;
 ///
 /// let filesystem = LocalFileSystem::host()?;
 /// let fixture = tempfile::tempdir()?;
 /// let directory = fixture.path().join("child");
-/// let outcome = filesystem.create_directory(&directory)?;
+/// let outcome: LocalCreateDirectoryOutcome = filesystem.create_directory(&directory)?;
 /// assert!(outcome.created());
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
@@ -41,6 +42,7 @@ impl LocalCreateDirectoryOutcome {
     /// # Returns
     ///
     /// An outcome containing whether the operation created the directory.
+    #[inline]
     pub(crate) const fn new(created: bool) -> Self {
         Self { created }
     }

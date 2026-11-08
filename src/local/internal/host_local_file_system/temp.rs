@@ -12,22 +12,17 @@ use std::ffi::OsStr;
 use std::fs::File;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::Instant;
 
 use super::HostLocalFileSystem;
-use super::LocalCopyOptions;
 use super::LocalFileError;
 use super::LocalFileErrorKind;
 use super::LocalFileOperation;
-use super::LocalMetadataPreservePolicy;
 use super::LocalResult;
 use super::LocalSymlinkPolicy;
 use super::LocalTempDirectory;
 use super::LocalTempDirectoryOptions;
 use super::LocalTempFile;
 use super::LocalTempFileOptions;
-use super::LocalWriteMode;
-use super::LocalWriteOptions;
 use super::Path;
 use super::fs;
 use super::io;
@@ -57,16 +52,14 @@ impl HostLocalFileSystem {
         options: &LocalTempFileOptions,
         symlink_policy: LocalSymlinkPolicy,
     ) -> LocalResult<LocalTempFile> {
-        let parent = options.parent().map_or_else(std::env::temp_dir, Path::to_path_buf);
-        let parent = resolve_host_path(&parent, symlink_policy, true)?;
-        if options.creates_parent() {
-            create_host_temp_parent(&parent, LocalFileOperation::CreateTempFile)?;
-        }
-        validate_host_temp_parent(&parent, LocalFileOperation::CreateTempFile)?;
-        validate_temp_affixes(options.prefix(), options.suffix()).map_err(|error| {
-            LocalFileError::from_io(LocalFileOperation::CreateTempFile, Some(parent.clone()), None, error)
-                .with_kind(LocalFileErrorKind::InvalidOptions)
-        })?;
+        let parent = prepare_host_temp_parent(
+            options.parent().map_or_else(std::env::temp_dir, Path::to_path_buf),
+            options.creates_parent(),
+            options.prefix(),
+            options.suffix(),
+            LocalFileOperation::CreateTempFile,
+            symlink_policy,
+        )?;
         if options.privacy() == LocalPrivacyRequirement::Required {
             return create_private_host_temp_file(&parent, options, symlink_policy);
         }
@@ -139,21 +132,14 @@ impl HostLocalFileSystem {
         options: &LocalTempDirectoryOptions,
         symlink_policy: LocalSymlinkPolicy,
     ) -> LocalResult<LocalTempDirectory> {
-        let parent = options.parent().map_or_else(std::env::temp_dir, Path::to_path_buf);
-        let parent = resolve_host_path(&parent, symlink_policy, true)?;
-        if options.creates_parent() {
-            create_host_temp_parent(&parent, LocalFileOperation::CreateTempDirectory)?;
-        }
-        validate_host_temp_parent(&parent, LocalFileOperation::CreateTempDirectory)?;
-        validate_temp_affixes(options.prefix(), options.suffix()).map_err(|error| {
-            LocalFileError::from_io(
-                LocalFileOperation::CreateTempDirectory,
-                Some(parent.clone()),
-                None,
-                error,
-            )
-            .with_kind(LocalFileErrorKind::InvalidOptions)
-        })?;
+        let parent = prepare_host_temp_parent(
+            options.parent().map_or_else(std::env::temp_dir, Path::to_path_buf),
+            options.creates_parent(),
+            options.prefix(),
+            options.suffix(),
+            LocalFileOperation::CreateTempDirectory,
+            symlink_policy,
+        )?;
         if options.privacy() == LocalPrivacyRequirement::Required {
             return create_private_host_temp_directory(&parent, options, symlink_policy);
         }
@@ -202,6 +188,18 @@ impl HostLocalFileSystem {
 /// The returned entry owns the parent authority, opened sandbox handle, and
 /// best-effort identity snapshot. Its joined path is diagnostic; recovery
 /// deletes only while the retained name still identifies that object.
+///
+/// # Parameters
+/// - `parent`: Validated directory in which to create the sandbox.
+/// - `operation`: Operation to attach to creation and cleanup errors.
+/// - `max_attempts`: Optional collision retry limit.
+///
+/// # Returns
+/// The sandbox path and retained native cleanup entry.
+///
+/// # Errors
+/// Returns an operation error when the parent cannot be opened or the sandbox
+/// cannot be created.
 fn create_host_temp_sandbox(
     parent: &Path,
     operation: LocalFileOperation,
@@ -241,10 +239,54 @@ fn create_host_temp_sandbox(
     Ok((sandbox, entry))
 }
 
-/// Opens a Host temporary parent with rights needed to retain its authority.
+/// Resolves and validates the parent and name affixes before temporary work.
 ///
-/// Windows requests directory backup semantics and attribute access; other
-/// platforms use their native directory-open behavior.
+/// Parent creation precedes directory validation, and affix validation follows
+/// both so the observable error ordering matches the public creation methods.
+///
+/// # Parameters
+/// - `parent`: Requested parent path, or the process temporary directory.
+/// - `creates_parent`: Whether missing parent directories should be created.
+/// - `prefix`, `suffix`: Optional entry-name affixes.
+/// - `operation`: Operation attached to validation and creation errors.
+/// - `symlink_policy`: Policy used to bind the parent path.
+///
+/// # Returns
+/// The resolved and validated parent directory.
+///
+/// # Errors
+/// Returns an operation error when resolution, creation, metadata validation,
+/// or affix validation fails.
+fn prepare_host_temp_parent(
+    parent: PathBuf,
+    creates_parent: bool,
+    prefix: Option<&str>,
+    suffix: Option<&str>,
+    operation: LocalFileOperation,
+    symlink_policy: LocalSymlinkPolicy,
+) -> LocalResult<PathBuf> {
+    let parent = resolve_host_path(&parent, symlink_policy, true)?;
+    if creates_parent {
+        create_host_temp_parent(&parent, operation)?;
+    }
+    validate_host_temp_parent(&parent, operation)?;
+    validate_temp_affixes(prefix, suffix).map_err(|error| {
+        LocalFileError::from_io(operation, Some(parent.clone()), None, error)
+            .with_kind(LocalFileErrorKind::InvalidOptions)
+    })?;
+    Ok(parent)
+}
+
+/// Opens the temporary parent with Windows directory and attribute rights.
+///
+/// # Parameters
+/// - `path`: Existing parent directory.
+///
+/// # Returns
+/// A handle retaining access to the parent directory.
+///
+/// # Errors
+/// Returns the operating-system error if the directory cannot be opened.
 #[cfg(windows)]
 fn open_host_temp_parent_directory(path: &Path) -> io::Result<File> {
     use std::os::windows::fs::OpenOptionsExt;
@@ -258,6 +300,16 @@ fn open_host_temp_parent_directory(path: &Path) -> io::Result<File> {
         .open(path)
 }
 
+/// Opens the temporary parent using the platform's standard file API.
+///
+/// # Parameters
+/// - `path`: Existing parent directory.
+///
+/// # Returns
+/// A handle retaining access to the parent directory.
+///
+/// # Errors
+/// Returns the operating-system error if the directory cannot be opened.
 #[cfg(not(windows))]
 fn open_host_temp_parent_directory(path: &Path) -> io::Result<File> {
     File::open(path)
@@ -268,6 +320,17 @@ fn open_host_temp_parent_directory(path: &Path) -> io::Result<File> {
 /// If opening fails after creation, the returned error carries recovery
 /// ownership with the parent handle and name, but without claiming an object
 /// identity that could not be observed.
+///
+/// # Parameters
+/// - `parent`: Directory in which to create the entry.
+/// - `parent_handle`: Retained authority for the parent directory.
+/// - `prefix`, `suffix`: Optional entry-name affixes.
+/// - `max_attempts`: Optional limit on collision retries.
+/// - `operation`: Operation associated with returned errors.
+///
+/// # Returns
+/// The created path and open directory handle, or an error retaining cleanup
+/// ownership.
 fn create_host_temp_directory_entry(
     parent: &Path,
     parent_handle: Arc<File>,
@@ -293,6 +356,21 @@ fn create_host_temp_directory_entry(
 /// the error for a later cleanup attempt; the supplied path is retained only
 /// as diagnostic context. `open_directory` is an internal seam for exercising
 /// this failure boundary.
+///
+/// # Parameters
+/// - `parent`: Directory in which to create the entry.
+/// - `parent_handle`: Retained parent authority.
+/// - `prefix`, `suffix`: Optional entry-name affixes.
+/// - `max_attempts`: Optional collision retry limit.
+/// - `operation`: Operation recorded in returned errors.
+/// - `open_directory`: Opens the newly created entry.
+///
+/// # Returns
+/// The created path and opened directory handle.
+///
+/// # Errors
+/// Returns a structured operation error; a post-creation open failure carries
+/// recovery ownership.
 fn create_host_temp_directory_entry_with_opener(
     parent: &Path,
     parent_handle: Arc<File>,
@@ -340,6 +418,19 @@ fn create_host_temp_directory_entry_with_opener(
 /// as its parent. Identity observation is best-effort here; cleanup refuses
 /// to delete any entry whose identity cannot later be verified. Each path is
 /// diagnostic and access remains anchored by the retained parent handle.
+///
+/// # Parameters
+/// - `sandbox_path`: Diagnostic path for the sandbox.
+/// - `sandbox`: Retained sandbox cleanup entry.
+/// - `child`: Optional child path and open handle.
+/// - `child_is_directory`: Whether the child is a directory.
+///
+/// # Returns
+/// The primary diagnostic path and ordered cleanup entries.
+///
+/// # Errors
+/// Returns an error if required parent authority or entry names are
+/// unavailable.
 fn host_temp_recovery_entries(
     sandbox_path: &Path,
     sandbox: crate::temp::internal::NativePrivateEntry,
@@ -381,6 +472,16 @@ fn host_temp_recovery_entries(
     Ok((recovery_path, entries))
 }
 
+/// Opens a newly created temporary directory for retained operations.
+///
+/// # Parameters
+/// - `path`: Newly created directory.
+///
+/// # Returns
+/// An open directory handle.
+///
+/// # Errors
+/// Returns the native error if opening fails.
 #[cfg(unix)]
 fn open_temp_directory(path: &Path) -> io::Result<File> {
     #[cfg(feature = "test-support")]
@@ -390,6 +491,16 @@ fn open_temp_directory(path: &Path) -> io::Result<File> {
     File::open(path)
 }
 
+/// Opens a newly created temporary directory with native cleanup rights.
+///
+/// # Parameters
+/// - `path`: Newly created directory.
+///
+/// # Returns
+/// An open handle with delete and attribute access.
+///
+/// # Errors
+/// Returns the native error if opening fails.
 #[cfg(windows)]
 fn open_temp_directory(path: &Path) -> io::Result<File> {
     use std::os::windows::fs::OpenOptionsExt;
@@ -404,6 +515,16 @@ fn open_temp_directory(path: &Path) -> io::Result<File> {
         .open(path)
 }
 
+/// Opens a newly created temporary directory using the standard file API.
+///
+/// # Parameters
+/// - `path`: Newly created directory.
+///
+/// # Returns
+/// An open directory handle.
+///
+/// # Errors
+/// Returns the native error if opening fails.
 #[cfg(not(any(unix, windows)))]
 fn open_temp_directory(path: &Path) -> io::Result<File> {
     File::open(path)
@@ -415,6 +536,14 @@ fn open_temp_directory(path: &Path) -> io::Result<File> {
 /// both are native-entry owners. Cleanup failure is attached to the primary
 /// error and the remaining owner is returned so callers can retry; partial
 /// cleanup may already have released earlier entries.
+///
+/// # Parameters
+/// - `primary`: Creation error to preserve.
+/// - `owner`: Cleanup ownership for the failed resource.
+/// - `sandbox`: Diagnostic sandbox path.
+///
+/// # Returns
+/// The primary error, retaining remaining ownership if cleanup fails.
 fn cleanup_failed_temp_owner(
     primary: LocalFileError,
     mut owner: crate::LocalTempRecovery,
@@ -463,6 +592,12 @@ fn cleanup_failed_temp_owner(
 /// Successful cleanup leaves the original error intact. Failed cleanup is
 /// recorded separately and the owner stays attached for a caller-controlled
 /// retry rather than being dropped at this boundary.
+///
+/// # Parameters
+/// - `primary`: Creation error that may carry a recovery owner.
+///
+/// # Returns
+/// The original error, retaining recovery ownership if cleanup fails.
 fn cleanup_failed_temp_creation_owner(primary: LocalFileError) -> LocalFileError {
     let (primary, recovery) = primary.into_temp_recovery_parts();
     let Some(mut recovery) = recovery else {
@@ -474,6 +609,17 @@ fn cleanup_failed_temp_creation_owner(primary: LocalFileError) -> LocalFileError
     }
 }
 
+/// Clones a file handle so failed resource construction retains independent
+/// cleanup ownership.
+///
+/// # Parameters
+/// - `file`: Open handle to the created temporary file.
+///
+/// # Returns
+/// A cloned handle to the same file object.
+///
+/// # Errors
+/// Returns the operating-system error if cloning fails.
 fn clone_host_temp_file(file: &File) -> io::Result<File> {
     #[cfg(feature = "test-support")]
     if crate::local::test_support_enabled("host-temp-file-recovery-clone-cleanup") {
@@ -482,6 +628,20 @@ fn clone_host_temp_file(file: &File) -> io::Result<File> {
     file.try_clone()
 }
 
+/// Creates a required-private temporary file using handle-relative platform
+/// APIs.
+///
+/// # Parameters
+/// - `parent`: Validated parent directory.
+/// - `options`: File naming and retry options.
+/// - `symlink_policy`: Policy used to bind the resulting resource.
+///
+/// # Returns
+/// A private temporary file with cleanup ownership.
+///
+/// # Errors
+/// Returns an operation error when creation or required privacy cannot be
+/// provided.
 fn create_private_host_temp_file(
     parent: &Path,
     options: &LocalTempFileOptions,
@@ -657,6 +817,20 @@ fn create_private_host_temp_file(
     }
 }
 
+/// Creates a required-private temporary directory using handle-relative
+/// platform APIs.
+///
+/// # Parameters
+/// - `parent`: Validated parent directory.
+/// - `options`: Directory naming and retry options.
+/// - `symlink_policy`: Policy used to bind the resulting resource.
+///
+/// # Returns
+/// A private temporary directory with cleanup ownership.
+///
+/// # Errors
+/// Returns an operation error when creation or required privacy cannot be
+/// provided.
 fn create_private_host_temp_directory(
     parent: &Path,
     options: &LocalTempDirectoryOptions,
@@ -832,6 +1006,16 @@ fn create_private_host_temp_directory(
     }
 }
 
+/// Opens a directory handle for native handle-relative temporary operations.
+///
+/// # Parameters
+/// - `path`: Existing directory to open.
+///
+/// # Returns
+/// An open directory handle.
+///
+/// # Errors
+/// Returns the native open error, or `Unsupported` on other platforms.
 fn open_host_directory_handle(path: &Path) -> io::Result<File> {
     #[cfg(unix)]
     {
@@ -857,6 +1041,17 @@ fn open_host_directory_handle(path: &Path) -> io::Result<File> {
     }
 }
 
+/// Creates a private file relative to an already-open directory.
+///
+/// # Parameters
+/// - `parent`: Open directory used as creation authority.
+/// - `name`: Single entry name to create.
+///
+/// # Returns
+/// An open handle to the new file.
+///
+/// # Errors
+/// Returns the native creation error and any retained partial-entry ownership.
 #[cfg(any(unix, windows))]
 fn private_create_file_at(parent: &File, name: &OsStr) -> Result<File, crate::temp::types::NativePrivateCreateError> {
     #[cfg(feature = "test-support")]
@@ -876,6 +1071,17 @@ fn private_create_file_at(parent: &File, name: &OsStr) -> Result<File, crate::te
     }
 }
 
+/// Creates a private directory relative to an already-open directory.
+///
+/// # Parameters
+/// - `parent`: Open directory used as creation authority.
+/// - `name`: Single entry name to create.
+///
+/// # Returns
+/// An open handle to the new directory.
+///
+/// # Errors
+/// Returns the native creation error and any retained partial-entry ownership.
 #[cfg(any(unix, windows))]
 fn private_create_directory_at(
     parent: &File,
@@ -898,12 +1104,21 @@ fn private_create_directory_at(
     }
 }
 
-#[cfg(any(unix, windows))]
 /// Builds an error and transfers any retained native entries to recovery.
 ///
 /// The creation error may own a partially created target; `extra` may own a
 /// sandbox needed to reach that target. Both are kept in the returned recovery
 /// value so the caller can retry cleanup after this function returns.
+///
+/// # Parameters
+/// - `operation`: Operation associated with the creation error.
+/// - `path`: Diagnostic attempted-resource path.
+/// - `error`: Native failure and optional partial-entry owner.
+/// - `extra`: Optional additional cleanup owner, such as a sandbox.
+///
+/// # Returns
+/// A structured error carrying all available cleanup ownership.
+#[cfg(any(unix, windows))]
 fn private_create_error(
     operation: LocalFileOperation,
     path: PathBuf,
@@ -926,7 +1141,6 @@ fn private_create_error(
     result
 }
 
-#[cfg(any(unix, windows))]
 /// Creates recovery ownership for a native temporary entry and optional
 /// sandbox.
 ///
@@ -937,6 +1151,18 @@ fn private_create_error(
 /// unavailable, later cleanup refuses path-only deletion. When supplied,
 /// `sandbox` is appended after the primary entry so cleanup removes the child
 /// before its containing sandbox.
+///
+/// # Parameters
+/// - `path`: Diagnostic primary-entry path.
+/// - `parent`: Open parent directory handle.
+/// - `name`: Entry name relative to `parent`.
+/// - `file`: Open handle to the created object.
+/// - `directory`: Whether the entry is a directory.
+/// - `sandbox`: Optional containing sandbox owner.
+///
+/// # Returns
+/// Recovery ownership ordered to clean the primary entry before its sandbox.
+#[cfg(any(unix, windows))]
 fn native_temp_recovery(
     path: PathBuf,
     parent: File,
@@ -969,8 +1195,17 @@ fn native_temp_recovery(
     crate::LocalTempRecovery::from_native_entries_with_paths(owner_path, paths)
 }
 
-#[cfg(any(unix, windows))]
 /// Clones the parent handle for later native cleanup or recovery.
+///
+/// # Parameters
+/// - `parent`: Open parent directory handle to retain.
+///
+/// # Returns
+/// A cloned handle to the same directory.
+///
+/// # Errors
+/// Returns the native error if cloning fails.
+#[cfg(any(unix, windows))]
 fn reserve_private_parent(parent: &File) -> io::Result<File> {
     #[cfg(feature = "test-support")]
     if crate::local::take_test_support("temp-private-parent-clone") {
@@ -982,12 +1217,20 @@ fn reserve_private_parent(parent: &File) -> io::Result<File> {
     parent.try_clone()
 }
 
-#[cfg(any(unix, windows))]
 /// Reserves recovery ownership for a created sandbox directory.
 ///
 /// On failure, returns the parent handle to the caller so it can transfer that
 /// handle and the still-open directory into a recovery value. Identity capture
 /// is best-effort; if it is absent, cleanup refuses deletion by path alone.
+///
+/// # Parameters
+/// - `parent`: Open parent handle returned on reservation failure.
+/// - `name`: Sandbox name relative to `parent`.
+/// - `directory`: Open handle to the created sandbox.
+///
+/// # Returns
+/// A retained cleanup entry, or the error and parent handle.
+#[cfg(any(unix, windows))]
 fn reserve_private_directory_guard(
     parent: File,
     name: &str,
@@ -1019,8 +1262,17 @@ fn reserve_private_directory_guard(
     })
 }
 
-#[cfg(any(unix, windows))]
 /// Associates an operation failure with recovery ownership of its sandbox.
+///
+/// # Parameters
+/// - `operation`: Operation associated with the failure.
+/// - `path`: Diagnostic path.
+/// - `source`: Underlying I/O failure.
+/// - `entry`: Optional sandbox cleanup owner.
+///
+/// # Returns
+/// A structured error retaining the owner when supplied.
+#[cfg(any(unix, windows))]
 fn sandbox_failure(
     operation: LocalFileOperation,
     path: PathBuf,
@@ -1034,8 +1286,15 @@ fn sandbox_failure(
     }
 }
 
-#[cfg(any(unix, windows))]
 /// Attempts sandbox cleanup and returns ownership when cleanup fails.
+///
+/// # Parameters
+/// - `path`: Diagnostic sandbox path.
+/// - `entry`: Retained cleanup authority.
+///
+/// # Returns
+/// Success after cleanup, or an error carrying the owner for retry.
+#[cfg(any(unix, windows))]
 fn cleanup_private_sandbox(path: &Path, entry: crate::temp::types::NativePrivateEntry) -> LocalResult<()> {
     let mut owner = crate::LocalTempRecovery::from_native(path.to_path_buf(), entry);
     match owner.cleanup() {
@@ -1044,98 +1303,20 @@ fn cleanup_private_sandbox(path: &Path, entry: crate::temp::types::NativePrivate
     }
 }
 
-/// Opens the existing robust same-directory staged writer implementation.
-///
-/// # Parameters
-///
-/// - `path`: Bound destination path.
-/// - `options`: Unified writer options.
-///
-/// # Returns
-///
-/// Open staged writer.
-///
-/// # Errors
-///
-/// Returns `LocalFileError` when staging cannot be prepared.
-pub(crate) fn open_staged_writer(
-    path: &Path,
-    options: &LocalWriteOptions,
-) -> LocalResult<crate::local::LocalAtomicWriter> {
-    let mut native_options = crate::local::LocalAtomicWriteOptions::new()
-        .with_durability(options.durability())
-        .with_file_sync(options.file_sync())
-        .with_metadata_policy(options.metadata_policy());
-    if options.mode() == LocalWriteMode::CreateNew {
-        native_options = native_options.with_create_new();
-    }
-    if options.creates_parent() {
-        native_options = native_options.with_create_parent();
-    }
-    if let Some(timeout) = options.open_retry_timeout() {
-        native_options = native_options.with_open_retry_timeout(timeout);
-    }
-    crate::local::LocalAtomicWriter::new(path, native_options).map_err(|error| {
-        let kind = error.kind();
-        LocalFileError::from_io(
-            LocalFileOperation::OpenWriter,
-            Some(path.to_path_buf()),
-            None,
-            io::Error::new(kind, error),
-        )
-    })
-}
-
-/// Converts unified copy policy to the existing shared native implementation.
-///
-/// # Parameters
-///
-/// - `options`: Unified public copy options.
-/// - `symlink_policy`: Owning filesystem policy used without an override.
-/// - `started_at`: Original operation start, including preflight time, used for
-///   the tree-copy deadline.
-///
-/// # Returns
-///
-/// Tree traversal, conflict, metadata, and durability options. The facade
-/// handles source mode, atomicity, and top-level parent creation separately.
-pub(crate) fn internal_copy_options(
-    options: &LocalCopyOptions,
-    symlink_policy: LocalSymlinkPolicy,
-    started_at: Instant,
-) -> crate::local::LocalCopyDirOptions {
-    let symlink_policy = options.symlink_policy_override().unwrap_or(symlink_policy);
-    let mut result = crate::local::LocalCopyDirOptions::new()
-        .with_conflict(options.conflict())
-        .with_type_conflict(options.type_conflict())
-        .with_symlink_policy(symlink_policy)
-        .with_durability(options.durability())
-        .with_started_at(started_at);
-    if let Some(value) = options.max_depth() {
-        result = result.with_max_depth(value);
-    }
-    if let Some(value) = options.max_entries() {
-        result = result.with_max_entries(value);
-    }
-    if let Some(value) = options.max_bytes() {
-        result = result.with_max_bytes(value);
-    }
-    if let Some(value) = options.max_open_directories() {
-        result = result.with_max_open_directories(value);
-    }
-    if let Some(value) = options.deadline() {
-        result = result.with_deadline(value);
-    }
-    if options.preserve_metadata() == LocalMetadataPreservePolicy::Permissions {
-        result = result.preserve_permissions();
-    }
-    result
-}
-
 /// Confirms that a host temporary-resource parent is an existing directory.
 ///
 /// Returns `NotDirectory` for another entry kind and propagates metadata
 /// failures with the supplied operation and parent path.
+///
+/// # Parameters
+/// - `parent`: Path to validate.
+/// - `operation`: Operation associated with validation errors.
+///
+/// # Returns
+/// Success when the path names a directory.
+///
+/// # Errors
+/// Returns a metadata error or `NotDirectory` when the path is not a directory.
 #[inline]
 fn validate_host_temp_parent(parent: &Path, operation: LocalFileOperation) -> LocalResult<()> {
     let metadata = match fs::metadata(parent) {
@@ -1157,6 +1338,18 @@ fn validate_host_temp_parent(parent: &Path, operation: LocalFileOperation) -> Lo
 
 /// Creates a missing Host temporary parent while deferring an existing-file
 /// collision to the common type validator.
+///
+/// # Parameters
+/// - `parent`: Directory path to create, including missing ancestors.
+/// - `operation`: Operation associated with creation errors.
+///
+/// # Returns
+/// Success when creation succeeds or an existing entry is deferred to
+/// validation.
+///
+/// # Errors
+/// Returns the native error for failures other than an existing-entry
+/// collision.
 fn create_host_temp_parent(parent: &Path, operation: LocalFileOperation) -> LocalResult<()> {
     match fs::create_dir_all(parent) {
         Ok(()) => Ok(()),
@@ -1168,30 +1361,6 @@ fn create_host_temp_parent(parent: &Path, operation: LocalFileOperation) -> Loca
             error,
         )),
     }
-}
-
-#[cfg(all(test, unix))]
-#[test]
-#[cfg(feature = "test-support")]
-fn test_host_temp_file_clone_failure_transfers_owned_recovery_for_retry() {
-    let fixture = tempfile::tempdir().expect("fixture");
-    let guard = crate::local::install_test_fault("host-temp-file-recovery-clone-cleanup")
-        .expect("install file clone and cleanup failure");
-    let error = HostLocalFileSystem::create_temp_file_with_policy(
-        &LocalTempFileOptions::new().with_parent(fixture.path()),
-        LocalSymlinkPolicy::FollowWithinScope,
-    )
-    .expect_err("injected handle preparation failure");
-    drop(guard);
-
-    let (primary, recovery) = error.into_temp_recovery_parts();
-    assert_eq!(primary.operation(), LocalFileOperation::CreateTempFile);
-    let mut recovery = recovery.expect("failed preparation retains native cleanup ownership");
-    assert!(recovery.identity().is_some(), "retained identity remains authoritative");
-    let path = recovery.path().to_path_buf();
-    assert!(path.exists(), "failed cleanup preserves the created file");
-    recovery.cleanup().expect("retry cleans the file and sandbox");
-    assert!(!path.exists(), "identity-checked retry removes the created file");
 }
 
 #[cfg(all(test, unix))]
@@ -1235,55 +1404,6 @@ fn test_host_temp_creation_error_releases_known_identity_owner() {
     );
     assert!(error.temp_recovery().is_none(), "successful cleanup releases the owner");
     assert!(!path.exists(), "identity-checked cleanup removes the sandbox");
-}
-
-#[cfg(all(test, unix))]
-#[test]
-#[cfg(feature = "test-support")]
-fn test_host_temp_sandbox_open_failure_reports_cleanup_error_and_retains_owner() {
-    let fixture = tempfile::tempdir().expect("fixture");
-    for (operation, error) in [
-        {
-            let guard = crate::local::install_test_fault("host-temp-sandbox-open").expect("install open failure");
-            let error = HostLocalFileSystem::create_temp_file_with_policy(
-                &LocalTempFileOptions::new().with_parent(fixture.path()),
-                LocalSymlinkPolicy::FollowWithinScope,
-            )
-            .expect_err("sandbox open should fail");
-            drop(guard);
-            (LocalFileOperation::CreateTempFile, error)
-        },
-        {
-            let guard = crate::local::install_test_fault("host-temp-sandbox-open").expect("install open failure");
-            let error = HostLocalFileSystem::create_temp_directory_with_policy(
-                &LocalTempDirectoryOptions::new().with_parent(fixture.path()),
-                LocalSymlinkPolicy::FollowWithinScope,
-            )
-            .expect_err("sandbox open should fail");
-            drop(guard);
-            (LocalFileOperation::CreateTempDirectory, error)
-        },
-    ] {
-        assert_eq!(error.operation(), operation);
-        assert_eq!(
-            error.cleanup_error().expect("cleanup failure is reported").kind(),
-            LocalFileErrorKind::RequirementNotMet
-        );
-        let recovery = error.temp_recovery().expect("sandbox recovery owner is retained");
-        let path = recovery.path().to_path_buf();
-        assert!(path.is_dir(), "unknown identity must preserve the residual sandbox");
-        assert!(recovery.identity().is_none(), "no path-derived identity is trusted");
-        let (_primary, mut recovery) = error.into_temp_recovery_parts();
-        let mut recovery = recovery.take().expect("owner transfers from public error");
-        assert_eq!(
-            recovery
-                .cleanup()
-                .expect_err("unknown identity is not cleanup authority")
-                .kind(),
-            LocalFileErrorKind::RequirementNotMet
-        );
-        assert!(path.is_dir(), "cleanup must not remove by diagnostic path");
-    }
 }
 
 #[cfg(all(test, unix))]

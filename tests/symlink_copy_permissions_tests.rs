@@ -77,7 +77,7 @@ fn set_readonly(path: &Path, readonly: bool) {
 /// Verifies Host copy inspects a single link entry without changing its
 /// referent.
 #[test]
-fn native_host_copy_does_not_use_single_symlink_referent_permissions() {
+fn test_native_host_copy_does_not_use_single_symlink_referent_permissions() {
     let directory = tempdir().expect("temporary directory should be created");
     let referent = directory.path().join("referent");
     let source = directory.path().join("source-link");
@@ -106,7 +106,7 @@ fn native_host_copy_does_not_use_single_symlink_referent_permissions() {
 /// Verifies Rooted copy inspects a single link entry without changing its
 /// referent.
 #[test]
-fn native_rooted_copy_does_not_use_single_symlink_referent_permissions() {
+fn test_native_rooted_copy_does_not_use_single_symlink_referent_permissions() {
     let directory = tempdir().expect("temporary directory should be created");
     let referent = directory.path().join("referent");
     let source = directory.path().join("source-link");
@@ -135,7 +135,7 @@ fn native_rooted_copy_does_not_use_single_symlink_referent_permissions() {
 /// Verifies Host copy inspects a symlink entry in a mixed tree without changing
 /// its referent.
 #[test]
-fn native_host_copy_does_not_use_mixed_tree_symlink_referent_permissions() {
+fn test_native_host_copy_does_not_use_mixed_tree_symlink_referent_permissions() {
     let directory = tempdir().expect("temporary directory should be created");
     let source_root = directory.path().join("source");
     let target_root = directory.path().join("target");
@@ -170,7 +170,7 @@ fn native_host_copy_does_not_use_mixed_tree_symlink_referent_permissions() {
 /// Verifies Rooted copy inspects a symlink entry in a mixed tree without
 /// changing its referent.
 #[test]
-fn native_rooted_copy_does_not_use_mixed_tree_symlink_referent_permissions() {
+fn test_native_rooted_copy_does_not_use_mixed_tree_symlink_referent_permissions() {
     let directory = tempdir().expect("temporary directory should be created");
     let source_root = directory.path().join("source");
     let target_root = directory.path().join("target");

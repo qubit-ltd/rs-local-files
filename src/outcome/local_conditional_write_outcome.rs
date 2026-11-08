@@ -20,7 +20,12 @@ use crate::recovery::LocalRecoveryFile;
 /// Retained files are owned by this outcome; dropping a recovery handle never
 /// deletes the file, so cleanup policy remains with the caller.
 ///
-/// # Example
+/// # Type Parameters
+///
+/// - `D` is the digest algorithm used to verify the installed content. It must
+///   implement [`Digest`], which supplies the corresponding output size.
+///
+/// # Examples
 ///
 /// ```
 /// use qubit_io::Output;
@@ -64,6 +69,17 @@ pub struct LocalConditionalWriteOutcome<D: Digest> {
 
 impl<D: Digest> LocalConditionalWriteOutcome<D> {
     /// Creates a result after publication and required synchronization succeed.
+    ///
+    /// # Parameters
+    ///
+    /// - `digest` is computed from the verified installed bytes.
+    /// - `write_outcome` records the publication method, byte count, and
+    ///   resulting durability status.
+    /// - `retained_files` contains recovery files that remain after cleanup.
+    /// - `cleanup_errors` contains cleanup failures that did not invalidate
+    ///   publication.
+    /// - `current_directory` supplies the directory context used to fill in
+    ///   missing context on cleanup errors.
     pub(crate) fn new(
         digest: Output<D>,
         write_outcome: LocalWriteOutcome,

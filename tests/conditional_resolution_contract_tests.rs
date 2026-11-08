@@ -6,12 +6,6 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 
-// =============================================================================
-//    Copyright (c) 2025 - 2026 Haixing Hu.
-//
-//    SPDX-License-Identifier: Apache-2.0
-// =============================================================================
-
 #![cfg(feature = "digest")]
 
 use std::ffi::OsStr;
@@ -88,7 +82,7 @@ fn pending_path_bytes(path: &Path) -> usize {
 }
 
 #[test]
-fn conditional_writer_inherits_rooted_component_policy_without_side_effects() {
+fn test_conditional_writer_inherits_rooted_component_policy_without_side_effects() {
     let fixture = tempfile::tempdir().expect("fixture");
     let mut filesystem = LocalFileSystem::rooted_with_options(
         fixture.path(),
@@ -155,7 +149,7 @@ fn conditional_writer_inherits_rooted_component_policy_without_side_effects() {
 
 #[test]
 #[cfg(unix)]
-fn conditional_writer_inherits_finite_resolution_budgets_and_unlimited_default() {
+fn test_conditional_writer_inherits_finite_resolution_budgets_and_unlimited_default() {
     let fixture = tempfile::tempdir().expect("fixture");
     let root = fixture.path().canonicalize().expect("fixture root should resolve");
     let root_components = root

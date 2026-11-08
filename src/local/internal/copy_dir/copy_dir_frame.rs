@@ -75,30 +75,33 @@ impl CopyDirFrame {
 
     /// Returns the source directory path.
     #[must_use]
+    #[inline]
     pub(super) fn src(&self) -> &Path {
         &self.src
     }
 
     /// Returns the destination directory path.
     #[must_use]
+    #[inline]
     pub(super) fn dst(&self) -> &Path {
         &self.dst
     }
 
     /// Returns the descendant depth of this directory.
     #[must_use]
+    #[inline]
     pub(super) const fn depth(&self) -> usize {
         self.depth
     }
 
     /// Returns the filesystem-object source identity.
-    #[must_use]
     pub(super) const fn source_identity(&self) -> &DirectoryIdentity {
         &self.source_identity
     }
 
     /// Returns the source permissions captured before traversal.
     #[must_use]
+    #[inline]
     pub(super) fn source_permissions(&self) -> &fs::Permissions {
         &self.source_permissions
     }
@@ -114,6 +117,7 @@ impl CopyDirFrame {
     ///
     /// The yielded result contains the filesystem error when an entry cannot
     /// be read.
+    #[inline]
     pub(super) fn next_entry(&mut self) -> Option<std::io::Result<fs::DirEntry>> {
         self.entries.next()
     }

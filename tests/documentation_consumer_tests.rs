@@ -60,7 +60,7 @@ fn lock_documentation_consumer() -> MutexGuard<'static, ()> {
 }
 
 #[test]
-fn documented_conditional_write_runs_as_a_consumer_without_a_digest_feature() {
+fn test_documented_conditional_write_runs_as_a_consumer_without_a_digest_feature() {
     let _guard = lock_documentation_consumer();
     let crate_path = Path::new(env!("CARGO_MANIFEST_DIR"))
         .canonicalize()
@@ -151,7 +151,7 @@ fn documented_conditional_write_runs_as_a_consumer_without_a_digest_feature() {
 }
 
 #[test]
-fn documented_failed_seal_cleanup_retains_owner_for_retry() {
+fn test_documented_failed_seal_cleanup_retains_owner_for_retry() {
     let _guard = lock_documentation_consumer();
     let crate_path = Path::new(env!("CARGO_MANIFEST_DIR"))
         .canonicalize()
@@ -288,7 +288,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {{
 }
 
 #[test]
-fn documented_inspection_cleanup_retains_owner_for_retry() {
+fn test_documented_inspection_cleanup_retains_owner_for_retry() {
     let _guard = lock_documentation_consumer();
     let crate_path = Path::new(env!("CARGO_MANIFEST_DIR"))
         .canonicalize()
@@ -460,7 +460,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {{
 }
 
 #[test]
-fn documented_tree_sync_compiles_with_introductory_dependencies() {
+fn test_documented_tree_sync_compiles_with_introductory_dependencies() {
     let _guard = lock_documentation_consumer();
     let crate_path = Path::new(env!("CARGO_MANIFEST_DIR"))
         .canonicalize()
@@ -521,7 +521,7 @@ fn documented_tree_sync_compiles_with_introductory_dependencies() {
 
 #[cfg(target_os = "linux")]
 #[test]
-fn documented_readonly_stage_recovery_preserves_destination() {
+fn test_documented_readonly_stage_recovery_preserves_destination() {
     let _guard = lock_documentation_consumer();
     let crate_path = Path::new(env!("CARGO_MANIFEST_DIR"))
         .canonicalize()
@@ -590,7 +590,7 @@ fn documented_readonly_stage_recovery_preserves_destination() {
 }
 
 #[test]
-fn documented_export_runs_twice_in_existing_output_directory() {
+fn test_documented_export_runs_twice_in_existing_output_directory() {
     let _guard = lock_documentation_consumer();
     let crate_path = Path::new(env!("CARGO_MANIFEST_DIR"))
         .canonicalize()

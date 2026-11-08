@@ -8,5 +8,7 @@
 
 mod path_binding_deadline;
 mod resolution_contract;
+#[cfg(any(windows, test))]
+pub(super) mod unc_segment;
 pub(crate) use path_binding_deadline::checked_path_binding_deadline;
 pub(crate) use resolution_contract::ResolutionContract;

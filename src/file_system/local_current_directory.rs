@@ -32,6 +32,12 @@ impl LocalCurrentDirectory {
     /// `operation` and `path` are attached to failures from querying the
     /// process PWD. A virtual PWD is cloned without native I/O.
     ///
+    /// # Parameters
+    ///
+    /// - `operation`: identifies the filesystem operation associated with a
+    ///   process-PWD query failure.
+    /// - `path`: optional path context attached to a process-PWD query failure.
+    ///
     /// Returns the process PWD or the retained virtual PWD. Returns an error
     /// when reading the process PWD fails (or when the test-support failure is
     /// triggered); the error includes `operation` and the optional `path` as
@@ -65,6 +71,11 @@ impl LocalCurrentDirectory {
     }
 
     /// Replaces a retained virtual PWD, taking ownership of its new path.
+    ///
+    /// # Parameters
+    ///
+    /// - `path`: namespace-absolute directory to retain when this state is
+    ///   virtual; it is unused for process-backed state.
     ///
     /// Returns `true` when the virtual PWD was replaced, or `false` when this
     /// state is process-backed and has no retained path to replace.

@@ -33,6 +33,24 @@ use crate::local::copy_tree as run_copy_tree;
 use crate::rooted::DirectoryReader;
 
 /// Copies a rooted directory tree with a lazy depth-first work stack.
+///
+/// # Parameters
+///
+/// - `root`: Opened authority used for every source and destination operation.
+/// - `source`: Rooted source directory to enumerate.
+/// - `destination`: Rooted destination directory to populate.
+/// - `source_metadata`: Metadata already inspected for the source root.
+/// - `options`: Copy policy controlling conflicts, links, and preservation.
+/// - `durability`: Required durability for destination publication.
+/// - `budget`: Mutable resource limits shared with the traversal scheduler.
+///
+/// # Returns
+///
+/// Statistics for completed copy effects.
+///
+/// # Errors
+///
+/// Returns the failing stage, coordinates, partial effects, and source error.
 pub(super) fn copy_tree(
     root: &Root,
     source: &Path,
@@ -98,6 +116,14 @@ impl CopyTreeBackend for RootedCopyBackend<'_> {
     type Entry = super::super::Entry;
 
     /// Clones frame coordinates for diagnostics without opening native handles.
+    ///
+    /// # Parameters
+    ///
+    /// - `frame`: Active frame whose paths and depth are copied.
+    ///
+    /// # Returns
+    ///
+    /// The frame's source and destination coordinates and logical depth.
     #[inline]
     fn frame_context(&self, frame: &Self::Frame) -> CopyTreeFrameContext {
         CopyTreeFrameContext {
@@ -108,6 +134,15 @@ impl CopyTreeBackend for RootedCopyBackend<'_> {
     }
 
     /// Reads one child lazily; `None` means the directory is exhausted.
+    ///
+    /// # Parameters
+    ///
+    /// - `frame`: Active directory reader advanced by this operation.
+    /// - `stats`: Completed copy effects included in any read error.
+    ///
+    /// # Returns
+    ///
+    /// The next lazy entry, or `None` when the directory is exhausted.
     ///
     /// # Errors
     ///
@@ -127,6 +162,15 @@ impl CopyTreeBackend for RootedCopyBackend<'_> {
     }
 
     /// Constructs child coordinates once, at one level below the active frame.
+    ///
+    /// # Parameters
+    ///
+    /// - `frame`: Parent coordinates used to derive child paths and depth.
+    /// - `entry`: Native entry whose child coordinates are constructed.
+    ///
+    /// # Returns
+    ///
+    /// The child's source and destination coordinates and logical depth.
     #[inline]
     fn child_context(&self, frame: &CopyTreeFrameContext, entry: &Self::Entry) -> CopyTreeFrameContext {
         CopyTreeFrameContext {
@@ -143,9 +187,24 @@ impl CopyTreeBackend for RootedCopyBackend<'_> {
     /// mutations as they occur. `None` means a leaf was copied or skipped;
     /// `Some` transfers a child reader and permit to the scheduler.
     ///
+    /// # Parameters
+    ///
+    /// - `entry`: Child entry already charged by the scheduler.
+    /// - `frame`: Precomputed child coordinates and depth.
+    /// - `stats`: Mutable counters updated as destination effects complete.
+    /// - `budget`: Shared byte and open-directory resource accounting state.
+    ///
+    /// # Returns
+    ///
+    /// `Some(frame)` when descent is required, otherwise `None`.
+    ///
     /// # Errors
     ///
     /// Returns native or policy failures with all recorded partial effects.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the scheduler supplies paths that are not valid rooted paths.
     fn process_entry(
         &mut self,
         entry: Self::Entry,
@@ -345,6 +404,15 @@ impl CopyTreeBackend for RootedCopyBackend<'_> {
     ///
     /// Consumes the frame, releasing its reader and permit on success or error.
     ///
+    /// # Parameters
+    ///
+    /// - `frame`: Completed directory frame consumed while finalizing it.
+    /// - `stats`: Completed effects retained if permission preservation fails.
+    ///
+    /// # Returns
+    ///
+    /// `Ok(())` after final permissions have been applied.
+    ///
     /// # Errors
     ///
     /// Reports permission preservation failures with current copy statistics.
@@ -366,6 +434,17 @@ impl CopyTreeBackend for RootedCopyBackend<'_> {
 
     /// Attaches scheduler failure coordinates and a snapshot of partial
     /// effects.
+    ///
+    /// # Parameters
+    ///
+    /// - `stage`: Scheduler stage at which the failure occurred.
+    /// - `context`: Source/destination coordinates and depth for the failure.
+    /// - `stats`: Completed copy effects included in the error.
+    /// - `source_error`: Underlying scheduler or I/O failure.
+    ///
+    /// # Returns
+    ///
+    /// A copy error carrying the stage, coordinates, statistics, and cause.
     fn error(
         &self,
         stage: Stage,
@@ -380,6 +459,21 @@ impl CopyTreeBackend for RootedCopyBackend<'_> {
 }
 
 /// Opens the initial lazy reader or reports its path and partial statistics.
+///
+/// # Parameters
+///
+/// - `root`: Opened authority from which the reader is created.
+/// - `source`: Rooted source directory to open.
+/// - `destination`: Destination coordinate attached to any open error.
+/// - `statistics`: Completed effects included in any open error.
+///
+/// # Returns
+///
+/// A lazy reader for the source directory.
+///
+/// # Errors
+///
+/// Returns a read-stage error with the source and destination coordinates.
 fn open_root_reader(
     root: &Root,
     source: &Path,
@@ -416,6 +510,25 @@ fn open_root_reader(
 ///
 /// Returns an owned frame for the scheduler; errors release acquired capacity
 /// and retain any destination changes already recorded by the caller.
+///
+/// # Parameters
+///
+/// - `root`: Opened authority used to create the child reader.
+/// - `source`: Child source directory to open.
+/// - `destination`: Child destination coordinate for diagnostics.
+/// - `metadata`: Inspected metadata retained in the resulting frame.
+/// - `depth`: Logical depth of the child relative to the requested root.
+/// - `active_sources`: Active source ancestors updated after successful open.
+/// - `budget`: Shared directory permit accounting.
+/// - `statistics`: Completed effects included in any open error.
+///
+/// # Returns
+///
+/// An owned frame holding the reader and its directory permit.
+///
+/// # Errors
+///
+/// Returns a read-stage error; any acquired permit is released on failure.
 #[allow(clippy::too_many_arguments)]
 fn enter_directory(
     root: &Root,
@@ -473,6 +586,22 @@ fn enter_directory(
 
 /// Rejects a source directory that contains the fixed destination root or is
 /// already an active ancestor before any child destination is prepared.
+///
+/// # Parameters
+///
+/// - `source`: Candidate source directory to validate.
+/// - `destination`: Corresponding destination coordinate for diagnostics.
+/// - `destination_root`: Fixed destination root for overlap checks.
+/// - `active_sources`: Ancestor source directories checked for cycles.
+/// - `statistics`: Completed effects included in any validation error.
+///
+/// # Returns
+///
+/// `Ok(())` when the source is disjoint from the destination and ancestors.
+///
+/// # Errors
+///
+/// Returns an inspect-source error for overlap or an active-source cycle.
 fn validate_source_directory(
     source: &Path,
     destination: &Path,

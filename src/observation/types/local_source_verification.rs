@@ -15,11 +15,15 @@
 /// `Unchanged` result covers only the check that just completed and does not
 /// lock the namespace against later changes.
 ///
+/// # Examples
+///
 /// ```
 /// use std::path::Path;
+///
 /// use qubit_local_files::LocalFileSystem;
 /// use qubit_local_files::observation::LocalSourceVerification;
-/// use qubit_local_files::options::{LocalObservedReadOptions, LocalPathBindingOptions};
+/// use qubit_local_files::options::LocalObservedReadOptions;
+/// use qubit_local_files::options::LocalPathBindingOptions;
 ///
 /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// let fixture = tempfile::tempdir()?;
@@ -33,11 +37,12 @@
 /// match reader.verify_path_binding()? {
 ///     LocalSourceVerification::Unchanged => {}
 ///     LocalSourceVerification::Changed | LocalSourceVerification::Missing => {}
-///     _ => {},
+///     _ => {}
 /// }
 /// # Ok(())
 /// # }
 /// ```
+#[must_use]
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub enum LocalSourceVerification {

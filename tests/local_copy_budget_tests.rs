@@ -7,14 +7,20 @@
 // =============================================================================
 
 use std::fs;
+use std::io::Error;
+use std::io::ErrorKind;
+#[cfg(unix)]
+use std::os::unix::fs::symlink;
 #[cfg(unix)]
 use std::path::Path;
 use std::path::PathBuf;
+use std::process::id;
 use std::time::Duration;
 
 use qubit_local_files::LocalFileSystem;
 use qubit_local_files::error::LocalFileErrorKind;
 use qubit_local_files::error::LocalResourceKind;
+use qubit_local_files::options::LocalCopyConflictPolicy;
 use qubit_local_files::options::LocalCopyOptions;
 use qubit_local_files::options::LocalCopyTypeConflictPolicy;
 use qubit_local_files::outcome::LocalCopyFailure;
@@ -169,10 +175,10 @@ fn test_rooted_replacement_tree_survives_copy_byte_budget_failure() {
 
     let failure = rooted
         .copy_with_options(
-            std::path::Path::new("source"),
-            std::path::Path::new("target"),
+            Path::new("source"),
+            Path::new("target"),
             &LocalCopyOptions::new()
-                .with_conflict(qubit_local_files::options::LocalCopyConflictPolicy::Overwrite)
+                .with_conflict(LocalCopyConflictPolicy::Overwrite)
                 .with_type_conflict(LocalCopyTypeConflictPolicy::Replace)
                 .with_max_bytes(0),
         )
@@ -216,10 +222,7 @@ fn test_copy_budget_matrix_enforces_deadline() {
             .expect_err("an immediate copy deadline should expire");
         assert_eq!(LocalFileErrorKind::Io, failure.error().kind());
         assert_eq!(LocalCopyFailureState::Unchanged, failure.state());
-        assert_eq!(
-            Some(std::io::ErrorKind::TimedOut),
-            failure.error().io_error().map(std::io::Error::kind),
-        );
+        assert_eq!(Some(ErrorKind::TimedOut), failure.error().io_error().map(Error::kind),);
     }
 }
 
@@ -252,18 +255,13 @@ fn test_copy_deadline_precedes_type_conflict_skip_outcomes() {
             )
             .expect_err("an expired deadline must precede a skip outcome");
 
-        assert_eq!(
-            Some(std::io::ErrorKind::TimedOut),
-            failure.error().io_error().map(std::io::Error::kind),
-        );
+        assert_eq!(Some(ErrorKind::TimedOut), failure.error().io_error().map(Error::kind),);
     }
 }
 
 #[cfg(unix)]
 #[test]
 fn test_copy_deadline_applies_to_final_symlink_entries() {
-    use std::os::unix::fs::symlink;
-
     for backend in Backend::all() {
         let directory = tempdir().expect("temporary directory should be created");
         fs::write(directory.path().join("referent"), b"payload").expect("referent should be written");
@@ -286,10 +284,7 @@ fn test_copy_deadline_applies_to_final_symlink_entries() {
             .expect_err("an immediate deadline should reject a final symlink copy");
 
         assert_eq!(LocalFileErrorKind::Io, failure.error().kind());
-        assert_eq!(
-            Some(std::io::ErrorKind::TimedOut),
-            failure.error().io_error().map(std::io::Error::kind),
-        );
+        assert_eq!(Some(ErrorKind::TimedOut), failure.error().io_error().map(Error::kind),);
         assert!(
             !directory.path().join("target").exists(),
             "an expired copy must not publish its target",
@@ -334,7 +329,7 @@ fn test_copy_backends_enforce_max_bytes_against_actual_stream_length() {
     assert_eq!(LocalFileErrorKind::ResourceLimit, failure.error().kind());
     assert!(!target.exists(), "failed staging must not publish a target");
 
-    let rooted_source = PathBuf::from(format!("proc/{}/cmdline", std::process::id()));
+    let rooted_source = PathBuf::from(format!("proc/{}/cmdline", id()));
     let rooted_target = target
         .strip_prefix(Path::new("/"))
         .expect("temporary target should be absolute");
@@ -354,8 +349,6 @@ fn test_copy_backends_enforce_max_bytes_against_actual_stream_length() {
 #[cfg(unix)]
 #[test]
 fn test_rooted_copy_preserves_final_and_nested_symlink_entries() {
-    use std::os::unix::fs::symlink;
-
     let directory = tempdir().expect("temporary directory should be created");
     fs::create_dir(directory.path().join("source")).expect("source directory should be created");
     fs::write(directory.path().join("source/referent"), b"payload").expect("referent should be written");

@@ -8,7 +8,7 @@
 
 use std::ffi::OsString;
 
-use super::symlink_identity::SymlinkIdentity;
+use super::internal::symlink_identity::SymlinkIdentity;
 use crate::directory::LocalResolutionOrigin;
 
 /// One pending step in handle-relative symbolic-link expansion.

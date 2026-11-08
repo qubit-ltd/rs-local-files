@@ -340,6 +340,19 @@ impl HostLocalFileSystem {
 /// Returns newly observed missing ancestors in shallow-to-deep order, or an
 /// empty list when parent creation is disabled. Inspection or creation errors
 /// propagate; successfully created ancestors are not rolled back.
+///
+/// # Parameters
+///
+/// - `target`: Destination path whose missing parents may be created.
+/// - `options`: Copy policy controlling whether parents are created.
+///
+/// # Returns
+///
+/// Paths of newly created parent directories in shallow-to-deep order.
+///
+/// # Errors
+///
+/// Returns the first inspection or directory-creation error.
 #[inline]
 fn prepare_copy_parent(target: &Path, options: &LocalCopyOptions) -> io::Result<Vec<PathBuf>> {
     if options.creates_parent() {
@@ -357,6 +370,25 @@ fn prepare_copy_parent(target: &Path, options: &LocalCopyOptions) -> io::Result<
 /// Returns native or budget failures with the strongest known destination
 /// state. Successful required durability synchronizes the target parent and
 /// all newly created ancestor entries.
+///
+/// # Parameters
+///
+/// - `source`: Final symbolic-link entry to reproduce without following it.
+/// - `target`: Destination path for the new symbolic link.
+/// - `options`: Conflict, parent-creation, and durability policies.
+/// - `symlink_policy`: Policy used when replacing an existing destination
+///   directory.
+/// - `budget`: Shared copy budget used for deadline and deletion checks.
+///
+/// # Returns
+///
+/// Copy statistics and the achieved publication and durability guarantees.
+///
+/// # Errors
+///
+/// Returns a structured failure containing the strongest known destination
+/// state when inspection, deletion, creation, budget, or required durability
+/// work fails.
 #[allow(clippy::result_large_err)]
 fn copy_symlink_entry(
     source: &Path,
@@ -511,6 +543,22 @@ fn copy_symlink_entry(
 /// Reads the source link kind without following its target on Windows.
 /// Returns source inspection or link-creation errors, or `Unsupported` where
 /// native symbolic links are unavailable.
+///
+/// # Parameters
+///
+/// - `link_target`: Stored target path read from the source symbolic link.
+/// - `_source`: Source link used on Windows to determine file versus directory
+///   link kind.
+/// - `target`: Destination path where the symbolic link is created.
+///
+/// # Returns
+///
+/// `Ok(())` after creating the link.
+///
+/// # Errors
+///
+/// Returns a source-inspection or link-creation error, or `Unsupported` on
+/// platforms without native symbolic-link support.
 fn create_symlink_entry(link_target: &Path, _source: &Path, target: &Path) -> io::Result<()> {
     #[cfg(unix)]
     {
@@ -538,6 +586,18 @@ fn create_symlink_entry(link_target: &Path, _source: &Path, target: &Path) -> io
 ///
 /// Returns the first Unix parent synchronization error. Other platforms
 /// perform no work here; required durability is rejected by capability checks.
+///
+/// # Parameters
+///
+/// - `paths`: Newly created parent directories in shallow-to-deep order.
+///
+/// # Returns
+///
+/// `Ok(())` after synchronizing the applicable parent directories.
+///
+/// # Errors
+///
+/// Returns the first Unix parent-directory synchronization error.
 fn sync_created_parent_directories(paths: &[PathBuf]) -> io::Result<()> {
     #[cfg(unix)]
     {
@@ -656,6 +716,16 @@ fn copy_alias_error(source: &Path, target: &Path) -> LocalFileError {
 }
 
 /// Converts a pipeline failure into a lossless public copy failure.
+///
+/// # Parameters
+///
+/// - `source`: Resolved source path associated with the failed copy.
+/// - `target`: Resolved destination path associated with the failed copy.
+/// - `error`: Internal directory-copy failure to preserve in the public error.
+///
+/// # Returns
+///
+/// A public copy failure retaining the internal failure details.
 #[inline]
 fn copy_pipeline_failure(source: &Path, target: &Path, error: crate::local::LocalCopyDirError) -> LocalCopyFailure {
     LocalCopyFailure::from_copy_dir_error(source, target, error)

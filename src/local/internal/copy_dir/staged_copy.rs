@@ -27,6 +27,7 @@ use super::error::record_skipped_file;
 use super::error::with_copy_context;
 use super::opened_copy_source::OpenedCopySource;
 use super::source::is_real_directory;
+use super::staged_copy_commit_options::StagedCopyCommitOptions;
 use super::staging_io::copy_into_staging;
 use super::staging_io::preserve_staged_permissions;
 use crate::LocalCopyConflictPolicy;
@@ -34,7 +35,6 @@ use crate::LocalCopyDirOptions;
 use crate::LocalCopyDirStage;
 use crate::LocalCopyDirStats;
 use crate::LocalDurabilityRequirement;
-use crate::LocalSymlinkPolicy;
 use crate::local::CopyBudget;
 use crate::local::CopyDestinationAction;
 use crate::local::decide_copy_destination;
@@ -59,6 +59,10 @@ const COPY_FILE_TEMP_SUFFIX: &str = ".tmp";
 /// * `options` - Recursive-copy behavior options.
 /// * `stats` - Mutable statistics accumulator.
 /// * `budget` - Shared resource state for the complete copy.
+///
+/// # Returns
+///
+/// Returns success after copying the source file or applying the skip policy.
 ///
 /// # Errors
 ///
@@ -178,6 +182,24 @@ pub(crate) fn copy_file_with_options(
 /// with zero bytes. Returns inspection, removal, link-read, publication, or
 /// accounting errors. A removed conflicting destination is not restored when
 /// a later step fails.
+///
+/// # Parameters
+///
+/// * `src` - Source symbolic-link path.
+/// * `dst` - Destination path for the new symbolic link.
+/// * `options` - Recursive-copy conflict and symlink policies.
+/// * `stats` - Mutable statistics accumulator.
+/// * `budget` - Shared deadline and resource budget for the copy.
+///
+/// # Returns
+///
+/// Returns success after copying or skipping the symbolic-link entry.
+///
+/// # Errors
+///
+/// Returns a structured error when inspection, link reading, publication, or
+/// accounting fails. A conflicting destination removed before a later error
+/// is not restored.
 pub(crate) fn copy_symlink_with_options(
     src: &Path,
     dst: &Path,
@@ -521,24 +543,24 @@ fn stage_copy_file(
 ///
 /// Returns native synchronization errors. The caller must keep the staging
 /// handle open; accessing a closed handle panics.
+///
+/// # Parameters
+///
+/// * `staged_file` - Open staging guard whose contents must be synchronized.
+///
+/// # Returns
+///
+/// Returns `Ok(())` after synchronization, or the native synchronization error.
+///
+/// # Panics
+///
+/// Panics if the guard's file handle has already been closed.
 fn sync_staged_file(staged_file: &StagedFile) -> std::io::Result<()> {
     #[cfg(feature = "test-support")]
     if crate::local::test_support_enabled("copy-staging-file-sync") {
         return Err(crate::local::test_fault_error());
     }
     staged_file.file().sync_all()
-}
-
-/// Configures destination handling for a staged copy commit.
-///
-/// `conflict` selects the existing-file policy, `remove_destination_directory`
-/// permits removing a conflicting destination directory immediately before
-/// installation, and `symlink_policy` controls links encountered while
-/// preparing the copy.
-struct StagedCopyCommitOptions {
-    conflict: LocalCopyConflictPolicy,
-    remove_destination_directory: bool,
-    symlink_policy: LocalSymlinkPolicy,
 }
 
 /// Commits an already staged regular file according to destination policies.
@@ -673,7 +695,7 @@ mod error_contract_tests {
     use crate::local::CopyBudget;
 
     #[test]
-    fn racing_destination_skip_cleans_real_staging_and_keeps_winner() {
+    fn test_racing_destination_skip_cleans_real_staging_and_keeps_winner() {
         let fixture = tempfile::tempdir().expect("fixture");
         let root = std::fs::canonicalize(fixture.path()).expect("fixture path should canonicalize");
         let source = root.join("source");
@@ -707,7 +729,7 @@ mod error_contract_tests {
     }
 
     #[test]
-    fn expired_replacement_budget_keeps_destination_tree_and_cleans_staging() {
+    fn test_expired_replacement_budget_keeps_destination_tree_and_cleans_staging() {
         let fixture = tempfile::tempdir().expect("fixture");
         let root = std::fs::canonicalize(fixture.path()).expect("fixture path should canonicalize");
         let source = root.join("source");

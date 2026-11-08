@@ -53,6 +53,20 @@ pub struct LocalCopyFailure {
 
 impl Display for LocalCopyFailure {
     /// Formats the primary copy failure and its proven destination state.
+    ///
+    /// # Parameters
+    ///
+    /// - `formatter`: Receives the formatted failure description.
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(())` after formatting, or the formatter's error if writing
+    /// fails.
+    ///
+    /// # Errors
+    ///
+    /// Returns the formatter's error when it cannot write the failure
+    /// description.
     #[inline]
     fn fmt(&self, formatter: &mut Formatter<'_>) -> FmtResult {
         write!(
@@ -80,6 +94,10 @@ impl Display for LocalCopyFailure {
 
 impl Error for LocalCopyFailure {
     /// Returns the primary typed filesystem error.
+    ///
+    /// # Returns
+    ///
+    /// Always returns the primary error as a trait object.
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         Some(&self.details.error)
     }
@@ -87,6 +105,19 @@ impl Error for LocalCopyFailure {
 
 impl LocalCopyFailure {
     /// Creates a typed copy failure from implementation facts.
+    ///
+    /// # Parameters
+    ///
+    /// - `error`: Primary filesystem error for the failed copy.
+    /// - `state`: Best-known state of the requested destination.
+    /// - `partial_stats`: Copy progress recorded before failure.
+    /// - `staging_path`: Retained staging path, when cleanup failed.
+    /// - `cleanup_error`: Secondary cleanup error, when present.
+    ///
+    /// # Returns
+    ///
+    /// Returns a failure retaining the supplied facts and request paths from
+    /// `error`.
     #[must_use]
     pub(crate) fn new(
         error: LocalFileError,
@@ -111,6 +142,17 @@ impl LocalCopyFailure {
     }
 
     /// Converts a structured native copy-pipeline error without losing facts.
+    ///
+    /// # Parameters
+    ///
+    /// - `source`: Source path supplied for the copy request.
+    /// - `target`: Destination path supplied for the copy request.
+    /// - `error`: Structured failure produced by the native copy pipeline.
+    ///
+    /// # Returns
+    ///
+    /// Returns a typed failure preserving the pipeline's state, progress, and
+    /// failed paths.
     #[must_use]
     pub(crate) fn from_copy_dir_error(source: &Path, target: &Path, error: LocalCopyDirError) -> Self {
         let failure_hint = error.failure_state();
@@ -186,70 +228,38 @@ impl LocalCopyFailure {
     }
 
     /// Adjusts the proof state when the caller knows the full request scope.
+    ///
+    /// # Parameters
+    ///
+    /// - `state`: More precise destination state established by the caller.
+    ///
+    /// # Returns
+    ///
+    /// Returns this failure with its proof state replaced by `state`.
     #[must_use]
     pub(crate) fn with_state(mut self, state: LocalCopyFailureState) -> Self {
         self.details.state = state;
         self
     }
 
-    /// Returns the primary typed filesystem error.
-    #[must_use = "inspect the primary copy error"]
-    #[inline]
-    pub fn error(&self) -> &LocalFileError {
-        &self.details.error
-    }
-
-    /// Returns the source path supplied for the copy request.
-    #[inline]
-    pub fn request_source_path(&self) -> Option<&Path> {
-        self.details.request_source_path.as_deref()
-    }
-
-    /// Returns the destination path supplied for the copy request.
-    #[inline]
-    pub fn request_target_path(&self) -> Option<&Path> {
-        self.details.request_target_path.as_deref()
-    }
-
-    /// Returns the source entry being processed when the copy failed.
-    #[inline]
-    pub fn failed_source_path(&self) -> Option<&Path> {
-        self.details.failed_source_path.as_deref()
-    }
-
-    /// Returns the destination entry being processed when the copy failed.
-    #[inline]
-    pub fn failed_target_path(&self) -> Option<&Path> {
-        self.details.failed_target_path.as_deref()
-    }
-
-    /// Returns the most precise destination state proven by native operations.
-    #[must_use = "inspect the proven copy failure state"]
-    #[inline]
-    pub fn state(&self) -> LocalCopyFailureState {
-        self.details.state
-    }
-
-    /// Returns statistics accumulated before the failure.
-    #[must_use = "partial statistics retain copy progress"]
-    #[inline]
-    pub fn partial_stats(&self) -> &LocalCopyStats {
-        &self.details.partial_stats
-    }
-
-    /// Returns the retained staging path when cleanup failed.
-    #[inline]
-    pub fn staging_path(&self) -> Option<&Path> {
-        self.details.staging_path.as_deref()
-    }
-
-    /// Returns the secondary rollback or cleanup error when cleanup failed.
-    #[inline]
-    pub fn cleanup_error(&self) -> Option<&LocalFileError> {
-        self.details.cleanup_error.as_ref()
-    }
-
     /// Rewrites backend-relative copy facts into one public namespace.
+    ///
+    /// # Parameters
+    ///
+    /// - `request_source`: Source path in the caller-visible namespace.
+    /// - `request_target`: Destination path in the caller-visible namespace.
+    /// - `backend_source`: Source prefix used by the backend.
+    /// - `backend_target`: Destination prefix used by the backend.
+    /// - `rooted`: Whether relative backend paths are rooted at the filesystem
+    ///   root.
+    /// - `current_directory`: Current directory used to update error path
+    ///   context.
+    ///
+    /// # Returns
+    ///
+    /// Returns this failure with backend paths mapped to the caller-visible
+    /// namespace.
+    #[must_use]
     pub(crate) fn remap_namespace(
         mut self,
         request_source: &Path,
@@ -278,9 +288,117 @@ impl LocalCopyFailure {
         self.details.staging_path = self.details.staging_path.as_deref().map(map_target);
         self
     }
+
+    /// Returns the primary typed filesystem error.
+    ///
+    /// # Returns
+    ///
+    /// Returns the primary filesystem error.
+    #[must_use = "inspect the primary copy error"]
+    #[inline]
+    pub fn error(&self) -> &LocalFileError {
+        &self.details.error
+    }
+
+    /// Returns the source path supplied for the copy request.
+    ///
+    /// # Returns
+    ///
+    /// Returns `Some` when the request recorded a source path, otherwise
+    /// `None`.
+    #[inline]
+    pub fn request_source_path(&self) -> Option<&Path> {
+        self.details.request_source_path.as_deref()
+    }
+
+    /// Returns the destination path supplied for the copy request.
+    ///
+    /// # Returns
+    ///
+    /// Returns `Some` when the request recorded a destination path, otherwise
+    /// `None`.
+    #[inline]
+    pub fn request_target_path(&self) -> Option<&Path> {
+        self.details.request_target_path.as_deref()
+    }
+
+    /// Returns the source entry being processed when the copy failed.
+    ///
+    /// # Returns
+    ///
+    /// Returns `Some` when the failed source entry is known, otherwise `None`.
+    #[inline]
+    pub fn failed_source_path(&self) -> Option<&Path> {
+        self.details.failed_source_path.as_deref()
+    }
+
+    /// Returns the destination entry being processed when the copy failed.
+    ///
+    /// # Returns
+    ///
+    /// Returns `Some` when the failed destination entry is known, otherwise
+    /// `None`.
+    #[inline]
+    pub fn failed_target_path(&self) -> Option<&Path> {
+        self.details.failed_target_path.as_deref()
+    }
+
+    /// Returns the most precise destination state proven by native operations.
+    ///
+    /// # Returns
+    ///
+    /// Returns the proven destination state for the failed request.
+    #[inline]
+    pub fn state(&self) -> LocalCopyFailureState {
+        self.details.state
+    }
+
+    /// Returns statistics accumulated before the failure.
+    ///
+    /// # Returns
+    ///
+    /// Returns the recorded progress statistics borrowed from this failure.
+    #[must_use = "partial statistics retain copy progress"]
+    #[inline]
+    pub fn partial_stats(&self) -> &LocalCopyStats {
+        &self.details.partial_stats
+    }
+
+    /// Returns the retained staging path when cleanup failed.
+    ///
+    /// # Returns
+    ///
+    /// Returns `Some` when a staging path remains for cleanup, otherwise
+    /// `None`.
+    #[inline]
+    pub fn staging_path(&self) -> Option<&Path> {
+        self.details.staging_path.as_deref()
+    }
+
+    /// Returns the secondary rollback or cleanup error when cleanup failed.
+    ///
+    /// # Returns
+    ///
+    /// Returns `Some` when cleanup failed, otherwise `None`.
+    #[inline]
+    pub fn cleanup_error(&self) -> Option<&LocalFileError> {
+        self.details.cleanup_error.as_ref()
+    }
 }
 
 /// Maps one backend path through its logical request prefix.
+///
+/// # Parameters
+///
+/// - `path`: Backend path to map.
+/// - `backend_base`: Backend prefix corresponding to the logical request.
+/// - `namespace_base`: Caller-visible prefix to use in the result.
+/// - `rooted`: Whether an unmapped relative path should be rooted.
+///
+/// # Returns
+///
+/// Returns the path translated into the logical namespace when possible.
+#[must_use]
 fn map_backend_path(path: &Path, backend_base: &Path, namespace_base: &Path, rooted: bool) -> PathBuf {
     if let Ok(relative) = path.strip_prefix(backend_base) {
         return namespace_base.join(relative);
@@ -294,6 +412,16 @@ fn map_backend_path(path: &Path, backend_base: &Path, namespace_base: &Path, roo
 }
 
 /// Maps structured native copy facts to the strongest proven failure state.
+///
+/// # Parameters
+///
+/// - `stage`: Native pipeline stage that failed.
+/// - `partial_stats`: Progress evidence recorded before failure.
+///
+/// # Returns
+///
+/// Returns the strongest failure state supported by the stage and progress
+/// evidence.
 pub(crate) const fn copy_failure_state(
     stage: LocalCopyDirStage,
     partial_stats: LocalCopyStats,
@@ -326,6 +454,16 @@ pub(crate) const fn copy_failure_state(
 }
 
 /// Merges the copy pipeline's inferred state with a separately observed effect.
+///
+/// # Parameters
+///
+/// - `inferred`: State inferred from the pipeline stage and progress.
+/// - `hint`: Optional state observed independently by the caller.
+///
+/// # Returns
+///
+/// Returns the strongest state supported by the inferred state and optional
+/// hint.
 pub(crate) const fn merge_copy_failure_state(
     inferred: LocalCopyFailureState,
     hint: Option<LocalCopyFailureState>,

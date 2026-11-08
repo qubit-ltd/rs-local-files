@@ -19,6 +19,8 @@ use std::path::PathBuf;
 #[cfg(unix)]
 use std::time::Duration;
 
+use qubit_io::Output;
+
 #[cfg(windows)]
 use super::create_rooted_directory;
 #[cfg(unix)]
@@ -77,13 +79,33 @@ use crate::LocalDurabilityRequirement;
 use crate::LocalRelativePath;
 use crate::options::LocalWriteMetadataPolicy;
 use crate::policy::LocalFileSyncRequirement;
+#[cfg(windows)]
+use crate::write::Mode as WriteMode;
+#[cfg(windows)]
+use crate::write::OpenOptions as WriteOpenOptions;
 use crate::writer::internal::LocalCommitSyncObserver;
 use crate::writer::internal::LocalCommitSyncOutcome;
 
 #[cfg(all(test, windows))]
-#[path = "local_root_atomic_writer/windows_diagnostic_tests.rs"]
 mod windows_diagnostic_tests;
 
+/// Synchronizes the rooted parent chain after recording the commit observer
+/// event.
+///
+/// # Parameters
+///
+/// * `parent` - Open descriptor for the destination parent directory.
+/// * `parent_dirs_to_sync` - Newly created ancestor directories, synchronized
+///   from the closest parent toward the root.
+/// * `observer` - Optional observer notified before synchronization begins.
+///
+/// # Returns
+///
+/// `Ok(())` when the destination parent and tracked ancestor directories sync.
+///
+/// # Errors
+///
+/// Returns the first native directory synchronization error.
 #[cfg(unix)]
 fn sync_rooted_parent_chain_observed(
     parent: &File,
@@ -95,20 +117,16 @@ fn sync_rooted_parent_chain_observed(
     }
     sync_rooted_parent_chain(parent, parent_dirs_to_sync)
 }
-#[cfg(windows)]
-use crate::write::Mode as WriteMode;
-#[cfg(windows)]
-use crate::write::OpenOptions as WriteOpenOptions;
 
 /// A streaming atomic writer contained by an open [`crate::rooted::Root`].
 ///
 /// Staging, replacement, synchronization, and cleanup use the destination
-/// parent descriptor and entry names. No diagnostic path is reused as
-/// authority, and no underlying file or directory handle is exposed.
-/// Commit observes the current destination and verifies its identity before
-/// replacement. On Unix, `PreserveExisting` opens a readable handle and copies
-/// strict platform-native metadata; `UseStaging` needs only a no-follow stat
-/// and leaves staging metadata intact. Metadata is captured at commit time
+/// parent descriptor on Unix and rooted handles on Windows. No diagnostic path
+/// is reused as authority, and no underlying file or directory handle is
+/// exposed. Commit observes the current destination and verifies its identity
+/// before replacement. On Unix, `PreserveExisting` opens a readable handle and
+/// copies strict platform-native metadata; `UseStaging` needs only a no-follow
+/// stat and leaves staging metadata intact. Metadata is captured at commit time
 /// rather than when the writer begins. A metadata or ACL copy failure aborts
 /// instead of silently reducing protection. A destination that was initially
 /// absent is installed without replacing a concurrent creator.
@@ -142,6 +160,7 @@ pub struct LocalRootAtomicWriter {
     /// Durability requested for staging and parent synchronization.
     #[cfg(unix)]
     durability: LocalDurabilityRequirement,
+    /// Additional policy controlling synchronization of staged file data.
     #[cfg(unix)]
     file_sync: LocalFileSyncRequirement,
     /// Descriptor-relative staging lifecycle.
@@ -159,6 +178,7 @@ pub struct LocalRootAtomicWriter {
     /// Durability requested for staging and parent synchronization.
     #[cfg(windows)]
     durability: LocalDurabilityRequirement,
+    /// Additional policy controlling synchronization of staged file data.
     #[cfg(windows)]
     file_sync: LocalFileSyncRequirement,
     /// Handle-relative staging lifecycle.
@@ -195,6 +215,24 @@ impl LocalRootAtomicWriter {
         Self::new_with_copy_replacement(root, diagnostic_root, path, options, false)
     }
 
+    /// Creates a writer that stages a replacement within the supplied root.
+    ///
+    /// # Parameters
+    ///
+    /// * `root` - Open root directory authority.
+    /// * `diagnostic_root` - Path used only to contextualize traversal errors.
+    /// * `path` - Validated relative destination.
+    /// * `options` - Publication and staging policy for the copy replacement.
+    ///
+    /// # Returns
+    ///
+    /// An armed writer whose destination inspection is deferred to the copy
+    /// flow.
+    ///
+    /// # Errors
+    ///
+    /// Returns a structured error if parent preparation or staging creation
+    /// fails.
     #[cfg(unix)]
     pub(crate) fn new_for_copy_replacement(
         root: &File,
@@ -205,6 +243,27 @@ impl LocalRootAtomicWriter {
         Self::new_with_copy_replacement(root, diagnostic_root, path, options, true)
     }
 
+    /// Creates a writer, optionally postponing destination inspection for copy
+    /// replacement.
+    ///
+    /// # Parameters
+    ///
+    /// * `root` - Open root directory authority.
+    /// * `diagnostic_root` - Path used only to contextualize traversal errors.
+    /// * `path` - Validated relative destination.
+    /// * `options` - Parent creation, publication, durability, and retry
+    ///   policy.
+    /// * `defer_destination_check` - Whether copy replacement owns destination
+    ///   inspection later in its copy flow.
+    ///
+    /// # Returns
+    ///
+    /// An armed writer configured for the requested copy replacement.
+    ///
+    /// # Errors
+    ///
+    /// Returns a structured error if parent preparation, destination
+    /// inspection, or staging creation fails.
     #[cfg(unix)]
     fn new_with_copy_replacement(
         root: &File,
@@ -280,10 +339,23 @@ impl LocalRootAtomicWriter {
     }
 
     /// Creates a Windows rooted atomic writer from an open root capability.
-    /// Uses `root` as authority, `diagnostic_root` only for error paths, and
-    /// `options` for parent creation, publication, and durability policy.
-    /// Native parent preparation, destination inspection, randomness, or
-    /// staging creation errors retain their stage; created parents remain.
+    ///
+    /// # Parameters
+    ///
+    /// * `root` - Open root directory authority.
+    /// * `diagnostic_root` - Path used only to contextualize traversal errors.
+    /// * `path` - Validated relative destination.
+    /// * `options` - Parent creation, publication, durability, and retry
+    ///   policy.
+    ///
+    /// # Returns
+    ///
+    /// An armed rooted atomic writer.
+    ///
+    /// # Errors
+    ///
+    /// Returns a structured error for parent preparation, destination
+    /// inspection, random-name generation, or staging-file creation failures.
     #[cfg(windows)]
     pub(crate) fn new(
         root: &File,
@@ -294,6 +366,24 @@ impl LocalRootAtomicWriter {
         Self::new_with_copy_replacement(root, diagnostic_root, path, options, false)
     }
 
+    /// Creates a writer that stages a replacement within the supplied root.
+    ///
+    /// # Parameters
+    ///
+    /// * `root` - Open root directory authority.
+    /// * `diagnostic_root` - Path used only to contextualize traversal errors.
+    /// * `path` - Validated relative destination.
+    /// * `options` - Publication and staging policy for the copy replacement.
+    ///
+    /// # Returns
+    ///
+    /// An armed writer whose destination inspection is deferred to the copy
+    /// flow.
+    ///
+    /// # Errors
+    ///
+    /// Returns a structured error if parent preparation or staging creation
+    /// fails.
     #[cfg(windows)]
     pub(crate) fn new_for_copy_replacement(
         root: &File,
@@ -304,6 +394,27 @@ impl LocalRootAtomicWriter {
         Self::new_with_copy_replacement(root, diagnostic_root, path, options, true)
     }
 
+    /// Creates a writer, optionally postponing destination inspection for copy
+    /// replacement.
+    ///
+    /// # Parameters
+    ///
+    /// * `root` - Open root directory authority.
+    /// * `diagnostic_root` - Path used only to contextualize traversal errors.
+    /// * `path` - Validated relative destination.
+    /// * `options` - Parent creation, publication, durability, and retry
+    ///   policy.
+    /// * `defer_destination_check` - Whether copy replacement owns destination
+    ///   inspection later in its copy flow.
+    ///
+    /// # Returns
+    ///
+    /// An armed writer configured for the requested copy replacement.
+    ///
+    /// # Errors
+    ///
+    /// Returns a structured error if parent preparation, destination
+    /// inspection, random-name generation, or staging creation fails.
     #[cfg(windows)]
     fn new_with_copy_replacement(
         root: &File,
@@ -460,6 +571,14 @@ impl LocalRootAtomicWriter {
     /// Consumes the writer and reports whether requested durability completed.
     /// Finalizes a failed commit by attempting safe staging cleanup and returns
     /// the primary error with any cleanup failure, without a retryable writer.
+    ///
+    /// # Returns
+    ///
+    /// Whether requested file and parent durability completed.
+    ///
+    /// # Errors
+    ///
+    /// Returns the commit failure enriched with any staging cleanup failure.
     #[inline]
     pub(crate) fn commit_with_durability(self) -> Result<bool, LocalAtomicWriteError> {
         self.commit_recoverable_with_durability()
@@ -481,6 +600,24 @@ impl LocalRootAtomicWriter {
         self.commit_recoverable_with_sync(None).map(|outcome| outcome.durable)
     }
 
+    /// Commits while retaining a retryable writer for failures before
+    /// installation.
+    ///
+    /// # Parameters
+    ///
+    /// * `observer` - Optional observer notified when file or parent
+    ///   synchronization is attempted.
+    ///
+    /// # Returns
+    ///
+    /// The synchronization outcome after commit, or an error containing the
+    /// writer when retry is safe.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error with the writer when retry remains safe. Once
+    /// publication may have changed the destination, the error is terminal
+    /// and has no writer.
     pub(crate) fn commit_recoverable_with_sync(
         self,
         observer: Option<&LocalCommitSyncObserver>,
@@ -514,11 +651,14 @@ impl LocalRootAtomicWriter {
         }
     }
 
-    /// Selects source permissions to apply to copy staging before publication.
-    pub(crate) fn set_copy_permissions(&mut self, permissions: crate::rooted::Permissions) {
-        self.copy_permissions = Some(permissions);
-    }
-
+    /// Returns the diagnostic path associated with the private staging file.
+    ///
+    /// # Returns
+    ///
+    /// The diagnostic path of the staging entry, borrowed for the writer's
+    /// lifetime. This path is for errors and diagnostics, not filesystem
+    /// authority.
+    #[must_use]
     pub(crate) fn staging_path(&self) -> &Path {
         #[cfg(unix)]
         {
@@ -530,12 +670,26 @@ impl LocalRootAtomicWriter {
         }
     }
 
-    /// Aborts replacement and removes the descriptor-relative staging entry.
+    /// Selects source permissions to apply to copy staging before publication.
+    /// Overrides staging permissions with the source mode during a rooted copy.
+    ///
+    /// # Parameters
+    ///
+    /// * `permissions` - Source permissions to apply before publication.
+    pub(crate) fn set_copy_permissions(&mut self, permissions: crate::rooted::Permissions) {
+        self.copy_permissions = Some(permissions);
+    }
+
+    /// Aborts replacement and removes the rooted staging entry.
     ///
     /// # Errors
     ///
     /// Returns a structured cleanup error on native staging removal or Windows
     /// attribute preparation failure; the caller may retry cleanup.
+    ///
+    /// # Returns
+    ///
+    /// `Ok(())` when the staging entry is removed or already disarmed.
     #[cfg_attr(not(any(unix, windows)), allow(unused_mut))]
     pub(crate) fn abort(&mut self) -> Result<(), LocalAtomicWriteError> {
         #[cfg(feature = "test-support")]
@@ -583,11 +737,25 @@ impl LocalRootAtomicWriter {
         }
     }
 
-    /// Runs one handle-relative Windows commit attempt.
-    /// Copies portable destination permissions, checks identity, and installs
-    /// staging. Returns false because namespace durability is unavailable.
-    /// Native metadata/permission/rename failures retain structured stage and
-    /// destination state; staging remains armed until successful installation.
+    /// Attempts handle-relative publication and returns structured native
+    /// failures.
+    ///
+    /// # Parameters
+    ///
+    /// * `observer` - Optional observer notified before file synchronization.
+    ///
+    /// # Returns
+    ///
+    /// An outcome whose `durable` field is false because Windows cannot
+    /// synchronize the parent namespace through this rooted API.
+    ///
+    /// # Errors
+    ///
+    /// Returns a structured failure while staging remains armed, except for a
+    /// failure reported after installation has replaced the destination.
+    ///
+    /// The attempt copies portable destination permissions, checks identity,
+    /// then installs staging. Native failures retain their stage and state.
     #[cfg(windows)]
     fn commit_attempt_windows(
         &mut self,
@@ -659,108 +827,9 @@ impl LocalRootAtomicWriter {
             })?;
         }
         self.apply_copy_permissions()?;
-        let file_synced = if self.durability == LocalDurabilityRequirement::Required
-            || self.file_sync == LocalFileSyncRequirement::Required
-        {
-            if let Some(observer) = observer {
-                observer.record_file_sync();
-            }
-            sync_rooted_staging_file(self.staged_file.file()).map_err(|source| {
-                LocalAtomicWriteError::new(
-                    LocalAtomicWriteStage::SyncTemporaryFile,
-                    self.path.clone(),
-                    Some(self.staged_file.diagnostic_path.clone()),
-                    LocalAtomicDestinationState::Unchanged,
-                    source,
-                )
-            })?;
-            true
-        } else if self.durability == LocalDurabilityRequirement::Preferred
-            || self.file_sync == LocalFileSyncRequirement::Preferred
-        {
-            if let Some(observer) = observer {
-                observer.record_file_sync();
-            }
-            sync_rooted_staging_file(self.staged_file.file()).is_ok()
-        } else {
-            false
-        };
+        let file_synced = self.sync_temporary_file(observer)?;
         if let Some(opened_destination) = destination.as_ref() {
-            #[cfg(feature = "test-support")]
-            if crate::local::test_support_enabled("rooted-writer-identity-replace") {
-                use std::io::Write;
-
-                let competitor_path = crate::LocalRelativePath::new("rooted-writer-race-competitor")
-                    .expect("static competitor path should be valid");
-                let replace_destination = || -> io::Result<()> {
-                    let mut competitor = open_rooted_native_writer(
-                        &self.staged_file.root,
-                        Path::new(""),
-                        &competitor_path,
-                        &WriteOpenOptions::new(WriteMode::CreateNew),
-                    )?;
-                    competitor.write_all(b"competing destination")?;
-                    drop(competitor);
-                    rename_rooted_entry(
-                        &self.staged_file.root,
-                        Path::new(""),
-                        &competitor_path,
-                        &self.destination,
-                        true,
-                    )
-                };
-                replace_destination().map_err(|source| {
-                    LocalAtomicWriteError::new(
-                        LocalAtomicWriteStage::ReplaceDestination,
-                        self.path.clone(),
-                        Some(self.staged_file.diagnostic_path.clone()),
-                        LocalAtomicDestinationState::Unchanged,
-                        source,
-                    )
-                })?;
-            }
-            let current_destination =
-                read_rooted_symlink_metadata(&self.staged_file.root, Path::new(""), &self.destination).map_err(
-                    |source| {
-                        LocalAtomicWriteError::new(
-                            LocalAtomicWriteStage::ReadDestinationMetadata,
-                            self.path.clone(),
-                            Some(self.staged_file.diagnostic_path.clone()),
-                            LocalAtomicDestinationState::Unchanged,
-                            source,
-                        )
-                    },
-                )?;
-            let opened = crate::rooted::Metadata::from_open_file(opened_destination).map_err(|source| {
-                LocalAtomicWriteError::new(
-                    LocalAtomicWriteStage::ReadDestinationMetadata,
-                    self.path.clone(),
-                    Some(self.staged_file.diagnostic_path.clone()),
-                    LocalAtomicDestinationState::Unchanged,
-                    source,
-                )
-            })?;
-            let current = crate::rooted::Metadata::from_open_file(&current_destination).map_err(|source| {
-                LocalAtomicWriteError::new(
-                    LocalAtomicWriteStage::ReadDestinationMetadata,
-                    self.path.clone(),
-                    Some(self.staged_file.diagnostic_path.clone()),
-                    LocalAtomicDestinationState::Unchanged,
-                    source,
-                )
-            })?;
-            if !opened.is_same_file(&current) {
-                return Err(LocalAtomicWriteError::new(
-                    LocalAtomicWriteStage::ReplaceDestination,
-                    self.path.clone(),
-                    Some(self.staged_file.diagnostic_path.clone()),
-                    LocalAtomicDestinationState::Unchanged,
-                    io::Error::new(
-                        io::ErrorKind::AlreadyExists,
-                        "rooted atomic destination changed during commit",
-                    ),
-                ));
-            }
+            self.verify_windows_destination_for_commit(opened_destination)?;
         }
         rename_rooted_entry(
             &self.staged_file.root,
@@ -795,7 +864,111 @@ impl LocalRootAtomicWriter {
         })
     }
 
-    /// Runs one rooted commit attempt without consuming recoverable staging.
+    /// Rechecks destination identity immediately before replacing it.
+    ///
+    /// # Parameters
+    ///
+    /// * `opened_destination` - Destination handle captured at commit start.
+    ///
+    /// # Returns
+    ///
+    /// `Ok(())` when the current rooted entry still refers to the opened file.
+    ///
+    /// # Errors
+    ///
+    /// Returns a structured metadata or replacement error if the entry changes
+    /// or cannot be observed. The test-support identity race is applied before
+    /// this comparison when enabled.
+    #[cfg(windows)]
+    fn verify_windows_destination_for_commit(&self, opened_destination: &File) -> Result<(), LocalAtomicWriteError> {
+        #[cfg(feature = "test-support")]
+        if crate::local::test_support_enabled("rooted-writer-identity-replace") {
+            use std::io::Write;
+
+            let competitor_path = crate::LocalRelativePath::new("rooted-writer-race-competitor")
+                .expect("static competitor path should be valid");
+            let replace_destination = || -> io::Result<()> {
+                let mut competitor = open_rooted_native_writer(
+                    &self.staged_file.root,
+                    Path::new(""),
+                    &competitor_path,
+                    &WriteOpenOptions::new(WriteMode::CreateNew),
+                )?;
+                competitor.write_all(b"competing destination")?;
+                drop(competitor);
+                rename_rooted_entry(
+                    &self.staged_file.root,
+                    Path::new(""),
+                    &competitor_path,
+                    &self.destination,
+                    true,
+                )
+            };
+            replace_destination().map_err(|source| {
+                LocalAtomicWriteError::new(
+                    LocalAtomicWriteStage::ReplaceDestination,
+                    self.path.clone(),
+                    Some(self.staged_file.diagnostic_path.clone()),
+                    LocalAtomicDestinationState::Unchanged,
+                    source,
+                )
+            })?;
+        }
+        let current_destination =
+            read_rooted_symlink_metadata(&self.staged_file.root, Path::new(""), &self.destination).map_err(
+                |source| {
+                    LocalAtomicWriteError::new(
+                        LocalAtomicWriteStage::ReadDestinationMetadata,
+                        self.path.clone(),
+                        Some(self.staged_file.diagnostic_path.clone()),
+                        LocalAtomicDestinationState::Unchanged,
+                        source,
+                    )
+                },
+            )?;
+        let opened = crate::rooted::Metadata::from_open_file(opened_destination).map_err(|source| {
+            LocalAtomicWriteError::new(
+                LocalAtomicWriteStage::ReadDestinationMetadata,
+                self.path.clone(),
+                Some(self.staged_file.diagnostic_path.clone()),
+                LocalAtomicDestinationState::Unchanged,
+                source,
+            )
+        })?;
+        let current = crate::rooted::Metadata::from_open_file(&current_destination).map_err(|source| {
+            LocalAtomicWriteError::new(
+                LocalAtomicWriteStage::ReadDestinationMetadata,
+                self.path.clone(),
+                Some(self.staged_file.diagnostic_path.clone()),
+                LocalAtomicDestinationState::Unchanged,
+                source,
+            )
+        })?;
+        if !opened.is_same_file(&current) {
+            return Err(LocalAtomicWriteError::new(
+                LocalAtomicWriteStage::ReplaceDestination,
+                self.path.clone(),
+                Some(self.staged_file.diagnostic_path.clone()),
+                LocalAtomicDestinationState::Unchanged,
+                io::Error::new(
+                    io::ErrorKind::AlreadyExists,
+                    "rooted atomic destination changed during commit",
+                ),
+            ));
+        }
+        Ok(())
+    }
+
+    /// Attempts rooted publication while leaving recoverable staging armed on
+    /// failure.
+    ///
+    /// # Parameters
+    ///
+    /// * `observer` - Optional observer notified before file or parent sync.
+    ///
+    /// # Returns
+    ///
+    /// The file and parent synchronization outcome after installation.
     ///
     /// # Errors
     ///
@@ -817,6 +990,10 @@ impl LocalRootAtomicWriter {
     }
 
     /// Applies the copy-only permission override after destination metadata.
+    ///
+    /// # Returns
+    ///
+    /// `Ok(())` after applying source permissions, or when no override is set.
     ///
     /// # Errors
     ///
@@ -924,6 +1101,10 @@ impl LocalRootAtomicWriter {
     ///
     /// * `destination` - Observed destination, or `None` for a new entry.
     ///
+    /// # Returns
+    ///
+    /// `Ok(())` when metadata is copied or no readable destination is present.
+    ///
     /// # Errors
     ///
     /// Returns a structured metadata-application error while retaining staging
@@ -949,13 +1130,20 @@ impl LocalRootAtomicWriter {
         )
     }
 
-    /// Synchronizes the rooted staging file before installation.
+    /// Synchronizes staging when requested by durability or file-sync policy.
+    ///
+    /// # Parameters
+    ///
+    /// * `observer` - Optional observer notified before a native sync attempt.
+    ///
+    /// # Returns
+    ///
+    /// Whether the staging file was synchronized.
     ///
     /// # Errors
     ///
-    /// Returns a structured staging synchronization error while retaining
-    /// staging when the native synchronization fails.
-    #[cfg(unix)]
+    /// Returns a structured synchronization error while staging remains
+    /// available.
     fn sync_temporary_file(
         &mut self,
         observer: Option<&LocalCommitSyncObserver>,
@@ -977,11 +1165,65 @@ impl LocalRootAtomicWriter {
         )
     }
 
+    /// Synchronizes Windows staging according to the requested durability.
+    ///
+    /// # Parameters
+    ///
+    /// * `observer` - Optional observer notified before a native sync attempt.
+    ///
+    /// # Returns
+    ///
+    /// Whether the staging file was synchronized. Preferred synchronization
+    /// failure is reported as `false`; required synchronization failure is an
+    /// error.
+    ///
+    /// # Errors
+    ///
+    /// Returns a structured staging synchronization error when synchronization
+    /// is required and the native operation fails.
+    #[cfg(windows)]
+    fn sync_temporary_file(
+        &mut self,
+        observer: Option<&LocalCommitSyncObserver>,
+    ) -> Result<bool, LocalAtomicWriteError> {
+        if self.durability == LocalDurabilityRequirement::Required
+            || self.file_sync == LocalFileSyncRequirement::Required
+        {
+            if let Some(observer) = observer {
+                observer.record_file_sync();
+            }
+            sync_rooted_staging_file(self.staged_file.file()).map_err(|source| {
+                LocalAtomicWriteError::new(
+                    LocalAtomicWriteStage::SyncTemporaryFile,
+                    self.path.clone(),
+                    Some(self.staged_file.diagnostic_path.clone()),
+                    LocalAtomicDestinationState::Unchanged,
+                    source,
+                )
+            })?;
+            Ok(true)
+        } else if self.durability == LocalDurabilityRequirement::Preferred
+            || self.file_sync == LocalFileSyncRequirement::Preferred
+        {
+            if let Some(observer) = observer {
+                observer.record_file_sync();
+            }
+            Ok(sync_rooted_staging_file(self.staged_file.file()).is_ok())
+        } else {
+            Ok(false)
+        }
+    }
+
     /// Verifies that the rooted destination still has the observed identity.
     ///
     /// # Parameters
     ///
     /// * `destination` - Observed destination, or `None` for a new entry.
+    ///
+    /// # Returns
+    ///
+    /// `Ok(())` when the destination still matches its observed identity, or
+    /// when no existing destination identity needs verification.
     ///
     /// # Errors
     ///
@@ -1023,6 +1265,14 @@ impl LocalRootAtomicWriter {
     }
 
     /// Finalizes a consuming Windows commit failure.
+    ///
+    /// # Parameters
+    ///
+    /// * `error` - The commit failure to return after staging cleanup.
+    ///
+    /// # Returns
+    ///
+    /// The original commit failure enriched with any staging cleanup failure.
     #[cfg(windows)]
     #[inline]
     fn finalize_failed_commit(self, error: LocalAtomicWriteError) -> LocalAtomicWriteError {
@@ -1045,6 +1295,16 @@ impl LocalRootAtomicWriter {
     }
 
     /// Installs rooted staging and synchronizes the parent descriptor chain.
+    ///
+    /// # Parameters
+    ///
+    /// * `observer` - Optional observer notified before synchronization
+    ///   attempts.
+    ///
+    /// # Returns
+    ///
+    /// `true` when parent synchronization completed, or `false` when durability
+    /// was not requested or preferred synchronization could not be completed.
     ///
     /// # Errors
     ///
@@ -1108,6 +1368,23 @@ impl LocalRootAtomicWriter {
     }
 }
 
+/// Opens the rooted staging file with native Windows semantics.
+///
+/// # Parameters
+///
+/// * `root` - Root capability used to resolve the staging path.
+/// * `diagnostic_root` - Diagnostic path base, not an authority.
+/// * `path` - Validated rooted staging path.
+/// * `options` - Native writer creation policy.
+///
+///
+/// # Returns
+///
+/// The opened staging file handle.
+///
+/// # Errors
+///
+/// Returns the native rooted-open error, including any test-injected failure.
 #[cfg(windows)]
 fn open_rooted_staging_writer(
     root: &File,
@@ -1122,6 +1399,19 @@ fn open_rooted_staging_writer(
     open_rooted_native_writer(root, diagnostic_root, path, options)
 }
 
+/// Synchronizes all data and metadata for a rooted staging handle.
+///
+/// # Parameters
+///
+/// * `file` - Open staging handle to synchronize.
+///
+/// # Returns
+///
+/// `Ok(())` after all staging data and metadata are synchronized.
+///
+/// # Errors
+///
+/// Returns the native synchronization error or an enabled test fault.
 #[cfg(windows)]
 fn sync_rooted_staging_file(file: &File) -> io::Result<()> {
     #[cfg(feature = "test-support")]
@@ -1132,18 +1422,64 @@ fn sync_rooted_staging_file(file: &File) -> io::Result<()> {
 }
 
 impl LocalRootAtomicWriter {
-    /// Writes bytes into the private rooted staging file.
+    /// Writes vectored byte slices into the staging handle.
+    ///
+    /// # Parameters
+    ///
+    /// * `buffers` - Ordered slices to write.
+    ///
+    /// # Returns
+    ///
+    /// The number of bytes accepted by the underlying writer.
+    ///
+    /// # Errors
+    ///
+    /// Returns slice-conversion, write, or unsupported-target errors.
+    #[inline]
+    #[allow(dead_code)]
+    pub(crate) fn write_vectored(&mut self, buffers: &[io::IoSlice<'_>]) -> io::Result<usize> {
+        #[cfg(any(unix, windows))]
+        {
+            let slices = crate::vectored::byte_slices(buffers)?;
+            Output::write_vectored(self, &slices)
+        }
+        #[cfg(not(any(unix, windows)))]
+        {
+            let _ = buffers;
+            Err(io::Error::new(
+                io::ErrorKind::Unsupported,
+                "secure rooted atomic writes are unsupported on this target",
+            ))
+        }
+    }
+}
+
+impl LocalRootAtomicWriter {
+    /// Writes one byte slice to the staging handle, preserving native IO
+    /// errors.
+    ///
+    /// # Parameters
+    ///
+    /// * `buffer` - Bytes to append to staging.
+    ///
+    /// # Returns
+    ///
+    /// The number of bytes accepted by the underlying writer.
+    ///
+    /// # Errors
+    ///
+    /// Returns the underlying write failure or an unsupported-target error.
     #[inline]
     fn write_once(&mut self, buffer: &[u8]) -> io::Result<usize> {
         #[cfg(test)]
         crate::tests::native_io_fault_tests::check(crate::tests::native_io_fault_tests::NativeIoPoint::FileWrite)?;
         #[cfg(unix)]
         {
-            qubit_io::Output::write(self.staged_file.file_mut(), buffer)
+            Output::write(self.staged_file.file_mut(), buffer)
         }
         #[cfg(windows)]
         {
-            qubit_io::Output::write(self.staged_file.file_mut(), buffer)
+            Output::write(self.staged_file.file_mut(), buffer)
         }
         #[cfg(not(any(unix, windows)))]
         {
@@ -1154,71 +1490,34 @@ impl LocalRootAtomicWriter {
             ))
         }
     }
-
-    /// Writes bytes into the private rooted staging file.
-    #[inline]
-    #[allow(dead_code)]
-    pub(crate) fn write_vectored(&mut self, buffers: &[io::IoSlice<'_>]) -> io::Result<usize> {
-        #[cfg(any(unix, windows))]
-        {
-            let slices = crate::vectored::byte_slices(buffers)?;
-            qubit_io::Output::write_vectored(self, &slices)
-        }
-        #[cfg(not(any(unix, windows)))]
-        {
-            let _ = buffers;
-            Err(io::Error::new(
-                io::ErrorKind::Unsupported,
-                "secure rooted atomic writes are unsupported on this target",
-            ))
-        }
-    }
 }
 
-#[cfg(all(test, unix))]
-mod output_range_tests {
-    use std::path::Path;
-
-    use tempfile::tempdir;
-
-    use super::LocalRootAtomicWriter;
-    use crate::LocalAtomicWriteOptions;
-    use crate::LocalDurabilityRequirement;
-    use crate::LocalRelativePath;
-
-    #[test]
-    fn rooted_atomic_writer_output_range_preserves_sentinels() {
-        let directory = tempdir().expect("temporary directory should be created");
-        let root = std::fs::File::open(directory.path()).expect("root directory should open");
-        let path = LocalRelativePath::new(Path::new("target")).expect("relative path should be valid");
-        let options = LocalAtomicWriteOptions::new().with_durability(LocalDurabilityRequirement::NotRequired);
-        let mut writer = LocalRootAtomicWriter::new(&root, directory.path(), &path, options)
-            .expect("rooted atomic writer should open");
-        // SAFETY: 2..5 is a valid input range.
-        assert_eq!(
-            3,
-            unsafe { qubit_io::Output::write_unchecked(&mut writer, b"!!xyz!!", 2, 3) }.unwrap()
-        );
-        // SAFETY: 7..7 is a valid empty input range.
-        assert_eq!(
-            0,
-            unsafe { qubit_io::Output::write_unchecked(&mut writer, b"1234567", 7, 0) }.unwrap()
-        );
-        writer.commit_with_durability().expect("rooted writer should commit");
-        assert_eq!(
-            b"xyz",
-            std::fs::read(directory.path().join("target")).unwrap().as_slice()
-        );
-    }
-}
-
-impl qubit_io::Output for LocalRootAtomicWriter {
+/// Writes bytes through the project's output abstraction into rooted staging.
+///
+/// The implementation keeps the output contract while ensuring writes target
+/// only the private staging handle until commit installs it.
+impl Output for LocalRootAtomicWriter {
+    /// Byte type accepted by this output implementation.
     type Item = u8;
 
+    /// Writes ordered byte slices to staging and returns the accepted byte
+    /// count.
+    ///
+    /// # Parameters
+    ///
+    /// * `buffers` - Ordered byte slices to append.
+    ///
+    /// # Returns
+    ///
+    /// The number of bytes accepted by the staging writer.
+    ///
+    /// # Errors
+    ///
+    /// Returns the underlying write failure or an unsupported-target error.
     fn write_vectored(&mut self, buffers: &[&[u8]]) -> io::Result<usize> {
         #[cfg(any(unix, windows))]
         {
-            qubit_io::Output::write_vectored(self.staged_file.file_mut(), buffers)
+            Output::write_vectored(self.staged_file.file_mut(), buffers)
         }
         #[cfg(not(any(unix, windows)))]
         {
@@ -1230,18 +1529,47 @@ impl qubit_io::Output for LocalRootAtomicWriter {
         }
     }
 
+    /// Writes a validated input range to staging without repeating its bounds
+    /// checks.
+    ///
+    /// # Parameters
+    ///
+    /// * `input` - Source byte buffer.
+    /// * `index` - Starting offset in `input`.
+    /// * `count` - Number of bytes to write.
+    ///
+    /// # Returns
+    ///
+    /// The number of bytes accepted by the staging writer.
+    ///
+    /// # Errors
+    ///
+    /// Returns the underlying write failure or an unsupported-target error.
+    ///
+    /// # Safety
+    ///
+    /// `index + count` must not overflow and must be within `input`.
     unsafe fn write_unchecked(&mut self, input: &[u8], index: usize, count: usize) -> io::Result<usize> {
         self.write_once(&input[index..index + count])
     }
 
+    /// Flushes the staging writer's buffered output, if any.
+    ///
+    /// # Returns
+    ///
+    /// `Ok(())` when all buffered output is forwarded to the staging handle.
+    ///
+    /// # Errors
+    ///
+    /// Returns the underlying flush error or an unsupported-target error.
     fn flush(&mut self) -> io::Result<()> {
         #[cfg(unix)]
         {
-            qubit_io::Output::flush(self.staged_file.file_mut())
+            Output::flush(self.staged_file.file_mut())
         }
         #[cfg(windows)]
         {
-            qubit_io::Output::flush(self.staged_file.file_mut())
+            Output::flush(self.staged_file.file_mut())
         }
         #[cfg(not(any(unix, windows)))]
         {

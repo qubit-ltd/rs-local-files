@@ -76,18 +76,32 @@ impl LocalPathBindingOptions {
     }
 
     /// Limits retained ancestor directory handles.
+    ///
+    /// # Parameters
+    ///
+    /// * `maximum` is the maximum number of ancestor handles to retain; zero
+    ///   permits none.
     pub const fn with_max_ancestors(mut self, maximum: usize) -> Self {
         self.max_ancestors = Some(maximum);
         self
     }
 
     /// Limits cumulative native path bytes retained for binding.
+    ///
+    /// # Parameters
+    ///
+    /// * `maximum` is the cumulative byte limit; zero permits no path bytes.
     pub const fn with_max_path_bytes(mut self, maximum: usize) -> Self {
         self.max_path_bytes = Some(maximum);
         self
     }
 
     /// Limits total time spent acquiring and verifying the binding.
+    ///
+    /// # Parameters
+    ///
+    /// * `maximum` is the cooperative time limit; zero is an immediate
+    ///   deadline.
     pub const fn with_deadline(mut self, maximum: Duration) -> Self {
         self.deadline = Some(maximum);
         self
@@ -96,6 +110,10 @@ impl LocalPathBindingOptions {
     ///
     /// These limits are combined with any enclosing filesystem or handle
     /// limits, so they can only make resolution more restrictive.
+    ///
+    /// # Parameters
+    ///
+    /// * `limits` supplies the additional resolution constraints.
     pub const fn with_resolution_limits(mut self, limits: LocalResolutionLimits) -> Self {
         self.resolution_limits = Some(limits);
         self

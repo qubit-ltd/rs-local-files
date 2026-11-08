@@ -93,6 +93,17 @@ fn identity_error(
 /// A missing path is reported as `Missing`; every other metadata result keeps
 /// the conservative `Unchanged` state because this check cannot prove that the
 /// caller's original destination was replaced.
+///
+/// # Parameters
+///
+/// * `path` - Operation path checked without following its final component. It
+///   must be the same path whose identity comparison just failed.
+///
+/// # Returns
+///
+/// `Missing` when the operation path no longer exists; otherwise,
+/// `Unchanged` because the check cannot establish that the original
+/// destination was replaced.
 fn destination_mismatch_state(path: &Path) -> LocalAtomicDestinationState {
     #[cfg(feature = "test-support")]
     let metadata = if super::test_support::is_enabled("atomic-identity-missing") {

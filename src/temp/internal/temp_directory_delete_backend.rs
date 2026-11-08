@@ -34,11 +34,19 @@ impl DeleteBackend for TempDirectoryDeleteBackend<'_> {
 
     /// Borrows the authority-relative path for queue accounting and
     /// diagnostics.
+    ///
+    /// # Parameters
+    ///
+    /// * `path` - The validated path retained by the deletion queue.
     fn path<'a>(&self, path: &'a Self::Path) -> &'a Path {
         path.as_path()
     }
 
     /// Reads no-follow metadata; traversal and disappearance errors propagate.
+    ///
+    /// # Parameters
+    ///
+    /// * `path` - The authority-relative entry to inspect.
     fn metadata(&self, path: &Self::Path) -> io::Result<Self::Metadata> {
         #[cfg(test)]
         crate::tests::native_io_fault_tests::check(crate::tests::native_io_fault_tests::NativeIoPoint::DeleteMetadata)?;
@@ -48,12 +56,20 @@ impl DeleteBackend for TempDirectoryDeleteBackend<'_> {
     }
 
     /// Distinguishes real directories from links and other leaves.
+    ///
+    /// # Parameters
+    ///
+    /// * `metadata` - No-follow metadata for the observed entry.
     fn is_directory(&self, metadata: &Self::Metadata) -> bool {
         metadata.kind() == crate::rooted::EntryKind::Directory
     }
 
     /// Opens an unsorted lazy reader through the retained Root authority.
     /// Native traversal and enumeration-open failures propagate.
+    ///
+    /// # Parameters
+    ///
+    /// * `path` - The real directory to enumerate.
     fn open_directory(&self, path: &Self::Path) -> io::Result<Self::Reader> {
         #[cfg(test)]
         crate::tests::native_io_fault_tests::check(
@@ -63,6 +79,11 @@ impl DeleteBackend for TempDirectoryDeleteBackend<'_> {
     }
 
     /// Returns the next validated child; native enumeration errors propagate.
+    ///
+    /// # Parameters
+    ///
+    /// * `parent` - The directory containing the next child.
+    /// * `reader` - The opened directory reader to advance.
     fn next_child(&self, parent: &Self::Path, reader: &mut Self::Reader) -> io::Result<Option<Self::Path>> {
         #[cfg(test)]
         crate::tests::native_io_fault_tests::check(
@@ -75,6 +96,11 @@ impl DeleteBackend for TempDirectoryDeleteBackend<'_> {
 
     /// Removes the leaf itself without following its target; native errors
     /// propagate.
+    ///
+    /// # Parameters
+    ///
+    /// * `path` - The non-directory entry to remove.
+    /// * `_metadata` - The no-follow metadata used to classify the entry.
     fn remove_non_directory(&self, path: &Self::Path, _metadata: &Self::Metadata) -> io::Result<()> {
         #[cfg(test)]
         crate::tests::native_io_fault_tests::check(
@@ -85,6 +111,10 @@ impl DeleteBackend for TempDirectoryDeleteBackend<'_> {
 
     /// Removes one empty directory; concurrent additions fail without
     /// rescanning.
+    ///
+    /// # Parameters
+    ///
+    /// * `path` - The directory to remove if it remains empty.
     fn remove_empty_directory(&self, path: &Self::Path) -> io::Result<()> {
         #[cfg(test)]
         crate::tests::native_io_fault_tests::check(
@@ -99,6 +129,10 @@ impl DeleteBackend for TempDirectoryDeleteBackend<'_> {
     }
 
     /// Runs the thread-isolated native-removal failure boundary in test builds.
+    ///
+    /// # Parameters
+    ///
+    /// * `_path` - The entry scheduled for removal; unused by this hook.
     fn before_remove(&self, _path: &Self::Path) -> io::Result<()> {
         #[cfg(feature = "test-support")]
         crate::test_support::temp_cleanup_before_remove()?;
@@ -115,11 +149,19 @@ impl DeleteBackend for HostTempResourceBackend {
     type Reader = fs::ReadDir;
 
     /// Borrows the creation-bound native path for accounting and diagnostics.
+    ///
+    /// # Parameters
+    ///
+    /// * `path` - The native path retained by the deletion queue.
     fn path<'a>(&self, path: &'a Self::Path) -> &'a Path {
         path
     }
 
     /// Inspects a final entry without following links; native errors propagate.
+    ///
+    /// # Parameters
+    ///
+    /// * `path` - The creation-bound native entry to inspect.
     fn metadata(&self, path: &Self::Path) -> io::Result<Self::Metadata> {
         #[cfg(test)]
         crate::tests::native_io_fault_tests::check(crate::tests::native_io_fault_tests::NativeIoPoint::DeleteMetadata)?;
@@ -129,11 +171,19 @@ impl DeleteBackend for HostTempResourceBackend {
     }
 
     /// Reports whether the observed entry is a real directory.
+    ///
+    /// # Parameters
+    ///
+    /// * `metadata` - No-follow metadata for the observed entry.
     fn is_directory(&self, metadata: &Self::Metadata) -> bool {
         metadata.file_type().is_dir()
     }
 
     /// Opens an unsorted lazy native reader, propagating native open errors.
+    ///
+    /// # Parameters
+    ///
+    /// * `path` - The real directory to enumerate.
     fn open_directory(&self, path: &Self::Path) -> io::Result<Self::Reader> {
         #[cfg(test)]
         crate::tests::native_io_fault_tests::check(
@@ -143,6 +193,12 @@ impl DeleteBackend for HostTempResourceBackend {
     }
 
     /// Produces one child path or propagates an enumeration error.
+    ///
+    /// # Parameters
+    ///
+    /// * `_parent` - The directory containing the next child; native paths are
+    ///   returned directly by the reader.
+    /// * `reader` - The opened directory reader to advance.
     fn next_child(&self, _parent: &Self::Path, reader: &mut Self::Reader) -> io::Result<Option<Self::Path>> {
         #[cfg(test)]
         crate::tests::native_io_fault_tests::check(
@@ -153,6 +209,11 @@ impl DeleteBackend for HostTempResourceBackend {
 
     /// Removes the leaf itself, including Windows directory links, without
     /// traversing its target. Native unlink errors propagate.
+    ///
+    /// # Parameters
+    ///
+    /// * `path` - The non-directory entry to remove.
+    /// * `metadata` - The no-follow metadata used to select the native unlink.
     fn remove_non_directory(&self, path: &Self::Path, metadata: &Self::Metadata) -> io::Result<()> {
         #[cfg(test)]
         crate::tests::native_io_fault_tests::check(
@@ -163,6 +224,10 @@ impl DeleteBackend for HostTempResourceBackend {
 
     /// Removes one empty directory; concurrent additions fail without
     /// rescanning.
+    ///
+    /// # Parameters
+    ///
+    /// * `path` - The directory to remove if it remains empty.
     fn remove_empty_directory(&self, path: &Self::Path) -> io::Result<()> {
         #[cfg(test)]
         crate::tests::native_io_fault_tests::check(
@@ -176,6 +241,10 @@ impl DeleteBackend for HostTempResourceBackend {
     }
 
     /// Runs the thread-isolated native-removal failure boundary in test builds.
+    ///
+    /// # Parameters
+    ///
+    /// * `_path` - The entry scheduled for removal; unused by this hook.
     fn before_remove(&self, _path: &Self::Path) -> io::Result<()> {
         #[cfg(feature = "test-support")]
         crate::test_support::temp_cleanup_before_remove()?;

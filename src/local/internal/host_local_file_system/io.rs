@@ -38,6 +38,12 @@ impl HostLocalFileSystem {
     ///
     /// Keeps the final symbolic link as an entry. Returns path-binding,
     /// forbidden intermediate-link traversal, or native metadata errors.
+    ///
+    /// # Parameters
+    ///
+    /// * `path` — path whose entry metadata is requested.
+    /// * `symlink_policy` — policy used to resolve intermediate path
+    ///   components; the final symbolic link remains an entry.
     pub fn metadata_with_policy(path: &Path, symlink_policy: LocalSymlinkPolicy) -> LocalResult<LocalFileMetadata> {
         let bound = bind_host_path(path)?;
         let resolved = if symlink_policy == LocalSymlinkPolicy::FollowAcrossScope {
@@ -57,6 +63,12 @@ impl HostLocalFileSystem {
     /// Resolves the final link according to the policy and requires a regular
     /// file. Returns resolution or native open errors, or `TypeConflict` for
     /// another resource kind. The returned reader owns the opened handle.
+    ///
+    /// # Parameters
+    ///
+    /// * `path` — path to the file to open.
+    /// * `options` — read retry and other reader options.
+    /// * `symlink_policy` — policy for resolving symbolic links in the path.
     pub fn open_reader_with_policy(
         path: &Path,
         options: &LocalReadOptions,
@@ -99,6 +111,13 @@ impl HostLocalFileSystem {
     /// regular file directly. Parent creation may persist after a later
     /// failure. Resolution, type, guarantee, and native preparation errors
     /// are returned before a writer is handed to the caller.
+    ///
+    /// # Parameters
+    ///
+    /// * `path` — destination path to open.
+    /// * `options` — write mode, durability, atomicity, and other writer
+    ///   options.
+    /// * `symlink_policy` — policy for resolving symbolic links in the path.
     pub fn open_writer_with_policy(
         path: &Path,
         options: &LocalWriteOptions,
@@ -181,6 +200,14 @@ impl HostLocalFileSystem {
     /// The list option's policy overrides `symlink_policy`. Resolution or
     /// initial directory-open failures are returned here; later enumeration
     /// errors are yielded by the walker.
+    ///
+    /// # Parameters
+    ///
+    /// * `path` — directory path to enumerate.
+    /// * `options` — traversal options; its symbolic-link policy takes
+    ///   precedence.
+    /// * `symlink_policy` — fallback link policy when `options` has none.
+    /// * `started_at` — operation start time used for walker timing.
     pub fn list_with_policy(
         path: &Path,
         options: &LocalListOptions,

@@ -21,6 +21,25 @@ use crate::recovery::LocalRecoveryFileRole;
 /// mismatch returns that entry with the error so its owner can retain it for
 /// recovery. Only a matching digest changes its role to `CandidateCopy` and
 /// permits the publication protocol to proceed with it.
+///
+/// # Type Parameters
+///
+/// * `D` is the digest algorithm used to verify the copy.
+/// * `B` is the backend that creates and checkpoints the copy.
+///
+/// # Parameters
+///
+/// * `backend` creates the copy and tracks its recovery ownership.
+/// * `candidate_digest` is the expected digest of the complete candidate.
+///
+/// # Returns
+///
+/// Returns the verified copy with the `CandidateCopy` role.
+///
+/// # Errors
+///
+/// Returns the I/O error and, when a copy was created, its optional recovery
+/// entry. A digest mismatch is reported as `InvalidData`.
 pub(super) fn prepare_copy<D, B>(
     backend: &mut B,
     candidate_digest: &Output<D>,

@@ -43,6 +43,17 @@ use crate::read;
 /// until staging completes; removal or later installation can still partially
 /// publish the replacement.
 ///
+/// # Parameters
+///
+/// - `root`: Supplies the filesystem authority used for all source and
+///   destination operations.
+/// - `source` and `destination`: Identify the rooted file paths to copy
+///   between.
+/// - `options`: Controls conflict handling and permission preservation.
+/// - `durability`: Selects the durability requirement for staged publication.
+/// - `statistics`: Carries counters accumulated before this file is copied.
+/// - `budget`: Tracks byte limits and deadlines for this copy operation.
+///
 /// # Errors
 ///
 /// Returns a structured error for deadline, source or destination inspection,
@@ -409,6 +420,15 @@ pub(super) fn copy_file(
 }
 
 /// Computes counters for a completed file before publication is attempted.
+///
+/// # Parameters
+///
+/// - `statistics`: Counters accumulated before this file is published.
+/// - `bytes`: Number of bytes copied from the source.
+/// - `overwritten`: Whether a destination entry existed before the copy.
+/// - `non_atomic_publication`: Whether replacement requires removing the old
+///   destination before installation.
+/// - `source` and `destination`: Paths used to report counter overflow.
 fn completed_file_statistics(
     statistics: Statistics,
     bytes: u64,
@@ -435,6 +455,12 @@ fn completed_file_statistics(
 
 /// Creates a deterministic competing destination through the retained Root
 /// authority at one selected copy boundary.
+///
+/// # Parameters
+///
+/// - `root`: Supplies the rooted filesystem authority.
+/// - `destination`: Identifies the path at which to create a competing entry.
+/// - `selector`: Names the enabled test-support injection point.
 #[cfg(feature = "test-support")]
 fn inject_race_destination(root: &Root, destination: &Path, selector: &str) -> io::Result<()> {
     let selected = crate::local::take_test_support(selector)
@@ -453,6 +479,14 @@ fn inject_race_destination(root: &Root, destination: &Path, selector: &str) -> i
 
 /// Returns true only when a staged-writer conflict proves an unchanged
 /// destination that the configured copy policies explicitly allow skipping.
+///
+/// # Parameters
+///
+/// - `root`: Supplies authority to inspect the destination safely.
+/// - `destination`: Identifies the path whose current conflict is checked.
+/// - `options`: Supplies the configured conflict policies.
+/// - `expected_stage`: Restricts which writer failure stage may be skipped.
+/// - `source_error`: Provides the staged writer's failure and cleanup state.
 fn should_skip_conflict_race(
     root: &Root,
     destination: &Path,
@@ -481,6 +515,14 @@ fn should_skip_conflict_race(
 
 /// Converts a rooted atomic-writer initialization failure without discarding
 /// staging cleanup details.
+///
+/// # Parameters
+///
+/// - `source` and `destination`: Paths associated with the failed copy.
+/// - `statistics`: Counters accumulated before publication.
+/// - `destination_removed`: Whether failure may have left the destination
+///   absent.
+/// - `source_error`: The writer initialization failure and staging context.
 fn rooted_open_error(
     source: &Path,
     destination: &Path,
@@ -512,6 +554,14 @@ fn rooted_open_error(
 /// Does nothing when preservation is disabled. A native permission failure
 /// returns the `PreservePermissions` stage and supplied statistics; it does
 /// not undo content already copied to the destination.
+///
+/// # Parameters
+///
+/// - `root`: Supplies authority to update destination metadata.
+/// - `source` and `destination`: Identify the copied file paths.
+/// - `metadata`: Supplies the source permissions to apply.
+/// - `options`: Determines whether permission preservation is enabled.
+/// - `statistics`: Tracks counters and metadata effects for the operation.
 ///
 /// # Errors
 ///
@@ -557,6 +607,14 @@ pub(super) fn preserve_permissions(
 ///
 /// Retains the primary I/O error and attaches the staging path and cleanup
 /// error when the failed commit reports them.
+///
+/// # Parameters
+///
+/// - `source` and `destination`: Paths associated with the failed copy.
+/// - `statistics`: Counters accumulated before publication.
+/// - `completed_statistics`: Counters reflecting the file if installation
+///   already occurred before a later failure.
+/// - `source_error`: The commit failure and any staging cleanup context.
 fn rooted_commit_error(
     source: &Path,
     destination: &Path,
@@ -607,7 +665,7 @@ mod tests {
     use super::should_skip_conflict_race;
 
     #[test]
-    fn conflict_race_is_skipped_only_for_a_clean_unchanged_allowed_conflict() {
+    fn test_conflict_race_is_skipped_only_for_a_clean_unchanged_allowed_conflict() {
         let directory = tempfile::tempdir().expect("temporary root should be created");
         let root = super::super::Root::open(directory.path()).expect("root authority should open");
         let destination =
@@ -656,7 +714,7 @@ mod tests {
     }
 
     #[test]
-    fn rooted_commit_error_maps_metadata_and_replacement_failures() {
+    fn test_rooted_commit_error_maps_metadata_and_replacement_failures() {
         let source = crate::local::LocalRelativePath::new(Path::new("source")).expect("valid relative source");
         let destination =
             crate::local::LocalRelativePath::new(Path::new("destination")).expect("valid relative destination");
@@ -733,7 +791,7 @@ mod tests {
     }
 
     #[test]
-    fn rooted_file_copy_deadline_fails_before_source_inspection() {
+    fn test_rooted_file_copy_deadline_fails_before_source_inspection() {
         let directory = tempfile::tempdir().expect("temporary root should be created");
         let root = super::super::Root::open(directory.path()).expect("root authority should open");
         let source = crate::local::LocalRelativePath::new(Path::new("source")).expect("valid relative source");

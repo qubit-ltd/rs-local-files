@@ -18,6 +18,11 @@ use std::os::fd::FromRawFd;
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::MetadataExt;
 
+use crate::observation::LocalFileIdentity;
+use crate::policy::LocalOwnerAccessPolicy;
+use crate::temp::types::NativePrivateCreateError;
+use crate::temp::types::NativePrivateEntry;
+
 #[cfg(test)]
 thread_local! {
     static ACCESS_FAILURE_AFTER: Cell<Option<usize>> = const { Cell::new(None) };
@@ -60,11 +65,21 @@ fn fail_access_if_scheduled() -> io::Result<()> {
     }
 }
 
-use crate::observation::LocalFileIdentity;
-use crate::policy::LocalOwnerAccessPolicy;
-use crate::temp::types::NativePrivateCreateError;
-use crate::temp::types::NativePrivateEntry;
-
+/// Selects the configured owner-only mode for a file or directory.
+///
+/// # Parameters
+///
+/// `policy` supplies both modes; `directory` selects the directory or file
+/// mode.
+///
+/// # Returns
+///
+/// The configured mode for the selected entry kind.
+///
+/// # Errors
+///
+/// Returns `InvalidInput` when Unix modes are absent or contain bits outside
+/// `0o700`.
 fn owner_mode(policy: &LocalOwnerAccessPolicy, directory: bool) -> io::Result<u32> {
     let (directory_mode, file_mode) = policy.unix_modes().ok_or_else(|| {
         io::Error::new(
@@ -81,6 +96,20 @@ fn owner_mode(policy: &LocalOwnerAccessPolicy, directory: bool) -> io::Result<u3
     Ok(if directory { directory_mode } else { file_mode })
 }
 
+/// Converts a policy mode to the platform's native mode type.
+///
+/// # Parameters
+///
+/// `mode` is the owner permission mode to convert.
+///
+/// # Returns
+///
+/// The mode represented as `libc::mode_t`.
+///
+/// # Errors
+///
+/// Returns `InvalidInput` when the mode cannot be represented by
+/// `libc::mode_t`.
 fn native_mode(mode: u32) -> io::Result<libc::mode_t> {
     libc::mode_t::try_from(mode).map_err(|_| {
         io::Error::new(
@@ -90,6 +119,20 @@ fn native_mode(mode: u32) -> io::Result<libc::mode_t> {
     })
 }
 
+/// Converts a policy mode to the integer type required by `openat`.
+///
+/// # Parameters
+///
+/// `mode` is the owner permission mode to convert.
+///
+/// # Returns
+///
+/// The mode represented as `libc::c_uint`.
+///
+/// # Errors
+///
+/// Returns `InvalidInput` when the mode cannot be represented by
+/// `libc::c_uint`.
 fn openat_mode(mode: u32) -> io::Result<libc::c_uint> {
     libc::c_uint::try_from(mode).map_err(|_| {
         io::Error::new(
@@ -99,6 +142,21 @@ fn openat_mode(mode: u32) -> io::Result<libc::c_uint> {
     })
 }
 
+/// Verifies ownership, exact mode, and absence of additional ACL entries.
+///
+/// # Parameters
+///
+/// `file` is the opened entry; `directory` selects its expected kind; `policy`
+/// supplies exact modes.
+///
+/// # Returns
+///
+/// Succeeds when the entry satisfies the exact owner policy.
+///
+/// # Errors
+///
+/// Returns an I/O error when ownership, type, exact mode, or ACL verification
+/// fails.
 pub(crate) fn verify_owner_access(file: &File, directory: bool, policy: &LocalOwnerAccessPolicy) -> io::Result<()> {
     let expected = owner_mode(policy, directory)?;
     ensure_acl_backend_supported()?;
@@ -113,6 +171,21 @@ pub(crate) fn verify_owner_access(file: &File, directory: bool, policy: &LocalOw
     verify_no_extra_acl(file, directory)
 }
 
+/// Applies the configured owner mode after validating the entry and ACL state.
+///
+/// # Parameters
+///
+/// `file` is the opened entry; `directory` selects its expected kind; `policy`
+/// supplies the target mode.
+///
+/// # Returns
+///
+/// Succeeds after the requested mode has been applied and verified.
+///
+/// # Errors
+///
+/// Returns an I/O error when validation, mode application, or post-application
+/// verification fails.
 pub(crate) fn apply_owner_access(file: &File, directory: bool, policy: &LocalOwnerAccessPolicy) -> io::Result<()> {
     let mode = native_mode(owner_mode(policy, directory)?)?;
     ensure_acl_backend_supported()?;
@@ -126,6 +199,22 @@ pub(crate) fn apply_owner_access(file: &File, directory: bool, policy: &LocalOwn
     verify_owner_access(file, directory, policy)
 }
 
+/// Creates a file or directory beneath `parent` using the configured owner
+/// mode.
+///
+/// # Parameters
+///
+/// `parent` supplies directory authority; `name` is one native path component;
+/// `directory` selects the entry kind; `policy` supplies its owner mode.
+///
+/// # Returns
+///
+/// The opened entry on success.
+///
+/// # Errors
+///
+/// Returns the creation or policy error, retaining recovery context when an
+/// entry may have been created.
 pub(crate) fn create_owner_entry_at(
     parent: &File,
     name: &OsStr,
@@ -135,6 +224,23 @@ pub(crate) fn create_owner_entry_at(
     create_owner_entry_at_with_hook(parent, name, directory, policy, || Ok(()))
 }
 
+/// Creates an owner entry while allowing the test build to inject an open
+/// failure.
+///
+/// # Parameters
+///
+/// `parent` supplies directory authority; `name` is one native path component;
+/// `directory` selects the entry kind; `policy` supplies its owner mode; `hook`
+/// runs after directory creation and before opening it.
+///
+/// # Returns
+///
+/// The opened entry on success.
+///
+/// # Errors
+///
+/// Returns the creation or policy error, retaining recovery context when an
+/// entry may have been created.
 fn create_owner_entry_at_with_hook(
     parent: &File,
     name: &OsStr,
@@ -220,6 +326,22 @@ fn create_owner_entry_at_with_hook(
     finish_owner_creation(parent, retained_parent, name, file, true, policy)
 }
 
+/// Applies and verifies policy on a newly opened owner entry, retaining
+/// recovery data on failure.
+///
+/// # Parameters
+///
+/// `parent` and `name` identify the entry; `retained_parent` preserves recovery
+/// authority; `file` is the opened handle; `directory` selects the expected
+/// entry kind; `policy` supplies its owner mode.
+///
+/// # Returns
+///
+/// The verified opened entry.
+///
+/// # Errors
+///
+/// Returns the policy error and retains available recovery context.
 fn finish_owner_creation(
     parent: &File,
     retained_parent: File,
@@ -258,11 +380,24 @@ fn finish_owner_creation(
     }
 }
 
+/// Rejects access or default POSIX ACL entries beyond the mode bits.
+///
+/// # Parameters
+///
+/// `file` is the opened entry to inspect; `directory` determines whether its
+/// default ACL is also checked.
+///
+/// # Returns
+///
+/// Succeeds when no additional ACL entries are present.
+///
+/// # Errors
+///
+/// Returns an I/O error when an extra ACL is present or ACL inspection is
+/// unavailable.
 fn verify_no_extra_acl(file: &File, directory: bool) -> io::Result<()> {
     #[cfg(target_os = "linux")]
     {
-        use std::ffi::CString;
-        use std::os::fd::AsRawFd;
         let names: &[&[u8]] = if directory {
             &[b"system.posix_acl_access\0", b"system.posix_acl_default\0"]
         } else {
@@ -294,6 +429,15 @@ fn verify_no_extra_acl(file: &File, directory: bool) -> io::Result<()> {
     }
 }
 
+/// Checks whether this platform can verify the exact ACL policy.
+///
+/// # Returns
+///
+/// Succeeds when this platform has the required ACL verification backend.
+///
+/// # Errors
+///
+/// Returns `Unsupported` when exact ACL verification is unavailable.
 fn ensure_acl_backend_supported() -> io::Result<()> {
     #[cfg(not(target_os = "linux"))]
     {
@@ -308,6 +452,21 @@ fn ensure_acl_backend_supported() -> io::Result<()> {
     }
 }
 
+/// Creates an exclusively named private regular file beneath an open directory.
+///
+/// # Parameters
+///
+/// `parent` supplies directory authority and `name` is one native path
+/// component.
+///
+/// # Returns
+///
+/// The newly opened private regular file.
+///
+/// # Errors
+///
+/// Returns the creation error, retaining recovery context when creation may
+/// have succeeded.
 pub(crate) fn create_private_file_at(parent: &File, name: &OsStr) -> Result<File, NativePrivateCreateError> {
     create_private_file_at_impl(parent, name, File::try_clone)
 }
@@ -324,6 +483,27 @@ where
     create_private_file_at_impl(parent, name, clone_parent)
 }
 
+/// Implements private file creation with an injectable parent-handle clone
+/// operation.
+///
+/// # Type Parameters
+///
+/// `F` is a one-shot operation that clones or otherwise retains the parent
+/// handle.
+///
+/// # Parameters
+///
+/// `parent` supplies directory authority; `name` is one native path component;
+/// `clone_parent` prepares a retained parent handle before mutation.
+///
+/// # Returns
+///
+/// The newly opened private regular file.
+///
+/// # Errors
+///
+/// Returns the creation error, retaining recovery context when creation may
+/// have succeeded.
 fn create_private_file_at_impl<F>(
     parent: &File,
     name: &OsStr,
@@ -399,6 +579,21 @@ where
     Ok(file)
 }
 
+/// Creates an exclusively named private directory beneath an open directory.
+///
+/// # Parameters
+///
+/// `parent` supplies directory authority and `name` is one native path
+/// component.
+///
+/// # Returns
+///
+/// The newly opened private directory.
+///
+/// # Errors
+///
+/// Returns the creation error, retaining recovery context when creation may
+/// have succeeded.
 pub(crate) fn create_private_directory_at(parent: &File, name: &OsStr) -> Result<File, NativePrivateCreateError> {
     create_private_directory_at_impl(parent, name, File::try_clone, || Ok(()), || {})
 }
@@ -439,6 +634,27 @@ where
     create_private_directory_at_impl(parent, name, File::try_clone, || Ok(()), after_open)
 }
 
+/// Implements private directory creation with injectable operations for tests.
+///
+/// # Type Parameters
+///
+/// `C` prepares a retained parent handle; `O` injects a fallible operation
+/// before opening; `H` injects a callback after opening.
+///
+/// # Parameters
+///
+/// `parent` supplies directory authority; `name` is one native path component;
+/// `clone_parent`, `before_open`, and `after_open` provide the corresponding
+/// test operations.
+///
+/// # Returns
+///
+/// The newly opened private directory.
+///
+/// # Errors
+///
+/// Returns the creation error, retaining recovery context when creation may
+/// have succeeded.
 fn create_private_directory_at_impl<C, O, H>(
     parent: &File,
     name: &OsStr,
@@ -566,6 +782,21 @@ where
     Ok(directory)
 }
 
+/// Applies the standard writable or read-only mode for the current user.
+///
+/// # Parameters
+///
+/// `file` is the opened entry; `directory` selects its expected kind;
+/// `read_only` selects owner read-only or writable access.
+///
+/// # Returns
+///
+/// Succeeds after the requested mode has been applied and verified.
+///
+/// # Errors
+///
+/// Returns an I/O error when ownership, type, mode application, or verification
+/// fails.
 pub(crate) fn apply_current_user_access(file: &File, directory: bool, read_only: bool) -> io::Result<()> {
     verify_owner_and_type(file, directory)?;
     let mode = match (directory, read_only) {
@@ -582,6 +813,21 @@ pub(crate) fn apply_current_user_access(file: &File, directory: bool, read_only:
     verify_current_user_access(file, directory, read_only)
 }
 
+/// Verifies ownership, entry type, and the standard current-user access mode.
+///
+/// # Parameters
+///
+/// `file` is the opened entry; `directory` selects its expected kind;
+/// `read_only` selects the expected owner mode.
+///
+/// # Returns
+///
+/// Succeeds when the entry has the requested current-user mode.
+///
+/// # Errors
+///
+/// Returns an I/O error when ownership, type, or mode does not match the
+/// requested access.
 pub(crate) fn verify_current_user_access(file: &File, directory: bool, read_only: bool) -> io::Result<()> {
     verify_owner_and_type(file, directory)?;
     let metadata = file.metadata()?;
@@ -600,6 +846,21 @@ pub(crate) fn verify_current_user_access(file: &File, directory: bool, read_only
     Ok(())
 }
 
+/// Verifies that `file` refers to an entry owned by the current user of the
+/// expected type.
+///
+/// # Parameters
+///
+/// `file` is the opened entry; `directory` selects the expected entry kind.
+///
+/// # Returns
+///
+/// Succeeds when metadata confirms the expected owner and entry kind.
+///
+/// # Errors
+///
+/// Returns an I/O error when metadata cannot be read or ownership and type do
+/// not match.
 fn verify_owner_and_type(file: &File, directory: bool) -> io::Result<()> {
     let metadata = file.metadata()?;
     let correct_type = if directory {
@@ -616,6 +877,20 @@ fn verify_owner_and_type(file: &File, directory: bool) -> io::Result<()> {
     Ok(())
 }
 
+/// Converts one valid native path component to a NUL-terminated string.
+///
+/// # Parameters
+///
+/// `name` is the native component to validate and convert.
+///
+/// # Returns
+///
+/// The NUL-terminated component.
+///
+/// # Errors
+///
+/// Returns `InvalidInput` when the component is empty, dot, dot-dot, contains a
+/// separator, or contains NUL.
 fn component_name(name: &OsStr) -> io::Result<CString> {
     let bytes = name.as_bytes();
     if bytes.is_empty() || bytes == b"." || bytes == b".." || bytes.contains(&b'/') {
@@ -627,11 +902,40 @@ fn component_name(name: &OsStr) -> io::Result<CString> {
     CString::new(bytes).map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "name contains a nul byte"))
 }
 
+/// Reads the stable device and inode identity from an open file handle.
+///
+/// # Parameters
+///
+/// `file` is the open handle whose identity is read.
+///
+/// # Returns
+///
+/// The device and inode identity.
+///
+/// # Errors
+///
+/// Returns an I/O error if handle metadata cannot be read.
 fn identity_for_file(file: &File) -> io::Result<LocalFileIdentity> {
     let metadata = file.metadata()?;
     Ok(LocalFileIdentity::unix(metadata.dev(), metadata.ino()))
 }
 
+/// Reads the no-follow identity of a named entry beneath `parent`.
+///
+/// # Parameters
+///
+/// `parent` supplies directory authority and `name` is one native path
+/// component.
+///
+/// # Returns
+///
+/// The named entry's device and inode identity without following a symbolic
+/// link.
+///
+/// # Errors
+///
+/// Returns an I/O error if the name is invalid or the entry cannot be
+/// inspected.
 fn identity_for_name(parent: &File, name: &OsStr) -> io::Result<LocalFileIdentity> {
     let name = component_name(name)?;
     let mut status = std::mem::MaybeUninit::<libc::stat>::uninit();
@@ -655,6 +959,18 @@ fn identity_for_name(parent: &File, name: &OsStr) -> io::Result<LocalFileIdentit
     Ok(LocalFileIdentity::unix(device, inode))
 }
 
+/// Builds a creation error that retains the entry context available for
+/// recovery.
+///
+/// # Parameters
+///
+/// `directory`, `parent`, and `name` describe the created entry; `source` is
+/// the failure; `file` and `identity` carry any proven handle and identity.
+///
+/// # Returns
+///
+/// A creation error containing the supplied failure and retained recovery
+/// context.
 fn create_error(
     directory: bool,
     source: io::Error,
@@ -675,207 +991,17 @@ fn create_error(
     }
 }
 
+/// Builds an error for a failure that occurred before an entry was created.
+///
+/// # Parameters
+///
+/// `source` is the failure that prevented entry creation.
+///
+/// # Returns
+///
+/// A creation error without retained entry context.
 fn pre_create_error(source: io::Error) -> NativePrivateCreateError {
     NativePrivateCreateError { source, retained: None }
-}
-
-#[cfg(test)]
-mod recovery_open_failure_unix_tests {
-    use std::fs::File;
-
-    use super::create_private_directory_at_with_open_failure_hook;
-
-    #[test]
-    fn open_failure_after_mkdir_retains_entry_without_unproven_identity() {
-        let fixture = tempfile::tempdir().expect("temporary directory");
-        let parent = File::open(fixture.path()).expect("open parent directory");
-        let error =
-            create_private_directory_at_with_open_failure_hook(&parent, std::ffi::OsStr::new("retained"), || {
-                Err(std::io::Error::other("injected directory open failure"))
-            })
-            .expect_err("injected open failure");
-
-        assert!(fixture.path().join("retained").is_dir());
-        let entry = error.retained.expect("mkdir entry is retained");
-        assert!(entry.file.is_none());
-        assert!(entry.identity.is_none());
-        assert_eq!(error.source.to_string(), "injected directory open failure");
-    }
-}
-
-#[cfg(test)]
-mod owner_policy_unix_tests {
-    #[cfg(target_os = "linux")]
-    use std::ffi::OsStr;
-    #[cfg(target_os = "linux")]
-    use std::fs;
-    use std::fs::File;
-    #[cfg(target_os = "linux")]
-    use std::io;
-    #[cfg(target_os = "linux")]
-    use std::os::unix::ffi::OsStrExt;
-    #[cfg(target_os = "linux")]
-    use std::os::unix::fs::MetadataExt;
-
-    #[cfg(target_os = "linux")]
-    use super::apply_owner_access;
-    use super::create_owner_entry_at;
-    #[cfg(target_os = "linux")]
-    use super::verify_owner_access;
-    #[cfg(target_os = "linux")]
-    use crate::observation::LocalFileIdentity;
-    use crate::policy::LocalOwnerAccessPolicy;
-
-    #[cfg(target_os = "linux")]
-    #[test]
-    fn owner_policy_failed_open_does_not_adopt_replacement() {
-        use std::ffi::CString;
-        use std::os::fd::AsRawFd;
-        use std::os::unix::fs::MetadataExt;
-
-        let temp = tempfile::tempdir().expect("temporary directory");
-        let parent = File::open(temp.path()).expect("open parent directory");
-        let policy = LocalOwnerAccessPolicy::new().with_unix_modes(0o700, 0o600);
-        super::install_owner_open_failure_hook(|parent, name| {
-            let name = CString::new(name.as_bytes()).expect("stage name contains no NUL");
-            let moved = CString::new("moved-original").expect("static name");
-            // SAFETY: names are NUL terminated and parent is an open directory.
-            assert_eq!(
-                unsafe { libc::renameat(parent.as_raw_fd(), name.as_ptr(), parent.as_raw_fd(), moved.as_ptr()) },
-                0
-            );
-            // SAFETY: same authority and a valid directory mode.
-            assert_eq!(unsafe { libc::mkdirat(parent.as_raw_fd(), name.as_ptr(), 0o700) }, 0);
-            Err(io::Error::other("injected open failure"))
-        });
-        let error =
-            super::create_owner_entry_at_with_hook(&parent, OsStr::new("owner-stage"), true, &policy, || Ok(()))
-                .expect_err("injected open failure");
-        let replacement = fs::metadata(temp.path().join("owner-stage")).expect("replacement metadata");
-        let replacement_identity = LocalFileIdentity::unix(replacement.dev(), replacement.ino());
-        let entry = error.retained.as_ref().expect("native recovery retained");
-        assert!(
-            entry.identity.is_none(),
-            "failed open must not adopt replacement identity"
-        );
-        assert!(entry.file.is_none());
-        assert_eq!(error.source.to_string(), "injected open failure");
-        assert!(temp.path().join("moved-original").is_dir());
-        assert_ne!(Some(&replacement_identity), entry.identity.as_ref());
-    }
-
-    #[cfg(target_os = "linux")]
-    #[test]
-    fn owner_policy_unix_creates_exact_modes_and_applies_read_only_policy() {
-        let temp = tempfile::tempdir().expect("temporary directory");
-        let parent = File::open(temp.path()).expect("open parent directory");
-        let editable = LocalOwnerAccessPolicy::new().with_unix_modes(0o700, 0o600);
-        let file = create_owner_entry_at(&parent, std::ffi::OsStr::new("owner-file"), false, &editable)
-            .expect("create owner file");
-        assert_eq!(file.metadata().expect("file metadata").mode() & 0o7777, 0o600);
-        apply_owner_access(
-            &file,
-            false,
-            &LocalOwnerAccessPolicy::new().with_unix_modes(0o500, 0o400),
-        )
-        .expect("apply read-only access");
-        verify_owner_access(
-            &file,
-            false,
-            &LocalOwnerAccessPolicy::new().with_unix_modes(0o500, 0o400),
-        )
-        .expect("verify read-only access");
-        assert_eq!(file.metadata().expect("file metadata").mode() & 0o7777, 0o400);
-        apply_owner_access(&file, false, &editable).expect("restore editable access");
-        assert_eq!(file.metadata().expect("file metadata").mode() & 0o7777, 0o600);
-
-        let editable_directory = create_owner_entry_at(
-            &parent,
-            std::ffi::OsStr::new("editable-owner-directory"),
-            true,
-            &editable,
-        )
-        .expect("create editable owner directory");
-        assert_eq!(
-            editable_directory.metadata().expect("directory metadata").mode() & 0o7777,
-            0o700
-        );
-
-        let readonly = LocalOwnerAccessPolicy::new().with_unix_modes(0o500, 0o400);
-        let readonly_file =
-            create_owner_entry_at(&parent, std::ffi::OsStr::new("readonly-owner-file"), false, &readonly)
-                .expect("create read-only owner file");
-        assert_eq!(readonly_file.metadata().expect("file metadata").mode() & 0o7777, 0o400);
-        let directory = create_owner_entry_at(&parent, std::ffi::OsStr::new("owner-directory"), true, &readonly)
-            .expect("create read-only owner directory");
-        assert_eq!(directory.metadata().expect("directory metadata").mode() & 0o7777, 0o500);
-    }
-
-    #[cfg(not(target_os = "linux"))]
-    #[test]
-    fn owner_policy_unix_is_unsupported_without_creating_entries() {
-        let temp = tempfile::tempdir().expect("temporary directory");
-        let parent = File::open(temp.path()).expect("open parent directory");
-        let policy = LocalOwnerAccessPolicy::new().with_unix_modes(0o700, 0o600);
-        let error = create_owner_entry_at(&parent, std::ffi::OsStr::new("owner-file"), false, &policy)
-            .expect_err("owner ACL verification is unsupported outside Linux");
-        assert_eq!(error.source.kind(), std::io::ErrorKind::Unsupported);
-        assert!(error.retained.is_none());
-        assert!(!temp.path().join("owner-file").exists());
-    }
-
-    #[test]
-    fn owner_policy_unix_rejects_unconfigured_and_invalid_modes_before_mutation() {
-        let temp = tempfile::tempdir().expect("temporary directory");
-        let parent = File::open(temp.path()).expect("open parent directory");
-        for policy in [
-            LocalOwnerAccessPolicy::new(),
-            LocalOwnerAccessPolicy::new().with_unix_modes(0o770, 0o600),
-            LocalOwnerAccessPolicy::new().with_unix_modes(0o4700, 0o600),
-        ] {
-            let error = create_owner_entry_at(&parent, std::ffi::OsStr::new("invalid"), false, &policy)
-                .expect_err("invalid policy must fail");
-            assert_eq!(error.source.kind(), std::io::ErrorKind::InvalidInput);
-            assert!(!temp.path().join("invalid").exists());
-        }
-    }
-
-    #[cfg(target_os = "linux")]
-    #[test]
-    fn owner_policy_unix_rejects_extended_access_acl() {
-        use std::ffi::CString;
-        use std::os::fd::AsRawFd;
-
-        let temp = tempfile::tempdir().expect("temporary directory");
-        let parent = File::open(temp.path()).expect("open parent directory");
-        let policy = LocalOwnerAccessPolicy::new().with_unix_modes(0o700, 0o600);
-        let file = create_owner_entry_at(&parent, std::ffi::OsStr::new("acl-file"), false, &policy)
-            .expect("create owner file");
-        let acl_name = CString::new("system.posix_acl_access").expect("static xattr name");
-        let acl = [
-            0x02_u8, 0x00, 0x00, 0x00, 0x01, 0x00, 0x07, 0x00, 0xff, 0xff, 0xff, 0xff, 0x02, 0x00, 0x04, 0x00, 0xfe,
-            0xff, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00, 0xff, 0xff, 0xff, 0xff, 0x10, 0x00, 0x00, 0x00, 0xff, 0xff, 0xff,
-            0xff, 0x20, 0x00, 0x00, 0x00, 0xff, 0xff, 0xff, 0xff,
-        ];
-        let set_result =
-            unsafe { libc::fsetxattr(file.as_raw_fd(), acl_name.as_ptr(), acl.as_ptr().cast(), acl.len(), 0) };
-        if set_result < 0 {
-            let error = std::io::Error::last_os_error();
-            panic!("Linux test filesystem must support installing the POSIX ACL fixture: {error}");
-        }
-        let chmod_result = unsafe { libc::fchmod(file.as_raw_fd(), 0o600) };
-        assert_eq!(chmod_result, 0, "preserve exact mode alongside ACL fixture");
-        let error = verify_owner_access(&file, false, &policy).expect_err("extended ACL is rejected");
-        assert_eq!(error.kind(), std::io::ErrorKind::PermissionDenied);
-        let error = apply_owner_access(
-            &file,
-            false,
-            &LocalOwnerAccessPolicy::new().with_unix_modes(0o500, 0o400),
-        )
-        .expect_err("extended ACL is rejected before applying a new mode");
-        assert_eq!(error.kind(), std::io::ErrorKind::PermissionDenied);
-        assert_eq!(file.metadata().expect("file metadata").mode() & 0o7777, 0o600);
-    }
 }
 
 #[cfg(test)]
@@ -889,7 +1015,7 @@ mod helper_validation_tests {
     use crate::policy::LocalOwnerAccessPolicy;
 
     #[test]
-    fn unix_private_entry_helpers_validate_names_and_modes() {
+    fn test_unix_private_entry_helpers_validate_names_and_modes() {
         let policy = LocalOwnerAccessPolicy::new().with_unix_modes(0o700, 0o400);
         assert_eq!(owner_mode(&policy, true).expect("directory mode"), 0o700);
         assert_eq!(owner_mode(&policy, false).expect("file mode"), 0o400);

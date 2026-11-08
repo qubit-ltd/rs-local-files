@@ -56,6 +56,7 @@ impl OpenedCopySource {
     ///
     /// * `path` - Source entry to open.
     /// * `symlink_policy` - Symbolic-link policy for the final component.
+    /// * `open_retry_timeout` - Maximum time to retry opening a busy source.
     ///
     /// # Returns
     ///
@@ -89,6 +90,21 @@ impl OpenedCopySource {
 
 /// Opens a Unix source without blocking on special files or following a
 /// forbidden final symbolic link.
+///
+/// # Parameters
+///
+/// * `path` - Source entry to open.
+/// * `symlink_policy` - Whether to follow the final symbolic link.
+/// * `open_retry_timeout` - Maximum time to retry opening a busy source.
+///
+/// # Returns
+///
+/// The opened regular file and metadata read from that file handle.
+///
+/// # Errors
+///
+/// Returns an I/O error if opening, reading metadata, or clearing nonblocking
+/// mode fails, or if the opened source is not a regular file.
 #[cfg(unix)]
 fn open_copy_source(
     path: &Path,
@@ -110,6 +126,16 @@ fn open_copy_source(
 }
 
 /// Normalizes final-link and non-openable special-file errors.
+///
+/// # Parameters
+///
+/// * `path` - Source path used to construct a stable invalid-source error.
+/// * `error` - Error returned while opening the source.
+///
+/// # Returns
+///
+/// A stable `InvalidInput` error for rejected final links and special files;
+/// otherwise, the original error.
 #[cfg(unix)]
 #[inline]
 fn normalize_unix_source_open_error(path: &Path, error: Error) -> Error {
@@ -121,6 +147,21 @@ fn normalize_unix_source_open_error(path: &Path, error: Error) -> Error {
 
 /// Opens a Windows source and rejects name-surrogate reparse points when links
 /// are disabled.
+///
+/// # Parameters
+///
+/// * `path` - Source entry to open.
+/// * `symlink_policy` - Whether to follow the final symbolic link.
+/// * `_open_retry_timeout` - Unused on Windows.
+///
+/// # Returns
+///
+/// The opened regular file and metadata read from that file handle.
+///
+/// # Errors
+///
+/// Returns an I/O error if opening, querying handle information, or reading
+/// metadata fails, or if the opened source is not a regular file.
 #[cfg(windows)]
 fn open_copy_source(
     path: &Path,
@@ -158,6 +199,21 @@ fn open_copy_source(
 }
 
 /// Opens a regular source on targets without specialized open flags.
+///
+/// # Parameters
+///
+/// * `path` - Source entry to open.
+/// * `_symlink_policy` - Unused on targets without specialized open flags.
+/// * `_open_retry_timeout` - Unused on targets without specialized open flags.
+///
+/// # Returns
+///
+/// The opened regular file and metadata read from that file handle.
+///
+/// # Errors
+///
+/// Returns an I/O error if opening or reading metadata fails, or if the opened
+/// source is not a regular file.
 #[cfg(not(any(unix, windows)))]
 fn open_copy_source(
     path: &Path,
@@ -171,6 +227,15 @@ fn open_copy_source(
 }
 
 /// Rejects metadata that does not represent a regular file.
+///
+/// # Parameters
+///
+/// * `path` - Source path used in the invalid-source error.
+/// * `metadata` - Metadata to check.
+///
+/// # Errors
+///
+/// Returns `InvalidInput` if the metadata does not describe a regular file.
 #[inline]
 fn reject_non_regular_source(path: &Path, metadata: &Metadata) -> Result<()> {
     if metadata.is_file() {
@@ -181,6 +246,14 @@ fn reject_non_regular_source(path: &Path, metadata: &Metadata) -> Result<()> {
 }
 
 /// Creates the stable error used for a non-regular copy source.
+///
+/// # Parameters
+///
+/// * `path` - Path included in the error message.
+///
+/// # Returns
+///
+/// An `InvalidInput` error identifying the rejected source path.
 #[must_use]
 #[inline]
 fn invalid_copy_source(path: &Path) -> Error {
@@ -198,7 +271,7 @@ mod error_contract_tests {
     use crate::LocalSymlinkPolicy;
 
     #[test]
-    fn opened_source_normalizes_final_link_but_preserves_missing_cause() {
+    fn test_opened_source_normalizes_final_link_but_preserves_missing_cause() {
         let fixture = tempfile::tempdir().expect("fixture");
         let file = fixture.path().join("file");
         std::fs::write(&file, b"source").expect("file");

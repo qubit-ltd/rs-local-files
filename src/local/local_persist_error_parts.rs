@@ -20,6 +20,9 @@ use crate::outcome::LocalTempSourceState;
 /// snapshot at failure. Query the resource for its current state after
 /// mutation.
 ///
+/// # Type Parameters
+/// - `T`: Type of the temporary resource retained for recovery.
+///
 /// # Examples
 ///
 /// ```

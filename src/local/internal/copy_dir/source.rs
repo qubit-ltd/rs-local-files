@@ -6,7 +6,7 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 //! Source metadata, cycle identity, and containment checks for recursive copy.
-// Private behavior is covered through public integration tests.
+// Private behavior is covered by focused unit and public integration tests.
 
 use std::fs;
 use std::io::Error;
@@ -132,7 +132,7 @@ mod error_contract_tests {
     use crate::LocalSymlinkPolicy;
 
     #[test]
-    fn source_inspection_rejects_file_and_contained_destination() {
+    fn test_source_inspection_rejects_files_and_overlapping_destinations() {
         let fixture = tempfile::tempdir().expect("fixture");
         let file = fixture.path().join("file");
         fs::write(&file, b"source").expect("file");
@@ -150,7 +150,7 @@ mod error_contract_tests {
     }
 
     #[test]
-    fn source_metadata_distinguishes_rejected_and_dangling_links() {
+    fn test_source_metadata_rejects_links_and_follows_dangling_links() {
         let fixture = tempfile::tempdir().expect("fixture");
         let link = fixture.path().join("link");
         std::os::unix::fs::symlink("missing", &link).expect("dangling link");

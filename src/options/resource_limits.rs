@@ -10,6 +10,22 @@
 /// Returns the stricter finite limit, treating `None` as unbounded.
 ///
 /// `Some(0)` remains a finite limit; validation belongs to the operation.
+///
+/// # Type Parameters
+///
+/// * `T` - The ordered resource-limit value.
+///
+/// # Parameters
+///
+/// * `requested` - The limit requested for the operation, or `None` if
+///   unbounded.
+/// * `ceiling` - The maximum permitted limit, or `None` if no ceiling applies.
+///
+/// # Returns
+///
+/// The smaller finite limit when both inputs are `Some`, the finite input when
+/// only one is `Some`, or `None` when both inputs are unbounded.
+#[inline]
 pub(super) fn tighter<T: Ord>(requested: Option<T>, ceiling: Option<T>) -> Option<T> {
     match (requested, ceiling) {
         (Some(a), Some(b)) => Some(a.min(b)),

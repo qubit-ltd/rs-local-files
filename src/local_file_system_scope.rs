@@ -8,6 +8,15 @@
 //! Native namespace scope exposed by a local filesystem instance.
 
 /// Namespace in which a [`crate::LocalFileSystem`] interprets paths.
+///
+/// # Examples
+///
+/// ```
+/// use qubit_local_files::path::{LocalFileSystemScope, LocalPaths};
+///
+/// let paths = LocalPaths::rooted();
+/// assert_eq!(paths.scope(), LocalFileSystemScope::Rooted);
+/// ```
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[must_use]
 pub enum LocalFileSystemScope {

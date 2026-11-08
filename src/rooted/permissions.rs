@@ -8,16 +8,6 @@
 //! Cross-platform rooted entry permissions.
 
 /// Permissions observed or applied through a rooted filesystem capability.
-///
-/// # Examples
-///
-/// ```ignore
-/// use qubit_local_files::rooted::Permissions;
-///
-/// let permissions = Permissions::from_read_only(true);
-/// assert!(permissions.is_read_only());
-/// assert_eq!(permissions.unix_mode(), None);
-/// ```
 #[must_use]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct Permissions {
@@ -29,6 +19,15 @@ pub struct Permissions {
 #[allow(dead_code)]
 impl Permissions {
     /// Creates a portable read-only or writable permission value.
+    ///
+    /// # Parameters
+    ///
+    /// - `read_only`: whether the portable permission view disables writing.
+    ///
+    /// # Returns
+    ///
+    /// A permission value with no explicit Unix mode.
+    #[inline]
     pub const fn from_read_only(read_only: bool) -> Self {
         Self {
             read_only,
@@ -39,6 +38,16 @@ impl Permissions {
     /// Creates permissions from Unix mode bits.
     ///
     /// Bits outside the portable permission and special-bit range are ignored.
+    ///
+    /// # Parameters
+    ///
+    /// - `mode`: Unix permission and special bits. Bits outside `0o7777` are
+    ///   ignored.
+    ///
+    /// # Returns
+    ///
+    /// A permission value containing the masked Unix mode bits.
+    #[inline]
     pub const fn from_unix_mode(mode: u32) -> Self {
         let mode = mode & 0o7777;
         Self {
@@ -48,6 +57,10 @@ impl Permissions {
     }
 
     /// Returns whether the portable permission view disables writing.
+    ///
+    /// # Returns
+    ///
+    /// `true` when write access is disabled; otherwise `false`.
     #[must_use]
     #[inline]
     pub const fn is_read_only(self) -> bool {
@@ -56,6 +69,11 @@ impl Permissions {
 
     /// Returns exact Unix mode bits, or `None` when created from a portable
     /// read-only value without an explicit Unix mode.
+    ///
+    /// # Returns
+    ///
+    /// `Some(mode)` contains the explicit Unix bits; `None` means this value
+    /// was created from only a portable read-only setting.
     #[inline]
     pub const fn unix_mode(self) -> Option<u32> {
         self.unix_mode
@@ -66,6 +84,16 @@ impl Permissions {
     /// An explicit Unix mode replaces `current_mode`. Otherwise read-only
     /// clears all write bits, while writable adds owner-write permission and
     /// preserves the other bits.
+    ///
+    /// # Parameters
+    ///
+    /// - `current_mode`: existing Unix mode bits used when no explicit mode is
+    ///   stored.
+    ///
+    /// # Returns
+    ///
+    /// The explicit mode when present; otherwise `current_mode` with write bits
+    /// cleared or owner-write added according to the portable setting.
     #[cfg(unix)]
     #[must_use]
     #[inline]

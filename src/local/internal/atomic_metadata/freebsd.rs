@@ -26,12 +26,27 @@ const XATTR_SIZE_RACE_ATTEMPTS: usize = 8;
 
 unsafe extern "C" {
     /// Gets a descriptor ACL of the requested native type.
+    ///
+    /// # Parameters
+    ///
+    /// - `file`: Descriptor whose ACL is requested.
+    /// - `acl_type`: Native ACL flavor to retrieve.
     fn acl_get_fd_np(file: libc::c_int, acl_type: u32) -> *mut c_void;
 
     /// Applies a descriptor ACL of the requested native type.
+    ///
+    /// # Parameters
+    ///
+    /// - `file`: Descriptor receiving the ACL.
+    /// - `acl`: ACL object to apply.
+    /// - `acl_type`: Native ACL flavor being applied.
     fn acl_set_fd_np(file: libc::c_int, acl: *mut c_void, acl_type: u32) -> libc::c_int;
 
     /// Releases an ACL allocated by the native ACL API.
+    ///
+    /// # Parameters
+    ///
+    /// - `object`: ACL allocation to release.
     fn acl_free(object: *mut c_void) -> libc::c_int;
 }
 
@@ -39,6 +54,11 @@ unsafe extern "C" {
 ///
 /// Returns the first filesystem error encountered while reading, applying, or
 /// synchronizing metadata. Unsupported xattr namespaces are treated as empty.
+///
+/// # Parameters
+///
+/// - `source`: File whose metadata is preserved.
+/// - `staging`: Replacement file receiving the metadata.
 pub(super) fn preserve_extended_metadata(source: &File, staging: &File) -> Result<()> {
     preserve_acl(source, staging)?;
     preserve_namespace(source, staging, libc::EXTATTR_NAMESPACE_USER)?;
@@ -50,6 +70,11 @@ pub(super) fn preserve_extended_metadata(source: &File, staging: &File) -> Resul
 /// Tries NFSv4 ACLs first, then POSIX.1e access ACLs when that flavor is not
 /// supported. Returns an error if neither ACL can be read or the selected ACL
 /// cannot be applied.
+///
+/// # Parameters
+///
+/// - `source`: File from which to read an ACL.
+/// - `staging`: File to receive the selected ACL.
 fn preserve_acl(source: &File, staging: &File) -> Result<()> {
     match get_acl(source, ACL_TYPE_NFS4) {
         Ok(acl) => apply_acl(staging, acl, ACL_TYPE_NFS4),
@@ -65,6 +90,11 @@ fn preserve_acl(source: &File, staging: &File) -> Result<()> {
 ///
 /// Returns the native error when the descriptor does not expose the requested
 /// ACL type or the operating system cannot retrieve the ACL.
+///
+/// # Parameters
+///
+/// - `file`: Descriptor owner whose ACL is requested.
+/// - `acl_type`: Native ACL flavor to retrieve.
 fn get_acl(file: &File, acl_type: u32) -> Result<*mut c_void> {
     // SAFETY: the descriptor remains live, and `acl_type` is one of the two
     // native ACL type constants accepted for regular files.
@@ -79,6 +109,12 @@ fn get_acl(file: &File, acl_type: u32) -> Result<*mut c_void> {
 ///
 /// Returns an ACL application error in preference to a later release error; if
 /// applying succeeds, a release failure is returned instead.
+///
+/// # Parameters
+///
+/// - `staging`: File receiving the ACL.
+/// - `acl`: Allocated ACL object to apply and release.
+/// - `acl_type`: Native ACL flavor being applied.
 fn apply_acl(staging: &File, acl: *mut c_void, acl_type: u32) -> Result<()> {
     // SAFETY: `acl` came from `acl_get_fd_np`, the staging descriptor remains
     // live, and `acl_type` is the same native flavor used to obtain the ACL.
@@ -100,6 +136,12 @@ fn apply_acl(staging: &File, acl: *mut c_void, acl_type: u32) -> Result<()> {
 ///
 /// Removes staging-only names and copies source values that differ. Returns an
 /// I/O error if listing, reading, writing, or removing an attribute fails.
+///
+/// # Parameters
+///
+/// - `source`: File providing the desired namespace contents.
+/// - `staging`: File whose namespace is synchronized.
+/// - `namespace`: FreeBSD extended-attribute namespace identifier.
 fn preserve_namespace(source: &File, staging: &File, namespace: libc::c_int) -> Result<()> {
     let source_names = list_attributes(source, namespace)?;
     let staging_names = list_attributes(staging, namespace)?;
@@ -120,6 +162,11 @@ fn preserve_namespace(source: &File, staging: &File, namespace: libc::c_int) -> 
 /// Retries a changing-size race up to [`XATTR_SIZE_RACE_ATTEMPTS`] times and
 /// treats an unsupported namespace as empty. Other syscall failures and
 /// malformed name lists are returned as errors.
+///
+/// # Parameters
+///
+/// - `file`: File descriptor whose names are listed.
+/// - `namespace`: FreeBSD extended-attribute namespace identifier.
 fn list_attributes(file: &File, namespace: libc::c_int) -> Result<BTreeSet<Vec<u8>>> {
     let result = read_attribute_names(
         || {
@@ -150,6 +197,15 @@ fn list_attributes(file: &File, namespace: libc::c_int) -> Result<BTreeSet<Vec<u
     }
 }
 
+/// Reads a changing length-prefixed name list using probe and read operations.
+///
+/// Each successful read is checked against a fresh probe before parsing, so a
+/// truncated prefix is never returned as a complete list.
+///
+/// # Parameters
+///
+/// - `probe`: Operation returning the current encoded list length.
+/// - `read`: Operation filling the supplied buffer with encoded names.
 fn read_attribute_names(
     mut probe: impl FnMut() -> Result<usize>,
     mut read: impl FnMut(&mut [u8]) -> Result<usize>,
@@ -205,6 +261,10 @@ fn read_attribute_names(
 ///
 /// Returns `InvalidData` for empty names, truncated entries, or names
 /// containing NUL bytes.
+///
+/// # Parameters
+///
+/// - `buffer`: Raw FreeBSD length-prefixed name list.
 fn parse_attribute_names(buffer: &[u8]) -> Result<BTreeSet<Vec<u8>>> {
     let mut names = BTreeSet::new();
     let mut offset = 0;
@@ -237,6 +297,12 @@ fn parse_attribute_names(buffer: &[u8]) -> Result<BTreeSet<Vec<u8>>> {
 ///
 /// Returns `NotFound` if the attribute disappears between listing and reading;
 /// other lookup failures retain their native I/O error.
+///
+/// # Parameters
+///
+/// - `file`: File containing the requested attribute.
+/// - `namespace`: FreeBSD extended-attribute namespace identifier.
+/// - `name`: Attribute name bytes.
 fn get_attribute(file: &File, namespace: libc::c_int, name: &[u8]) -> Result<Vec<u8>> {
     get_optional_attribute(file, namespace, name)?.ok_or_else(|| {
         Error::new(
@@ -251,6 +317,12 @@ fn get_attribute(file: &File, namespace: libc::c_int, name: &[u8]) -> Result<Vec
 /// Returns `None` if the attribute is absent and the value otherwise. A value
 /// size race is retried up to [`XATTR_SIZE_RACE_ATTEMPTS`] times; other native
 /// failures are returned as errors.
+///
+/// # Parameters
+///
+/// - `file`: File containing the requested attribute.
+/// - `namespace`: FreeBSD extended-attribute namespace identifier.
+/// - `name`: Attribute name bytes.
 fn get_optional_attribute(file: &File, namespace: libc::c_int, name: &[u8]) -> Result<Option<Vec<u8>>> {
     let name = native_name(name)?;
     read_optional_attribute(
@@ -286,6 +358,16 @@ fn get_optional_attribute(file: &File, namespace: libc::c_int, name: &[u8]) -> R
     )
 }
 
+/// Reads an optional value while detecting changes between its size probe and
+/// read.
+///
+/// Missing-attribute errors from either operation become `None`; size races are
+/// retried within the shared attempt budget.
+///
+/// # Parameters
+///
+/// - `probe`: Operation returning the current value length.
+/// - `read`: Operation filling the supplied buffer with the value.
 fn read_optional_attribute(
     mut probe: impl FnMut() -> Result<usize>,
     mut read: impl FnMut(&mut [u8]) -> Result<usize>,
@@ -343,6 +425,13 @@ fn read_optional_attribute(
 ///
 /// Returns the native error, or `WriteZero` if the system call reports a short
 /// write.
+///
+/// # Parameters
+///
+/// - `file`: File receiving the attribute.
+/// - `namespace`: FreeBSD extended-attribute namespace identifier.
+/// - `name`: Attribute name bytes.
+/// - `value`: Attribute contents to store.
 fn set_attribute(file: &File, namespace: libc::c_int, name: &[u8], value: &[u8]) -> Result<()> {
     let name = native_name(name)?;
     // SAFETY: the descriptor, name, and value remain live for the call, and
@@ -372,6 +461,12 @@ fn set_attribute(file: &File, namespace: libc::c_int, name: &[u8], value: &[u8])
 ///
 /// Treats an attribute that disappeared before removal as already removed and
 /// returns other native failures.
+///
+/// # Parameters
+///
+/// - `file`: File from which to remove the attribute.
+/// - `namespace`: FreeBSD extended-attribute namespace identifier.
+/// - `name`: Attribute name bytes.
 fn remove_attribute(file: &File, namespace: libc::c_int, name: &[u8]) -> Result<()> {
     let name = native_name(name)?;
     // SAFETY: the descriptor and name remain live for this non-retaining call.
@@ -389,12 +484,20 @@ fn remove_attribute(file: &File, namespace: libc::c_int, name: &[u8]) -> Result<
 /// Converts an attribute name to a native C string.
 ///
 /// Returns `InvalidData` if the byte sequence contains an interior NUL.
+///
+/// # Parameters
+///
+/// - `name`: Attribute name bytes to convert.
 #[inline]
 fn native_name(name: &[u8]) -> Result<CString> {
     CString::new(name).map_err(|_| Error::new(ErrorKind::InvalidData, "extended-attribute name contains NUL"))
 }
 
 /// Reports an absent FreeBSD extended attribute.
+///
+/// # Parameters
+///
+/// - `error`: Native error to inspect.
 #[must_use]
 #[inline]
 fn is_missing_attribute(error: &Error) -> bool {
@@ -626,6 +729,10 @@ mod tests {
 }
 
 /// Reports that a filesystem lacks an extended-attribute namespace.
+///
+/// # Parameters
+///
+/// - `error`: Native error to inspect.
 #[must_use]
 #[inline]
 fn is_not_supported(error: &Error) -> bool {
@@ -634,6 +741,10 @@ fn is_not_supported(error: &Error) -> bool {
 }
 
 /// Reports that a filesystem does not use the requested ACL flavor.
+///
+/// # Parameters
+///
+/// - `error`: Native error to inspect.
 #[must_use]
 #[inline]
 fn is_unsupported_acl_type(error: &Error) -> bool {

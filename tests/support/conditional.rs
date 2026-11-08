@@ -10,6 +10,8 @@ use qubit_io::Input;
 use qubit_local_files::LocalFileSystem;
 use qubit_local_files::policy::LocalSymlinkPolicy;
 
+/// Creates a host filesystem that rejects symbolic links for conditional tests.
+#[must_use]
 pub fn host() -> LocalFileSystem {
     let mut filesystem = LocalFileSystem::host().expect("host filesystem");
     filesystem
@@ -18,11 +20,17 @@ pub fn host() -> LocalFileSystem {
     filesystem
 }
 
+/// Reads the verified recovery candidate attached to a conditional commit
+/// error.
+#[must_use]
 pub fn read_candidate(error: &qubit_local_files::error::LocalConditionalCommitError) -> Vec<u8> {
     let candidate = error.candidate().expect("verified candidate copy");
     read_recovery(candidate)
 }
 
+/// Reads all bytes from a retained recovery file for conditional test
+/// assertions.
+#[must_use]
 pub fn read_recovery(file: &qubit_local_files::recovery::LocalRecoveryFile) -> Vec<u8> {
     let mut reader = file.open_reader().expect("open recovery file through retained access");
     let mut bytes = Vec::new();

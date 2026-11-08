@@ -44,13 +44,6 @@ pub struct LocalFileSystemCapabilities {
 }
 
 impl LocalFileSystemCapabilities {
-    #[cfg(test)]
-    pub(crate) const fn with_rename_capabilities_for_test(mut self, atomic_rename: bool, durable_rename: bool) -> Self {
-        self.atomic_rename = atomic_rename;
-        self.durable_rename = durable_rename;
-        self
-    }
-
     /// Detects capabilities compiled for the current target platform.
     pub(crate) const fn detect_host() -> Self {
         Self {
@@ -170,5 +163,20 @@ impl LocalFileSystemCapabilities {
     #[inline]
     pub const fn supports_durable_temp_file_persist(self) -> bool {
         self.durable_temp_file_persist
+    }
+
+    /// Overrides rename support flags for validation tests without changing
+    /// other target capabilities.
+    ///
+    /// # Parameters
+    ///
+    /// - `self` is the capability snapshot whose rename flags are overridden.
+    /// - `atomic_rename` sets whether atomic rename is reported as supported.
+    /// - `durable_rename` sets whether durable rename is reported as supported.
+    #[cfg(test)]
+    pub(crate) const fn with_rename_capabilities_for_test(mut self, atomic_rename: bool, durable_rename: bool) -> Self {
+        self.atomic_rename = atomic_rename;
+        self.durable_rename = durable_rename;
+        self
     }
 }

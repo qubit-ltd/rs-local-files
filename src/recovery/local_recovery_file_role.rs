@@ -7,6 +7,15 @@
 // =============================================================================
 
 /// Role of a file retained after a conditional write attempt.
+///
+/// # Examples
+///
+/// ```
+/// use qubit_local_files::recovery::LocalRecoveryFileRole;
+///
+/// let role = LocalRecoveryFileRole::CandidateCopy;
+/// assert_eq!(role, LocalRecoveryFileRole::CandidateCopy);
+/// ```
 #[must_use]
 #[non_exhaustive]
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]

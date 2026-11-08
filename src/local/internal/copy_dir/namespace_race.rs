@@ -94,6 +94,7 @@ pub(super) fn removable_non_directory_metadata(result: Result<fs::Metadata>) -> 
 
 /// Returns whether test support should classify a replacement race as
 /// directory.
+#[must_use]
 #[inline]
 fn test_removal_directory_race_enabled() -> bool {
     #[cfg(feature = "test-support")]

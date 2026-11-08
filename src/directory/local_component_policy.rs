@@ -56,13 +56,20 @@ use crate::LocalResult;
 /// # Ok(())
 /// # }
 /// ```
+#[must_use = "a component policy has no effect unless it is used"]
 #[derive(Clone, Debug, Default)]
 pub struct LocalComponentPolicy {
+    /// Native component names rejected by this policy.
     denied: Vec<OsString>,
 }
 
 impl LocalComponentPolicy {
     /// Allows every component name.
+    ///
+    /// # Returns
+    ///
+    /// A policy that rejects no component names.
+    #[inline]
     pub const fn allow_all() -> Self {
         Self { denied: Vec::new() }
     }
@@ -75,6 +82,20 @@ impl LocalComponentPolicy {
     /// `BindPath` context. The resulting policy applies to components used by
     /// handle operations and path resolution; it does not filter names found
     /// by recursive discovery.
+    ///
+    /// # Parameters
+    ///
+    /// - `names`: Native names to reject. Each value must be one non-empty
+    ///   normal path component other than `.` or `..`.
+    ///
+    /// # Returns
+    ///
+    /// A policy containing the validated denied names.
+    ///
+    /// # Errors
+    ///
+    /// Returns `InvalidOptions` with `BindPath` context when any name violates
+    /// the component constraint.
     pub fn deny_names(names: Vec<OsString>) -> LocalResult<Self> {
         for name in &names {
             let mut components = Path::new(name).components();
@@ -91,11 +112,41 @@ impl LocalComponentPolicy {
     }
 
     /// Reports whether `component` exactly matches a denied native name.
+    ///
+    /// # Parameters
+    ///
+    /// - `component`: Native path component to compare against the denied
+    ///   names.
+    ///
+    /// # Returns
+    ///
+    /// `true` when the component exactly matches a denied name.
+    #[must_use]
     pub(crate) fn denies(&self, component: &std::ffi::OsStr) -> bool {
         self.denied.iter().any(|name| name == component)
     }
 
+    /// Reports whether the policy permits every component name.
+    ///
+    /// # Returns
+    ///
+    /// `true` when no component names are denied.
+    #[cfg(not(unix))]
+    #[must_use]
+    pub(crate) fn is_allow_all(&self) -> bool {
+        self.denied.is_empty()
+    }
+
     /// Combines parent and child restrictions, retaining each denied name once.
+    ///
+    /// # Parameters
+    ///
+    /// - `other`: Additional policy whose denied names are merged with this
+    ///   policy.
+    ///
+    /// # Returns
+    ///
+    /// A policy containing the unique union of both denied-name lists.
     pub(crate) fn combined_with(&self, other: &Self) -> Self {
         let mut denied = self.denied.clone();
         for name in &other.denied {
@@ -106,12 +157,20 @@ impl LocalComponentPolicy {
         Self { denied }
     }
 
-    #[cfg(not(unix))]
-    pub(crate) fn is_allow_all(&self) -> bool {
-        self.denied.is_empty()
-    }
-
     /// Accepts an allowed component or returns `InvalidPath` for a denied one.
+    ///
+    /// # Parameters
+    ///
+    /// - `component`: Native path component to validate against this policy.
+    ///
+    /// # Returns
+    ///
+    /// `Ok(())` when the component is allowed.
+    ///
+    /// # Errors
+    ///
+    /// Returns `InvalidPath` with `BindPath` context when the component is
+    /// denied.
     pub(crate) fn validate_component(&self, component: &std::ffi::OsStr) -> LocalResult<()> {
         if self.denies(component) {
             return Err(

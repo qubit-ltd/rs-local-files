@@ -19,7 +19,7 @@ use qubit_local_files::options::LocalWriteOptions;
 use qubit_local_files::test_support::install_test_fault;
 
 #[test]
-fn generic_vectored_reader_fills_multiple_buffers() {
+fn test_generic_vectored_reader_fills_multiple_buffers() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("source");
     std::fs::write(&path, b"abcdef").unwrap();
@@ -36,7 +36,7 @@ fn generic_vectored_reader_fills_multiple_buffers() {
 }
 
 #[test]
-fn generic_vectored_writer_counts_once_for_all_backends() {
+fn test_generic_vectored_writer_counts_once_for_all_backends() {
     let dir = tempfile::tempdir().unwrap();
     let host = LocalFileSystem::host().unwrap();
     let rooted = LocalFileSystem::rooted(dir.path()).unwrap();
@@ -69,7 +69,7 @@ fn generic_vectored_writer_counts_once_for_all_backends() {
 }
 
 #[test]
-fn vectored_writer_entries_share_the_byte_count() {
+fn test_vectored_writer_entries_share_the_byte_count() {
     let dir = tempfile::tempdir().unwrap();
     let fs = LocalFileSystem::host().unwrap();
     let path = dir.path().join("mixed");
@@ -86,7 +86,7 @@ fn vectored_writer_entries_share_the_byte_count() {
 }
 
 #[test]
-fn closed_temp_file_checks_state_before_empty_vectored_write() {
+fn test_closed_temp_file_checks_state_before_empty_vectored_write() {
     let fs = LocalFileSystem::host().unwrap();
     let mut temporary = fs.create_temp_file().unwrap();
     temporary.close();
@@ -101,7 +101,7 @@ fn closed_temp_file_checks_state_before_empty_vectored_write() {
 }
 
 #[test]
-fn aborted_writer_checks_state_before_empty_vectored_write() {
+fn test_aborted_writer_checks_state_before_empty_vectored_write() {
     let dir = tempfile::tempdir().unwrap();
     let fs = LocalFileSystem::host().unwrap();
     let mut writer = fs.open_writer(&dir.path().join("aborted")).unwrap();
@@ -117,7 +117,7 @@ fn aborted_writer_checks_state_before_empty_vectored_write() {
 }
 
 #[test]
-fn active_writer_accepts_empty_vectored_write_without_counting_bytes() {
+fn test_active_writer_accepts_empty_vectored_write_without_counting_bytes() {
     let dir = tempfile::tempdir().unwrap();
     let fs = LocalFileSystem::host().unwrap();
     let mut writer = fs.open_writer(&dir.path().join("empty")).unwrap();
@@ -128,7 +128,7 @@ fn active_writer_accepts_empty_vectored_write_without_counting_bytes() {
 
 #[cfg(all(feature = "test-support", unix))]
 #[test]
-fn failed_writer_checks_failure_state_before_empty_vectored_write() {
+fn test_failed_writer_checks_failure_state_before_empty_vectored_write() {
     let dir = tempfile::tempdir().unwrap();
     let fs = LocalFileSystem::host().unwrap();
     let mut writer = fs.open_writer(&dir.path().join("failed")).unwrap();
@@ -141,7 +141,7 @@ fn failed_writer_checks_failure_state_before_empty_vectored_write() {
 }
 
 #[test]
-fn generic_vectored_reader_keeps_the_legacy_entry_compatible() {
+fn test_generic_vectored_reader_keeps_the_legacy_entry_compatible() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("source");
     std::fs::write(&path, b"abcdef").unwrap();

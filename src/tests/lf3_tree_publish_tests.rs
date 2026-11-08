@@ -82,7 +82,7 @@ impl Drop for WritableTreeFixture {
 }
 
 #[test]
-fn lf_review_tree_exact_set_conflicts_leave_destination_and_owner_untouched() {
+fn test_lf_review_tree_exact_set_conflicts_leave_destination_and_owner_untouched() {
     for (name, expected) in [
         ("missing", Vec::new()),
         (
@@ -134,7 +134,7 @@ fn lf_review_tree_exact_set_conflicts_leave_destination_and_owner_untouched() {
 }
 
 #[test]
-fn lf_n02_required_sync_accepts_a_file_at_the_depth_boundary() {
+fn test_lf_n02_required_sync_accepts_a_file_at_the_depth_boundary() {
     let fixture = tempfile::tempdir().expect("fixture");
     let fs = crate::LocalFileSystem::host().expect("Host");
     let parent = fs
@@ -162,7 +162,7 @@ fn lf_n02_required_sync_accepts_a_file_at_the_depth_boundary() {
 }
 
 #[test]
-fn lf_n02_over_depth_publish_is_not_published_and_returns_stage() {
+fn test_lf_n02_over_depth_publish_is_not_published_and_returns_stage() {
     let fixture = tempfile::tempdir().expect("fixture");
     let fs = crate::LocalFileSystem::host().expect("Host");
     let parent = fs
@@ -194,7 +194,7 @@ fn lf_n02_over_depth_publish_is_not_published_and_returns_stage() {
 }
 
 #[test]
-fn lf_review_tree_duplicate_expected_paths_preserve_publish_owner() {
+fn test_lf_review_tree_duplicate_expected_paths_preserve_publish_owner() {
     let fixture = tempfile::tempdir().expect("fixture");
     let fs = crate::LocalFileSystem::host().expect("Host");
     let parent = fs
@@ -225,7 +225,7 @@ fn lf_review_tree_duplicate_expected_paths_preserve_publish_owner() {
 
 #[cfg(unix)]
 #[test]
-fn lf_review_tree_special_allowed_with_only_limits() {
+fn test_lf_review_tree_special_allowed_with_only_limits() {
     use std::os::unix::fs::FileTypeExt;
     use std::os::unix::net::UnixListener;
 
@@ -258,7 +258,7 @@ fn lf_review_tree_special_allowed_with_only_limits() {
 
 #[cfg(unix)]
 #[test]
-fn lf_review_tree_special_rejected_when_requested() {
+fn test_lf_review_tree_special_rejected_when_requested() {
     use std::os::unix::net::UnixListener;
 
     let fixture = tempfile::tempdir_in("/tmp").expect("fixture");
@@ -295,7 +295,7 @@ fn lf_review_tree_special_rejected_when_requested() {
 
 #[cfg(unix)]
 #[test]
-fn lf_review_tree_hardlinks_reject_only_external_links() {
+fn test_lf_review_tree_hardlinks_reject_only_external_links() {
     for external in [false, true] {
         let fixture = tempfile::tempdir().expect("fixture");
         let fs = crate::LocalFileSystem::host().expect("Host");
@@ -343,7 +343,7 @@ fn lf_review_tree_hardlinks_reject_only_external_links() {
 }
 
 #[test]
-fn lf_review_tree_path_budget_precedes_publish_retention() {
+fn test_lf_review_tree_path_budget_precedes_publish_retention() {
     let fixture = tempfile::tempdir().expect("fixture");
     let fs = crate::LocalFileSystem::host().expect("Host");
     let parent = fs
@@ -379,7 +379,7 @@ fn lf_review_tree_path_budget_precedes_publish_retention() {
 }
 
 #[test]
-fn lf_review_tree_publish_depth_limit_retains_stage() {
+fn test_lf_review_tree_publish_depth_limit_retains_stage() {
     let fixture = tempfile::tempdir().expect("fixture");
     let fs = crate::LocalFileSystem::host().expect("Host");
     let parent = fs
@@ -418,7 +418,7 @@ fn lf_review_tree_publish_depth_limit_retains_stage() {
 }
 
 #[test]
-fn lf_review_tree_zero_deadline_and_entry_limit_retain_publish_owner() {
+fn test_lf_review_tree_zero_deadline_and_entry_limit_retain_publish_owner() {
     for limits in [
         LocalListOptions::new().with_deadline(std::time::Duration::ZERO),
         LocalListOptions::new().with_max_entries(0),
@@ -452,7 +452,7 @@ fn lf_review_tree_zero_deadline_and_entry_limit_retain_publish_owner() {
 }
 
 #[test]
-fn lf3_tree_publish_conflict_retains_original() {
+fn test_lf3_tree_publish_conflict_retains_original() {
     let fixture = tempfile::tempdir().expect("fixture should be created");
     std::fs::create_dir(fixture.path().join("target")).expect("target should be created");
     std::fs::write(fixture.path().join("target/old"), b"original").expect("target contents should be written");
@@ -475,7 +475,7 @@ fn lf3_tree_publish_conflict_retains_original() {
 }
 
 #[test]
-fn tree_publish_conflict_reports_prior_access_mutation() {
+fn test_tree_publish_conflict_reports_prior_access_mutation() {
     let fixture = tempfile::tempdir().expect("fixture should be created");
     std::fs::create_dir(fixture.path().join("target")).expect("target should be created");
     let fs = crate::LocalFileSystem::host().expect("host filesystem should open");
@@ -553,7 +553,7 @@ fn test_recovery_error_tree_cleanup_source_retains_its_cause_and_owner() {
 
 #[cfg(unix)]
 #[test]
-fn tree_access_policy_round_trips_without_releasing_stage() {
+fn test_tree_access_policy_round_trips_without_releasing_stage() {
     use std::os::unix::fs::PermissionsExt;
 
     let fixture = tempfile::tempdir().expect("fixture should be created");
@@ -619,7 +619,7 @@ fn tree_access_policy_round_trips_without_releasing_stage() {
 }
 
 #[test]
-fn tree_publish_rejects_non_component_names_without_consuming_stage() {
+fn test_tree_publish_rejects_non_component_names_without_consuming_stage() {
     let fixture = tempfile::tempdir().expect("fixture should be created");
     let fs = crate::LocalFileSystem::host().expect("host filesystem should open");
     let parent = fs
@@ -636,7 +636,7 @@ fn tree_publish_rejects_non_component_names_without_consuming_stage() {
 }
 
 #[test]
-fn retained_stage_can_be_reopened_by_identity_and_explicitly_cleaned() {
+fn test_retained_stage_can_be_reopened_by_identity_and_explicitly_cleaned() {
     let fixture = tempfile::tempdir().expect("fixture should be created");
     let fs = crate::LocalFileSystem::host().expect("host filesystem should open");
     let parent = fs
@@ -665,7 +665,7 @@ fn retained_stage_can_be_reopened_by_identity_and_explicitly_cleaned() {
 }
 
 #[test]
-fn successful_publish_keeps_stage_contents_at_target() {
+fn test_successful_publish_keeps_stage_contents_at_target() {
     let fixture = tempfile::tempdir().expect("fixture should be created");
     let fs = crate::LocalFileSystem::host().expect("host filesystem should open");
     let parent = fs
@@ -690,7 +690,7 @@ fn successful_publish_keeps_stage_contents_at_target() {
 }
 
 #[test]
-fn required_file_sync_is_completed_before_publish() {
+fn test_required_file_sync_is_completed_before_publish() {
     let fixture = tempfile::tempdir().expect("fixture should be created");
     let fs = crate::LocalFileSystem::host().expect("host filesystem should open");
     let parent = fs
@@ -713,7 +713,7 @@ fn required_file_sync_is_completed_before_publish() {
 
 #[cfg(unix)]
 #[test]
-fn readonly_publish_collision_restores_stage_access() {
+fn test_readonly_publish_collision_restores_stage_access() {
     let fixture = tempfile::tempdir().expect("fixture should be created");
     std::fs::write(fixture.path().join("published"), b"existing").expect("destination");
     let fs = crate::LocalFileSystem::host().expect("host filesystem should open");
@@ -754,7 +754,7 @@ fn readonly_publish_collision_restores_stage_access() {
 
 #[cfg(unix)]
 #[test]
-fn readonly_publish_collision_and_restore_failure_preserve_both_errors() {
+fn test_readonly_publish_collision_and_restore_failure_preserve_both_errors() {
     let fixture = tempfile::tempdir().expect("fixture should be created");
     std::fs::write(fixture.path().join("published"), b"existing").expect("destination");
     let fs = crate::LocalFileSystem::host().expect("host filesystem should open");
@@ -791,7 +791,7 @@ fn readonly_publish_collision_and_restore_failure_preserve_both_errors() {
 
 #[cfg(unix)]
 #[test]
-fn readonly_publish_final_access_failure_reports_published() {
+fn test_readonly_publish_final_access_failure_reports_published() {
     let fixture = tempfile::tempdir().expect("fixture should be created");
     let fs = crate::LocalFileSystem::host().expect("host filesystem should open");
     let parent = fs
@@ -823,7 +823,7 @@ fn readonly_publish_final_access_failure_reports_published() {
 
 #[cfg(unix)]
 #[test]
-fn lf_revision_readonly_sync_publishes_all_sync_requirements() {
+fn test_lf_revision_readonly_sync_publishes_all_sync_requirements() {
     assert_ne!(
         unsafe { libc::geteuid() },
         0,
@@ -879,7 +879,7 @@ fn lf_revision_readonly_sync_publishes_all_sync_requirements() {
 
 #[cfg(unix)]
 #[test]
-fn lf_revision_readonly_sync_failure_states_preserve_truthful_outcomes() {
+fn test_lf_revision_readonly_sync_failure_states_preserve_truthful_outcomes() {
     assert_ne!(
         unsafe { libc::geteuid() },
         0,
@@ -982,7 +982,7 @@ fn test_readonly_tree_fixture_cleans_after_unwind() {
 
 #[cfg(windows)]
 #[test]
-fn lf_revision_preserve_sync_uses_a_write_capable_handle() {
+fn test_lf_revision_preserve_sync_uses_a_write_capable_handle() {
     let fixture = tempfile::tempdir().expect("fixture should be created");
     let filesystem = crate::LocalFileSystem::host().expect("host filesystem should open");
     let parent = filesystem
@@ -1016,7 +1016,7 @@ fn lf_revision_preserve_sync_uses_a_write_capable_handle() {
 
 #[cfg(windows)]
 #[test]
-fn windows_access_failure_after_child_mutation_reports_mixed_and_keeps_stage() {
+fn test_windows_access_failure_after_child_mutation_reports_mixed_and_keeps_stage() {
     use crate::temp::internal::privacy_windows;
     use crate::temp::internal::privacy_windows::FailurePoint;
 
@@ -1051,7 +1051,7 @@ fn windows_access_failure_after_child_mutation_reports_mixed_and_keeps_stage() {
 
 #[cfg(unix)]
 #[test]
-fn unix_access_failure_after_child_mutation_reports_mixed_and_keeps_stage() {
+fn test_unix_access_failure_after_child_mutation_reports_mixed_and_keeps_stage() {
     let fixture = tempfile::tempdir().expect("fixture should be created");
     let fs = crate::LocalFileSystem::host().expect("host filesystem should open");
     let parent = fs
@@ -1082,7 +1082,7 @@ fn unix_access_failure_after_child_mutation_reports_mixed_and_keeps_stage() {
 }
 
 #[test]
-fn required_sync_failure_keeps_unpublished_stage_for_cleanup() {
+fn test_required_sync_failure_keeps_unpublished_stage_for_cleanup() {
     let fixture = tempfile::tempdir().expect("fixture should be created");
     let fs = crate::LocalFileSystem::host().expect("host filesystem should open");
     let parent = fs

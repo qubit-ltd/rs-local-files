@@ -8,6 +8,10 @@
 use std::fs;
 use std::path::Path;
 
+#[cfg(unix)]
+use libc::mkfifo;
+use tempfile::tempdir;
+
 use crate::LocalFileKind;
 use crate::LocalFileSystem;
 use crate::directory::LocalTreeEntry;
@@ -20,10 +24,10 @@ use crate::policy::LocalPrivacyRequirement;
 
 #[cfg(unix)]
 #[test]
-fn lf_review_tree_directory_links_are_entries() {
+fn test_lf_review_tree_directory_links_are_entries() {
     use std::os::unix::fs::symlink;
 
-    let fixture = tempfile::tempdir().expect("fixture");
+    let fixture = tempdir().expect("fixture");
     let fs = LocalFileSystem::host().expect("Host");
     let parent = fs
         .open_directory_with_options(fixture.path(), &LocalDirectoryOpenOptions::new())
@@ -61,10 +65,10 @@ fn lf_review_tree_directory_links_are_entries() {
 
 #[cfg(unix)]
 #[test]
-fn lf_review_tree_dangling_and_loop_links_are_entries() {
+fn test_lf_review_tree_dangling_and_loop_links_are_entries() {
     use std::os::unix::fs::symlink;
 
-    let fixture = tempfile::tempdir().expect("fixture");
+    let fixture = tempdir().expect("fixture");
     let fs = LocalFileSystem::host().expect("Host");
     let parent = fs
         .open_directory_with_options(fixture.path(), &LocalDirectoryOpenOptions::new())
@@ -88,8 +92,8 @@ fn lf_review_tree_dangling_and_loop_links_are_entries() {
 }
 
 #[test]
-fn lf_review_tree_expected_path_budget_is_checked_before_matching() {
-    let fixture = tempfile::tempdir().expect("fixture");
+fn test_lf_review_tree_expected_path_budget_is_checked_before_matching() {
+    let fixture = tempdir().expect("fixture");
     let fs = LocalFileSystem::host().expect("Host");
     let parent = fs
         .open_directory_with_options(fixture.path(), &LocalDirectoryOpenOptions::new())
@@ -108,8 +112,8 @@ fn lf_review_tree_expected_path_budget_is_checked_before_matching() {
 }
 
 #[test]
-fn lf3_tree_observer_defers_entry_reads_until_next() {
-    let fixture = tempfile::tempdir().expect("fixture should exist");
+fn test_lf3_tree_observer_defers_entry_reads_until_next() {
+    let fixture = tempdir().expect("fixture should exist");
     let fs = LocalFileSystem::host().expect("host filesystem should open");
     let parent = fs
         .open_directory_with_options(fixture.path(), &LocalDirectoryOpenOptions::new())
@@ -144,7 +148,7 @@ fn lf3_tree_observer_defers_entry_reads_until_next() {
 }
 
 #[test]
-fn lf3_tree_entry_rejects_escaping_paths_and_special_kinds() {
+fn test_lf3_tree_entry_rejects_escaping_paths_and_special_kinds() {
     assert!(LocalTreeEntry::new(Path::new("../escape").to_path_buf(), LocalFileKind::File).is_err());
     assert!(LocalTreeEntry::new(Path::new("/absolute").to_path_buf(), LocalFileKind::File).is_err());
     assert!(LocalTreeEntry::new(Path::new("file").to_path_buf(), LocalFileKind::Fifo).is_err());
@@ -152,8 +156,8 @@ fn lf3_tree_entry_rejects_escaping_paths_and_special_kinds() {
 }
 
 #[test]
-fn lf3_tree_validation_checks_exact_entries_and_rejects_symlink_opt_in() {
-    let fixture = tempfile::tempdir().expect("fixture should exist");
+fn test_lf3_tree_validation_checks_exact_entries_and_rejects_symlink_opt_in() {
+    let fixture = tempdir().expect("fixture should exist");
     let fs = LocalFileSystem::host().expect("host filesystem should open");
     let parent = fs
         .open_directory_with_options(fixture.path(), &LocalDirectoryOpenOptions::new())
@@ -175,8 +179,8 @@ fn lf3_tree_validation_checks_exact_entries_and_rejects_symlink_opt_in() {
 }
 
 #[test]
-fn lf3_tree_write_new_enforces_no_replace_and_stream_limit() {
-    let fixture = tempfile::tempdir().expect("fixture should exist");
+fn test_lf3_tree_write_new_enforces_no_replace_and_stream_limit() {
+    let fixture = tempdir().expect("fixture should exist");
     let fs = LocalFileSystem::host().expect("host filesystem should open");
     let parent = fs
         .open_directory_with_options(fixture.path(), &LocalDirectoryOpenOptions::new())
@@ -214,8 +218,8 @@ fn lf3_tree_write_new_enforces_no_replace_and_stream_limit() {
 }
 
 #[test]
-fn lf3_tree_cleanup_refuses_replaced_stage_name() {
-    let fixture = tempfile::tempdir().expect("fixture should exist");
+fn test_lf3_tree_cleanup_refuses_replaced_stage_name() {
+    let fixture = tempdir().expect("fixture should exist");
     let fs = LocalFileSystem::host().expect("host filesystem should open");
     let parent = fs
         .open_directory_with_options(fixture.path(), &LocalDirectoryOpenOptions::new())
@@ -237,8 +241,8 @@ fn lf3_tree_cleanup_refuses_replaced_stage_name() {
 }
 
 #[test]
-fn lf3_tree_cleanup_refuses_replaced_owned_child() {
-    let fixture = tempfile::tempdir().expect("fixture should exist");
+fn test_lf3_tree_cleanup_refuses_replaced_owned_child() {
+    let fixture = tempdir().expect("fixture should exist");
     let fs = LocalFileSystem::host().expect("host filesystem should open");
     let parent = fs
         .open_directory_with_options(fixture.path(), &LocalDirectoryOpenOptions::new())
@@ -266,9 +270,9 @@ fn lf3_tree_cleanup_refuses_replaced_owned_child() {
 }
 
 #[test]
-fn lf_revision_cleanup_index_scales_with_real_cleanup_entries() {
+fn test_lf_revision_cleanup_index_scales_with_real_cleanup_entries() {
     for count in [64, 128] {
-        let fixture = tempfile::tempdir().expect("fixture should exist");
+        let fixture = tempdir().expect("fixture should exist");
         let fs = LocalFileSystem::host().expect("host filesystem should open");
         let parent = fs
             .open_directory_with_options(fixture.path(), &LocalDirectoryOpenOptions::new())
@@ -297,8 +301,8 @@ fn lf_revision_cleanup_index_scales_with_real_cleanup_entries() {
 }
 
 #[test]
-fn lf_revision_cleanup_index_refuses_replaced_owned_file() {
-    let fixture = tempfile::tempdir().expect("fixture should exist");
+fn test_lf_revision_cleanup_index_refuses_replaced_owned_file() {
+    let fixture = tempdir().expect("fixture should exist");
     let fs = LocalFileSystem::host().expect("host filesystem should open");
     let parent = fs
         .open_directory_with_options(fixture.path(), &LocalDirectoryOpenOptions::new())
@@ -333,8 +337,8 @@ fn lf_revision_cleanup_index_refuses_replaced_owned_file() {
 }
 
 #[test]
-fn lf_revision_cleanup_index_keeps_original_identity_on_duplicate_record() {
-    let fixture = tempfile::tempdir().expect("fixture should exist");
+fn test_lf_revision_cleanup_index_keeps_original_identity_on_duplicate_record() {
+    let fixture = tempdir().expect("fixture should exist");
     let fs = LocalFileSystem::host().expect("host filesystem should open");
     let parent = fs
         .open_directory_with_options(fixture.path(), &LocalDirectoryOpenOptions::new())
@@ -382,10 +386,10 @@ fn lf_revision_cleanup_index_keeps_original_identity_on_duplicate_record() {
 
 #[cfg(unix)]
 #[test]
-fn lf3_tree_staged_directory_can_require_private_creation() {
+fn test_lf3_tree_staged_directory_can_require_private_creation() {
     use std::os::unix::fs::PermissionsExt;
 
-    let fixture = tempfile::tempdir().expect("fixture should exist");
+    let fixture = tempdir().expect("fixture should exist");
     let fs = LocalFileSystem::host().expect("host filesystem should open");
     let parent = fs
         .open_directory_with_options(fixture.path(), &LocalDirectoryOpenOptions::new())
@@ -416,10 +420,10 @@ fn lf3_tree_staged_directory_can_require_private_creation() {
 
 #[cfg(unix)]
 #[test]
-fn lf3_tree_hardlink_validation_counts_links_inside_the_checked_tree() {
+fn test_lf3_tree_hardlink_validation_counts_links_inside_the_checked_tree() {
     use std::fs::hard_link;
 
-    let fixture = tempfile::tempdir().expect("fixture should exist");
+    let fixture = tempdir().expect("fixture should exist");
     let fs = LocalFileSystem::host().expect("host filesystem should open");
     let parent = fs
         .open_directory_with_options(fixture.path(), &LocalDirectoryOpenOptions::new())
@@ -455,8 +459,8 @@ fn lf3_tree_hardlink_validation_counts_links_inside_the_checked_tree() {
 }
 
 #[test]
-fn lf3_tree_validation_rejects_a_truncated_walk() {
-    let fixture = tempfile::tempdir().expect("fixture should exist");
+fn test_lf3_tree_validation_rejects_a_truncated_walk() {
+    let fixture = tempdir().expect("fixture should exist");
     let fs = LocalFileSystem::host().expect("host filesystem should open");
     let parent = fs
         .open_directory_with_options(fixture.path(), &LocalDirectoryOpenOptions::new())
@@ -475,10 +479,10 @@ fn lf3_tree_validation_rejects_a_truncated_walk() {
 }
 
 #[test]
-fn lf3_tree_validation_enforces_name_entry_and_deadline_budgets() {
+fn test_lf3_tree_validation_enforces_name_entry_and_deadline_budgets() {
     use std::time::Duration;
 
-    let fixture = tempfile::tempdir().expect("fixture should exist");
+    let fixture = tempdir().expect("fixture should exist");
     let fs = LocalFileSystem::host().expect("host filesystem should open");
     let parent = fs
         .open_directory_with_options(fixture.path(), &LocalDirectoryOpenOptions::new())
@@ -515,8 +519,8 @@ fn lf3_tree_validation_enforces_name_entry_and_deadline_budgets() {
 }
 
 #[test]
-fn lf3_tree_observer_respects_open_directory_limit() {
-    let fixture = tempfile::tempdir().expect("fixture should exist");
+fn test_lf3_tree_observer_respects_open_directory_limit() {
+    let fixture = tempdir().expect("fixture should exist");
     let fs = LocalFileSystem::host().expect("host filesystem should open");
     let parent = fs
         .open_directory_with_options(fixture.path(), &LocalDirectoryOpenOptions::new())
@@ -554,8 +558,8 @@ fn lf3_tree_observer_respects_open_directory_limit() {
 }
 
 #[test]
-fn lf3_tree_create_error_retains_structured_failure() {
-    let fixture = tempfile::tempdir().expect("fixture should exist");
+fn test_lf3_tree_create_error_retains_structured_failure() {
+    let fixture = tempdir().expect("fixture should exist");
     let fs = LocalFileSystem::host().expect("host filesystem should open");
     let parent = fs
         .open_directory_with_options(fixture.path(), &LocalDirectoryOpenOptions::new())
@@ -572,8 +576,8 @@ fn lf3_tree_create_error_retains_structured_failure() {
 }
 
 #[test]
-fn lf_n04_stage_name_affixes_and_invalid_names_follow_options() {
-    let fixture = tempfile::tempdir().expect("fixture");
+fn test_lf_n04_stage_name_affixes_and_invalid_names_follow_options() {
+    let fixture = tempdir().expect("fixture");
     let fs = LocalFileSystem::host().expect("host filesystem");
     let parent = fs
         .open_directory_with_options(fixture.path(), &LocalDirectoryOpenOptions::new())
@@ -607,12 +611,12 @@ fn lf_n04_stage_name_affixes_and_invalid_names_follow_options() {
 
 #[cfg(feature = "test-support")]
 #[test]
-fn lf_n04_unbounded_attempts_survive_more_than_sixty_four_collisions() {
+fn test_lf_n04_unbounded_attempts_survive_more_than_sixty_four_collisions() {
     for privacy in [
         LocalPrivacyRequirement::PlatformDefault,
         LocalPrivacyRequirement::Required,
     ] {
-        let fixture = tempfile::tempdir().expect("fixture");
+        let fixture = tempdir().expect("fixture");
         let fs = LocalFileSystem::host().expect("host filesystem");
         let parent = fs
             .open_directory_with_options(fixture.path(), &LocalDirectoryOpenOptions::new())
@@ -631,13 +635,13 @@ fn lf_n04_unbounded_attempts_survive_more_than_sixty_four_collisions() {
 
 #[cfg(feature = "test-support")]
 #[test]
-fn lf_n04_finite_attempts_and_zero_attempts_are_exact() {
+fn test_lf_n04_finite_attempts_and_zero_attempts_are_exact() {
     for privacy in [
         LocalPrivacyRequirement::PlatformDefault,
         LocalPrivacyRequirement::Required,
     ] {
         for (maximum, collisions) in [(64, 64), (1, 1)] {
-            let fixture = tempfile::tempdir().expect("fixture");
+            let fixture = tempdir().expect("fixture");
             let fs = LocalFileSystem::host().expect("host filesystem");
             let parent = fs
                 .open_directory_with_options(fixture.path(), &LocalDirectoryOpenOptions::new())
@@ -661,7 +665,7 @@ fn lf_n04_finite_attempts_and_zero_attempts_are_exact() {
             assert_eq!(0, fs::read_dir(fixture.path()).expect("parent listing").count());
         }
 
-        let fixture = tempfile::tempdir().expect("fixture");
+        let fixture = tempdir().expect("fixture");
         let fs = LocalFileSystem::host().expect("host filesystem");
         let parent = fs
             .open_directory_with_options(fixture.path(), &LocalDirectoryOpenOptions::new())
@@ -684,8 +688,8 @@ fn lf_n04_finite_attempts_and_zero_attempts_are_exact() {
 
 #[cfg(feature = "test-support")]
 #[test]
-fn lf3_tree_private_stage_retries_name_collisions_without_deleting_conflicts() {
-    let fixture = tempfile::tempdir().expect("fixture should exist");
+fn test_lf3_tree_private_stage_retries_name_collisions_without_deleting_conflicts() {
+    let fixture = tempdir().expect("fixture should exist");
     let fs = LocalFileSystem::host().expect("host filesystem should open");
     let parent = fs
         .open_directory_with_options(fixture.path(), &LocalDirectoryOpenOptions::new())
@@ -705,11 +709,11 @@ fn lf3_tree_private_stage_retries_name_collisions_without_deleting_conflicts() {
 
 #[cfg(unix)]
 #[test]
-fn lf3_tree_private_stage_does_not_claim_or_cleanup_replaced_name() {
+fn test_lf3_tree_private_stage_does_not_claim_or_cleanup_replaced_name() {
     use std::sync::Arc;
     use std::sync::Mutex;
 
-    let fixture = tempfile::tempdir().expect("fixture should exist");
+    let fixture = tempdir().expect("fixture should exist");
     let fs = LocalFileSystem::host().expect("host filesystem should open");
     let parent = fs
         .open_directory_with_options(fixture.path(), &LocalDirectoryOpenOptions::new())
@@ -775,7 +779,7 @@ fn test_review_stage_creation_identity_rejects_replaced_name_for_all_policies() 
     };
 
     for (label, options) in cases {
-        let fixture = tempfile::tempdir().expect("fixture should exist");
+        let fixture = tempdir().expect("fixture should exist");
         let fs = LocalFileSystem::host().expect("host filesystem should open");
         let parent = fs
             .open_directory_with_options(fixture.path(), &LocalDirectoryOpenOptions::new())
@@ -857,8 +861,8 @@ fn test_review_stage_creation_identity_rejects_replaced_name_for_all_policies() 
 
 #[cfg(feature = "test-support")]
 #[test]
-fn lf3_tree_partial_private_stage_retains_identity_and_cleanup_owner() {
-    let fixture = tempfile::tempdir().expect("fixture should exist");
+fn test_lf3_tree_partial_private_stage_retains_identity_and_cleanup_owner() {
+    let fixture = tempdir().expect("fixture should exist");
     let fs = LocalFileSystem::host().expect("host filesystem should open");
     let parent = fs
         .open_directory_with_options(fixture.path(), &LocalDirectoryOpenOptions::new())
@@ -899,8 +903,8 @@ fn lf3_tree_partial_private_stage_retains_identity_and_cleanup_owner() {
 }
 
 #[test]
-fn lf3_tree_recovery_location_survives_drop_and_reopens_by_identity() {
-    let fixture = tempfile::tempdir().expect("fixture should exist");
+fn test_lf3_tree_recovery_location_survives_drop_and_reopens_by_identity() {
+    let fixture = tempdir().expect("fixture should exist");
     let fs = LocalFileSystem::host().expect("host filesystem should open");
     let parent = fs
         .open_directory_with_options(fixture.path(), &LocalDirectoryOpenOptions::new())
@@ -931,10 +935,10 @@ fn lf3_tree_recovery_location_survives_drop_and_reopens_by_identity() {
 }
 
 #[test]
-fn lf3_tree_cleanup_limit_failure_retains_retryable_owner() {
+fn test_lf3_tree_cleanup_limit_failure_retains_retryable_owner() {
     use std::time::Duration;
 
-    let fixture = tempfile::tempdir().expect("fixture should exist");
+    let fixture = tempdir().expect("fixture should exist");
     let fs = LocalFileSystem::host().expect("host filesystem should open");
     let parent = fs
         .open_directory_with_options(fixture.path(), &LocalDirectoryOpenOptions::new())
@@ -959,10 +963,10 @@ fn lf3_tree_cleanup_limit_failure_retains_retryable_owner() {
 
 #[cfg(unix)]
 #[test]
-fn lf3_tree_observer_observes_symlink_entry_without_following_it() {
+fn test_lf3_tree_observer_observes_symlink_entry_without_following_it() {
     use std::os::unix::fs::symlink;
 
-    let fixture = tempfile::tempdir().expect("fixture should exist");
+    let fixture = tempdir().expect("fixture should exist");
     let fs = LocalFileSystem::host().expect("host filesystem should open");
     let parent = fs
         .open_directory_with_options(fixture.path(), &LocalDirectoryOpenOptions::new())
@@ -1001,8 +1005,8 @@ fn lf3_tree_observer_observes_symlink_entry_without_following_it() {
 
 #[cfg(unix)]
 #[test]
-fn lf3_tree_special_file_rejection_is_independent() {
-    let fixture = tempfile::tempdir().expect("fixture should exist");
+fn test_lf3_tree_special_file_rejection_is_independent() {
+    let fixture = tempdir().expect("fixture should exist");
     let fs = LocalFileSystem::host().expect("host filesystem should open");
     let parent = fs
         .open_directory_with_options(fixture.path(), &LocalDirectoryOpenOptions::new())
@@ -1014,7 +1018,7 @@ fn lf3_tree_special_file_rejection_is_independent() {
     let path = std::ffi::CString::new(fifo.as_os_str().as_encoded_bytes()).expect("fixture path has no NUL");
     // SAFETY: `path` is NUL terminated and points to a writable child path in the
     // fixture.
-    assert_eq!(0, unsafe { libc::mkfifo(path.as_ptr(), 0o600) });
+    assert_eq!(0, unsafe { mkfifo(path.as_ptr(), 0o600) });
     let mut observer = stage
         .observe_tree_with_options(&LocalListOptions::new())
         .expect("observer should open");

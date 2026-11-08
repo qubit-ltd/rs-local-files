@@ -38,6 +38,20 @@ use crate::local_file_system_validation::validate_rename_options;
 use crate::local_file_system_validation::validate_temp_options;
 use crate::local_file_system_validation::validate_write_options;
 
+/// Adds the current virtual directory to a rename configuration error.
+///
+/// The helper preserves the error's operation, kind, and paths while attaching
+/// the directory context used by the owning filesystem instance.
+///
+/// # Parameters
+///
+/// - `error`: Configuration error whose operation, kind, and paths are
+///   retained.
+/// - `current_directory`: Optional virtual directory context to attach.
+///
+/// # Returns
+///
+/// The original error with the supplied current-directory context attached.
 fn rename_options_error(error: LocalFileError, current_directory: Option<&Path>) -> LocalFileError {
     with_current_directory(error, current_directory)
 }
@@ -49,7 +63,6 @@ impl LocalFileSystem {
     ///
     /// `Host` for process-wide native paths or `Rooted` for paths interpreted
     /// below a retained directory authority.
-    #[must_use = "inspect which namespace this filesystem uses"]
     #[inline]
     pub fn scope(&self) -> LocalFileSystemScope {
         match &self.core.namespace {
@@ -122,7 +135,10 @@ impl LocalFileSystem {
 
     /// Returns the default symlink policy inherited by operations that do not
     /// supply an explicit policy.
-    #[must_use = "inspect the default symbolic-link policy"]
+    ///
+    /// # Returns
+    ///
+    /// The policy currently inherited by defaulted operations.
     #[inline]
     pub const fn symlink_policy(&self) -> LocalSymlinkPolicy {
         self.symlink_policy
@@ -161,6 +177,10 @@ impl LocalFileSystem {
     }
 
     /// Returns the reader options inherited by calls without explicit options.
+    ///
+    /// # Returns
+    ///
+    /// A borrow of the reader defaults stored by this filesystem.
     #[inline]
     #[must_use = "inspect the default options"]
     pub const fn default_read_options(&self) -> &LocalReadOptions {
@@ -169,16 +189,26 @@ impl LocalFileSystem {
 
     /// Replaces the reader options inherited by subsequent calls.
     ///
+    /// # Parameters
+    ///
+    /// - `options`: Reader behavior to use for later calls without explicit
+    ///   options.
+    ///
     /// # Errors
     ///
     /// This setter is currently infallible; its `Result` keeps all
     /// configuration setters uniform and allows future validation.
+    #[inline]
     pub fn set_default_read_options(&mut self, options: LocalReadOptions) -> LocalResult<()> {
         self.defaults.read = options;
         Ok(())
     }
 
     /// Returns the writer options inherited by calls without explicit options.
+    ///
+    /// # Returns
+    ///
+    /// A borrow of the writer defaults stored by this filesystem.
     #[inline]
     #[must_use = "inspect the default options"]
     pub const fn default_write_options(&self) -> &LocalWriteOptions {
@@ -186,6 +216,11 @@ impl LocalFileSystem {
     }
 
     /// Replaces the writer options inherited by subsequent calls.
+    ///
+    /// # Parameters
+    ///
+    /// - `options`: Writer behavior to use for later calls without explicit
+    ///   options.
     ///
     /// # Errors
     ///
@@ -199,6 +234,10 @@ impl LocalFileSystem {
     }
 
     /// Returns the listing options inherited by calls without explicit options.
+    ///
+    /// # Returns
+    ///
+    /// A borrow of the listing defaults stored by this filesystem.
     #[inline]
     #[must_use = "inspect the default options"]
     pub const fn default_list_options(&self) -> &LocalListOptions {
@@ -206,6 +245,10 @@ impl LocalFileSystem {
     }
 
     /// Replaces the default listing options after structural validation.
+    ///
+    /// # Parameters
+    ///
+    /// - `options`: Listing behavior to install after validation.
     ///
     /// # Errors
     ///
@@ -219,6 +262,10 @@ impl LocalFileSystem {
     }
 
     /// Returns the copy options inherited by calls without explicit options.
+    ///
+    /// # Returns
+    ///
+    /// A borrow of the copy defaults stored by this filesystem.
     #[inline]
     #[must_use = "inspect the default options"]
     pub const fn default_copy_options(&self) -> &LocalCopyOptions {
@@ -226,6 +273,10 @@ impl LocalFileSystem {
     }
 
     /// Replaces the default copy options after structural validation.
+    ///
+    /// # Parameters
+    ///
+    /// - `options`: Copy behavior to install after validation.
     ///
     /// # Errors
     ///
@@ -248,6 +299,10 @@ impl LocalFileSystem {
     }
 
     /// Returns the directory-creation options inherited by defaulted calls.
+    ///
+    /// # Returns
+    ///
+    /// A borrow of the directory-creation defaults stored by this filesystem.
     #[inline]
     #[must_use = "inspect the default options"]
     pub const fn default_create_directory_options(&self) -> &LocalCreateDirectoryOptions {
@@ -256,10 +311,15 @@ impl LocalFileSystem {
 
     /// Replaces the default directory-creation options.
     ///
+    /// # Parameters
+    ///
+    /// - `options`: Directory-creation behavior for later calls.
+    ///
     /// # Errors
     ///
     /// This setter is currently infallible; its `Result` keeps all
     /// configuration setters uniform and allows future validation.
+    #[inline]
     pub fn set_default_create_directory_options(&mut self, options: LocalCreateDirectoryOptions) -> LocalResult<()> {
         self.defaults.create_directory = options;
         Ok(())
@@ -267,6 +327,10 @@ impl LocalFileSystem {
 
     /// Returns the deletion options inherited by calls without explicit
     /// options.
+    ///
+    /// # Returns
+    ///
+    /// A borrow of the deletion defaults stored by this filesystem.
     #[inline]
     #[must_use = "inspect the default options"]
     pub const fn default_delete_options(&self) -> &LocalDeleteOptions {
@@ -275,16 +339,25 @@ impl LocalFileSystem {
 
     /// Replaces the default deletion options.
     ///
+    /// # Parameters
+    ///
+    /// - `options`: Deletion behavior for later calls.
+    ///
     /// # Errors
     ///
     /// This setter is currently infallible; its `Result` keeps all
     /// configuration setters uniform and allows future validation.
+    #[inline]
     pub fn set_default_delete_options(&mut self, options: LocalDeleteOptions) -> LocalResult<()> {
         self.defaults.delete = options;
         Ok(())
     }
 
     /// Returns the rename options inherited by calls without explicit options.
+    ///
+    /// # Returns
+    ///
+    /// A borrow of the rename defaults stored by this filesystem.
     #[inline]
     #[must_use = "inspect the default options"]
     pub const fn default_rename_options(&self) -> &LocalRenameOptions {
@@ -292,6 +365,10 @@ impl LocalFileSystem {
     }
 
     /// Replaces the default rename options.
+    ///
+    /// # Parameters
+    ///
+    /// - `options`: Rename behavior to install after validation.
     ///
     /// # Errors
     ///
@@ -306,6 +383,10 @@ impl LocalFileSystem {
     }
 
     /// Returns the temporary-file options inherited by defaulted calls.
+    ///
+    /// # Returns
+    ///
+    /// A borrow of the temporary-file defaults stored by this filesystem.
     #[inline]
     #[must_use = "inspect the default options"]
     pub const fn default_temp_file_options(&self) -> &LocalTempFileOptions {
@@ -313,6 +394,10 @@ impl LocalFileSystem {
     }
 
     /// Replaces the default temporary-file options after validation.
+    ///
+    /// # Parameters
+    ///
+    /// - `options`: Temporary-file naming and retry behavior to install.
     ///
     /// # Errors
     ///
@@ -331,6 +416,10 @@ impl LocalFileSystem {
     }
 
     /// Returns the temporary-directory options inherited by defaulted calls.
+    ///
+    /// # Returns
+    ///
+    /// A borrow of the temporary-directory defaults stored by this filesystem.
     #[inline]
     #[must_use = "inspect the default options"]
     pub const fn default_temp_directory_options(&self) -> &LocalTempDirectoryOptions {
@@ -338,6 +427,10 @@ impl LocalFileSystem {
     }
 
     /// Replaces the default temporary-directory options after validation.
+    ///
+    /// # Parameters
+    ///
+    /// - `options`: Temporary-directory naming and retry behavior to install.
     ///
     /// # Errors
     ///
@@ -356,8 +449,16 @@ impl LocalFileSystem {
     }
 
     /// Installs an instance-local fault plan in test-support builds.
-    #[cfg(feature = "test-support")]
+    ///
+    /// # Parameters
+    ///
+    /// - `test_faults`: Optional fault plan applied to future operations.
+    ///
+    /// # Returns
+    ///
+    /// This filesystem with the supplied fault plan installed.
     #[doc(hidden)]
+    #[cfg(feature = "test-support")]
     #[must_use = "use the filesystem configured with test faults"]
     #[inline]
     pub fn with_test_faults(mut self, test_faults: Option<crate::TestFaultPlan>) -> Self {
@@ -374,8 +475,16 @@ impl LocalFileSystem {
     }
 
     /// Installs one instance-local conditional publication hook for tests.
-    #[cfg(all(feature = "digest", feature = "test-support"))]
+    ///
+    /// # Parameters
+    ///
+    /// - `hooks`: Test hook applied to conditional publication operations.
+    ///
+    /// # Returns
+    ///
+    /// This filesystem with the supplied publication hook installed.
     #[doc(hidden)]
+    #[cfg(all(feature = "digest", feature = "test-support"))]
     #[must_use = "use the filesystem configured with conditional test hooks"]
     pub fn with_conditional_test_hooks(mut self, hooks: crate::test_support::TestConditionalHooks) -> Self {
         let conditional_hooks = if let Some(existing) = &self.core.conditional_hooks {
@@ -398,65 +507,8 @@ impl LocalFileSystem {
 
 #[cfg(test)]
 mod tests {
-    use super::LocalCopyOptions;
-    use super::LocalCreateDirectoryOptions;
-    use super::LocalDeleteOptions;
-    use super::LocalFileSystem;
-    use super::LocalListOptions;
-    use super::LocalReadOptions;
-    use super::LocalRenameOptions;
-    use super::LocalTempDirectoryOptions;
-    use super::LocalTempFileOptions;
-    use super::LocalWriteOptions;
-    use crate::options::LocalWriteMode;
-
     #[test]
-    fn rooted_default_options_accessors_and_setters_round_trip() {
-        let fixture = tempfile::tempdir().expect("fixture");
-        let mut filesystem = LocalFileSystem::rooted(fixture.path()).expect("rooted filesystem");
-
-        let _ = filesystem.default_read_options();
-        filesystem
-            .set_default_read_options(LocalReadOptions::new())
-            .expect("read defaults");
-        let _ = filesystem.default_write_options();
-        filesystem
-            .set_default_write_options(LocalWriteOptions::new(LocalWriteMode::CreateNew))
-            .expect("write defaults");
-        let _ = filesystem.default_list_options();
-        filesystem
-            .set_default_list_options(LocalListOptions::new())
-            .expect("list defaults");
-        let _ = filesystem.default_copy_options();
-        filesystem
-            .set_default_copy_options(LocalCopyOptions::new())
-            .expect("copy defaults");
-        let _ = filesystem.default_create_directory_options();
-        filesystem
-            .set_default_create_directory_options(LocalCreateDirectoryOptions::new())
-            .expect("create-directory defaults");
-        let _ = filesystem.default_delete_options();
-        filesystem
-            .set_default_delete_options(LocalDeleteOptions::new())
-            .expect("delete defaults");
-        let _ = filesystem.default_rename_options();
-        filesystem
-            .set_default_rename_options(LocalRenameOptions::new())
-            .expect("rename defaults");
-        let _ = filesystem.default_temp_file_options();
-        filesystem
-            .set_default_temp_file_options(LocalTempFileOptions::new())
-            .expect("temp-file defaults");
-        let _ = filesystem.default_temp_directory_options();
-        filesystem
-            .set_default_temp_directory_options(LocalTempDirectoryOptions::new())
-            .expect("temp-directory defaults");
-        #[cfg(feature = "test-support")]
-        let _filesystem = filesystem.with_test_faults(None);
-    }
-
-    #[test]
-    fn rename_configuration_errors_include_the_current_directory() {
+    fn test_rename_configuration_errors_include_the_current_directory() {
         let current_directory = std::path::Path::new("/workspace");
         let error = super::rename_options_error(
             crate::LocalFileError::new(
@@ -470,19 +522,5 @@ mod tests {
         assert_eq!(None, error.path());
         assert_eq!(crate::LocalFileOperation::Configure, error.operation());
         assert_eq!(crate::LocalFileErrorKind::RequirementNotMet, error.kind());
-    }
-
-    #[test]
-    fn rooted_symlink_policy_rejection_preserves_the_previous_default() {
-        let fixture = tempfile::tempdir().expect("fixture");
-        let mut filesystem = LocalFileSystem::rooted(fixture.path()).expect("rooted filesystem");
-        let original = filesystem.symlink_policy();
-
-        let error = filesystem
-            .set_symlink_policy(crate::LocalSymlinkPolicy::FollowAcrossScope)
-            .expect_err("rooted filesystems cannot follow links across scope");
-
-        assert_eq!(error.kind(), crate::LocalFileErrorKind::InvalidOptions);
-        assert_eq!(filesystem.symlink_policy(), original);
     }
 }

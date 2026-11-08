@@ -14,6 +14,7 @@ use std::io::Error;
 use std::io::ErrorKind;
 use std::io::Result;
 use std::os::fd::AsRawFd;
+use std::os::unix::fs::MetadataExt;
 use std::path::Path;
 use std::path::PathBuf;
 
@@ -42,8 +43,15 @@ pub(in crate::local) struct RootedStagedFile {
     identity: Option<(u64, u64)>,
 }
 
+/// Captures the device and inode identity used to authorize staging cleanup.
+///
+/// # Parameters
+///
+/// * `file` - Open staging handle whose metadata supplies the cleanup identity.
+///
+/// Returns `None` when metadata cannot be read; that absence deliberately
+/// prevents cleanup from unlinking an entry whose identity was not captured.
 fn file_identity(file: &File) -> Option<(u64, u64)> {
-    use std::os::unix::fs::MetadataExt;
     let metadata = file.metadata().ok()?;
     Some((metadata.dev(), metadata.ino()))
 }

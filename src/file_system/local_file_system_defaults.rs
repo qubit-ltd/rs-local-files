@@ -7,6 +7,8 @@
 // =============================================================================
 //! Per-instance operation defaults.
 
+use self::internal::TempDirectoryDebug;
+use self::internal::TempFileDebug;
 use crate::LocalCopyOptions;
 use crate::LocalCreateDirectoryOptions;
 use crate::LocalDeleteOptions;
@@ -16,6 +18,8 @@ use crate::LocalRenameOptions;
 use crate::LocalTempDirectoryOptions;
 use crate::LocalTempFileOptions;
 use crate::LocalWriteOptions;
+
+mod internal;
 
 /// Replaceable convenience configuration, not mandatory resource ceilings.
 ///
@@ -43,41 +47,18 @@ pub(crate) struct LocalFileSystemDefaults {
     pub(crate) temp_directory: LocalTempDirectoryOptions,
 }
 
-/// Formats temporary-file defaults without exposing their parent path.
-struct TempFileDebug<'a>(&'a LocalTempFileOptions);
-
-impl std::fmt::Debug for TempFileDebug<'_> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("LocalTempFileOptions")
-            .field("parent", &self.0.parent().map(crate::local_file_system::redacted_path))
-            .field("prefix", &self.0.prefix())
-            .field("suffix", &self.0.suffix())
-            .field("max_attempts", &self.0.max_attempts())
-            .field("create_parent", &self.0.creates_parent())
-            .field("privacy", &self.0.privacy())
-            .finish()
-    }
-}
-
-/// Formats temporary-directory defaults without exposing their parent path.
-struct TempDirectoryDebug<'a>(&'a LocalTempDirectoryOptions);
-
-impl std::fmt::Debug for TempDirectoryDebug<'_> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("LocalTempDirectoryOptions")
-            .field("parent", &self.0.parent().map(crate::local_file_system::redacted_path))
-            .field("prefix", &self.0.prefix())
-            .field("suffix", &self.0.suffix())
-            .field("max_attempts", &self.0.max_attempts())
-            .field("create_parent", &self.0.creates_parent())
-            .field("privacy", &self.0.privacy())
-            .field("cleanup_limits", &self.0.cleanup_limits())
-            .field("owner_access_policy", &self.0.owner_access_policy())
-            .finish()
-    }
-}
-
 impl std::fmt::Debug for LocalFileSystemDefaults {
+    /// Formats all operation defaults while redacting temporary-resource parent
+    /// paths.
+    ///
+    /// # Parameters
+    ///
+    /// - `f`: Formatter that receives the debug representation.
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(())` when formatting succeeds, or the formatter's error
+    /// otherwise.
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("LocalFileSystemDefaults")
             .field("read", &self.read)

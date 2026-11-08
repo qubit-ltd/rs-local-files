@@ -10,6 +10,8 @@
 use std::fs;
 #[cfg(unix)]
 use std::os::unix::net::UnixListener;
+#[cfg(windows)]
+use std::os::windows::fs::FileTypeExt;
 use std::path::PathBuf;
 
 use qubit_local_files::LocalFileSystem;
@@ -18,7 +20,11 @@ use qubit_local_files::options::LocalCopyConflictPolicy;
 use qubit_local_files::options::LocalCopyOptions;
 use qubit_local_files::options::LocalCopySourceMode;
 use qubit_local_files::outcome::LocalCopyFailureState;
+#[cfg(any(unix, windows))]
+use qubit_local_files::policy::LocalAtomicityRequirement;
 #[cfg(unix)]
+use qubit_local_files::policy::LocalDurabilityRequirement;
+#[cfg(any(unix, windows))]
 use qubit_local_files::policy::LocalSymlinkPolicy;
 use tempfile::tempdir;
 
@@ -213,8 +219,6 @@ fn test_final_link_source_modes_do_not_follow_targets() {
                     let _ = result.expect("link entry should copy");
                     #[cfg(windows)]
                     {
-                        use std::os::windows::fs::FileTypeExt;
-
                         let kind = fs::symlink_metadata(directory.path().join("parent/target"))
                             .expect("copied link should exist")
                             .file_type();
@@ -285,10 +289,6 @@ fn test_tree_copy_preserves_dangling_links_for_host_and_rooted() {
 #[cfg(windows)]
 #[test]
 fn test_tree_copy_preserves_dangling_directory_link_kind() {
-    use std::os::windows::fs::FileTypeExt;
-
-    use qubit_local_files::policy::LocalSymlinkPolicy;
-
     for rooted in [false, true] {
         let directory = tempdir().expect("fixture should exist");
         fs::create_dir(directory.path().join("source")).expect("source directory should exist");
@@ -404,8 +404,6 @@ fn test_auto_reset_copies_opposite_source_kind_and_retains_byte_limit() {
 #[cfg(any(unix, windows))]
 #[test]
 fn test_link_copy_overwrites_directory_link_without_removing_referent() {
-    use qubit_local_files::policy::LocalSymlinkPolicy;
-
     for rooted in [false, true] {
         for tree in [false, true] {
             let directory = tempdir().expect("fixture should exist");
@@ -483,8 +481,6 @@ fn test_link_copy_overwrites_directory_link_without_removing_referent() {
             );
             #[cfg(windows)]
             {
-                use std::os::windows::fs::FileTypeExt;
-
                 assert!(
                     !fs::symlink_metadata(target_link)
                         .expect("link should exist")
@@ -500,8 +496,6 @@ fn test_link_copy_overwrites_directory_link_without_removing_referent() {
 #[cfg(any(unix, windows))]
 #[test]
 fn test_link_copy_rejects_required_atomicity_before_mutation() {
-    use qubit_local_files::policy::LocalAtomicityRequirement;
-
     for rooted in [false, true] {
         for mode in [LocalCopySourceMode::Entry, LocalCopySourceMode::Auto] {
             let options = LocalCopyOptions::new()
@@ -547,8 +541,6 @@ fn test_link_copy_rejects_required_atomicity_before_mutation() {
 #[cfg(unix)]
 #[test]
 fn test_link_copy_reports_required_namespace_durability() {
-    use qubit_local_files::policy::LocalDurabilityRequirement;
-
     for rooted in [false, true] {
         let directory = tempdir().expect("fixture should exist");
         std::os::unix::fs::symlink("missing", directory.path().join("source"))

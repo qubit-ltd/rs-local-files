@@ -40,6 +40,13 @@ use crate::local::LocalRelativePath;
 
 /// Renames one rooted entry within the same opened root.
 ///
+/// # Parameters
+///
+/// * `root` is the opened root used for handle-relative traversal.
+/// * `_diagnostic_root` is retained for the caller's diagnostic context.
+/// * `source` and `destination` identify the rooted entries to rename.
+/// * `overwrite` controls whether an existing destination may be replaced.
+///
 /// # Errors
 ///
 /// Returns an I/O error when traversal or handle-relative rename fails.
@@ -57,6 +64,13 @@ pub(crate) fn rename_rooted_entry(
 /// Applies portable permissions to a rooted entry.
 ///
 /// Windows currently maps the Unix write bits to the read-only attribute.
+///
+/// # Parameters
+///
+/// * `root` is the opened root used for handle-relative traversal.
+/// * `_diagnostic_root` is retained for the caller's diagnostic context.
+/// * `path` identifies the rooted entry to update.
+/// * `mode` supplies the portable permission bits used for the mapping.
 ///
 /// # Errors
 ///
@@ -82,6 +96,11 @@ pub(crate) fn set_rooted_permissions(
 /// Marks the entry identified by an opened handle for deletion on close.
 /// The caller must have opened `entry` with DELETE access. Returns the native
 /// disposition error; success does not itself close the supplied handle.
+///
+/// # Parameters
+///
+/// * `entry` is the opened handle to mark for deletion; it must have delete
+///   access.
 pub(super) fn delete_open_entry(entry: &File) -> Result<()> {
     use windows_sys::Win32::Storage::FileSystem::FILE_DISPOSITION_INFO;
     use windows_sys::Win32::Storage::FileSystem::FileDispositionInfo;
@@ -107,6 +126,12 @@ pub(super) fn delete_open_entry(entry: &File) -> Result<()> {
 
 /// Deletes an owned entry while preserving its captured identity and the
 /// original file attributes when compatibility fallback deletion fails.
+///
+/// # Parameters
+///
+/// * `entry` is the owned open handle whose identity and attributes are
+///   checked.
+/// * `expected` is the identity captured when ownership was established.
 pub(super) fn delete_owned_read_only_entry(entry: &File, expected: &crate::rooted::Metadata) -> Result<()> {
     let actual = crate::rooted::Metadata::from_open_file(entry)?;
     if !expected.is_same_file(&actual) {
@@ -124,6 +149,12 @@ pub(super) fn delete_owned_read_only_entry(entry: &File, expected: &crate::roote
 }
 
 /// Requests extended deletion, optionally asking Windows to ignore read-only.
+///
+/// # Parameters
+///
+/// * `entry` is a live file handle opened with delete access.
+/// * `ignore_read_only` selects whether the native operation ignores the
+///   read-only attribute.
 fn delete_with_extended_disposition(entry: &File, ignore_read_only: bool) -> Result<()> {
     use windows_sys::Win32::Storage::FileSystem::FILE_DISPOSITION_FLAG_DELETE;
     use windows_sys::Win32::Storage::FileSystem::FILE_DISPOSITION_FLAG_IGNORE_READONLY_ATTRIBUTE;
@@ -167,6 +198,11 @@ fn delete_with_extended_disposition(entry: &File, ignore_read_only: bool) -> Res
 
 /// Uses the legacy disposition only after the extended class is explicitly
 /// unavailable. Restores every basic attribute field if deletion fails.
+///
+/// # Parameters
+///
+/// * `entry` is the live file handle whose attributes may be temporarily
+///   changed.
 fn delete_with_attribute_fallback(entry: &File) -> Result<()> {
     use windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_NORMAL;
     use windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_READONLY;
@@ -251,6 +287,10 @@ fn delete_with_attribute_fallback(entry: &File) -> Result<()> {
 
 /// Retries deletion without the read-only override before using the legacy
 /// disposition class on filesystems that reject the extended class.
+///
+/// # Parameters
+///
+/// * `entry` is the live file handle to delete.
 fn delete_after_readonly_clear(entry: &File) -> Result<()> {
     match delete_with_extended_disposition(entry, false) {
         Err(error) if extended_disposition_is_unsupported(&error) => delete_open_entry(entry),
@@ -259,6 +299,11 @@ fn delete_after_readonly_clear(entry: &File) -> Result<()> {
 }
 
 /// Restores the complete captured `FILE_BASIC_INFO` payload.
+///
+/// # Parameters
+///
+/// * `entry` is the live file handle whose attributes are restored.
+/// * `original` is the complete attribute payload captured before deletion.
 fn restore_file_basic_info(
     entry: &File,
     original: &windows_sys::Win32::Storage::FileSystem::FILE_BASIC_INFO,
@@ -284,6 +329,10 @@ fn restore_file_basic_info(
 
 /// Returns whether the extended disposition failure means the class is
 /// unsupported, rather than an access, sharing, or namespace failure.
+///
+/// # Parameters
+///
+/// * `error` is the native failure returned by extended disposition.
 fn extended_disposition_is_unsupported(error: &Error) -> bool {
     use windows_sys::Win32::Foundation::ERROR_CALL_NOT_IMPLEMENTED;
     use windows_sys::Win32::Foundation::ERROR_INVALID_FUNCTION;
@@ -306,6 +355,13 @@ fn extended_disposition_is_unsupported(error: &Error) -> bool {
 /// parent during installation. `overwrite` permits replacement, with a legacy
 /// fallback when the extended information class is unsupported. Propagates
 /// native traversal/open/rename and payload-construction errors.
+///
+/// # Parameters
+///
+/// * `root` is the opened root used to resolve both paths.
+/// * `source` identifies the entry to rename.
+/// * `destination` identifies the destination within the same root.
+/// * `overwrite` controls replacement of an existing destination.
 pub(super) fn rename_open_entry(
     root: &File,
     source: &LocalRelativePath,
@@ -365,6 +421,12 @@ pub(super) fn rename_open_entry(
 }
 
 /// Renames one entry between retained Windows directory handles.
+///
+/// # Parameters
+///
+/// * `source_parent` and `source_name` identify the source entry.
+/// * `destination_parent` and `destination_name` identify its destination.
+/// * `overwrite` controls replacement of an existing destination.
 #[cfg(feature = "digest")]
 pub(in crate::local::internal) fn rename_conditional_entry_at(
     source_parent: &File,
@@ -432,6 +494,11 @@ pub(in crate::local::internal) fn rename_conditional_entry_at(
 /// `NtSetInformationFile`, while the boolean controls replacement of an
 /// existing destination.
 ///
+/// # Parameters
+///
+/// * `destination` supplies the UTF-16 filename stored in the payload.
+/// * `overwrite` sets the native replacement flag.
+///
 /// # Errors
 ///
 /// Returns `InvalidInput` if the UTF-16 name or complete payload length cannot
@@ -477,6 +544,10 @@ fn build_rename_information(destination: &OsStr, overwrite: bool) -> Result<(Vec
 
 /// Returns whether the extended rename information class is unavailable on
 /// the current filesystem and the legacy class is an appropriate fallback.
+///
+/// # Parameters
+///
+/// * `status` is the NTSTATUS returned by the extended rename operation.
 fn is_legacy_rename_status(status: i32) -> bool {
     matches!(
         status,

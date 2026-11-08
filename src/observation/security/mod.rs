@@ -12,6 +12,27 @@ use crate::LocalResult;
 use crate::observation::LocalSecurityObservation;
 use crate::observation::LocalSecurityObservationOptions;
 
+/// Collects optional filesystem, access, and link-count facts for an open file.
+///
+/// Platform-specific queries borrow the same file handle, so the observation
+/// cannot silently switch to a different file if its path is replaced. Facts
+/// marked as required by `options` cause an error when the platform cannot
+/// provide them.
+///
+/// # Parameters
+///
+/// - `file` is the already-open file whose metadata is observed.
+/// - `options` selects which observation facts are optional or required.
+///
+/// # Returns
+///
+/// Returns the facts available for the file. Unsupported optional facts are
+/// represented as absent.
+///
+/// # Errors
+///
+/// Returns an error when a required fact cannot be obtained or a metadata
+/// query fails.
 pub(crate) fn query_security(
     file: &File,
     options: &LocalSecurityObservationOptions,
@@ -42,6 +63,25 @@ pub(crate) fn query_security(
     })
 }
 
+/// Runs a security query through an injected operation while retaining the
+/// production function's file and options arguments.
+///
+/// This private seam lets the inline unit test verify error propagation and
+/// that the query observes the original file handle without invoking native
+/// security APIs.
+///
+/// # Parameters
+///
+/// - `file` and `options` are forwarded unchanged to `query`.
+/// - `query` supplies the platform operation to run.
+///
+/// # Returns
+///
+/// Returns the injected operation's observation unchanged.
+///
+/// # Errors
+///
+/// Returns any error produced by the injected operation.
 fn query_security_with(
     file: &File,
     options: &LocalSecurityObservationOptions,
@@ -59,7 +99,7 @@ mod tests {
     use crate::observation::LocalSecurityObservationOptions;
 
     #[test]
-    fn injected_security_failures_preserve_kind_on_same_file_handle() {
+    fn test_injected_security_failures_preserve_kind_on_same_file_handle() {
         let directory = tempfile::tempdir().expect("temporary directory");
         let path = directory.path().join("file");
         std::fs::write(&path, b"data").expect("create file");

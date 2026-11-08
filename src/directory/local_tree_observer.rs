@@ -16,11 +16,13 @@ thread_local! {
     static TREE_ENTRY_OBSERVATIONS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
+/// Resets the thread-local count of metadata observations made by tests.
 #[cfg(test)]
 pub(crate) fn reset_test_observation_count() {
     TREE_ENTRY_OBSERVATIONS.with(|count| count.set(0));
 }
 
+/// Returns the thread-local number of metadata observations made by tests.
 #[cfg(test)]
 pub(crate) fn test_observation_count() -> usize {
     TREE_ENTRY_OBSERVATIONS.with(std::cell::Cell::get)
@@ -74,19 +76,39 @@ pub(crate) fn test_observation_count() -> usize {
 /// ```
 #[derive(Debug)]
 pub struct LocalTreeObserver {
+    /// Directory handle used to observe each path returned by the walker.
     directory: LocalDirectoryHandle,
+    /// Incremental traversal state and its configured error policy.
     walker: LocalDirectoryWalker,
 }
 
 impl LocalTreeObserver {
+    /// Creates an observer from a staged directory and its configured walker.
+    ///
+    /// The walker determines enumeration limits and error handling; metadata
+    /// observation is performed lazily as callers request items.
+    ///
+    /// # Parameters
+    ///
+    /// - `directory`: retained authority used to observe each enumerated entry.
+    /// - `walker`: configured traversal state that supplies entries and
+    ///   controls traversal limits and error handling.
     pub(crate) fn new(directory: LocalDirectoryHandle, walker: LocalDirectoryWalker) -> Self {
         Self { directory, walker }
     }
 }
 
 impl Iterator for LocalTreeObserver {
+    /// Each item pairs a relative path with its observed metadata, or reports
+    /// the failure for that path.
     type Item = LocalResult<LocalTreeEntryObservation>;
 
+    /// Observes the next enumerated entry when requested.
+    ///
+    /// Enumeration and metadata lookup are separate operations, so the entry
+    /// may change or disappear between them. An item error does not necessarily
+    /// end iteration; traversal limits and the walker's error policy control
+    /// whether later entries can be yielded.
     fn next(&mut self) -> Option<Self::Item> {
         let entry = match self.walker.next()? {
             Ok(entry) => entry,

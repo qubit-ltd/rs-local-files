@@ -11,6 +11,8 @@ use std::path::Path;
 use std::sync::Arc;
 
 use qubit_local_files::LocalFileSystem;
+use qubit_local_files::LocalResult;
+use qubit_local_files::directory::LocalDirectoryHandle;
 use qubit_local_files::directory::LocalResolutionOrigin;
 use qubit_local_files::directory::LocalResolutionPolicy;
 use qubit_local_files::directory::LocalResolutionScope;
@@ -20,12 +22,14 @@ use qubit_local_files::error::LocalFileOperation;
 use qubit_local_files::observation::LocalSourceVerification;
 use qubit_local_files::options::LocalCopyOptions;
 use qubit_local_files::options::LocalDirectoryOpenOptions;
+use qubit_local_files::options::LocalListOptions;
 use qubit_local_files::options::LocalObservedReadOptions;
 use qubit_local_files::options::LocalPathBindingOptions;
 use qubit_local_files::options::LocalResolutionLimits;
 use qubit_local_files::options::LocalRootOpenOptions;
 use qubit_local_files::options::LocalWriteMode;
 use qubit_local_files::options::LocalWriteOptions;
+use tempfile::TempDir;
 use tempfile::tempdir;
 
 #[derive(Debug)]
@@ -37,7 +41,7 @@ impl LocalResolutionPolicy for TimeoutPayload {
         component: &OsStr,
         _scope: LocalResolutionScope,
         _origin: LocalResolutionOrigin,
-    ) -> qubit_local_files::LocalResult<()> {
+    ) -> LocalResult<()> {
         if component == OsStr::new("payload") {
             Err(LocalFileError::from_io(
                 LocalFileOperation::Metadata,
@@ -51,16 +55,12 @@ impl LocalResolutionPolicy for TimeoutPayload {
         }
     }
 
-    fn validate_symlink_target(
-        &self,
-        _target: &Path,
-        _scope: LocalResolutionScope,
-    ) -> qubit_local_files::LocalResult<()> {
+    fn validate_symlink_target(&self, _target: &Path, _scope: LocalResolutionScope) -> LocalResult<()> {
         Ok(())
     }
 }
 
-fn timeout_test_directory() -> (tempfile::TempDir, qubit_local_files::directory::LocalDirectoryHandle) {
+fn timeout_test_directory() -> (TempDir, LocalDirectoryHandle) {
     let scratch = tempdir().expect("fixture should exist");
     fs::write(scratch.path().join("payload"), b"data").expect("payload should exist");
     let options = LocalRootOpenOptions::new().with_resolution_policy(Arc::new(TimeoutPayload));
@@ -91,10 +91,7 @@ fn test_path_resolution_timeout_preserves_bind_operation_and_source() {
     assert_bind_path_timeout(&metadata_error);
 
     let list_error = directory
-        .list_with_options(
-            Path::new("payload"),
-            &qubit_local_files::options::LocalListOptions::new(),
-        )
+        .list_with_options(Path::new("payload"), &LocalListOptions::new())
         .expect_err("list resolution should time out");
     assert_bind_path_timeout(&list_error);
 

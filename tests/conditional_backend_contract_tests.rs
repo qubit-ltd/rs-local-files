@@ -37,7 +37,7 @@ fn read_all(mut reader: impl qubit_io::Input<Item = u8>) -> Vec<u8> {
 
 #[test]
 #[cfg(unix)]
-fn rooted_recovery_coordinate_is_absolute_and_reusable_after_pwd_change() {
+fn test_rooted_recovery_coordinate_is_absolute_and_reusable_after_pwd_change() {
     let parent = tempdir().expect("fixture parent should be created");
     let root_path = parent.path().join("root");
     std::fs::create_dir(&root_path).expect("root should be created");
@@ -116,7 +116,7 @@ fn rooted_recovery_coordinate_is_absolute_and_reusable_after_pwd_change() {
 
 #[cfg(unix)]
 #[test]
-fn rooted_abort_invalid_state_keeps_the_open_time_pwd_snapshot() {
+fn test_rooted_abort_invalid_state_keeps_the_open_time_pwd_snapshot() {
     let parent = tempdir().expect("fixture parent should be created");
     let root_path = parent.path().join("root");
     std::fs::create_dir(&root_path).expect("root should be created");
@@ -146,7 +146,7 @@ fn rooted_abort_invalid_state_keeps_the_open_time_pwd_snapshot() {
 }
 
 #[test]
-fn host_relative_commit_error_keeps_the_open_time_pwd_snapshot() {
+fn test_host_relative_commit_error_keeps_the_open_time_pwd_snapshot() {
     const CHILD_SENTINEL_ENV: &str = "QUBIT_LOCAL_FILES_HOST_CWD_SCENARIO_SENTINEL";
     const CHILD_SENTINEL_CONTENT: &[u8] = b"host-relative-cwd-scenario-complete";
 
@@ -177,7 +177,7 @@ fn host_relative_commit_error_keeps_the_open_time_pwd_snapshot() {
     let status = Command::new(std::env::current_exe().expect("test executable should be available"))
         .args([
             "--exact",
-            "host_relative_commit_error_keeps_the_open_time_pwd_snapshot",
+            "test_host_relative_commit_error_keeps_the_open_time_pwd_snapshot",
             "--nocapture",
         ])
         .env(CHILD_SENTINEL_ENV, &sentinel)
@@ -246,7 +246,7 @@ fn host_relative_commit_scenario(directory: &Path) {
 }
 
 #[test]
-fn host_absolute_commit_error_has_no_pwd_fallback() {
+fn test_host_absolute_commit_error_has_no_pwd_fallback() {
     let directory = tempdir().expect("fixture directory should be created");
     let target = directory.path().join("existing");
     std::fs::write(&target, b"old").expect("target should be created");
@@ -269,7 +269,7 @@ fn host_absolute_commit_error_has_no_pwd_fallback() {
 }
 
 #[test]
-fn successful_absent_publication_reports_atomic_rename() {
+fn test_successful_absent_publication_reports_atomic_rename() {
     let directory = tempdir().expect("fixture directory should be created");
     let target = directory.path().join("new-target");
     let mut filesystem = LocalFileSystem::host().expect("Host filesystem should open");
@@ -294,7 +294,7 @@ fn successful_absent_publication_reports_atomic_rename() {
 
 #[cfg(unix)]
 #[test]
-fn successful_content_publication_reports_atomic_exchange() {
+fn test_successful_content_publication_reports_atomic_exchange() {
     let directory = tempdir().expect("fixture directory should be created");
     let target = directory.path().join("target");
     std::fs::write(&target, b"old").expect("old target should be written");
@@ -320,7 +320,7 @@ fn successful_content_publication_reports_atomic_exchange() {
 
 #[cfg(windows)]
 #[test]
-fn windows_host_content_publication_reports_replace_with_backup() {
+fn test_windows_host_content_publication_reports_replace_with_backup() {
     let directory = tempdir().expect("fixture directory should be created");
     let target = directory.path().join("target");
     std::fs::write(&target, b"old").expect("old target should be written");

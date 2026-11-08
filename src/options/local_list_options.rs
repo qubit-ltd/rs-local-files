@@ -74,6 +74,11 @@ impl LocalListOptions {
     /// `None` means unbounded; finite limits use the smaller value, including
     /// zero. This performs no I/O or validation and does not restart deadlines.
     /// Invalid limits are rejected when the resulting options are used.
+    ///
+    /// # Parameters
+    ///
+    /// - `ceilings`: Resource limits that cap the corresponding limits in this
+    ///   request; operation policies from this value are ignored.
     pub fn tighten_resource_limits(mut self, ceilings: &Self) -> Self {
         use super::resource_limits::tighter;
         self.max_depth = tighter(self.max_depth, ceilings.max_depth);
@@ -150,6 +155,11 @@ impl LocalListOptions {
     }
 
     /// Overrides the owning filesystem's symbolic-link policy.
+    ///
+    /// # Parameters
+    ///
+    /// - `symlink_policy`: Policy used to decide whether symbolic links are
+    ///   followed during traversal.
     #[inline]
     pub const fn with_symlink_policy(mut self, symlink_policy: LocalSymlinkPolicy) -> Self {
         self.symlink_policy = Some(symlink_policy);
@@ -175,6 +185,11 @@ impl LocalListOptions {
     }
 
     /// Limits the number of entries yielded by the walker.
+    ///
+    /// # Parameters
+    ///
+    /// - `max_entries`: Maximum number of entries to yield; zero yields no
+    ///   entries.
     #[inline]
     pub const fn with_max_entries(mut self, max_entries: usize) -> Self {
         self.max_entries = Some(max_entries);
@@ -191,6 +206,11 @@ impl LocalListOptions {
     /// Limits cumulative name bytes observed by duplicate-name tracking.
     ///
     /// Capacity is not released when a completed directory frame is popped.
+    ///
+    /// # Parameters
+    ///
+    /// - `max_seen_name_bytes`: Maximum cumulative name bytes retained by
+    ///   duplicate-name tracking.
     #[inline]
     pub const fn with_max_seen_name_bytes(mut self, max_seen_name_bytes: usize) -> Self {
         self.max_seen_name_bytes = Some(max_seen_name_bytes);
@@ -205,6 +225,10 @@ impl LocalListOptions {
     }
 
     /// Sets the maximum elapsed time for the complete traversal.
+    ///
+    /// # Parameters
+    ///
+    /// - `deadline`: Maximum elapsed time allowed for the traversal.
     #[inline]
     pub const fn with_deadline(mut self, deadline: Duration) -> Self {
         self.deadline = Some(deadline);
@@ -221,6 +245,11 @@ impl LocalListOptions {
     /// Sets the maximum number of concurrently open directory handles.
     ///
     /// A value of zero is invalid and is rejected when a walker is opened.
+    ///
+    /// # Parameters
+    ///
+    /// - `max_open_directories`: Maximum concurrently open directory handles;
+    ///   must be greater than zero.
     #[inline]
     pub const fn with_max_open_directories(mut self, max_open_directories: usize) -> Self {
         self.max_open_directories = Some(max_open_directories);
@@ -235,6 +264,11 @@ impl LocalListOptions {
     }
 
     /// Sets the policy used after the handle budget is reached.
+    ///
+    /// # Parameters
+    ///
+    /// - `reopen_policy`: Action taken when traversal reaches the open-handle
+    ///   budget.
     #[inline]
     pub const fn with_reopen_policy(mut self, reopen_policy: LocalDirectoryReopenPolicy) -> Self {
         self.reopen_policy = reopen_policy;
@@ -242,6 +276,11 @@ impl LocalListOptions {
     }
 
     /// Sets the policy applied after an iteration error.
+    ///
+    /// # Parameters
+    ///
+    /// - `error_policy`: Action taken when an entry or descendant cannot be
+    ///   inspected.
     #[inline]
     pub const fn with_error_policy(mut self, error_policy: LocalWalkErrorPolicy) -> Self {
         self.error_policy = error_policy;

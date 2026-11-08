@@ -6,19 +6,24 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 
+use std::env;
 use std::io;
+use std::path::Path;
 
 const REQUIRE_SYMLINKS_ENV: &str = "QUBIT_LOCAL_FILES_REQUIRE_SYMLINKS";
 
+#[must_use]
+#[inline]
 fn permission_denied_requires_failure(required: bool) -> bool {
     required
 }
 
-pub(crate) fn create_file_link(target: &std::path::Path, link: &std::path::Path) -> bool {
+#[must_use]
+pub(crate) fn create_file_link(target: &Path, link: &Path) -> bool {
     match std::os::windows::fs::symlink_file(target, link) {
         Ok(()) => true,
         Err(error) if error.kind() == io::ErrorKind::PermissionDenied => {
-            if permission_denied_requires_failure(std::env::var(REQUIRE_SYMLINKS_ENV).as_deref() == Ok("1")) {
+            if permission_denied_requires_failure(env::var(REQUIRE_SYMLINKS_ENV).as_deref() == Ok("1")) {
                 panic!("required Windows file symlink fixture is unavailable: {error}");
             }
             eprintln!("skipping Windows file symlink scenario: permission denied creating {link:?}: {error}");
@@ -28,11 +33,12 @@ pub(crate) fn create_file_link(target: &std::path::Path, link: &std::path::Path)
     }
 }
 
-pub(crate) fn create_directory_link(target: &std::path::Path, link: &std::path::Path) -> bool {
+#[must_use]
+pub(crate) fn create_directory_link(target: &Path, link: &Path) -> bool {
     match std::os::windows::fs::symlink_dir(target, link) {
         Ok(()) => true,
         Err(error) if error.kind() == io::ErrorKind::PermissionDenied => {
-            if permission_denied_requires_failure(std::env::var(REQUIRE_SYMLINKS_ENV).as_deref() == Ok("1")) {
+            if permission_denied_requires_failure(env::var(REQUIRE_SYMLINKS_ENV).as_deref() == Ok("1")) {
                 panic!("required Windows directory symlink fixture is unavailable: {error}");
             }
             eprintln!("skipping Windows directory symlink scenario: permission denied creating {link:?}: {error}");
@@ -47,12 +53,12 @@ mod tests {
     use super::permission_denied_requires_failure;
 
     #[test]
-    fn required_symlink_permission_denial_is_failure() {
+    fn test_required_symlink_permission_denial_fails() {
         assert!(permission_denied_requires_failure(true));
     }
 
     #[test]
-    fn optional_symlink_permission_denial_is_skippable() {
+    fn test_optional_symlink_permission_denial_is_skippable() {
         assert!(!permission_denied_requires_failure(false));
     }
 }

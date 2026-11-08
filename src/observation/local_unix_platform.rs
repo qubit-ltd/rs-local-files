@@ -6,9 +6,9 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 
+/// Unix platform family used to interpret filesystem observations.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 #[non_exhaustive]
-/// Unix platform family used to interpret filesystem observations.
 pub enum LocalUnixPlatform {
     /// Linux.
     Linux,

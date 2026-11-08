@@ -61,6 +61,14 @@ pub(crate) fn temp_cleanup_deadline_expired() -> bool {
 /// Replaces an entry after its type was observed, through the original root.
 /// This deterministic race affects only the scoped selector's owning thread.
 /// Native replacement setup errors propagate without concealing their cause.
+///
+/// # Parameters
+///
+/// * `root` - Open directory handle anchoring the replacement beneath the
+///   original root.
+/// * `diagnostic_root` - Root path used by rooted helpers for diagnostics.
+/// * `path` - Relative path of the entry whose observed type is being raced.
+/// * `directory` - Whether the observed entry is expected to be a directory.
 #[cfg(any(unix, windows))]
 pub(crate) fn temp_cleanup_replace_observed_entry(
     root: &File,

@@ -106,7 +106,7 @@ impl LocalResolutionPolicy for RejectBlockedComponent {
 
 #[cfg(unix)]
 #[test]
-fn root_policy_survives_child_symlink_reader_and_final_binding() {
+fn test_root_policy_survives_child_symlink_reader_and_final_binding() {
     use std::os::unix::fs::symlink;
 
     let tmp = tempfile::tempdir().expect("fixture directory");
@@ -169,7 +169,7 @@ fn root_policy_survives_child_symlink_reader_and_final_binding() {
 
 #[cfg(target_os = "linux")]
 #[test]
-fn custom_stage_observation_tightening_reopen_and_publish_preserve_owner_policy() {
+fn test_custom_stage_observation_tightening_reopen_and_publish_preserve_owner_policy() {
     let tmp = tempfile::tempdir().expect("fixture directory");
     let fs = LocalFileSystem::host().expect("host filesystem");
     let parent = fs
@@ -299,7 +299,7 @@ fn assert_unix_owner_mode(observation: &qubit_local_files::observation::LocalSec
 
 #[cfg(unix)]
 #[test]
-fn resolution_quota_failure_keeps_structured_measurement_and_no_stage_owner_alias() {
+fn test_resolution_quota_failure_keeps_structured_measurement_and_no_stage_owner_alias() {
     use std::os::unix::fs::symlink;
 
     let tmp = tempfile::tempdir().expect("fixture directory");
@@ -323,7 +323,7 @@ fn resolution_quota_failure_keeps_structured_measurement_and_no_stage_owner_alia
 
 #[cfg(all(target_os = "linux", feature = "test-support"))]
 #[test]
-fn acl_budget_failure_reports_acl_dimension_and_stage_remains_the_only_cleanup_owner() {
+fn test_acl_budget_failure_reports_acl_dimension_and_stage_remains_the_only_cleanup_owner() {
     use std::ffi::CString;
     use std::os::unix::ffi::OsStrExt;
     use std::os::unix::fs::MetadataExt;
@@ -422,7 +422,7 @@ fn acl_budget_failure_reports_acl_dimension_and_stage_remains_the_only_cleanup_o
 
 #[cfg(all(windows, feature = "digest"))]
 #[test]
-fn rooted_content_remains_unsupported_without_mutation_while_l01_is_blocked() {
+fn test_rooted_content_remains_unsupported_without_mutation_while_l01_is_blocked() {
     use qubit_local_files::options::LocalWriteMode;
     use qubit_local_files::options::LocalWriteOptions;
     use qubit_local_files::options::LocalWritePrecondition;

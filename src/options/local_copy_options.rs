@@ -11,6 +11,7 @@ use std::time::Duration;
 
 use super::LocalCopySourceMode;
 use super::LocalMetadataPreservePolicy;
+use super::resource_limits::tighter;
 use crate::LocalCopyConflictPolicy;
 use crate::LocalCopyTypeConflictPolicy;
 use crate::policy::LocalAtomicityRequirement;
@@ -62,22 +63,6 @@ pub struct LocalCopyOptions {
 }
 
 impl LocalCopyOptions {
-    /// Tightens only resource limits against `ceilings`, preserving this
-    /// request's operation behavior.
-    ///
-    /// `None` means unbounded; finite limits use the smaller value, including
-    /// zero. This performs no I/O or validation and does not restart deadlines.
-    /// Invalid limits are rejected when the resulting options are used.
-    pub fn tighten_resource_limits(mut self, ceilings: &Self) -> Self {
-        use super::resource_limits::tighter;
-        self.max_depth = tighter(self.max_depth, ceilings.max_depth);
-        self.max_entries = tighter(self.max_entries, ceilings.max_entries);
-        self.max_bytes = tighter(self.max_bytes, ceilings.max_bytes);
-        self.max_open_directories = tighter(self.max_open_directories, ceilings.max_open_directories);
-        self.deadline = tighter(self.deadline, ceilings.deadline);
-        self
-    }
-
     /// Creates copy options that inherit the owning filesystem's
     /// symbolic-link policy.
     pub const fn new() -> Self {
@@ -120,6 +105,12 @@ impl LocalCopyOptions {
     }
 
     /// Returns the optional symbolic-link policy override.
+    ///
+    /// # Returns
+    ///
+    /// `Some(policy)` overrides the owning filesystem's policy; `None` inherits
+    /// that policy.
+    #[must_use]
     #[inline]
     pub const fn symlink_policy_override(&self) -> Option<LocalSymlinkPolicy> {
         self.symlink
@@ -154,32 +145,85 @@ impl LocalCopyOptions {
     }
 
     /// Returns the optional maximum tree depth.
+    ///
+    /// # Returns
+    ///
+    /// `Some(depth)` limits descendant depth, with the copied root at depth
+    /// zero; `None` leaves tree depth unbounded.
+    #[must_use]
     #[inline]
     pub const fn max_depth(&self) -> Option<usize> {
         self.max_depth
     }
     /// Returns the optional maximum source-entry count.
+    ///
+    /// # Returns
+    ///
+    /// `Some(count)` limits processed source entries; `None` leaves the count
+    /// unbounded.
+    #[must_use]
     #[inline]
     pub const fn max_entries(&self) -> Option<usize> {
         self.max_entries
     }
     /// Returns the optional maximum source-byte count.
+    ///
+    /// # Returns
+    ///
+    /// `Some(bytes)` limits copied source bytes; `None` leaves the byte count
+    /// unbounded.
+    #[must_use]
     #[inline]
     pub const fn max_bytes(&self) -> Option<u64> {
         self.max_bytes
     }
     /// Returns the optional maximum open-directory count.
+    ///
+    /// # Returns
+    ///
+    /// `Some(count)` limits concurrently open source directories; `None` leaves
+    /// the count unbounded.
+    #[must_use]
     #[inline]
     pub const fn max_open_directories(&self) -> Option<usize> {
         self.max_open_directories
     }
     /// Returns the optional elapsed-time budget.
+    ///
+    /// # Returns
+    ///
+    /// `Some(duration)` sets the complete-copy time budget; `None` means no
+    /// deadline is configured.
+    #[must_use]
     #[inline]
     pub const fn deadline(&self) -> Option<Duration> {
         self.deadline
     }
 
+    /// Tightens only resource limits against `ceilings`, preserving this
+    /// request's operation behavior.
+    ///
+    /// `None` means unbounded; finite limits use the smaller value, including
+    /// zero. This performs no I/O or validation and does not restart deadlines.
+    /// Invalid limits are rejected when the resulting options are used.
+    ///
+    /// # Parameters
+    ///
+    /// - `ceilings`: Resource limits to apply as upper bounds to this request.
+    pub fn tighten_resource_limits(mut self, ceilings: &Self) -> Self {
+        self.max_depth = tighter(self.max_depth, ceilings.max_depth);
+        self.max_entries = tighter(self.max_entries, ceilings.max_entries);
+        self.max_bytes = tighter(self.max_bytes, ceilings.max_bytes);
+        self.max_open_directories = tighter(self.max_open_directories, ceilings.max_open_directories);
+        self.deadline = tighter(self.deadline, ceilings.deadline);
+        self
+    }
+
     /// Sets the destination file conflict policy.
+    ///
+    /// # Parameters
+    ///
+    /// - `conflict`: Policy for an existing destination file.
     #[must_use = "use the configured copy options"]
     #[inline]
     pub const fn with_conflict(mut self, conflict: LocalCopyConflictPolicy) -> Self {
@@ -188,6 +232,11 @@ impl LocalCopyOptions {
     }
 
     /// Sets the file/directory type conflict policy.
+    ///
+    /// # Parameters
+    ///
+    /// - `type_conflict`: Policy for a destination whose kind differs from the
+    ///   source kind.
     #[must_use = "use the configured copy options"]
     #[inline]
     pub const fn with_type_conflict(mut self, type_conflict: LocalCopyTypeConflictPolicy) -> Self {
@@ -196,6 +245,10 @@ impl LocalCopyOptions {
     }
 
     /// Sets metadata preservation policy.
+    ///
+    /// # Parameters
+    ///
+    /// - `preserve_metadata`: Metadata categories to preserve during copying.
     #[must_use = "use the configured copy options"]
     #[inline]
     pub const fn with_metadata_preservation(mut self, preserve_metadata: LocalMetadataPreservePolicy) -> Self {
@@ -204,6 +257,10 @@ impl LocalCopyOptions {
     }
 
     /// Sets symbolic-link policy.
+    ///
+    /// # Parameters
+    ///
+    /// - `symlink`: Policy to use for symbolic-link source entries.
     #[must_use = "use the configured copy options"]
     #[inline]
     pub const fn with_symlink_policy(mut self, symlink: LocalSymlinkPolicy) -> Self {
@@ -215,6 +272,10 @@ impl LocalCopyOptions {
     ///
     /// `Auto` explicitly resets a previously configured entry or tree mode.
     /// Every mode rejects special files before creating destination parents.
+    ///
+    /// # Parameters
+    ///
+    /// - `mode`: Source interpretation to use for the copy.
     #[must_use = "use the configured copy options"]
     #[inline]
     pub const fn with_source_mode(mut self, mode: LocalCopySourceMode) -> Self {
@@ -256,6 +317,11 @@ impl LocalCopyOptions {
     }
 
     /// Sets required publication atomicity.
+    ///
+    /// # Parameters
+    ///
+    /// - `atomicity`: Minimum publication atomicity required from the
+    ///   operation.
     #[must_use = "use the configured copy options"]
     #[inline]
     pub const fn with_atomicity(mut self, atomicity: LocalAtomicityRequirement) -> Self {
@@ -264,6 +330,10 @@ impl LocalCopyOptions {
     }
 
     /// Sets required durability.
+    ///
+    /// # Parameters
+    ///
+    /// - `durability`: Minimum durability required from the operation.
     #[must_use = "use the configured copy options"]
     #[inline]
     pub const fn with_durability(mut self, durability: LocalDurabilityRequirement) -> Self {
@@ -274,6 +344,10 @@ impl LocalCopyOptions {
     /// Limits recursive tree depth.
     ///
     /// The copied root is depth zero; each descendant consumes one level.
+    ///
+    /// # Parameters
+    ///
+    /// - `max_depth`: Maximum descendant depth; zero permits only the root.
     #[must_use = "use the configured copy options"]
     #[inline]
     pub const fn with_max_depth(mut self, max_depth: usize) -> Self {
@@ -290,6 +364,10 @@ impl LocalCopyOptions {
     /// Limits the number of source entries processed.
     ///
     /// An entry is charged immediately before the backend processes it.
+    ///
+    /// # Parameters
+    ///
+    /// - `max_entries`: Maximum number of source entries to process.
     #[must_use = "use the configured copy options"]
     #[inline]
     pub const fn with_max_entries(mut self, max_entries: usize) -> Self {
@@ -304,6 +382,10 @@ impl LocalCopyOptions {
         self
     }
     /// Limits source bytes copied.
+    ///
+    /// # Parameters
+    ///
+    /// - `max_bytes`: Maximum number of source bytes to copy.
     #[must_use = "use the configured copy options"]
     #[inline]
     pub const fn with_max_bytes(mut self, max_bytes: u64) -> Self {
@@ -318,6 +400,11 @@ impl LocalCopyOptions {
         self
     }
     /// Limits concurrently open source directories.
+    ///
+    /// # Parameters
+    ///
+    /// - `max_open_directories`: Maximum number of source directories open at
+    ///   the same time.
     #[must_use = "use the configured copy options"]
     #[inline]
     pub const fn with_max_open_directories(mut self, max_open_directories: usize) -> Self {
@@ -332,6 +419,10 @@ impl LocalCopyOptions {
         self
     }
     /// Sets the maximum elapsed time for the complete copy.
+    ///
+    /// # Parameters
+    ///
+    /// - `deadline`: Maximum elapsed time allowed for the complete copy.
     #[must_use = "use the configured copy options"]
     #[inline]
     pub const fn with_deadline(mut self, deadline: Duration) -> Self {

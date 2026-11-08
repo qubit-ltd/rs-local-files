@@ -6,13 +6,14 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 //! Facade for the private recursive directory-copy pipeline.
-// Private behavior is covered through public integration tests.
+// Copy behavior is covered by crate-private contract and public integration
+// tests.
 
 use std::path::Path;
 
 use super::copy_dir_result::CopyDirResult;
 use super::error::with_copy_context;
-use super::host_copy_backend::copy_dir_iterative;
+use super::host_copy_backend_ops::copy_dir_iterative;
 use crate::LocalCopyDirOptions;
 use crate::LocalCopyDirStage;
 use crate::LocalCopyDirStats;
@@ -144,37 +145,28 @@ fn copy_dir_all_with_scope(
     Ok(stats)
 }
 
-#[cfg(all(test, unix))]
+#[cfg(test)]
 mod tests {
-    use std::fs;
-    use std::os::unix::fs::symlink;
-
-    use tempfile::tempdir;
-
     use super::copy_dir_all_with_paths_scoped;
     use crate::LocalCopyDirOptions;
-    use crate::LocalSymlinkPolicy;
+    use crate::LocalCopyDirStage;
 
     #[test]
-    fn test_scoped_copy_follows_in_scope_directory_link() {
-        let directory = tempdir().expect("temporary directory should be created");
-        let source = directory.path().join("source");
-        let linked = directory.path().join("linked");
-        let destination = directory.path().join("destination");
-        fs::create_dir_all(&source).expect("source directory should be created");
-        fs::create_dir(&linked).expect("link target should be created");
-        fs::write(linked.join("entry"), b"payload").expect("link target entry should be written");
-        symlink("../linked", source.join("link")).expect("in-scope directory link should be created");
-
-        let stats = copy_dir_all_with_paths_scoped(
+    fn test_missing_scope_fails_before_destination_creation() {
+        let fixture = tempfile::tempdir().expect("fixture directory");
+        let source = fixture.path().join("source");
+        let destination = fixture.path().join("destination");
+        std::fs::create_dir(&source).expect("source directory");
+        std::fs::write(source.join("file"), b"original").expect("source file");
+        let error = copy_dir_all_with_paths_scoped(
             &source,
             &destination,
-            LocalCopyDirOptions::new().with_symlink_policy(LocalSymlinkPolicy::FollowWithinScope),
-            directory.path(),
+            LocalCopyDirOptions::default(),
+            &fixture.path().join("missing-scope"),
         )
-        .expect("copy should follow a directory link inside its scope");
-
-        assert_eq!(1, stats.files);
-        assert_eq!(b"payload", fs::read(destination.join("link/entry")).unwrap().as_slice());
+        .expect_err("missing scope must reject the copy");
+        assert_eq!(error.stage(), LocalCopyDirStage::InspectSource);
+        assert!(!destination.exists());
+        assert_eq!(std::fs::read(source.join("file")).expect("source remains"), b"original");
     }
 }

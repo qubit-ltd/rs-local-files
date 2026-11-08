@@ -6,6 +6,15 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 /// Access policy known to hold for a staged directory tree.
+///
+/// # Examples
+///
+/// ```
+/// use qubit_local_files::outcome::LocalTreeAccessState;
+///
+/// let state = LocalTreeAccessState::Preserved;
+/// assert_eq!(state, LocalTreeAccessState::Preserved);
+/// ```
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub enum LocalTreeAccessState {

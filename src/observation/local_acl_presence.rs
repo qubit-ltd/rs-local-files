@@ -15,6 +15,15 @@
 /// data, and configured resource-limit violations are errors rather than
 /// presence states. These variants describe the queried ACL kind only and do
 /// not by themselves establish effective access.
+///
+/// # Examples
+///
+/// ```
+/// use qubit_local_files::observation::LocalAclPresence;
+///
+/// let presence = LocalAclPresence::Present;
+/// assert_eq!(presence, LocalAclPresence::Present);
+/// ```
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub enum LocalAclPresence {

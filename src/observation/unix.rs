@@ -24,6 +24,12 @@ use crate::observation::LocalObservationRequirement;
 use crate::observation::LocalUnixFileDetails;
 
 /// Queries normalized metadata and native identity from the same open handle.
+///
+/// # Parameters
+///
+/// * `file` is the already-open file whose metadata is observed.
+/// * `requirement` controls whether unavailable Unix identity or timestamp
+///   details make the observation fail.
 pub(crate) fn query_native(
     file: &File,
     requirement: LocalObservationRequirement,
@@ -31,6 +37,21 @@ pub(crate) fn query_native(
     query_native_with(file, requirement, |file| fstat(file).map_err(io::Error::from))
 }
 
+/// Queries metadata and Unix details using a caller-provided native query.
+///
+/// This helper allows the native query to be supplied while keeping metadata
+/// and native details tied to the same open file.
+///
+/// # Parameters
+///
+/// * `file` is the already-open file whose metadata is observed.
+/// * `requirement` controls whether unavailable identity or timestamp details
+///   make the observation fail.
+/// * `native_query` reads native metadata from that same file handle.
+///
+/// # Type Parameters
+///
+/// * `F` is a one-shot query that reads native metadata from the supplied file.
 pub(crate) fn query_native_with<F>(
     file: &File,
     requirement: LocalObservationRequirement,
@@ -97,6 +118,13 @@ where
     Ok(LocalFileObservation::from_parts(normalized, identity, details))
 }
 
+/// Reports whether a Unix timestamp fraction is within the valid nanosecond
+/// range.
+///
+/// # Parameters
+///
+/// * `nanos` is the timestamp's fractional part, expressed as nanoseconds.
+#[inline]
 const fn valid_nanos(nanos: u64) -> bool {
     nanos < 1_000_000_000
 }

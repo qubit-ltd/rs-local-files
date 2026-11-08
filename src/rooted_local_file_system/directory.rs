@@ -122,6 +122,12 @@ impl RootedLocalFileSystem {
 /// `exists_ok` permits an existing or concurrently created final directory.
 /// Native inspection/creation and type-conflict failures retain the failed
 /// relative component and whether earlier directory creation had side effects.
+///
+/// # Parameters
+///
+/// - `root`: Opened authority used for component inspection and creation.
+/// - `path`: Validated relative path whose missing directories are created.
+/// - `exists_ok`: Whether an already existing final directory is accepted.
 fn create_rooted_directory_tree(
     root: &crate::rooted::Root,
     path: &crate::local::LocalRelativePath,
@@ -201,6 +207,12 @@ fn create_rooted_directory_tree(
 }
 
 /// Builds one Rooted recursive-create error with its failed relative path.
+///
+/// # Parameters
+///
+/// - `path`: Relative component where inspection or creation failed.
+/// - `created_any`: Whether an earlier component was created by this operation.
+/// - `source`: Native error that caused recursive creation to fail.
 fn rooted_create_component_error(
     path: &crate::local::LocalRelativePath,
     created_any: bool,

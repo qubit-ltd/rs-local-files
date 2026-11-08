@@ -46,6 +46,14 @@ use crate::read;
 ///
 /// Returns an I/O error when the root cannot be opened or is not a real
 /// directory.
+///
+/// # Parameters
+///
+/// - `path`: Absolute path to the root directory.
+///
+/// # Returns
+///
+/// The opened root directory handle.
 pub(crate) fn open_root_directory(path: &Path) -> Result<File> {
     let wide = wide_path(path)?;
     // SAFETY: `wide` is a live NUL-terminated UTF-16 path. All optional
@@ -76,6 +84,16 @@ pub(crate) fn open_root_directory(path: &Path) -> Result<File> {
 /// # Errors
 ///
 /// Returns an I/O error when traversal, opening, or metadata inspection fails.
+///
+/// # Parameters
+///
+/// - `root`: Open handle for the rooted filesystem boundary.
+/// - `_diagnostic_root`: Diagnostic path retained for the reader interface.
+/// - `path`: Validated path relative to `root`.
+///
+/// # Returns
+///
+/// A handle to the final entry without following its final component.
 #[inline]
 pub(crate) fn read_rooted_symlink_metadata(
     root: &File,
@@ -89,6 +107,19 @@ pub(crate) fn read_rooted_symlink_metadata(
 /// retaining the final reparse point for classification by the caller.
 /// `name` must be one previously validated normal component. Propagates
 /// name-encoding and native open errors; the returned handle owns the entry.
+///
+/// # Parameters
+///
+/// - `root`: Open handle for the parent directory.
+/// - `name`: Previously validated normal child component.
+///
+/// # Returns
+///
+/// An owned handle to the child entry, preserving its final reparse point.
+///
+/// # Errors
+///
+/// Returns errors from name encoding or the native relative open.
 pub(crate) fn read_rooted_component_metadata(root: &File, name: &OsStr) -> Result<File> {
     nt_open_at(root, name, FILE_READ_ATTRIBUTES | SYNCHRONIZE, FILE_OPEN, 0)
 }
@@ -97,6 +128,20 @@ pub(crate) fn read_rooted_component_metadata(root: &File, name: &OsStr) -> Resul
 /// directory handle without following name-surrogate reparse points.
 /// `name` must be one previously validated normal component. Propagates native
 /// open/inspection, non-directory, reparse-point, and name-encoding errors.
+///
+/// # Parameters
+///
+/// - `root`: Open handle for the parent directory.
+/// - `name`: Previously validated normal child component.
+///
+/// # Returns
+///
+/// An owned handle to the verified real child directory.
+///
+/// # Errors
+///
+/// Returns errors from opening or inspecting the child, including when it is
+/// not a real directory.
 pub(crate) fn open_rooted_component_directory(root: &File, name: &OsStr) -> Result<File> {
     let directory = nt_open_at(
         root,
@@ -115,6 +160,17 @@ pub(crate) fn open_rooted_component_directory(root: &File, name: &OsStr) -> Resu
 ///
 /// Returns an I/O error when traversal escapes through a reparse point or the
 /// final entry is not a regular file.
+///
+/// # Parameters
+///
+/// - `root`: Open handle for the rooted filesystem boundary.
+/// - `_diagnostic_root`: Diagnostic path retained for the reader interface.
+/// - `path`: Validated path relative to `root`.
+/// - `_options`: Reader options retained for the reader interface.
+///
+/// # Returns
+///
+/// An owned handle to the verified regular file.
 pub(crate) fn open_rooted_native_reader(
     root: &File,
     _diagnostic_root: &Path,
@@ -137,6 +193,23 @@ pub(crate) fn open_rooted_native_reader(
 /// which may create or truncate according to `disposition`. Rejects final
 /// name-surrogate reparse points and propagates traversal/open/inspection
 /// errors.
+///
+/// # Parameters
+///
+/// - `root`: Open handle for the rooted filesystem boundary.
+/// - `path`: Validated path relative to `root`.
+/// - `access`: Native access mask for the final entry.
+/// - `disposition`: Native open disposition, which may create or truncate.
+/// - `options`: Native open options for the final entry.
+///
+/// # Returns
+///
+/// An owned handle to the opened entry after rejecting name-surrogate links.
+///
+/// # Errors
+///
+/// Returns traversal, native open, or inspection errors. A successful native
+/// create or truncate is not rolled back if later verification fails.
 pub(super) fn open_entry(
     root: &File,
     path: &LocalRelativePath,
@@ -155,6 +228,23 @@ pub(super) fn open_entry(
 /// requested `access`, `disposition`, and `options`. Propagates traversal,
 /// name-encoding, and native open errors; creation/truncation is not rolled
 /// back.
+///
+/// # Parameters
+///
+/// - `root`: Open handle for the rooted filesystem boundary.
+/// - `path`: Validated path relative to `root`.
+/// - `access`: Native access mask for the final entry.
+/// - `disposition`: Native open disposition, which may create or truncate.
+/// - `options`: Native open options for the final entry.
+///
+/// # Returns
+///
+/// An owned handle to the final entry, including a final reparse point.
+///
+/// # Errors
+///
+/// Returns traversal, name-encoding, or native open errors. A successful
+/// native create or truncate is not rolled back if a later step fails.
 #[inline]
 pub(super) fn open_entry_no_follow(
     root: &File,
@@ -169,6 +259,18 @@ pub(super) fn open_entry_no_follow(
 
 /// Converts a native path to a NUL-terminated UTF-16 string.
 /// Returns `InvalidInput` for an embedded native NUL.
+///
+/// # Parameters
+///
+/// - `path`: Native path to encode as UTF-16.
+///
+/// # Returns
+///
+/// The encoded path terminated by a NUL code unit.
+///
+/// # Errors
+///
+/// Returns `InvalidInput` when the path contains an embedded NUL.
 #[inline]
 fn wide_path(path: &Path) -> Result<Vec<u16>> {
     let units: Vec<u16> = path.as_os_str().encode_wide().collect();
@@ -184,6 +286,20 @@ fn wide_path(path: &Path) -> Result<Vec<u16>> {
 /// Opens and verifies every parent component beneath the root.
 /// Returns the owned parent handle and final native name, propagating handle
 /// duplication, traversal, name-encoding, and directory verification errors.
+///
+/// # Parameters
+///
+/// - `root`: Open handle for the rooted filesystem boundary.
+/// - `path`: Validated path whose parent components are opened beneath `root`.
+///
+/// # Returns
+///
+/// The owned final parent handle and final native path component.
+///
+/// # Errors
+///
+/// Returns errors from handle duplication, traversal, name encoding, or
+/// directory verification.
 pub(super) fn open_parent(root: &File, path: &LocalRelativePath) -> Result<(File, OsString)> {
     open_parent_with_access(
         root,
@@ -193,6 +309,20 @@ pub(super) fn open_parent(root: &File, path: &LocalRelativePath) -> Result<(File
 }
 
 /// Opens the validated parent of a conditional-write target relative to `root`.
+///
+/// # Parameters
+///
+/// - `root`: Open handle for the rooted filesystem boundary.
+/// - `path`: Validated conditional-write target path.
+///
+/// # Returns
+///
+/// The owned parent handle and final native path component.
+///
+/// # Errors
+///
+/// Returns the same traversal, duplication, encoding, or verification errors
+/// as [`open_parent`].
 #[cfg(feature = "digest")]
 pub(in crate::local::internal) fn open_conditional_parent(
     root: &File,
@@ -206,6 +336,21 @@ pub(in crate::local::internal) fn open_conditional_parent(
 /// Opens every parent component with the rights needed for a rooted rename.
 /// Uses [`open_parent`]'s result and error contract. `overwrite` currently
 /// does not change the required parent access rights.
+///
+/// # Parameters
+///
+/// - `root`: Open handle for the rooted filesystem boundary.
+/// - `path`: Validated rename target path.
+/// - `overwrite`: Whether the caller permits replacing an existing target; this
+///   flag does not change parent access rights.
+///
+/// # Returns
+///
+/// The owned final parent handle and final native path component.
+///
+/// # Errors
+///
+/// Returns the same errors as [`open_parent`].
 pub(super) fn open_parent_for_rename(
     root: &File,
     path: &LocalRelativePath,
@@ -220,6 +365,21 @@ pub(super) fn open_parent_for_rename(
 /// Returns the owned parent and final name; an empty path is `InvalidInput`.
 /// Native duplication/open/inspection and name-encoding failures propagate,
 /// dropping any intermediate handles acquired by this attempt.
+///
+/// # Parameters
+///
+/// - `root`: Open handle for the rooted filesystem boundary.
+/// - `path`: Validated path whose parent components are opened beneath `root`.
+/// - `access`: Native access mask requested for each parent directory.
+///
+/// # Returns
+///
+/// The owned final parent handle and final native path component.
+///
+/// # Errors
+///
+/// Returns `InvalidInput` for an empty path and propagates duplication, native
+/// open/inspection, and name-encoding errors.
 fn open_parent_with_access(root: &File, path: &LocalRelativePath, access: u32) -> Result<(File, OsString)> {
     let mut components: Vec<OsString> = path
         .as_path()

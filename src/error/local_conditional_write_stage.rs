@@ -7,6 +7,20 @@
 // =============================================================================
 
 /// Operation stage at which a conditional commit stopped.
+///
+/// The stage is available from a [`LocalConditionalCommitError`] to identify
+/// where a conditional write failed.
+///
+/// # Examples
+///
+/// ```
+/// use qubit_local_files::error::LocalConditionalWriteStage;
+///
+/// let stage = LocalConditionalWriteStage::Precheck;
+/// assert_eq!(stage, LocalConditionalWriteStage::Precheck);
+/// ```
+///
+/// [`LocalConditionalCommitError`]: crate::error::LocalConditionalCommitError
 #[must_use]
 #[non_exhaustive]
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]

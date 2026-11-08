@@ -6,16 +6,13 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 use std::io;
-use std::io::Seek;
-use std::io::SeekFrom;
-use std::io::Write;
+
+use qubit_io::Input;
 
 use crate::error::LocalFileErrorKind;
-use crate::observation::LocalObservationRequirement;
-use crate::observation::LocalObservedReader;
 
 #[test]
-fn lf3_observation_collect_limit_and_sentinel() {
+fn test_lf3_observation_collect_limit_and_sentinel() {
     let bytes = [1_u8, 2, 3];
     let mut exact = bytes.as_slice();
     assert_eq!(
@@ -38,30 +35,7 @@ fn lf3_observation_collect_limit_and_sentinel() {
 }
 
 #[test]
-fn lf3_observation_reader_refreshes_same_handle_and_keeps_initial_value() {
-    let mut file = tempfile::tempfile().expect("create temporary file");
-    file.write_all(b"old").expect("write initial bytes");
-    let reader = crate::LocalFileReader::from_file(file.try_clone().expect("clone handle")).expect("construct reader");
-    let observed =
-        LocalObservedReader::from_reader(reader, LocalObservationRequirement::Required).expect("observe initial file");
-    let initial = observed.observation().clone();
-
-    file.set_len(0).expect("truncate file");
-    file.seek(SeekFrom::Start(0)).expect("rewind file");
-    file.write_all(b"new content").expect("write replacement contents");
-
-    let refreshed = observed.observe_now().expect("refresh retained handle");
-    assert_eq!(initial.metadata().len(), 3);
-    assert_eq!(observed.observation().metadata().len(), 3);
-    assert_eq!(refreshed.metadata().len(), 11);
-    assert_eq!(
-        observed.verify_path_binding().unwrap_err().kind(),
-        LocalFileErrorKind::InvalidState
-    );
-}
-
-#[test]
-fn lf3_observation_collect_retries_interrupted_and_preserves_read_errors() {
+fn test_lf3_observation_collect_retries_interrupted_and_preserves_read_errors() {
     let mut interrupted = ScriptedInput { phase: 0 };
     assert_eq!(
         crate::observation::reader::collect_limited(&mut interrupted, Some(4)).unwrap(),
@@ -78,7 +52,7 @@ fn lf3_observation_collect_retries_interrupted_and_preserves_read_errors() {
 }
 
 #[test]
-fn lf3_observation_collect_accepts_u64_maximum() {
+fn test_lf3_observation_collect_accepts_u64_maximum() {
     let mut input = b"finite".as_slice();
     assert_eq!(
         crate::observation::reader::collect_limited(&mut input, Some(u64::MAX)).unwrap(),
@@ -87,7 +61,7 @@ fn lf3_observation_collect_accepts_u64_maximum() {
 }
 
 #[test]
-fn lf3_observation_collect_uses_one_byte_at_the_limit() {
+fn test_lf3_observation_collect_uses_one_byte_at_the_limit() {
     let mut input = ProbeCountingInput {
         offset: 0,
         requests: Vec::new(),
@@ -100,7 +74,7 @@ fn lf3_observation_collect_uses_one_byte_at_the_limit() {
 }
 
 #[test]
-fn lf3_observation_collect_allocation_failure_is_resource_limit() {
+fn test_lf3_observation_collect_allocation_failure_is_resource_limit() {
     let mut input = b"data".as_slice();
     let error = crate::observation::reader::collect_limited_with_test_reserver(&mut input, None, |_, _| {
         Err(io::Error::other("injected reservation failure"))
@@ -118,10 +92,11 @@ fn lf3_observation_collect_allocation_failure_is_resource_limit() {
     assert_eq!(bytes, b"ok");
 }
 
+/// Emits an interruption, a fixed payload, then EOF for collector retry tests.
 struct ScriptedInput {
     phase: u8,
 }
-impl qubit_io::Input for ScriptedInput {
+impl Input for ScriptedInput {
     type Item = u8;
     unsafe fn read_unchecked(&mut self, output: &mut [u8], index: usize, count: usize) -> io::Result<usize> {
         match self.phase {
@@ -141,15 +116,17 @@ impl qubit_io::Input for ScriptedInput {
     }
 }
 
+/// Emits a partial payload followed by a read error.
 struct FailingInput {
     phase: u8,
 }
 
+/// Records each requested read size while returning a fixed payload.
 struct ProbeCountingInput {
     offset: usize,
     requests: Vec<usize>,
 }
-impl qubit_io::Input for ProbeCountingInput {
+impl Input for ProbeCountingInput {
     type Item = u8;
     unsafe fn read_unchecked(&mut self, output: &mut [u8], index: usize, count: usize) -> io::Result<usize> {
         self.requests.push(count);
@@ -160,7 +137,7 @@ impl qubit_io::Input for ProbeCountingInput {
         Ok(amount)
     }
 }
-impl qubit_io::Input for FailingInput {
+impl Input for FailingInput {
     type Item = u8;
     unsafe fn read_unchecked(&mut self, output: &mut [u8], index: usize, count: usize) -> io::Result<usize> {
         if self.phase == 0 {

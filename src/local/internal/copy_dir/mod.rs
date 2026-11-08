@@ -15,10 +15,12 @@ mod destination_removal_failure;
 mod error;
 mod facade;
 mod host_copy_backend;
+mod host_copy_backend_ops;
 mod namespace_race;
 mod opened_copy_source;
 mod source;
 mod staged_copy;
+mod staged_copy_commit_options;
 mod staging_io;
 mod statistics_overflow;
 

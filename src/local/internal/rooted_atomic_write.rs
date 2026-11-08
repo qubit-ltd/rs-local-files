@@ -78,12 +78,10 @@ pub(in crate::local) fn inspect_rooted_atomic_destination(
     if replace_target_symlink && (status.st_mode as libc::mode_t & libc::S_IFMT) == libc::S_IFLNK {
         return Ok((true, false));
     }
-    {
-        Err(Error::new(
-            ErrorKind::InvalidInput,
-            "rooted atomic destination is not a regular file",
-        ))
-    }
+    Err(Error::new(
+        ErrorKind::InvalidInput,
+        "rooted atomic destination is not a regular file",
+    ))
 }
 
 /// Creates a unique staging entry in an open destination parent directory.

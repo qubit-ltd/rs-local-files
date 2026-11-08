@@ -27,7 +27,7 @@ fn rooted_host_path(root: &Path, virtual_path: &Path) -> std::path::PathBuf {
 }
 
 #[test]
-fn temp_adapter_seek_and_cleanup_preserve_ownership() {
+fn test_temp_adapter_seek_and_cleanup_preserve_ownership() {
     let fs = LocalFileSystem::host().expect("host filesystem should open");
     let mut file = fs.create_temp_file().expect("temporary file should be created");
 
@@ -68,7 +68,7 @@ fn temp_adapter_seek_and_cleanup_preserve_ownership() {
 }
 
 #[test]
-fn temp_vectored_write_uses_inherent_method() {
+fn test_temp_vectored_write_uses_inherent_method() {
     let fs = LocalFileSystem::host().expect("host filesystem should open");
     let mut file = fs.create_temp_file().expect("temporary file should be created");
     let written = file
@@ -90,7 +90,7 @@ fn temp_vectored_write_uses_inherent_method() {
 }
 
 #[test]
-fn rooted_temp_range_write_and_cleanup_preserve_authority() {
+fn test_rooted_temp_range_write_and_cleanup_preserve_authority() {
     let directory = tempdir().expect("root directory should be created");
     let fs = LocalFileSystem::rooted(directory.path()).expect("rooted filesystem should open");
     let mut file = fs.create_temp_file().expect("rooted temporary file should be created");
@@ -117,7 +117,7 @@ fn rooted_temp_range_write_and_cleanup_preserve_authority() {
 }
 
 #[test]
-fn owned_std_write_can_be_recovered_before_keep_and_persist() {
+fn test_owned_std_write_can_be_recovered_before_keep_and_persist() {
     let directory = tempdir().expect("same-filesystem destination directory should be created");
     let fs = LocalFileSystem::host().expect("host filesystem should open");
 

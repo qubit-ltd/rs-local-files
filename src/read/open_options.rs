@@ -21,8 +21,11 @@ pub struct OpenOptions {
 impl OpenOptions {
     /// Returns the Unix lease-conflict retry timeout.
     ///
-    /// `None` returns the first lease conflict unchanged without retrying.
-    /// `Some` bounds retries; zero reports `TimedOut` after the first conflict.
+    /// # Returns
+    /// - `None` returns the first lease conflict unchanged without retrying.
+    /// - `Some` bounds retries; zero reports `TimedOut` after the first
+    ///   conflict.
+    #[must_use]
     #[inline]
     pub(crate) const fn open_retry_timeout(&self) -> Option<Duration> {
         self.open_retry_timeout

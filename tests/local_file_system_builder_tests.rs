@@ -9,8 +9,75 @@
 
 use qubit_local_files::LocalFileSystem;
 use qubit_local_files::error::LocalFileErrorKind;
+use qubit_local_files::options::LocalCopyOptions;
+use qubit_local_files::options::LocalCreateDirectoryOptions;
+use qubit_local_files::options::LocalDeleteOptions;
 use qubit_local_files::options::LocalListOptions;
+use qubit_local_files::options::LocalReadOptions;
+use qubit_local_files::options::LocalRenameOptions;
+use qubit_local_files::options::LocalTempDirectoryOptions;
+use qubit_local_files::options::LocalTempFileOptions;
+use qubit_local_files::options::LocalWriteMode;
+use qubit_local_files::options::LocalWriteOptions;
 use qubit_local_files::path::LocalFileSystemScope;
+use qubit_local_files::policy::LocalSymlinkPolicy;
+
+#[test]
+fn test_rooted_default_options_accessors_and_setters_round_trip() {
+    let fixture = tempfile::tempdir().expect("fixture");
+    let mut filesystem = LocalFileSystem::rooted(fixture.path()).expect("rooted filesystem");
+
+    let _ = filesystem.default_read_options();
+    filesystem
+        .set_default_read_options(LocalReadOptions::new())
+        .expect("read defaults");
+    let _ = filesystem.default_write_options();
+    filesystem
+        .set_default_write_options(LocalWriteOptions::new(LocalWriteMode::CreateNew))
+        .expect("write defaults");
+    let _ = filesystem.default_list_options();
+    filesystem
+        .set_default_list_options(LocalListOptions::new())
+        .expect("list defaults");
+    let _ = filesystem.default_copy_options();
+    filesystem
+        .set_default_copy_options(LocalCopyOptions::new())
+        .expect("copy defaults");
+    let _ = filesystem.default_create_directory_options();
+    filesystem
+        .set_default_create_directory_options(LocalCreateDirectoryOptions::new())
+        .expect("create-directory defaults");
+    let _ = filesystem.default_delete_options();
+    filesystem
+        .set_default_delete_options(LocalDeleteOptions::new())
+        .expect("delete defaults");
+    let _ = filesystem.default_rename_options();
+    filesystem
+        .set_default_rename_options(LocalRenameOptions::new())
+        .expect("rename defaults");
+    let _ = filesystem.default_temp_file_options();
+    filesystem
+        .set_default_temp_file_options(LocalTempFileOptions::new())
+        .expect("temp-file defaults");
+    let _ = filesystem.default_temp_directory_options();
+    filesystem
+        .set_default_temp_directory_options(LocalTempDirectoryOptions::new())
+        .expect("temp-directory defaults");
+}
+
+#[test]
+fn test_rooted_symlink_policy_rejection_preserves_the_previous_default() {
+    let fixture = tempfile::tempdir().expect("fixture");
+    let mut filesystem = LocalFileSystem::rooted(fixture.path()).expect("rooted filesystem");
+    let original = filesystem.symlink_policy();
+
+    let error = filesystem
+        .set_symlink_policy(LocalSymlinkPolicy::FollowAcrossScope)
+        .expect_err("rooted filesystems cannot follow links across scope");
+
+    assert_eq!(error.kind(), LocalFileErrorKind::InvalidOptions);
+    assert_eq!(filesystem.symlink_policy(), original);
+}
 
 #[test]
 fn test_cloned_filesystem_shares_authority_but_copies_configuration() {

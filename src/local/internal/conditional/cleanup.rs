@@ -19,6 +19,19 @@ use crate::recovery::LocalRecoveryFile;
 /// removal. A failed checkpoint, identity check, or removal records a cleanup
 /// error and transfers that entry into the returned recovery list; it is never
 /// treated as successfully removed.
+///
+/// # Type Parameters
+///
+/// - `B`: Backend that verifies and removes entries and reports deferred
+///   cleanup errors.
+///
+/// # Parameters
+///
+/// - `backend`: Backend used for checkpoints, identity verification, removal,
+///   and collection of cleanup errors. It is mutated during cleanup.
+/// - `entries`: Verified entries to remove. Failed removals are retained in the
+///   returned recovery list.
+#[must_use = "cleanup errors and retained recovery entries must be handled"]
 pub(super) fn cleanup_entries<B: ConditionalBackend>(
     backend: &mut B,
     mut entries: Vec<ConditionalEntry>,

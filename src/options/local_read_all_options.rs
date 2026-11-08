@@ -53,6 +53,11 @@ pub struct LocalReadAllOptions {
 impl LocalReadAllOptions {
     /// Creates options that inherit filesystem reader defaults and have no
     /// additional byte limit.
+    ///
+    /// # Returns
+    ///
+    /// Options with no explicit reader configuration, symlink override, or
+    /// byte limit.
     pub const fn new() -> Self {
         Self {
             max_bytes: None,
@@ -62,36 +67,79 @@ impl LocalReadAllOptions {
     }
 
     /// Sets the maximum number of bytes returned by a complete read.
+    ///
+    /// # Parameters
+    ///
+    /// - `maximum`: Maximum number of bytes to return; reads exceeding this
+    ///   limit fail with a resource-limit error.
+    ///
+    /// # Returns
+    ///
+    /// Updated options with the specified complete-file byte limit.
     pub const fn with_max_bytes(mut self, maximum: u64) -> Self {
         self.max_bytes = Some(maximum);
         self
     }
 
     /// Replaces the filesystem's complete reader options.
+    ///
+    /// # Parameters
+    ///
+    /// - `options`: Complete reader configuration to use instead of the
+    ///   filesystem's reader defaults.
+    ///
+    /// # Returns
+    ///
+    /// Updated options containing the supplied reader configuration.
     pub const fn with_read_options(mut self, options: LocalReadOptions) -> Self {
         self.read_options = Some(options);
         self
     }
 
     /// Overrides the symbolic-link policy after selecting reader options.
+    ///
+    /// # Parameters
+    ///
+    /// - `policy`: Symbolic-link policy to apply after the selected reader
+    ///   options, taking precedence over their policy and the filesystem
+    ///   default.
+    ///
+    /// # Returns
+    ///
+    /// Updated options containing the symlink policy override.
     pub const fn with_symlink_policy(mut self, policy: LocalSymlinkPolicy) -> Self {
         self.symlink_policy = Some(policy);
         self
     }
 
     /// Returns the additional complete-file byte limit, if configured.
+    ///
+    /// # Returns
+    ///
+    /// `Some(limit)` when a byte limit is configured, or `None` when complete
+    /// reads have no additional byte limit.
     pub(crate) const fn max_bytes(&self) -> Option<u64> {
         self.max_bytes
     }
 
     /// Returns the explicit reader configuration; `None` means inherit
     /// defaults.
+    ///
+    /// # Returns
+    ///
+    /// A borrowed reader configuration when explicitly set, or `None` to
+    /// inherit the filesystem's reader defaults.
     pub(crate) const fn read_options(&self) -> Option<&LocalReadOptions> {
         self.read_options.as_ref()
     }
 
     /// Returns the policy override, if present, which takes precedence over
     /// the selected reader options and filesystem default.
+    ///
+    /// # Returns
+    ///
+    /// `Some(policy)` when an override is configured, or `None` to use the
+    /// policy from the selected reader options or filesystem defaults.
     pub(crate) const fn symlink_policy(&self) -> Option<LocalSymlinkPolicy> {
         self.symlink_policy
     }

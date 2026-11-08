@@ -17,7 +17,7 @@ use qubit_local_files::options::LocalObservedReadOptions;
 use qubit_local_files::options::LocalPathBindingOptions;
 
 #[test]
-fn observed_reader_binding_checks_deadline_and_retains_ancestors() {
+fn test_observed_reader_binding_checks_deadline_and_retains_ancestors() {
     let fixture = tempfile::tempdir().expect("fixture directory should be created");
     let path = fixture.path().join("payload");
     std::fs::write(&path, b"observed").expect("fixture file should be written");
@@ -80,7 +80,7 @@ fn observed_reader_binding_checks_deadline_and_retains_ancestors() {
 }
 
 #[test]
-fn directory_binding_retains_chain_and_enforces_ancestor_limits() {
+fn test_directory_binding_retains_chain_and_enforces_ancestor_limits() {
     let fixture = tempfile::tempdir().expect("fixture directory should be created");
     std::fs::create_dir(fixture.path().join("parent")).expect("parent should be created");
     std::fs::create_dir(fixture.path().join("parent/child")).expect("child should be created");

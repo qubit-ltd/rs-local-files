@@ -24,7 +24,16 @@ use crate::observation::LocalObservationRequirement;
 use crate::policy::LocalPrivacyRequirement;
 use crate::policy::LocalSymlinkPolicy;
 
+/// Maps expected relative paths to their required kind and observation state.
+///
+/// The borrowed keys remain valid for the duration of tree verification, and
+/// the boolean records whether each expected entry has been observed.
 type ExpectedIndex<'a> = HashMap<&'a Path, (LocalFileKind, bool)>;
+
+/// Tracks native hard-link counts and observed occurrences by file identity.
+///
+/// The stored count detects changes during verification; the occurrence count
+/// is compared with it to identify links outside the staged tree.
 type LinkCounts = HashMap<LocalFileIdentity, (u64, usize)>;
 
 /// Verifies a staged tree in one entry-only pass.
@@ -35,6 +44,19 @@ type LinkCounts = HashMap<LocalFileIdentity, (u64, usize)>;
 /// observation ceiling: actual entries beyond it fail rather than being
 /// silently omitted. This checks a sequence of observations and does not
 /// provide an atomic filesystem snapshot.
+///
+/// # Parameters
+///
+/// * `stage` is the retained staged directory whose root identity is verified.
+/// * `expected` optionally supplies the exact relative paths and kinds
+///   required.
+/// * `options` supplies privacy, file-kind, hard-link, resource, and deadline
+///   constraints.
+///
+/// # Returns
+///
+/// `Ok(())` when all requested checks pass; otherwise returns the first
+/// encountered validation or observation error.
 ///
 /// # Errors
 ///
@@ -327,6 +349,14 @@ pub(in crate::directory) fn verify_tree(
 }
 
 /// Determines whether any configured constraint requires enumerating entries.
+///
+/// # Parameters
+///
+/// * `options` supplies the constraints whose presence may require a tree walk.
+///
+/// # Returns
+///
+/// `true` when at least one configured constraint requires entry enumeration.
 fn requires_tree_walk(options: &LocalTreeValidationOptions) -> bool {
     let limits = options.limits();
     options.exact_entries().is_some()
@@ -343,6 +373,26 @@ fn requires_tree_walk(options: &LocalTreeValidationOptions) -> bool {
 }
 
 /// Checks privacy of the retained stage root when privacy is required.
+///
+/// # Parameters
+///
+/// * `stage` provides the retained root authority and diagnostic path.
+/// * `options` supplies the privacy and owner-access policy to enforce.
+///
+/// # Returns
+///
+/// `Ok(())` when root privacy checks pass or are not required.
+///
+/// # Errors
+///
+/// Returns an observation error when the root authority cannot be inspected,
+/// `ChangedDuringRead` when its identity changes, or a privacy-policy error
+/// when the configured access requirement is not met.
+///
+/// # Panics
+///
+/// On Windows, panics if the staged-directory invariant that the stage owner
+/// exists is violated.
 fn verify_root_privacy(stage: &LocalStagedDirectory, options: &LocalTreeValidationOptions) -> LocalResult<()> {
     if options.privacy() != LocalPrivacyRequirement::Required && options.owner_access_policy().is_none() {
         return Ok(());
@@ -422,6 +472,25 @@ fn verify_root_privacy(stage: &LocalStagedDirectory, options: &LocalTreeValidati
 }
 
 /// Checks privacy for an observed ordinary file or directory entry.
+///
+/// # Parameters
+///
+/// * `stage` provides the retained directory authority and diagnostic root.
+/// * `path` is the observed entry's relative path within the staged tree.
+/// * `kind` is the entry kind captured by traversal.
+/// * `identity` is the identity captured by traversal and rechecked after
+///   reopen.
+/// * `options` supplies the privacy and owner-access policy to enforce.
+///
+/// # Returns
+///
+/// `Ok(())` when entry privacy checks pass or are not required.
+///
+/// # Errors
+///
+/// Returns `Unsupported` when identity is unavailable, `ChangedDuringRead`
+/// when the reopened entry differs, or a privacy-policy error when access
+/// verification fails.
 fn verify_entry_privacy(
     stage: &LocalStagedDirectory,
     path: &Path,
@@ -495,11 +564,28 @@ fn verify_entry_privacy(
 }
 
 /// Associates a native access error with the operation and diagnostic path.
+///
+/// # Parameters
+///
+/// * `operation` identifies the filesystem operation that failed.
+/// * `path` is the diagnostic path associated with the failure.
+/// * `source` is the native I/O error to preserve as the cause.
 fn file_error(operation: LocalFileOperation, path: &Path, source: std::io::Error) -> LocalFileError {
     LocalFileError::from_io(operation, Some(path.to_path_buf()), None, source)
         .with_reason("tree privacy or owner-access policy verification failed")
 }
 
+/// Adds staged-tree path context to an error when it does not already have one.
+///
+/// Existing error paths are preserved; the supplied relative path is joined to
+/// the staged root only when the original error has no path.
+///
+/// # Parameters
+///
+/// * `error` is the original filesystem error.
+/// * `stage` provides the diagnostic root for a missing error path.
+/// * `relative` is the entry path to attach when needed.
+/// * `reason` describes the failed tree-verification operation.
 fn context_error(
     error: LocalFileError,
     stage: &LocalStagedDirectory,
@@ -516,6 +602,19 @@ fn context_error(
 }
 
 /// Returns a resource-limit error when a cooperative deadline has elapsed.
+///
+/// # Parameters
+///
+/// * `stage` provides the diagnostic root for the deadline error.
+/// * `deadline` is the optional monotonic expiration instant.
+///
+/// # Returns
+///
+/// `Ok(())` while the deadline has not elapsed or is absent.
+///
+/// # Errors
+///
+/// Returns `ResourceLimit` when the cooperative deadline has elapsed.
 fn check_deadline(stage: &LocalStagedDirectory, deadline: Option<Instant>) -> LocalResult<()> {
     if deadline.is_some_and(|deadline| Instant::now() >= deadline) {
         Err(resource_error(
@@ -531,17 +630,35 @@ fn check_deadline(stage: &LocalStagedDirectory, deadline: Option<Instant>) -> Lo
 
 /// Enforces the logical encoded-name byte budget, excluding allocator overhead.
 /// Creates the common error used when complete traversal exceeds a budget.
+///
+/// This error has no path or resource facts until a caller adds the relevant
+/// traversal context.
 fn resource_limit() -> LocalFileError {
     LocalFileError::new(LocalFileErrorKind::ResourceLimit, LocalFileOperation::Read)
 }
 
 /// Creates the error used when an observed tree violates a requested condition.
+///
+/// # Parameters
+///
+/// * `stage` provides the diagnostic root.
+/// * `relative` identifies the offending entry within the staged tree.
+/// * `reason` states which requested condition was violated.
 fn requirement_error(stage: &LocalStagedDirectory, relative: &Path, reason: &'static str) -> LocalFileError {
     LocalFileError::new(LocalFileErrorKind::RequirementNotMet, LocalFileOperation::Metadata)
         .with_path(stage.directory().diagnostic_path().join(relative))
         .with_reason(reason)
 }
 
+/// Creates a resource-limit error with staged-tree path and optional budget
+/// facts.
+///
+/// # Parameters
+///
+/// * `stage` provides the diagnostic root.
+/// * `relative` identifies the path associated with the resource failure.
+/// * `reason` explains the exhausted or overflowing resource.
+/// * `facts` carries the configured and observed limit values when available.
 fn resource_error(
     stage: &LocalStagedDirectory,
     relative: &Path,
@@ -557,6 +674,14 @@ fn resource_error(
     }
 }
 
+/// Converts a traversal limit and its facts into a path-aware error.
+///
+/// # Parameters
+///
+/// * `stage` provides the diagnostic root.
+/// * `relative` identifies the entry that crossed the configured limit.
+/// * `facts` describes the resource and observed limit values.
+/// * `reason` explains which tree limit was exceeded.
 fn tree_limit(
     stage: &LocalStagedDirectory,
     relative: &Path,
@@ -566,6 +691,14 @@ fn tree_limit(
     resource_error(stage, relative, reason, Some(facts))
 }
 
+/// Creates a resource-limit error recording arithmetic overflow.
+///
+/// # Parameters
+///
+/// * `stage` provides the diagnostic root.
+/// * `relative` identifies the path whose accounting overflowed.
+/// * `resource` identifies the resource whose counter overflowed.
+/// * `reason` explains the failed accounting operation.
 fn resource_overflow(
     stage: &LocalStagedDirectory,
     relative: &Path,
@@ -595,7 +728,7 @@ mod missing_path_tests {
     use crate::policy::LocalPrivacyRequirement;
 
     #[test]
-    fn missing_entry_identity_is_reported_before_privacy_reopen() {
+    fn test_missing_entry_identity_is_reported_before_privacy_reopen() {
         let fixture = tempfile::tempdir().expect("fixture");
         let filesystem = LocalFileSystem::host().expect("host filesystem");
         let parent = filesystem
@@ -622,7 +755,7 @@ mod missing_path_tests {
     }
 
     #[test]
-    fn explicit_resource_overflow_retains_limit_kind_and_path() {
+    fn test_explicit_resource_overflow_retains_limit_kind_and_path() {
         let fixture = tempfile::tempdir().expect("fixture");
         let filesystem = LocalFileSystem::host().expect("host filesystem");
         let parent = filesystem
@@ -647,7 +780,7 @@ mod missing_path_tests {
     }
 
     #[test]
-    fn privacy_reopen_failure_keeps_the_entry_path_context() {
+    fn test_privacy_reopen_failure_keeps_the_entry_path_context() {
         let fixture = tempfile::tempdir().expect("fixture");
         let filesystem = LocalFileSystem::host().expect("host filesystem");
         let parent = filesystem

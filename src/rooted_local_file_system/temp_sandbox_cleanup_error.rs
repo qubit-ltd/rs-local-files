@@ -15,6 +15,7 @@ use std::io;
 use std::path::PathBuf;
 
 /// Retains a rooted temporary creation failure and failed sandbox cleanup.
+#[must_use]
 #[derive(Debug)]
 #[allow(dead_code)]
 pub(crate) struct TempSandboxCleanupError {
@@ -28,6 +29,16 @@ pub(crate) struct TempSandboxCleanupError {
 
 impl TempSandboxCleanupError {
     /// Creates an aggregate while preserving both native failures.
+    ///
+    /// # Parameters
+    ///
+    /// * `primary` is the I/O failure that caused the operation to stop.
+    /// * `sandbox` is the caller-visible path whose cleanup failed.
+    /// * `cleanup` is the I/O failure encountered while removing the sandbox.
+    ///
+    /// # Returns
+    ///
+    /// The aggregate containing the supplied failures and sandbox path.
     #[allow(dead_code)]
     pub(crate) const fn new(primary: io::Error, sandbox: PathBuf, cleanup: io::Error) -> Self {
         Self {
@@ -40,6 +51,18 @@ impl TempSandboxCleanupError {
 
 impl Display for TempSandboxCleanupError {
     /// Formats the primary failure and the sandbox cleanup failure.
+    ///
+    /// # Parameters
+    ///
+    /// * `formatter` receives the combined failure description.
+    ///
+    /// # Returns
+    ///
+    /// `Ok(())` when formatting succeeds.
+    ///
+    /// # Errors
+    ///
+    /// Returns the formatter's error if writing the description fails.
     fn fmt(&self, formatter: &mut Formatter<'_>) -> FmtResult {
         write!(
             formatter,
@@ -53,6 +76,10 @@ impl Display for TempSandboxCleanupError {
 
 impl Error for TempSandboxCleanupError {
     /// Returns the primary native creation failure.
+    ///
+    /// # Returns
+    ///
+    /// Always returns `Some` containing the primary I/O failure.
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         Some(&self.primary)
     }

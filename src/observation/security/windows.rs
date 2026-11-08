@@ -8,15 +8,22 @@
 
 #![allow(clippy::items_after_test_module)]
 
-use std::fmt;
+use core::ffi::c_void;
 use std::fs::File;
 use std::io;
 use std::mem::size_of;
+use std::ops::Range;
 use std::os::windows::io::AsRawHandle;
 use std::os::windows::io::FromRawHandle;
 use std::os::windows::io::OwnedHandle;
 use std::ptr;
 
+use windows_sys::Wdk::Storage::FileSystem::NtQuerySecurityObject;
+use windows_sys::Win32::Foundation::ERROR_CALL_NOT_IMPLEMENTED;
+use windows_sys::Win32::Foundation::ERROR_INVALID_FUNCTION;
+use windows_sys::Win32::Foundation::ERROR_NO_TOKEN;
+use windows_sys::Win32::Foundation::ERROR_NOT_SUPPORTED;
+use windows_sys::Win32::Foundation::HANDLE;
 use windows_sys::Win32::Security::DACL_SECURITY_INFORMATION;
 use windows_sys::Win32::Security::GetTokenInformation;
 use windows_sys::Win32::Security::OWNER_SECURITY_INFORMATION;
@@ -24,6 +31,7 @@ use windows_sys::Win32::Security::TOKEN_QUERY;
 use windows_sys::Win32::Security::TOKEN_USER;
 use windows_sys::Win32::Security::TokenUser;
 use windows_sys::Win32::Storage::FileSystem::FILE_ID_INFO;
+use windows_sys::Win32::Storage::FileSystem::FILE_INFO_BY_HANDLE_CLASS;
 use windows_sys::Win32::Storage::FileSystem::FILE_STANDARD_INFO;
 use windows_sys::Win32::Storage::FileSystem::FileIdInfo;
 use windows_sys::Win32::Storage::FileSystem::FileStandardInfo;
@@ -34,6 +42,7 @@ use windows_sys::Win32::System::Threading::GetCurrentThread;
 use windows_sys::Win32::System::Threading::OpenProcessToken;
 use windows_sys::Win32::System::Threading::OpenThreadToken;
 
+use self::nt_status_error::NtStatusError;
 use crate::LocalResult;
 use crate::error::LocalFileError;
 use crate::error::LocalFileErrorKind;
@@ -48,7 +57,11 @@ use crate::observation::LocalObservationRequirement;
 use crate::observation::LocalSecurityObservation;
 use crate::observation::LocalSecurityObservationOptions;
 use crate::observation::LocalWindowsAccessObservation;
+use crate::observation::LocalWindowsAceObservation;
 use crate::observation::LocalWindowsFileSystemObservation;
+
+// Wraps an NTSTATUS value for standard I/O error formatting.
+mod nt_status_error;
 
 const MAX_SECURITY_DESCRIPTOR_BYTES: usize = 1024 * 1024;
 const MAX_OWNER_DESCRIPTOR_BYTES: usize = 4096;
@@ -62,6 +75,23 @@ const STATUS_BUFFER_OVERFLOW: i32 = 0x8000_0005u32 as i32;
 const SE_DACL_PRESENT: u16 = 0x0004;
 const SE_DACL_PROTECTED: u16 = 0x1000;
 
+/// Collects bounded Windows security metadata for an open file.
+///
+/// # Parameters
+///
+/// * `file` is the open file whose security metadata is observed.
+/// * `options` selects required observations and bounds ACL decoding.
+///
+/// # Returns
+///
+/// Returns the requested metadata facts, with optional facts absent when an
+/// optional native query is unsupported.
+///
+/// # Errors
+///
+/// Returns an error when a required observation is unsupported, native
+/// metadata is malformed, a configured resource limit is exceeded, or the
+/// file identity changes during collection.
 pub(crate) fn query_security(
     file: &File,
     options: &LocalSecurityObservationOptions,
@@ -104,12 +134,22 @@ pub(crate) fn query_security(
     ))
 }
 
-fn query_identity(handle: windows_sys::Win32::Foundation::HANDLE) -> LocalResult<LocalFileIdentity> {
+/// Reads the stable file identity associated with a borrowed native handle.
+///
+/// # Parameters
+///
+/// * `handle` is a live handle borrowed from the open file.
+fn query_identity(handle: HANDLE) -> LocalResult<LocalFileIdentity> {
     let id = query_file_info::<FILE_ID_INFO>(handle, FileIdInfo)?;
     Ok(LocalFileIdentity::windows(id.VolumeSerialNumber, id.FileId.Identifier))
 }
 
-fn query_filesystem(handle: windows_sys::Win32::Foundation::HANDLE) -> LocalResult<LocalFileSystemObservation> {
+/// Queries the filesystem name and attributes associated with a native handle.
+///
+/// # Parameters
+///
+/// * `handle` is a live handle borrowed from the open file.
+fn query_filesystem(handle: HANDLE) -> LocalResult<LocalFileSystemObservation> {
     let mut name = [0u16; 64];
     let mut attributes = 0u32;
     // SAFETY: `handle` is borrowed from `file`; both output buffers have the
@@ -138,8 +178,14 @@ fn query_filesystem(handle: windows_sys::Win32::Foundation::HANDLE) -> LocalResu
     ))
 }
 
+/// Queries and decodes the owner and discretionary access control list.
+///
+/// # Parameters
+///
+/// * `handle` is a live handle borrowed from the open file.
+/// * `options` supplies the ACL decoding limits.
 fn query_access(
-    handle: windows_sys::Win32::Foundation::HANDLE,
+    handle: HANDLE,
     options: &LocalSecurityObservationOptions,
 ) -> LocalResult<LocalWindowsAccessObservation> {
     let current_sid = current_user_sid()?;
@@ -158,8 +204,16 @@ fn query_access(
     Ok(decoded)
 }
 
+/// Queries a native security descriptor within the supplied byte limits.
+///
+/// # Parameters
+///
+/// * `handle` is the native handle to query.
+/// * `information` selects the security information requested from Windows.
+/// * `max_bytes` bounds the descriptor allocation when present.
+/// * `acl_budget` bounds the ACL payload when present.
 fn query_security_descriptor(
-    handle: windows_sys::Win32::Foundation::HANDLE,
+    handle: HANDLE,
     information: u32,
     max_bytes: Option<usize>,
     acl_budget: Option<usize>,
@@ -171,24 +225,28 @@ fn query_security_descriptor(
         |information, output, capacity, needed| {
             // SAFETY: the caller supplies either a null pointer with zero capacity
             // for the probe or a writable allocation of exactly this capacity.
-            unsafe {
-                windows_sys::Wdk::Storage::FileSystem::NtQuerySecurityObject(
-                    handle,
-                    information,
-                    output,
-                    capacity,
-                    needed,
-                )
-            }
+            unsafe { NtQuerySecurityObject(handle, information, output, capacity, needed) }
         },
     )
 }
 
+/// Runs a bounded descriptor query through an injectable native-call boundary.
+///
+/// # Type Parameters
+///
+/// The callable type supplied for `query` implements the native-call boundary.
+///
+/// # Parameters
+///
+/// * `information` selects the security information requested.
+/// * `max_bytes` bounds descriptor allocation when present.
+/// * `acl_budget` bounds the ACL payload when present.
+/// * `query` performs one native query call and reports its status.
 fn query_security_descriptor_with(
     information: u32,
     max_bytes: Option<usize>,
     acl_budget: Option<usize>,
-    mut query: impl FnMut(u32, *mut core::ffi::c_void, u32, *mut u32) -> i32,
+    mut query: impl FnMut(u32, *mut c_void, u32, *mut u32) -> i32,
 ) -> LocalResult<Vec<u8>> {
     let mut needed = 0u32;
     let status = query(information, ptr::null_mut(), 0, &mut needed);
@@ -255,6 +313,7 @@ fn query_security_descriptor_with(
     )
 }
 
+/// Returns the effective thread or process user's security identifier.
 fn current_user_sid() -> LocalResult<String> {
     let mut token = ptr::null_mut();
     // Prefer the impersonation token when this thread has one, so the observed
@@ -263,7 +322,7 @@ fn current_user_sid() -> LocalResult<String> {
     // to writable storage for a returned token handle.
     if unsafe { OpenThreadToken(GetCurrentThread(), TOKEN_QUERY, 1, &mut token) } == 0 {
         let error = io::Error::last_os_error();
-        if error.raw_os_error() != Some(windows_sys::Win32::Foundation::ERROR_NO_TOKEN as i32) {
+        if error.raw_os_error() != Some(ERROR_NO_TOKEN as i32) {
             return Err(native_io_error(error));
         }
         // SAFETY: the pseudo process handle is valid for this process and
@@ -309,10 +368,17 @@ fn current_user_sid() -> LocalResult<String> {
     sid_string(&buffer[offset..]).ok_or_else(data_corruption)
 }
 
-fn query_file_info<T: Default>(
-    handle: windows_sys::Win32::Foundation::HANDLE,
-    class: windows_sys::Win32::Storage::FileSystem::FILE_INFO_BY_HANDLE_CLASS,
-) -> LocalResult<T> {
+/// Reads one fixed-size information class from a borrowed file handle.
+///
+/// # Type Parameters
+///
+/// * `T` is the native output structure for the selected information class.
+///
+/// # Parameters
+///
+/// * `handle` is a live handle borrowed from the open file.
+/// * `class` selects the native information structure written to the output.
+fn query_file_info<T: Default>(handle: HANDLE, class: FILE_INFO_BY_HANDLE_CLASS) -> LocalResult<T> {
     let mut output = T::default();
     // SAFETY: output is a correctly sized writable value for the selected
     // information class and the handle is borrowed from the retained File.
@@ -397,6 +463,16 @@ fn decode_security_descriptor(
     ))
 }
 
+/// Decodes the owner SID from a self-relative security descriptor.
+///
+/// # Parameters
+///
+/// * `bytes` contains the descriptor bytes to validate and decode.
+///
+/// # Returns
+///
+/// Returns the decoded owner SID, or `None` when the descriptor or SID is
+/// invalid.
 fn decode_owner_sid(bytes: &[u8]) -> Option<String> {
     if bytes.len() < RELATIVE_DESCRIPTOR_HEADER_BYTES || bytes[0] != 1 {
         return None;
@@ -413,6 +489,20 @@ fn decode_owner_sid(bytes: &[u8]) -> Option<String> {
     sid_string(&bytes[offset..end])
 }
 
+/// Decodes DACL state and entries from a self-relative security descriptor.
+///
+/// # Parameters
+///
+/// * `bytes` contains the descriptor bytes to validate and decode.
+/// * `max_entries` optionally bounds the number of ACEs.
+/// * `max_acl_bytes` optionally bounds the ACL size.
+/// * `owner_sid` is the already decoded owner identifier.
+/// * `current_sid` identifies the effective caller for trustee comparisons.
+///
+/// # Returns
+///
+/// Returns the decoded DACL observation, or `None` when its descriptor or ACL
+/// structure is invalid or exceeds a supplied limit.
 fn decode_dacl_descriptor(
     bytes: &[u8],
     max_entries: Option<usize>,
@@ -472,6 +562,17 @@ fn decode_dacl_descriptor(
     ))
 }
 
+/// Returns the exclusive end of a structurally valid SID at `offset`.
+///
+/// # Parameters
+///
+/// * `bytes` contains the binary descriptor data.
+/// * `offset` is the candidate SID's starting byte index.
+///
+/// # Returns
+///
+/// Returns the byte index immediately after a valid SID, or `None` when the
+/// SID header or bounds are invalid.
 fn sid_end(bytes: &[u8], offset: usize) -> Option<usize> {
     let header_end = offset.checked_add(8)?;
     if header_end > bytes.len() || bytes[offset] != 1 || bytes[offset + 1] > 15 {
@@ -483,10 +584,16 @@ fn sid_end(bytes: &[u8], offset: usize) -> Option<usize> {
 }
 
 #[cfg(test)]
-fn ranges_overlap(left: std::ops::Range<usize>, right: std::ops::Range<usize>) -> bool {
+fn ranges_overlap(left: Range<usize>, right: Range<usize>) -> bool {
     left.start < right.end && right.start < left.end
 }
 
+/// Validates descriptor ACL dimensions against the configured resource limits.
+///
+/// # Parameters
+///
+/// * `bytes` contains the self-relative descriptor and ACL bytes.
+/// * `options` supplies the maximum ACL byte and entry counts.
 fn check_acl_budget(bytes: &[u8], options: &LocalSecurityObservationOptions) -> LocalResult<()> {
     if bytes.len() < 20 {
         return Err(data_corruption());
@@ -527,10 +634,29 @@ fn check_acl_budget(bytes: &[u8], options: &LocalSecurityObservationOptions) -> 
     Ok(())
 }
 
+/// Identifies errors that represent an unsupported observation capability.
+///
+/// # Parameters
+///
+/// * `error` is the metadata failure to classify.
 fn explicitly_unsupported(error: &LocalFileError) -> bool {
     error.kind() == LocalFileErrorKind::Unsupported
 }
 
+/// Converts only unsupported query failures into absent optional observations.
+///
+/// # Type Parameters
+///
+/// * `T` is the value produced by a successful query.
+///
+/// # Parameters
+///
+/// * `result` is the query outcome to normalize.
+///
+/// # Returns
+///
+/// Returns `Some(value)` on success, `None` only for unsupported queries, and
+/// propagates all other errors.
 fn optional_query<T>(result: LocalResult<T>) -> LocalResult<Option<T>> {
     match result {
         Ok(value) => Ok(Some(value)),
@@ -539,10 +665,24 @@ fn optional_query<T>(result: LocalResult<T>) -> LocalResult<Option<T>> {
     }
 }
 
+/// Converts unsupported query failures into unmet required observations.
+///
+/// # Type Parameters
+///
+/// * `T` is the value produced by a successful query.
+///
+/// # Parameters
+///
+/// * `result` is the query outcome to normalize.
 fn required_query<T>(result: LocalResult<T>) -> LocalResult<T> {
     result.map_err(requirement_for_unsupported)
 }
 
+/// Maps unsupported capability errors to a required-observation failure.
+///
+/// # Parameters
+///
+/// * `error` is the failure returned by the attempted observation.
 fn requirement_for_unsupported(error: LocalFileError) -> LocalFileError {
     if explicitly_unsupported(&error) {
         LocalFileError::new(LocalFileErrorKind::RequirementNotMet, LocalFileOperation::Metadata)
@@ -551,10 +691,18 @@ fn requirement_for_unsupported(error: LocalFileError) -> LocalFileError {
     }
 }
 
+/// Constructs the metadata error used for malformed native data.
 fn data_corruption() -> LocalFileError {
     LocalFileError::new(LocalFileErrorKind::DataCorruption, LocalFileOperation::Metadata)
 }
 
+/// Constructs a metadata resource-limit error with the observed dimensions.
+///
+/// # Parameters
+///
+/// * `resource` identifies the bounded resource.
+/// * `limit` is the configured maximum.
+/// * `requested` is the observed requested amount.
 fn resource_limit(resource: LocalResourceKind, limit: usize, requested: usize) -> LocalFileError {
     LocalFileError::from_resource_limit(
         LocalFileOperation::Metadata,
@@ -563,13 +711,18 @@ fn resource_limit(resource: LocalResourceKind, limit: usize, requested: usize) -
     )
 }
 
+/// Converts a native I/O error and classifies unsupported Windows operations.
+///
+/// # Parameters
+///
+/// * `error` is the native failure returned by Windows.
 fn native_io_error(error: io::Error) -> LocalFileError {
     let unsupported_code = matches!(
         error.raw_os_error(),
         Some(code)
-            if code == windows_sys::Win32::Foundation::ERROR_INVALID_FUNCTION as i32
-                || code == windows_sys::Win32::Foundation::ERROR_NOT_SUPPORTED as i32
-                || code == windows_sys::Win32::Foundation::ERROR_CALL_NOT_IMPLEMENTED as i32
+            if code == ERROR_INVALID_FUNCTION as i32
+                || code == ERROR_NOT_SUPPORTED as i32
+                || code == ERROR_CALL_NOT_IMPLEMENTED as i32
     );
     let converted = LocalFileError::from_io(LocalFileOperation::Metadata, None, None, error);
     if unsupported_code {
@@ -579,6 +732,11 @@ fn native_io_error(error: io::Error) -> LocalFileError {
     }
 }
 
+/// Converts an NTSTATUS result into the crate's metadata error model.
+///
+/// # Parameters
+///
+/// * `status` is the status code returned by the native security query.
 fn ntstatus_error(status: i32) -> LocalFileError {
     const STATUS_ACCESS_DENIED: i32 = 0xC000_0022u32 as i32;
     const STATUS_NOT_SUPPORTED: i32 = 0xC000_00BBu32 as i32;
@@ -598,24 +756,13 @@ fn ntstatus_error(status: i32) -> LocalFileError {
     .with_kind(kind)
 }
 
-#[derive(Debug)]
-struct NtStatusError(i32);
-
-impl fmt::Display for NtStatusError {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            formatter,
-            "NtQuerySecurityObject returned NTSTATUS {:#010x}",
-            self.0 as u32
-        )
-    }
-}
-
-impl std::error::Error for NtStatusError {}
-
 #[cfg(test)]
 mod tests {
     use std::io;
+
+    use windows_sys::Win32::Foundation::ERROR_CALL_NOT_IMPLEMENTED;
+    use windows_sys::Win32::Foundation::ERROR_INVALID_FUNCTION;
+    use windows_sys::Win32::Foundation::ERROR_NOT_SUPPORTED;
 
     use super::decode_acl;
     use super::decode_security_descriptor;
@@ -627,19 +774,17 @@ mod tests {
     use crate::error::LocalResourceKind;
     use crate::observation::LocalSecurityObservationOptions;
 
-    #[cfg_attr(windows, path = "../acl_budget_tests.rs")]
-    #[cfg_attr(not(windows), path = "../windows/acl_budget_tests.rs")]
     mod acl_budget_tests;
 
     #[test]
-    fn security_windows_sid_decode_validates_length_and_formats_authority() {
+    fn test_sid_decode_validates_length_and_formats_authority() {
         let sid = [1, 2, 0, 0, 0, 0, 0, 5, 32, 0, 0, 0, 33, 2, 0, 0];
         assert_eq!(sid_string(&sid), Some("S-1-5-32-545".to_owned()));
         assert_eq!(sid_string(&sid[..15]), None);
     }
 
     #[test]
-    fn security_windows_acl_decode_preserves_unknown_ace_and_rejects_bad_bounds() {
+    fn test_acl_decode_preserves_unknown_ace_and_rejects_bad_bounds() {
         let acl = [2, 0, 16, 0, 1, 0, 0, 0, 0x7f, 0, 8, 0, 0, 0, 0, 0];
         let entries = decode_acl(&acl, None, None, None).expect("valid ACL");
         assert_eq!(entries.len(), 1);
@@ -650,7 +795,7 @@ mod tests {
     }
 
     #[test]
-    fn security_windows_acl_decodes_basic_ace_mask_and_current_trustee() {
+    fn test_acl_decodes_basic_ace_mask_and_current_trustee() {
         let acl = [
             2, 0, 32, 0, 1, 0, 0, 0, // ACL header
             0, 0, 24, 0, // ACCESS_ALLOWED_ACE header
@@ -666,7 +811,7 @@ mod tests {
     }
 
     #[test]
-    fn security_windows_descriptor_distinguishes_absent_null_and_empty_dacl() {
+    fn test_descriptor_distinguishes_absent_null_and_empty_dacl() {
         let owner = [1, 2, 0, 0, 0, 0, 0, 5, 32, 0, 0, 0, 33, 2, 0, 0];
         let mut descriptor = vec![0; 44];
         descriptor[0] = 1;
@@ -720,7 +865,7 @@ mod tests {
     }
 
     #[test]
-    fn security_windows_acl_limits_report_the_dimension_before_decode() {
+    fn test_acl_limits_report_the_dimension_before_decode() {
         let descriptor = descriptor_with_one_unknown_ace();
         let bytes_limited = super::check_acl_budget(
             &descriptor,
@@ -746,12 +891,8 @@ mod tests {
     }
 
     #[test]
-    fn security_windows_optional_suppresses_only_unsupported_and_required_rejects_it() {
-        for code in [
-            windows_sys::Win32::Foundation::ERROR_INVALID_FUNCTION,
-            windows_sys::Win32::Foundation::ERROR_NOT_SUPPORTED,
-            windows_sys::Win32::Foundation::ERROR_CALL_NOT_IMPLEMENTED,
-        ] {
+    fn test_optional_suppresses_only_unsupported_and_required_rejects_it() {
+        for code in [ERROR_INVALID_FUNCTION, ERROR_NOT_SUPPORTED, ERROR_CALL_NOT_IMPLEMENTED] {
             let unsupported = native_io_error(io::Error::from_raw_os_error(code as i32));
             assert_eq!(unsupported.kind(), LocalFileErrorKind::Unsupported);
             assert!(
@@ -794,6 +935,16 @@ mod tests {
     }
 }
 
+/// Formats a bounded binary SID using its canonical textual components.
+///
+/// # Parameters
+///
+/// * `bytes` contains the binary SID and any available trailing bytes.
+///
+/// # Returns
+///
+/// Returns the canonical SID string, or `None` when the binary SID is invalid
+/// or truncated.
 fn sid_string(bytes: &[u8]) -> Option<String> {
     if bytes.len() < 8 || bytes[0] != 1 {
         return None;
@@ -814,12 +965,26 @@ fn sid_string(bytes: &[u8]) -> Option<String> {
     Some(result)
 }
 
+/// Decodes bounded ACL entries while preserving unknown ACEs in their order.
+///
+/// # Parameters
+///
+/// * `bytes` contains the ACL to validate and decode.
+/// * `max_entries` optionally limits the decoded ACE count.
+/// * `max_bytes` optionally limits the ACL size.
+/// * `current_sid` optionally identifies the effective caller for trustee
+///   comparisons.
+///
+/// # Returns
+///
+/// Returns ordered ACE observations, or `None` when the ACL bounds or an ACE
+/// structure is invalid or exceeds a supplied limit.
 fn decode_acl(
     bytes: &[u8],
     max_entries: Option<usize>,
     max_bytes: Option<usize>,
     current_sid: Option<&str>,
-) -> Option<Vec<crate::observation::LocalWindowsAceObservation>> {
+) -> Option<Vec<LocalWindowsAceObservation>> {
     if bytes.len() < 8 {
         return None;
     }
@@ -865,7 +1030,7 @@ fn decode_acl(
             (None, None)
         };
         let trustee_is_current_user = trustee.as_deref().zip(current_sid).map(|(sid, current)| sid == current);
-        output.push(crate::observation::LocalWindowsAceObservation::new(
+        output.push(LocalWindowsAceObservation::new(
             ace_type,
             flags,
             u16::try_from(ace_size).ok()?,

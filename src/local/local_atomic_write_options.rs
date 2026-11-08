@@ -52,6 +52,7 @@ pub struct LocalAtomicWriteOptions {
     publication_mode: LocalAtomicPublicationMode,
     /// Durability requested for staging and parent synchronization.
     durability: LocalDurabilityRequirement,
+    /// Whether staging-file contents and metadata must be synchronized.
     file_sync: LocalFileSyncRequirement,
 }
 
@@ -74,16 +75,12 @@ impl LocalAtomicWriteOptions {
     }
 
     /// Returns the metadata policy for replacing an existing regular file.
+    ///
+    /// # Returns
+    /// The configured replacement metadata policy.
     #[inline]
     pub const fn metadata_policy(&self) -> LocalWriteMetadataPolicy {
         self.metadata_policy
-    }
-
-    /// Selects replacement metadata without changing identity verification.
-    #[inline]
-    pub const fn with_metadata_policy(mut self, policy: LocalWriteMetadataPolicy) -> Self {
-        self.metadata_policy = policy;
-        self
     }
 
     /// Returns whether missing parent directories will be created.
@@ -96,16 +93,6 @@ impl LocalAtomicWriteOptions {
         self.create_parent
     }
 
-    /// Enables parent directory creation.
-    ///
-    /// # Returns
-    /// Updated options that create missing parent directories before staging.
-    #[inline]
-    pub const fn with_create_parent(mut self) -> Self {
-        self.create_parent = true;
-        self
-    }
-
     /// Returns the configured nonblocking-open retry timeout.
     ///
     /// On Unix, this limits how long commit waits for an existing destination
@@ -115,11 +102,66 @@ impl LocalAtomicWriteOptions {
     ///
     /// # Returns
     /// The configured timeout, or [`None`] when retries are disabled.
-    #[must_use]
     #[inline]
     #[cfg_attr(windows, allow(dead_code))]
     pub const fn open_retry_timeout(&self) -> Option<Duration> {
         self.open_retry_timeout
+    }
+
+    /// Returns the requested durability for atomic publication.
+    ///
+    /// # Returns
+    /// The configured file and parent synchronization policy.
+    #[must_use = "inspect the requested durability"]
+    #[inline]
+    pub const fn durability(&self) -> LocalDurabilityRequirement {
+        self.durability
+    }
+
+    /// Reports whether final symbolic-link replacement is enabled.
+    ///
+    /// # Returns
+    /// `true` when publication replaces the destination symlink entry.
+    #[must_use]
+    #[inline]
+    pub const fn replaces_target_symlink(&self) -> bool {
+        self.replace_target_symlink
+    }
+
+    /// Returns the final installation policy.
+    ///
+    /// # Returns
+    /// The policy enforced when installing the completed staging file.
+    #[must_use]
+    #[inline]
+    pub const fn publication_mode(&self) -> LocalAtomicPublicationMode {
+        self.publication_mode
+    }
+
+    /// Selects metadata copied to a replacement staging file.
+    ///
+    /// This policy does not alter the destination identity checks used during
+    /// publication.
+    ///
+    /// # Parameters
+    /// - `policy`: Metadata source for replacing an existing regular file.
+    ///
+    /// # Returns
+    /// Updated options carrying the replacement metadata policy.
+    #[inline]
+    pub const fn with_metadata_policy(mut self, policy: LocalWriteMetadataPolicy) -> Self {
+        self.metadata_policy = policy;
+        self
+    }
+
+    /// Enables parent directory creation.
+    ///
+    /// # Returns
+    /// Updated options that create missing parent directories before staging.
+    #[inline]
+    pub const fn with_create_parent(mut self) -> Self {
+        self.create_parent = true;
+        self
     }
 
     /// Sets the nonblocking-open retry timeout.
@@ -138,13 +180,6 @@ impl LocalAtomicWriteOptions {
         self
     }
 
-    /// Returns the requested durability for atomic publication.
-    #[must_use = "inspect the requested durability"]
-    #[inline]
-    pub const fn durability(&self) -> LocalDurabilityRequirement {
-        self.durability
-    }
-
     /// Sets the required durability for atomic publication.
     ///
     /// # Parameters
@@ -158,17 +193,6 @@ impl LocalAtomicWriteOptions {
     pub const fn with_durability(mut self, durability: LocalDurabilityRequirement) -> Self {
         self.durability = durability;
         self
-    }
-
-    #[inline]
-    pub(crate) const fn with_file_sync(mut self, requirement: LocalFileSyncRequirement) -> Self {
-        self.file_sync = requirement;
-        self
-    }
-
-    #[inline]
-    pub(crate) const fn file_sync(&self) -> LocalFileSyncRequirement {
-        self.file_sync
     }
 
     /// Requires final publication to preserve every existing destination.
@@ -186,23 +210,38 @@ impl LocalAtomicWriteOptions {
         self
     }
 
-    /// Reports whether final symbolic-link replacement is enabled.
-    #[must_use]
-    #[inline]
-    pub const fn replaces_target_symlink(&self) -> bool {
-        self.replace_target_symlink
+    /// Returns the requested synchronization of the staging file's contents
+    /// and metadata before publication.
+    ///
+    /// # Returns
+    /// The configured synchronization requirement.
+    pub(crate) const fn file_sync(&self) -> LocalFileSyncRequirement {
+        self.file_sync
     }
 
-    /// Returns the final installation policy.
-    #[must_use]
+    /// Sets whether staging-file contents and metadata must be synchronized
+    /// before publication.
+    ///
+    /// This setting is independent of the durability policy for the parent
+    /// directory.
+    ///
+    /// # Parameters
+    /// - `requirement`: File synchronization policy to use during publication.
+    ///
+    /// # Returns
+    /// Updated options carrying the file synchronization policy.
     #[inline]
-    pub const fn publication_mode(&self) -> LocalAtomicPublicationMode {
-        self.publication_mode
+    pub(crate) const fn with_file_sync(mut self, requirement: LocalFileSyncRequirement) -> Self {
+        self.file_sync = requirement;
+        self
     }
 }
 
 impl Default for LocalAtomicWriteOptions {
     /// Returns the same policy as [`Self::new`].
+    ///
+    /// # Returns
+    /// Default atomic write options.
     fn default() -> Self {
         Self::new()
     }

@@ -74,7 +74,7 @@ fn rooted_handle(
 }
 
 #[test]
-fn component_policy_does_not_filter_discovered_tree_copy_entries() {
+fn test_component_policy_does_not_filter_discovered_tree_copy_entries() {
     let fixture = tempdir().expect("fixture root should be created");
     fs::create_dir_all(fixture.path().join("source/private")).expect("private subtree should be created");
     fs::write(fixture.path().join("source/private/payload"), b"contents").expect("payload should be written");
@@ -113,7 +113,7 @@ fn component_policy_does_not_filter_discovered_tree_copy_entries() {
 }
 
 #[test]
-fn resolution_policy_applies_to_resolver_paths_but_not_native_recursive_enumeration() {
+fn test_resolution_policy_applies_to_resolver_paths_but_not_native_recursive_enumeration() {
     let fixture = tempdir().expect("fixture root should be created");
     fs::create_dir_all(fixture.path().join("copy-source/private")).expect("copy subtree should be created");
     fs::write(fixture.path().join("copy-source/private/payload"), b"copied").expect("copy payload should be written");

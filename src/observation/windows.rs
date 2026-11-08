@@ -5,14 +5,20 @@
 //
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
+use std::ffi::c_void;
 use std::fs::File;
 use std::io;
 use std::mem::size_of;
 use std::os::windows::io::AsRawHandle;
 use std::ptr;
 
+use windows_sys::Win32::Foundation::ERROR_INVALID_FUNCTION;
+use windows_sys::Win32::Foundation::ERROR_INVALID_PARAMETER;
+use windows_sys::Win32::Foundation::ERROR_NOT_SUPPORTED;
+use windows_sys::Win32::Foundation::HANDLE;
 use windows_sys::Win32::Storage::FileSystem::FILE_BASIC_INFO;
 use windows_sys::Win32::Storage::FileSystem::FILE_ID_INFO;
+use windows_sys::Win32::Storage::FileSystem::FILE_INFO_BY_HANDLE_CLASS;
 use windows_sys::Win32::Storage::FileSystem::FileBasicInfo;
 use windows_sys::Win32::Storage::FileSystem::FileIdInfo;
 use windows_sys::Win32::Storage::FileSystem::GetFileInformationByHandleEx;
@@ -32,18 +38,30 @@ use crate::observation::LocalWindowsFileDetails;
 ///
 /// The caller must provide a valid live handle and a writable buffer with the
 /// size required by the selected information class.
-pub(crate) type NativeQuery = unsafe extern "system" fn(
-    windows_sys::Win32::Foundation::HANDLE,
-    windows_sys::Win32::Storage::FileSystem::FILE_INFO_BY_HANDLE_CLASS,
-    *mut std::ffi::c_void,
-    u32,
-) -> i32;
+pub(crate) type NativeQuery = unsafe extern "system" fn(HANDLE, FILE_INFO_BY_HANDLE_CLASS, *mut c_void, u32) -> i32;
 
 /// Queries identity and timestamps through the operating system API.
 ///
 /// The handle remains borrowed from `file`. When optional facts cannot be
 /// queried, the result retains normalized metadata with absent native details;
 /// required facts turn that condition into `RequirementNotMet`.
+///
+/// # Parameters
+///
+/// * `file` is the live file whose native identity and timestamps are queried.
+/// * `requirement` determines whether unavailable native facts are acceptable.
+///
+/// # Returns
+///
+/// Returns normalized metadata with native details when available. Optional
+/// unsupported facts produce an observation without native details.
+///
+/// # Errors
+///
+/// Returns an error if metadata cannot be read, an optional native query fails
+/// for a reason other than explicit lack of support, or required native facts
+/// cannot be queried.
+#[inline]
 pub(crate) fn query_native(file: &File, requirement: LocalObservationRequirement) -> LocalResult<LocalFileObservation> {
     query_native_with(file, requirement, GetFileInformationByHandleEx)
 }
@@ -55,6 +73,22 @@ pub(crate) fn query_native(file: &File, requirement: LocalObservationRequirement
 /// native query failures are returned as I/O errors. `Required` returns
 /// `RequirementNotMet` for native query failures or unavailable facts while
 /// retaining the underlying I/O source when present.
+///
+/// # Parameters
+///
+/// * `file` is the live file whose metadata and native details are queried.
+/// * `requirement` controls how unavailable native facts are handled.
+/// * `query` supplies the native information query operation.
+///
+/// # Returns
+///
+/// Returns an observation with normalized metadata and any available native
+/// details.
+///
+/// # Errors
+///
+/// Returns an I/O error for metadata or optional native query failures, and a
+/// `RequirementNotMet` error for required native query failures.
 pub(crate) fn query_native_with(
     file: &File,
     requirement: LocalObservationRequirement,
@@ -103,22 +137,52 @@ pub(crate) fn query_native_with(
     }
 }
 
+/// Determines whether a native query failure explicitly reports unsupported
+/// information for the requested query.
+///
+/// `ERROR_INVALID_PARAMETER` counts as unsupported only for a file ID query.
+///
+/// # Parameters
+///
+/// * `error` is the native query failure to classify.
+/// * `querying_file_id` indicates whether the failed query requested file ID
+///   information.
 fn explicitly_unsupported(error: &io::Error, querying_file_id: bool) -> bool {
     match error.raw_os_error() {
         Some(code) => {
-            code == windows_sys::Win32::Foundation::ERROR_NOT_SUPPORTED as i32
-                || code == windows_sys::Win32::Foundation::ERROR_INVALID_FUNCTION as i32
-                || (querying_file_id && code == windows_sys::Win32::Foundation::ERROR_INVALID_PARAMETER as i32)
+            code == ERROR_NOT_SUPPORTED as i32
+                || code == ERROR_INVALID_FUNCTION as i32
+                || (querying_file_id && code == ERROR_INVALID_PARAMETER as i32)
         }
         None => false,
     }
 }
 
 /// Calls one information class with a correctly sized output value.
+///
+/// # Type Parameters
+///
+/// * `T` is the default-initializable output structure required by the
+///   information class.
+///
+/// # Parameters
+///
+/// * `query` is the native operation to invoke.
+/// * `handle` is a live file handle borrowed from its owner.
+/// * `class` selects the information structure requested from the system.
+/// * `output` is writable storage for a value of the selected structure type.
+///
+/// # Returns
+///
+/// Returns `Ok(())` when the native query succeeds.
+///
+/// # Errors
+///
+/// Returns the operating system's last error when the native query fails.
 fn query_info<T: Default>(
     query: NativeQuery,
-    handle: windows_sys::Win32::Foundation::HANDLE,
-    class: windows_sys::Win32::Storage::FileSystem::FILE_INFO_BY_HANDLE_CLASS,
+    handle: HANDLE,
+    class: FILE_INFO_BY_HANDLE_CLASS,
     output: &mut T,
 ) -> io::Result<()> {
     // SAFETY: `handle` is borrowed from a live `File`, and `output` points to

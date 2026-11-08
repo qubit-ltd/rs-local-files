@@ -13,6 +13,28 @@ use std::path::PathBuf;
 use crate::LocalFileMetadata;
 
 /// One entry yielded by a native local directory walker.
+///
+/// The walker supplies entries lazily; their paths identify the entry in the
+/// filesystem namespace, while diagnostic paths are only observations of the
+/// native path at traversal time.
+///
+/// # Examples
+///
+/// ```no_run
+/// use std::path::Path;
+///
+/// use qubit_local_files::LocalFileSystem;
+///
+/// # fn main() -> qubit_local_files::LocalResult<()> {
+/// let filesystem = LocalFileSystem::host()?;
+/// let walker = filesystem.list(Path::new("."))?;
+/// for entry in walker {
+///     let entry = entry?;
+///     println!("{} ({})", entry.path().display(), entry.metadata().len());
+/// }
+/// # Ok(())
+/// # }
+/// ```
 #[derive(Clone, Debug)]
 #[must_use]
 pub struct LocalDirectoryEntry {
@@ -62,6 +84,13 @@ impl LocalDirectoryEntry {
     ///
     /// Rooted walkers retain descriptor authority, so callers must use
     /// [`Self::path`] for a reusable namespace identity.
+    ///
+    /// # Returns
+    ///
+    /// `Some(path)` contains the native diagnostic path; `None` means that no
+    /// such path was captured. This path is not an authority for filesystem
+    /// operations.
+    #[must_use]
     #[inline]
     pub fn diagnostic_path(&self) -> Option<&Path> {
         self.diagnostic_path.as_deref()

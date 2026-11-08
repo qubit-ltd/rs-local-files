@@ -58,7 +58,12 @@ fn test_failure_before_tree_removal_is_unchanged() {
     let failure = copy_file_over_replaced_tree(directory.path(), "rooted-copy-remove-tree-native");
 
     assert_eq!(LocalCopyFailureState::Unchanged, failure.state());
-    assert_eq!(2, fs::read_dir(directory.path().join("target")).unwrap().count());
+    assert_eq!(
+        2,
+        fs::read_dir(directory.path().join("target"))
+            .expect("target directory should remain readable")
+            .count()
+    );
 }
 
 #[test]
@@ -91,12 +96,14 @@ fn test_writer_open_failure_preserves_conflicting_tree() {
     assert_eq!(
         b"first",
         fs::read(directory.path().join("target/first/entry"))
-            .unwrap()
+            .expect("first target should remain readable")
             .as_slice()
     );
     assert_eq!(
         b"second",
-        fs::read(directory.path().join("target/second")).unwrap().as_slice()
+        fs::read(directory.path().join("target/second"))
+            .expect("second target should remain readable")
+            .as_slice()
     );
     assert_eq!(LocalFileErrorKind::PermissionDenied, failure.error().kind());
 }
@@ -109,12 +116,14 @@ fn test_copy_contents_failure_preserves_conflicting_tree() {
     assert_eq!(
         b"first",
         fs::read(directory.path().join("target/first/entry"))
-            .unwrap()
+            .expect("first target should remain readable")
             .as_slice()
     );
     assert_eq!(
         b"second",
-        fs::read(directory.path().join("target/second")).unwrap().as_slice()
+        fs::read(directory.path().join("target/second"))
+            .expect("second target should remain readable")
+            .as_slice()
     );
 }
 
@@ -148,7 +157,7 @@ fn test_copy_failure_retains_staging_cleanup_error_context() {
     assert_eq!(
         b"first",
         fs::read(directory.path().join("target/first/entry"))
-            .unwrap()
+            .expect("first target should remain readable")
             .as_slice()
     );
 }
@@ -161,18 +170,20 @@ fn test_destination_replaced_after_staging_is_preserved() {
     assert_eq!(LocalCopyFailureState::Unchanged, failure.state());
     assert_eq!(
         b"replacement sentinel",
-        fs::read(directory.path().join("target")).unwrap().as_slice()
+        fs::read(directory.path().join("target"))
+            .expect("replacement target should remain readable")
+            .as_slice()
     );
     assert_eq!(
         b"first",
         fs::read(directory.path().join("rooted-copy-displaced-target/first/entry"))
-            .unwrap()
+            .expect("displaced first target should remain readable")
             .as_slice()
     );
     assert_eq!(
         b"second",
         fs::read(directory.path().join("rooted-copy-displaced-target/second"))
-            .unwrap()
+            .expect("displaced second target should remain readable")
             .as_slice()
     );
 }
@@ -185,7 +196,9 @@ fn test_competitor_created_after_tree_removal_is_not_overwritten() {
     assert_eq!(LocalCopyFailureState::PartiallyPublished, failure.state());
     assert_eq!(
         b"concurrent sentinel",
-        fs::read(directory.path().join("target")).unwrap().as_slice()
+        fs::read(directory.path().join("target"))
+            .expect("concurrent target should remain readable")
+            .as_slice()
     );
 }
 

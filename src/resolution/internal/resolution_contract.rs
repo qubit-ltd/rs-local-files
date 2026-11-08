@@ -14,6 +14,7 @@ use crate::directory::LocalResolutionScope;
 use crate::options::LocalResolutionLimits;
 
 /// Policies and tightened limits inherited by one resolution session.
+#[must_use = "resolution contracts have no effect unless passed to a resolver"]
 #[derive(Clone)]
 pub(crate) struct ResolutionContract {
     /// Effective limits after applying every ancestor's constraints.
@@ -22,11 +23,73 @@ pub(crate) struct ResolutionContract {
     policies: Vec<Arc<dyn LocalResolutionPolicy>>,
 }
 impl ResolutionContract {
+    /// Creates the root contract before caller limits or policies are applied.
+    ///
+    /// # Returns
+    ///
+    /// A contract with uncapped limits and no validation policies.
+    pub(crate) fn unrestricted() -> Self {
+        Self {
+            limits: LocalResolutionLimits::new(),
+            policies: Vec::new(),
+        }
+    }
     /// Returns the effective per-session resolution limits.
+    ///
+    /// # Returns
+    ///
+    /// The limits formed by tightening every ancestor's limits.
     pub(crate) fn limits(&self) -> LocalResolutionLimits {
         self.limits
     }
+    /// Adds child limits while retaining the stricter value from each ancestor.
+    ///
+    /// # Parameters
+    ///
+    /// * `limits` — additional caps requested for the child resolution.
+    ///
+    /// # Returns
+    ///
+    /// A new contract with the stricter per-dimension limits and the same
+    /// policy chain.
+    pub(crate) fn tightened(&self, limits: LocalResolutionLimits) -> Self {
+        Self {
+            limits: self.limits.tightened(limits),
+            policies: self.policies.clone(),
+        }
+    }
+    /// Appends a child policy after all inherited parent policies.
+    ///
+    /// # Parameters
+    ///
+    /// * `policy` — child policy to run after inherited policies.
+    ///
+    /// # Returns
+    ///
+    /// A new contract retaining the effective limits and extended policy chain.
+    pub(crate) fn with_policy(&self, policy: Arc<dyn LocalResolutionPolicy>) -> Self {
+        let mut policies = self.policies.clone();
+        policies.push(policy);
+        Self {
+            limits: self.limits,
+            policies,
+        }
+    }
     /// Runs every inherited policy before a normal path component is accessed.
+    ///
+    /// # Parameters
+    ///
+    /// * `component` — normal path component presented to the resolver.
+    /// * `scope` — relationship of the component to the bound root.
+    /// * `origin` — whether the component came from input or a symlink target.
+    ///
+    /// # Returns
+    ///
+    /// Success when every inherited policy accepts the component.
+    ///
+    /// # Errors
+    ///
+    /// Returns the first error produced by an inherited policy.
     pub(crate) fn validate_component(
         &self,
         component: &std::ffi::OsStr,
@@ -39,6 +102,19 @@ impl ResolutionContract {
         Ok(())
     }
     /// Runs every inherited policy on the original symlink target text.
+    ///
+    /// # Parameters
+    ///
+    /// * `target` — unnormalized target text read from the symlink.
+    /// * `scope` — relationship of the target to the bound root.
+    ///
+    /// # Returns
+    ///
+    /// Success when every inherited policy accepts the target.
+    ///
+    /// # Errors
+    ///
+    /// Returns the first error produced by an inherited policy.
     pub(crate) fn validate_target(
         &self,
         target: &std::path::Path,
@@ -48,29 +124,6 @@ impl ResolutionContract {
             policy.validate_symlink_target(target, scope)?;
         }
         Ok(())
-    }
-    /// Creates the root contract before caller limits or policies are applied.
-    pub(crate) fn unrestricted() -> Self {
-        Self {
-            limits: LocalResolutionLimits::new(),
-            policies: Vec::new(),
-        }
-    }
-    /// Adds child limits while retaining the stricter value from each ancestor.
-    pub(crate) fn tightened(&self, limits: LocalResolutionLimits) -> Self {
-        Self {
-            limits: self.limits.tightened(limits),
-            policies: self.policies.clone(),
-        }
-    }
-    /// Appends a child policy after all inherited parent policies.
-    pub(crate) fn with_policy(&self, policy: Arc<dyn LocalResolutionPolicy>) -> Self {
-        let mut policies = self.policies.clone();
-        policies.push(policy);
-        Self {
-            limits: self.limits,
-            policies,
-        }
     }
 }
 
@@ -102,7 +155,7 @@ mod tests {
     }
 
     #[test]
-    fn resolution_session_policy_chain_runs_parent_then_child() {
+    fn test_resolution_session_policy_chain_runs_parent_then_child() {
         let calls = Arc::new(Mutex::new(Vec::new()));
         let parent = ResolutionContract::unrestricted().with_policy(Arc::new(Recorder("parent", calls.clone())));
         let child = parent.with_policy(Arc::new(Recorder("child", calls.clone())));
@@ -142,7 +195,7 @@ mod tests {
     }
 
     #[test]
-    fn resolution_contract_child_none_preserves_each_parent_limit() {
+    fn test_resolution_contract_child_none_preserves_each_parent_limit() {
         let parent = LocalResolutionLimits::new()
             .with_max_symlink_hops(1)
             .with_max_symlink_target_bytes(2)
@@ -162,7 +215,7 @@ mod tests {
     }
 
     #[test]
-    fn resolution_contract_parent_none_adopts_each_child_limit() {
+    fn test_resolution_contract_parent_none_adopts_each_child_limit() {
         let child = LocalResolutionLimits::new()
             .with_max_symlink_hops(5)
             .with_max_symlink_target_bytes(6)
@@ -176,7 +229,7 @@ mod tests {
     }
 
     #[test]
-    fn resolution_contract_uses_the_smaller_of_each_pair() {
+    fn test_resolution_contract_uses_the_smaller_of_each_pair() {
         let parent = LocalResolutionLimits::new()
             .with_max_symlink_hops(8)
             .with_max_symlink_target_bytes(1)
@@ -200,7 +253,7 @@ mod tests {
     }
 
     #[test]
-    fn resolution_contract_keeps_empty_limits_unrestricted() {
+    fn test_resolution_contract_keeps_empty_limits_unrestricted() {
         let empty = LocalResolutionLimits::new();
 
         assert_eq!(
@@ -210,7 +263,7 @@ mod tests {
     }
 
     #[test]
-    fn resolution_contract_preserves_zero_as_a_real_limit() {
+    fn test_resolution_contract_preserves_zero_as_a_real_limit() {
         let parent = LocalResolutionLimits::new().with_max_symlink_hops(0);
         let child = LocalResolutionLimits::new().with_max_symlink_hops(3);
 

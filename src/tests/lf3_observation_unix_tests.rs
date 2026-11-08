@@ -17,7 +17,7 @@ use crate::observation::unix::query_native;
 use crate::observation::unix::query_native_with;
 
 #[test]
-fn lf3_native_unix_refreshes_same_handle() {
+fn test_lf3_native_unix_refreshes_same_handle() {
     let directory = tempfile::tempdir().expect("temporary directory should be created");
     let path = directory.path().join("observed");
     std::fs::write(&path, b"a").expect("fixture should be written");
@@ -48,7 +48,7 @@ fn test_lf3_native_unix_optional_io_failure_preserves_source() {
 }
 
 #[test]
-fn lf3_native_unix_required_extension_failure_preserves_io_source() {
+fn test_lf3_native_unix_required_extension_failure_preserves_io_source() {
     let directory = tempfile::tempdir().expect("temporary directory should be created");
     let path = directory.path().join("observed");
     std::fs::write(&path, b"data").expect("fixture should be written");
@@ -63,7 +63,7 @@ fn lf3_native_unix_required_extension_failure_preserves_io_source() {
 }
 
 #[test]
-fn lf3_native_unix_rejects_out_of_range_nanoseconds_when_required() {
+fn test_lf3_native_unix_rejects_out_of_range_nanoseconds_when_required() {
     let directory = tempfile::tempdir().expect("temporary directory should be created");
     let path = directory.path().join("observed");
     std::fs::write(&path, b"data").expect("fixture should be written");
@@ -79,7 +79,7 @@ fn lf3_native_unix_rejects_out_of_range_nanoseconds_when_required() {
 }
 
 #[test]
-fn lf3_snapshot_changed_during_read_keeps_rooted_pwd_context() {
+fn test_lf3_snapshot_changed_during_read_keeps_rooted_pwd_context() {
     use crate::options::LocalSnapshotOptions;
 
     let directory = tempfile::tempdir().expect("temporary directory should be created");
@@ -105,7 +105,7 @@ fn lf3_snapshot_changed_during_read_keeps_rooted_pwd_context() {
 
 #[cfg(target_os = "macos")]
 #[test]
-fn lf3_native_unix_rejects_negative_nanoseconds_when_required() {
+fn test_lf3_native_unix_rejects_negative_nanoseconds_when_required() {
     let directory = tempfile::tempdir().expect("temporary directory should be created");
     let path = directory.path().join("observed");
     std::fs::write(&path, b"data").expect("fixture should be written");

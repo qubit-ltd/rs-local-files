@@ -7,10 +7,16 @@
 // =============================================================================
 
 use std::fs;
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
+#[cfg(unix)]
+use std::os::unix::fs::symlink;
 use std::path::Path;
 use std::path::PathBuf;
 use std::time::Duration;
 
+#[cfg(unix)]
+use libc::geteuid;
 use qubit_local_files::LocalFileSystem;
 use qubit_local_files::error::LocalFileErrorKind;
 #[cfg(feature = "test-support")]
@@ -260,7 +266,7 @@ fn test_local_directory_walker_continue_skips_handle_limited_branch() {
         let fail_fast_options = LocalListOptions::new()
             .with_recursive()
             .with_max_open_directories(1)
-            .with_reopen_policy(qubit_local_files::options::LocalDirectoryReopenPolicy::Fail)
+            .with_reopen_policy(LocalDirectoryReopenPolicy::Fail)
             .with_error_policy(LocalWalkErrorPolicy::FailFast);
         let mut fail_fast = filesystem
             .list_with_options(root, &fail_fast_options)
@@ -283,7 +289,7 @@ fn test_local_directory_walker_continue_skips_handle_limited_branch() {
         let options = LocalListOptions::new()
             .with_recursive()
             .with_max_open_directories(1)
-            .with_reopen_policy(qubit_local_files::options::LocalDirectoryReopenPolicy::Fail)
+            .with_reopen_policy(LocalDirectoryReopenPolicy::Fail)
             .with_error_policy(LocalWalkErrorPolicy::Continue);
         let walker = filesystem
             .list_with_options(root, &options)
@@ -374,7 +380,7 @@ fn test_local_directory_walker_scripted_open_error_does_not_hide_sibling() {
             let options = LocalListOptions::new()
                 .with_recursive()
                 .with_max_open_directories(1)
-                .with_reopen_policy(qubit_local_files::options::LocalDirectoryReopenPolicy::Fail)
+                .with_reopen_policy(LocalDirectoryReopenPolicy::Fail)
                 .with_error_policy(LocalWalkErrorPolicy::Continue);
             let walker = filesystem
                 .list_with_options(root, &options)
@@ -428,8 +434,6 @@ fn test_local_directory_walker_scripted_open_error_does_not_hide_sibling() {
 #[cfg(unix)]
 #[test]
 fn test_local_directory_walker_resolves_links_only_when_descent_is_allowed() {
-    use std::os::unix::fs::symlink;
-
     for rooted in [false, true] {
         let directory = tempdir().expect("temporary directory should be created");
         let target = directory.path().join("target");
@@ -493,8 +497,6 @@ fn test_local_directory_walker_resolves_links_only_when_descent_is_allowed() {
 #[cfg(unix)]
 #[test]
 fn test_rooted_directory_walker_rejects_out_of_scope_symlink() {
-    use std::os::unix::fs::symlink;
-
     let owner = tempdir().expect("fixture owner should be created");
     let root = owner.path().join("root");
     let outside = owner.path().join("outside");
@@ -666,8 +668,6 @@ fn test_local_directory_walker_rejects_zero_open_directory_budget() {
 #[cfg(unix)]
 #[test]
 fn test_local_directory_walker_follow_mode_traverses_links_and_rejects_cycles() {
-    use std::os::unix::fs::symlink;
-
     let directory = tempdir().expect("temporary directory should be created");
     let outside = tempdir().expect("outside directory should be created");
     let target = outside.path().join("target");
@@ -709,8 +709,6 @@ fn test_local_directory_walker_follow_mode_traverses_links_and_rejects_cycles() 
 #[cfg(unix)]
 #[test]
 fn test_local_directory_walker_follow_mode_reports_dangling_link() {
-    use std::os::unix::fs::symlink;
-
     let directory = tempdir().expect("temporary directory should be created");
     let link = directory.path().join("dangling");
     symlink(directory.path().join("missing"), &link).expect("dangling link fixture should be created");
@@ -735,11 +733,9 @@ fn test_local_directory_walker_follow_mode_reports_dangling_link() {
 #[cfg(unix)]
 #[test]
 fn test_local_directory_walker_reports_unreadable_child_directory() {
-    use std::os::unix::fs::PermissionsExt;
-
     // SAFETY: `geteuid` reads the current process identity without pointers or
     // mutable state.
-    if unsafe { libc::geteuid() } == 0 {
+    if unsafe { geteuid() } == 0 {
         return;
     }
     let directory = tempdir().expect("temporary directory should be created");
@@ -768,11 +764,9 @@ fn test_local_directory_walker_reports_unreadable_child_directory() {
 #[cfg(unix)]
 #[test]
 fn test_local_directory_walker_rejects_unreadable_root_directory() {
-    use std::os::unix::fs::PermissionsExt;
-
     // SAFETY: `geteuid` reads the current process identity without pointers or
     // mutable state.
-    if unsafe { libc::geteuid() } == 0 {
+    if unsafe { geteuid() } == 0 {
         return;
     }
     let directory = tempdir().expect("temporary directory should be created");
@@ -796,8 +790,6 @@ fn test_local_directory_walker_rejects_unreadable_root_directory() {
 #[cfg(unix)]
 #[test]
 fn test_local_directory_walker_fail_fast_stops_after_error() {
-    use std::os::unix::fs::symlink;
-
     let directory = tempdir().expect("temporary directory should be created");
     symlink(directory.path().join("missing"), directory.path().join("dangling"))
         .expect("dangling link fixture should be created");
@@ -820,8 +812,6 @@ fn test_local_directory_walker_fail_fast_stops_after_error() {
 #[cfg(unix)]
 #[test]
 fn test_local_directory_walker_continue_policy_keeps_iterating() {
-    use std::os::unix::fs::symlink;
-
     let directory = tempdir().expect("temporary directory should be created");
     fs::write(directory.path().join("readable"), b"payload").expect("readable entry should be created");
     symlink(directory.path().join("missing"), directory.path().join("dangling"))

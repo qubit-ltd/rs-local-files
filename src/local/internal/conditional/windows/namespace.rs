@@ -20,43 +20,28 @@ use std::fs;
 use std::fs::File;
 use std::io;
 use std::io::ErrorKind;
-use std::os::windows::ffi::OsStrExt;
-use std::os::windows::io::AsRawHandle;
-use std::os::windows::io::FromRawHandle;
 use std::path::Path;
 use std::path::PathBuf;
-use std::ptr::null;
-use std::ptr::null_mut;
 
 use windows_sys::Wdk::Storage::FileSystem::FILE_CREATE;
 use windows_sys::Wdk::Storage::FileSystem::FILE_DIRECTORY_FILE;
 use windows_sys::Wdk::Storage::FileSystem::FILE_NON_DIRECTORY_FILE;
 use windows_sys::Wdk::Storage::FileSystem::FILE_OPEN;
 use windows_sys::Win32::Foundation::GENERIC_READ;
-use windows_sys::Win32::Foundation::GENERIC_WRITE;
-use windows_sys::Win32::Foundation::INVALID_HANDLE_VALUE;
-use windows_sys::Win32::Storage::FileSystem::CreateFileW;
-use windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_REPARSE_POINT;
-use windows_sys::Win32::Storage::FileSystem::FILE_FLAG_BACKUP_SEMANTICS;
-use windows_sys::Win32::Storage::FileSystem::FILE_FLAG_OPEN_REPARSE_POINT;
-use windows_sys::Win32::Storage::FileSystem::FILE_ID_INFO;
-use windows_sys::Win32::Storage::FileSystem::FILE_LIST_DIRECTORY;
 use windows_sys::Win32::Storage::FileSystem::FILE_READ_ATTRIBUTES;
-use windows_sys::Win32::Storage::FileSystem::FILE_SHARE_DELETE;
 use windows_sys::Win32::Storage::FileSystem::FILE_SHARE_READ;
 use windows_sys::Win32::Storage::FileSystem::FILE_SHARE_WRITE;
-use windows_sys::Win32::Storage::FileSystem::FILE_TRAVERSE;
-use windows_sys::Win32::Storage::FileSystem::FileAttributeTagInfo;
-use windows_sys::Win32::Storage::FileSystem::FileIdInfo;
-use windows_sys::Win32::Storage::FileSystem::GetFileInformationByHandleEx;
-use windows_sys::Win32::Storage::FileSystem::OPEN_EXISTING;
 use windows_sys::Win32::Storage::FileSystem::SYNCHRONIZE;
 
+use self::entry_access::EntryAccess;
+use self::scope::Scope;
+use self::windows_handle::delete_open_entry;
+use self::windows_handle::open_host_directory_no_reparse;
+use self::windows_handle::open_host_file;
+use self::windows_handle::verify_directory_no_reparse;
+use self::windows_handle::verify_regular_no_reparse;
 use super::super::ConditionalEntry;
-use super::super::RecoveryAccess;
-use crate::LocalFileReader;
 use crate::LocalRelativePath;
-use crate::LocalResult;
 use crate::local::internal::windows_rooted::create_rooted_directory;
 use crate::local::internal::windows_rooted::native::nt_open_at_with_share_mode;
 use crate::local::internal::windows_rooted::open_conditional_entry_at;
@@ -65,36 +50,51 @@ use crate::local::internal::windows_rooted::open_root_directory;
 use crate::local::internal::windows_rooted::rename_conditional_entry_at;
 use crate::options::LocalWriteOptions;
 use crate::recovery::LocalRecoveryFileRole;
+mod entry_access;
+mod file_identity;
+mod scope;
+mod windows_handle;
+pub(super) use self::file_identity::FileIdentity;
+pub(super) use self::windows_handle::file_identity;
 
-pub(super) const SHARE_ALL: u32 = FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE;
 pub(super) const ENTRY_ACCESS: u32 = GENERIC_READ | FILE_READ_ATTRIBUTES | SYNCHRONIZE;
-const FILE_ATTRIBUTE_DIRECTORY: u32 = 0x10;
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(super) struct FileIdentity {
-    volume_serial: u64,
-    file_id: [u8; 16],
-}
-
-#[derive(Debug)]
-enum Scope {
-    Host { parent_path: PathBuf },
-    Rooted { namespace_absolute: PathBuf },
-}
-
+/// Holds the directory handle and identity context for conditional entries.
 #[derive(Debug)]
 pub(super) struct Namespace {
+    /// Selects the host-path or rooted access strategy.
     scope: Scope,
+    /// Retained handle for the target's containing directory.
     parent: File,
+    /// Leaf name of the target entry.
     target_name: OsString,
+    /// Namespace path used to identify the target for internal operations.
     target_path: PathBuf,
+    /// Optional user-facing path used only for diagnostics.
     diagnostic_path: Option<PathBuf>,
+    /// Retained directory handles for recovery containers.
     recovery_parents: RefCell<Vec<(PathBuf, File)>>,
+    /// Test-only switch for exercising recovery-container verification failure.
     #[cfg(test)]
     fail_container_verification: Cell<bool>,
 }
 
 impl Namespace {
+    /// Opens the host parent directory and records the target leaf name.
+    ///
+    /// # Parameters
+    ///
+    /// - `path`: Target path whose parent is retained.
+    /// - `options`: Write options controlling parent creation.
+    ///
+    /// # Returns
+    ///
+    /// The namespace retaining the target parent handle and leaf name.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if parent creation or directory opening fails, or if
+    /// `path` has no filename.
     pub(super) fn open_host(path: &Path, options: &LocalWriteOptions) -> io::Result<Self> {
         let parent_path = path
             .parent()
@@ -123,6 +123,25 @@ impl Namespace {
         })
     }
 
+    /// Opens the target parent relative to a retained root directory handle.
+    ///
+    /// # Parameters
+    ///
+    /// - `root`: Open root directory handle.
+    /// - `relative`: Target path relative to the root.
+    /// - `namespace_absolute`: Absolute namespace path used for internal
+    ///   identity.
+    /// - `diagnostic`: Optional user-facing path for errors.
+    /// - `options`: Write options controlling parent creation.
+    ///
+    /// # Returns
+    ///
+    /// The namespace retaining the rooted parent handle and target leaf name.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `relative` is invalid or a rooted directory
+    /// operation fails.
     pub(super) fn open_rooted(
         root: File,
         relative: &Path,
@@ -151,17 +170,46 @@ impl Namespace {
             fail_container_verification: Cell::new(false),
         })
     }
-
+    /// Returns the target leaf name used for handle-relative operations.
+    ///
+    /// # Returns
+    ///
+    /// Borrows the leaf name retained when the namespace was opened.
+    #[must_use]
+    #[inline]
     pub(super) fn target_name(&self) -> &OsStr {
         &self.target_name
     }
+    /// Returns the namespace path associated with the target entry.
+    ///
+    /// # Returns
+    ///
+    /// Borrows the namespace path retained for this target.
+    #[must_use]
+    #[inline]
     pub(super) fn target_path(&self) -> &Path {
         &self.target_path
     }
+    /// Reports whether this namespace is anchored to a retained root handle.
+    ///
+    /// # Returns
+    ///
+    /// `true` for rooted access and `false` for host-path access.
+    #[must_use]
+    #[inline]
     pub(super) fn is_rooted(&self) -> bool {
         matches!(self.scope, Scope::Rooted { .. })
     }
 
+    /// Returns the host parent path, or an unsupported error for rooted access.
+    ///
+    ///
+    /// # Returns
+    ///
+    /// Borrows the host parent path when host-path access is active.
+    /// # Errors
+    ///
+    /// Returns `Unsupported` when this namespace uses rooted access.
     pub(super) fn host_parent_path(&self) -> io::Result<&Path> {
         match &self.scope {
             Scope::Host { parent_path } => Ok(parent_path),
@@ -171,11 +219,33 @@ impl Namespace {
             )),
         }
     }
-
+    /// Builds the host path for a private entry; rooted namespaces reject it.
+    ///
+    /// # Parameters
+    ///
+    /// - `name`: Private entry leaf name.
+    ///
+    /// # Returns
+    ///
+    /// The host path for `name` when host-path access is active.
+    /// # Errors
+    ///
+    /// Returns `Unsupported` when this namespace uses rooted access.
+    #[inline]
     pub(super) fn private_file_path(&self, name: &OsStr) -> io::Result<PathBuf> {
         self.host_child_path(name)
     }
 
+    /// Creates a uniquely named recovery directory and backup entry path.
+    ///
+    ///
+    /// # Returns
+    ///
+    /// The recovery directory path and its backup entry path.
+    /// # Errors
+    ///
+    /// Returns an error if a unique recovery directory cannot be created or
+    /// verified.
     pub(super) fn backup_container(&self) -> io::Result<(PathBuf, PathBuf)> {
         self.backup_container_with_names(|| {
             let dirname = crate::local::internal::file_name_generation::try_random_file_name(
@@ -189,6 +259,24 @@ impl Namespace {
         })
     }
 
+    /// Creates and retains a verified recovery directory using supplied names.
+    ///
+    /// # Type Parameters
+    ///
+    /// - `F`: Callback type used to generate the directory and backup names.
+    ///
+    /// # Parameters
+    ///
+    /// - `next`: Callback that supplies a container and backup leaf name.
+    ///
+    ///
+    /// # Returns
+    ///
+    /// The created recovery directory path and its backup entry path.
+    /// # Errors
+    ///
+    /// Returns an error if host access, name generation, directory creation, or
+    /// identity verification fails.
     pub(super) fn backup_container_with_names<F>(&self, mut next: F) -> io::Result<(PathBuf, PathBuf)>
     where
         F: FnMut() -> io::Result<(OsString, OsString)>,
@@ -244,19 +332,24 @@ impl Namespace {
         ))
     }
 
-    fn verify_new_container(&self, handle: &File) -> io::Result<()> {
-        #[cfg(test)]
-        if self.fail_container_verification.replace(false) {
-            return Err(io::Error::other("injected recovery container verification failure"));
-        }
-        verify_directory_no_reparse(handle)
-    }
-
+    /// Injects one verification failure for recovery cleanup tests.
     #[cfg(test)]
     pub(super) fn fail_next_container_verification(&self) {
         self.fail_container_verification.set(true);
     }
-
+    /// Compares a recovery path's current identity with its retained handle.
+    ///
+    /// # Parameters
+    ///
+    /// - `path`: Recovery container path whose identity is checked.
+    ///
+    /// # Returns
+    ///
+    /// `true` when `path` resolves to the retained directory; `false` when no
+    /// handle is retained for it. # Errors
+    ///
+    /// Returns an error if the path cannot be opened or either file identity
+    /// cannot be read.
     #[cfg(test)]
     pub(super) fn recovery_container_is_bound(&self, path: &Path) -> io::Result<bool> {
         let parents = self.recovery_parents.borrow();
@@ -267,6 +360,22 @@ impl Namespace {
         Ok(file_identity(handle)? == file_identity(&current)?)
     }
 
+    /// Creates an entry permission bound to a recovery container handle.
+    ///
+    /// # Parameters
+    ///
+    /// - `role`: Recovery role assigned to the entry.
+    /// - `container`: Recovery directory containing the entry.
+    /// - `backup_path`: Backup path whose leaf is opened.
+    ///
+    ///
+    /// # Returns
+    ///
+    /// A conditional entry bound to the backup file's observed identity.
+    /// # Errors
+    ///
+    /// Returns an error if the backup path has no leaf or its directory, file,
+    /// or identity cannot be opened.
     pub(super) fn entry_in_container(
         &self,
         role: LocalRecoveryFileRole,
@@ -304,6 +413,22 @@ impl Namespace {
         ))
     }
 
+    /// Creates an entry permission tied to an already-open file identity.
+    ///
+    /// # Parameters
+    ///
+    /// - `role`: Recovery role assigned to the entry.
+    /// - `name`: Entry leaf name.
+    /// - `file`: Open handle whose identity is retained.
+    ///
+    ///
+    /// # Returns
+    ///
+    /// A conditional entry bound to the supplied file identity and retained
+    /// handle. # Errors
+    ///
+    /// Returns an error if the file is not regular, its identity cannot be
+    /// read, or handles cannot be cloned.
     pub(super) fn entry_bound_to(
         &self,
         role: LocalRecoveryFileRole,
@@ -331,6 +456,16 @@ impl Namespace {
         ))
     }
 
+    /// Deletes a retained recovery directory after verifying its handle.
+    ///
+    /// # Parameters
+    ///
+    /// - `container`: Recovery directory to remove after handle verification.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Unsupported` for rooted access and an error if the retained
+    /// directory cannot be verified or deleted.
     pub(super) fn remove_container(&self, container: &Path) -> io::Result<()> {
         if self.is_rooted() {
             return Err(io::Error::new(
@@ -355,6 +490,16 @@ impl Namespace {
         Ok(())
     }
 
+    /// Joins a leaf name to this namespace's diagnostic location.
+    ///
+    /// # Parameters
+    ///
+    /// - `name`: Entry leaf name to append.
+    ///
+    /// # Returns
+    ///
+    /// The diagnostic child path formed from this namespace and `name`.
+    #[must_use]
     pub(super) fn child_path(&self, name: &OsStr) -> PathBuf {
         match &self.scope {
             Scope::Host { parent_path } => parent_path.join(name),
@@ -364,6 +509,20 @@ impl Namespace {
         }
     }
 
+    /// Builds a host child path, rejecting rooted namespaces without host
+    /// access.
+    ///
+    /// # Parameters
+    ///
+    /// - `name`: Entry leaf name to append.
+    ///
+    ///
+    /// # Returns
+    ///
+    /// The host child path formed from the retained parent and `name`.
+    /// # Errors
+    ///
+    /// Returns `Unsupported` when this namespace uses rooted access.
     pub(super) fn host_child_path(&self, name: &OsStr) -> io::Result<PathBuf> {
         match &self.scope {
             Scope::Host { parent_path } => Ok(parent_path.join(name)),
@@ -374,6 +533,21 @@ impl Namespace {
         }
     }
 
+    /// Opens and records an entry after capturing its identity and file type.
+    ///
+    /// # Parameters
+    ///
+    /// - `role`: Recovery role assigned to the entry.
+    /// - `name`: Entry leaf name to open and bind.
+    ///
+    ///
+    /// # Returns
+    ///
+    /// A conditional entry bound to the opened file identity.
+    /// # Errors
+    ///
+    /// Returns an error if the entry cannot be opened, validated, or bound to a
+    /// cloned parent handle.
     pub(super) fn entry(&self, role: LocalRecoveryFileRole, name: OsString) -> io::Result<ConditionalEntry> {
         let file = self.open_entry(&name)?;
         let identity = file_identity(&file)?;
@@ -397,6 +571,21 @@ impl Namespace {
         ))
     }
 
+    /// Creates a private entry beneath the retained parent, cleaning failures
+    /// safely.
+    ///
+    /// # Parameters
+    ///
+    /// - `prefix`: Name prefix identifying the private entry purpose.
+    ///
+    ///
+    /// # Returns
+    ///
+    /// The allocated entry leaf name and its open file handle.
+    /// # Errors
+    ///
+    /// Returns an error if allocation fails or cleanup cannot safely remove a
+    /// partially created entry.
     pub(super) fn create_private(&self, prefix: &str) -> io::Result<(OsString, File)> {
         for _ in 0..32 {
             let name = OsString::from(crate::local::internal::file_name_generation::try_random_file_name(
@@ -441,6 +630,20 @@ impl Namespace {
         ))
     }
 
+    /// Opens a non-directory entry relative to the namespace authority.
+    ///
+    /// # Parameters
+    ///
+    /// - `name`: Entry leaf name to open.
+    ///
+    ///
+    /// # Returns
+    ///
+    /// An open handle to the non-directory entry.
+    /// # Errors
+    ///
+    /// Returns an error if the entry cannot be opened beneath this namespace
+    /// authority.
     pub(super) fn open_entry(&self, name: &OsStr) -> io::Result<File> {
         match &self.scope {
             Scope::Host { .. } => open_host_file(&self.host_child_path(name)?, ENTRY_ACCESS),
@@ -450,6 +653,20 @@ impl Namespace {
         }
     }
 
+    /// Returns an entry identity, using `None` only when the name is absent.
+    ///
+    /// # Parameters
+    ///
+    /// - `name`: Entry leaf name whose current identity is queried.
+    ///
+    ///
+    /// # Returns
+    ///
+    /// `Some(identity)` when the entry exists and `None` only when its name is
+    /// absent. # Errors
+    ///
+    /// Returns an error if opening the entry or reading its identity fails for
+    /// a reason other than absence.
     pub(super) fn identity_at(&self, name: &OsStr) -> io::Result<Option<FileIdentity>> {
         match self.open_entry(name) {
             Ok(file) => Ok(Some(file_identity(&file)?)),
@@ -458,6 +675,16 @@ impl Namespace {
         }
     }
 
+    /// Reopens an entry and checks that it still denotes the retained object.
+    ///
+    /// # Parameters
+    ///
+    /// - `entry`: Permission whose namespace entry is checked.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the entry cannot be reopened or its current identity
+    /// differs from the retained identity.
     pub(super) fn verify_entry(&self, entry: &ConditionalEntry) -> io::Result<()> {
         let retained = entry.open_reader().map_err(io::Error::other)?;
         let path = entry.namespace_path();
@@ -482,10 +709,32 @@ impl Namespace {
         Ok(())
     }
 
+    /// Renames entries relative to the retained parent handle.
+    ///
+    /// # Parameters
+    ///
+    /// - `source`: Source entry leaf name.
+    /// - `destination`: Destination entry leaf name.
+    /// - `overwrite`: Whether an existing destination may be replaced.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the handle-relative rename cannot be completed.
     pub(super) fn rename(&self, source: &OsStr, destination: &OsStr, overwrite: bool) -> io::Result<()> {
         rename_conditional_entry_at(&self.parent, source, &self.parent, destination, overwrite)
     }
 
+    /// Removes an entry only after matching its current identity to its
+    /// permission.
+    ///
+    /// # Parameters
+    ///
+    /// - `entry`: Permission for the entry to remove.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the entry identity changed or handle-relative
+    /// deletion fails.
     pub(super) fn remove(&self, entry: &ConditionalEntry) -> io::Result<()> {
         let verified = entry.open_reader().map_err(io::Error::other)?;
         let expected_identity = file_identity(verified.as_file())?;
@@ -535,6 +784,18 @@ impl Namespace {
         }
     }
 
+    /// Deletes a private file handle after optional identity and type
+    /// verification.
+    ///
+    /// # Parameters
+    ///
+    /// - `file`: Open private file handle to delete.
+    /// - `expected`: Optional identity that the handle must match.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the expected identity differs, the file is not
+    /// regular, or deletion fails.
     pub(super) fn delete_created_private(&self, file: &File, expected: Option<FileIdentity>) -> io::Result<()> {
         if let Some(expected) = expected
             && file_identity(file)? != expected
@@ -548,6 +809,37 @@ impl Namespace {
         delete_open_entry(file)
     }
 
+    /// Confirms a newly created recovery handle names a real directory.
+    ///
+    /// # Parameters
+    ///
+    /// - `handle`: Newly created directory handle to validate.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the handle does not identify a real directory.
+    fn verify_new_container(&self, handle: &File) -> io::Result<()> {
+        #[cfg(test)]
+        if self.fail_container_verification.replace(false) {
+            return Err(io::Error::other("injected recovery container verification failure"));
+        }
+        verify_directory_no_reparse(handle)
+    }
+
+    /// Clones the retained parent handle corresponding to a host entry path.
+    ///
+    /// # Parameters
+    ///
+    /// - `path`: Entry path whose retained parent handle is requested.
+    ///
+    ///
+    /// # Returns
+    ///
+    /// A clone of the retained parent directory handle for `path`.
+    /// # Errors
+    ///
+    /// Returns `InvalidInput` when `path` has no parent and `NotFound` when no
+    /// retained parent matches.
     fn parent_handle_for(&self, path: &Path) -> io::Result<File> {
         let parent_path = path
             .parent()
@@ -562,236 +854,5 @@ impl Namespace {
             .map(|(_, parent)| parent.try_clone())
             .transpose()?
             .ok_or_else(|| io::Error::new(ErrorKind::NotFound, "conditional recovery parent handle is unavailable"))
-    }
-}
-
-#[derive(Debug)]
-struct EntryAccess {
-    parent: File,
-    name: OsString,
-    diagnostic_path: Option<PathBuf>,
-    identity: FileIdentity,
-    _retained: Option<File>,
-}
-
-impl RecoveryAccess for EntryAccess {
-    fn open_reader(&self) -> LocalResult<LocalFileReader> {
-        let file = open_conditional_entry_at(
-            &self.parent,
-            &self.name,
-            ENTRY_ACCESS,
-            FILE_OPEN,
-            FILE_NON_DIRECTORY_FILE,
-        )
-        .map_err(|error| {
-            crate::LocalFileError::from_io(
-                crate::LocalFileOperation::OpenReader,
-                self.diagnostic_path.clone(),
-                None,
-                error,
-            )
-        })?;
-        let observed = file_identity(&file).map_err(|error| {
-            crate::LocalFileError::from_io(
-                crate::LocalFileOperation::OpenReader,
-                self.diagnostic_path.clone(),
-                None,
-                error,
-            )
-        })?;
-        verify_regular_no_reparse(&file).map_err(|error| {
-            crate::LocalFileError::from_io(
-                crate::LocalFileOperation::OpenReader,
-                self.diagnostic_path.clone(),
-                None,
-                error,
-            )
-        })?;
-        if observed != self.identity {
-            return Err(crate::LocalFileError::from_io(
-                crate::LocalFileOperation::OpenReader,
-                self.diagnostic_path.clone(),
-                None,
-                io::Error::new(ErrorKind::InvalidData, "conditional recovery entry identity changed"),
-            ));
-        }
-        LocalFileReader::from_file(file).map_err(|error| {
-            crate::LocalFileError::from_io(
-                crate::LocalFileOperation::OpenReader,
-                self.diagnostic_path.clone(),
-                None,
-                error,
-            )
-        })
-    }
-
-    fn sync_file(&self) -> io::Result<()> {
-        let file = open_conditional_entry_at(
-            &self.parent,
-            &self.name,
-            GENERIC_READ | GENERIC_WRITE | FILE_READ_ATTRIBUTES | SYNCHRONIZE,
-            FILE_OPEN,
-            FILE_NON_DIRECTORY_FILE,
-        )?;
-        verify_regular_no_reparse(&file)?;
-        if file_identity(&file)? != self.identity {
-            return Err(io::Error::new(
-                ErrorKind::InvalidData,
-                "conditional entry identity changed before file synchronization",
-            ));
-        }
-        file.sync_all()
-    }
-}
-
-pub(super) fn file_identity(file: &File) -> io::Result<FileIdentity> {
-    let mut identity = FILE_ID_INFO::default();
-    // SAFETY: `file` owns a live handle and `identity` is a correctly sized
-    // writable buffer for FileIdInfo.
-    let success = unsafe {
-        GetFileInformationByHandleEx(
-            file.as_raw_handle(),
-            FileIdInfo,
-            (&raw mut identity).cast(),
-            std::mem::size_of::<FILE_ID_INFO>() as u32,
-        )
-    };
-    if success == 0 {
-        return Err(io::Error::last_os_error());
-    }
-    Ok(FileIdentity {
-        volume_serial: identity.VolumeSerialNumber,
-        file_id: identity.FileId.Identifier,
-    })
-}
-
-pub(super) fn verify_regular_no_reparse(file: &File) -> io::Result<()> {
-    let metadata = file.metadata()?;
-    if !metadata.is_file() {
-        return Err(io::Error::new(
-            ErrorKind::InvalidInput,
-            "conditional entry is not a regular file",
-        ));
-    }
-    let mut tag = windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_TAG_INFO::default();
-    // SAFETY: `file` owns a live handle and `tag` is a correctly sized output
-    // buffer.
-    let success = unsafe {
-        GetFileInformationByHandleEx(
-            file.as_raw_handle(),
-            windows_sys::Win32::Storage::FileSystem::FileAttributeTagInfo,
-            (&raw mut tag).cast(),
-            std::mem::size_of::<windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_TAG_INFO>() as u32,
-        )
-    };
-    if success == 0 {
-        return Err(io::Error::last_os_error());
-    }
-    if tag.FileAttributes & FILE_ATTRIBUTE_REPARSE_POINT != 0 || tag.FileAttributes & FILE_ATTRIBUTE_DIRECTORY != 0 {
-        return Err(io::Error::new(
-            ErrorKind::InvalidInput,
-            "conditional entry is a reparse point or directory",
-        ));
-    }
-    Ok(())
-}
-
-pub(super) fn open_host_file(path: &Path, access: u32) -> io::Result<File> {
-    let wide: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
-    if wide[..wide.len() - 1].contains(&0) {
-        return Err(io::Error::new(ErrorKind::InvalidInput, "path contains an interior NUL"));
-    }
-    // SAFETY: `wide` is NUL terminated and remains live for the synchronous
-    // CreateFileW call. The returned handle is checked before ownership transfer.
-    let handle = unsafe {
-        CreateFileW(
-            wide.as_ptr(),
-            access,
-            SHARE_ALL,
-            null(),
-            OPEN_EXISTING,
-            FILE_FLAG_OPEN_REPARSE_POINT,
-            null_mut(),
-        )
-    };
-    if handle == INVALID_HANDLE_VALUE {
-        return Err(io::Error::last_os_error());
-    }
-    // SAFETY: CreateFileW returned a uniquely owned valid handle.
-    let file = unsafe { File::from_raw_handle(handle) };
-    verify_regular_no_reparse(&file)?;
-    Ok(file)
-}
-
-fn open_host_directory_no_reparse(path: &Path) -> io::Result<File> {
-    let wide: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
-    if wide[..wide.len() - 1].contains(&0) {
-        return Err(io::Error::new(ErrorKind::InvalidInput, "path contains an interior NUL"));
-    }
-    // SAFETY: `wide` remains live through the synchronous call; the returned
-    // handle is validated before ownership transfers to `File`.
-    let handle = unsafe {
-        CreateFileW(
-            wide.as_ptr(),
-            FILE_LIST_DIRECTORY | FILE_READ_ATTRIBUTES | FILE_TRAVERSE | SYNCHRONIZE,
-            SHARE_ALL,
-            null(),
-            OPEN_EXISTING,
-            FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT,
-            null_mut(),
-        )
-    };
-    if handle == INVALID_HANDLE_VALUE {
-        return Err(io::Error::last_os_error());
-    }
-    // SAFETY: CreateFileW returned a uniquely owned valid handle.
-    let file = unsafe { File::from_raw_handle(handle) };
-    verify_directory_no_reparse(&file)?;
-    Ok(file)
-}
-
-fn verify_directory_no_reparse(file: &File) -> io::Result<()> {
-    let mut tag = windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_TAG_INFO::default();
-    // SAFETY: `file` owns a live handle and `tag` is a correctly sized output
-    // buffer.
-    let success = unsafe {
-        GetFileInformationByHandleEx(
-            file.as_raw_handle(),
-            FileAttributeTagInfo,
-            (&raw mut tag).cast(),
-            std::mem::size_of_val(&tag) as u32,
-        )
-    };
-    if success == 0 {
-        return Err(io::Error::last_os_error());
-    }
-    if tag.FileAttributes & FILE_ATTRIBUTE_REPARSE_POINT != 0 || tag.FileAttributes & FILE_ATTRIBUTE_DIRECTORY == 0 {
-        return Err(io::Error::new(
-            ErrorKind::InvalidInput,
-            "conditional recovery container is not a real directory",
-        ));
-    }
-    Ok(())
-}
-
-fn delete_open_entry(file: &File) -> io::Result<()> {
-    use windows_sys::Win32::Storage::FileSystem::FILE_DISPOSITION_INFO;
-    use windows_sys::Win32::Storage::FileSystem::FileDispositionInfo;
-    use windows_sys::Win32::Storage::FileSystem::SetFileInformationByHandle;
-    let disposition = FILE_DISPOSITION_INFO { DeleteFile: true };
-    // SAFETY: The handle was opened with DELETE and the buffer matches the info
-    // class.
-    let success = unsafe {
-        SetFileInformationByHandle(
-            file.as_raw_handle(),
-            FileDispositionInfo,
-            (&raw const disposition).cast(),
-            std::mem::size_of::<FILE_DISPOSITION_INFO>() as u32,
-        )
-    };
-    if success == 0 {
-        Err(io::Error::last_os_error())
-    } else {
-        Ok(())
     }
 }

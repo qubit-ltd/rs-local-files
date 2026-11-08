@@ -24,7 +24,7 @@ fn overlap_options() -> LocalCopyOptions {
 }
 
 #[test]
-fn ancestor_target_preserves_source_for_host_and_rooted() {
+fn test_ancestor_target_preserves_source_for_host_and_rooted() {
     for rooted in [false, true] {
         let fixture = tempdir().expect("fixture");
         let source = fixture.path().join("container/source");
@@ -58,7 +58,7 @@ fn ancestor_target_preserves_source_for_host_and_rooted() {
 }
 
 #[test]
-fn empty_directory_cannot_merge_into_its_ancestor() {
+fn test_empty_directory_cannot_merge_into_its_ancestor() {
     for rooted in [false, true] {
         let fixture = tempdir().expect("fixture");
         let source = fixture.path().join("container/source");
@@ -97,7 +97,7 @@ fn empty_directory_cannot_merge_into_its_ancestor() {
 }
 
 #[test]
-fn equal_and_descendant_targets_are_rejected_for_host_and_rooted() {
+fn test_equal_and_descendant_targets_are_rejected_for_host_and_rooted() {
     for rooted in [false, true] {
         for descendant in [false, true] {
             let fixture = tempdir().expect("fixture");
@@ -137,7 +137,7 @@ fn equal_and_descendant_targets_are_rejected_for_host_and_rooted() {
 }
 
 #[test]
-fn entry_mode_directory_source_keeps_its_source_mode_error() {
+fn test_entry_mode_directory_source_keeps_its_source_mode_error() {
     for rooted in [false, true] {
         let fixture = tempdir().expect("fixture");
         let source = fixture.path().join("container/source");
@@ -168,7 +168,7 @@ fn entry_mode_directory_source_keeps_its_source_mode_error() {
 }
 
 #[test]
-fn sibling_tree_copy_still_succeeds_for_host_and_rooted() {
+fn test_sibling_tree_copy_still_succeeds_for_host_and_rooted() {
     for rooted in [false, true] {
         let fixture = tempdir().expect("fixture");
         let source = fixture.path().join("source");
@@ -194,7 +194,7 @@ fn sibling_tree_copy_still_succeeds_for_host_and_rooted() {
 
 #[cfg(unix)]
 #[test]
-fn host_ancestor_symlink_alias_is_rejected_before_mutation() {
+fn test_host_ancestor_symlink_alias_is_rejected_before_mutation() {
     use std::os::unix::fs::symlink;
 
     let fixture = tempdir().expect("fixture");

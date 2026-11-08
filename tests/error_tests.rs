@@ -11,12 +11,17 @@ use std::io;
 use std::path::Path;
 
 use qubit_local_files::LocalFileError;
+use qubit_local_files::LocalFileSystem;
+use qubit_local_files::LocalTempSealError;
 use qubit_local_files::error::LocalFileEffectState;
 use qubit_local_files::error::LocalFileErrorKind;
 use qubit_local_files::error::LocalFileErrorSource;
 use qubit_local_files::error::LocalFileOperation;
+use qubit_local_files::error::LocalPathCodecError;
 use qubit_local_files::error::LocalResourceKind;
 use qubit_local_files::error::LocalResourceLimitError;
+use qubit_local_files::options::LocalSealOptions;
+use qubit_local_files::options::LocalTempFileOptions;
 
 /// Verifies invalid UTF-8 Debug output omits bytes while retaining typed
 /// access.
@@ -54,7 +59,7 @@ fn test_read_text_debug_stays_bounded_for_large_invalid_input() {
     let mut bytes = vec![b'x'; 1024 * 1024];
     bytes[0] = 0xff;
     std::fs::write(&path, &bytes).expect("fixture should be written");
-    let filesystem = qubit_local_files::LocalFileSystem::host().expect("host filesystem should initialize");
+    let filesystem = LocalFileSystem::host().expect("host filesystem should initialize");
     let error = filesystem
         .read_text(&path)
         .expect_err("invalid bytes should be rejected");
@@ -78,8 +83,7 @@ fn test_other_local_file_error_sources_keep_debug_shape_and_source() {
     assert!(format!("{io_source:?}").starts_with("Io("));
     assert!(Error::source(&io_source).is_some());
 
-    let codec_source =
-        LocalFileErrorSource::PathCodec(qubit_local_files::error::LocalPathCodecError::InvalidEscape { offset: 3 });
+    let codec_source = LocalFileErrorSource::PathCodec(LocalPathCodecError::InvalidEscape { offset: 3 });
     assert!(format!("{codec_source:?}").starts_with("PathCodec("));
     assert!(Error::source(&codec_source).is_some());
 
@@ -300,11 +304,8 @@ fn test_local_file_error_exposes_optional_context_without_source() {
 fn require_standard_error<E: Error + 'static>() {}
 
 fn seal_failure_propagates_as_standard_error() -> Result<(), Box<dyn Error>> {
-    use qubit_local_files::options::LocalSealOptions;
-    use qubit_local_files::options::LocalTempFileOptions;
-
     let parent = tempfile::tempdir()?;
-    let mut temporary = qubit_local_files::LocalFileSystem::host()?
+    let mut temporary = LocalFileSystem::host()?
         .create_temp_file_with_options(&LocalTempFileOptions::new().with_parent(parent.path()))?;
     temporary.close();
     let _sealed = temporary.seal_with_options(&LocalSealOptions::new())?;
@@ -313,13 +314,9 @@ fn seal_failure_propagates_as_standard_error() -> Result<(), Box<dyn Error>> {
 
 #[test]
 fn test_recovery_error_seal_implements_standard_error() {
-    use qubit_local_files::LocalTempSealError;
-    use qubit_local_files::options::LocalSealOptions;
-    use qubit_local_files::options::LocalTempFileOptions;
-
     require_standard_error::<LocalTempSealError>();
     let parent = tempfile::tempdir().expect("temporary parent should be created");
-    let mut temporary = qubit_local_files::LocalFileSystem::host()
+    let mut temporary = LocalFileSystem::host()
         .expect("Host filesystem should open")
         .create_temp_file_with_options(&LocalTempFileOptions::new().with_parent(parent.path()))
         .expect("temporary file should be created");

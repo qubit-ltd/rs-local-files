@@ -49,11 +49,12 @@ use crate::local::DirectoryIdentity;
 /// ```no_run
 /// use std::path::Path;
 ///
+/// use qubit_local_files::LocalDirectoryWalker;
 /// use qubit_local_files::LocalFileSystem;
 ///
 /// # fn main() -> qubit_local_files::LocalResult<()> {
 /// let filesystem = LocalFileSystem::host()?;
-/// let walker = filesystem.list(Path::new("."))?;
+/// let walker: LocalDirectoryWalker = filesystem.list(Path::new("."))?;
 /// for entry in walker {
 ///     let entry = entry?;
 ///     println!("{}", entry.path().display());
@@ -91,6 +92,20 @@ pub struct LocalDirectoryWalker {
 }
 
 impl std::fmt::Debug for LocalDirectoryWalker {
+    /// Formats traversal scope and active state without exposing filesystem
+    /// paths.
+    ///
+    /// # Parameters
+    ///
+    /// - `formatter`: Destination receiving the redacted debug representation.
+    ///
+    /// # Returns
+    ///
+    /// A formatting result from the supplied formatter.
+    ///
+    /// # Errors
+    ///
+    /// Returns the formatter's error if writing the debug representation fails.
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let active_frames = self
             .rooted
@@ -107,12 +122,30 @@ impl std::fmt::Debug for LocalDirectoryWalker {
 }
 
 impl LocalDirectoryWalker {
-    /// Opens a Host walker with separate backend and diagnostic roots.
+    /// Opens a host walker with separate backend and diagnostic roots.
     ///
     /// Validates options, inspects the root without following its final link,
     /// and eagerly opens its reader. Returns `InvalidOptions`, `TypeConflict`,
     /// or a native inspection/open/identity error. Descendant work is lazy;
     /// acquired handles and permits are released on construction failure.
+    ///
+    /// # Parameters
+    ///
+    /// - `backend_root`: Native directory used for filesystem operations.
+    /// - `diagnostic_root`: Namespace path attached to returned errors.
+    /// - `options`: Traversal and resource limits.
+    /// - `symlink_policy`: Policy for descendant symbolic links.
+    /// - `started_at`: Creation timestamp used to calculate the deadline.
+    ///
+    /// # Returns
+    ///
+    /// A lazy walker rooted at `backend_root`, with errors reported against
+    /// `diagnostic_root`.
+    ///
+    /// # Errors
+    ///
+    /// Returns `LocalFileError` for invalid options, a non-directory root, or
+    /// native root inspection, identity, or reader-open failures.
     pub(crate) fn open_with_diagnostic(
         backend_root: PathBuf,
         diagnostic_root: PathBuf,
@@ -232,6 +265,27 @@ impl LocalDirectoryWalker {
     /// `output_parent` is relative to `namespace_root`; `path` is relative to
     /// the retained authority. Uses [`Self::open_rooted`]'s validation and
     /// error contract while retaining these separate path coordinates.
+    ///
+    /// # Parameters
+    ///
+    /// - `root`: Opened descriptor or handle authority.
+    /// - `path`: Optional path relative to the authority.
+    /// - `output_parent`: Output path relative to `namespace_root`.
+    /// - `namespace_root`: Public namespace-absolute listing root.
+    /// - `options`: Traversal policy fixed for the walker lifetime.
+    /// - `symlink_policy`: Policy applied when resolving followed descendants.
+    /// - `started_at`: Creation timestamp used to calculate the deadline.
+    ///
+    /// # Returns
+    ///
+    /// A lazy walker that emits paths relative to `namespace_root` while
+    /// retaining `root` as the authority for filesystem operations.
+    ///
+    /// # Errors
+    ///
+    /// Returns `LocalFileError` for invalid options or failed starting-entry
+    /// metadata inspection. Rooted directory opening and enumeration errors
+    /// are yielded by the iterator.
     pub(crate) fn open_rooted_with_output(
         root: Arc<crate::rooted::Root>,
         path: Option<crate::local::LocalRelativePath>,
@@ -306,6 +360,10 @@ impl LocalDirectoryWalker {
     }
 
     /// Returns the bound traversal root.
+    ///
+    /// # Returns
+    ///
+    /// The namespace-absolute root path used for yielded entries.
     #[must_use]
     #[inline]
     pub fn root(&self) -> &Path {
@@ -313,7 +371,17 @@ impl LocalDirectoryWalker {
     }
 
     /// Binds the filesystem PWD snapshot used by yielded errors.
+    ///
+    /// # Parameters
+    ///
+    /// - `current_directory`: Optional PWD snapshot attached to iteration
+    ///   errors.
+    ///
+    /// # Returns
+    ///
+    /// The walker with the supplied diagnostic context.
     #[must_use]
+    #[inline]
     pub(crate) fn bind_current_directory(mut self, current_directory: Option<PathBuf>) -> Self {
         self.current_directory = current_directory;
         self
@@ -328,6 +396,7 @@ impl LocalDirectoryWalker {
     /// # Returns
     ///
     /// `true` when recursion and the configured depth limit permit descent.
+    #[must_use]
     #[inline]
     fn may_descend(&self, entry_depth: usize) -> bool {
         self.options.recursive() && self.options.max_depth().is_none_or(|max_depth| entry_depth < max_depth)
@@ -522,6 +591,15 @@ impl LocalDirectoryWalker {
     }
 
     /// Applies the configured error policy to a failed host frame reopen.
+    ///
+    /// # Parameters
+    ///
+    /// - `error`: Error produced while reopening the current frame.
+    ///
+    /// # Errors
+    ///
+    /// Returns the supplied error after applying the configured termination
+    /// or frame-removal behavior.
     fn handle_reopen_error(&mut self, error: LocalFileError) -> LocalResult<()> {
         if self.options.error_policy() == LocalWalkErrorPolicy::FailFast {
             self.terminated = true;
@@ -535,13 +613,34 @@ impl LocalDirectoryWalker {
     }
 }
 
-/// Returns whether traversal needs per-directory names for budget admission
-/// or duplicate suppression after reopening a directory reader.
+/// Reports whether the test-only inner deadline fault is active.
+///
+/// # Parameters
+///
+/// - `deadline`: Optional deadline under evaluation.
+/// - `now`: Deterministic current instant used for comparison.
+///
+/// # Returns
+///
+/// `true` when the deadline has expired and the test fault is enabled.
 #[cfg(feature = "test-support")]
+#[must_use]
 fn inner_deadline_fault_is_active(deadline: Option<Instant>, now: Instant) -> bool {
     deadline.is_some_and(|deadline| now >= deadline) && crate::local::test_support_enabled("walker-deadline-inner")
 }
 
+/// Determines whether traversal must retain names for budget or reopen logic.
+///
+/// # Parameters
+///
+/// - `options`: Fixed traversal policy to inspect.
+///
+/// # Returns
+///
+/// `true` when name retention is required for budget admission or to suppress
+/// duplicates after reopening a reader.
+#[must_use]
+#[inline]
 fn needs_seen_names(options: &LocalListOptions) -> bool {
     let explicit_name_budget = options.max_seen_name_bytes().is_some();
     let can_descend = options.recursive() && options.max_depth().is_none_or(|max_depth| max_depth > 1);
@@ -552,10 +651,225 @@ fn needs_seen_names(options: &LocalListOptions) -> bool {
 }
 
 impl LocalDirectoryWalker {
+    /// Advances the current host reader to its next unseen entry.
+    ///
+    /// Reopens a retained frame when needed, checks the deadline around each
+    /// reader advance, and preserves test-only sibling and error injection.
+    /// A deadline expiration terminates the walker; reader failures are
+    /// returned for `next_entry` to apply the configured error policy.
+    ///
+    /// # Parameters
+    ///
+    /// - `relative_parent`: Root-relative directory path used to reopen the
+    ///   reader and attach failures.
+    ///
+    /// # Returns
+    ///
+    /// The next unseen entry, or `None` when the reader is exhausted.
+    ///
+    /// # Errors
+    ///
+    /// Returns the path-specific listing error from a failed reopen, deadline,
+    /// or reader advance.
+    fn next_host_reader_entry(&mut self, relative_parent: &Path) -> LocalResult<Option<fs::DirEntry>> {
+        let frame = self
+            .stack
+            .last()
+            .expect("host walker stack was checked before reader advancement");
+        let needs_reopen = frame.entries.is_none();
+        if needs_reopen && let Err(error) = self.reopen_host_frame(relative_parent) {
+            return Err(error);
+        }
+        let frame = self
+            .stack
+            .last_mut()
+            .expect("host walker frame remains present after reader reopening");
+        let next_entry = loop {
+            if matches!(self.deadline, Some(deadline) if Instant::now() >= deadline) {
+                self.terminated = true;
+                return Err(walk_io_error(
+                    &self.root,
+                    std::io::Error::new(std::io::ErrorKind::TimedOut, "local listing deadline exceeded"),
+                ));
+            }
+            #[cfg(feature = "test-support")]
+            if inner_deadline_fault_is_active(self.deadline, Instant::now()) {
+                return Err(walk_io_error(
+                    &self.root,
+                    std::io::Error::other("test instrumentation observed an unchecked deadline"),
+                ));
+            }
+            #[cfg(feature = "test-support")]
+            let (next, scripted_sibling) = if let Some(entry) = frame.scripted_sibling.take() {
+                (Some(Ok(entry)), true)
+            } else {
+                (
+                    frame
+                        .entries
+                        .as_mut()
+                        .expect("host walker reader was initialized")
+                        .next(),
+                    false,
+                )
+            };
+            #[cfg(not(feature = "test-support"))]
+            let next = frame
+                .entries
+                .as_mut()
+                .expect("host walker reader was initialized")
+                .next();
+            match next {
+                Some(Ok(entry)) => {
+                    #[cfg(feature = "test-support")]
+                    if !scripted_sibling
+                        && relative_parent.as_os_str().is_empty()
+                        && crate::local::test_support_enabled("walker-enter-open-host")
+                        && entry.file_name() == std::ffi::OsStr::new("sibling")
+                    {
+                        frame.scripted_sibling = Some(entry);
+                        continue;
+                    }
+                    let name = entry.file_name();
+                    #[cfg(feature = "test-support")]
+                    let force_duplicate_deadline = crate::local::take_test_support("walker-deadline-inner");
+                    #[cfg(not(feature = "test-support"))]
+                    let force_duplicate_deadline = false;
+                    if force_duplicate_deadline {
+                        if let Some(seen) = frame.seen.as_mut() {
+                            seen.insert(name.clone());
+                        }
+                        self.deadline = Some(Instant::now());
+                    }
+                    if frame.seen.as_mut().is_none_or(|seen| seen.insert(name)) {
+                        break Some(Ok(entry));
+                    }
+                }
+                other => break other,
+            }
+        };
+        #[cfg(feature = "test-support")]
+        let next_entry = if crate::local::take_test_support("walker-entry") {
+            Some(Err(std::io::Error::other("injected walker directory entry failure")))
+        } else {
+            next_entry
+        };
+        match next_entry {
+            Some(Ok(entry)) => Ok(Some(entry)),
+            Some(Err(error)) => {
+                if self.options.error_policy() == LocalWalkErrorPolicy::FailFast {
+                    self.terminated = true;
+                }
+                Err(walk_io_error(&self.root.join(relative_parent), error))
+            }
+            None => Ok(None),
+        }
+    }
+
+    /// Consumes the cumulative entry and native-name budgets for one entry.
+    ///
+    /// Budget failures terminate host traversal before metadata is inspected,
+    /// matching the iterator's admission order.
+    ///
+    /// # Parameters
+    ///
+    /// - `entry`: Entry whose name and yield count are charged.
+    /// - `relative_parent`: Parent path used for resource-limit diagnostics.
+    ///
+    /// # Errors
+    ///
+    /// Returns the configured resource-limit error and terminates the walker
+    /// when either cumulative budget is exhausted.
+    fn consume_host_entry_budgets(&mut self, entry: &fs::DirEntry, relative_parent: &Path) -> LocalResult<()> {
+        if let Some(budget) = self.entry_budget.as_mut()
+            && let Err(error) = budget.try_consume(1)
+        {
+            self.terminated = true;
+            return Err(directory_limit_error(&self.root.join(relative_parent), error));
+        }
+        if let Some(budget) = self.seen_name_budget.as_mut()
+            && let Err(error) = budget.try_consume(name_bytes(&entry.file_name()))
+        {
+            self.terminated = true;
+            return Err(directory_limit_error(&self.root.join(relative_parent), error));
+        }
+        Ok(())
+    }
+
+    /// Resolves one host entry's metadata, optional descent, and output paths.
+    ///
+    /// Metadata and descent failures retain their existing fail-fast behavior;
+    /// successful descent is recorded before the entry is returned.
+    ///
+    /// # Parameters
+    ///
+    /// - `entry`: Native directory entry selected by the current reader.
+    /// - `relative_parent`: Root-relative directory containing the entry.
+    /// - `entry_depth`: Depth at which the entry is yielded.
+    ///
+    /// # Returns
+    ///
+    /// The structured entry with namespace and backend paths.
+    ///
+    /// # Errors
+    ///
+    /// Returns a path-specific metadata, symlink-resolution, identity, or
+    /// directory-open error.
+    fn build_host_entry(
+        &mut self,
+        entry: fs::DirEntry,
+        relative_parent: &Path,
+        entry_depth: usize,
+    ) -> LocalResult<LocalDirectoryEntry> {
+        let path = entry.path();
+        let relative = relative_parent.join(entry.file_name());
+        let entry_metadata = match fs::symlink_metadata(&path) {
+            Ok(metadata) => metadata,
+            Err(error) => {
+                if self.options.error_policy() == LocalWalkErrorPolicy::FailFast {
+                    self.terminated = true;
+                }
+                return Err(walk_io_error(&path, error));
+            }
+        };
+        let may_descend = self.may_descend(entry_depth);
+        let descent_metadata =
+            if entry_metadata.file_type().is_symlink() && may_descend && self.symlink_policy.follows() {
+                match fs::metadata(&path) {
+                    Ok(metadata) => metadata,
+                    Err(error) => {
+                        if self.options.error_policy() == LocalWalkErrorPolicy::FailFast {
+                            self.terminated = true;
+                        }
+                        return Err(walk_io_error(&path, error));
+                    }
+                }
+            } else {
+                entry_metadata.clone()
+            };
+        let is_directory = descent_metadata.file_type().is_dir();
+        let metadata = LocalFileMetadata::from_native(&entry_metadata);
+
+        if is_directory
+            && may_descend
+            && let Err(error) = self.descend(&path, &descent_metadata, relative.clone(), entry_depth)
+        {
+            if self.options.error_policy() == LocalWalkErrorPolicy::FailFast {
+                self.terminated = true;
+            }
+            return Err(error);
+        }
+        let namespace_path = self.root.join(&relative);
+        Ok(LocalDirectoryEntry::new(namespace_path, relative, Some(path), metadata))
+    }
+
     /// Produces the next entry or error, opening or reopening readers as
     /// needed. Returns `None` after exhaustion or termination. Applies
     /// traversal, symlink, resource-budget, and deadline policies while
     /// advancing frames.
+    ///
+    /// # Returns
+    ///
+    /// The next entry or error, or `None` after exhaustion or termination.
     fn next_entry(&mut self) -> Option<LocalResult<LocalDirectoryEntry>> {
         if self.terminated {
             return None;
@@ -596,90 +910,10 @@ impl LocalDirectoryWalker {
             let frame = self.stack.last()?;
             let entry_depth = frame.entry_depth;
             let relative_parent = frame.relative.clone();
-            let needs_reopen = frame.entries.is_none();
-            if needs_reopen && let Err(error) = self.reopen_host_frame(&relative_parent) {
-                return Some(Err(error));
-            }
-            let frame = self.stack.last_mut()?;
-            let next_entry = loop {
-                if matches!(self.deadline, Some(deadline) if Instant::now() >= deadline) {
-                    self.terminated = true;
-                    return Some(Err(walk_io_error(
-                        &self.root,
-                        std::io::Error::new(std::io::ErrorKind::TimedOut, "local listing deadline exceeded"),
-                    )));
-                }
-                #[cfg(feature = "test-support")]
-                if inner_deadline_fault_is_active(self.deadline, Instant::now()) {
-                    return Some(Err(walk_io_error(
-                        &self.root,
-                        std::io::Error::other("test instrumentation observed an unchecked deadline"),
-                    )));
-                }
-                #[cfg(feature = "test-support")]
-                let (next, scripted_sibling) = if let Some(entry) = frame.scripted_sibling.take() {
-                    (Some(Ok(entry)), true)
-                } else {
-                    (
-                        frame
-                            .entries
-                            .as_mut()
-                            .expect("host walker reader was initialized")
-                            .next(),
-                        false,
-                    )
-                };
-                #[cfg(not(feature = "test-support"))]
-                let next = frame
-                    .entries
-                    .as_mut()
-                    .expect("host walker reader was initialized")
-                    .next();
-                match next {
-                    Some(Ok(entry)) => {
-                        #[cfg(feature = "test-support")]
-                        if !scripted_sibling
-                            && relative_parent.as_os_str().is_empty()
-                            && crate::local::test_support_enabled("walker-enter-open-host")
-                            && entry.file_name() == std::ffi::OsStr::new("sibling")
-                        {
-                            frame.scripted_sibling = Some(entry);
-                            continue;
-                        }
-                        let name = entry.file_name();
-                        #[cfg(feature = "test-support")]
-                        let force_duplicate_deadline = crate::local::take_test_support("walker-deadline-inner");
-                        #[cfg(not(feature = "test-support"))]
-                        let force_duplicate_deadline = false;
-                        if force_duplicate_deadline {
-                            if let Some(seen) = frame.seen.as_mut() {
-                                seen.insert(name.clone());
-                            }
-                            self.deadline = Some(Instant::now());
-                        }
-                        if frame.seen.as_mut().is_none_or(|seen| seen.insert(name)) {
-                            break Some(Ok(entry));
-                        }
-                        continue;
-                    }
-                    other => break other,
-                }
-            };
-            #[cfg(feature = "test-support")]
-            let next_entry = if crate::local::take_test_support("walker-entry") {
-                Some(Err(std::io::Error::other("injected walker directory entry failure")))
-            } else {
-                next_entry
-            };
-            let entry = match next_entry {
-                Some(Ok(entry)) => entry,
-                Some(Err(error)) => {
-                    if self.options.error_policy() == LocalWalkErrorPolicy::FailFast {
-                        self.terminated = true;
-                    }
-                    return Some(Err(walk_io_error(&self.root.join(&relative_parent), error)));
-                }
-                None => {
+            let entry = match self.next_host_reader_entry(&relative_parent) {
+                Ok(Some(entry)) => entry,
+                Err(error) => return Some(Err(error)),
+                Ok(None) => {
                     let completed = self.pop_host_frame().expect("stack is non-empty");
                     if let Some(identity) = completed.identity {
                         self.followed_directories.remove(&identity);
@@ -694,63 +928,10 @@ impl LocalDirectoryWalker {
             {
                 continue;
             }
-            if let Some(budget) = self.entry_budget.as_mut()
-                && let Err(error) = budget.try_consume(1)
-            {
-                self.terminated = true;
-                return Some(Err(directory_limit_error(&self.root.join(&relative_parent), error)));
-            }
-            if let Some(budget) = self.seen_name_budget.as_mut()
-                && let Err(error) = budget.try_consume(name_bytes(&entry.file_name()))
-            {
-                self.terminated = true;
-                return Some(Err(directory_limit_error(&self.root.join(&relative_parent), error)));
-            }
-            let path = entry.path();
-            let relative = relative_parent.join(entry.file_name());
-            let entry_metadata = match fs::symlink_metadata(&path) {
-                Ok(metadata) => metadata,
-                Err(error) => {
-                    if self.options.error_policy() == LocalWalkErrorPolicy::FailFast {
-                        self.terminated = true;
-                    }
-                    return Some(Err(walk_io_error(&path, error)));
-                }
-            };
-            let may_descend = self.may_descend(entry_depth);
-            let descent_metadata =
-                if entry_metadata.file_type().is_symlink() && may_descend && self.symlink_policy.follows() {
-                    match fs::metadata(&path) {
-                        Ok(metadata) => metadata,
-                        Err(error) => {
-                            if self.options.error_policy() == LocalWalkErrorPolicy::FailFast {
-                                self.terminated = true;
-                            }
-                            return Some(Err(walk_io_error(&path, error)));
-                        }
-                    }
-                } else {
-                    entry_metadata.clone()
-                };
-            let is_directory = descent_metadata.file_type().is_dir();
-            let metadata = LocalFileMetadata::from_native(&entry_metadata);
-
-            if is_directory
-                && may_descend
-                && let Err(error) = self.descend(&path, &descent_metadata, relative.clone(), entry_depth)
-            {
-                if self.options.error_policy() == LocalWalkErrorPolicy::FailFast {
-                    self.terminated = true;
-                }
+            if let Err(error) = self.consume_host_entry_budgets(&entry, &relative_parent) {
                 return Some(Err(error));
             }
-            let namespace_path = self.root.join(&relative);
-            return Some(Ok(LocalDirectoryEntry::new(
-                namespace_path,
-                relative,
-                Some(path),
-                metadata,
-            )));
+            return Some(self.build_host_entry(entry, &relative_parent, entry_depth));
         }
     }
 }
@@ -760,6 +941,11 @@ impl Iterator for LocalDirectoryWalker {
     type Item = LocalResult<LocalDirectoryEntry>;
 
     /// Advances the traversal while preserving its creation-time PWD context.
+    ///
+    /// # Returns
+    ///
+    /// `Some(Ok(entry))` for an entry, `Some(Err(error))` for a traversal
+    /// failure, or `None` after exhaustion or termination.
     fn next(&mut self) -> Option<Self::Item> {
         let current_directory = self.current_directory.clone();
         self.next_entry().map(|result| {

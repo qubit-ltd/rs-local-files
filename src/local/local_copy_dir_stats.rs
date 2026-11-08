@@ -98,6 +98,9 @@ impl LocalCopyDirStats {
     }
 
     /// Returns the number of destination entries overwritten.
+    ///
+    /// # Returns
+    /// Number of existing destination entries replaced.
     #[must_use]
     #[inline]
     pub const fn overwritten(&self) -> u64 {
@@ -105,6 +108,9 @@ impl LocalCopyDirStats {
     }
 
     /// Reports whether every completed file publication was atomic.
+    ///
+    /// # Returns
+    /// `true` when no publication required removing an existing directory.
     #[must_use]
     #[inline]
     pub const fn atomic_publication(&self) -> bool {
@@ -112,6 +118,9 @@ impl LocalCopyDirStats {
     }
 
     /// Reports whether every copied file was synchronized before publication.
+    ///
+    /// # Returns
+    /// `true` when every copied regular file was synchronized.
     #[must_use]
     #[inline]
     pub const fn files_durable(&self) -> bool {
@@ -119,6 +128,11 @@ impl LocalCopyDirStats {
     }
 
     /// Reports a successful copy that skipped every entry without publishing.
+    ///
+    /// # Returns
+    /// `true` when at least one entry was skipped and no content or metadata
+    /// change was published.
+    #[must_use]
     #[inline]
     pub(crate) const fn was_fully_skipped(&self) -> bool {
         self.skipped > 0

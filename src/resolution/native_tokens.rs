@@ -6,9 +6,15 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 
+mod native_token;
+
 use std::ffi::OsString;
 use std::path::Path;
 
+pub(crate) use native_token::NativeToken;
+
+#[cfg(any(windows, test))]
+use super::internal::unc_segment::UncSegment;
 use super::session::ResolutionSession;
 use crate::LocalResult;
 use crate::directory::LocalResolutionOrigin;
@@ -16,17 +22,26 @@ use crate::error::LocalFileError;
 use crate::error::LocalFileOperation;
 use crate::error::LocalResourceKind;
 
-/// A lexical resolution step retaining dot and parent components.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) enum NativeToken {
-    Normal(OsString, LocalResolutionOrigin),
-    Current(LocalResolutionOrigin),
-    Parent(LocalResolutionOrigin),
-    RequireDirectory,
-}
-
 /// Measures in constant space, checks the session budget, then builds native
 /// tokens.
+///
+/// # Parameters
+///
+/// * `path` is the native path to tokenize; its lexical components are
+///   preserved, including explicit dot and parent components.
+/// * `origin` is attached to every emitted component token.
+/// * `session` enforces pending component and native-byte limits before token
+///   allocation.
+///
+/// # Returns
+///
+/// Returns the ordered tokens, including a directory requirement when the
+/// input ends in a separator.
+///
+/// # Errors
+///
+/// Returns a resource-limit or allocation error if measuring, budget checking,
+/// capacity calculation, or token allocation fails.
 pub(crate) fn tokenize(
     path: &Path,
     origin: LocalResolutionOrigin,
@@ -41,10 +56,41 @@ pub(crate) fn tokenize(
     tokens_after_check(path, origin, capacity)
 }
 
+/// Computes the reservation capacity including an optional directory marker.
+///
+/// # Parameters
+///
+/// * `components` is the measured number of lexical components.
+/// * `trailing_directory_marker` indicates whether one marker token is needed.
+///
+/// # Returns
+///
+/// Returns the required capacity, or `None` if adding the marker overflows.
+#[inline]
 fn token_capacity(components: usize, trailing_directory_marker: bool) -> Option<usize> {
     components.checked_add(usize::from(trailing_directory_marker))
 }
 
+/// Allocates and constructs tokens after the caller has charged the session.
+///
+/// The caller-provided capacity is reserved before walking the path so
+/// allocation failure is reported through the filesystem error type.
+///
+/// # Parameters
+///
+/// * `path` is the path whose lexical components are converted.
+/// * `origin` is retained on each component token.
+/// * `capacity` is the checked reservation size computed by `token_capacity`.
+///
+/// # Returns
+///
+/// Returns the allocated token sequence, preserving a trailing directory
+/// marker when present.
+///
+/// # Errors
+///
+/// Returns an I/O-shaped allocation error if reserving the token vector or a
+/// native component buffer fails.
 fn tokens_after_check(path: &Path, origin: LocalResolutionOrigin, capacity: usize) -> LocalResult<Vec<NativeToken>> {
     let mut tokens = Vec::new();
     tokens.try_reserve_exact(capacity).map_err(allocation_error)?;
@@ -124,6 +170,20 @@ fn tokens_after_check(path: &Path, origin: LocalResolutionOrigin, capacity: usiz
     Ok(tokens)
 }
 
+/// Reports whether the native path ends in a platform separator.
+///
+/// The check uses native path units on Unix and Windows, preserving non-UTF-8
+/// and non-BMP names without lossy conversion.
+///
+/// # Parameters
+///
+/// * `path` is the native path to inspect.
+///
+/// # Returns
+///
+/// Returns `true` only when the final native unit is a platform separator.
+#[must_use]
+#[inline]
 fn has_trailing_separator(path: &Path) -> bool {
     #[cfg(unix)]
     {
@@ -143,6 +203,16 @@ fn has_trailing_separator(path: &Path) -> bool {
 
 /// Computes the complete pending component and byte snapshot without
 /// allocating.
+///
+/// # Parameters
+///
+/// * `path` is measured using native encoding units; separators do not count as
+///   components.
+///
+/// # Returns
+///
+/// Returns component and byte counts, or `None` if the path cannot be
+/// represented by the platform measurement or a count overflows.
 pub(crate) fn measure_path(path: &Path) -> Option<(usize, usize)> {
     #[cfg(unix)]
     {
@@ -188,12 +258,42 @@ pub(crate) fn measure_path(path: &Path) -> Option<(usize, usize)> {
     }
 }
 
+/// Counts the Windows prefix units omitted from descendant tokenization.
+///
+/// Server and share names form the UNC anchor; extended UNC markers and the
+/// anchor are also excluded from the pending descendant budget.
+///
+/// # Parameters
+///
+/// * `path` is the native Windows path being tokenized.
+///
+/// # Returns
+///
+/// Returns the number of encoded units to skip, or `None` if prefix measurement
+/// overflows or the UNC anchor is incomplete.
 #[cfg(windows)]
 fn windows_prefix_units(path: &Path) -> Option<usize> {
     use std::os::windows::ffi::OsStrExt;
     prefix_units_from_wide(path.as_os_str().encode_wide())
 }
 
+/// Counts drive, root, and UNC anchor units from an encoded Windows path.
+///
+/// Returns `None` if counting the prefix overflows or a required UNC segment
+/// is absent.
+///
+/// # Type Parameters
+///
+/// * `I` is an iterator over encoded UTF-16 code units.
+///
+/// # Parameters
+///
+/// * `units` supplies the encoded path in native order.
+///
+/// # Returns
+///
+/// Returns the number of prefix units to skip, or `None` for overflow or an
+/// incomplete UNC anchor.
 #[cfg(any(windows, test))]
 fn prefix_units_from_wide<I>(mut units: I) -> Option<usize>
 where
@@ -233,17 +333,38 @@ where
     Some(0)
 }
 
+/// Identifies slash and backslash as Windows path separators.
+///
+/// # Parameters
+///
+/// * `unit` is one UTF-16 code unit from the path.
+///
+/// # Returns
+///
+/// Returns `true` for either Windows path separator.
+#[must_use]
+#[inline]
 #[cfg(any(windows, test))]
 const fn is_separator(unit: u16) -> bool {
     unit == b'/' as u16 || unit == b'\\' as u16
 }
 
-#[cfg(any(windows, test))]
-struct UncSegment {
-    is_extended_marker: bool,
-    is_unc_marker: bool,
-}
-
+/// Consumes one UNC segment and following separators while updating the prefix
+/// length. The returned flags identify the extended-path markers.
+///
+/// # Type Parameters
+///
+/// * `I` is an iterator over UTF-16 code units.
+///
+/// # Parameters
+///
+/// * `units` supplies the unconsumed path suffix.
+/// * `skipped` accumulates the number of consumed prefix units.
+///
+/// # Returns
+///
+/// Returns marker flags for the consumed segment, or `None` if the prefix
+/// length overflows.
 #[cfg(any(windows, test))]
 fn consume_unc_segment<I>(units: &mut std::iter::Peekable<I>, skipped: &mut usize) -> Option<UncSegment>
 where
@@ -272,10 +393,38 @@ where
     })
 }
 
+/// Adds a path measurement quantity, returning `None` on integer overflow.
+///
+/// # Parameters
+///
+/// * `current` is the accumulated count.
+/// * `added` is the next quantity to include.
+///
+/// # Returns
+///
+/// Returns the sum when it fits in `usize`.
+#[inline]
 fn checked_sum(current: usize, added: usize) -> Option<usize> {
     current.checked_add(added)
 }
 
+/// Measures Windows descendant path units using UTF-16 code units.
+///
+/// Each component charges its encoded bytes plus a separator budget. Prefix
+/// anchors are excluded before measurement.
+///
+/// # Type Parameters
+///
+/// * `I` is a cloneable iterator over UTF-16 code units.
+///
+/// # Parameters
+///
+/// * `units` is the encoded native path.
+///
+/// # Returns
+///
+/// Returns descendant component and byte counts, or `None` on arithmetic
+/// overflow or an invalid prefix measurement.
 #[cfg(any(windows, test))]
 fn measure_windows_units<I>(units: I) -> Option<(usize, usize)>
 where
@@ -305,6 +454,17 @@ where
     Some((components, bytes))
 }
 
+/// Converts an ASCII lowercase UTF-16 unit to uppercase for UNC marker checks.
+///
+/// # Parameters
+///
+/// * `unit` is the encoded UTF-16 code unit to normalize.
+///
+/// # Returns
+///
+/// Returns its uppercase ASCII equivalent, or the unchanged unit otherwise.
+#[must_use]
+#[inline]
 #[cfg(any(windows, test))]
 fn ascii_upper(unit: u16) -> u16 {
     if (b'a' as u16..=b'z' as u16).contains(&unit) {
@@ -314,6 +474,16 @@ fn ascii_upper(unit: u16) -> u16 {
     }
 }
 
+/// Converts a reservation failure into the operation's structured I/O error.
+///
+/// # Parameters
+///
+/// * `error` is the allocation failure returned by a fallible reservation.
+///
+/// # Returns
+///
+/// Returns a metadata-operation error retaining the allocation failure as its
+/// I/O source.
 fn allocation_error(error: std::collections::TryReserveError) -> LocalFileError {
     LocalFileError::from_io(
         LocalFileOperation::Metadata,
@@ -325,186 +495,49 @@ fn allocation_error(error: std::collections::TryReserveError) -> LocalFileError 
 
 #[cfg(test)]
 mod tests {
-    use std::path::Path;
-
-    use super::NativeToken;
-    use super::measure_path;
     use super::prefix_units_from_wide;
-    use super::tokenize;
-    use crate::directory::LocalResolutionOrigin;
-    use crate::directory::LocalResolutionScope;
-    use crate::options::LocalResolutionLimits;
-    use crate::resolution::ResolutionContract;
-    use crate::resolution::session::ResolutionSession;
-
-    fn session(max_components: usize, max_bytes: usize) -> ResolutionSession {
-        let contract = ResolutionContract::unrestricted().tightened(
-            LocalResolutionLimits::new()
-                .with_max_actual_components(max_components)
-                .with_max_resolved_path_bytes(max_bytes),
-        );
-        ResolutionSession::new(&contract, LocalResolutionScope::Descendant)
-    }
 
     #[test]
-    fn resolution_session_tokenizer_preserves_dot_parent_and_origin() {
-        let tokens = tokenize(
-            Path::new("a/./../b"),
-            LocalResolutionOrigin::SymlinkTarget,
-            &session(4, 64),
-        )
-        .unwrap();
+    fn test_native_measurement_reports_overflow() {
         assert_eq!(
-            tokens,
-            vec![
-                NativeToken::Normal("a".into(), LocalResolutionOrigin::SymlinkTarget),
-                NativeToken::Current(LocalResolutionOrigin::SymlinkTarget),
-                NativeToken::Parent(LocalResolutionOrigin::SymlinkTarget),
-                NativeToken::Normal("b".into(), LocalResolutionOrigin::SymlinkTarget),
-            ]
-        );
-    }
-
-    #[cfg(any(unix, windows))]
-    #[test]
-    fn test_tokenizer_path_budget_matches_native_units() {
-        let path = Path::new("a/./../b");
-        #[cfg(unix)]
-        let expected_bytes = 9;
-        #[cfg(windows)]
-        let expected_bytes = 18;
-        assert_eq!(Some((4, expected_bytes)), measure_path(path));
-        assert!(tokenize(path, LocalResolutionOrigin::SymlinkTarget, &session(4, expected_bytes)).is_ok());
-        let error = tokenize(
-            path,
-            LocalResolutionOrigin::SymlinkTarget,
-            &session(4, expected_bytes - 1),
-        )
-        .unwrap_err();
-        assert_eq!(crate::LocalFileErrorKind::ResourceLimit, error.kind());
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn resolution_session_tokenizer_preserves_non_utf8_names() {
-        use std::os::unix::ffi::OsStrExt;
-        use std::os::unix::ffi::OsStringExt;
-        let value = std::ffi::OsString::from_vec(vec![b'x', b'/', 0xff]);
-        let tokens = tokenize(Path::new(&value), LocalResolutionOrigin::Input, &session(2, 4)).unwrap();
-        assert!(matches!(&tokens[1], NativeToken::Normal(name, _) if name.as_bytes() == [0xff]));
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn resolution_session_tokenizer_checks_exact_limit_before_building_tokens() {
-        assert_eq!(measure_path(Path::new("a/b")), Some((2, 4)));
-        assert_eq!(
-            tokenize(Path::new("a/b"), LocalResolutionOrigin::Input, &session(2, 4))
-                .unwrap()
-                .len(),
-            2
-        );
-        let error = tokenize(Path::new("a/b"), LocalResolutionOrigin::Input, &session(2, 3)).unwrap_err();
-        assert_eq!(
-            error.resource_limit_error().unwrap().resource(),
-            crate::error::LocalResourceKind::PendingResolutionBytes
-        );
-        let error = tokenize(Path::new("a/b"), LocalResolutionOrigin::Input, &session(1, 4)).unwrap_err();
-        assert_eq!(
-            error.resource_limit_error().unwrap().resource(),
-            crate::error::LocalResourceKind::PendingResolutionComponents
-        );
-    }
-
-    #[test]
-    fn resolution_session_native_measurement_reports_overflow() {
-        assert_eq!(super::checked_sum(usize::MAX, 1), None);
-        assert_eq!(super::token_capacity(usize::MAX, true), None);
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn tokenizer_preserves_one_trailing_directory_marker_without_budget_charge() {
-        let origin = LocalResolutionOrigin::Input;
-        let path = Path::new("///a//");
-        assert_eq!(measure_path(path), Some((1, 2)));
-        assert_eq!(
-            tokenize(path, origin, &session(1, 2)).unwrap(),
-            vec![NativeToken::Normal("a".into(), origin), NativeToken::RequireDirectory,]
+            super::checked_sum(usize::MAX, 1),
+            None,
+            "path measurement must reject overflowing additions"
         );
         assert_eq!(
-            tokenize(Path::new("/"), origin, &session(0, 0)).unwrap(),
-            vec![NativeToken::RequireDirectory]
+            super::token_capacity(usize::MAX, true),
+            None,
+            "token capacity must reject a trailing marker overflow"
         );
-        assert_eq!(
-            tokenize(Path::new("a/."), origin, &session(2, 4)).unwrap(),
-            vec![NativeToken::Normal("a".into(), origin), NativeToken::Current(origin)]
-        );
-        use std::os::unix::ffi::OsStrExt;
-        use std::os::unix::ffi::OsStringExt;
-        let non_utf8 = std::ffi::OsString::from_vec(vec![b'x', 0xff, b'/']);
-        assert!(matches!(
-            tokenize(Path::new(&non_utf8), origin, &session(1, 3)).unwrap().as_slice(),
-            [NativeToken::Normal(name, _), NativeToken::RequireDirectory]
-                if name.as_bytes() == [b'x', 0xff]
-        ));
-    }
-
-    #[cfg(windows)]
-    #[test]
-    fn tokenizer_preserves_windows_trailing_directory_separators() {
-        for path in [r"C:\a\", "C:/a/"] {
-            assert!(matches!(
-                tokenize(Path::new(path), LocalResolutionOrigin::Input, &session(1, 4))
-                    .unwrap()
-                    .last(),
-                Some(NativeToken::RequireDirectory)
-            ));
-        }
     }
 
     #[test]
-    fn resolution_session_windows_unc_prefixes_exclude_server_and_share() {
+    fn test_windows_unc_prefix_measurement_excludes_server_and_share() {
         let standard = r"\\server\share\foo";
         let standard_anchor = r"\\server\share\";
         assert_eq!(
             prefix_units_from_wide(standard.encode_utf16()),
-            Some(standard_anchor.encode_utf16().count())
+            Some(standard_anchor.encode_utf16().count()),
+            "the standard UNC anchor must include its server and share"
         );
         assert_eq!(
             super::measure_windows_units(standard.encode_utf16().collect::<Vec<_>>().into_iter()),
-            Some((1, 8))
+            Some((1, 8)),
+            "the standard UNC budget must include only the descendant"
         );
 
         let extended = r"\\?\UNC\server\share\foo";
         let extended_anchor = r"\\?\UNC\server\share\";
         assert_eq!(
             prefix_units_from_wide(extended.encode_utf16()),
-            Some(extended_anchor.encode_utf16().count())
+            Some(extended_anchor.encode_utf16().count()),
+            "the extended UNC anchor must include its server and share"
         );
         assert_eq!(
             super::measure_windows_units(extended.encode_utf16().collect::<Vec<_>>().into_iter()),
-            Some((1, 8))
+            Some((1, 8)),
+            "the extended UNC budget must include only the descendant"
         );
-    }
-
-    #[cfg(windows)]
-    #[test]
-    fn resolution_session_windows_unc_tokenization_only_emits_descendants() {
-        for value in [r"\\server\share\foo", r"\\?\UNC\server\share\foo"] {
-            let path = Path::new(value);
-            assert_eq!(measure_path(path), Some((1, 8)));
-            assert_eq!(
-                tokenize(path, LocalResolutionOrigin::Input, &session(1, 8)).unwrap(),
-                vec![NativeToken::Normal("foo".into(), LocalResolutionOrigin::Input)]
-            );
-        }
-    }
-
-    #[cfg(windows)]
-    #[test]
-    fn resolution_session_windows_non_bmp_pending_bytes_use_utf16_units() {
-        assert_eq!(measure_path(Path::new("a/😀")), Some((2, 10)));
     }
 }
 
@@ -521,14 +554,23 @@ mod allocation_contract_tests {
         let error = super::tokens_after_check(Path::new("child"), LocalResolutionOrigin::Input, usize::MAX)
             .expect_err("an unrepresentable token allocation must return an error");
 
-        assert_eq!(error.operation(), LocalFileOperation::Metadata);
-        assert_eq!(error.io_error_kind(), ErrorKind::OutOfMemory);
+        assert_eq!(
+            error.operation(),
+            LocalFileOperation::Metadata,
+            "allocation failure must retain the metadata operation"
+        );
+        assert_eq!(
+            error.io_error_kind(),
+            ErrorKind::OutOfMemory,
+            "allocation failure must retain its out-of-memory classification"
+        );
         assert!(
             error
                 .io_error()
                 .expect("allocation failure must retain its I/O source")
                 .get_ref()
-                .is_some()
+                .is_some(),
+            "allocation failure must retain the original reservation error"
         );
     }
 }

@@ -382,7 +382,7 @@ mod tests {
     use crate::local::CopyDestinationAction;
 
     #[test]
-    fn unchanged_real_directory_destination_can_be_removed() {
+    fn test_unchanged_real_directory_destination_can_be_removed() {
         let parent = tempfile::tempdir().expect("parent directory should be created");
         let parent_path = std::fs::canonicalize(parent.path()).expect("parent path should canonicalize");
         let absent = parent_path.join("absent");
@@ -415,7 +415,7 @@ mod tests {
     }
 
     #[test]
-    fn existing_file_conflict_for_directory_destination_reports_policy_error() {
+    fn test_existing_file_conflict_for_directory_destination_reports_policy_error() {
         let parent = tempfile::tempdir().expect("parent directory should be created");
         let destination = parent.path().join("destination");
         std::fs::write(&destination, b"preserve existing file").expect("file destination should be created");
@@ -440,7 +440,7 @@ mod tests {
 
     #[cfg(feature = "test-support")]
     #[test]
-    fn partial_directory_removal_reports_indeterminate_effect() {
+    fn test_partial_directory_removal_reports_indeterminate_effect() {
         let parent = tempfile::tempdir().expect("parent directory should be created");
         let destination = parent.path().join("destination");
         std::fs::create_dir(&destination).expect("destination directory");
@@ -464,7 +464,7 @@ mod tests {
 
     #[cfg(feature = "test-support")]
     #[test]
-    fn native_directory_removal_failure_preserves_retry_context() {
+    fn test_native_directory_removal_failure_preserves_retry_context() {
         let parent = tempfile::tempdir().expect("parent directory should be created");
         let destination = parent.path().join("destination");
         std::fs::create_dir(&destination).expect("destination directory");

@@ -16,11 +16,28 @@
 /// # Examples
 ///
 /// ```
-/// use qubit_local_files::observation::LocalWindowsFileDetails;
+/// use std::path::Path;
 ///
-/// fn native_id(details: &LocalWindowsFileDetails) -> (u64, &[u8; 16]) {
-///     (details.volume_serial(), details.file_id())
+/// use qubit_local_files::LocalFileSystem;
+/// use qubit_local_files::options::LocalDirectoryOpenOptions;
+///
+/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+/// let scratch = tempfile::tempdir()?;
+/// std::fs::write(scratch.path().join("payload"), b"data")?;
+/// let filesystem = LocalFileSystem::host()?;
+/// let directory = filesystem.open_directory_with_options(
+///     scratch.path(),
+///     &LocalDirectoryOpenOptions::new(),
+/// )?;
+/// let observation = directory.observe_entry(Path::new("payload"))?;
+/// if let Some(details) = observation
+///     .native_details()
+///     .and_then(|native| native.windows())
+/// {
+///     assert_eq!(details.file_id().len(), 16);
 /// }
+/// # Ok(())
+/// # }
 /// ```
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LocalWindowsFileDetails {
@@ -36,6 +53,20 @@ pub struct LocalWindowsFileDetails {
 
 impl LocalWindowsFileDetails {
     /// Builds details from values returned by the Windows handle query.
+    ///
+    /// # Parameters
+    ///
+    /// - `volume_serial`: serial number of the volume containing the file.
+    /// - `file_id`: complete native 128-bit identifier returned for the file.
+    /// - `last_write_time`: signed native last-write `FILETIME` count in
+    ///   100-nanosecond units.
+    /// - `change_time`: signed native change `FILETIME` count in 100-nanosecond
+    ///   units.
+    ///
+    /// # Returns
+    ///
+    /// Details containing the supplied volume identifier, file identifier,
+    /// and native timestamps.
     #[cfg(any(windows, test))]
     pub(crate) const fn new(volume_serial: u64, file_id: [u8; 16], last_write_time: i64, change_time: i64) -> Self {
         Self {
@@ -47,18 +78,42 @@ impl LocalWindowsFileDetails {
     }
 
     /// Returns the volume serial number.
+    ///
+    /// # Returns
+    ///
+    /// The serial number of the containing volume.
+    #[must_use]
+    #[inline]
     pub const fn volume_serial(&self) -> u64 {
         self.volume_serial
     }
     /// Returns the complete native 128-bit file identifier.
+    ///
+    /// # Returns
+    ///
+    /// A borrow of the full native file identifier.
+    #[must_use]
+    #[inline]
     pub const fn file_id(&self) -> &[u8; 16] {
         &self.file_id
     }
     /// Returns the native last-write timestamp.
+    ///
+    /// # Returns
+    ///
+    /// The signed native `FILETIME` count in 100-nanosecond units.
+    #[must_use]
+    #[inline]
     pub const fn last_write_time(&self) -> i64 {
         self.last_write_time
     }
     /// Returns the native change timestamp.
+    ///
+    /// # Returns
+    ///
+    /// The signed native `FILETIME` count in 100-nanosecond units.
+    #[must_use]
+    #[inline]
     pub const fn change_time(&self) -> i64 {
         self.change_time
     }

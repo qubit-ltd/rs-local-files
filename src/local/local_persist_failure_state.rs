@@ -37,6 +37,13 @@ pub enum LocalPersistFailureState {
 impl LocalPersistFailureState {
     /// Classifies only a completed native rename attempt's publication result.
     /// This classification never grants source ownership.
+    ///
+    /// # Parameters
+    /// - `kind`: Native error kind returned by the rename attempt.
+    ///
+    /// # Returns
+    /// `NotPublished` for known pre-publication failures; `Indeterminate` when
+    /// the error kind does not establish that the target was left unchanged.
     pub(crate) const fn from_native_error(kind: io::ErrorKind) -> Self {
         match kind {
             io::ErrorKind::AlreadyExists

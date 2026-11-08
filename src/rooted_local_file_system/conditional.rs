@@ -18,6 +18,29 @@ use crate::local::conditional::ConditionalWriterBackend;
 use crate::options::LocalWriteOptions;
 
 impl RootedLocalFileSystem {
+    /// Opens a conditional-write backend relative to this rooted authority.
+    ///
+    /// The target must remain beneath the opened root, and symbolic-link
+    /// traversal is rejected. The backend receives the namespace path for
+    /// error reporting and the optional diagnostic path unchanged.
+    ///
+    /// # Parameters
+    ///
+    /// - `relative`: Target path relative to the opened root.
+    /// - `namespace_absolute`: Absolute namespace path used in operation
+    ///   errors.
+    /// - `diagnostic`: Optional path supplied for backend diagnostics.
+    /// - `options`: Conditional-write policy and resource options.
+    ///
+    /// # Returns
+    ///
+    /// A backend bound to a clone of this rooted authority.
+    ///
+    /// # Errors
+    ///
+    /// Returns `LocalFileError` if path resolution, authority cloning, or
+    /// backend opening fails. Errors identify the `OpenWriter` operation and
+    /// the namespace path.
     pub(crate) fn open_conditional_backend(
         &self,
         relative: &Path,

@@ -9,6 +9,12 @@
 
 use std::ffi::OsStr;
 use std::ffi::OsString;
+use std::io::Error;
+use std::path::Component;
+use std::path::Path;
+
+#[cfg(not(test))]
+use getrandom::fill;
 
 use crate::LocalFileError;
 use crate::LocalFileErrorKind;
@@ -45,6 +51,10 @@ pub struct LocalFileNames {
 
 impl LocalFileNames {
     /// Creates the conservative cross-platform filename policy.
+    ///
+    /// # Returns
+    ///
+    /// A policy that accepts only portable UTF-8 filename components.
     #[inline]
     pub const fn portable() -> Self {
         Self {
@@ -54,6 +64,10 @@ impl LocalFileNames {
     }
 
     /// Creates the lossless current-platform filename policy.
+    ///
+    /// # Returns
+    ///
+    /// A policy that accepts components representable by the current platform.
     #[inline]
     pub(crate) const fn native() -> Self {
         Self {
@@ -63,6 +77,13 @@ impl LocalFileNames {
     }
 
     /// Returns the caller-configured component-size budget.
+    ///
+    /// # Returns
+    ///
+    /// `Some(maximum)` when a byte limit is configured, or `None` when the
+    /// policy has no component-size limit.
+    #[must_use]
+    #[inline]
     pub const fn max_component_bytes(&self) -> Option<usize> {
         self.max_component_bytes
     }
@@ -89,6 +110,11 @@ impl LocalFileNames {
     }
 
     /// Removes the caller-configured component-size budget.
+    ///
+    /// # Returns
+    ///
+    /// A copy of this policy without a component-size limit.
+    #[inline]
     pub const fn without_max_component_bytes(mut self) -> Self {
         self.max_component_bytes = None;
         self
@@ -99,6 +125,10 @@ impl LocalFileNames {
     /// # Parameters
     ///
     /// - `name`: Native filename component to validate.
+    ///
+    /// # Returns
+    ///
+    /// `Ok(())` when `name` satisfies this policy.
     ///
     /// # Errors
     ///
@@ -127,6 +157,10 @@ impl LocalFileNames {
 
     /// Generates a cryptographically random filename component.
     ///
+    /// # Returns
+    ///
+    /// A generated filename component with the default prefix.
+    ///
     /// # Errors
     ///
     /// Returns a structured generation error when operating-system randomness
@@ -143,6 +177,10 @@ impl LocalFileNames {
     /// - `prefix`: Optional native prefix.
     /// - `suffix`: Optional native suffix.
     ///
+    /// # Returns
+    ///
+    /// A generated filename component with the requested native affixes.
+    ///
     /// # Errors
     ///
     /// Returns a structured generation error when operating-system randomness
@@ -153,14 +191,9 @@ impl LocalFileNames {
         #[cfg(test)]
         let random_result = crate::tests::native_io_fault_tests::random_fill(&mut random);
         #[cfg(not(test))]
-        let random_result = getrandom::fill(&mut random);
+        let random_result = fill(&mut random);
         random_result.map_err(|source| {
-            LocalFileError::from_io(
-                LocalFileOperation::GenerateName,
-                None,
-                None,
-                std::io::Error::other(source),
-            )
+            LocalFileError::from_io(LocalFileOperation::GenerateName, None, None, Error::other(source))
         })?;
         let random = encode_hex(&random);
         let mut name = prefix.map_or_else(|| OsString::from("qubit-local-files-"), OsStr::to_os_string);
@@ -199,6 +232,10 @@ fn encode_hex(bytes: &[u8]) -> String {
 ///
 /// - `name`: Portable UTF-8 component.
 ///
+/// # Returns
+///
+/// `Ok(())` when `name` is a valid portable component.
+///
 /// # Errors
 ///
 /// Returns an invalid-path error for empty names, dot segments, trailing
@@ -224,6 +261,10 @@ fn validate_portable_component(name: &str) -> LocalResult<()> {
 ///
 /// - `name`: Native component to validate.
 ///
+/// # Returns
+///
+/// `Ok(())` when `name` is exactly one valid native filename component.
+///
 /// # Errors
 ///
 /// Returns an invalid-path error when `name` is empty, is a dot segment,
@@ -233,9 +274,9 @@ fn validate_native_component(name: &OsStr) -> LocalResult<()> {
     if name.is_empty() || contains_native_nul(name) || has_native_separator(name) {
         return Err(invalid_name_error());
     }
-    let path = std::path::Path::new(name);
+    let path = Path::new(name);
     let mut components = path.components();
-    if !matches!(components.next(), Some(std::path::Component::Normal(_))) || components.next().is_some() {
+    if !matches!(components.next(), Some(Component::Normal(_))) || components.next().is_some() {
         return Err(invalid_name_error());
     }
     Ok(())
@@ -259,6 +300,14 @@ fn native_component_bytes(name: &OsStr) -> LocalResult<usize> {
 }
 
 /// Returns the UTF-16 byte size used for a Windows native component limit.
+///
+/// # Parameters
+///
+/// - `name`: Validated native component whose UTF-16 encoding is measured.
+///
+/// # Returns
+///
+/// The UTF-16 byte count of the component.
 #[cfg(windows)]
 fn native_component_bytes(name: &OsStr) -> LocalResult<usize> {
     use std::os::windows::ffi::OsStrExt;
@@ -267,6 +316,15 @@ fn native_component_bytes(name: &OsStr) -> LocalResult<usize> {
 }
 
 /// Rejects native component sizing on unsupported targets.
+///
+/// # Parameters
+///
+/// - `_name`: Native component, unused because this target has no supported
+///   native filename representation.
+///
+/// # Errors
+///
+/// Always returns an unsupported-operation error on this target.
 #[cfg(not(any(unix, windows)))]
 fn native_component_bytes(_name: &OsStr) -> LocalResult<usize> {
     Err(LocalFileError::new(
@@ -276,6 +334,14 @@ fn native_component_bytes(_name: &OsStr) -> LocalResult<usize> {
 }
 
 /// Reports whether a Unix component contains native NUL.
+///
+/// # Parameters
+///
+/// - `name`: Native component to inspect for the zero byte.
+///
+/// # Returns
+///
+/// `true` when the component contains a NUL byte.
 #[cfg(unix)]
 #[must_use]
 fn contains_native_nul(name: &OsStr) -> bool {
@@ -285,6 +351,14 @@ fn contains_native_nul(name: &OsStr) -> bool {
 }
 
 /// Reports whether a Windows component contains native NUL.
+///
+/// # Parameters
+///
+/// - `name`: Native component to inspect as UTF-16 code units.
+///
+/// # Returns
+///
+/// `true` when the component contains a NUL code unit.
 #[cfg(windows)]
 #[must_use]
 fn contains_native_nul(name: &OsStr) -> bool {
@@ -294,6 +368,15 @@ fn contains_native_nul(name: &OsStr) -> bool {
 }
 
 /// Rejects native components on unsupported targets.
+///
+/// # Parameters
+///
+/// - `_name`: Native component, unused because this target has no supported
+///   native filename representation.
+///
+/// # Returns
+///
+/// Always returns `true` because native components are unsupported here.
 #[cfg(not(any(unix, windows)))]
 #[must_use]
 const fn contains_native_nul(_name: &OsStr) -> bool {
@@ -301,6 +384,14 @@ const fn contains_native_nul(_name: &OsStr) -> bool {
 }
 
 /// Reports whether a Unix component contains its native separator.
+///
+/// # Parameters
+///
+/// - `name`: Native component to inspect for the `/` byte.
+///
+/// # Returns
+///
+/// `true` when the component contains the Unix path separator.
 #[cfg(unix)]
 #[must_use]
 fn has_native_separator(name: &OsStr) -> bool {
@@ -310,6 +401,14 @@ fn has_native_separator(name: &OsStr) -> bool {
 }
 
 /// Reports whether a Windows component contains a native separator.
+///
+/// # Parameters
+///
+/// - `name`: Native component to inspect for `/` or `\\` code units.
+///
+/// # Returns
+///
+/// `true` when the component contains a Windows path separator.
 #[cfg(windows)]
 #[must_use]
 fn has_native_separator(name: &OsStr) -> bool {
@@ -320,6 +419,15 @@ fn has_native_separator(name: &OsStr) -> bool {
 }
 
 /// Rejects native components on unsupported targets.
+///
+/// # Parameters
+///
+/// - `_name`: Native component, unused because this target has no supported
+///   native filename representation.
+///
+/// # Returns
+///
+/// Always returns `true` because native components are unsupported here.
 #[cfg(not(any(unix, windows)))]
 #[must_use]
 const fn has_native_separator(_name: &OsStr) -> bool {
@@ -359,6 +467,10 @@ fn is_windows_reserved_file_name(name: &str) -> bool {
 }
 
 /// Creates a structured invalid filename error.
+///
+/// # Returns
+///
+/// An invalid-path error for filename validation.
 #[inline]
 fn invalid_name_error() -> LocalFileError {
     LocalFileError::new(LocalFileErrorKind::InvalidPath, LocalFileOperation::ValidateName)

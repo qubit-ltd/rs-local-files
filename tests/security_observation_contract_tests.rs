@@ -19,7 +19,7 @@ use qubit_local_files::options::LocalObservedReadOptions;
 
 #[cfg(unix)]
 #[test]
-fn reader_security_observation_stays_with_open_file_after_rename() {
+fn test_reader_security_observation_stays_with_open_file_after_rename() {
     let directory = tempfile::tempdir().expect("temporary directory");
     let original = directory.path().join("original");
     let moved = directory.path().join("moved");
@@ -42,7 +42,7 @@ fn reader_security_observation_stays_with_open_file_after_rename() {
 
 #[cfg(unix)]
 #[test]
-fn observed_reader_exposes_native_unix_details_from_its_open_handle() {
+fn test_observed_reader_exposes_native_unix_details_from_its_open_handle() {
     use std::os::unix::fs::MetadataExt;
 
     let directory = tempfile::tempdir().expect("temporary directory");
@@ -69,7 +69,7 @@ fn observed_reader_exposes_native_unix_details_from_its_open_handle() {
 
 #[cfg(unix)]
 #[test]
-fn directory_security_observation_stays_with_retained_authority_after_rename() {
+fn test_directory_security_observation_stays_with_retained_authority_after_rename() {
     use std::os::unix::fs::MetadataExt;
 
     let parent = tempfile::tempdir().expect("temporary directory");
@@ -98,7 +98,7 @@ fn directory_security_observation_stays_with_retained_authority_after_rename() {
 
 #[cfg(unix)]
 #[test]
-fn options_default_to_optional_and_allow_zero_acl_limits() {
+fn test_options_default_to_optional_and_allow_zero_acl_limits() {
     let options = LocalSecurityObservationOptions::new()
         .with_max_acl_entries(0)
         .with_max_acl_bytes(0);
@@ -115,7 +115,7 @@ fn options_default_to_optional_and_allow_zero_acl_limits() {
 
 #[cfg(target_os = "linux")]
 #[test]
-fn required_fields_and_each_individual_requirement_are_reported() {
+fn test_required_fields_and_each_individual_requirement_are_reported() {
     let directory = tempfile::tempdir().expect("temporary directory");
     let path = directory.path().join("file");
     std::fs::write(&path, b"data").expect("create source");
@@ -150,7 +150,7 @@ fn required_fields_and_each_individual_requirement_are_reported() {
 
 #[cfg(all(unix, not(any(target_os = "linux", target_os = "macos"))))]
 #[test]
-fn unimplemented_unix_filesystem_observation_obeys_optional_and_required_requests() {
+fn test_unimplemented_unix_filesystem_observation_obeys_optional_and_required_requests() {
     use qubit_local_files::error::LocalFileErrorKind;
     use qubit_local_files::error::LocalFileOperation;
 

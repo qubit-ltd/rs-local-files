@@ -18,7 +18,12 @@ use super::file_name_validation::validate_portable_generated_component;
 /// Random payload length used by generated file names.
 const RANDOM_NAME_BYTES: usize = 16;
 
-/// Tries to build a random file-name component.
+/// Builds a file-name component from caller fragments and process-local data.
+///
+/// The generated component combines the selected prefix and suffix with the
+/// current Unix timestamp, process ID, and 128 bits of operating-system
+/// randomness. Both fragments and the completed component are validated
+/// before it is returned.
 ///
 /// # Parameters
 /// - `default_prefix`: Prefix used when `prefix` is `None`.
@@ -26,13 +31,14 @@ const RANDOM_NAME_BYTES: usize = 16;
 /// - `suffix`: Optional caller-provided suffix.
 ///
 /// # Returns
-/// A random file-name component.
+/// A validated component containing the selected fragments and generated
+/// uniqueness data.
 ///
 /// # Errors
-/// Returns [`std::io::ErrorKind::InvalidInput`] when a caller-provided
-/// fragment can behave like a path. Returns
-/// [`std::io::ErrorKind::Other`] when operating-system randomness is
-/// unavailable.
+/// Returns [`std::io::ErrorKind::InvalidInput`] when either fragment can
+/// behave like a path or the completed component violates the portable
+/// filename policy. Returns [`std::io::ErrorKind::Other`] when operating-system
+/// randomness is unavailable.
 pub(crate) fn try_random_file_name(default_prefix: &str, prefix: Option<&str>, suffix: Option<&str>) -> Result<String> {
     let prefix = prefix.unwrap_or(default_prefix);
     let suffix = suffix.unwrap_or("");

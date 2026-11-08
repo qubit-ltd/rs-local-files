@@ -34,6 +34,7 @@ pub enum LocalPathLengthUnit {
 
 impl LocalPathLengthUnit {
     /// Returns the native path-observation unit for the current target.
+    #[inline]
     pub(crate) const fn native() -> Self {
         #[cfg(windows)]
         {

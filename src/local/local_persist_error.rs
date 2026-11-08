@@ -37,6 +37,9 @@ use crate::outcome::LocalTempSourceState;
 /// publish failure, temporary handles reject cleanup and their `Drop`
 /// implementation performs no namespace operation.
 ///
+/// # Type Parameters
+/// - `T`: Temporary resource retained after persistence fails.
+///
 /// # Examples
 ///
 /// A no-replace conflict leaves the destination unchanged and returns an owned
@@ -243,6 +246,15 @@ impl<T> LocalPersistError<T> {
     }
 
     /// Attaches the retained resource to an already-captured failure snapshot.
+    ///
+    /// # Type Parameters
+    /// - `U`: Replacement resource type retained by the failure.
+    ///
+    /// # Parameters
+    /// - `resource`: Resource to attach to the captured failure snapshot.
+    ///
+    /// # Returns
+    /// Failure snapshot retaining the replacement resource.
     pub(crate) fn with_resource<U>(self, resource: U) -> LocalPersistError<U> {
         LocalPersistError {
             error: self.error,
@@ -256,6 +268,13 @@ impl<T> LocalPersistError<T> {
     }
 
     /// Attaches the PWD snapshot retained by the temporary resource.
+    ///
+    /// # Parameters
+    /// - `current_directory`: Working-directory snapshot retained by the
+    ///   resource.
+    ///
+    /// # Returns
+    /// This failure with the retained working-directory snapshot attached.
     pub(crate) fn with_current_directory(mut self, current_directory: PathBuf) -> Self {
         self.error = Box::new((*self.error).with_current_directory(current_directory));
         self
@@ -263,6 +282,12 @@ impl<T> LocalPersistError<T> {
 
     /// Reclassifies a constructed persistence failure with a stable public
     /// error kind while retaining its native source details.
+    ///
+    /// # Parameters
+    /// - `kind`: Stable error classification to attach to this failure.
+    ///
+    /// # Returns
+    /// This failure reclassified with `kind`.
     pub(crate) fn with_kind(mut self, kind: LocalFileErrorKind) -> Self {
         self.error = Box::new((*self.error).with_kind(kind));
         self
@@ -271,6 +296,12 @@ impl<T> LocalPersistError<T> {
 
 impl<T> Display for LocalPersistError<T> {
     /// Formats the failure stage, target context, and native error.
+    ///
+    /// # Parameters
+    /// - `formatter`: Destination receiving the formatted failure description.
+    ///
+    /// # Returns
+    /// Formatting result from writing the failure description.
     fn fmt(&self, formatter: &mut Formatter<'_>) -> FmtResult {
         if let Some(resolved_target) = self.resolved_target.as_ref() {
             write!(

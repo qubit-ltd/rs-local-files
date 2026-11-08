@@ -8,13 +8,14 @@
 
 // Rooted support operations.
 
+use std::collections::HashSet;
+use std::collections::VecDeque;
+use std::ffi::OsStr;
+use std::ffi::OsString;
+use std::path::Component;
+#[cfg(windows)]
+use std::path::Prefix;
 use std::time::Instant;
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum RootParentBehavior {
-    RejectEscape,
-    StayAtHostRoot,
-}
 
 use super::LocalFileError;
 use super::LocalFileErrorKind;
@@ -23,11 +24,12 @@ use super::LocalResult;
 use super::LocalSymlinkPolicy;
 use super::Path;
 use super::PathBuf;
+use super::internal::symlink_identity::SymlinkIdentity;
 use super::io;
 use super::resolution_step::ResolutionStep;
+use super::root_parent_behavior::RootParentBehavior;
 use super::rooted_io_error;
 use super::rooted_path;
-use super::symlink_identity::SymlinkIdentity;
 use crate::directory::LocalResolutionOrigin;
 use crate::directory::LocalResolutionScope;
 use crate::resolution::native_tokens;
@@ -38,6 +40,20 @@ use crate::resolution::session::ResolutionSession;
 /// Applies `symlink_policy` to the start path; empty input selects the opened
 /// root. Returns a type conflict for a non-directory, or a path/policy/native
 /// inspection error with listing context.
+///
+/// # Parameters
+///
+/// `root` supplies the rooted authority, `path` selects the start, and
+/// `symlink_policy` controls link traversal. `deadline` bounds inspection.
+///
+/// # Returns
+///
+/// The validated start directory as a root-relative path.
+///
+/// # Errors
+///
+/// Returns listing-context errors when the deadline expires, inspection fails,
+/// or the requested start is not a directory.
 pub(crate) fn validate_rooted_list_start(
     root: &crate::rooted::Root,
     path: &Path,
@@ -105,6 +121,22 @@ pub(crate) fn validate_rooted_list_start(
 /// Resolves rooted path components while preserving final-entry semantics.
 /// Uses [`resolve_rooted_path_allow_root`]'s policy and errors, but rejects an
 /// empty virtual-root result because the caller needs a non-empty descendant.
+///
+/// # Parameters
+///
+/// `root`, `path`, `symlink_policy`, `follow_final`, and `operation` define
+/// the authority, input, traversal policy, final-link behavior, and error
+/// context.
+///
+/// # Returns
+///
+/// The resolved non-empty path relative to `root`.
+///
+/// # Errors
+///
+/// Returns validation, policy, resource-limit, or native inspection errors with
+/// `operation` context.
+#[inline]
 pub(crate) fn resolve_rooted_path(
     root: &crate::rooted::Root,
     path: &Path,
@@ -117,10 +149,19 @@ pub(crate) fn resolve_rooted_path(
 
 /// Resolves a non-root descendant while checking an optional absolute deadline.
 ///
+/// # Parameters
+///
+/// `root`, `path`, `symlink_policy`, `follow_final`, and `operation` define
+/// the resolution request; `deadline` optionally bounds its execution.
+///
+/// # Returns
+///
+/// The resolved non-empty path relative to `root`.
+///
 /// # Errors
 ///
-/// Returns rooted path, symlink-policy, or native inspection errors with
-/// `operation` context; an expired deadline is reported as `TimedOut`.
+/// Returns rooted path, symlink-policy, resource-limit, or native inspection
+/// errors.
 pub(crate) fn resolve_rooted_path_with_deadline(
     root: &crate::rooted::Root,
     path: &Path,
@@ -144,6 +185,21 @@ pub(crate) fn resolve_rooted_path_with_deadline(
 /// components are retained for later creation. Returns path-validation,
 /// forbidden-policy, cycle/escape, or native inspection/read-link errors with
 /// `operation` context. `FollowAcrossScope` is invalid for this authority.
+///
+/// # Parameters
+///
+/// `root`, `path`, `symlink_policy`, `follow_final`, and `operation` define
+/// the resolution request.
+///
+/// # Returns
+///
+/// The resolved path, which may represent the virtual root.
+///
+/// # Errors
+///
+/// Returns validation, policy, resource-limit, or native inspection errors with
+/// `operation` context.
+#[inline]
 pub(crate) fn resolve_rooted_path_allow_root(
     root: &crate::rooted::Root,
     path: &Path,
@@ -155,6 +211,21 @@ pub(crate) fn resolve_rooted_path_allow_root(
 }
 
 /// Resolves a rooted path while checking an optional absolute listing deadline.
+///
+/// # Parameters
+///
+/// The arguments define the rooted resolution request; `deadline` is an
+/// optional absolute deadline.
+///
+/// # Returns
+///
+/// The resolved path, which may represent the virtual root.
+///
+/// # Errors
+///
+/// Returns validation, policy, resource-limit, deadline, or native inspection
+/// errors.
+#[inline]
 pub(crate) fn resolve_rooted_path_allow_root_with_deadline(
     root: &crate::rooted::Root,
     path: &Path,
@@ -174,6 +245,21 @@ pub(crate) fn resolve_rooted_path_allow_root_with_deadline(
     )
 }
 
+/// Resolves a rooted path under an explicit resolution scope and deadline.
+///
+/// # Parameters
+///
+/// The arguments define the authority, path, symlink behavior, operation
+/// context, resolution scope, and optional absolute deadline.
+///
+/// # Returns
+///
+/// The resolved path, which may represent the virtual root.
+///
+/// # Errors
+///
+/// Returns validation, policy, resource-limit, deadline, or native inspection
+/// errors.
 pub(super) fn resolve_rooted_path_allow_root_with_scope_and_deadline(
     root: &crate::rooted::Root,
     path: &Path,
@@ -231,8 +317,18 @@ pub(super) fn resolve_rooted_path_allow_root_with_scope_and_deadline(
     )
 }
 
+/// Reports whether a path contains no current-directory or parent components.
+///
+/// # Parameters
+///
+/// `path` is the path whose components are inspected.
+///
+/// # Returns
+///
+/// `true` when every component is a prefix, root, or normal name.
+#[must_use]
+#[inline]
 fn has_only_normal_components(path: &Path) -> bool {
-    use std::path::Component;
     path.components().all(|component| {
         matches!(
             component,
@@ -241,6 +337,22 @@ fn has_only_normal_components(path: &Path) -> bool {
     })
 }
 
+/// Resolves a rooted path while applying component policy and an optional
+/// budget.
+///
+/// # Parameters
+///
+/// The arguments provide the rooted request, component policy, deadline, and
+/// optional mutable path-binding budget.
+///
+/// # Returns
+///
+/// The resolved path, which may represent the virtual root.
+///
+/// # Errors
+///
+/// Returns validation, policy, resource-limit, deadline, or native inspection
+/// errors.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn resolve_rooted_path_allow_root_with_component_policy_and_budget(
     root: &crate::rooted::Root,
@@ -265,6 +377,23 @@ pub(crate) fn resolve_rooted_path_allow_root_with_component_policy_and_budget(
     )
 }
 
+/// Resolves a host-root path while applying component policy and an optional
+/// budget.
+///
+/// # Parameters
+///
+/// The arguments provide the rooted request, component policy, deadline, and
+/// optional mutable path-binding budget.
+///
+/// # Returns
+///
+/// The resolved host-root path, which may be empty when resolution reaches its
+/// root.
+///
+/// # Errors
+///
+/// Returns validation, policy, resource-limit, deadline, or native inspection
+/// errors.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn resolve_host_root_path_with_component_policy_and_budget(
     root: &crate::rooted::Root,
@@ -289,6 +418,21 @@ pub(crate) fn resolve_host_root_path_with_component_policy_and_budget(
     )
 }
 
+/// Resolves a rooted path using the selected behavior at the parent boundary.
+///
+/// # Parameters
+///
+/// The arguments provide the resolution request, policy, deadline, budget,
+/// and parent-boundary behavior.
+///
+/// # Returns
+///
+/// The resolved path, which may represent the virtual root.
+///
+/// # Errors
+///
+/// Returns validation, policy, resource-limit, deadline, or native inspection
+/// errors.
 #[allow(clippy::too_many_arguments)]
 fn resolve_rooted_path_allow_root_with_component_policy_and_budget_and_parent_behavior(
     root: &crate::rooted::Root,
@@ -321,6 +465,20 @@ fn resolve_rooted_path_allow_root_with_component_policy_and_budget_and_parent_be
     )
 }
 
+/// Returns a timeout error when the optional absolute deadline has elapsed.
+///
+/// # Parameters
+///
+/// `deadline` is the optional cutoff; `original` and `operation` are retained
+/// as error context.
+///
+/// # Returns
+///
+/// `Ok(())` while before the deadline.
+///
+/// # Errors
+///
+/// Returns a `TimedOut` error when the absolute deadline has elapsed.
 pub(super) fn check_resolution_deadline(
     deadline: Option<Instant>,
     original: &Path,
@@ -344,11 +502,23 @@ pub(super) fn check_resolution_deadline(
     Ok(())
 }
 
-/// Checks a normal rooted path with linear descriptor-relative work.
-/// Each intermediate component requires metadata inspection and a directory
-/// open; the final component is inspected only when `follow_final` is true.
-/// Any uncertainty returns `None`, allowing the symlink-aware resolver to
-/// classify the path and its errors.
+/// Resolves a normal path using descriptor-relative traversal when possible.
+///
+/// Returns `None` when link-aware fallback is required.
+///
+/// # Parameters
+///
+/// The arguments provide the authority, validated relative path, final-link
+/// behavior, deadline, original error context, and shared resolution session.
+///
+/// # Returns
+///
+/// `Some(path)` when descriptor traversal resolves it, or `None` when fallback
+/// is needed.
+///
+/// # Errors
+///
+/// Returns validation, resource-limit, deadline, or native traversal errors.
 fn try_resolve_without_symlinks(
     root: &crate::rooted::Root,
     path: &crate::local::LocalRelativePath,
@@ -425,12 +595,29 @@ fn try_resolve_without_symlinks(
     Ok(Some(path.as_path().to_path_buf()))
 }
 
-/// Expands symlinks from the retained root handle without consulting its
-/// diagnostic path or imposing a fixed expansion-count budget.
-/// Tracks identities only during active expansion to reject cycles. Missing
-/// components remain lexical; rejected policy, virtual-root escape, invalid
-/// target syntax, and native inspection/read-link failures carry `original`
-/// and `operation` context.
+/// Resolves path steps while expanding symbolic links under the rooted
+/// authority.
+///
+/// Missing components remain lexical, while rejected traversal and native
+/// failures retain the original request context.
+/// Expands links from the retained root handle without consulting its
+/// diagnostic path or imposing a fixed expansion-count budget. Tracks link
+/// identities only during active expansion to reject cycles. Rejected policy,
+/// virtual-root escape, invalid target syntax, and native inspection/read-link
+/// failures retain `original` and `operation` context.
+///
+/// # Parameters
+///
+/// The arguments provide the resolution request, policies, optional budget,
+/// session state, and parent-boundary behavior.
+///
+/// # Returns
+///
+/// The resolved path, which may represent the virtual root.
+///
+/// # Errors
+///
+/// Returns path, policy, resource-limit, deadline, or native inspection errors.
 #[allow(clippy::too_many_arguments)]
 fn resolve_rooted_symlinks(
     root: &crate::rooted::Root,
@@ -446,7 +633,6 @@ fn resolve_rooted_symlinks(
     mut session: ResolutionSession,
     parent_behavior: RootParentBehavior,
 ) -> LocalResult<PathBuf> {
-    use std::collections::HashSet;
     #[cfg(test)]
     crate::tests::rooted::support::resolution_observation_tests::record_fallback();
     if symlink_policy == LocalSymlinkPolicy::FollowAcrossScope {
@@ -456,7 +642,7 @@ fn resolve_rooted_symlinks(
     }
     let mut pending = steps_from_path(path, LocalResolutionOrigin::Input, &session, operation, original)?;
     let mut pending_actions = pending.iter().filter(|step| !is_end_symlink_step(step)).count();
-    let mut resolved = Vec::<std::ffi::OsString>::new();
+    let mut resolved = Vec::<OsString>::new();
     let mut resolved_component_bytes = Vec::<usize>::new();
     let mut resolved_bytes = 0usize;
     let mut cursor: Option<crate::rooted::RootedResolutionCursor> = None;
@@ -506,41 +692,12 @@ fn resolve_rooted_symlinks(
                 active_symlinks.remove(&identity);
             }
             ResolutionStep::Normal(component, origin) => {
-                let component_bytes = native_path_bytes(Path::new(&component))
-                    .and_then(|bytes| bytes.checked_add(native_unit_bytes()))
-                    .ok_or_else(|| {
-                        crate::resolution::session::overflow_error(crate::error::LocalResourceKind::ResolvedPathBytes)
-                            .with_operation(operation)
-                            .with_path(original.to_path_buf())
-                    })?;
-                if let Some(budget) = budget.as_deref_mut() {
-                    budget.debit(component_bytes, operation, original)?;
-                }
-                if let Some(component_policy) = component_policy {
-                    component_policy
-                        .validate_component(&component)
-                        .map_err(|error| error.with_operation(operation).with_path(original.to_path_buf()))?;
-                }
-                session
-                    .validate_component(&component, origin)
-                    .map_err(|error| error.with_operation(operation).with_path(original.to_path_buf()))?;
-                let next_resolved_bytes = resolved_bytes.checked_add(component_bytes).ok_or_else(|| {
-                    crate::resolution::session::overflow_error(crate::error::LocalResourceKind::ResolvedPathBytes)
-                        .with_operation(operation)
-                        .with_path(original.to_path_buf())
-                })?;
-                session
-                    .check_resolved(
-                        resolved.len().checked_add(1).ok_or_else(|| {
-                            crate::resolution::session::overflow_error(
-                                crate::error::LocalResourceKind::ResolvedComponents,
-                            )
-                            .with_operation(operation)
-                            .with_path(original.to_path_buf())
-                        })?,
-                        next_resolved_bytes,
-                    )
-                    .map_err(|error| error.with_operation(operation).with_path(original.to_path_buf()))?;
+                let (component_bytes, next_resolved_bytes) = validate_resolved_component(
+                    &component,
+                    origin,
+                    (resolved.len(), resolved_bytes),
+                    (component_policy, budget.as_deref_mut(), &session, original, operation),
+                )?;
                 let is_final = pending_actions == 0;
                 if is_final && !follow_final {
                     resolved.push(component);
@@ -603,57 +760,18 @@ fn resolve_rooted_symlinks(
                         .with_reason("symbolic-link traversal is rejected by policy")
                         .with_path(original.to_path_buf()));
                 }
-                let identity = match metadata.native_identity() {
-                    Some((device, file)) => SymlinkIdentity::Native(device, file, candidate.as_path().to_path_buf()),
-                    None => SymlinkIdentity::NamespacePath(candidate.as_path().to_path_buf()),
-                };
-                if !active_symlinks.insert(identity.clone()) {
-                    return Err(LocalFileError::new(LocalFileErrorKind::InvalidPath, operation)
-                        .with_reason("symbolic-link expansion cycle detected")
-                        .with_path(original.to_path_buf()));
-                }
-                session
-                    .before_follow_link()
-                    .map_err(|error| error.with_operation(operation).with_path(original.to_path_buf()))?;
-                check_resolution_deadline(deadline, original, operation)?;
-                let target_result = root.read_link_limited(
+                let replacement = expand_rooted_symlink(
+                    root,
                     &candidate,
-                    root.resolution_contract().limits().symlink_target_bytes(),
-                    |target| {
-                        session
-                            .validate_target(target)
-                            .map_err(|error| error.with_operation(operation).with_path(original.to_path_buf()))
-                    },
-                );
-                check_resolution_deadline(deadline, original, operation)?;
-                let target = match target_result {
-                    Ok(target) => target,
-                    Err(error) => {
-                        return Err(error.with_operation(operation).with_path(original.to_path_buf()));
-                    }
-                };
-                if scope == LocalResolutionScope::OpeningRoot && !opening_root_target_matches_anchor(root, &target) {
-                    return Err(LocalFileError::new(LocalFileErrorKind::InvalidPath, operation)
-                        .with_reason("absolute symbolic-link target uses a different native root")
-                        .with_path(original.to_path_buf()));
-                }
-                let mut replacement = steps_from_path(
-                    &target,
-                    LocalResolutionOrigin::SymlinkTarget,
-                    &session,
-                    operation,
+                    metadata,
+                    scope,
+                    deadline,
                     original,
+                    operation,
+                    &mut active_symlinks,
+                    &mut session,
+                    pending,
                 )?;
-                replacement.push_back(ResolutionStep::EndSymlink(identity));
-                replacement.extend(pending);
-                let (pending_count, pending_bytes) = pending_measure(&replacement).ok_or_else(|| {
-                    crate::resolution::session::overflow_error(crate::error::LocalResourceKind::PendingResolutionBytes)
-                        .with_operation(operation)
-                        .with_path(original.to_path_buf())
-                })?;
-                session
-                    .check_pending(pending_count, pending_bytes)
-                    .map_err(|error| error.with_operation(operation).with_path(original.to_path_buf()))?;
                 pending_actions = replacement.iter().filter(|step| !is_end_symlink_step(step)).count();
                 pending = replacement;
             }
@@ -662,11 +780,204 @@ fn resolve_rooted_symlinks(
     Ok(path_from_components(resolved.iter()))
 }
 
+/// Reads and validates one rooted link target before preparing its replacement
+/// steps.
+///
+/// The identity enters `active_symlinks` before native target inspection and is
+/// removed later by its queued end marker. Session accounting and deadline
+/// checks remain in the same order as the resolver's traversal phase.
+///
+/// # Parameters
+///
+/// `root`, `candidate`, and `metadata` identify the retained link; policy,
+/// scope, and deadline constrain expansion. `active_symlinks`, `session`, and
+/// `pending` carry traversal state, while `original` and `operation` preserve
+/// error context.
+///
+/// # Returns
+///
+/// The validated link target steps followed by the pending caller steps.
+///
+/// # Errors
+///
+/// Returns cycle, target-validation, resource-limit, deadline, or native
+/// read-link errors.
+#[allow(clippy::too_many_arguments)]
+fn expand_rooted_symlink(
+    root: &crate::rooted::Root,
+    candidate: &crate::local::LocalRelativePath,
+    metadata: crate::rooted::Metadata,
+    scope: LocalResolutionScope,
+    deadline: Option<Instant>,
+    original: &Path,
+    operation: LocalFileOperation,
+    active_symlinks: &mut HashSet<SymlinkIdentity>,
+    session: &mut ResolutionSession,
+    pending: VecDeque<ResolutionStep>,
+) -> LocalResult<VecDeque<ResolutionStep>> {
+    let identity = match metadata.native_identity() {
+        Some((device, file)) => SymlinkIdentity::Native(device, file, candidate.as_path().to_path_buf()),
+        None => SymlinkIdentity::NamespacePath(candidate.as_path().to_path_buf()),
+    };
+    if !active_symlinks.insert(identity.clone()) {
+        return Err(LocalFileError::new(LocalFileErrorKind::InvalidPath, operation)
+            .with_reason("symbolic-link expansion cycle detected")
+            .with_path(original.to_path_buf()));
+    }
+    session
+        .before_follow_link()
+        .map_err(|error| error.with_operation(operation).with_path(original.to_path_buf()))?;
+    check_resolution_deadline(deadline, original, operation)?;
+    let target_result = root.read_link_limited(
+        candidate,
+        root.resolution_contract().limits().symlink_target_bytes(),
+        |target| {
+            session
+                .validate_target(target)
+                .map_err(|error| error.with_operation(operation).with_path(original.to_path_buf()))
+        },
+    );
+    check_resolution_deadline(deadline, original, operation)?;
+    let target = match target_result {
+        Ok(target) => target,
+        Err(error) => return Err(error.with_operation(operation).with_path(original.to_path_buf())),
+    };
+    if scope == LocalResolutionScope::OpeningRoot && !opening_root_target_matches_anchor(root, &target) {
+        return Err(LocalFileError::new(LocalFileErrorKind::InvalidPath, operation)
+            .with_reason("absolute symbolic-link target uses a different native root")
+            .with_path(original.to_path_buf()));
+    }
+    replacement_steps_after_link(&target, identity, pending, session, operation, original)
+}
+
+/// Prepends a validated link target and checks the resulting pending-work
+/// budget.
+///
+/// The active-link marker closes after the target's steps, before the caller's
+/// previously pending steps. The complete queue is measured before traversal
+/// resumes so link expansion keeps the same resource-limit boundary.
+///
+/// # Parameters
+///
+/// `target` supplies the link target, `identity` tracks active expansion,
+/// `pending` contains the caller's remaining steps, and `session` enforces
+/// resolution limits. `operation` and `original` preserve error context.
+///
+/// # Returns
+///
+/// The validated target steps, link-closing marker, and remaining caller steps.
+///
+/// # Errors
+///
+/// Returns path-validation or pending-resolution resource-limit errors with
+/// the caller's operation and original path.
+fn replacement_steps_after_link(
+    target: &Path,
+    identity: SymlinkIdentity,
+    pending: VecDeque<ResolutionStep>,
+    session: &ResolutionSession,
+    operation: LocalFileOperation,
+    original: &Path,
+) -> LocalResult<VecDeque<ResolutionStep>> {
+    let mut replacement = steps_from_path(
+        target,
+        LocalResolutionOrigin::SymlinkTarget,
+        session,
+        operation,
+        original,
+    )?;
+    replacement.push_back(ResolutionStep::EndSymlink(identity));
+    replacement.extend(pending);
+    let (pending_count, pending_bytes) = pending_measure(&replacement).ok_or_else(|| {
+        crate::resolution::session::overflow_error(crate::error::LocalResourceKind::PendingResolutionBytes)
+            .with_operation(operation)
+            .with_path(original.to_path_buf())
+    })?;
+    session
+        .check_pending(pending_count, pending_bytes)
+        .map_err(|error| error.with_operation(operation).with_path(original.to_path_buf()))?;
+    Ok(replacement)
+}
+
+/// Validates one normal component and accounts for its resource usage.
+///
+/// # Parameters
+///
+/// The component and origin identify the step; `resolved_components` and
+/// `resolved_bytes` describe retained state. Policy, budget, session, and
+/// request context apply their respective limits and error attribution.
+///
+/// # Returns
+///
+/// The component's encoded byte count and the resulting resolved byte count.
+///
+/// # Errors
+///
+/// Returns component-policy, budget, or resource-limit errors.
+fn validate_resolved_component(
+    component: &OsStr,
+    origin: LocalResolutionOrigin,
+    resolved: (usize, usize),
+    context: (
+        Option<&crate::directory::LocalComponentPolicy>,
+        Option<&mut crate::directory::binding::PathBindingBudget>,
+        &ResolutionSession,
+        &Path,
+        LocalFileOperation,
+    ),
+) -> LocalResult<(usize, usize)> {
+    let (resolved_components, resolved_bytes) = resolved;
+    let (component_policy, budget, session, original, operation) = context;
+    let component_bytes = native_path_bytes(Path::new(component))
+        .and_then(|bytes| bytes.checked_add(native_unit_bytes()))
+        .ok_or_else(|| {
+            crate::resolution::session::overflow_error(crate::error::LocalResourceKind::ResolvedPathBytes)
+                .with_operation(operation)
+                .with_path(original.to_path_buf())
+        })?;
+    if let Some(budget) = budget {
+        budget.debit(component_bytes, operation, original)?;
+    }
+    if let Some(component_policy) = component_policy {
+        component_policy
+            .validate_component(component)
+            .map_err(|error| error.with_operation(operation).with_path(original.to_path_buf()))?;
+    }
+    session
+        .validate_component(component, origin)
+        .map_err(|error| error.with_operation(operation).with_path(original.to_path_buf()))?;
+    let next_resolved_bytes = resolved_bytes.checked_add(component_bytes).ok_or_else(|| {
+        crate::resolution::session::overflow_error(crate::error::LocalResourceKind::ResolvedPathBytes)
+            .with_operation(operation)
+            .with_path(original.to_path_buf())
+    })?;
+    session
+        .check_resolved(
+            resolved_components.checked_add(1).ok_or_else(|| {
+                crate::resolution::session::overflow_error(crate::error::LocalResourceKind::ResolvedComponents)
+                    .with_operation(operation)
+                    .with_path(original.to_path_buf())
+            })?,
+            next_resolved_bytes,
+        )
+        .map_err(|error| error.with_operation(operation).with_path(original.to_path_buf()))?;
+    Ok((component_bytes, next_resolved_bytes))
+}
+
+/// Checks whether an absolute link target names the opened root's native
+/// anchor.
+///
+/// # Parameters
+///
+/// `root` supplies the opened authority and `target` is the absolute link
+/// target.
+///
+/// # Returns
+///
+/// `true` when the target's native root anchor matches the opened root.
 fn opening_root_target_matches_anchor(root: &crate::rooted::Root, target: &Path) -> bool {
     #[cfg(windows)]
     {
-        use std::path::Component;
-        use std::path::Prefix;
         let Some(target_prefix) = target.components().find_map(|component| match component {
             Component::Prefix(prefix) => Some((prefix.kind(), prefix.as_os_str())),
             _ => None,
@@ -698,9 +1009,25 @@ fn opening_root_target_matches_anchor(root: &crate::rooted::Root, target: &Path)
     }
 }
 
+/// Ensures the resolved prefix exists and is a directory beneath the root.
+///
+/// # Parameters
+///
+/// `root` supplies the authority, `resolved` the prefix components, and
+/// `original` plus `operation` preserve request error context.
+///
+/// # Returns
+///
+/// Returns `Ok(())` when the prefix is the virtual root or an existing
+/// directory.
+///
+/// # Errors
+///
+/// Returns native inspection errors or `NotDirectory` when the prefix is not a
+/// directory.
 fn ensure_resolved_prefix_is_directory(
     root: &crate::rooted::Root,
-    resolved: &[std::ffi::OsString],
+    resolved: &[OsString],
     original: &Path,
     operation: LocalFileOperation,
 ) -> LocalResult<()> {
@@ -717,9 +1044,26 @@ fn ensure_resolved_prefix_is_directory(
     Ok(())
 }
 
+/// Opens a cursor at the resolved directory prefix, returning `None` if absent
+/// or if a prefix component is not a directory.
+///
+/// # Parameters
+///
+/// `root` supplies the authority, `resolved` selects the prefix, and
+/// `deadline`, `original`, and `operation` bound traversal and preserve error
+/// context.
+///
+/// # Returns
+///
+/// An opened cursor when the prefix exists as a directory, or `None` when
+/// absent.
+///
+/// # Errors
+///
+/// Returns deadline or native traversal errors.
 fn open_resolved_cursor(
     root: &crate::rooted::Root,
-    resolved: &[std::ffi::OsString],
+    resolved: &[OsString],
     deadline: Option<Instant>,
     original: &Path,
     operation: LocalFileOperation,
@@ -750,6 +1094,16 @@ fn open_resolved_cursor(
     Ok(Some(cursor))
 }
 
+/// Measures a path in native encoded bytes, returning `None` on overflow.
+///
+/// # Parameters
+///
+/// `path` is measured using the platform's native encoding.
+///
+/// # Returns
+///
+/// The native encoded byte count, or `None` when encoding or checked arithmetic
+/// fails.
 fn native_path_bytes(path: &Path) -> Option<usize> {
     #[cfg(unix)]
     {
@@ -767,7 +1121,18 @@ fn native_path_bytes(path: &Path) -> Option<usize> {
     }
 }
 
-fn pending_measure(steps: &std::collections::VecDeque<ResolutionStep>) -> Option<(usize, usize)> {
+/// Measures pending resolution components and native bytes with checked
+/// arithmetic.
+///
+/// # Parameters
+///
+/// `steps` is the pending resolution queue to measure.
+///
+/// # Returns
+///
+/// The pending component count and byte count, or `None` if accounting
+/// overflows.
+fn pending_measure(steps: &VecDeque<ResolutionStep>) -> Option<(usize, usize)> {
     let mut components = 0usize;
     let mut bytes = 0usize;
     let unit_bytes = native_unit_bytes();
@@ -792,16 +1157,41 @@ fn pending_measure(steps: &std::collections::VecDeque<ResolutionStep>) -> Option
     Some((components, bytes))
 }
 
+/// Returns the native byte width of one path separator unit.
+///
+/// # Returns
+///
+/// Two bytes on Windows and one byte on other supported platforms.
+#[inline]
 const fn native_unit_bytes() -> usize {
     if cfg!(windows) { 2 } else { 1 }
 }
 
+/// Multiplies native path units by their width without overflowing.
+///
+/// # Parameters
+///
+/// `units` is the count and `unit_bytes` is the native byte width per unit.
+///
+/// # Returns
+///
+/// The product, or `None` if multiplication overflows.
+#[inline]
 fn checked_native_units(units: usize, unit_bytes: usize) -> Option<usize> {
     units.checked_mul(unit_bytes)
 }
 
 /// Reports whether a pending resolution step only closes an expanded link.
+///
+/// # Parameters
+///
+/// `step` is the pending operation to classify.
+///
+/// # Returns
+///
+/// `true` when `step` closes an expanded symbolic link.
 #[must_use]
+#[inline]
 const fn is_end_symlink_step(step: &ResolutionStep) -> bool {
     matches!(step, ResolutionStep::EndSymlink(_))
 }
@@ -809,15 +1199,27 @@ const fn is_end_symlink_step(step: &ResolutionStep) -> bool {
 /// Converts native path syntax into pending virtual-root resolution steps.
 /// Returns `InvalidPath` for native prefixes; roots restart at the virtual
 /// root, dots disappear, and parents remain deferred traversal steps.
+///
+/// # Parameters
+///
+/// `path`, `origin`, and `session` supply tokens and validation policy;
+/// `operation` and `original` preserve the caller's error context.
+///
+/// # Returns
+///
+/// The pending virtual-root resolution steps represented by `path`.
+///
+/// # Errors
+///
+/// Returns token validation errors with the caller's operation and path
+/// context.
 fn steps_from_path(
     path: &Path,
     origin: LocalResolutionOrigin,
     session: &ResolutionSession,
     operation: LocalFileOperation,
     original: &Path,
-) -> LocalResult<std::collections::VecDeque<ResolutionStep>> {
-    use std::collections::VecDeque;
-
+) -> LocalResult<VecDeque<ResolutionStep>> {
     let mut steps = VecDeque::new();
     if path.is_absolute() {
         steps.push_back(ResolutionStep::ResetRoot);
@@ -838,8 +1240,25 @@ fn steps_from_path(
 /// Builds a non-empty rooted relative path from normalized native components.
 /// Returns `InvalidPath` with `original` and `operation` context when the
 /// assembled path fails relative-path validation.
+///
+/// # Type Parameters
+///
+/// `'component` is the borrow lifetime of the supplied native components.
+///
+/// # Parameters
+///
+/// `components` supplies normalized names; `original` and `operation` identify
+/// the caller's request in any validation error.
+///
+/// # Returns
+///
+/// The validated relative path made from `components`.
+///
+/// # Errors
+///
+/// Returns `InvalidPath` with original request context if validation fails.
 fn relative_from_components<'component>(
-    components: impl Iterator<Item = &'component std::ffi::OsString>,
+    components: impl Iterator<Item = &'component OsString>,
     original: &Path,
     operation: LocalFileOperation,
 ) -> LocalResult<crate::local::LocalRelativePath> {
@@ -854,7 +1273,20 @@ fn relative_from_components<'component>(
 }
 
 /// Builds a rooted relative path, including the empty virtual-root spelling.
-fn path_from_components<'component>(components: impl Iterator<Item = &'component std::ffi::OsString>) -> PathBuf {
+///
+/// # Type Parameters
+///
+/// `'component` is the borrow lifetime of the supplied native components.
+///
+/// # Parameters
+///
+/// `components` supplies the normalized native path components.
+///
+/// # Returns
+///
+/// A path containing the supplied components, including an empty path for no
+/// components.
+fn path_from_components<'component>(components: impl Iterator<Item = &'component OsString>) -> PathBuf {
     let mut path = PathBuf::new();
     for component in components {
         path.push(component);
@@ -866,6 +1298,21 @@ fn path_from_components<'component>(components: impl Iterator<Item = &'component
 /// Synchronizes the parents of `target`'s non-empty ancestors from deepest to
 /// shallowest; the caller synchronizes `target`'s immediate parent separately.
 /// Stops and propagates the first native synchronization failure.
+///
+/// # Parameters
+///
+/// `root` supplies the rooted authority and `target` is the validated relative
+/// path.
+///
+/// # Returns
+///
+/// Returns `Ok(())` after syncing every non-empty ancestor parent, or when none
+/// exist.
+///
+/// # Errors
+///
+/// Returns the first native synchronization error and stops syncing shallower
+/// parents.
 pub(crate) fn sync_rooted_copy_parent_chain(
     root: &crate::rooted::Root,
     target: &crate::local::LocalRelativePath,
@@ -887,76 +1334,8 @@ mod pending_measure_tests {
     use super::checked_native_units;
 
     #[test]
-    fn native_unit_measurement_reports_overflow() {
+    fn test_native_unit_measurement_reports_overflow() {
         assert_eq!(None, checked_native_units(usize::MAX, 2));
-    }
-}
-
-#[cfg(all(test, unix))]
-mod expanded_prefix_budget_tests {
-    use std::fs;
-    use std::os::unix::fs::symlink;
-    use std::path::Path;
-
-    use crate::LocalFileErrorKind;
-    use crate::LocalFileOperation;
-    use crate::LocalResourceKind;
-    use crate::LocalSymlinkPolicy;
-    use crate::options::LocalResolutionLimits;
-    use crate::resolution::ResolutionContract;
-    use crate::rooted::Root;
-
-    #[test]
-    fn test_symlink_expansion_accounts_for_retained_resolved_prefix() {
-        let fixture = tempfile::tempdir().expect("root fixture should exist");
-        fs::create_dir_all(fixture.path().join("a/b")).expect("target prefix should exist");
-        fs::write(fixture.path().join("a/b/ccc"), b"payload").expect("target file should exist");
-        symlink("b/ccc", fixture.path().join("a/l")).expect("relative link should exist");
-        let unrestricted = Root::open(fixture.path()).expect("root authority should open");
-        // Each input and target fits separately, but the retained `a` makes resolution
-        // exceed either limit.
-        let cases = [
-            (
-                LocalResolutionLimits::new().with_max_actual_components(2),
-                LocalResourceKind::ResolvedComponents,
-                2,
-                3,
-            ),
-            (
-                LocalResolutionLimits::new().with_max_resolved_path_bytes(7),
-                LocalResourceKind::ResolvedPathBytes,
-                7,
-                8,
-            ),
-        ];
-        for (limits, resource, limit, observed) in cases {
-            let root = Root::from_directory_authority_with_contract(
-                unrestricted.try_clone_authority().expect("authority should clone"),
-                unrestricted.path().to_path_buf(),
-                ResolutionContract::unrestricted().tightened(limits),
-            );
-            let path = Path::new("a/l");
-            let error = super::resolve_rooted_path(
-                &root,
-                path,
-                LocalSymlinkPolicy::FollowWithinScope,
-                true,
-                LocalFileOperation::List,
-            )
-            .expect_err("retained prefix and expanded target must share the resolved budget");
-            assert_eq!(error.kind(), LocalFileErrorKind::ResourceLimit);
-            assert_eq!(error.operation(), LocalFileOperation::List);
-            assert_eq!(error.path(), Some(path));
-            let facts = error
-                .resource_limit_error()
-                .expect("resolution failure must preserve budget facts");
-            assert_eq!(facts.resource(), resource);
-            assert_eq!(facts.limit(), limit);
-            assert_eq!(facts.remaining(), 0);
-            assert_eq!(facts.requested(), 1);
-            assert_eq!(facts.observed(), Some(observed));
-            assert!(!facts.overflowed());
-        }
     }
 }
 
@@ -1060,21 +1439,6 @@ mod native_resolution_failure_tests {
                     .to_string(),
                 "injected native I/O contract failure"
             );
-        }
-    }
-
-    #[test]
-    fn test_root_listing_start_native_metadata_failures_retain_input_context() {
-        let fixture = tempfile::tempdir().expect("root fixture should exist");
-        let root = Root::open(fixture.path()).expect("root authority should open");
-        for path in [Path::new(""), Path::new(".")] {
-            let guard = NativeIoFaultGuard::fail_on(NativeIoPoint::RootMetadata, 1);
-            let error = super::validate_rooted_list_start(&root, path, LocalSymlinkPolicy::FollowWithinScope, None)
-                .expect_err("root metadata failure must stop listing startup");
-            assert!(guard.fired());
-            assert_eq!(error.operation(), LocalFileOperation::List);
-            assert_eq!(error.path(), Some(Path::new("")));
-            assert_eq!(error.io_error_kind(), std::io::ErrorKind::Other);
         }
     }
 }

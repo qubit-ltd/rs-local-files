@@ -32,7 +32,7 @@ fn open_directory(path: &std::path::Path) -> std::fs::File {
 
 #[cfg(windows)]
 #[test]
-fn lf3_privacy_windows_creates_protected_file_and_directory() {
+fn test_creates_protected_file_and_directory() {
     use std::os::windows::io::AsRawHandle;
 
     use crate::temp::internal::privacy_windows;
@@ -49,7 +49,7 @@ fn lf3_privacy_windows_creates_protected_file_and_directory() {
 
 #[cfg(windows)]
 #[test]
-fn lf3_privacy_windows_private_file_io_and_standard_read_reopen() {
+fn test_private_file_io_and_standard_read_reopen() {
     use crate::temp::internal::privacy_windows;
 
     let fixture = tempfile::tempdir().unwrap();
@@ -77,7 +77,7 @@ fn lf3_privacy_windows_private_file_io_and_standard_read_reopen() {
 
 #[cfg(windows)]
 #[test]
-fn lf3_privacy_windows_private_directory_reopens_by_handle() {
+fn test_private_directory_reopens_by_handle() {
     use crate::temp::internal::privacy_windows;
 
     let fixture = tempfile::tempdir().unwrap();
@@ -92,7 +92,7 @@ fn lf3_privacy_windows_private_directory_reopens_by_handle() {
 
 #[cfg(windows)]
 #[test]
-fn lf3_privacy_windows_read_only_removes_data_write_access() {
+fn test_read_only_removes_data_write_access() {
     use crate::temp::internal::privacy_windows;
 
     let fixture = tempfile::tempdir().unwrap();
@@ -142,7 +142,7 @@ fn test_private_windows_native_missing_entry_kind() {
 
 #[cfg(windows)]
 #[test]
-fn lf3_privacy_windows_retains_partial_after_readback_failure() {
+fn test_retains_partial_after_readback_failure() {
     use crate::temp::internal::privacy_windows;
 
     let fixture = tempfile::tempdir().unwrap();
@@ -151,13 +151,16 @@ fn lf3_privacy_windows_retains_partial_after_readback_failure() {
     let error = privacy_windows::create_private_file_at(&parent, std::ffi::OsStr::new("partial")).unwrap_err();
     let retained = error.retained.expect("created entry must remain owned");
     assert_eq!(retained.name, std::ffi::OsStr::new("partial"));
-    assert!(retained.file.is_some());
-    assert!(fixture.path().join("partial").exists());
+    assert!(retained.file.is_some(), "retained entry must keep its file handle");
+    assert!(
+        fixture.path().join("partial").exists(),
+        "partial file must remain on disk"
+    );
 }
 
 #[cfg(windows)]
 #[test]
-fn lf3_privacy_windows_injected_precreate_failures_do_not_create_entries() {
+fn test_injected_precreate_failures_do_not_create_entries() {
     use crate::temp::internal::privacy_windows;
 
     for (point, name) in [
@@ -169,14 +172,20 @@ fn lf3_privacy_windows_injected_precreate_failures_do_not_create_entries() {
         let fixture = tempfile::tempdir().unwrap();
         let parent = open_directory(fixture.path());
         privacy_windows::fail_once_at(point);
-        assert!(privacy_windows::create_private_file_at(&parent, std::ffi::OsStr::new(name)).is_err());
-        assert!(!fixture.path().join(name).exists());
+        assert!(
+            privacy_windows::create_private_file_at(&parent, std::ffi::OsStr::new(name)).is_err(),
+            "injected pre-create failure at {point:?} must be reported"
+        );
+        assert!(
+            !fixture.path().join(name).exists(),
+            "injected pre-create failure at {point:?} must not create an entry"
+        );
     }
 }
 
 #[cfg(windows)]
 #[test]
-fn lf3_privacy_windows_injected_acl_and_readonly_failures_are_reported() {
+fn test_injected_acl_and_readonly_failures_are_reported() {
     use crate::temp::internal::privacy_windows;
 
     let fixture = tempfile::tempdir().unwrap();
@@ -184,15 +193,21 @@ fn lf3_privacy_windows_injected_acl_and_readonly_failures_are_reported() {
     let file = privacy_windows::create_private_file_at(&parent, std::ffi::OsStr::new("policy")).unwrap();
 
     privacy_windows::fail_once_at(privacy_windows::FailurePoint::AclApply);
-    assert!(privacy_windows::apply_current_user_access(&file, false, false).is_err());
+    assert!(
+        privacy_windows::apply_current_user_access(&file, false, false).is_err(),
+        "injected ACL failure must be reported"
+    );
 
     privacy_windows::fail_once_at(privacy_windows::FailurePoint::ReadOnly);
-    assert!(privacy_windows::apply_current_user_access(&file, false, true).is_err());
+    assert!(
+        privacy_windows::apply_current_user_access(&file, false, true).is_err(),
+        "injected read-only failure must be reported"
+    );
 }
 
 #[cfg(windows)]
 #[test]
-fn lf3_privacy_windows_nth_child_create_failure_keeps_prior_children() {
+fn test_nth_child_create_failure_keeps_prior_children() {
     use crate::temp::internal::privacy_windows;
 
     let fixture = tempfile::tempdir().unwrap();
@@ -201,8 +216,14 @@ fn lf3_privacy_windows_nth_child_create_failure_keeps_prior_children() {
     for name in ["child-1", "child-2"] {
         privacy_windows::create_private_directory_at(&parent, std::ffi::OsStr::new(name)).unwrap();
     }
-    assert!(privacy_windows::create_private_directory_at(&parent, std::ffi::OsStr::new("child-3")).is_err());
-    assert!(fixture.path().join("child-1").is_dir());
-    assert!(fixture.path().join("child-2").is_dir());
-    assert!(!fixture.path().join("child-3").exists());
+    assert!(
+        privacy_windows::create_private_directory_at(&parent, std::ffi::OsStr::new("child-3")).is_err(),
+        "injected third-child creation failure must be reported"
+    );
+    assert!(fixture.path().join("child-1").is_dir(), "first child must remain");
+    assert!(fixture.path().join("child-2").is_dir(), "second child must remain");
+    assert!(
+        !fixture.path().join("child-3").exists(),
+        "failed third-child creation must leave no entry"
+    );
 }

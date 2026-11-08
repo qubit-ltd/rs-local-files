@@ -36,6 +36,10 @@ use crate::local::LocalCopyDirStage as Stage;
 use crate::local::LocalCopyDirStats as Statistics;
 
 /// Converts a typed deletion effect into the copy pipeline's state hint.
+///
+/// # Parameters
+///
+/// * `error` - Deletion failure whose recorded effect determines the hint.
 pub(super) fn deletion_failure_hint(error: &LocalFileError) -> Option<LocalCopyFailureState> {
     match error.effect_state() {
         Some(LocalFileEffectState::Unchanged) | None => None,
@@ -47,6 +51,12 @@ pub(super) fn deletion_failure_hint(error: &LocalFileError) -> Option<LocalCopyF
 }
 
 /// Retains a successful conflicting-entry removal through a later error.
+///
+/// # Parameters
+///
+/// * `error` - Later copy failure to preserve or update.
+/// * `removed` - Whether removal of the conflicting destination entry
+///   succeeded.
 pub(super) fn mark_partial_after_removal(mut error: Error, removed: bool) -> Error {
     if removed && error.failure_state() != Some(LocalCopyFailureState::Published) {
         error = error.with_failure_state(LocalCopyFailureState::PartiallyPublished);

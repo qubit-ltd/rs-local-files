@@ -16,7 +16,7 @@ use qubit_io::InputRef;
 use qubit_local_files::LocalFileSystem;
 
 #[test]
-fn reader_indexed_range_and_adapter_share_cursor() {
+fn test_reader_indexed_range_and_adapter_share_cursor() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("source");
     std::fs::write(&path, b"abcdef").unwrap();
@@ -43,7 +43,7 @@ fn reader_indexed_range_and_adapter_share_cursor() {
 }
 
 #[test]
-fn reader_handles_eof_zero_length_and_owned_adapter() {
+fn test_reader_handles_eof_zero_length_and_owned_adapter() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("source");
     std::fs::write(&path, b"abc").unwrap();
@@ -70,7 +70,7 @@ fn reader_handles_eof_zero_length_and_owned_adapter() {
 }
 
 #[test]
-fn inherent_read_vectored_skips_empty_buffers_and_reads_in_order() {
+fn test_inherent_read_vectored_skips_empty_buffers_and_reads_in_order() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("source");
     std::fs::write(&path, b"abcdef").unwrap();
@@ -90,7 +90,7 @@ fn inherent_read_vectored_skips_empty_buffers_and_reads_in_order() {
 }
 
 #[test]
-fn trait_vectored_read_preserves_nonzero_file_offset() {
+fn test_trait_vectored_read_preserves_nonzero_file_offset() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("source");
     std::fs::write(&path, b"012345").unwrap();
@@ -113,7 +113,7 @@ fn trait_vectored_read_preserves_nonzero_file_offset() {
 }
 
 #[test]
-fn inherent_vectored_read_preserves_nonzero_file_offset() {
+fn test_inherent_vectored_read_preserves_nonzero_file_offset() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("source");
     std::fs::write(&path, b"012345").unwrap();
@@ -157,7 +157,7 @@ fn test_inherent_single_buffer_read_handles_offset_eof_and_empty_inputs() {
 }
 
 #[test]
-fn read_prefix_keeps_limit_and_zero_limit_behavior() {
+fn test_read_prefix_keeps_limit_and_zero_limit_behavior() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("source");
     std::fs::write(&path, b"abcdef").unwrap();

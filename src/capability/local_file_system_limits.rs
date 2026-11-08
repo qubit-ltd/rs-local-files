@@ -43,6 +43,14 @@ pub struct LocalFileSystemLimits {
 
 impl LocalFileSystemLimits {
     /// Creates limits from independently observed native dimensions.
+    ///
+    /// # Parameters
+    ///
+    /// - `max_path_length`: Maximum complete-path length, or the reason it is
+    ///   unavailable or path-dependent.
+    /// - `max_component_length`: Maximum single-component length, or the reason
+    ///   it is unavailable or path-dependent.
+    /// - `length_unit`: Native unit shared by both length observations.
     #[inline]
     pub const fn new(
         max_path_length: SizeLimit,

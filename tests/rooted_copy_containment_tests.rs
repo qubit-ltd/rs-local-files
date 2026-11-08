@@ -15,6 +15,7 @@ use qubit_local_files::LocalFileSystem;
 use qubit_local_files::error::LocalFileErrorKind;
 use qubit_local_files::error::LocalFileErrorSource;
 use qubit_local_files::options::LocalCopyOptions;
+use qubit_local_files::outcome::LocalCopyFailure;
 use qubit_local_files::policy::LocalSymlinkPolicy;
 use tempfile::tempdir;
 
@@ -26,7 +27,7 @@ fn followed_tree_options() -> LocalCopyOptions {
         .with_max_depth(8)
 }
 
-fn assert_containment_rejection(failure: qubit_local_files::outcome::LocalCopyFailure, source: &Path, component: &str) {
+fn assert_containment_rejection(failure: LocalCopyFailure, source: &Path, component: &str) {
     assert_eq!(LocalFileErrorKind::InvalidPath, failure.error().kind());
     let io_error = match failure.error().typed_source() {
         Some(LocalFileErrorSource::Io(error)) => error,

@@ -28,6 +28,14 @@ pub(crate) struct LocalNamespacePath {
 
 impl LocalNamespacePath {
     /// Creates one resolver-owned bound path.
+    ///
+    /// # Parameters
+    ///
+    /// - `namespace_absolute` is the reusable namespace-absolute path.
+    /// - `authority_relative` is the representation consumed by the authority
+    ///   backend.
+    /// - `directory_required` records whether the original syntax requires a
+    ///   directory.
     pub(super) const fn new(
         namespace_absolute: PathBuf,
         authority_relative: PathBuf,

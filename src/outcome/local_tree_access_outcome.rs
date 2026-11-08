@@ -48,16 +48,42 @@ use crate::policy::LocalOwnerAccessPolicy;
 /// ```
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct LocalTreeAccessOutcome {
+    /// State confirmed for the staged tree after the access operation.
     state: LocalTreeAccessState,
+    /// Exact policy applied and verified, or `None` when no owner policy was
+    /// applied or its exact result is not available.
     owner_access_policy: Option<LocalOwnerAccessPolicy>,
 }
 impl LocalTreeAccessOutcome {
+    /// Creates an outcome without a confirmed exact owner policy.
+    ///
+    /// This constructor is used when the operation preserves access or reports
+    /// a state that does not correspond to a verified owner policy.
+    ///
+    /// # Parameters
+    ///
+    /// - `state`: The access state confirmed for the staged tree.
+    #[must_use]
+    #[inline]
     pub(crate) const fn new(state: LocalTreeAccessState) -> Self {
         Self {
             state,
             owner_access_policy: None,
         }
     }
+
+    /// Creates an outcome for an exact owner policy that was applied and
+    /// verified.
+    ///
+    /// The supplied policy is retained so callers can distinguish a verified
+    /// configuration from a general access state.
+    ///
+    /// # Parameters
+    ///
+    /// - `state`: The access state confirmed for the staged tree.
+    /// - `policy`: The exact owner policy applied and verified for the tree.
+    #[must_use]
+    #[inline]
     pub(crate) const fn with_owner_policy(state: LocalTreeAccessState, policy: LocalOwnerAccessPolicy) -> Self {
         Self {
             state,
@@ -65,10 +91,30 @@ impl LocalTreeAccessOutcome {
         }
     }
     /// Returns the access state confirmed by the operation.
+    ///
+    /// This reports the observed result and does not imply that a requested
+    /// mutation occurred when the state is [`LocalTreeAccessState::Preserved`].
+    ///
+    /// # Returns
+    ///
+    /// The access state observed and confirmed for the staged tree.
+    #[must_use]
+    #[inline]
     pub const fn access_state(self) -> LocalTreeAccessState {
         self.state
     }
     /// Returns the exact owner policy confirmed for this tree, when applied.
+    ///
+    /// Returns `Some` only when the exact policy was applied and verified;
+    /// otherwise returns `None`. The reference borrows the stored policy from
+    /// this outcome.
+    ///
+    /// # Returns
+    ///
+    /// `Some` with a reference to the verified policy, or `None` when no exact
+    /// owner policy was applied and verified.
+    #[must_use = "inspect the returned policy to confirm the applied configuration"]
+    #[inline]
     pub const fn owner_access_policy(&self) -> Option<&LocalOwnerAccessPolicy> {
         self.owner_access_policy.as_ref()
     }

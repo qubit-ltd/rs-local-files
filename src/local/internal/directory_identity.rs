@@ -28,6 +28,7 @@ use windows_sys::Win32::Storage::FileSystem::FILE_FLAG_BACKUP_SEMANTICS;
 use windows_sys::Win32::Storage::FileSystem::GetFileInformationByHandle;
 
 /// Identifies one directory independently of the path used to reach it.
+#[must_use]
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub(crate) enum DirectoryIdentity {
     /// Platform-native filesystem and file identifiers.

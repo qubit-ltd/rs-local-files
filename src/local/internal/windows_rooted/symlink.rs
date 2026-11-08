@@ -63,6 +63,12 @@ const SYMLINK_REPARSE_FIXED_DATA_LENGTH: usize = 12;
 ///
 /// Returns an I/O error when parent traversal, final-handle opening, native
 /// reparse retrieval, or buffer validation fails.
+///
+/// # Parameters
+///
+/// - `root`: Open directory handle bounding parent traversal.
+/// - `_diagnostic_root`: Diagnostic context; it does not direct traversal.
+/// - `path`: Root-relative path whose final link target is read.
 pub(crate) fn read_rooted_link(root: &File, _diagnostic_root: &Path, path: &LocalRelativePath) -> Result<PathBuf> {
     let link = open_link(root, path, GENERIC_READ | FILE_READ_ATTRIBUTES | SYNCHRONIZE)?;
     let buffer = read_reparse_buffer(&link)?;
@@ -71,6 +77,13 @@ pub(crate) fn read_rooted_link(root: &File, _diagnostic_root: &Path, path: &Loca
 
 /// Reads one final symbolic-link target, constructing a `PathBuf` only when it
 /// fits.
+///
+/// # Parameters
+///
+/// - `root`: Open directory handle bounding parent traversal.
+/// - `_diagnostic_root`: Diagnostic context; it does not direct traversal.
+/// - `path`: Root-relative path whose final link target is read.
+/// - `maximum_bytes`: Optional limit applied before path conversion.
 pub(crate) fn read_rooted_link_limited(
     root: &File,
     _diagnostic_root: &Path,
@@ -84,6 +97,11 @@ pub(crate) fn read_rooted_link_limited(
 
 /// Normalizes a bounded target only after policy has inspected its raw
 /// spelling.
+///
+/// # Parameters
+///
+/// - `raw_path`: Raw substitute name to normalize after policy checks.
+/// - `flags`: Native flags determining relative or absolute interpretation.
 pub(crate) fn normalize_rooted_link_target(raw_path: &Path, flags: u32) -> Result<PathBuf> {
     use std::os::windows::ffi::OsStrExt;
 
@@ -105,6 +123,14 @@ pub(crate) fn normalize_rooted_link_target(raw_path: &Path, flags: u32) -> Resul
 /// Retains the primary error, destination certainty, and a separate cleanup
 /// error when rollback also fails. `targets_directory` selects placeholder
 /// kind.
+///
+/// # Parameters
+///
+/// - `root`: Open directory handle bounding destination traversal.
+/// - `_diagnostic_root`: Diagnostic context; it does not direct mutation.
+/// - `target`: User-visible target encoded in the reparse record.
+/// - `path`: Root-relative destination path.
+/// - `targets_directory`: Selects the placeholder kind.
 pub(crate) fn create_rooted_symlink(
     root: &File,
     _diagnostic_root: &Path,
@@ -145,6 +171,12 @@ pub(crate) fn create_rooted_symlink(
 /// Reopening by the retained parent handle and comparing stable file identity
 /// avoids treating the mere presence of a native error code as proof that the
 /// destination still names the placeholder.
+///
+/// # Parameters
+///
+/// - `parent`: Retained parent handle for safe inspection.
+/// - `name`: Destination entry name relative to `parent`.
+/// - `placeholder`: Open handle whose identity is compared.
 fn rollback_failure_state(
     parent: &File,
     name: &std::ffi::OsStr,
@@ -165,6 +197,10 @@ fn rollback_failure_state(
 
 /// Reads the stable volume and file identifier of an opened entry.
 /// Propagates the native `GetFileInformationByHandleEx` error.
+///
+/// # Parameters
+///
+/// - `file`: Open entry whose stable identity is queried.
 fn handle_identity(file: &File) -> Result<(u64, [u8; 16])> {
     let mut identity = FILE_ID_INFO::default();
     // SAFETY: `file` owns a live handle and `identity` is a correctly sized
@@ -191,6 +227,11 @@ fn handle_identity(file: &File) -> Result<(u64, [u8; 16])> {
 ///
 /// Returns an I/O error when the final entry cannot be opened, is not a
 /// symbolic link, or its attributes cannot be inspected.
+///
+/// # Parameters
+///
+/// - `root`: Open directory handle bounding parent traversal.
+/// - `path`: Root-relative path to the final symbolic-link entry.
 pub(crate) fn rooted_link_targets_directory(root: &File, path: &LocalRelativePath) -> Result<bool> {
     let link = open_link(root, path, FILE_READ_ATTRIBUTES | SYNCHRONIZE)?;
     let attributes = handle_attributes(&link)?;
@@ -206,6 +247,12 @@ pub(crate) fn rooted_link_targets_directory(root: &File, path: &LocalRelativePat
 /// Opens the final link without following it.
 /// Uses the requested native `access` and propagates parent traversal or final
 /// open errors. The caller verifies that the returned entry is a symbolic link.
+///
+/// # Parameters
+///
+/// - `root`: Open directory handle bounding parent traversal.
+/// - `path`: Root-relative path to open.
+/// - `access`: Native access mask requested for the final handle.
 fn open_link(root: &File, path: &LocalRelativePath, access: u32) -> Result<File> {
     let (parent, name) = open_parent(root, path)?;
     nt_open_at(&parent, &name, access, FILE_OPEN, 0)
@@ -216,6 +263,11 @@ fn open_link(root: &File, path: &LocalRelativePath, access: u32) -> Result<File>
 /// This issues `FSCTL_SET_REPARSE_POINT`. Returns `InvalidInput` when the
 /// buffer length cannot be represented as a native `u32`, or propagates the
 /// native installation error. The caller is responsible for rollback.
+///
+/// # Parameters
+///
+/// - `link`: Writable placeholder handle receiving the record.
+/// - `buffer`: Complete encoded symbolic-link reparse record.
 fn set_reparse_buffer(link: &File, buffer: &[u8]) -> Result<()> {
     let mut returned = 0_u32;
     let buffer_length = u32::try_from(buffer.len())
@@ -244,6 +296,10 @@ fn set_reparse_buffer(link: &File, buffer: &[u8]) -> Result<()> {
 /// Builds the native reparse record that preserves one user-visible target.
 /// Returns `InvalidInput` for native NUL, length overflow, or a target
 /// exceeding native field/buffer limits. Performs no filesystem access.
+///
+/// # Parameters
+///
+/// - `target`: User-visible target whose native record is built.
 fn build_symbolic_link_buffer(target: &Path) -> Result<Vec<u8>> {
     let print_name: Vec<u16> = target.as_os_str().encode_wide().collect();
     if print_name.contains(&0) {
@@ -292,12 +348,20 @@ fn build_symbolic_link_buffer(target: &Path) -> Result<Vec<u8>> {
 /// Parses and validates the actual target from a native reparse record.
 /// Returns `Unsupported` for other reparse tags or unsupported absolute
 /// namespaces, and `InvalidData` for malformed names or inconsistent flags.
+///
+/// # Parameters
+///
+/// - `buffer`: Native reparse record to validate and decode.
 fn parse_symbolic_link_target(buffer: &[u8]) -> Result<PathBuf> {
     let units = parse_symbolic_link_target_units(buffer)?;
     Ok(PathBuf::from(OsString::from_wide(&units)))
 }
 
 /// Parses and validates the target's UTF-16 units without constructing a path.
+///
+/// # Parameters
+///
+/// - `buffer`: Native reparse record whose target units are decoded.
 fn parse_symbolic_link_target_units(buffer: &[u8]) -> Result<Vec<u16>> {
     let (record_length, substitute_offset, substitute_length, flags) = parse_symbolic_link_fields(buffer)?;
     let units = read_wide_range(buffer, record_length, substitute_offset, substitute_length)?;
@@ -305,6 +369,11 @@ fn parse_symbolic_link_target_units(buffer: &[u8]) -> Result<Vec<u16>> {
 }
 
 /// Checks the raw substitute name limit before copying any target UTF-16 units.
+///
+/// # Parameters
+///
+/// - `buffer`: Native reparse record to validate and inspect.
+/// - `maximum_bytes`: Optional limit applied to the raw substitute name.
 fn parse_limited_symbolic_link_target(buffer: &[u8], maximum_bytes: Option<usize>) -> Result<RootedLinkTargetRead> {
     let (record_length, substitute_offset, substitute_length, flags) = parse_symbolic_link_fields(buffer)?;
     let (start, end) = wide_range(record_length, substitute_offset, substitute_length)?;
@@ -323,6 +392,10 @@ fn parse_limited_symbolic_link_target(buffer: &[u8], maximum_bytes: Option<usize
 }
 
 /// Reads and validates the fixed fields of a symbolic-link reparse record.
+///
+/// # Parameters
+///
+/// - `buffer`: Native reparse record containing the fixed fields.
 fn parse_symbolic_link_fields(buffer: &[u8]) -> Result<(usize, usize, usize, u32)> {
     if buffer.len() < SYMLINK_PATH_BUFFER_OFFSET {
         return Err(corrupt_reparse("symbolic-link reparse buffer is truncated"));
@@ -347,6 +420,11 @@ fn parse_symbolic_link_fields(buffer: &[u8]) -> Result<(usize, usize, usize, u32
 }
 
 /// Validates target semantics and normalizes supported absolute NT names.
+///
+/// # Parameters
+///
+/// - `units`: Decoded substitute-name UTF-16 units.
+/// - `flags`: Native flags determining target semantics.
 fn normalize_symbolic_link_target(units: Vec<u16>, flags: u32) -> Result<Vec<u16>> {
     let units = match flags {
         SYMLINK_FLAG_RELATIVE if is_rooted_wide_path(&units) => {
@@ -362,6 +440,10 @@ fn normalize_symbolic_link_target(units: Vec<u16>, flags: u32) -> Result<Vec<u16
 }
 
 /// Converts supported absolute NT substitute names to equivalent Win32 paths.
+///
+/// # Parameters
+///
+/// - `units`: Absolute substitute-name UTF-16 units to normalize.
 fn normalize_absolute_substitute_name(units: &[u16]) -> Result<Vec<u16>> {
     const NT_PREFIX: &[u16] = &[b'\\' as u16, b'?' as u16, b'?' as u16, b'\\' as u16];
     const NT_UNC_PREFIX: &[u16] = &[
@@ -406,6 +488,10 @@ fn normalize_absolute_substitute_name(units: &[u16]) -> Result<Vec<u16>> {
 }
 
 /// Identifies drive-rooted or slash-rooted UTF-16 paths without host APIs.
+///
+/// # Parameters
+///
+/// - `units`: UTF-16 path units to classify.
 fn is_rooted_wide_path(units: &[u16]) -> bool {
     units
         .first()
@@ -414,6 +500,12 @@ fn is_rooted_wide_path(units: &[u16]) -> bool {
 }
 
 /// Produces the kernel substitute name and relative-link flag.
+///
+/// # Parameters
+///
+/// - `target`: Original target used to determine relative or absolute
+///   semantics.
+/// - `print_name`: Encoded user-visible target spelling.
 fn substitute_name(target: &Path, print_name: &[u16]) -> (Vec<u16>, u32) {
     const NT_PREFIX: &[u16] = &[b'\\' as u16, b'?' as u16, b'?' as u16, b'\\' as u16];
     const NT_UNC_PREFIX: &[u16] = &[
@@ -459,6 +551,10 @@ fn substitute_name(target: &Path, print_name: &[u16]) -> (Vec<u16>, u32) {
 
 /// Converts a UTF-16 unit count into a native 16-bit byte length.
 /// Returns `InvalidInput` on multiplication overflow or a length above `u16`.
+///
+/// # Parameters
+///
+/// - `units`: Number of UTF-16 units to convert to a byte length.
 fn checked_utf16_byte_length(units: usize) -> Result<u16> {
     units
         .checked_mul(size_of::<u16>())
@@ -467,6 +563,11 @@ fn checked_utf16_byte_length(units: usize) -> Result<u16> {
 }
 
 /// Reads one little-endian 16-bit value from a validated native buffer.
+///
+/// # Parameters
+///
+/// - `buffer`: Native record bytes containing the field.
+/// - `offset`: Byte offset of the field in `buffer`.
 fn read_u16(buffer: &[u8], offset: usize) -> Result<u16> {
     let bytes = buffer
         .get(offset..offset + 2)
@@ -475,6 +576,11 @@ fn read_u16(buffer: &[u8], offset: usize) -> Result<u16> {
 }
 
 /// Reads one little-endian 32-bit value from a validated native buffer.
+///
+/// # Parameters
+///
+/// - `buffer`: Native record bytes containing the field.
+/// - `offset`: Byte offset of the field in `buffer`.
 fn read_u32(buffer: &[u8], offset: usize) -> Result<u32> {
     let bytes = buffer
         .get(offset..offset + 4)
@@ -486,6 +592,13 @@ fn read_u32(buffer: &[u8], offset: usize) -> Result<u32> {
 /// The caller must ensure `record_length <= buffer.len()`. Returns
 /// `InvalidData` for misalignment, arithmetic overflow, or a range extending
 /// beyond that validated record length.
+///
+/// # Parameters
+///
+/// - `buffer`: Native record bytes containing the UTF-16 range.
+/// - `record_length`: Validated byte length of the record within `buffer`.
+/// - `offset`: UTF-16 byte offset relative to the path buffer.
+/// - `length`: UTF-16 byte length of the requested range.
 fn read_wide_range(buffer: &[u8], record_length: usize, offset: usize, length: usize) -> Result<Vec<u16>> {
     let (start, end) = wide_range(record_length, offset, length)?;
     Ok(buffer[start..end]
@@ -495,6 +608,12 @@ fn read_wide_range(buffer: &[u8], record_length: usize, offset: usize, length: u
 }
 
 /// Validates a UTF-16 range and returns its byte bounds without allocating.
+///
+/// # Parameters
+///
+/// - `record_length`: Validated byte length of the record.
+/// - `offset`: UTF-16 byte offset relative to the path buffer.
+/// - `length`: UTF-16 byte length of the requested range.
 fn wide_range(record_length: usize, offset: usize, length: usize) -> Result<(usize, usize)> {
     if !offset.is_multiple_of(size_of::<u16>()) || !length.is_multiple_of(size_of::<u16>()) {
         return Err(corrupt_reparse("symbolic-link reparse name is not UTF-16 aligned"));
@@ -510,21 +629,43 @@ fn wide_range(record_length: usize, offset: usize, length: usize) -> Result<(usi
 }
 
 /// Builds an invalid-data error for a malformed native reparse record.
+///
+/// # Parameters
+///
+/// - `message`: Static explanation associated with the malformed-record error.
 pub(super) fn corrupt_reparse(message: &'static str) -> Error {
     Error::new(ErrorKind::InvalidData, message)
 }
 
 /// Writes one little-endian 16-bit field into a sized builder buffer.
+///
+/// # Parameters
+///
+/// - `buffer`: Sized output buffer receiving the field.
+/// - `offset`: Byte offset at which the field is written.
+/// - `value`: Little-endian value to encode.
 fn write_u16(buffer: &mut [u8], offset: usize, value: u16) {
     buffer[offset..offset + 2].copy_from_slice(&value.to_le_bytes());
 }
 
 /// Writes one little-endian 32-bit field into a sized builder buffer.
+///
+/// # Parameters
+///
+/// - `buffer`: Sized output buffer receiving the field.
+/// - `offset`: Byte offset at which the field is written.
+/// - `value`: Little-endian value to encode.
 fn write_u32(buffer: &mut [u8], offset: usize, value: u32) {
     buffer[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
 }
 
 /// Writes UTF-16 units into a sized builder buffer.
+///
+/// # Parameters
+///
+/// - `buffer`: Sized output buffer receiving the units.
+/// - `offset`: Byte offset of the first unit.
+/// - `units`: UTF-16 units to encode in little-endian order.
 fn write_wide(buffer: &mut [u8], offset: usize, units: &[u16]) {
     for (index, unit) in units.iter().enumerate() {
         let start = offset + index * size_of::<u16>();

@@ -19,6 +19,8 @@ use super::internal::LocalNativeIdentity;
 /// compares the platform identity values; it does not promise uniqueness after
 /// object deletion and identifier reuse.
 ///
+/// # Examples
+///
 /// ```
 /// use std::path::Path;
 /// use qubit_local_files::LocalFileSystem;
@@ -46,7 +48,15 @@ pub struct LocalFileIdentity {
 
 impl LocalFileIdentity {
     /// Builds an identity from Unix device and inode values.
+    ///
+    /// # Parameters
+    ///
+    /// * `device` - The native device number identifying the filesystem.
+    /// * `inode` - The native inode number identifying the object on that
+    ///   device.
+    #[must_use]
     #[cfg(unix)]
+    #[inline]
     pub(crate) const fn unix(device: u64, inode: u64) -> Self {
         Self {
             native: LocalNativeIdentity::Unix { device, inode },
@@ -54,7 +64,16 @@ impl LocalFileIdentity {
     }
 
     /// Builds an identity from the Windows volume serial and complete file ID.
+    ///
+    /// # Parameters
+    ///
+    /// * `volume_serial` - The serial number of the volume containing the
+    ///   object.
+    /// * `file_id` - The complete 128-bit identifier supplied by Windows.
+    #[must_use]
+    #[inline]
     #[cfg(windows)]
+    #[inline]
     pub(crate) const fn windows(volume_serial: u64, file_id: [u8; 16]) -> Self {
         Self {
             native: LocalNativeIdentity::Windows { volume_serial, file_id },

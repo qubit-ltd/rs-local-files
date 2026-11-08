@@ -10,37 +10,6 @@
 
 mod support;
 
-mod conditional {
-    use qubit_io::Input;
-    use qubit_local_files::LocalFileSystem;
-    use qubit_local_files::policy::LocalSymlinkPolicy;
-
-    pub fn host() -> LocalFileSystem {
-        let mut filesystem = LocalFileSystem::host().expect("host filesystem");
-        filesystem
-            .set_symlink_policy(LocalSymlinkPolicy::Reject)
-            .expect("reject symlinks");
-        filesystem
-    }
-
-    pub fn read_candidate(error: &qubit_local_files::error::LocalConditionalCommitError) -> Vec<u8> {
-        let candidate = error.candidate().expect("verified candidate copy");
-        read_recovery(candidate)
-    }
-
-    pub fn read_recovery(file: &qubit_local_files::recovery::LocalRecoveryFile) -> Vec<u8> {
-        let mut reader = file.open_reader().expect("open recovery file through retained access");
-        let mut bytes = Vec::new();
-        let mut buffer = [0_u8; 128];
-        loop {
-            match reader.read(&mut buffer).expect("read candidate") {
-                0 => return bytes,
-                count => bytes.extend_from_slice(&buffer[..count]),
-            }
-        }
-    }
-}
-
 #[cfg(unix)]
 use std::error::Error;
 
@@ -53,11 +22,12 @@ use qubit_local_files::test_support::TestConditionalHooks;
 use qubit_local_files::test_support::TestConditionalPoint;
 use sha2::Digest;
 use sha2::Sha256;
+use support::conditional;
 use support::conditional_temp_directory::tempdir;
 
 #[test]
 #[cfg(unix)]
-fn required_file_sync_error_before_publication_is_reported_as_not_published() {
+fn test_required_file_sync_error_before_publication_is_reported_as_not_published() {
     let directory = tempdir().unwrap();
     let path = directory.path().join("target");
     let filesystem = conditional::host().with_conditional_test_hooks(TestConditionalHooks::once(
@@ -85,7 +55,7 @@ fn required_file_sync_error_before_publication_is_reported_as_not_published() {
 
 #[test]
 #[cfg(unix)]
-fn required_parent_sync_error_is_reported_after_published_file_sync() {
+fn test_required_parent_sync_error_is_reported_after_published_file_sync() {
     let directory = tempdir().unwrap();
     let path = directory.path().join("target");
     let filesystem = conditional::host().with_conditional_test_hooks(TestConditionalHooks::once(
@@ -125,7 +95,7 @@ fn required_parent_sync_error_is_reported_after_published_file_sync() {
 
 #[cfg(windows)]
 #[test]
-fn windows_sharing_failure_removes_empty_owned_recovery_container() {
+fn test_windows_sharing_failure_removes_empty_owned_recovery_container() {
     use std::os::windows::fs::OpenOptionsExt;
 
     use qubit_local_files::recovery::LocalRecoveryFileRole;
@@ -175,7 +145,7 @@ fn windows_sharing_failure_removes_empty_owned_recovery_container() {
 
 #[test]
 #[cfg(windows)]
-fn required_parent_sync_unavailability_fails_before_publication() {
+fn test_required_parent_sync_unavailability_fails_before_publication() {
     use qubit_local_files::LocalFileSystem;
     use qubit_local_files::error::LocalFileErrorKind;
     use qubit_local_files::error::LocalFileOperation;
@@ -251,7 +221,7 @@ fn required_parent_sync_unavailability_fails_before_publication() {
 }
 
 #[test]
-fn candidate_copy_verification_fault_does_not_publish() {
+fn test_candidate_copy_verification_fault_does_not_publish() {
     let directory = tempdir().unwrap();
     let path = directory.path().join("target");
     let filesystem = conditional::host().with_conditional_test_hooks(TestConditionalHooks::once(
@@ -278,7 +248,7 @@ fn candidate_copy_verification_fault_does_not_publish() {
 }
 
 #[test]
-fn candidate_copy_preparation_failure_keeps_but_does_not_label_candidate_copy() {
+fn test_candidate_copy_preparation_failure_keeps_but_does_not_label_candidate_copy() {
     let directory = tempdir().unwrap();
     let path = directory.path().join("target");
     let filesystem = conditional::host().with_conditional_test_hooks(TestConditionalHooks::once(
@@ -305,7 +275,7 @@ fn candidate_copy_preparation_failure_keeps_but_does_not_label_candidate_copy() 
 }
 
 #[test]
-fn cleanup_old_failure_keeps_success_and_displaced_contents() {
+fn test_cleanup_old_failure_keeps_success_and_displaced_contents() {
     let directory = tempdir().unwrap();
     let path = directory.path().join("target");
     std::fs::write(&path, b"A").unwrap();
@@ -333,7 +303,7 @@ fn cleanup_old_failure_keeps_success_and_displaced_contents() {
 }
 
 #[test]
-fn cleanup_copy_failure_keeps_success_and_reports_recovery_file() {
+fn test_cleanup_copy_failure_keeps_success_and_reports_recovery_file() {
     let directory = tempdir().unwrap();
     let path = directory.path().join("target");
     let filesystem = conditional::host().with_conditional_test_hooks(TestConditionalHooks::once(
@@ -365,7 +335,7 @@ fn cleanup_copy_failure_keeps_success_and_reports_recovery_file() {
 }
 
 #[test]
-fn cleanup_directory_sync_error_keeps_success_even_after_copy_removal() {
+fn test_cleanup_directory_sync_error_keeps_success_even_after_copy_removal() {
     let directory = tempdir().unwrap();
     let path = directory.path().join("target");
     let filesystem = conditional::host().with_conditional_test_hooks(TestConditionalHooks::once(
@@ -393,7 +363,7 @@ fn cleanup_directory_sync_error_keeps_success_even_after_copy_removal() {
 }
 
 #[test]
-fn default_durability_skips_cleanup_sync_checkpoint_for_host_and_rooted_writes() {
+fn test_default_durability_skips_cleanup_sync_checkpoint_for_host_and_rooted_writes() {
     use qubit_local_files::LocalFileSystem;
 
     for rooted in [false, true] {
@@ -454,7 +424,7 @@ fn default_durability_skips_cleanup_sync_checkpoint_for_host_and_rooted_writes()
 }
 
 #[test]
-fn panic_after_publication_does_not_remove_candidate_or_unknown_target() {
+fn test_panic_after_publication_does_not_remove_candidate_or_unknown_target() {
     let directory = tempdir().unwrap();
     let path = directory.path().join("target");
     let competitor = path.clone();
@@ -481,7 +451,7 @@ fn panic_after_publication_does_not_remove_candidate_or_unknown_target() {
 }
 
 #[test]
-fn panic_before_native_publish_leaves_unpublished_staging_for_recovery() {
+fn test_panic_before_native_publish_leaves_unpublished_staging_for_recovery() {
     let directory = tempdir().unwrap();
     let path = directory.path().join("target");
     let filesystem = conditional::host()

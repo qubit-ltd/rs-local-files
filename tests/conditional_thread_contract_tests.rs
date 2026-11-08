@@ -47,7 +47,7 @@ fn test_conditional_recovery_types_are_send_sync() {
 }
 
 #[test]
-fn conditional_commit_failure_can_move_across_threads_and_keeps_recovery_file() {
+fn test_conditional_commit_failure_can_move_across_threads_and_keeps_recovery_file() {
     let directory = tempdir().expect("create temporary directory");
     let target = directory
         .path()

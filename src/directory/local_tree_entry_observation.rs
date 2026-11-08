@@ -51,6 +51,16 @@ pub struct LocalTreeEntryObservation {
 
 impl LocalTreeEntryObservation {
     /// Creates an observation for a stage-relative entry.
+    ///
+    /// # Parameters
+    ///
+    /// - `relative_path`: Entry path relative to the staged directory root.
+    /// - `observation`: Native metadata captured for the enumerated entry.
+    ///
+    /// # Returns
+    ///
+    /// An entry observation containing the supplied path and metadata.
+    #[inline]
     pub(crate) const fn new(relative_path: PathBuf, observation: LocalFileObservation) -> Self {
         Self {
             relative_path,
@@ -59,13 +69,23 @@ impl LocalTreeEntryObservation {
     }
 
     /// Returns this entry's path relative to the staged directory.
+    ///
+    /// # Returns
+    ///
+    /// The path captured for this entry.
     #[must_use]
+    #[inline]
     pub fn relative_path(&self) -> &Path {
         &self.relative_path
     }
 
     /// Returns the native observation captured for this entry.
+    ///
+    /// # Returns
+    ///
+    /// The metadata observation captured for this entry.
     #[must_use]
+    #[inline]
     pub const fn observation(&self) -> &LocalFileObservation {
         &self.observation
     }

@@ -19,7 +19,7 @@ use qubit_local_files::options::LocalDirectoryOpenOptions;
 use qubit_local_files::options::LocalListOptions;
 
 #[test]
-fn directory_handle_list_zero_deadline_times_out_without_changes() {
+fn test_directory_handle_list_zero_deadline_times_out_without_changes() {
     let fixture = tempfile::tempdir().expect("fixture should exist");
     fs::create_dir(fixture.path().join("child")).expect("child should exist");
     fs::write(fixture.path().join("child/payload"), b"unchanged").expect("payload should exist");

@@ -14,6 +14,13 @@ use crate::observation::LocalObservedReader;
 use crate::options::LocalObservedReadOptions;
 
 /// Opens a reader through this handle's retained root and original recipe.
+///
+/// # Parameters
+///
+/// - `handle` is the directory handle whose retained root and binding recipe
+///   are used to open the reader.
+/// - `relative` is the path to open relative to the handle's root.
+/// - `options` controls how the observed reader is opened.
 pub(super) fn open(
     handle: &LocalDirectoryHandle,
     relative: &Path,

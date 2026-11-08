@@ -142,12 +142,24 @@ impl DeleteBackend for RootedLocalFileSystem {
 
     /// Borrows diagnostic coordinates without allocating or resolving the
     /// entry.
+    ///
+    /// # Parameters
+    ///
+    /// - `value`: Root-relative coordinate whose path is borrowed.
+    ///
+    /// # Returns
+    ///
+    /// The filesystem path represented by `value`.
     #[inline]
     fn path<'a>(&self, value: &'a Self::Path) -> &'a std::path::Path {
         value.as_path()
     }
 
     /// Inspects the final entry without following its symbolic-link target.
+    ///
+    /// # Parameters
+    ///
+    /// - `path`: Root-relative entry to inspect.
     ///
     /// # Errors
     ///
@@ -169,12 +181,20 @@ impl DeleteBackend for RootedLocalFileSystem {
 
     /// Tests whether inspected metadata denotes a real directory rather than a
     /// link.
+    ///
+    /// # Parameters
+    ///
+    /// - `metadata`: Metadata returned by the no-follow inspection.
     #[inline]
     fn is_directory(&self, metadata: &Self::Metadata) -> bool {
         metadata.kind() == crate::rooted::EntryKind::Directory
     }
 
     /// Opens a lazy reader whose lifetime is controlled by the scheduler.
+    ///
+    /// # Parameters
+    ///
+    /// - `path`: Root-relative directory to enumerate.
     ///
     /// # Errors
     ///
@@ -189,6 +209,11 @@ impl DeleteBackend for RootedLocalFileSystem {
     }
 
     /// Produces one child coordinate, or `None` when the reader is exhausted.
+    ///
+    /// # Parameters
+    ///
+    /// - `parent`: Root-relative coordinate used to form child paths.
+    /// - `reader`: Open directory reader to advance.
     ///
     /// # Errors
     ///
@@ -205,6 +230,11 @@ impl DeleteBackend for RootedLocalFileSystem {
 
     /// Removes the inspected leaf itself, including a final directory link.
     ///
+    /// # Parameters
+    ///
+    /// - `path`: Root-relative leaf to unlink.
+    /// - `_metadata`: Previously inspected metadata, unused by this backend.
+    ///
     /// # Errors
     ///
     /// Returns native unlink errors; symbolic-link targets remain untouched.
@@ -218,6 +248,10 @@ impl DeleteBackend for RootedLocalFileSystem {
     }
 
     /// Removes a directory after the scheduler has processed its children.
+    ///
+    /// # Parameters
+    ///
+    /// - `path`: Root-relative directory to remove.
     ///
     /// # Errors
     ///
@@ -236,6 +270,10 @@ impl DeleteBackend for RootedLocalFileSystem {
     ///
     /// Production calls have no side effects; an enabled test fault returns an
     /// I/O error before the scheduler can count this entry as removed.
+    ///
+    /// # Parameters
+    ///
+    /// - `path`: Root-relative entry about to be removed.
     fn before_remove(&self, path: &Self::Path) -> io::Result<()> {
         #[cfg(feature = "test-support")]
         if crate::local::take_test_support_on_nth("rooted-delete-directory-entry-second", 2) {

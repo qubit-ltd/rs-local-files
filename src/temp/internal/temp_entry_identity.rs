@@ -9,7 +9,22 @@
 
 use std::fs;
 use std::io;
+#[cfg(unix)]
+use std::os::unix::fs::MetadataExt;
+#[cfg(windows)]
+use std::os::windows::fs::OpenOptionsExt;
+#[cfg(windows)]
+use std::os::windows::io::AsRawHandle;
 use std::path::Path;
+
+#[cfg(windows)]
+use windows_sys::Win32::Storage::FileSystem::BY_HANDLE_FILE_INFORMATION;
+#[cfg(windows)]
+use windows_sys::Win32::Storage::FileSystem::FILE_FLAG_BACKUP_SEMANTICS;
+#[cfg(windows)]
+use windows_sys::Win32::Storage::FileSystem::FILE_FLAG_OPEN_REPARSE_POINT;
+#[cfg(windows)]
+use windows_sys::Win32::Storage::FileSystem::GetFileInformationByHandle;
 
 /// Native identity captured when a host temporary entry is created.
 #[derive(Debug)]
@@ -30,8 +45,17 @@ pub(crate) struct TempEntryIdentity {
 
 impl TempEntryIdentity {
     /// Captures identity from a newly created regular file handle.
-    /// Propagates native metadata/identity inspection errors or `Unsupported`
-    /// when stable native identity is unavailable on this platform.
+    ///
+    /// # Parameters
+    /// - `file`: Open handle for the newly created regular file.
+    ///
+    /// # Returns
+    /// The native identity captured from the file handle's metadata.
+    ///
+    /// # Errors
+    /// Returns native metadata or identity inspection failures, or
+    /// `Unsupported` when stable native identity is unavailable on this
+    /// platform.
     pub(crate) fn from_file(file: &fs::File) -> io::Result<Self> {
         #[cfg(feature = "test-support")]
         if crate::local::take_test_support("temp-identity-file")
@@ -58,8 +82,18 @@ impl TempEntryIdentity {
     }
 
     /// Captures identity from a newly created directory path.
-    /// Observes the final entry without following a link. Propagates native
-    /// open/inspection errors or unsupported-platform errors.
+    /// Observes the final entry without following a link.
+    ///
+    /// # Parameters
+    /// - `path`: Path to the newly created directory entry.
+    ///
+    /// # Returns
+    /// The native identity captured from the final path entry.
+    ///
+    /// # Errors
+    /// Returns native open or identity inspection failures, or
+    /// `Unsupported` when stable native identity is unavailable on this
+    /// platform.
     pub(crate) fn from_path(path: &Path) -> io::Result<Self> {
         #[cfg(feature = "test-support")]
         if crate::local::take_test_support("temp-identity-directory")
@@ -69,11 +103,6 @@ impl TempEntryIdentity {
         }
         #[cfg(windows)]
         {
-            use std::os::windows::fs::OpenOptionsExt;
-
-            use windows_sys::Win32::Storage::FileSystem::FILE_FLAG_BACKUP_SEMANTICS;
-            use windows_sys::Win32::Storage::FileSystem::FILE_FLAG_OPEN_REPARSE_POINT;
-
             let file = fs::OpenOptions::new()
                 .read(true)
                 .custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT)
@@ -87,8 +116,18 @@ impl TempEntryIdentity {
     }
 
     /// Returns whether `path` still names the captured entry.
-    /// Returns false for a different identity; a missing entry or failed
-    /// native inspection is an error, not a negative match.
+    ///
+    /// # Parameters
+    /// - `path`: Path to inspect without treating inspection failures as a
+    ///   negative match.
+    ///
+    /// # Returns
+    /// `true` when the path names the captured entry, or `false` when it names
+    /// a different entry.
+    ///
+    /// # Errors
+    /// Returns an error if the entry is missing or native identity inspection
+    /// fails.
     pub(crate) fn matches_path(&self, path: &Path) -> io::Result<bool> {
         Ok(*self == Self::from_path(path)?)
     }
@@ -98,6 +137,10 @@ impl TempEntryIdentity {
     /// # Parameters
     /// - `file`: Open file handle to inspect.
     ///
+    /// # Returns
+    /// `true` when the handle identifies the captured entry, or `false` when
+    /// it identifies a different entry.
+    ///
     /// # Errors
     /// Returns native identity-inspection failures.
     pub(crate) fn matches_file(&self, file: &fs::File) -> io::Result<bool> {
@@ -105,12 +148,21 @@ impl TempEntryIdentity {
     }
 
     /// Captures the stable native identity reported by metadata.
+    ///
+    /// # Parameters
+    /// - `metadata`: Metadata for the entry whose identity is captured.
+    ///
+    /// # Returns
+    /// The stable native identity represented by the metadata.
+    ///
+    /// # Errors
+    /// Returns `Unsupported` when this platform has no supported stable native
+    /// identity representation.
     #[cfg(not(windows))]
+    #[inline]
     fn from_metadata(metadata: &fs::Metadata) -> io::Result<Self> {
         #[cfg(unix)]
         {
-            use std::os::unix::fs::MetadataExt;
-
             Ok(Self {
                 device: metadata.dev(),
                 inode: metadata.ino(),
@@ -127,14 +179,18 @@ impl TempEntryIdentity {
     }
 
     /// Captures volume and file identifiers from an opened Windows handle.
-    /// Propagates the native `GetFileInformationByHandle` error.
+    ///
+    /// # Parameters
+    /// - `file`: Open Windows handle whose volume and file identifiers are
+    ///   captured.
+    ///
+    /// # Returns
+    /// The volume serial number and file index reported by the handle.
+    ///
+    /// # Errors
+    /// Returns the native `GetFileInformationByHandle` error.
     #[cfg(windows)]
     fn from_windows_file(file: &fs::File) -> io::Result<Self> {
-        use std::os::windows::io::AsRawHandle;
-
-        use windows_sys::Win32::Storage::FileSystem::BY_HANDLE_FILE_INFORMATION;
-        use windows_sys::Win32::Storage::FileSystem::GetFileInformationByHandle;
-
         let mut information = BY_HANDLE_FILE_INFORMATION::default();
         // SAFETY: `file` owns a live handle and `information` is the matching
         // writable output structure.
@@ -151,6 +207,13 @@ impl TempEntryIdentity {
 
 impl PartialEq for TempEntryIdentity {
     /// Compares the stable native identity components for this target.
+    ///
+    /// # Parameters
+    /// - `other`: Identity to compare with this value.
+    ///
+    /// # Returns
+    /// `true` when both values identify the same native entry on this target.
+    #[inline]
     fn eq(&self, other: &Self) -> bool {
         #[cfg(unix)]
         {

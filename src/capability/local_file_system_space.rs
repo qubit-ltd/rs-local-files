@@ -30,6 +30,14 @@ pub struct LocalFileSystemSpace {
 
 impl LocalFileSystemSpace {
     /// Creates space observations from independently available values.
+    ///
+    /// # Parameters
+    ///
+    /// * `capacity_bytes` - Total filesystem capacity, or `None` when unknown.
+    /// * `free_bytes` - Unallocated capacity including privileged reserve, or
+    ///   `None` when unknown.
+    /// * `available_bytes` - Capacity available to the caller, or `None` when
+    ///   unknown.
     #[inline]
     pub const fn new(capacity_bytes: Option<u64>, free_bytes: Option<u64>, available_bytes: Option<u64>) -> Self {
         Self {
@@ -40,18 +48,32 @@ impl LocalFileSystemSpace {
     }
 
     /// Returns the total filesystem capacity when it can be observed.
+    ///
+    /// # Returns
+    ///
+    /// `Some(bytes)` when capacity is known, or `None` when it is unavailable.
     #[inline]
     pub const fn capacity_bytes(&self) -> Option<u64> {
         self.capacity_bytes
     }
 
     /// Returns filesystem free capacity, including reserved space, when known.
+    ///
+    /// # Returns
+    ///
+    /// `Some(bytes)` when free capacity is known, or `None` when it is
+    /// unavailable.
     #[inline]
     pub const fn free_bytes(&self) -> Option<u64> {
         self.free_bytes
     }
 
     /// Returns capacity currently available to the calling identity when known.
+    ///
+    /// # Returns
+    ///
+    /// `Some(bytes)` when caller-available capacity is known, or `None` when it
+    /// is unavailable.
     #[inline]
     pub const fn available_bytes(&self) -> Option<u64> {
         self.available_bytes

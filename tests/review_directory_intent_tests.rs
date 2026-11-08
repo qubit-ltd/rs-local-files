@@ -7,16 +7,19 @@
 // =============================================================================
 
 #[cfg(unix)]
+use std::os::unix::fs::symlink;
+use std::path::Path;
+
+use qubit_io::Streams;
+use qubit_local_files::LocalFileSystem;
+use qubit_local_files::error::LocalFileErrorKind;
+use qubit_local_files::options::LocalDirectoryOpenOptions;
+use qubit_local_files::options::LocalObservedReadOptions;
+use qubit_local_files::options::LocalPathBindingOptions;
+
+#[cfg(unix)]
 #[test]
-fn trailing_separator_requires_a_directory_for_rooted_and_fixed_readers() {
-    use std::os::unix::fs::symlink;
-    use std::path::Path;
-
-    use qubit_local_files::LocalFileSystem;
-    use qubit_local_files::options::LocalDirectoryOpenOptions;
-    use qubit_local_files::options::LocalObservedReadOptions;
-    use qubit_local_files::options::LocalPathBindingOptions;
-
+fn test_trailing_separator_requires_a_directory_for_rooted_and_fixed_readers() {
     let fixture = tempfile::tempdir().expect("fixture");
     std::fs::write(fixture.path().join("payload"), b"file").expect("payload");
     std::fs::create_dir(fixture.path().join("directory")).expect("directory");
@@ -26,7 +29,7 @@ fn trailing_separator_requires_a_directory_for_rooted_and_fixed_readers() {
 
     let mut reader = filesystem.open_reader(Path::new("payload")).expect("regular file");
     let mut bytes = Vec::new();
-    qubit_io::Streams::copy_input_to_output(&mut reader, &mut bytes).expect("read regular file");
+    Streams::copy_input_to_output(&mut reader, &mut bytes).expect("read regular file");
     assert_eq!(bytes, b"file");
     assert!(filesystem.open_reader(Path::new("alias")).is_err());
     let observed = LocalObservedReadOptions::new();
@@ -36,7 +39,7 @@ fn trailing_separator_requires_a_directory_for_rooted_and_fixed_readers() {
         .open_directory_with_options(Path::new("/"), &LocalDirectoryOpenOptions::new())
         .expect("root directory");
     let error = root.open_observed_reader(Path::new("payload/"), &observed).unwrap_err();
-    assert_eq!(error.kind(), qubit_local_files::error::LocalFileErrorKind::NotDirectory);
+    assert_eq!(error.kind(), LocalFileErrorKind::NotDirectory);
     assert!(root.open_observed_reader(Path::new("payload/."), &observed).is_err());
     let mut bound = observed;
     bound = bound.with_path_binding(LocalPathBindingOptions::new());

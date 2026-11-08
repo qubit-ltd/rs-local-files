@@ -15,7 +15,7 @@ use crate::options::LocalTempDirectoryOptions;
 use crate::policy::LocalOwnerAccessPolicy;
 
 #[test]
-fn explicit_entry_limit_can_raise_owner_policy_default_ceiling() {
+fn test_explicit_entry_limit_can_raise_owner_policy_default_ceiling() {
     const ENTRY_COUNT: usize = 257;
 
     let fixture = tempfile::tempdir().expect("fixture should be created");

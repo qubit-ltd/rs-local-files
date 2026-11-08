@@ -60,7 +60,7 @@ pub(crate) fn resolve_host_path(
     let mut resolved = PathBuf::new();
     while let Some(component) = components.next() {
         push_host_component(&mut resolved, component);
-        if !matches!(component, std::path::Component::Normal(_)) {
+        if !matches!(component, Component::Normal(_)) {
             continue;
         }
         let is_final = components.peek().is_none();

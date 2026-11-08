@@ -21,6 +21,7 @@ use std::ptr::null_mut;
 
 use windows_sys::Wdk::Storage::FileSystem::FILE_CREATE;
 use windows_sys::Wdk::Storage::FileSystem::FILE_DIRECTORY_FILE;
+use windows_sys::Wdk::Storage::FileSystem::FILE_NON_DIRECTORY_FILE;
 use windows_sys::Wdk::Storage::FileSystem::FILE_OPEN;
 use windows_sys::Wdk::Storage::FileSystem::FILE_OPEN_IF;
 use windows_sys::Win32::Foundation::GENERIC_READ;
@@ -36,6 +37,7 @@ use windows_sys::Win32::Storage::FileSystem::FILE_LIST_DIRECTORY;
 use windows_sys::Win32::Storage::FileSystem::FILE_NAME_NORMALIZED;
 use windows_sys::Win32::Storage::FileSystem::FILE_READ_ATTRIBUTES;
 use windows_sys::Win32::Storage::FileSystem::FILE_TRAVERSE;
+use windows_sys::Win32::Storage::FileSystem::FILE_WRITE_ATTRIBUTES;
 use windows_sys::Win32::Storage::FileSystem::GetFinalPathNameByHandleW;
 use windows_sys::Win32::Storage::FileSystem::OPEN_EXISTING;
 use windows_sys::Win32::Storage::FileSystem::SYNCHRONIZE;
@@ -54,6 +56,16 @@ use crate::rooted::Metadata;
 use crate::temp::types::NativePrivateCreateError;
 
 /// Creates one temporary child using the inherited default Windows ACL.
+///
+/// # Parameters
+///
+/// - `parent` is the opened root directory that owns the new child.
+/// - `name` is the single child name to create beneath `parent`.
+/// - `directory` selects a directory (`true`) or regular file (`false`).
+///
+/// # Returns
+///
+/// Returns an open handle to the newly created child.
 ///
 /// # Errors
 /// Returns the native open/create error. `FILE_CREATE` creates the entry and
@@ -84,13 +96,23 @@ pub(crate) fn create_rooted_temp_child(
         if directory {
             FILE_DIRECTORY_FILE
         } else {
-            windows_sys::Wdk::Storage::FileSystem::FILE_NON_DIRECTORY_FILE
+            FILE_NON_DIRECTORY_FILE
         },
     )
     .map_err(|source| NativePrivateCreateError { source, retained: None })
 }
 
 /// Opens a lazy reader for immediate children of the opened root.
+///
+/// # Parameters
+///
+/// - `root` is the opened directory handle used to enumerate immediate
+///   children.
+/// - `_diagnostic_root` is unused by this handle-relative backend.
+///
+/// # Returns
+///
+/// Returns a lazy reader backed by an independent enumeration handle.
 ///
 /// # Errors
 ///
@@ -108,6 +130,19 @@ pub(crate) fn open_root_directory_reader(root: &File, _diagnostic_root: &Path) -
 /// `reopen` attempts to obtain a distinct file object for enumeration. If it
 /// returns `None`, this function returns `Unsupported`: cloning a Windows
 /// directory handle would share its native enumeration cursor.
+///
+/// # Type Parameters
+///
+/// - `F` is a one-shot operation that attempts to reopen `root` independently.
+///
+/// # Parameters
+///
+/// - `root` is the directory handle passed to `reopen`.
+/// - `reopen` attempts to produce an independent enumeration handle.
+///
+/// # Returns
+///
+/// Returns a lazy reader backed by the independent handle.
 ///
 /// # Errors
 ///
@@ -129,13 +164,23 @@ where
 }
 
 #[cfg(test)]
-#[path = "directory/fallback_tests.rs"]
 mod fallback_tests;
 
 /// Opens the root's normalized final path as a new file object.
 ///
-/// Returns `None` when the path cannot be used because it disappeared, changed
-/// identity, or access was denied. Propagates other native and metadata errors.
+/// # Parameters
+///
+/// - `root` supplies the identity and path used to reopen the directory.
+///
+/// # Returns
+///
+/// Returns `None` if the path is unavailable or resolves to a different file;
+/// otherwise returns the independently opened directory handle.
+///
+/// # Errors
+///
+/// Propagates native path lookup and metadata errors other than disappearance,
+/// identity change, and access denial, which return `None`.
 fn open_independent_root_directory(root: &File) -> Result<Option<File>> {
     let mut path = vec![0_u16; 256];
     loop {
@@ -203,6 +248,18 @@ fn open_independent_root_directory(root: &File) -> Result<Option<File>> {
 
 /// Lists immediate children of a rooted descendant directory.
 ///
+/// # Parameters
+///
+/// - `root` is the opened root capability used for secure traversal.
+/// - `diagnostic_root` is retained for the backend interface; enumeration uses
+///   only the opened directory handle and does not inspect this path.
+/// - `path` is the descendant directory to enumerate relative to `root`.
+///
+/// # Returns
+///
+/// Returns the immediate children in native-name order, each with an open
+/// handle.
+///
 /// # Errors
 ///
 /// Returns an I/O error when traversal, enumeration, or child inspection
@@ -224,6 +281,16 @@ pub(crate) fn read_rooted_directory(
 }
 
 /// Opens a lazy reader for immediate children of a rooted descendant.
+///
+/// # Parameters
+///
+/// - `root` is the opened root capability used for secure traversal.
+/// - `_diagnostic_root` is unused by this handle-relative backend.
+/// - `path` is the descendant directory to enumerate relative to `root`.
+///
+/// # Returns
+///
+/// Returns a lazy reader for the descendant's immediate children.
 ///
 /// # Errors
 ///
@@ -248,6 +315,18 @@ pub(crate) fn open_rooted_directory_reader(
 /// `recursive` allows creation of missing intermediate directories;
 /// `exists_ok` accepts an existing final directory. Earlier creations remain
 /// if a later component fails.
+///
+/// # Parameters
+///
+/// - `root` is the opened root capability used for secure traversal.
+/// - `_diagnostic_root` is unused by this handle-relative backend.
+/// - `path` identifies the directory path to create beneath `root`.
+/// - `recursive` permits creating missing intermediate directories.
+/// - `exists_ok` permits the final directory to already exist.
+///
+/// # Returns
+///
+/// Returns `()` after all path components have been processed.
 ///
 /// # Errors
 ///
@@ -298,6 +377,16 @@ pub(crate) fn create_rooted_directory(
 /// Recursive callers use the shared deletion scheduler before this boundary.
 /// Direct removal requires a leaf or an empty directory.
 ///
+/// # Parameters
+///
+/// - `root` is the opened root capability used for secure traversal.
+/// - `_diagnostic_root` is unused by this handle-relative backend.
+/// - `path` identifies the entry to remove beneath `root`.
+///
+/// # Returns
+///
+/// Returns `()` after the entry or directory tree has been removed.
+///
 /// # Errors
 ///
 /// Returns an I/O error when traversal, enumeration, or handle deletion fails.
@@ -307,6 +396,21 @@ pub(crate) fn remove_rooted_entry(root: &File, _diagnostic_root: &Path, path: &L
 
 /// Removes a rooted entry only when the current no-follow name still has the
 /// identity observed through the caller's retained handle.
+///
+/// # Parameters
+///
+/// - `root` is the opened root capability used for secure traversal.
+/// - `path` identifies the entry whose current identity is checked.
+/// - `expected` is the retained identity that must match before deletion.
+///
+/// # Returns
+///
+/// Returns `true` when the matching entry was removed, or `false` when its
+/// current identity differs from `expected`.
+///
+/// # Errors
+///
+/// Returns an I/O error when the entry cannot be opened, inspected, or deleted.
 pub(crate) fn remove_rooted_entry_if_same_file(
     root: &File,
     path: &LocalRelativePath,
@@ -322,6 +426,23 @@ pub(crate) fn remove_rooted_entry_if_same_file(
 }
 
 /// Removes one no-follow handle after checking the requested entry type.
+///
+/// # Parameters
+///
+/// - `root` is the opened root capability used for secure traversal.
+/// - `_diagnostic_root` is unused by this handle-relative backend.
+/// - `path` identifies the entry to remove beneath `root`.
+/// - `directory` requires a directory when `true` and a non-directory file or
+///   symlink when `false`.
+///
+/// # Returns
+///
+/// Returns `()` after the entry of the requested type has been removed.
+///
+/// # Errors
+///
+/// Returns an I/O error when the entry cannot be opened, its type does not
+/// match `directory`, or deletion fails.
 pub(crate) fn remove_rooted_entry_typed(
     root: &File,
     _diagnostic_root: &Path,
@@ -353,6 +474,21 @@ pub(crate) fn remove_rooted_entry_typed(
 
 /// Removes one owned rooted file only when its opened entry retains the
 /// creation-time identity.
+///
+/// # Parameters
+///
+/// - `root` is the opened root capability used for secure traversal.
+/// - `path` identifies the owned file beneath `root`.
+/// - `expected` is the file identity recorded at creation time.
+///
+/// # Returns
+///
+/// Returns `()` after the matching owned file has been removed.
+///
+/// # Errors
+///
+/// Returns an I/O error when the entry cannot be opened, is not a regular file,
+/// or fails the ownership check or removal.
 pub(crate) fn remove_rooted_owned_read_only_file(
     root: &File,
     path: &LocalRelativePath,
@@ -361,7 +497,7 @@ pub(crate) fn remove_rooted_owned_read_only_file(
     let entry = open_entry_no_follow(
         root,
         path,
-        DELETE | FILE_READ_ATTRIBUTES | windows_sys::Win32::Storage::FileSystem::FILE_WRITE_ATTRIBUTES | SYNCHRONIZE,
+        DELETE | FILE_READ_ATTRIBUTES | FILE_WRITE_ATTRIBUTES | SYNCHRONIZE,
         FILE_OPEN,
         0,
     )?;
@@ -372,6 +508,15 @@ pub(crate) fn remove_rooted_owned_read_only_file(
 }
 
 /// Opens and deletes one rooted entry without following a reparse point.
+///
+/// # Parameters
+///
+/// - `root` is the opened root capability used for secure traversal.
+/// - `path` identifies the entry to delete beneath `root`.
+///
+/// # Returns
+///
+/// Returns `()` after the entry has been removed.
 ///
 /// # Errors
 ///
@@ -385,6 +530,21 @@ fn delete_rooted_entry(root: &File, path: &LocalRelativePath) -> Result<()> {
 /// Enumerates one already opened directory with `NtQueryDirectoryFile`.
 /// Returns an eager list sorted by native name, retaining a handle per child.
 /// Propagates handle duplication, native enumeration, and child-open errors.
+///
+/// # Parameters
+///
+/// - `directory` is the already opened directory handle to enumerate.
+/// - `_diagnostic_root` is unused by this handle-relative backend.
+///
+/// # Returns
+///
+/// Returns the immediate children in native-name order, each with an open
+/// handle.
+///
+/// # Errors
+///
+/// Returns an I/O error when handle duplication, native enumeration, or child
+/// opening fails.
 fn read_directory_handle(directory: &File, _diagnostic_root: &Path) -> Result<Vec<(OsString, File)>> {
     let mut entries = Vec::new();
     let mut reader = RootedDirectoryReader::new(directory.try_clone()?);

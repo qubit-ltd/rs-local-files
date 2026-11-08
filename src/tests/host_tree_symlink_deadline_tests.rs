@@ -49,7 +49,7 @@ fn assert_host_tree_symlink_create_failure_effect(replaced: bool) {
         .expect("host filesystem")
         .copy_with_options(&source, &target, &tree_replace_options())
         .expect_err("injected link creation failure");
-    assert!(guard.fired());
+    assert!(guard.fired(), "injected symlink creation failure should fire");
     let expected = if replaced {
         crate::LocalCopyFailureState::PartiallyPublished
     } else {

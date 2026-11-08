@@ -78,14 +78,12 @@ mod rooted_staging_retry;
 mod rooted_symlink_create_error;
 mod rooted_symlink_create_failure_state;
 mod staged_file;
+mod staged_identity;
 mod temp_entry;
 pub(crate) mod test_fault_guard;
 pub(crate) mod test_support;
 #[cfg(unix)]
 mod unix_nonblocking;
-#[cfg(all(test, unix))]
-#[path = "../../tests/local/internal/unix_nonblocking_tests.rs"]
-mod unix_nonblocking_tests;
 #[cfg(unix)]
 mod unix_stat;
 #[cfg(windows)]
@@ -147,7 +145,15 @@ pub(crate) use operation_policy::ensure_required_directory_durability;
 pub(super) use owned_unicode_string::OwnedUnicodeString;
 pub(crate) use path_operations::absolute_path;
 pub(crate) use path_operations::add_path_context;
+#[cfg(test)]
+pub(crate) use path_operations::canonicalize_existing_prefix;
+#[cfg(test)]
+pub(crate) use path_operations::clean_dir_path;
+#[cfg(test)]
+pub(crate) use path_operations::ensure_parent_path;
 pub(crate) use path_operations::ensure_parent_path_with_sync_dirs;
+#[cfg(test)]
+pub(crate) use path_operations::remove_any_path;
 pub(crate) use publication_state::copy_failure_indeterminate;
 pub(crate) use publication_state::copy_failure_published;
 pub(crate) use publication_state::copy_failure_unchanged;

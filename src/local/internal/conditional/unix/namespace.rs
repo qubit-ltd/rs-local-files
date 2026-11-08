@@ -18,8 +18,8 @@ use std::os::unix::fs::MetadataExt;
 use std::path::Path;
 use std::path::PathBuf;
 
-use super::ConditionalEntry;
-use super::recovery::EntryAccess;
+use super::super::ConditionalEntry;
+use super::entry_access::EntryAccess;
 use crate::local::internal::RootedParentMode;
 use crate::local::internal::ensure_parent_path_with_sync_dirs;
 use crate::local::internal::open_rooted_parent;
@@ -34,14 +34,32 @@ use crate::recovery::LocalRecoveryFileRole;
 /// to reopen and verify a name after this namespace is dropped.
 #[derive(Debug)]
 pub(super) struct Namespace {
+    /// Open descriptor for the directory that owns all addressed names.
     pub(super) parent: File,
+    /// NUL-terminated final component used to address the target relative to
+    /// `parent`.
     pub(super) target_name: CString,
+    /// Parent descriptors whose directory entries must be synchronized after
+    /// creation.
     pub(super) sync_dirs: Vec<File>,
+    /// Absolute or rooted display path retained for entry metadata and
+    /// diagnostics.
     pub(super) namespace_path: PathBuf,
+    /// Optional user-facing path used to construct diagnostic entry paths.
     pub(super) diagnostic_path: Option<PathBuf>,
 }
 
 impl Namespace {
+    /// Opens the target's host parent and records any directories created along
+    /// the way.
+    ///
+    /// The parent descriptor is the authority for subsequent operations; the
+    /// stored path is retained only for display and diagnostics.
+    ///
+    /// # Parameters
+    ///
+    /// - `path`: target path whose parent directory will be retained.
+    /// - `options`: controls whether missing parent directories are created.
     pub(super) fn open_host(path: &Path, options: &LocalWriteOptions) -> io::Result<Self> {
         let absolute = if path.is_absolute() {
             path.to_path_buf()
@@ -73,6 +91,19 @@ impl Namespace {
         })
     }
 
+    /// Opens a target parent beneath an already-open root directory.
+    ///
+    /// `relative` must satisfy the crate's rooted relative-path contract. The
+    /// supplied absolute and diagnostic paths describe the namespace but do
+    /// not grant authority.
+    ///
+    /// # Parameters
+    ///
+    /// - `root`: open directory descriptor defining the authority boundary.
+    /// - `relative`: validated path of the target beneath `root`.
+    /// - `namespace_absolute`: rooted path used for namespace metadata.
+    /// - `diagnostic`: optional user-facing path used only for diagnostics.
+    /// - `options`: controls whether missing parent directories are created.
     pub(super) fn open_rooted(
         root: File,
         relative: &Path,
@@ -98,6 +129,15 @@ impl Namespace {
         })
     }
 
+    /// Creates a uniquely named private staging file in the retained parent
+    /// directory.
+    ///
+    /// Retries collisions up to a fixed bound and returns the component with
+    /// its open file.
+    ///
+    /// # Parameters
+    ///
+    /// - `prefix`: purpose label included in the generated staging name.
     pub(super) fn create_private(&self, prefix: &str) -> io::Result<(CString, File)> {
         let prefix = format!(".qubit-{prefix}-");
         for _ in 0..128 {
@@ -120,6 +160,16 @@ impl Namespace {
         ))
     }
 
+    /// Builds a recovery entry bound to the current identity of a named child.
+    ///
+    /// The cloned parent descriptor and captured device/inode pair let recovery
+    /// reopen and verify the entry without relying on its display path.
+    ///
+    /// # Parameters
+    ///
+    /// - `role`: recovery role assigned to the child entry.
+    /// - `name`: NUL-terminated single-component child name.
+    /// - `_unused`: reserved compatibility parameter; its value is ignored.
     pub(super) fn entry(
         &self,
         role: LocalRecoveryFileRole,
@@ -146,10 +196,17 @@ impl Namespace {
         Ok(ConditionalEntry::new(role, display, diagnostic_path, Box::new(access)))
     }
 
+    /// Opens a named child only when it is a regular file and does not follow
+    /// symlinks.
+    ///
+    /// # Parameters
+    ///
+    /// - `name`: NUL-terminated single-component child name.
     pub(super) fn open_name(&self, name: &CString) -> io::Result<File> {
         open_regular_at(&self.parent, name)
     }
 
+    /// Synchronizes the target parent and tracked ancestor directories.
     pub(super) fn sync_all(&self) -> io::Result<()> {
         self.parent.sync_all()?;
         for directory in self.sync_dirs.iter().rev() {
@@ -158,15 +215,21 @@ impl Namespace {
         Ok(())
     }
 
+    /// Confirms that an entry still resolves to its captured filesystem
+    /// identity.
+    ///
+    /// # Parameters
+    ///
+    /// - `entry`: recovery entry whose current identity is checked.
     pub(super) fn verify(&self, entry: &ConditionalEntry) -> io::Result<()> {
         self.entry_identity(entry).map(|_| ())
     }
 
-    fn entry_identity(&self, entry: &ConditionalEntry) -> io::Result<(u64, u64)> {
-        let metadata = entry.open_reader().map_err(io::Error::other)?.as_file().metadata()?;
-        Ok((metadata.dev(), metadata.ino()))
-    }
-
+    /// Removes a verified entry relative to the retained parent descriptor.
+    ///
+    /// # Parameters
+    ///
+    /// - `entry`: recovery entry to verify and remove.
     pub(super) fn remove(&self, entry: &ConditionalEntry) -> io::Result<()> {
         self.verify(entry)?;
         let name = super::recovery::name(entry)?;
@@ -180,6 +243,13 @@ impl Namespace {
         }
     }
 
+    /// Creates the target exclusively, replacing a racing occupant through a
+    /// private file.
+    ///
+    /// # Parameters
+    ///
+    /// - `bytes`: complete contents written to the created or replacement
+    ///   target.
     pub(super) fn replace_target(&self, bytes: &[u8]) -> io::Result<()> {
         match open_at(
             &self.parent,
@@ -209,6 +279,12 @@ impl Namespace {
             Err(error) => Err(error),
         }
     }
+
+    /// Truncates and writes the current target without following a symlink.
+    ///
+    /// # Parameters
+    ///
+    /// - `bytes`: complete replacement contents written to the target.
     pub(super) fn overwrite_target(&self, bytes: &[u8]) -> io::Result<()> {
         let mut file = open_at(
             &self.parent,
@@ -218,8 +294,26 @@ impl Namespace {
         )?;
         file.write_all(bytes)
     }
+
+    /// Reads the device and inode of an entry through its recovery reader.
+    ///
+    /// # Parameters
+    ///
+    /// - `entry`: recovery entry whose opened reader supplies the identity.
+    fn entry_identity(&self, entry: &ConditionalEntry) -> io::Result<(u64, u64)> {
+        let metadata = entry.open_reader().map_err(io::Error::other)?.as_file().metadata()?;
+        Ok((metadata.dev(), metadata.ino()))
+    }
 }
 
+/// Returns the device and inode of a child without following a symlink.
+///
+/// The name is interpreted relative to the supplied directory descriptor.
+///
+/// # Parameters
+///
+/// - `parent`: open directory descriptor containing the child.
+/// - `name`: NUL-terminated single-component child name.
 #[allow(clippy::unnecessary_cast)] // Native stat fields differ across Unix targets.
 pub(super) fn identity_at(parent: &File, name: &CString) -> io::Result<(u64, u64)> {
     let mut metadata = std::mem::MaybeUninit::<libc::stat>::uninit();
@@ -243,6 +337,14 @@ pub(super) fn identity_at(parent: &File, name: &CString) -> io::Result<(u64, u64
     Ok((metadata.st_dev as u64, metadata.st_ino as u64))
 }
 
+/// Opens a child relative to a directory and rejects non-regular files.
+///
+/// Nonblocking open avoids hanging if an attacker substitutes a special file.
+///
+/// # Parameters
+///
+/// - `parent`: open directory descriptor containing the child.
+/// - `name`: NUL-terminated single-component child name.
 pub(super) fn open_regular_at(parent: &File, name: &CString) -> io::Result<File> {
     let file = open_at(
         parent,
@@ -260,6 +362,15 @@ pub(super) fn open_regular_at(parent: &File, name: &CString) -> io::Result<File>
     Ok(file)
 }
 
+/// Calls `openat` with a single NUL-terminated child name and takes ownership
+/// of its result.
+///
+/// # Parameters
+///
+/// - `parent`: open directory descriptor used as the lookup base.
+/// - `name`: NUL-terminated single-component name to open.
+/// - `flags`: operating-system open flags.
+/// - `mode`: creation mode used when flags request creation.
 fn open_at(parent: &File, name: &CString, flags: libc::c_int, mode: libc::mode_t) -> io::Result<File> {
     // SAFETY: the directory handle and NUL-terminated component are live for
     // the call. A successful descriptor is immediately wrapped as owned.
@@ -271,6 +382,13 @@ fn open_at(parent: &File, name: &CString, flags: libc::c_int, mode: libc::mode_t
     Ok(unsafe { File::from_raw_fd(descriptor) })
 }
 
+/// Converts a path-component NUL error into the namespace's invalid-input
+/// error.
+///
+/// # Parameters
+///
+/// - The NUL error is consumed; its details are intentionally replaced by a
+///   stable invalid-input error for the namespace API.
 fn invalid_name(_: std::ffi::NulError) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidInput, "path component contains NUL")
 }
@@ -285,7 +403,7 @@ mod invalid_operand_contract_tests {
     use crate::options::LocalWriteOptions;
 
     #[test]
-    fn native_namespace_rejects_root_nul_and_invalid_relative_operands() {
+    fn test_native_namespace_rejects_root_nul_and_invalid_relative_operands() {
         let fixture = tempfile::tempdir().expect("fixture");
         let options = LocalWriteOptions::default();
         let error = Namespace::open_host(Path::new("/"), &options).expect_err("root has no target name");

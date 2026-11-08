@@ -207,10 +207,3 @@ fn test_unix_rooted_create_new_commit_failure_preserves_replacement_staging_iden
     );
     assert_sentinel_unchanged(fixture.path());
 }
-// =============================================================================
-//    Copyright (c) 2026 Haixing Hu.
-//
-//    SPDX-License-Identifier: Apache-2.0
-//
-//    Licensed under the Apache License, Version 2.0.
-// =============================================================================

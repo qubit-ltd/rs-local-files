@@ -30,6 +30,10 @@ pub struct LocalRelativePath {
 impl LocalRelativePath {
     /// Validates and owns a relative rooted path.
     ///
+    /// # Type Parameters
+    ///
+    /// * `P` - A path-like input borrowed through [`AsRef<Path>`].
+    ///
     /// # Parameters
     ///
     /// * `path` - Candidate path to validate and own.
@@ -75,6 +79,10 @@ impl LocalRelativePath {
     }
 
     /// Appends a validated relative descendant.
+    ///
+    /// # Type Parameters
+    ///
+    /// * `P` - A path-like child borrowed through [`AsRef<Path>`].
     ///
     /// # Parameters
     ///

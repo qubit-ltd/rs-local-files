@@ -11,10 +11,12 @@ use std::io::IoSliceMut;
 use std::path::Path;
 
 use qubit_local_files::LocalFileSystem;
+use qubit_local_files::error::LocalFileErrorKind;
 use qubit_local_files::options::LocalDirectoryOpenOptions;
 use qubit_local_files::options::LocalPersistOptions;
 use qubit_local_files::options::LocalSealOptions;
 use qubit_local_files::options::LocalTempDirectoryOptions;
+use qubit_local_files::options::LocalTempFileOptions;
 use qubit_local_files::options::LocalWriteMode;
 use qubit_local_files::options::LocalWriteOptions;
 use qubit_local_files::policy::LocalFileSyncRequirement;
@@ -69,7 +71,7 @@ fn test_rooted_path_lexical_escape_is_rejected_with_namespace_context() {
     let error = filesystem
         .canonicalize(Path::new("../outside"))
         .expect_err("lexical parent must not leave the virtual root");
-    assert_eq!(error.kind(), qubit_local_files::error::LocalFileErrorKind::InvalidPath);
+    assert_eq!(error.kind(), LocalFileErrorKind::InvalidPath);
     assert_eq!(error.path(), Some(Path::new("../outside")));
 }
 
@@ -109,7 +111,7 @@ fn test_directory_qualified_file_operand_reports_not_directory() {
     let error = filesystem
         .target_metadata(&directory_qualified)
         .expect_err("a file cannot satisfy a directory-qualified operand");
-    assert_eq!(error.kind(), qubit_local_files::error::LocalFileErrorKind::NotDirectory);
+    assert_eq!(error.kind(), LocalFileErrorKind::NotDirectory);
 }
 
 #[test]
@@ -121,8 +123,7 @@ fn test_writer_open_error_preserves_directory_operand_context() {
         .expect_err("a directory cannot be opened as a new file writer");
     assert!(matches!(
         error.kind(),
-        qubit_local_files::error::LocalFileErrorKind::IsDirectory
-            | qubit_local_files::error::LocalFileErrorKind::AlreadyExists
+        LocalFileErrorKind::IsDirectory | LocalFileErrorKind::AlreadyExists
     ));
     assert_eq!(error.path(), Some(fixture.path()));
 }
@@ -167,34 +168,28 @@ fn test_temp_file_persist_at_rejects_non_directory_and_dotted_bases() {
     let filesystem = LocalFileSystem::host().expect("host filesystem");
 
     let temporary = filesystem
-        .create_temp_file_with_options(&qubit_local_files::options::LocalTempFileOptions::new())
+        .create_temp_file_with_options(&LocalTempFileOptions::new())
         .expect("temporary source");
     let error = temporary
         .persist_at(&file_base, Path::new("published"), LocalPersistOptions::new())
         .expect_err("a regular file cannot be a persistence base");
-    assert_eq!(
-        error.error().kind(),
-        qubit_local_files::error::LocalFileErrorKind::NotDirectory
-    );
+    assert_eq!(error.error().kind(), LocalFileErrorKind::NotDirectory);
 
     let temporary = filesystem
-        .create_temp_file_with_options(&qubit_local_files::options::LocalTempFileOptions::new())
+        .create_temp_file_with_options(&LocalTempFileOptions::new())
         .expect("second temporary source");
     let dotted_base = fixture.path().join("..");
     let error = temporary
         .persist_at(&dotted_base, Path::new("published"), LocalPersistOptions::new())
         .expect_err("explicit bases cannot contain parent components");
-    assert_eq!(
-        error.error().kind(),
-        qubit_local_files::error::LocalFileErrorKind::InvalidPath
-    );
+    assert_eq!(error.error().kind(), LocalFileErrorKind::InvalidPath);
 }
 
 #[test]
 fn test_temp_file_creation_parent_keep_and_vectored_write() {
     let filesystem = LocalFileSystem::host().expect("host filesystem");
     let mut temporary = filesystem
-        .create_temp_file_with_options(&qubit_local_files::options::LocalTempFileOptions::new())
+        .create_temp_file_with_options(&LocalTempFileOptions::new())
         .expect("temporary file");
     assert!(temporary.creation_parent().is_absolute());
     assert!(temporary.path().starts_with(temporary.creation_parent()));
@@ -210,7 +205,7 @@ fn test_temp_file_creation_parent_keep_and_vectored_write() {
 fn test_sealed_temp_file_observation_and_cleanup_lifecycle() {
     let filesystem = LocalFileSystem::host().expect("host filesystem");
     let temporary = filesystem
-        .create_temp_file_with_options(&qubit_local_files::options::LocalTempFileOptions::new())
+        .create_temp_file_with_options(&LocalTempFileOptions::new())
         .expect("temporary file");
     let mut sealed = temporary
         .seal_with_options(&LocalSealOptions::new())
@@ -223,7 +218,7 @@ fn test_sealed_temp_file_observation_and_cleanup_lifecycle() {
     sealed.cleanup().expect("cleanup sealed file");
     assert_eq!(
         sealed.observation().expect_err("closed sealed handle").kind(),
-        qubit_local_files::error::LocalFileErrorKind::Io
+        LocalFileErrorKind::Io
     );
 }
 
@@ -243,6 +238,6 @@ fn test_filesystem_read_all_reports_complete_bytes_and_missing_path_context() {
     let missing = filesystem
         .read_all(&fixture.path().join("missing"))
         .expect_err("missing file should fail");
-    assert_eq!(missing.kind(), qubit_local_files::error::LocalFileErrorKind::NotFound);
+    assert_eq!(missing.kind(), LocalFileErrorKind::NotFound);
     assert!(missing.path().is_some());
 }

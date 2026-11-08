@@ -86,6 +86,11 @@ pub(crate) fn clear_nonblocking(descriptor: RawFd) -> Result<()> {
 ///
 /// Returns [`ErrorKind::TimedOut`] when the configured duration expires after
 /// a lease conflict, or returns any non-conflict open error unchanged.
+///
+/// # Type Parameters
+///
+/// * `F` - Closure type used for each native open attempt.
+/// * `T` - Value returned by a successful open attempt.
 pub(crate) fn open_with_nonblocking_retry<F, T>(timeout: Option<Duration>, mut open: F) -> Result<T>
 where
     F: FnMut() -> Result<T>,
@@ -113,6 +118,11 @@ where
 }
 
 /// Waits before the next nonblocking open attempt.
+///
+/// # Parameters
+///
+/// * `delay` - Current retry delay, updated for the following attempt.
+/// * `remaining` - Time left before the retry deadline.
 fn wait_for_nonblocking_open_retry(delay: &mut Duration, remaining: Duration) {
     if delay.is_zero() {
         thread::yield_now();
@@ -125,6 +135,10 @@ fn wait_for_nonblocking_open_retry(delay: &mut Duration, remaining: Duration) {
 }
 
 /// Creates the stable error returned when an open retry deadline expires.
+///
+/// # Parameters
+///
+/// * `timeout` - Configured retry duration included in the error message.
 #[must_use]
 #[inline]
 fn open_retry_timed_out(timeout: Duration) -> Error {

@@ -64,7 +64,7 @@ fn assert_private_stage(path: &Path) {
 }
 
 #[test]
-fn sync_files_required_reads_readonly_staged_file() {
+fn test_sync_files_required_reads_readonly_staged_file() {
     let scratch = tempdir().expect("scratch");
     let parent = parent_handle(scratch.path());
     let stage = private_stage(&parent);
@@ -80,7 +80,7 @@ fn sync_files_required_reads_readonly_staged_file() {
 }
 
 #[test]
-fn sync_tree_synchronizes_readonly_staged_file() {
+fn test_sync_tree_synchronizes_readonly_staged_file() {
     let scratch = tempdir().expect("scratch");
     let parent = parent_handle(scratch.path());
     let stage = private_stage(&parent);
@@ -93,7 +93,7 @@ fn sync_tree_synchronizes_readonly_staged_file() {
 }
 
 #[test]
-fn publish_new_required_syncs_readonly_staged_file() {
+fn test_publish_new_required_syncs_readonly_staged_file() {
     let scratch = tempdir().expect("scratch");
     let parent = parent_handle(scratch.path());
     let stage = writable_stage(&parent);

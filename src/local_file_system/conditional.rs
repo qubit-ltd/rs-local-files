@@ -57,6 +57,18 @@ impl LocalFileSystem {
     /// [`into_recovery_files`](crate::error::LocalConditionalCommitError::into_recovery_files).
     /// Dropping a recovery handle does not delete its file.
     ///
+    /// # Type Parameters
+    ///
+    /// - `D`: Digest algorithm whose output is compared when the precondition
+    ///   is [`LocalWritePrecondition::Content`].
+    ///
+    /// # Parameters
+    ///
+    /// - `path`: Destination path to conditionally publish.
+    /// - `precondition`: Requirement the destination must satisfy.
+    /// - `options`: Write mode, metadata, and symlink policies for the
+    ///   operation.
+    ///
     /// # Errors
     ///
     /// Returns an error when the mode, symlink policy, path, or selected

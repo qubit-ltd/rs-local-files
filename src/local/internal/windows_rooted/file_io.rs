@@ -30,6 +30,14 @@ use crate::write;
 
 /// Opens a rooted regular file for writing.
 ///
+/// # Parameters
+///
+/// * `root` - Open directory handle that anchors handle-relative traversal.
+/// * `_diagnostic_root` - Platform-parity path context; Windows opens relative
+///   to `root` and does not use this path.
+/// * `path` - Validated relative path of the file to open.
+/// * `options` - Native write mode and parent-directory creation policy.
+///
 /// # Errors
 ///
 /// Returns an I/O error when parent traversal, creation, or final verification

@@ -8,6 +8,8 @@
 
 // Host delete operations.
 
+#[cfg(windows)]
+use std::os::windows::fs::FileTypeExt;
 use std::time::Instant;
 
 use super::HostLocalFileSystem;
@@ -84,6 +86,8 @@ impl HostLocalFileSystem {
     /// - `path`: Native directory path.
     /// - `options`: Recursion and missing-entry policy.
     /// - `symlink_policy`: Policy for intermediate symbolic links.
+    /// - `started_at`: Start time used to account for recursive deletion
+    ///   elapsed time.
     ///
     /// # Returns
     ///
@@ -140,11 +144,22 @@ impl HostLocalFileSystem {
 }
 
 /// Removes one Host entry already known not to be a real directory.
+///
+/// # Parameters
+///
+/// - `path`: Entry to unlink without following its final symbolic link.
+/// - `metadata`: No-follow metadata used to identify Windows directory links.
+///
+/// # Returns
+///
+/// Returns `Ok(())` after unlinking the entry.
+///
+/// # Errors
+///
+/// Returns the native unlink error when the entry cannot be removed.
 pub(crate) fn remove_host_non_directory(path: &Path, metadata: &fs::Metadata) -> io::Result<()> {
     #[cfg(windows)]
     {
-        use std::os::windows::fs::FileTypeExt;
-
         if metadata.file_type().is_symlink_dir() {
             return remove_directory_symlink(path);
         }
@@ -164,12 +179,28 @@ impl DeleteBackend for HostLocalFileSystem {
 
     /// Borrows diagnostic coordinates without allocating or resolving the
     /// entry.
+    ///
+    /// # Parameters
+    ///
+    /// - `value`: Bound native coordinate whose diagnostic path is borrowed.
+    ///
+    /// # Returns
+    ///
+    /// The diagnostic path corresponding to `value`.
     #[inline]
     fn path<'a>(&self, value: &'a Self::Path) -> &'a Path {
         value
     }
 
     /// Inspects the final entry without following its symbolic-link target.
+    ///
+    /// # Parameters
+    ///
+    /// - `path`: Native entry whose metadata is inspected.
+    ///
+    /// # Returns
+    ///
+    /// No-follow metadata for the entry.
     ///
     /// # Errors
     ///
@@ -191,12 +222,29 @@ impl DeleteBackend for HostLocalFileSystem {
 
     /// Tests whether inspected metadata denotes a real directory rather than a
     /// link.
+    ///
+    /// # Parameters
+    ///
+    /// - `metadata`: No-follow metadata returned by `metadata`.
+    ///
+    /// # Returns
+    ///
+    /// `true` when the metadata describes a real directory, and `false` for
+    /// other entries, including symbolic links.
     #[inline]
     fn is_directory(&self, metadata: &Self::Metadata) -> bool {
         metadata.file_type().is_dir()
     }
 
     /// Opens a lazy reader whose lifetime is controlled by the scheduler.
+    ///
+    /// # Parameters
+    ///
+    /// - `path`: Directory to enumerate.
+    ///
+    /// # Returns
+    ///
+    /// A lazy reader over the directory's immediate entries.
     ///
     /// # Errors
     ///
@@ -212,6 +260,16 @@ impl DeleteBackend for HostLocalFileSystem {
 
     /// Produces one child coordinate, or `None` when the reader is exhausted.
     ///
+    /// # Parameters
+    ///
+    /// - `_parent`: Parent coordinate retained by the backend interface; the
+    ///   Host reader obtains each child path directly from its directory entry.
+    /// - `reader`: Open directory reader advanced by one entry.
+    ///
+    /// # Returns
+    ///
+    /// `Some(path)` for the next child, or `None` when the reader is exhausted.
+    ///
     /// # Errors
     ///
     /// Returns enumeration failures.
@@ -224,6 +282,16 @@ impl DeleteBackend for HostLocalFileSystem {
     }
 
     /// Removes the inspected leaf itself, including a final directory link.
+    ///
+    /// # Parameters
+    ///
+    /// - `path`: Leaf entry to unlink.
+    /// - `metadata`: No-follow metadata used to handle directory links on
+    ///   Windows.
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(())` after the leaf has been unlinked.
     ///
     /// # Errors
     ///
@@ -238,6 +306,14 @@ impl DeleteBackend for HostLocalFileSystem {
     }
 
     /// Removes a directory after the scheduler has processed its children.
+    ///
+    /// # Parameters
+    ///
+    /// - `path`: Empty directory to remove without recursive traversal.
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(())` after removing the empty directory.
     ///
     /// # Errors
     ///
@@ -256,6 +332,19 @@ impl DeleteBackend for HostLocalFileSystem {
     ///
     /// Production calls have no side effects; an enabled test fault returns an
     /// I/O error before the scheduler can count this entry as removed.
+    ///
+    /// # Parameters
+    ///
+    /// - `path`: Entry about to be removed, used by the backend contract even
+    ///   though this Host fault hook does not inspect it.
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(())` when no test fault is enabled.
+    ///
+    /// # Errors
+    ///
+    /// Returns an I/O error when enabled test support injects a fault.
     fn before_remove(&self, path: &Self::Path) -> io::Result<()> {
         #[cfg(feature = "test-support")]
         if crate::local::take_test_support_on_nth("host-delete-directory-entry-second", 2) {
@@ -263,32 +352,6 @@ impl DeleteBackend for HostLocalFileSystem {
         }
         let _ = path;
         Ok(())
-    }
-}
-
-#[cfg(all(test, windows))]
-mod tests {
-    use std::fs;
-    use std::os::windows::fs::symlink_dir;
-
-    use super::remove_host_non_directory;
-
-    #[test]
-    fn test_remove_host_non_directory_rejects_replaced_directory_symlink() {
-        let directory = tempfile::tempdir().expect("temporary directory should be created");
-        let target = directory.path().join("target");
-        let entry = directory.path().join("entry");
-        fs::create_dir(&target).expect("link target should be created");
-        symlink_dir(&target, &entry).expect("directory link should be created");
-        let metadata = fs::symlink_metadata(&entry).expect("link metadata should be captured");
-
-        fs::remove_dir(&entry).expect("link should be replaced");
-        fs::create_dir(&entry).expect("replacement directory should be created");
-
-        let result = remove_host_non_directory(&entry, &metadata);
-
-        assert!(result.is_err(), "replacement directory must not be removed");
-        assert!(entry.is_dir(), "replacement directory should remain");
     }
 }
 

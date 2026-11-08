@@ -70,6 +70,10 @@ impl OpenOptions {
     ///
     /// `None` returns the first lease conflict unchanged without retrying.
     /// `Some` bounds retries; zero reports `TimedOut` after the first conflict.
+    ///
+    /// # Returns
+    /// `None` when lease-conflict retries are disabled, or `Some(duration)`
+    /// with the maximum retry duration.
     #[inline]
     pub const fn open_retry_timeout(&self) -> Option<Duration> {
         self.open_retry_timeout

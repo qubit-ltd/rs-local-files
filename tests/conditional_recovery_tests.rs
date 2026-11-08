@@ -10,37 +10,6 @@
 
 mod support;
 
-mod conditional {
-    use qubit_io::Input;
-    use qubit_local_files::LocalFileSystem;
-    use qubit_local_files::policy::LocalSymlinkPolicy;
-
-    pub fn host() -> LocalFileSystem {
-        let mut filesystem = LocalFileSystem::host().expect("host filesystem");
-        filesystem
-            .set_symlink_policy(LocalSymlinkPolicy::Reject)
-            .expect("reject symlinks");
-        filesystem
-    }
-
-    pub fn read_candidate(error: &qubit_local_files::error::LocalConditionalCommitError) -> Vec<u8> {
-        let candidate = error.candidate().expect("verified candidate copy");
-        read_recovery(candidate)
-    }
-
-    pub fn read_recovery(file: &qubit_local_files::recovery::LocalRecoveryFile) -> Vec<u8> {
-        let mut reader = file.open_reader().expect("open recovery file through retained access");
-        let mut bytes = Vec::new();
-        let mut buffer = [0_u8; 128];
-        loop {
-            match reader.read(&mut buffer).expect("read candidate") {
-                0 => return bytes,
-                count => bytes.extend_from_slice(&buffer[..count]),
-            }
-        }
-    }
-}
-
 use qubit_io::Output;
 use qubit_local_files::LocalFileSystem;
 use qubit_local_files::options::LocalWriteMode;
@@ -52,6 +21,7 @@ use qubit_local_files::test_support::TestConditionalHooks;
 use qubit_local_files::test_support::TestConditionalPoint;
 use sha2::Digest;
 use sha2::Sha256;
+use support::conditional;
 
 #[cfg(windows)]
 fn windows_file_identity(path: &std::path::Path) -> (u32, u64) {
@@ -109,7 +79,7 @@ fn find_windows_backup_file(parent: &std::path::Path) -> std::io::Result<(std::p
 
 #[cfg(windows)]
 #[test]
-fn windows_cleanup_removed_file_reports_container_residual() {
+fn test_windows_cleanup_removed_file_reports_container_residual() {
     use std::sync::Arc;
     use std::sync::Mutex;
 
@@ -161,7 +131,7 @@ fn windows_cleanup_removed_file_reports_container_residual() {
 
 #[cfg(windows)]
 #[test]
-fn windows_cleanup_failed_file_remains_readable() {
+fn test_windows_cleanup_failed_file_remains_readable() {
     use std::fs::OpenOptions;
     use std::os::windows::fs::OpenOptionsExt;
     use std::sync::Arc;
@@ -254,7 +224,7 @@ fn mutate_displaced_copy(parent: &std::path::Path, installed: &std::path::Path) 
 
 #[cfg(unix)]
 #[test]
-fn rollback_backend_precheck_observes_competitor_without_exchange() {
+fn test_rollback_backend_precheck_observes_competitor_without_exchange() {
     let directory = support::conditional_temp_directory::tempdir().unwrap();
     let path = directory.path().join("target");
     std::fs::write(&path, b"A").unwrap();
@@ -315,7 +285,7 @@ fn rollback_backend_precheck_observes_competitor_without_exchange() {
 
 #[cfg(unix)]
 #[test]
-fn rollback_exchange_displaces_competitor_and_retains_each_resource_once() {
+fn test_rollback_exchange_displaces_competitor_and_retains_each_resource_once() {
     use qubit_local_files::outcome::LocalConditionalPublicationState;
     use qubit_local_files::recovery::LocalRecoveryFileRole;
 
@@ -410,7 +380,7 @@ fn rollback_exchange_displaces_competitor_and_retains_each_resource_once() {
 
 #[cfg(unix)]
 #[test]
-fn rooted_recovery_candidate_diagnostic_tracks_its_native_entry() {
+fn test_rooted_recovery_candidate_diagnostic_tracks_its_native_entry() {
     use std::path::Path;
 
     use qubit_local_files::recovery::LocalRecoveryFileRole;
@@ -469,7 +439,7 @@ fn rooted_recovery_candidate_diagnostic_tracks_its_native_entry() {
 
 #[cfg(windows)]
 #[test]
-fn windows_rollback_exchange_receipts_track_restored_and_competing_identities() {
+fn test_windows_rollback_exchange_receipts_track_restored_and_competing_identities() {
     use qubit_local_files::outcome::LocalConditionalPublicationState;
     use qubit_local_files::recovery::LocalRecoveryFileRole;
 
@@ -555,7 +525,7 @@ fn windows_rollback_exchange_receipts_track_restored_and_competing_identities() 
 
 #[cfg(windows)]
 #[test]
-fn windows_failed_rollback_exchange_preserves_published_candidate_and_displaced_file() {
+fn test_windows_failed_rollback_exchange_preserves_published_candidate_and_displaced_file() {
     use qubit_local_files::error::LocalConditionalWriteStage;
     use qubit_local_files::outcome::LocalConditionalPublicationState;
     use qubit_local_files::recovery::LocalRecoveryFileRole;
@@ -626,7 +596,7 @@ fn windows_failed_rollback_exchange_preserves_published_candidate_and_displaced_
 
 #[cfg(windows)]
 #[test]
-fn windows_rollback_without_target_replacement_restores_original_identity() {
+fn test_windows_rollback_without_target_replacement_restores_original_identity() {
     use qubit_local_files::outcome::LocalConditionalPublicationState;
     use qubit_local_files::recovery::LocalRecoveryFileRole;
 
@@ -696,7 +666,7 @@ fn windows_rollback_without_target_replacement_restores_original_identity() {
 
 #[cfg(unix)]
 #[test]
-fn after_rollback_replacement_is_retained_with_the_observed_identity() {
+fn test_after_rollback_replacement_is_retained_with_the_observed_identity() {
     use std::os::unix::fs::MetadataExt;
 
     use qubit_local_files::outcome::LocalConditionalPublicationState;
@@ -761,7 +731,7 @@ fn after_rollback_replacement_is_retained_with_the_observed_identity() {
 }
 
 #[test]
-fn uncommitted_drop_does_not_publish_candidate() {
+fn test_uncommitted_drop_does_not_publish_candidate() {
     let directory = support::conditional_temp_directory::tempdir().unwrap();
     let path = directory.path().join("target");
     let filesystem: LocalFileSystem = conditional::host();
@@ -778,7 +748,7 @@ fn uncommitted_drop_does_not_publish_candidate() {
 }
 
 #[test]
-fn abort_cleans_unpublished_candidate_without_touching_target() {
+fn test_abort_cleans_unpublished_candidate_without_touching_target() {
     let directory = support::conditional_temp_directory::tempdir().unwrap();
     let path = directory.path().join("target");
     std::fs::write(&path, b"A").unwrap();
@@ -797,7 +767,7 @@ fn abort_cleans_unpublished_candidate_without_touching_target() {
 
 #[cfg(unix)]
 #[test]
-fn abort_failure_can_be_retried_after_candidate_name_is_restored() {
+fn test_abort_failure_can_be_retried_after_candidate_name_is_restored() {
     let directory = support::conditional_temp_directory::tempdir().unwrap();
     let path = directory.path().join("target");
     let mut writer = conditional::host()
@@ -826,7 +796,7 @@ fn abort_failure_can_be_retried_after_candidate_name_is_restored() {
 
 #[cfg(unix)]
 #[test]
-fn dropping_commit_error_keeps_recovery_candidate_on_disk() {
+fn test_dropping_commit_error_keeps_recovery_candidate_on_disk() {
     let directory = support::conditional_temp_directory::tempdir().unwrap();
     let path = directory.path().join("target");
     std::fs::write(&path, b"A").unwrap();
@@ -851,7 +821,7 @@ fn dropping_commit_error_keeps_recovery_candidate_on_disk() {
 }
 
 #[test]
-fn dropping_success_outcome_does_not_remove_retained_cleanup_file() {
+fn test_dropping_success_outcome_does_not_remove_retained_cleanup_file() {
     let directory = support::conditional_temp_directory::tempdir().unwrap();
     let path = directory.path().join("target");
     let filesystem = conditional::host().with_conditional_test_hooks(TestConditionalHooks::once(

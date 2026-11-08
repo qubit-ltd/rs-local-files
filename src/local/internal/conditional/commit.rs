@@ -65,6 +65,31 @@ where
 /// synchronization completed; cleanup failures are returned alongside any
 /// retained files and do not change that success. This protocol does not
 /// provide a strict compare-and-swap guarantee.
+///
+/// # Type Parameters
+///
+/// * `D` is the digest algorithm used to verify candidate and retained entries.
+/// * `B` is the backend that supplies conditional namespace operations.
+///
+/// # Parameters
+///
+/// * `backend` owns the staged candidate and provides publication operations.
+/// * `precondition` specifies whether the destination must be absent or match
+///   an expected digest.
+/// * `options` selects metadata preservation and synchronization requirements.
+/// * `bytes_written` is the number of bytes written to the staged candidate.
+/// * `current_directory` is the resolver snapshot used for fallback
+///   diagnostics.
+///
+/// # Returns
+///
+/// The outcome includes the verified candidate digest, publication details,
+/// cleanup failures, retained recovery files, and resolver snapshot.
+///
+/// # Errors
+///
+/// Returns a staged commit error with the failed protocol stage, publication
+/// state, and any entries retained for recovery.
 #[allow(clippy::result_large_err)]
 pub(crate) fn commit_conditional_with_directory<D, B>(
     mut backend: B,
@@ -148,46 +173,14 @@ where
             }
         }
 
-        stage = LocalConditionalWriteStage::Precheck;
-        backend
-            .checkpoint(ConditionalPoint::Precheck)
-            .map_err(|error| (stage, error))?;
-        let observed = backend.open_target();
-        match (&precondition, observed) {
-            (LocalWritePrecondition::Absent, Ok(_)) => {
-                return Err((stage, io::Error::new(io::ErrorKind::AlreadyExists, "target exists")));
-            }
-            (LocalWritePrecondition::Absent, Err(error)) if error.kind() == io::ErrorKind::NotFound => {}
-            (LocalWritePrecondition::Absent, Err(error)) => return Err((stage, error)),
-            (LocalWritePrecondition::Content(_), Err(error)) => return Err((stage, error)),
-            (LocalWritePrecondition::Content(expected), Ok(target)) => {
-                if digest_entry::<D>(&target).map_err(|error| (stage, error))? != *expected {
-                    return Err((
-                        stage,
-                        io::Error::new(io::ErrorKind::InvalidData, "content precondition mismatch"),
-                    ));
-                }
-                if options.metadata_policy() == crate::options::LocalWriteMetadataPolicy::PreserveExisting {
-                    backend.preserve_metadata(&target).map_err(|error| (stage, error))?;
-                    if sync_requirement != LocalFileSyncRequirement::NotRequired
-                        && let Err(error) = backend.sync_candidate()
-                    {
-                        if sync_requirement == LocalFileSyncRequirement::Required {
-                            return Err((stage, error));
-                        }
-                        if options.durability() == LocalDurabilityRequirement::Preferred {
-                            durable = false;
-                        }
-                    }
-                }
-                // The observed target is only a precheck/metadata source. The
-                // backend returns the actual displaced object after publish.
-            }
-        }
-
-        backend
-            .checkpoint(ConditionalPoint::AfterPrecheck)
-            .map_err(|error| (stage, error))?;
+        precheck_target::<D, B>(
+            &mut backend,
+            &mut stage,
+            &precondition,
+            &options,
+            sync_requirement,
+            &mut durable,
+        )?;
 
         backend
             .verify_entry(backend.candidate())
@@ -613,6 +606,87 @@ where
     ))
 }
 
+/// Checks the destination precondition and applies requested target metadata
+/// before publication, preserving the protocol stage for every failure.
+///
+/// # Type Parameters
+///
+/// * `D` is the digest algorithm used to compare the current destination.
+/// * `B` provides the destination and metadata operations for the commit.
+///
+/// # Parameters
+///
+/// * `backend` supplies destination access and metadata operations.
+/// * `stage` receives the protocol stage reached before an operation fails.
+/// * `precondition` specifies whether the destination must be absent or match
+///   an expected digest.
+/// * `options` selects target metadata and durability behavior.
+/// * `sync_requirement` determines whether candidate synchronization is
+///   required, preferred, or unnecessary.
+/// * `durable` is cleared when a preferred synchronization operation fails.
+///
+/// # Returns
+///
+/// Returns `Ok(())` after the precondition and requested metadata work finish.
+///
+/// # Errors
+///
+/// Returns the active protocol stage and source IO error when a check or
+/// metadata operation fails.
+fn precheck_target<D, B>(
+    backend: &mut B,
+    stage: &mut LocalConditionalWriteStage,
+    precondition: &LocalWritePrecondition<Output<D>>,
+    options: &LocalWriteOptions,
+    sync_requirement: LocalFileSyncRequirement,
+    durable: &mut bool,
+) -> Result<(), (LocalConditionalWriteStage, io::Error)>
+where
+    D: Digest,
+    B: ConditionalBackend,
+{
+    *stage = LocalConditionalWriteStage::Precheck;
+    backend
+        .checkpoint(ConditionalPoint::Precheck)
+        .map_err(|error| (*stage, error))?;
+    let observed = backend.open_target();
+    match (precondition, observed) {
+        (LocalWritePrecondition::Absent, Ok(_)) => {
+            return Err((*stage, io::Error::new(io::ErrorKind::AlreadyExists, "target exists")));
+        }
+        (LocalWritePrecondition::Absent, Err(error)) if error.kind() == io::ErrorKind::NotFound => {}
+        (LocalWritePrecondition::Absent, Err(error)) => return Err((*stage, error)),
+        (LocalWritePrecondition::Content(_), Err(error)) => return Err((*stage, error)),
+        (LocalWritePrecondition::Content(expected), Ok(target)) => {
+            if digest_entry::<D>(&target).map_err(|error| (*stage, error))? != *expected {
+                return Err((
+                    *stage,
+                    io::Error::new(io::ErrorKind::InvalidData, "content precondition mismatch"),
+                ));
+            }
+            if options.metadata_policy() == crate::options::LocalWriteMetadataPolicy::PreserveExisting {
+                backend.preserve_metadata(&target).map_err(|error| (*stage, error))?;
+                if sync_requirement != LocalFileSyncRequirement::NotRequired
+                    && let Err(error) = backend.sync_candidate()
+                {
+                    if sync_requirement == LocalFileSyncRequirement::Required {
+                        return Err((*stage, error));
+                    }
+                    if options.durability() == LocalDurabilityRequirement::Preferred {
+                        *durable = false;
+                    }
+                }
+            }
+            // The observed target is only a precheck/metadata source. The
+            // backend returns the actual displaced object after publish.
+        }
+    }
+
+    backend
+        .checkpoint(ConditionalPoint::AfterPrecheck)
+        .map_err(|error| (*stage, error))
+}
+
 #[cfg(all(test, feature = "digest"))]
 mod backend_phase_error_contract_tests {
     use std::path::PathBuf;
@@ -625,7 +699,7 @@ mod backend_phase_error_contract_tests {
     use super::super::ConditionalHooks;
     use super::super::NativeAttempt;
     use super::super::RecoveryAccess;
-    use super::super::fake_backend::FakeBackend;
+    use super::super::fake_backend_tests::FakeBackend;
     use super::ConditionalBackend;
     use super::ConditionalPoint;
     use super::commit_conditional;
@@ -777,8 +851,8 @@ mod backend_phase_error_contract_tests {
     }
 
     #[test]
-    fn model_backend_errors_preserve_stage_recovery_and_unpublished_destination() {
-        use super::super::fake_backend::required_options;
+    fn test_model_backend_errors_preserve_stage_recovery_and_unpublished_destination() {
+        use super::super::fake_backend_tests::required_options;
         use crate::options::LocalWriteMetadataPolicy;
 
         for (phase, expected_stage) in [
@@ -840,10 +914,10 @@ mod backend_phase_error_contract_tests {
     }
 
     #[test]
-    fn transparent_model_adapter_preserves_successful_publication_sync_and_cleanup() {
+    fn test_transparent_model_adapter_preserves_successful_publication_sync_and_cleanup() {
         use super::super::ConditionalHookAction;
-        use super::super::fake_backend::Event;
-        use super::super::fake_backend::required_options;
+        use super::super::fake_backend_tests::Event;
+        use super::super::fake_backend_tests::required_options;
         use crate::options::LocalWriteMetadataPolicy;
 
         for absent in [false, true] {
@@ -923,7 +997,7 @@ mod backend_phase_error_contract_tests {
     }
 
     #[test]
-    fn transparent_model_adapter_abort_preserves_unpublished_data_and_releases_ownership() {
+    fn test_transparent_model_adapter_abort_preserves_unpublished_data_and_releases_ownership() {
         let inner = FakeBackend::new(b"old", b"candidate");
         let (lease, target) = inner.target_observer();
         let root = lease.path().to_path_buf();

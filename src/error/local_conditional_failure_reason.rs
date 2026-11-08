@@ -7,6 +7,15 @@
 // =============================================================================
 
 /// Stable classification of a conditional commit failure.
+///
+/// # Examples
+///
+/// ```
+/// use qubit_local_files::error::LocalConditionalFailureReason;
+///
+/// let reason = LocalConditionalFailureReason::TargetExists;
+/// assert_eq!(reason, LocalConditionalFailureReason::TargetExists);
+/// ```
 #[must_use]
 #[non_exhaustive]
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]

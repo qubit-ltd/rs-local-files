@@ -87,6 +87,15 @@ const RENAME_EXCL: std::os::raw::c_uint = 0x0000_0004;
 #[cfg(target_os = "macos")]
 unsafe extern "C" {
     /// Renames a path using macOS-specific flags.
+    ///
+    /// # Parameters
+    /// - `from`: NUL-terminated source path.
+    /// - `to`: NUL-terminated destination path.
+    /// - `flags`: Native rename behavior flags.
+    ///
+    /// # Safety
+    /// Both pointers must remain valid and point to NUL-terminated C strings
+    /// for the duration of the call.
     fn renamex_np(
         from: *const std::os::raw::c_char,
         to: *const std::os::raw::c_char,
@@ -464,6 +473,18 @@ pub(crate) fn sync_parent_dir(path: &Path) -> Result<()> {
     )
 }
 
+/// Opens and synchronizes the parent directory through supplied operations.
+///
+/// This helper keeps platform-specific directory opening separate from error
+/// propagation so both stages preserve their original I/O errors.
+///
+/// # Parameters
+/// - `path`: File path whose parent directory should be synchronized.
+/// - `open_directory`: Operation that opens the parent directory.
+/// - `sync_directory`: Operation that synchronizes the opened directory.
+///
+/// # Errors
+/// Returns the error from opening or synchronizing the parent directory.
 #[cfg(any(windows, test))]
 fn sync_parent_directory_with(
     path: &Path,
@@ -498,7 +519,7 @@ mod tests {
     use super::sync_parent_directory_with;
 
     #[test]
-    fn parent_directory_open_errors_are_preserved() {
+    fn test_parent_directory_open_errors_are_preserved() {
         for error in [
             Error::new(ErrorKind::PermissionDenied, "denied"),
             Error::from_raw_os_error(32),
@@ -514,7 +535,7 @@ mod tests {
     }
 
     #[test]
-    fn parent_directory_sync_errors_are_preserved() {
+    fn test_parent_directory_sync_errors_are_preserved() {
         for error in [
             Error::new(ErrorKind::PermissionDenied, "denied"),
             Error::from_raw_os_error(32),

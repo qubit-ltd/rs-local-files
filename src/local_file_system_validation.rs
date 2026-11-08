@@ -39,6 +39,15 @@ pub(crate) use conditional_open::validate_conditional_open;
 /// directory.
 /// Returns `InvalidPath` with the namespace path and optional PWD snapshot;
 /// operands without the directory requirement succeed without I/O.
+///
+/// # Parameters
+///
+/// `path` is the parsed namespace path, `operation` identifies the operation
+/// for any error, and `current_directory` supplies the optional PWD snapshot.
+///
+/// # Errors
+///
+/// Returns `InvalidPath` when `path` explicitly requires a directory.
 pub(super) fn reject_directory_qualified_file(
     path: &LocalNamespacePath,
     operation: LocalFileOperation,
@@ -60,6 +69,16 @@ pub(super) fn reject_directory_qualified_file(
 ///
 /// Returns `InvalidOptions` only for `FollowAcrossScope` in Rooted scope,
 /// retaining the supplied operation and optional path for diagnostics.
+///
+/// # Parameters
+///
+/// `scope` and `policy` determine compatibility; `operation` labels an error,
+/// and `path` optionally supplies its diagnostic path.
+///
+/// # Errors
+///
+/// Returns `InvalidOptions` when `scope` is Rooted and `policy` is
+/// `FollowAcrossScope`.
 pub(super) fn validate_scope_symlink_policy(
     scope: LocalFileSystemScope,
     policy: LocalSymlinkPolicy,
@@ -81,6 +100,16 @@ pub(super) fn validate_scope_symlink_policy(
 ///
 /// Returns `InvalidOptions` for a zero open-directory limit or a forbidden
 /// scope policy. An absent path identifies configuration-time validation.
+///
+/// # Parameters
+///
+/// `scope` and `default_policy` provide filesystem defaults, `options` holds
+/// listing settings, and `path` identifies an optional operation-time path.
+///
+/// # Errors
+///
+/// Returns `InvalidOptions` for a zero open-directory limit, an unrepresentable
+/// deadline, or a forbidden scope policy.
 pub(super) fn validate_list_options(
     scope: LocalFileSystemScope,
     default_policy: LocalSymlinkPolicy,
@@ -124,6 +153,17 @@ pub(super) fn validate_list_options(
 /// Returns `InvalidOptions` for a forbidden scope policy or an unrepresentable
 /// deadline. Other budget values and source-dependent requirements are checked
 /// during execution. An absent source identifies configuration-time validation.
+///
+/// # Parameters
+///
+/// `scope`, `default_policy`, and `capabilities` describe the execution
+/// environment; `options` holds copy settings, and `source` and `destination`
+/// optionally identify operation paths for diagnostics.
+///
+/// # Errors
+///
+/// Returns `InvalidOptions` for a forbidden scope policy or unrepresentable
+/// deadline, and `RequirementNotMet` for unavailable requested guarantees.
 pub(super) fn validate_copy_options(
     scope: LocalFileSystemScope,
     default_policy: LocalSymlinkPolicy,
@@ -178,6 +218,15 @@ pub(super) fn validate_copy_options(
 /// Validates an explicit temporary-name collision budget.
 ///
 /// Returns `InvalidOptions` for `Some(0)`; `None` permits unbounded retries.
+///
+/// # Parameters
+///
+/// `max_attempts` is the optional collision budget, and `operation` labels any
+/// validation error.
+///
+/// # Errors
+///
+/// Returns `InvalidOptions` when `max_attempts` is `Some(0)`.
 pub(super) fn validate_temp_attempts(max_attempts: Option<usize>, operation: LocalFileOperation) -> LocalResult<()> {
     if max_attempts != Some(0) {
         return Ok(());
@@ -191,6 +240,16 @@ pub(super) fn validate_temp_attempts(max_attempts: Option<usize>, operation: Loc
 ///
 /// Returns `RequirementNotMet` with `operation` when append requires atomicity
 /// or this build cannot provide the requested staging-write durability.
+///
+/// # Parameters
+///
+/// `options` contains requested writer guarantees, `capabilities` describes
+/// guarantees implemented by this build, and `operation` labels any error.
+///
+/// # Errors
+///
+/// Returns `RequirementNotMet` when the requested writer guarantee is
+/// unavailable.
 pub(super) fn validate_write_options(
     options: &LocalWriteOptions,
     capabilities: LocalFileSystemCapabilities,
@@ -214,6 +273,16 @@ pub(super) fn validate_write_options(
 /// Returns `RequirementNotMet` with `operation` if native rename or requested
 /// durability is unavailable. Runtime mount restrictions remain operation
 /// errors.
+///
+/// # Parameters
+///
+/// `options` contains requested rename guarantees, `capabilities` describes
+/// guarantees implemented by this build, and `operation` labels any error.
+///
+/// # Errors
+///
+/// Returns `RequirementNotMet` when atomic rename or requested durability is
+/// unavailable in this build.
 pub(crate) fn validate_rename_options(
     options: &LocalRenameOptions,
     capabilities: LocalFileSystemCapabilities,
@@ -233,6 +302,16 @@ pub(crate) fn validate_rename_options(
 /// `prefix` and `suffix` are optional filename fragments; `max_attempts` is
 /// the collision budget. Returns `InvalidOptions` with `operation` for invalid
 /// fragments or a zero budget, retaining the native validation cause.
+///
+/// # Parameters
+///
+/// `prefix` and `suffix` are optional filename fragments, `max_attempts` is
+/// the optional collision budget, and `operation` labels any error.
+///
+/// # Errors
+///
+/// Returns `InvalidOptions` for invalid filename fragments or a zero retry
+/// budget.
 pub(super) fn validate_temp_options(
     prefix: Option<&str>,
     suffix: Option<&str>,
@@ -254,7 +333,7 @@ mod rename_options_tests {
     use crate::LocalRenameOptions;
 
     #[test]
-    fn rename_options_validate_atomicity_and_durability_requirements() {
+    fn test_rename_options_validate_atomicity_and_durability_requirements() {
         let capabilities = LocalFileSystemCapabilities::detect_host();
         let atomicity = validate_rename_options(&LocalRenameOptions::new(), capabilities, LocalFileOperation::Rename);
         if capabilities.supports_atomic_rename() {
@@ -284,7 +363,7 @@ mod rename_options_tests {
     }
 
     #[test]
-    fn rename_options_reject_unavailable_atomic_rename() {
+    fn test_rename_options_reject_unavailable_atomic_rename() {
         let capabilities = LocalFileSystemCapabilities::detect_host().with_rename_capabilities_for_test(false, true);
         let error = validate_rename_options(&LocalRenameOptions::new(), capabilities, LocalFileOperation::Rename)
             .expect_err("atomic rename must be rejected when unavailable");

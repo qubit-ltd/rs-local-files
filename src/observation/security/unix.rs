@@ -34,7 +34,6 @@ use crate::observation::LocalUnixAccessObservation;
 use crate::observation::LocalUnixFileSystemObservation;
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 use crate::observation::LocalUnixPlatform;
-
 #[cfg(target_os = "linux")]
 const ACL_RETRIES: usize = 8;
 #[cfg(target_os = "linux")]
@@ -42,6 +41,15 @@ const LINUX_ACL_VERSION: u32 = 2;
 #[cfg(target_os = "linux")]
 const LINUX_ACL_ENTRY_SIZE: usize = 8;
 
+/// Collects security metadata from one retained Unix file descriptor.
+///
+/// The descriptor is checked before and after the queries so a changed file
+/// identity is reported instead of combining observations from different files.
+///
+/// # Parameters
+///
+/// * `file` is the retained descriptor whose metadata is observed.
+/// * `options` selects required facts and bounds ACL data.
 pub(crate) fn query_security(
     file: &File,
     options: &LocalSecurityObservationOptions,
@@ -74,6 +82,12 @@ pub(crate) fn query_security(
     ))
 }
 
+/// Reads metadata for the object referenced by `file` without resolving its
+/// path.
+///
+/// # Parameters
+///
+/// * `file` is the open descriptor whose metadata is read.
 fn stat(file: &File) -> LocalResult<libc::stat> {
     // SAFETY: `stat` is initialized by fstat on success and `file` owns a valid
     // descriptor.
@@ -86,6 +100,29 @@ fn stat(file: &File) -> LocalResult<libc::stat> {
     Ok(stat)
 }
 
+/// Applies a requested metadata query while preserving real I/O failures.
+///
+/// Unsupported native operations become absent values when optional and
+/// requirement errors when required.
+///
+/// # Type Parameters
+///
+/// * `T` is the native fact returned by the query.
+///
+/// # Parameters
+///
+/// * `requirement` determines whether explicit lack of support is tolerated.
+/// * `query` performs the native operation and returns its result.
+///
+/// # Returns
+///
+/// Returns a value when the query succeeds, `None` when an optional query is
+/// explicitly unsupported, or an error for unsupported required facts.
+///
+/// # Errors
+///
+/// Returns a metadata error when a required fact is unsupported or the query
+/// fails for another reason.
 #[cfg(any(target_os = "linux", target_os = "macos", test))]
 fn requested_value<T>(
     requirement: LocalObservationRequirement,
@@ -107,6 +144,12 @@ fn requested_value<T>(
     }
 }
 
+/// Queries filesystem locality and native filesystem details when available.
+///
+/// # Parameters
+///
+/// * `file` is the retained descriptor used for the filesystem query.
+/// * `requirement` determines whether unsupported facts are tolerated.
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 fn query_filesystem(
     file: &File,
@@ -115,6 +158,12 @@ fn query_filesystem(
     requested_value(requirement, || filesystem_facts(file))
 }
 
+/// Reports the unsupported filesystem observation according to its requirement.
+///
+/// # Parameters
+///
+/// * `_file` is unused on targets without a filesystem query implementation.
+/// * `requirement` determines whether unavailable facts are tolerated.
 #[cfg(all(unix, not(any(target_os = "linux", target_os = "macos"))))]
 fn query_filesystem(
     _file: &File,
@@ -130,6 +179,12 @@ fn query_filesystem(
     }
 }
 
+/// Reads Linux filesystem metadata and maps known filesystem identifiers to
+/// locality.
+///
+/// # Parameters
+///
+/// * `file` is the retained descriptor whose filesystem is inspected.
 #[cfg(target_os = "linux")]
 fn filesystem_facts(file: &File) -> io::Result<LocalFileSystemObservation> {
     // SAFETY: `statfs` is initialized by fstatfs on success and the descriptor is
@@ -162,6 +217,11 @@ fn filesystem_facts(file: &File) -> io::Result<LocalFileSystemObservation> {
     ))
 }
 
+/// Reads macOS filesystem metadata and maps known filesystem names to locality.
+///
+/// # Parameters
+///
+/// * `file` is the retained descriptor whose filesystem is inspected.
 #[cfg(target_os = "macos")]
 fn filesystem_facts(file: &File) -> io::Result<LocalFileSystemObservation> {
     // SAFETY: `statfs` is initialized by fstatfs on success and the descriptor is
@@ -190,6 +250,14 @@ fn filesystem_facts(file: &File) -> io::Result<LocalFileSystemObservation> {
     ))
 }
 
+/// Queries Linux access permissions and ACL presence from the retained
+/// descriptor.
+///
+/// # Parameters
+///
+/// * `file` is the retained descriptor whose access facts are queried.
+/// * `stat` is metadata already read from that same descriptor.
+/// * `options` supplies the access requirement and ACL bounds.
 #[cfg(target_os = "linux")]
 fn query_access(
     file: &File,
@@ -200,6 +268,12 @@ fn query_access(
         .map(|value| value.map(|access| LocalAccessObservation::new(Some(access), None)))
 }
 
+/// Reports whether complete Unix ACL facts are unavailable on this target.
+///
+/// # Parameters
+///
+/// * `_file` and `_stat` retain the backend signature but are unused here.
+/// * `options` determines whether unavailable ACL facts are tolerated.
 #[cfg(not(target_os = "linux"))]
 fn query_access(
     _file: &File,
@@ -216,6 +290,21 @@ fn query_access(
     }
 }
 
+/// Reads permission bits, ownership relation, and both access and default ACLs.
+///
+/// # Parameters
+///
+/// * `file` is the retained descriptor used to read ACLs.
+/// * `stat` supplies mode and owner metadata from that descriptor.
+/// * `options` bounds ACL reads and decoded entries.
+///
+/// # Returns
+///
+/// Returns the mode, owner relation, and access/default ACL statuses.
+///
+/// # Errors
+///
+/// Returns an I/O error when reading or validating either ACL fails.
 #[cfg(target_os = "linux")]
 fn query_linux_access(
     file: &File,
@@ -237,7 +326,6 @@ fn query_linux_access(
     ))
 }
 
-#[cfg(target_os = "linux")]
 /// Queries one Linux POSIX ACL xattr through the retained object descriptor.
 ///
 /// `Absent` and `NotSupported` are only returned for their corresponding
@@ -245,6 +333,22 @@ fn query_linux_access(
 /// allocation failures, and ACL resource-limit violations remain errors. The
 /// bounded retry handles a size change between the length probe and read; it
 /// never accepts a truncated prefix as a complete ACL.
+///
+/// # Parameters
+///
+/// * `file` is the retained file descriptor to query.
+/// * `name` is a NUL-terminated Linux xattr name.
+/// * `options` supplies the ACL byte and entry limits.
+///
+/// # Returns
+///
+/// Returns the ACL presence when the xattr is read successfully.
+///
+/// # Errors
+///
+/// Returns an I/O error for native query failures, malformed ACL data,
+/// allocation failures, or configured resource-limit violations.
+#[cfg(target_os = "linux")]
 fn query_linux_acl(
     file: &File,
     name: &'static [u8],
@@ -301,6 +405,13 @@ fn query_linux_acl(
     Err(io::Error::other("ACL changed during bounded read retries"))
 }
 
+/// Validates the Linux POSIX ACL v2 header, entries, and structural
+/// constraints.
+///
+/// # Parameters
+///
+/// * `bytes` contains the complete ACL value, including its version header.
+/// * `max_entries` optionally limits the number of ACL entries accepted.
 #[cfg(target_os = "linux")]
 fn validate_linux_acl(bytes: &[u8], max_entries: Option<usize>) -> io::Result<()> {
     if bytes.len() < 4 || u32::from_le_bytes(bytes[0..4].try_into().map_err(|_| invalid_acl())?) != LINUX_ACL_VERSION {
@@ -370,19 +481,32 @@ fn validate_linux_acl(bytes: &[u8], max_entries: Option<usize>) -> io::Result<()
     Ok(())
 }
 
+/// Converts a native metadata I/O error into the crate's metadata error type.
+///
+/// # Parameters
+///
+/// * `error` is the native failure to preserve in the crate error.
 fn io_error(error: io::Error) -> LocalFileError {
     LocalFileError::from_io(LocalFileOperation::Metadata, None, None, error)
 }
 
+/// Creates the invalid-data error used for malformed Linux ACL values.
 #[cfg(target_os = "linux")]
 fn invalid_acl() -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, "malformed POSIX ACL")
 }
 
+/// Creates a data-corruption error for unrepresentable native metadata.
 fn invalid_native_metadata() -> LocalFileError {
     LocalFileError::new(LocalFileErrorKind::DataCorruption, LocalFileOperation::Metadata)
 }
 
+/// Recognizes native error codes that explicitly indicate an unsupported
+/// operation.
+///
+/// # Parameters
+///
+/// * `error` is the native error whose status code is inspected.
 #[cfg(any(target_os = "linux", target_os = "macos", test))]
 fn explicitly_unsupported(error: &io::Error) -> bool {
     error
@@ -390,6 +514,12 @@ fn explicitly_unsupported(error: &io::Error) -> bool {
         .is_some_and(|code| code == libc::ENOTSUP || code == libc::EOPNOTSUPP || code == libc::ENOSYS)
 }
 
+/// Identifies ACL read errors that indicate the value changed after its length
+/// probe.
+///
+/// # Parameters
+///
+/// * `error` is the native ACL read error to classify.
 #[cfg(any(target_os = "linux", test))]
 fn acl_read_requires_retry(error: &io::Error) -> bool {
     let Some(code) = error.raw_os_error() else {
@@ -405,6 +535,12 @@ fn acl_read_requires_retry(error: &io::Error) -> bool {
     false
 }
 
+/// Enforces the configured byte limit for a Linux ACL xattr.
+///
+/// # Parameters
+///
+/// * `length` is the probed ACL size in bytes.
+/// * `options` supplies the optional maximum ACL byte count.
 #[cfg(target_os = "linux")]
 fn check_acl_size_io(length: usize, options: &LocalSecurityObservationOptions) -> io::Result<()> {
     if let Some(max) = options.max_acl_bytes()
@@ -417,6 +553,12 @@ fn check_acl_size_io(length: usize, options: &LocalSecurityObservationOptions) -
     Ok(())
 }
 
+/// Checks ACL framing and configured byte and entry limits before allocation.
+///
+/// # Parameters
+///
+/// * `length` is the probed ACL size in bytes.
+/// * `options` supplies the ACL byte and entry limits.
 #[cfg(target_os = "linux")]
 fn check_acl_length(length: usize, options: &LocalSecurityObservationOptions) -> io::Result<()> {
     check_acl_size_io(length, options)?;
@@ -433,17 +575,14 @@ fn check_acl_length(length: usize, options: &LocalSecurityObservationOptions) ->
     }
     Ok(())
 }
-
 #[cfg(test)]
 mod tests {
     use std::fs;
-    use std::os::unix::fs::MetadataExt;
 
     use super::File;
     #[cfg(target_os = "linux")]
     use super::LocalAclPresence;
     use super::LocalFileErrorKind;
-    use super::LocalFileIdentity;
     use super::LocalObservationRequirement;
     #[cfg(target_os = "linux")]
     use super::LocalResourceKind;
@@ -457,58 +596,12 @@ mod tests {
     use super::io_error;
     #[cfg(target_os = "linux")]
     use super::query_linux_acl;
-    use super::query_security;
     use super::requested_value;
     #[cfg(target_os = "linux")]
     use super::validate_linux_acl;
 
     #[test]
-    fn security_unix_observes_retained_file_after_path_replacement() {
-        let directory = tempfile::tempdir().expect("temporary directory");
-        let path = directory.path().join("object");
-        fs::write(&path, b"original").expect("create original");
-        let retained = File::open(&path).expect("open original");
-        let expected = retained.metadata().expect("metadata").ino();
-        fs::remove_file(&path).expect("remove name");
-        fs::write(&path, b"replacement").expect("create replacement");
-
-        #[cfg(target_os = "linux")]
-        let options = LocalSecurityObservationOptions::new().with_access(LocalObservationRequirement::Required);
-        #[cfg(not(target_os = "linux"))]
-        let options = LocalSecurityObservationOptions::new();
-        let observation = query_security(&retained, &options).expect("observe retained object");
-        assert_eq!(
-            observation.identity().expect("identity").clone(),
-            LocalFileIdentity::unix(retained.metadata().unwrap().dev(), expected)
-        );
-        assert_eq!(observation.link_count(), Some(0));
-        #[cfg(target_os = "macos")]
-        assert_eq!(
-            query_security(
-                &retained,
-                &LocalSecurityObservationOptions::new().with_access(LocalObservationRequirement::Required),
-            )
-            .expect_err("macOS cannot provide the required complete Unix ACL observation")
-            .kind(),
-            LocalFileErrorKind::RequirementNotMet,
-        );
-    }
-
-    #[test]
-    fn security_unix_reports_same_handle_link_count() {
-        let directory = tempfile::tempdir().expect("temporary directory");
-        let path = directory.path().join("object");
-        let alias = directory.path().join("alias");
-        fs::write(&path, b"same inode").expect("create file");
-        let retained = File::open(&path).expect("open file");
-        let options = LocalSecurityObservationOptions::new().with_link_count(LocalObservationRequirement::Required);
-        assert_eq!(query_security(&retained, &options).unwrap().link_count(), Some(1));
-        fs::hard_link(&path, alias).expect("create hard link");
-        assert_eq!(query_security(&retained, &options).unwrap().link_count(), Some(2));
-    }
-
-    #[test]
-    fn security_unix_preserves_optional_permission_errors() {
+    fn test_preserves_optional_permission_errors() {
         let denied = io::Error::from_raw_os_error(libc::EACCES);
         let result: LocalResult<Option<u8>> = requested_value(LocalObservationRequirement::Optional, || Err(denied));
         assert_eq!(
@@ -518,7 +611,7 @@ mod tests {
     }
 
     #[test]
-    fn security_unix_retries_acl_length_change_errors() {
+    fn test_retries_acl_length_change_errors() {
         assert!(acl_read_requires_retry(&io::Error::from_raw_os_error(libc::ERANGE)));
         #[cfg(target_os = "linux")]
         assert!(acl_read_requires_retry(&io::Error::from_raw_os_error(libc::ENODATA)));
@@ -527,7 +620,7 @@ mod tests {
 
     #[cfg(target_os = "linux")]
     #[test]
-    fn security_unix_zero_acl_byte_limit_rejects_nonempty_acl() {
+    fn test_zero_acl_byte_limit_rejects_nonempty_acl() {
         let acl = [
             2, 0, 0, 0, 1, 0, 7, 0, 0xff, 0xff, 0xff, 0xff, 4, 0, 5, 0, 0xff, 0xff, 0xff, 0xff, 0x20, 0, 0, 0, 0xff,
             0xff, 0xff, 0xff,
@@ -549,7 +642,7 @@ mod tests {
     }
 
     #[test]
-    fn security_unix_requested_values_keep_success_and_distinguish_unsupported() {
+    fn test_requested_values_keep_success_and_distinguish_unsupported() {
         for requirement in [
             LocalObservationRequirement::Optional,
             LocalObservationRequirement::Required,
@@ -576,7 +669,7 @@ mod tests {
     }
 
     #[test]
-    fn security_unix_requested_values_preserve_real_io_failures() {
+    fn test_requested_values_preserve_real_io_failures() {
         let directory = tempfile::tempdir().expect("temporary directory");
         let missing = directory.path().join("missing");
         for requirement in [
@@ -620,7 +713,7 @@ mod tests {
 
     #[cfg(target_os = "linux")]
     #[test]
-    fn security_unix_acl_accepts_base_mask_and_named_principals() {
+    fn test_acl_accepts_base_mask_and_named_principals() {
         let base = [(0x01, 7, u32::MAX), (0x04, 5, u32::MAX), (0x20, 0, u32::MAX)];
         for extra in [
             vec![],
@@ -640,7 +733,7 @@ mod tests {
 
     #[cfg(target_os = "linux")]
     #[test]
-    fn security_unix_acl_rejects_malformed_headers_and_entries() {
+    fn test_acl_rejects_malformed_headers_and_entries() {
         let base = vec![(0x01, 7, u32::MAX), (0x04, 5, u32::MAX), (0x20, 0, u32::MAX)];
         let mut malformed = vec![vec![], vec![2, 0, 0], 1_u32.to_le_bytes().to_vec(), vec![2, 0, 0, 0, 1]];
         malformed.push(acl_bytes(&[]));
@@ -678,7 +771,7 @@ mod tests {
 
     #[cfg(target_os = "linux")]
     #[test]
-    fn security_unix_acl_length_and_decoding_keep_structured_limits() {
+    fn test_acl_length_and_decoding_keep_structured_limits() {
         let options = LocalSecurityObservationOptions::new();
         for length in [0, 1, 2, 3, 5, 11, 13] {
             assert_eq!(
@@ -699,7 +792,7 @@ mod tests {
 
     #[cfg(target_os = "linux")]
     #[test]
-    fn security_unix_queries_present_acl_and_absent_default_acl_from_retained_file() {
+    fn test_queries_present_acl_and_absent_default_acl_from_retained_file() {
         use std::os::unix::ffi::OsStrExt;
 
         let directory = tempfile::tempdir().expect("temporary directory");

@@ -8,6 +8,10 @@
 //! Pending work items for recursive deletion.
 
 /// Pending work for one no-follow recursive deletion.
+///
+/// # Type Parameters
+///
+/// * `P` - The coordinate type used to identify filesystem entries.
 pub(crate) enum DeleteWork<P> {
     /// Inspects an entry before deciding how to remove it.
     Inspect(

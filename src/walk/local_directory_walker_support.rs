@@ -24,12 +24,21 @@ use crate::LocalResourceLimitError;
 use crate::LocalResult;
 
 /// Closes one host frame reader and drops its capacity permit.
+///
+/// # Parameters
+///
+/// - `frame`: The frame whose reader and permit are released.
 pub(super) fn close_host_frame(frame: &mut WalkFrame) {
     let _ = frame.entries.take();
     let _ = frame.directory_permit.take();
 }
 
 /// Creates the established listing error for exhausted directory capacity.
+///
+/// # Parameters
+///
+/// - `path`: The directory path associated with the failed reservation.
+/// - `error`: The resource-pool failure describing the exhausted capacity.
 pub(super) fn directory_limit_error(
     path: &Path,
     error: InsufficientBudgetError<LocalResourceKind, usize>,
@@ -48,6 +57,11 @@ pub(super) fn directory_limit_error(
 }
 
 /// Validates options that must hold before a walker can be constructed.
+///
+/// # Parameters
+///
+/// - `root`: The listing root to include in any validation error.
+/// - `options`: The traversal options to validate.
 pub(super) fn validate_options(root: &Path, options: &LocalListOptions) -> LocalResult<()> {
     if options.max_open_directories() == Some(0) {
         return Err(
@@ -60,6 +74,13 @@ pub(super) fn validate_options(root: &Path, options: &LocalListOptions) -> Local
 }
 
 /// Converts the relative deadline into one checked monotonic instant.
+///
+/// # Parameters
+///
+/// - `root`: The listing root to include in any deadline error.
+/// - `options`: The traversal options containing the optional deadline.
+/// - `started_at`: The monotonic start instant from which the deadline is
+///   measured.
 pub(super) fn walker_deadline(
     root: &Path,
     options: &LocalListOptions,
@@ -79,6 +100,10 @@ pub(super) fn walker_deadline(
 }
 
 /// Creates the finite pool that accounts for opened directory readers.
+///
+/// # Parameters
+///
+/// - `options`: The traversal options containing the optional directory limit.
 pub(super) fn directory_pool(options: &LocalListOptions) -> Option<ManagedResourcePool<LocalResourceKind, usize>> {
     options
         .max_open_directories()
@@ -90,6 +115,11 @@ pub(super) fn directory_pool(options: &LocalListOptions) -> Option<ManagedResour
 /// The fault attempts to reserve one additional handle at the child frame's
 /// actual acquisition point, while its parent still owns the configured
 /// capacity.
+///
+/// # Parameters
+///
+/// - `pool`: The optional pool used to simulate the extra reservation.
+/// - `path`: The child path checked for the scripted `nested` failure.
 #[cfg(feature = "test-support")]
 pub(super) fn scripted_open_directory_error(
     pool: &Option<ManagedResourcePool<LocalResourceKind, usize>>,
@@ -111,6 +141,10 @@ pub(super) fn scripted_open_directory_error(
 }
 
 /// Measures the platform-native storage size of one directory-entry name.
+///
+/// # Parameters
+///
+/// - `name`: The platform-native name whose storage size is measured.
 pub(super) fn name_bytes(name: &OsStr) -> usize {
     #[cfg(unix)]
     {
@@ -129,6 +163,11 @@ pub(super) fn name_bytes(name: &OsStr) -> usize {
 }
 
 /// Reports whether an iterator error must terminate global traversal state.
+///
+/// # Parameters
+///
+/// - `error`: The traversal error to classify.
+/// - `policy`: The configured policy for handling traversal errors.
 #[must_use]
 pub(super) fn is_terminal_walk_error(error: &LocalFileError, policy: crate::LocalWalkErrorPolicy) -> bool {
     if policy == crate::LocalWalkErrorPolicy::FailFast {

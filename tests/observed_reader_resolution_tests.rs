@@ -16,7 +16,7 @@ use qubit_local_files::options::LocalResolutionLimits;
 mod support;
 
 #[test]
-fn host_rejects_finite_resolution_limits_before_resolving_the_path() {
+fn test_host_rejects_finite_resolution_limits_before_resolving_the_path() {
     let scratch = tempfile::tempdir().expect("scratch directory should be created");
     let missing = scratch.path().join("missing");
     let filesystem = LocalFileSystem::host().expect("host filesystem should open");
@@ -42,7 +42,7 @@ fn host_rejects_finite_resolution_limits_before_resolving_the_path() {
 }
 
 #[test]
-fn host_accepts_absent_and_empty_resolution_limits() {
+fn test_host_accepts_absent_and_empty_resolution_limits() {
     let scratch = tempfile::tempdir().expect("scratch directory should be created");
     let file = scratch.path().join("payload");
     std::fs::write(&file, b"data").expect("payload should be created");
@@ -63,7 +63,7 @@ fn host_accepts_absent_and_empty_resolution_limits() {
 
 #[cfg(unix)]
 #[test]
-fn host_binding_rejects_finite_resolution_limits() {
+fn test_host_binding_rejects_finite_resolution_limits() {
     use qubit_local_files::options::LocalPathBindingOptions;
 
     let scratch = tempfile::tempdir().expect("scratch directory should be created");
@@ -83,7 +83,7 @@ fn host_binding_rejects_finite_resolution_limits() {
 
 #[cfg(unix)]
 #[test]
-fn rooted_reads_still_enforce_zero_symlink_hops() {
+fn test_rooted_reads_still_enforce_zero_symlink_hops() {
     use std::os::unix::fs::symlink;
     use std::path::Path;
 

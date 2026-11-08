@@ -8,11 +8,11 @@
 //! Crate-local contract tests for Host directory creation.
 
 use std::fs;
-use std::path::Path;
 
 use tempfile::tempdir;
 
 use crate::LocalCreateDirectoryOptions;
+use crate::LocalFileOperation;
 use crate::LocalSymlinkPolicy;
 use crate::local::HostLocalFileSystem;
 
@@ -39,7 +39,7 @@ fn test_host_directory_creation_rejects_file_component() {
     fs::write(&blocker, b"file").expect("blocking file should be written");
 
     let error = HostLocalFileSystem::create_directory_with_policy(
-        Path::new(&blocker).join("child").as_path(),
+        &blocker.join("child"),
         &LocalCreateDirectoryOptions::new().with_recursive(),
         LocalSymlinkPolicy::FollowAcrossScope,
     )
@@ -47,7 +47,7 @@ fn test_host_directory_creation_rejects_file_component() {
 
     assert!(matches!(
         error.operation(),
-        crate::LocalFileOperation::BindPath | crate::LocalFileOperation::CreateDirectory
+        LocalFileOperation::BindPath | LocalFileOperation::CreateDirectory
     ));
 }
 
@@ -65,7 +65,7 @@ fn test_host_recursive_directory_reports_partial_creation_failure() {
     )
     .expect_err("injected second component failure should be returned");
 
-    assert_eq!(crate::LocalFileOperation::CreateDirectory, error.operation());
+    assert_eq!(LocalFileOperation::CreateDirectory, error.operation());
     assert!(directory.path().join("created").is_dir());
     assert!(!directory.path().join("created/blocked").exists());
 }

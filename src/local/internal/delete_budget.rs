@@ -34,6 +34,16 @@ pub(crate) struct DeleteBudget {
 
 impl DeleteBudget {
     /// Creates a fresh budget; no filesystem access or mutation is performed.
+    ///
+    /// # Parameters
+    ///
+    /// - `options`: Caller-selected limits for recursive deletion.
+    /// - `started`: Monotonic start time used for cooperative deadline checks.
+    ///
+    /// # Returns
+    ///
+    /// A budget initialized with the selected limits and an empty pending-path
+    /// queue.
     #[must_use]
     pub(crate) fn new(options: LocalDeleteOptions, started: Instant) -> Self {
         Self {
@@ -50,6 +60,14 @@ impl DeleteBudget {
     ///
     /// Returns `TimedOut` before the next native call; in-flight I/O cannot
     /// be interrupted by this cooperative deadline.
+    ///
+    /// # Returns
+    ///
+    /// `Ok(())` while the deadline has not expired.
+    ///
+    /// # Errors
+    ///
+    /// Returns `TimedOut` when the configured deadline has elapsed.
     pub(crate) fn check_deadline(&self) -> io::Result<()> {
         // Exercise expiry between native calls without timing-dependent tests.
         #[cfg(feature = "test-support")]
@@ -84,6 +102,20 @@ impl DeleteBudget {
     ///
     /// `depth` is zero for the requested directory. Returns typed depth or
     /// entry budget facts, or `TimedOut`, without permitting unbudgeted work.
+    ///
+    /// # Parameters
+    ///
+    /// - `depth`: Depth of the discovered entry, with the requested directory
+    ///   at zero.
+    ///
+    /// # Returns
+    ///
+    /// `Ok(())` when the entry is within the configured budgets.
+    ///
+    /// # Errors
+    ///
+    /// Returns a quota error when the depth or entry limit is exceeded, or
+    /// `TimedOut` when the configured deadline has elapsed.
     pub(crate) fn discover(&mut self, depth: usize) -> io::Result<()> {
         self.check_deadline()?;
         if let Some(limit) = self.options.max_depth()
@@ -114,6 +146,19 @@ impl DeleteBudget {
     ///
     /// Returns structured memory-budget facts on exhaustion or accounting
     /// overflow. The actively inspected path is not part of this queue limit.
+    ///
+    /// # Parameters
+    ///
+    /// - `path`: Path whose encoded native bytes are being reserved.
+    ///
+    /// # Returns
+    ///
+    /// `Ok(())` after the path's encoded native bytes have been reserved.
+    ///
+    /// # Errors
+    ///
+    /// Returns a quota error when the pending-path byte limit is exceeded or
+    /// the byte counter would overflow.
     pub(crate) fn reserve_path(&mut self, path: &Path) -> io::Result<()> {
         let requested = path.as_os_str().len();
         let limit = self.options.max_pending_path_bytes().unwrap_or(usize::MAX);
@@ -131,12 +176,31 @@ impl DeleteBudget {
     }
 
     /// Releases a previously reserved path when its work item is popped.
+    ///
+    /// # Parameters
+    ///
+    /// - `path`: Previously reserved path whose encoded native bytes are
+    ///   released.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `path` was not reserved or its encoded length exceeds the
+    /// remaining pending-byte count.
     pub(crate) fn release_path(&mut self, path: &Path) {
         self.pending_bytes -= path.as_os_str().len();
     }
 }
 
 /// Wraps typed budget facts for conversion by the public filesystem facade.
+///
+/// # Parameters
+///
+/// - `error`: Structured facts describing the exhausted resource budget.
+///
+/// # Returns
+///
+/// An I/O error with quota-exceeded kind and the supplied resource facts.
+#[must_use]
 fn resource_error(error: LocalResourceLimitError) -> io::Error {
     io::Error::new(io::ErrorKind::QuotaExceeded, error)
 }

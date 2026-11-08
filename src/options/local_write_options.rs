@@ -55,6 +55,10 @@ impl LocalWriteOptions {
     /// # Parameters
     ///
     /// - `mode`: Destination publication mode.
+    ///
+    /// # Returns
+    ///
+    /// Writer options initialized with defaults for the selected mode.
     pub const fn new(mode: LocalWriteMode) -> Self {
         Self {
             mode,
@@ -68,12 +72,20 @@ impl LocalWriteOptions {
     }
 
     /// Returns the publication mode.
+    ///
+    /// # Returns
+    ///
+    /// The mode used to publish the destination.
     #[inline]
     pub const fn mode(&self) -> LocalWriteMode {
         self.mode
     }
 
     /// Returns the metadata policy used for staged replacement.
+    ///
+    /// # Returns
+    ///
+    /// The policy applied when replacing an existing destination.
     #[inline]
     pub const fn metadata_policy(&self) -> LocalWriteMetadataPolicy {
         self.metadata_policy
@@ -83,6 +95,15 @@ impl LocalWriteOptions {
     ///
     /// `UseStaging` can change access controls. Create-new and append modes do
     /// not copy old metadata under either policy.
+    ///
+    /// # Parameters
+    ///
+    /// - `policy`: Metadata source to use when replacing an existing
+    ///   destination.
+    ///
+    /// # Returns
+    ///
+    /// The updated options.
     #[inline]
     pub const fn with_metadata_policy(mut self, policy: LocalWriteMetadataPolicy) -> Self {
         self.metadata_policy = policy;
@@ -90,6 +111,10 @@ impl LocalWriteOptions {
     }
 
     /// Reports whether missing parent directories are created.
+    ///
+    /// # Returns
+    ///
+    /// `true` if missing parent directories will be created.
     #[must_use]
     #[inline]
     pub const fn creates_parent(&self) -> bool {
@@ -97,30 +122,51 @@ impl LocalWriteOptions {
     }
 
     /// Returns the required atomicity.
+    ///
+    /// # Returns
+    ///
+    /// The atomicity guarantee requested for publication.
     #[inline]
     pub const fn atomicity(&self) -> LocalAtomicityRequirement {
         self.atomicity
     }
 
     /// Returns the required durability.
+    ///
+    /// # Returns
+    ///
+    /// The durability guarantee requested for the operation.
     #[inline]
     pub const fn durability(&self) -> LocalDurabilityRequirement {
         self.durability
     }
 
     /// Returns the requested synchronization of the file itself.
+    ///
+    /// # Returns
+    ///
+    /// The requested file synchronization guarantee.
     #[inline]
     pub const fn file_sync(&self) -> LocalFileSyncRequirement {
         self.file_sync
     }
 
     /// Returns the configured Unix open retry timeout.
+    ///
+    /// # Returns
+    ///
+    /// `Some(duration)` when library-level retries are bounded by a timeout;
+    /// `None` when no retry timeout is configured.
     #[inline]
     pub const fn open_retry_timeout(&self) -> Option<Duration> {
         self.open_retry_timeout
     }
 
     /// Enables creation of missing parent directories.
+    ///
+    /// # Returns
+    ///
+    /// The updated options with parent directory creation enabled.
     #[inline]
     pub const fn with_create_parent(mut self) -> Self {
         self.create_parent = true;
@@ -128,6 +174,14 @@ impl LocalWriteOptions {
     }
 
     /// Sets the required atomicity.
+    ///
+    /// # Parameters
+    ///
+    /// - `atomicity`: Atomicity guarantee requested for publication.
+    ///
+    /// # Returns
+    ///
+    /// The updated options.
     #[inline]
     pub const fn with_atomicity(mut self, atomicity: LocalAtomicityRequirement) -> Self {
         self.atomicity = atomicity;
@@ -135,6 +189,14 @@ impl LocalWriteOptions {
     }
 
     /// Sets the required durability.
+    ///
+    /// # Parameters
+    ///
+    /// - `durability`: Durability guarantee requested for the operation.
+    ///
+    /// # Returns
+    ///
+    /// The updated options.
     #[inline]
     pub const fn with_durability(mut self, durability: LocalDurabilityRequirement) -> Self {
         self.durability = durability;
@@ -142,6 +204,15 @@ impl LocalWriteOptions {
     }
 
     /// Sets the requested synchronization of the file itself.
+    ///
+    /// # Parameters
+    ///
+    /// - `requirement`: File synchronization guarantee requested before
+    ///   publication.
+    ///
+    /// # Returns
+    ///
+    /// The updated options.
     #[inline]
     pub const fn with_file_sync(mut self, requirement: LocalFileSyncRequirement) -> Self {
         self.file_sync = requirement;
@@ -149,6 +220,14 @@ impl LocalWriteOptions {
     }
 
     /// Sets the maximum time spent retrying Unix lease conflicts.
+    ///
+    /// # Parameters
+    ///
+    /// - `timeout`: Maximum duration to spend retrying lease conflicts.
+    ///
+    /// # Returns
+    ///
+    /// The updated options with the specified retry timeout.
     #[inline]
     pub const fn with_open_retry_timeout(mut self, timeout: Duration) -> Self {
         self.open_retry_timeout = Some(timeout);
@@ -156,6 +235,10 @@ impl LocalWriteOptions {
     }
 
     /// Disables library-level open retries.
+    ///
+    /// # Returns
+    ///
+    /// The updated options with library-level retries disabled.
     #[inline]
     pub const fn without_open_retry_timeout(mut self) -> Self {
         self.open_retry_timeout = None;

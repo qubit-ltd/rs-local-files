@@ -6,16 +6,15 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 
-// =============================================================================
-//    Copyright (c) 2026 Haixing Hu.
-//
-//    SPDX-License-Identifier: Apache-2.0
-// =============================================================================
 //! Strict depth limits for staged tree recovery cleanup.
 
+use std::fs::canonicalize;
 use std::path::Path;
+use std::path::PathBuf;
 
 use qubit_local_files::LocalFileSystem;
+use qubit_local_files::directory::LocalStagedDirectory;
+use qubit_local_files::directory::LocalTreeValidationOptions;
 use qubit_local_files::error::LocalFileErrorKind;
 use qubit_local_files::error::LocalFileOperation;
 use qubit_local_files::error::LocalResourceKind;
@@ -23,15 +22,12 @@ use qubit_local_files::options::LocalCreateDirectoryOptions;
 use qubit_local_files::options::LocalDirectoryOpenOptions;
 use qubit_local_files::options::LocalTempCleanupLimits;
 use qubit_local_files::options::LocalTempDirectoryOptions;
+use qubit_local_files::outcome::LocalTreeMutationState;
+use tempfile::TempDir;
+use tempfile::tempdir;
 
-fn stage_with_files(
-    paths: &[&str],
-) -> (
-    tempfile::TempDir,
-    qubit_local_files::directory::LocalStagedDirectory,
-    std::path::PathBuf,
-) {
-    let scratch = tempfile::tempdir().expect("scratch");
+fn stage_with_files(paths: &[&str]) -> (TempDir, LocalStagedDirectory, PathBuf) {
+    let scratch = tempdir().expect("scratch");
     let fs = LocalFileSystem::host().expect("host");
     let parent = fs
         .open_directory_with_options(scratch.path(), &LocalDirectoryOpenOptions::new())
@@ -69,8 +65,8 @@ fn test_stage_cleanup_depth_zero_returns_typed_limit_and_can_retry() {
     assert_eq!(Some(1), limit.observed());
     let error_path = error.cause().path().expect("cleanup path");
     assert_eq!(
-        std::fs::canonicalize(error_path).expect("reported cleanup path should resolve"),
-        std::fs::canonicalize(&native).expect("native cleanup path should resolve"),
+        canonicalize(error_path).expect("reported cleanup path should resolve"),
+        canonicalize(&native).expect("native cleanup path should resolve"),
     );
     assert!(native.exists());
 
@@ -91,11 +87,9 @@ fn test_empty_stage_cleanup_succeeds_at_depth_zero() {
 
 #[test]
 fn test_empty_stage_cleanup_honors_path_byte_budget() {
-    use qubit_local_files::directory::LocalTreeValidationOptions;
-
     for rooted in [false, true] {
         for limit_kind in 0..4 {
-            let scratch = tempfile::tempdir().expect("scratch");
+            let scratch = tempdir().expect("scratch");
             let filesystem = if rooted {
                 LocalFileSystem::rooted(scratch.path())
             } else {
@@ -109,7 +103,7 @@ fn test_empty_stage_cleanup_honors_path_byte_budget() {
             let stage = parent
                 .create_staged_directory(&LocalTempDirectoryOptions::new())
                 .expect("stage");
-            let relative = std::path::PathBuf::from(stage.relative_name());
+            let relative = PathBuf::from(stage.relative_name());
             let identity = stage.identity().expect("stage identity").clone();
             let location = stage.retain_in_place();
             let namespace_path = location.namespace_path().to_path_buf();
@@ -131,10 +125,7 @@ fn test_empty_stage_cleanup_honors_path_byte_budget() {
                 let error = retained.cleanup().expect_err("root path exceeds budget");
                 assert_eq!(LocalFileErrorKind::ResourceLimit, error.cause().kind());
                 assert_eq!(LocalFileOperation::Cleanup, error.cause().operation());
-                assert_eq!(
-                    qubit_local_files::outcome::LocalTreeMutationState::NotStarted,
-                    error.mutation_state()
-                );
+                assert_eq!(LocalTreeMutationState::NotStarted, error.mutation_state());
                 assert_eq!(Some(namespace_path.as_path()), error.cause().path());
                 assert!(native_stage.exists(), "budget failure must precede deletion");
                 for mut owner in error.into_retained_resources() {
@@ -151,10 +142,8 @@ fn test_empty_stage_cleanup_honors_path_byte_budget() {
 
 #[test]
 fn test_empty_stage_drop_honors_path_byte_budget() {
-    use qubit_local_files::directory::LocalTreeValidationOptions;
-
     for rooted in [false, true] {
-        let scratch = tempfile::tempdir().expect("scratch");
+        let scratch = tempdir().expect("scratch");
         let filesystem = if rooted {
             LocalFileSystem::rooted(scratch.path())
         } else {
@@ -168,7 +157,7 @@ fn test_empty_stage_drop_honors_path_byte_budget() {
         let stage = parent
             .create_staged_directory(&LocalTempDirectoryOptions::new())
             .expect("stage");
-        let relative = std::path::PathBuf::from(stage.relative_name());
+        let relative = PathBuf::from(stage.relative_name());
         let identity = stage.identity().expect("stage identity").clone();
         let location = stage.retain_in_place();
         let root_bytes = location.namespace_path().as_os_str().as_encoded_bytes().len();

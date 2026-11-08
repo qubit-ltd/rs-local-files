@@ -12,6 +12,8 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use qubit_io::Output;
+
 use super::internal::LocalCommitSyncObserver;
 use super::internal::LocalFileWriterBackend;
 use super::internal::WriterByteCount;
@@ -34,7 +36,7 @@ use crate::policy::LocalFileSyncRequirement;
 ///
 /// # Examples
 ///
-/// This writer implements [`qubit_io::Output`], not `std::io::Write`.
+/// This writer implements [`Output`], not `std::io::Write`.
 ///
 /// ```compile_fail
 /// fn require_write<T: std::io::Write>() {}
@@ -78,6 +80,20 @@ pub struct LocalFileWriter {
 }
 
 impl std::fmt::Debug for LocalFileWriter {
+    /// Formats writer state while redacting paths that may contain sensitive
+    /// data.
+    ///
+    /// # Parameters
+    ///
+    /// - `f`: Formatter receiving the debug representation.
+    ///
+    /// # Returns
+    ///
+    /// `Ok(())` when the debug representation was written.
+    ///
+    /// # Errors
+    ///
+    /// Returns the formatter's error when it cannot accept more output.
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let backend = self.backend.as_ref().map(|backend| match backend {
             LocalFileWriterBackend::Staged(_) => "Staged",
@@ -117,6 +133,10 @@ impl LocalFileWriter {
     /// - `diagnostic_path`: Destination path captured for diagnostics.
     /// - `backend`: Staged or append backend.
     /// - `options`: Writer policy.
+    ///
+    /// # Returns
+    ///
+    /// An open writer initialized with the supplied backend and policy.
     #[inline]
     pub(crate) fn new(diagnostic_path: PathBuf, backend: LocalFileWriterBackend, options: LocalWriteOptions) -> Self {
         Self {
@@ -133,6 +153,10 @@ impl LocalFileWriter {
     }
 
     /// Returns the reusable namespace-absolute destination path.
+    ///
+    /// # Returns
+    ///
+    /// The namespace-absolute destination path retained by this writer.
     #[must_use]
     #[inline]
     pub fn path(&self) -> &Path {
@@ -143,13 +167,21 @@ impl LocalFileWriter {
     ///
     /// Rooted writers retain descriptor authority, so this path can refer to a
     /// replacement after the opened root is renamed.
+    ///
+    /// # Returns
+    ///
+    /// `Some(path)` when a diagnostic path was captured, or `None` when no
+    /// diagnostic path is available.
     #[inline]
     pub fn diagnostic_path(&self) -> Option<&Path> {
         self.diagnostic_path.as_deref()
     }
 
     /// Returns the current writer state.
-    #[must_use = "inspect the writer state"]
+    ///
+    /// # Returns
+    ///
+    /// The lifecycle state currently retained by this writer.
     #[inline]
     pub const fn state(&self) -> LocalWriterState {
         self.state
@@ -161,6 +193,11 @@ impl LocalFileWriter {
     /// means that no failure conclusion is retained; it does not prove that
     /// the destination is unchanged. Inspect commit or abort outcomes for
     /// their operation-specific conclusions.
+    ///
+    /// # Returns
+    ///
+    /// `Some(state)` when a failure conclusion is retained, or `None` when no
+    /// failure conclusion is available.
     #[inline]
     pub const fn failure_state(&self) -> Option<LocalWriteFailureState> {
         self.failure_state
@@ -200,10 +237,10 @@ impl LocalFileWriter {
                 let flush_result = if crate::local::test_support_enabled("writer-append-commit-flush") {
                     Err(crate::local::test_fault_error())
                 } else {
-                    qubit_io::Output::flush(&mut file)
+                    Output::flush(&mut file)
                 };
                 #[cfg(not(feature = "test-support"))]
-                let flush_result = qubit_io::Output::flush(&mut file);
+                let flush_result = Output::flush(&mut file);
                 if let Err(error) = flush_result {
                     return Err(LocalFileCommitError::new(
                         self.contextualize_error(publication_error(
@@ -333,10 +370,10 @@ impl LocalFileWriter {
                 let flush_result = if crate::local::test_support_enabled("writer-append-abort-flush") {
                     Err(crate::local::test_fault_error())
                 } else {
-                    qubit_io::Output::flush(file)
+                    Output::flush(file)
                 };
                 #[cfg(not(feature = "test-support"))]
-                let flush_result = qubit_io::Output::flush(file);
+                let flush_result = Output::flush(file);
                 if let Err(error) = flush_result {
                     return Err(self.contextualize_error(writer_io_error(
                         &self.path,
@@ -360,6 +397,16 @@ impl LocalFileWriter {
     }
 
     /// Replaces the public identity with its normalized namespace path.
+    ///
+    /// # Parameters
+    ///
+    /// - `path`: Normalized namespace-absolute destination path.
+    /// - `current_directory`: Namespace-absolute working directory captured
+    ///   when the writer was opened, if available.
+    ///
+    /// # Returns
+    ///
+    /// The writer with its namespace identity updated.
     pub(crate) fn bind_namespace(mut self, path: PathBuf, current_directory: Option<PathBuf>) -> Self {
         self.path = path;
         self.current_directory = current_directory;
@@ -377,6 +424,20 @@ impl LocalFileWriter {
     /// Consumes `backend` and marks this writer committed on success. On
     /// failure, returns publication certainty and an optional rebuilt writer
     /// retaining the backend only when retry or explicit abort remains safe.
+    ///
+    /// # Parameters
+    ///
+    /// - `backend`: Staged backend whose publication is being committed.
+    ///
+    /// # Returns
+    ///
+    /// The committed outcome, or an error with publication state and any safe
+    /// retry writer.
+    ///
+    /// # Errors
+    ///
+    /// Returns a commit error when publication or its required synchronization
+    /// fails.
     #[allow(clippy::result_large_err)]
     fn commit_staged_backend(
         &mut self,
@@ -441,6 +502,10 @@ impl LocalFileWriter {
     /// bytes have not reached the destination; append bytes already accepted
     /// remain published even when a later write fails.
     ///
+    /// # Type Parameters
+    ///
+    /// - `T`: Successful value carried by the backend result.
+    ///
     /// # Parameters
     ///
     /// - `result`: Backend stream result.
@@ -464,6 +529,14 @@ impl LocalFileWriter {
     }
 
     /// Attaches the creation-time PWD to one structured session error.
+    ///
+    /// # Parameters
+    ///
+    /// - `error`: Structured error produced by the writer operation.
+    ///
+    /// # Returns
+    ///
+    /// The error augmented with the captured working directory when present.
     fn contextualize_error(&self, error: LocalFileError) -> LocalFileError {
         match &self.current_directory {
             Some(current_directory) => error.with_current_directory(current_directory.clone()),
@@ -472,6 +545,19 @@ impl LocalFileWriter {
     }
 
     /// Performs one state-checked native write and records accepted bytes.
+    ///
+    /// # Parameters
+    ///
+    /// - `buffer`: Bytes offered to one native write operation.
+    ///
+    /// # Returns
+    ///
+    /// The number of bytes accepted by the backend.
+    ///
+    /// # Errors
+    ///
+    /// Returns an I/O error when the writer is not writable, the request
+    /// exceeds accounting limits, or the backend write fails.
     fn write_once(&mut self, buffer: &[u8]) -> io::Result<usize> {
         if self.state != LocalWriterState::Open || self.failure_state.is_some() {
             return Err(io::Error::new(
@@ -491,9 +577,9 @@ impl LocalFileWriter {
             }
         }
         let result = match self.backend.as_mut() {
-            Some(LocalFileWriterBackend::Staged(writer)) => qubit_io::Output::write(writer, buffer),
-            Some(LocalFileWriterBackend::Rooted(writer)) => qubit_io::Output::write(writer, buffer),
-            Some(LocalFileWriterBackend::Append(file)) => qubit_io::Output::write(file, buffer),
+            Some(LocalFileWriterBackend::Staged(writer)) => Output::write(writer, buffer),
+            Some(LocalFileWriterBackend::Rooted(writer)) => Output::write(writer, buffer),
+            Some(LocalFileWriterBackend::Append(file)) => Output::write(file, buffer),
             None => unreachable!("open writer must retain one backend"),
         };
         let result = self.observe_stream_result(result);
@@ -506,8 +592,21 @@ impl LocalFileWriter {
     /// Writes vectored bytes to staging or directly appends to the destination.
     ///
     /// Uses the same lifecycle and error contract as
-    /// [`qubit_io::Output::write`], while preserving the native short-write
+    /// [`Output::write`], while preserving the native short-write
     /// result of one vectored operation.
+    ///
+    /// # Parameters
+    ///
+    /// - `buffers`: Ordered byte slices offered to one vectored write.
+    ///
+    /// # Returns
+    ///
+    /// The number of bytes accepted, which may be less than the total length.
+    ///
+    /// # Errors
+    ///
+    /// Returns an I/O error when the writer is terminal, a fatal stream
+    /// failure was recorded, or the backend rejects the write.
     pub fn write_vectored(&mut self, buffers: &[IoSlice<'_>]) -> io::Result<usize> {
         if self.state != LocalWriterState::Open || self.failure_state.is_some() {
             return Err(io::Error::new(
@@ -520,13 +619,28 @@ impl LocalFileWriter {
             return qubit_io::Output::write_vectored(self, &slices);
         }
         let slices = crate::vectored::byte_slices(buffers)?;
-        qubit_io::Output::write_vectored(self, &slices)
+        Output::write_vectored(self, &slices)
     }
 }
 
-impl qubit_io::Output for LocalFileWriter {
+impl Output for LocalFileWriter {
+    /// Byte type accepted by the native writer.
     type Item = u8;
 
+    /// Writes from ordered byte slices with one backend vectored operation.
+    ///
+    /// # Parameters
+    ///
+    /// - `buffers`: Ordered byte slices offered to one backend operation.
+    ///
+    /// # Returns
+    ///
+    /// The number of bytes accepted, which may be less than the total length.
+    ///
+    /// # Errors
+    ///
+    /// Returns an I/O error when the writer is terminal, accounting rejects
+    /// the request, or the backend write fails.
     fn write_vectored(&mut self, buffers: &[&[u8]]) -> io::Result<usize> {
         if self.state != LocalWriterState::Open || self.failure_state.is_some() {
             return Err(io::Error::new(
@@ -536,9 +650,9 @@ impl qubit_io::Output for LocalFileWriter {
         }
         self.bytes_written.check_vectored_request(buffers.iter().copied())?;
         let result = match self.backend.as_mut() {
-            Some(LocalFileWriterBackend::Staged(writer)) => qubit_io::Output::write_vectored(writer, buffers),
-            Some(LocalFileWriterBackend::Rooted(writer)) => qubit_io::Output::write_vectored(writer, buffers),
-            Some(LocalFileWriterBackend::Append(file)) => qubit_io::Output::write_vectored(file, buffers),
+            Some(LocalFileWriterBackend::Staged(writer)) => Output::write_vectored(writer, buffers),
+            Some(LocalFileWriterBackend::Rooted(writer)) => Output::write_vectored(writer, buffers),
+            Some(LocalFileWriterBackend::Append(file)) => Output::write_vectored(file, buffers),
             None => unreachable!("open writer must retain one backend"),
         };
         let result = self.observe_stream_result(result);
@@ -546,6 +660,26 @@ impl qubit_io::Output for LocalFileWriter {
         Ok(written)
     }
 
+    /// Writes one indexed input range after the trait's caller-side validation.
+    ///
+    /// # Safety
+    ///
+    /// `index..index + count` must be a valid range within `input`, and the
+    /// addition must not overflow.
+    ///
+    /// # Parameters
+    ///
+    /// - `input`: Source byte storage.
+    /// - `index`: Start of the requested range.
+    /// - `count`: Number of bytes in the requested range.
+    ///
+    /// # Returns
+    ///
+    /// The number of bytes accepted, which may be less than `count`.
+    ///
+    /// # Errors
+    ///
+    /// Returns the backend I/O error or an accounting error.
     unsafe fn write_unchecked(&mut self, input: &[u8], index: usize, count: usize) -> io::Result<usize> {
         self.write_once(&input[index..index + count])
     }
@@ -555,6 +689,15 @@ impl qubit_io::Output for LocalFileWriter {
     /// Returns `BrokenPipe` after termination or a fatal stream failure, and
     /// otherwise propagates the backend flush result. This is not a durability
     /// synchronization operation.
+    ///
+    /// # Returns
+    ///
+    /// `Ok(())` when backend buffers were flushed.
+    ///
+    /// # Errors
+    ///
+    /// Returns `BrokenPipe` when the writer is not open or the backend flush
+    /// error when flushing fails.
     fn flush(&mut self) -> io::Result<()> {
         if self.state != LocalWriterState::Open || self.failure_state.is_some() {
             return Err(io::Error::new(
@@ -563,9 +706,9 @@ impl qubit_io::Output for LocalFileWriter {
             ));
         }
         let result = match self.backend.as_mut() {
-            Some(LocalFileWriterBackend::Staged(writer)) => qubit_io::Output::flush(writer),
-            Some(LocalFileWriterBackend::Rooted(writer)) => qubit_io::Output::flush(writer),
-            Some(LocalFileWriterBackend::Append(file)) => qubit_io::Output::flush(file),
+            Some(LocalFileWriterBackend::Staged(writer)) => Output::flush(writer),
+            Some(LocalFileWriterBackend::Rooted(writer)) => Output::flush(writer),
+            Some(LocalFileWriterBackend::Append(file)) => Output::flush(file),
             None => unreachable!("open writer must retain one backend"),
         };
         self.observe_stream_result(result)
@@ -667,6 +810,15 @@ fn publication_error(error: LocalFileError, state: LocalWriteFailureState) -> Lo
     }
 }
 
+/// Synchronizes an append file's contents and metadata to stable storage.
+///
+/// # Parameters
+///
+/// - `file`: Append handle whose current contents must be synchronized.
+///
+/// # Errors
+///
+/// Returns the native synchronization error, or the configured test fault.
 fn sync_append_file(file: &std::fs::File) -> io::Result<()> {
     #[cfg(feature = "test-support")]
     if crate::local::test_support_enabled("writer-append-file-sync") {

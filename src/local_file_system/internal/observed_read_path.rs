@@ -12,7 +12,10 @@ use crate::directory::LocalComponentPolicy;
 /// Selects how the observed-read core interprets its input path.
 pub(crate) enum ObservedReadPath<'a> {
     /// A path in the filesystem namespace, resolved using its normal PWD rules.
-    Namespace(&'a Path),
+    Namespace(
+        /// The caller-supplied path interpreted in the filesystem namespace.
+        &'a Path,
+    ),
     /// An unmodified recipe relative to an already retained directory
     /// authority.
     FixedRelative {
@@ -27,6 +30,8 @@ pub(crate) enum ObservedReadPath<'a> {
 
 impl ObservedReadPath<'_> {
     /// Returns the exact path supplied to the selected interpretation mode.
+    #[must_use]
+    #[inline]
     pub(crate) fn original(&self) -> &Path {
         match self {
             Self::Namespace(path) => path,
@@ -35,6 +40,8 @@ impl ObservedReadPath<'_> {
     }
 
     /// Returns the namespace coordinate used to attach observed-read errors.
+    #[must_use]
+    #[inline]
     pub(crate) fn request_path(&self) -> &Path {
         match self {
             Self::Namespace(path) => path,

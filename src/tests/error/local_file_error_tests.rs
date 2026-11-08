@@ -7,6 +7,7 @@
 // =============================================================================
 
 use std::io;
+use std::path::Path;
 
 use crate::error::LocalFileEffectState;
 use crate::error::LocalFileError;
@@ -68,4 +69,26 @@ fn test_effect_queries_preserve_semantic_cause_reclassification() {
 
     assert_eq!(Some(LocalFileErrorKind::TypeConflict), error.cause_kind());
     assert_eq!(None, error.effect_state());
+}
+
+#[test]
+fn test_internal_error_remapping_retains_every_context_field() {
+    let mut error = LocalFileError::from_path_codec(
+        LocalFileOperation::Read,
+        Some("original".into()),
+        LocalPathCodecError::NativeNul,
+    )
+    .with_kind(LocalFileErrorKind::InvalidOptions)
+    .with_operation(LocalFileOperation::OpenWriter);
+    error.replace_paths(Some("source".into()), Some("target".into()), Some("/workspace".into()));
+
+    assert_eq!(LocalFileErrorKind::InvalidOptions, error.kind());
+    assert_eq!(LocalFileOperation::OpenWriter, error.operation());
+    assert_eq!(Some(Path::new("/workspace")), error.current_directory());
+    assert_eq!(Some(Path::new("source")), error.path());
+    assert_eq!(Some(Path::new("target")), error.target());
+    assert_eq!(io::ErrorKind::InvalidInput, error.io_error_kind());
+    assert!(error.typed_source().is_some());
+    assert!(error.io_error().is_none());
+    assert!(error.to_string().contains("caused by"));
 }

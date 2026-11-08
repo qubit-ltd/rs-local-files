@@ -5,8 +5,7 @@
 //
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
-//! Fuzzes bounded temporary-resource sequences, including external source
-//! replacement.
+//! Fuzzes bounded temporary-resource sequences inside a rooted filesystem.
 
 #![no_main]
 

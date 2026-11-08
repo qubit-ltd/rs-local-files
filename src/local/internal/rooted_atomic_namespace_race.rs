@@ -91,6 +91,11 @@ fn identity_error(
 }
 
 /// Classifies a rooted identity mismatch before replacement.
+///
+/// # Parameters
+///
+/// * `parent` - Open parent directory that anchors the rooted lookup.
+/// * `name` - Destination entry name relative to that directory.
 fn rooted_mismatch_state(parent: &File, name: &CString) -> LocalAtomicDestinationState {
     #[cfg(feature = "test-support")]
     if super::test_support::is_enabled("rooted-identity-missing") {

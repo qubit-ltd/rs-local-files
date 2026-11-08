@@ -45,6 +45,12 @@ impl PathIoError {
 
 impl std::fmt::Display for PathIoError {
     /// Formats the operation, path, and native I/O error.
+    ///
+    /// # Parameters
+    /// - `formatter`: Destination for the formatted error message.
+    ///
+    /// # Returns
+    /// `Ok(())` when formatting succeeds, or the formatter's error otherwise.
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             formatter,

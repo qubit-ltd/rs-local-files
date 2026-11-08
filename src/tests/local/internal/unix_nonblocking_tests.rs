@@ -16,8 +16,8 @@ use std::time::Duration;
 
 use tempfile::tempdir;
 
-use super::unix_nonblocking::clear_nonblocking;
-use super::unix_nonblocking::open_with_nonblocking_retry;
+use crate::local::clear_nonblocking;
+use crate::local::open_with_nonblocking_retry;
 
 /// Verifies descriptor status restoration clears `O_NONBLOCK` while
 /// retaining every unrelated status flag.

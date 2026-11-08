@@ -8,8 +8,15 @@
 //! Crate-private contract tests for `LocalCopyDirOptions`.
 
 use std::io::Cursor;
+use std::io::ErrorKind;
+use std::path::Path;
 use std::time::Duration;
 use std::time::Instant;
+
+use qubit_io::ByteInput;
+use qubit_io::ByteOutput;
+use qubit_io::CountingInput;
+use qubit_io::CountingOutput;
 
 use crate::local::CopyBudget;
 use crate::local::LocalCopyDirOptions;
@@ -81,7 +88,7 @@ fn test_copy_budget_stops_at_the_next_chunk_deadline_boundary() {
         .copy_with_now(&mut reader, &mut writer, &mut now)
         .expect_err("the second chunk must observe the expired deadline");
 
-    assert_eq!(std::io::ErrorKind::TimedOut, error.kind());
+    assert_eq!(ErrorKind::TimedOut, error.kind());
     assert!(writer.len() < source.len());
     assert_eq!(64 * 1024, writer.len());
 }
@@ -89,8 +96,8 @@ fn test_copy_budget_stops_at_the_next_chunk_deadline_boundary() {
 #[test]
 fn test_copy_budget_accepts_pure_item_wrappers() {
     let mut budget = CopyBudget::new(LocalCopyDirOptions::new());
-    let mut input = qubit_io::CountingInput::new(Cursor::new(b"payload"));
-    let mut output = qubit_io::CountingOutput::new(Vec::<u8>::new());
+    let mut input = CountingInput::new(Cursor::new(b"payload"));
+    let mut output = CountingOutput::new(Vec::<u8>::new());
 
     assert_eq!(budget.copy(&mut input, &mut output).unwrap(), 7);
     assert_eq!(input.items_read(), 7);
@@ -103,8 +110,8 @@ fn test_copy_budget_accepts_dynamic_protocol_references() {
     let mut budget = CopyBudget::new(LocalCopyDirOptions::new());
     let mut source = Cursor::new(b"dynamic".to_vec());
     let mut destination = Vec::new();
-    let reader: &mut dyn qubit_io::ByteInput = &mut source;
-    let writer: &mut dyn qubit_io::ByteOutput = &mut destination;
+    let reader: &mut dyn ByteInput = &mut source;
+    let writer: &mut dyn ByteOutput = &mut destination;
 
     assert_eq!(budget.copy(reader, writer).unwrap(), 7);
     assert_eq!(destination, b"dynamic");
@@ -123,16 +130,14 @@ fn test_copy_budget_accepts_standard_cursor_and_vec() {
 #[test]
 fn test_generated_keep_target_promotes_only_well_formed_sandbox_paths() {
     assert_eq!(
-        std::path::Path::new("/parent/resource"),
-        generated_target(std::path::Path::new("/parent/sandbox/resource"))
-            .expect("sandboxed path should derive a sibling target")
+        Path::new("/parent/resource"),
+        generated_target(Path::new("/parent/sandbox/resource")).expect("sandboxed path should derive a sibling target")
     );
-    assert!(generated_target(std::path::Path::new("resource")).is_err());
-    assert!(generated_target(std::path::Path::new("/resource")).is_err());
-    assert!(generated_target(std::path::Path::new("/parent/sandbox/..")).is_err());
+    assert!(generated_target(Path::new("resource")).is_err());
+    assert!(generated_target(Path::new("/resource")).is_err());
+    assert!(generated_target(Path::new("/parent/sandbox/..")).is_err());
     assert_eq!(
-        std::path::Path::new("/resource"),
-        generated_target(std::path::Path::new("/sandbox/resource"))
-            .expect("root sandbox should derive a root sibling target")
+        Path::new("/resource"),
+        generated_target(Path::new("/sandbox/resource")).expect("root sandbox should derive a root sibling target")
     );
 }

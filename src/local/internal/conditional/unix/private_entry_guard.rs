@@ -7,27 +7,53 @@
 // =============================================================================
 //! Identity-bound cleanup ownership for a newly created Unix private entry.
 
-use std::error::Error;
 use std::ffi::CString;
-use std::fmt;
 use std::fs::File;
 use std::io;
 use std::os::fd::AsRawFd;
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::MetadataExt;
+use std::path::Path;
+use std::path::PathBuf;
+
+use libc::unlinkat;
 
 use super::namespace::Namespace;
 use super::namespace::identity_at;
+use super::private_entry_setup_error::PrivateEntrySetupError;
 
+/// Owns best-effort cleanup of a newly created private namespace entry.
+///
+/// The guard records the file identity before cleanup and removes the entry
+/// only while its current identity still matches. Dropping an armed guard
+/// attempts the same verified cleanup and deliberately ignores cleanup errors.
 #[derive(Debug)]
 pub(super) struct PrivateEntryGuard<'a> {
+    /// Namespace whose retained parent descriptor anchors cleanup.
     namespace: &'a Namespace,
+    /// NUL-terminated, single-component name of the created entry.
     name: CString,
+    /// Device and inode captured from the created file, when available.
     identity: Option<(u64, u64)>,
+    /// Whether dropping this guard should attempt verified cleanup.
     armed: bool,
 }
 
 impl<'a> PrivateEntryGuard<'a> {
+    /// Creates an armed guard and captures the created file's identity.
+    ///
+    /// On metadata failure, returns the error together with the still-armed
+    /// guard so the caller can attempt cleanup before propagating the error.
+    ///
+    /// # Parameters
+    ///
+    /// - `namespace`: retained directory namespace used to anchor cleanup.
+    /// - `name`: NUL-terminated component naming the created entry.
+    /// - `file`: handle for the entry whose identity is captured.
+    ///
+    /// # Returns
+    ///
+    /// Returns the armed guard, or the metadata error paired with that guard.
     pub(super) fn new(namespace: &'a Namespace, name: CString, file: &File) -> Result<Self, (io::Error, Self)> {
         let mut guard = Self {
             namespace,
@@ -49,10 +75,26 @@ impl<'a> PrivateEntryGuard<'a> {
         }
     }
 
+    /// Relinquishes responsibility for deleting the private entry.
     pub(super) fn disarm(&mut self) {
         self.armed = false;
     }
 
+    /// Attempts cleanup and combines a cleanup failure with the setup error.
+    ///
+    /// The returned error retains the primary error kind. If cleanup fails,
+    /// the guard remains armed so `Drop` can make one further best-effort
+    /// attempt.
+    ///
+    /// # Parameters
+    ///
+    /// - `primary`: the error that prevented setup from completing.
+    ///
+    /// # Returns
+    ///
+    /// Returns the primary error, or an error describing both setup and
+    /// cleanup failures.
+    #[must_use]
     pub(super) fn finish_with(&mut self, primary: io::Error) -> io::Error {
         let cleanup = self.cleanup();
         if cleanup.is_ok() {
@@ -74,6 +116,26 @@ impl<'a> PrivateEntryGuard<'a> {
         }
     }
 
+    /// Builds the diagnostic path without using it to select the entry.
+    ///
+    /// # Returns
+    ///
+    /// Returns the namespace's parent path joined with the entry name for
+    /// error reporting.
+    fn path(&self) -> PathBuf {
+        self.namespace
+            .namespace_path
+            .parent()
+            .unwrap_or(Path::new(""))
+            .join(std::ffi::OsStr::from_bytes(self.name.as_bytes()))
+    }
+
+    /// Removes the entry only after confirming that its identity is unchanged.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the identity is unavailable or changed, identity
+    /// lookup fails, or the operating system cannot remove the entry.
     fn cleanup(&self) -> io::Result<()> {
         let Some(expected) = self.identity else {
             return Err(io::Error::new(
@@ -95,53 +157,21 @@ impl<'a> PrivateEntryGuard<'a> {
         }
         // SAFETY: the parent descriptor is retained and the single-component
         // name is NUL-terminated. Identity was checked immediately above.
-        let result = unsafe { libc::unlinkat(self.namespace.parent.as_raw_fd(), self.name.as_ptr(), 0) };
+        let result = unsafe { unlinkat(self.namespace.parent.as_raw_fd(), self.name.as_ptr(), 0) };
         if result == -1 {
             Err(io::Error::last_os_error())
         } else {
             Ok(())
         }
     }
-
-    fn path(&self) -> std::path::PathBuf {
-        self.namespace
-            .namespace_path
-            .parent()
-            .unwrap_or(std::path::Path::new(""))
-            .join(std::ffi::OsStr::from_bytes(self.name.as_bytes()))
-    }
 }
 
 impl Drop for PrivateEntryGuard<'_> {
+    /// Makes one ignored-error cleanup attempt while the guard remains armed.
     fn drop(&mut self) {
         if self.armed {
             let _ = self.cleanup();
         }
-    }
-}
-
-#[derive(Debug)]
-struct PrivateEntrySetupError {
-    primary: io::Error,
-    cleanup: io::Error,
-    path: std::path::PathBuf,
-}
-
-impl fmt::Display for PrivateEntrySetupError {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            formatter,
-            "{}; private-entry cleanup failed at {}: {}",
-            self.primary,
-            self.path.display(),
-            self.cleanup
-        )
-    }
-}
-
-impl Error for PrivateEntrySetupError {
-    fn source(&self) -> Option<&(dyn Error + 'static)> {
-        Some(&self.primary)
     }
 }
 
@@ -155,6 +185,7 @@ mod tests {
     use super::PrivateEntryGuard;
     use crate::local::internal::conditional::unix::namespace::Namespace;
 
+    /// Builds a namespace rooted at a temporary directory for these tests.
     fn namespace(directory: &std::path::Path) -> Namespace {
         Namespace {
             parent: File::open(directory).expect("parent directory should open"),
@@ -166,7 +197,7 @@ mod tests {
     }
 
     #[test]
-    fn explicit_setup_failure_cleans_the_verified_private_entry() {
+    fn test_explicit_setup_failure_cleans_the_verified_private_entry() {
         let directory = tempfile::tempdir().expect("fixture should be created");
         let namespace = namespace(directory.path());
         let (name, mut file) = namespace
@@ -187,7 +218,7 @@ mod tests {
     }
 
     #[test]
-    fn cleanup_refuses_to_remove_a_replacement_with_unknown_identity() {
+    fn test_cleanup_refuses_to_remove_a_replacement_with_unknown_identity() {
         let directory = tempfile::tempdir().expect("fixture should be created");
         let namespace = namespace(directory.path());
         let (name, file) = namespace

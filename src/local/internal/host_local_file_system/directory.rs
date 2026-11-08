@@ -112,6 +112,15 @@ impl HostLocalFileSystem {
 /// The success flag records creation of `path` itself. Existing directories
 /// are accepted only as allowed by `exists_ok`; inspection and creation errors
 /// retain any earlier ancestor creation as an effect of the operation.
+///
+/// # Parameters
+///
+/// - `path`: Resolved native path whose missing normal components are created.
+/// - `exists_ok`: Whether an existing target directory is accepted.
+///
+/// # Returns
+///
+/// Whether this operation created the requested target directory.
 fn create_host_directory_tree(path: &Path, exists_ok: bool) -> LocalResult<bool> {
     let mut current = PathBuf::new();
     let mut created_any = false;
@@ -176,6 +185,17 @@ fn create_host_directory_tree(path: &Path, exists_ok: bool) -> LocalResult<bool>
 }
 
 /// Builds one recursive-create error while retaining partial publication.
+///
+/// # Parameters
+///
+/// - `path`: Component whose inspection or creation failed.
+/// - `created_any`: Whether an earlier component was created by this operation.
+/// - `source`: Underlying failure to preserve in the returned filesystem error.
+///
+/// # Returns
+///
+/// A structured create-directory error retaining the component path and
+/// partial-publication state.
 fn create_component_error(path: &Path, created_any: bool, source: io::Error) -> LocalFileError {
     directory_mutation_error(LocalFileOperation::CreateDirectory, path, created_any, source)
 }

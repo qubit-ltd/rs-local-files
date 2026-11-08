@@ -7,61 +7,12 @@
 // =============================================================================
 //! Shared bounded scratch-root ownership for filesystem fuzz targets.
 
-use std::fs;
-use std::io;
-use std::path::Path;
-use std::path::PathBuf;
-use std::sync::atomic::AtomicU64;
-use std::sync::atomic::Ordering;
-
-const MAX_ROOT_ATTEMPTS: u64 = 16;
-static NEXT_ROOT_ID: AtomicU64 = AtomicU64::new(0);
-
-/// A uniquely created scratch directory removed on scope exit.
-pub(crate) struct FuzzRoot {
-    path: PathBuf,
-}
-
-impl FuzzRoot {
-    /// Atomically creates one process-unique scratch directory.
-    ///
-    /// Returns `None` after a bounded sequence of collisions or ambient I/O
-    /// failures so that environmental setup does not become a fuzz finding.
-    pub(crate) fn create(label: &str) -> Option<Self> {
-        let first_id = NEXT_ROOT_ID.fetch_add(MAX_ROOT_ATTEMPTS, Ordering::Relaxed);
-        for offset in 0..MAX_ROOT_ATTEMPTS {
-            let path = std::env::temp_dir().join(format!(
-                "qubit-local-files-{label}-{}-{}",
-                std::process::id(),
-                first_id + offset,
-            ));
-            match fs::create_dir(&path) {
-                Ok(()) => return Some(Self { path }),
-                Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
-                Err(_) => return None,
-            }
-        }
-        None
-    }
-
-    /// Returns the exclusively owned scratch-root path.
-    pub(crate) fn path(&self) -> &Path {
-        &self.path
-    }
-}
-
-impl Drop for FuzzRoot {
-    /// Performs best-effort cleanup without converting host cleanup failures
-    /// into library crash findings.
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.path);
-    }
-}
+mod fuzz_root;
+pub(crate) use fuzz_root::FuzzRoot;
 
 /// Shared state machine; other fuzz targets only use the scratch-root owner.
 #[allow(dead_code)]
 pub(crate) mod lifecycle {
-    use std::collections::BTreeMap;
     use std::fs;
     use std::path::Path;
     use std::path::PathBuf;
@@ -69,13 +20,8 @@ pub(crate) mod lifecycle {
     use qubit_io::Output;
     use qubit_local_files::LocalFileSystem;
     use qubit_local_files::LocalResult;
-    use qubit_local_files::LocalTempDirectory;
-    use qubit_local_files::LocalTempFile;
-    use qubit_local_files::error::LocalPersistError;
-    use qubit_local_files::error::LocalPersistErrorParts;
     use qubit_local_files::options::LocalDeleteOptions;
     use qubit_local_files::options::LocalListOptions;
-    use qubit_local_files::options::LocalPersistOptions;
     use qubit_local_files::options::LocalTempCleanupLimits;
     use qubit_local_files::options::LocalTempDirectoryOptions;
     use qubit_local_files::options::LocalTempFileOptions;
@@ -83,13 +29,23 @@ pub(crate) mod lifecycle {
     use qubit_local_files::options::LocalWriteMode;
     use qubit_local_files::options::LocalWriteOptions;
     use qubit_local_files::outcome::LocalPersistFailureState;
-    use qubit_local_files::outcome::LocalPersistOutcome;
     use qubit_local_files::outcome::LocalPersistStage;
     use qubit_local_files::outcome::LocalTempSourceState;
     use qubit_local_files::outcome::LocalWriterState;
-    use qubit_local_files::policy::LocalDurabilityRequirement;
 
     use super::FuzzRoot;
+
+    mod directory_snapshot;
+    mod lifecycle_witness;
+    mod published_resource;
+    mod resource;
+    mod snapshot_entry;
+
+    use directory_snapshot::DirectorySnapshot;
+    use lifecycle_witness::LifecycleWitness;
+    use published_resource::PublishedResource;
+    use resource::Resource;
+    use snapshot_entry::SnapshotEntry;
 
     const MAX_OPERATIONS: usize = 64;
     const MAX_ENTRIES: usize = 256;
@@ -99,6 +55,8 @@ pub(crate) mod lifecycle {
     // Bound the model from the fixture's entry/depth limits and largest marker.
     const MAX_SNAPSHOT_BYTES: usize = MAX_ENTRIES * (MAX_DEPTH * 16 + REPLACEMENT.len());
 
+    /// Turns fixture setup failures into clear harness failures while leaving
+    /// environmental setup for the caller to skip before this helper runs.
     fn require_created<T>(result: LocalResult<T>, kind: &str) -> T {
         match result {
             Ok(resource) => resource,
@@ -106,6 +64,7 @@ pub(crate) mod lifecycle {
         }
     }
 
+    /// Fails a deterministic fixture when expected publication is rejected.
     fn assert_expected_publication_success(expected_success: bool, succeeded: bool) {
         assert!(
             !expected_success || succeeded,
@@ -113,217 +72,8 @@ pub(crate) mod lifecycle {
         );
     }
 
-    #[derive(Debug, Default, PartialEq, Eq)]
-    struct LifecycleWitness {
-        created: usize,
-        successful_publications: usize,
-        explicit_cleanups: usize,
-        released: usize,
-        artifacts_absent: usize,
-    }
-
-    /// The public resource retained between independently decoded operations.
-    #[derive(Debug)]
-    enum Resource {
-        File(LocalTempFile),
-        Directory(LocalTempDirectory),
-    }
-
-    /// Publication errors keep ownership and both independent state axes.
-    struct Retained {
-        resource: Box<Resource>,
-        publication: LocalPersistFailureState,
-        stage: LocalPersistStage,
-        source: LocalTempSourceState,
-        target: Option<PathBuf>,
-    }
-
-    #[derive(Debug, PartialEq, Eq)]
-    enum SnapshotEntry {
-        Directory,
-        File(Vec<u8>),
-        Symlink(PathBuf),
-    }
-
-    /// A bounded, non-following snapshot of a published directory tree.
-    #[derive(Debug, PartialEq, Eq)]
-    struct DirectorySnapshot {
-        entries: BTreeMap<PathBuf, SnapshotEntry>,
-    }
-
-    impl DirectorySnapshot {
-        /// Captures the complete tree within the harness entry and byte
-        /// budgets.
-        fn capture(root: &Path) -> Self {
-            fn visit(
-                path: &Path,
-                relative: &Path,
-                entries: &mut BTreeMap<PathBuf, SnapshotEntry>,
-                byte_count: &mut usize,
-            ) {
-                assert!(
-                    relative.components().count() <= MAX_DEPTH,
-                    "snapshot exceeded its depth budget"
-                );
-                assert!(entries.len() < MAX_ENTRIES, "snapshot exceeded its entry budget");
-                let metadata = fs::symlink_metadata(path).expect("snapshot entry metadata");
-                let snapshot_entry = if metadata.file_type().is_symlink() {
-                    let target = fs::read_link(path).expect("read snapshot link text");
-                    *byte_count = byte_count
-                        .checked_add(relative.as_os_str().len())
-                        .and_then(|size| size.checked_add(target.as_os_str().len()))
-                        .expect("snapshot byte budget arithmetic");
-                    assert!(*byte_count <= MAX_SNAPSHOT_BYTES, "snapshot exceeded its byte budget");
-                    SnapshotEntry::Symlink(target)
-                } else if metadata.is_dir() {
-                    *byte_count = byte_count
-                        .checked_add(relative.as_os_str().len())
-                        .expect("snapshot byte budget arithmetic");
-                    assert!(*byte_count <= MAX_SNAPSHOT_BYTES, "snapshot exceeded its byte budget");
-                    SnapshotEntry::Directory
-                } else if metadata.is_file() {
-                    let file_size = usize::try_from(metadata.len()).expect("snapshot file size fits usize");
-                    *byte_count = byte_count
-                        .checked_add(relative.as_os_str().len())
-                        .and_then(|size| size.checked_add(file_size))
-                        .expect("snapshot byte budget arithmetic");
-                    assert!(*byte_count <= MAX_SNAPSHOT_BYTES, "snapshot exceeded its byte budget");
-                    SnapshotEntry::File(fs::read(path).expect("read snapshot file"))
-                } else {
-                    panic!("unsupported entry in fuzz-owned directory: {path:?}");
-                };
-                entries.insert(relative.to_path_buf(), snapshot_entry);
-
-                if metadata.is_dir() {
-                    for child in fs::read_dir(path).expect("read snapshot directory") {
-                        let child = child.expect("read snapshot directory entry");
-                        let child_path = child.path();
-                        let child_relative = relative.join(child.file_name());
-                        visit(&child_path, &child_relative, entries, byte_count);
-                    }
-                }
-            }
-
-            let mut entries = BTreeMap::new();
-            let mut byte_count = 0;
-            visit(root, Path::new(""), &mut entries, &mut byte_count);
-            Self { entries }
-        }
-
-        /// Asserts the exact relative paths, entry kinds, link text and bytes.
-        fn assert_matches(&self, root: &Path) {
-            assert_eq!(self, &Self::capture(root), "published directory tree changed: {root:?}");
-        }
-    }
-
-    enum PublishedResource {
-        File(PathBuf, Vec<u8>),
-        Directory(PathBuf, DirectorySnapshot),
-    }
-
-    /// Converts named public error parts without discarding the retained guard.
-    fn retain<T>(error: LocalPersistError<T>, wrap: fn(T) -> Resource) -> Retained {
-        let LocalPersistErrorParts {
-            resource,
-            state,
-            source_state,
-            stage,
-            resolved_target,
-            ..
-        } = error.into_parts();
-        Retained {
-            resource: Box::new(wrap(resource)),
-            publication: state,
-            stage,
-            source: source_state,
-            target: resolved_target,
-        }
-    }
-
-    impl Resource {
-        /// Returns the creating authority's namespace path without host
-        /// conversion.
-        fn path(&self) -> &Path {
-            match self {
-                Self::File(resource) => resource.path(),
-                Self::Directory(resource) => resource.path(),
-            }
-        }
-
-        /// Reads the guard's current source authority after preceding
-        /// operations.
-        fn source_state(&self) -> LocalTempSourceState {
-            match self {
-                Self::File(resource) => resource.source_state(),
-                Self::Directory(resource) => resource.source_state(),
-            }
-        }
-
-        /// Runs public cleanup, preserving the concrete error for assertions.
-        fn cleanup(&mut self) -> LocalResult<()> {
-            match self {
-                Self::File(resource) => resource.cleanup(),
-                Self::Directory(resource) => resource.cleanup(),
-            }
-        }
-
-        /// Publishes, keeps, or retries at an explicit base; failures retain
-        /// the resource.
-        fn publish(
-            self,
-            base: &Path,
-            target: &Path,
-            opcode: u8,
-            selector: u8,
-            rooted: bool,
-        ) -> Result<LocalPersistOutcome, Retained> {
-            let durability = match selector % 3 {
-                0 => LocalDurabilityRequirement::NotRequired,
-                1 => LocalDurabilityRequirement::Preferred,
-                _ => LocalDurabilityRequirement::Required,
-            };
-            let options = LocalPersistOptions::new().with_durability(durability);
-            let (invalid_base, invalid_target) = match selector % 6 {
-                0 => (Path::new("/"), Path::new("../../outside")),
-                1 => (Path::new("relative"), Path::new("published")),
-                2 => (Path::new("/."), Path::new("published")),
-                3 => (Path::new("/"), Path::new("/absolute")),
-                4 => (Path::new("/"), Path::new("")),
-                _ => (Path::new("/missing"), Path::new("published")),
-            };
-            let relative_base = base.join("scratch");
-            let relative_target = Path::new("..").join(target.file_name().unwrap_or_default());
-            let (explicit_base, explicit_target) = if selector & 1 == 0 {
-                (base, Path::new(target.file_name().unwrap_or_default()))
-            } else {
-                (relative_base.as_path(), relative_target.as_path())
-            };
-            match self {
-                Self::File(resource) => {
-                    let result = match opcode {
-                        3 => resource.keep(),
-                        10 if rooted => resource.persist_at(invalid_base, invalid_target, options),
-                        9 => resource.persist_at(explicit_base, explicit_target, options),
-                        _ => resource.persist_with(target, options),
-                    };
-                    result.map_err(|error| retain(error, Self::File))
-                }
-                Self::Directory(resource) => {
-                    let result = match opcode {
-                        3 => resource.keep(),
-                        10 if rooted => resource.persist_at(invalid_base, invalid_target, options),
-                        9 => resource.persist_at(explicit_base, explicit_target, options),
-                        _ => resource.persist_with(target, options),
-                    };
-                    result.map_err(|error| retain(error, Self::Directory))
-                }
-            }
-        }
-    }
-
-    /// Converts a namespace path only for adversarial host mutation and
-    /// observation. Rooted library calls always receive their original
-    /// namespace operands.
+    /// Converts namespace paths to host paths only for adversarial mutation and
+    /// observation; rooted library calls retain their original operands.
     fn host_path(root: &Path, namespace: &Path, rooted: bool) -> PathBuf {
         if rooted {
             root.join(namespace.strip_prefix(Path::new("/")).expect("rooted absolute path"))
@@ -348,7 +98,7 @@ pub(crate) mod lifecycle {
         use super::FuzzRoot;
 
         #[test]
-        fn snapshot_rejects_payload_loss_and_accepts_remaining_tree() {
+        fn test_snapshot_rejects_payload_loss_and_accepts_remaining_tree() {
             let root = FuzzRoot::create("snapshot-test").expect("create fixture root");
             let root_path = root.path();
             fs::create_dir_all(root_path.join("nested")).expect("create fixture tree");
@@ -365,7 +115,7 @@ pub(crate) mod lifecycle {
 
         #[cfg(unix)]
         #[test]
-        fn snapshot_records_symlink_text_without_following_it() {
+        fn test_snapshot_records_symlink_text_without_following_it() {
             use std::os::unix::fs::symlink;
 
             let root = FuzzRoot::create("symlink-snapshot-test").expect("create fixture root");
@@ -384,8 +134,8 @@ pub(crate) mod lifecycle {
         }
     }
 
-    /// Asserts saved replacement bytes and every published target survive later
-    /// actions.
+    /// Checks that saved replacement bytes and every published resource remain
+    /// unchanged after later actions.
     fn assert_preserved(replacements: &[PathBuf], published: &[PublishedResource]) {
         for marker in replacements {
             assert_eq!(fs::read(marker).expect("replacement remains readable"), REPLACEMENT);
@@ -407,10 +157,15 @@ pub(crate) mod lifecycle {
     /// levels for the resource and sandbox plus one level for its payload
     /// file. Filesystem assertion failures are fuzz findings; ambient
     /// initial setup errors skip.
+    ///
+    /// Shared by host and rooted lifecycle targets; generated assertion
+    /// failures remain fuzz findings.
     pub(crate) fn run(data: &[u8], rooted: bool) {
         let _ = run_model(data, rooted);
     }
 
+    /// Executes the bounded lifecycle model and returns fixture counters.
+    /// Returns `None` when host setup prevents the model from starting.
     fn run_model(data: &[u8], rooted: bool) -> Option<LifecycleWitness> {
         let Some(root) = FuzzRoot::create(if rooted { "rooted-lifecycle" } else { "lifecycle" }) else {
             return None;
@@ -797,7 +552,7 @@ pub(crate) mod lifecycle {
         use super::run_model;
 
         #[test]
-        fn expected_publication_success_rejects_failure_without_rejecting_other_cases() {
+        fn test_expected_publication_success_rejects_failure_without_rejecting_other_cases() {
             assert!(
                 std::panic::catch_unwind(|| {
                     assert_expected_publication_success(true, false);
@@ -811,7 +566,7 @@ pub(crate) mod lifecycle {
         }
 
         #[test]
-        fn require_created_panics_for_fixture_creation_errors_and_returns_success() {
+        fn test_require_created_panics_for_fixture_creation_errors_and_returns_success() {
             for kind in [LocalFileErrorKind::Unsupported, LocalFileErrorKind::InvalidPath] {
                 let error = LocalFileError::new(kind, LocalFileOperation::CreateTempFile);
                 assert!(
@@ -825,7 +580,7 @@ pub(crate) mod lifecycle {
         }
 
         #[test]
-        fn fixed_file_lifecycle_creates_cleans_releases_and_removes_artifact() {
+        fn test_fixed_file_lifecycle_creates_cleans_releases_and_removes_artifact() {
             let witness = run_model(&[0, 0, 11, 0, 4, 0, 5, 0], false).expect("fixture environment");
             assert_eq!(witness.created, 1);
             assert_eq!(witness.explicit_cleanups, 1);
@@ -834,7 +589,7 @@ pub(crate) mod lifecycle {
         }
 
         #[test]
-        fn fixed_directory_lifecycle_creates_cleans_releases_and_removes_artifact() {
+        fn test_fixed_directory_lifecycle_creates_cleans_releases_and_removes_artifact() {
             let witness = run_model(&[0, 1, 11, 0, 4, 0, 5, 0], true).expect("fixture environment");
             assert_eq!(witness.created, 1);
             assert_eq!(witness.explicit_cleanups, 1);
@@ -843,7 +598,7 @@ pub(crate) mod lifecycle {
         }
 
         #[test]
-        fn fixed_host_directory_lifecycle_creates_cleans_releases_and_removes_artifact() {
+        fn test_fixed_host_directory_lifecycle_creates_cleans_releases_and_removes_artifact() {
             let witness = run_model(&[0, 1, 11, 0, 4, 0, 5, 0], false).expect("fixture environment");
             assert_eq!(witness.created, 1);
             assert_eq!(witness.explicit_cleanups, 1);
@@ -852,7 +607,7 @@ pub(crate) mod lifecycle {
         }
 
         #[test]
-        fn fixed_rooted_file_lifecycle_creates_cleans_releases_and_removes_artifact() {
+        fn test_fixed_rooted_file_lifecycle_creates_cleans_releases_and_removes_artifact() {
             let witness = run_model(&[0, 0, 11, 0, 4, 0, 5, 0], true).expect("fixture environment");
             assert_eq!(witness.created, 1);
             assert_eq!(witness.explicit_cleanups, 1);
@@ -861,28 +616,28 @@ pub(crate) mod lifecycle {
         }
 
         #[test]
-        fn fixed_host_file_publication_succeeds() {
+        fn test_fixed_host_file_publication_succeeds() {
             let witness = run_model(&[0, 0, 2, 0], false).expect("fixture environment");
             assert_eq!(witness.created, 1);
             assert_eq!(witness.successful_publications, 1);
         }
 
         #[test]
-        fn fixed_rooted_file_publication_succeeds() {
+        fn test_fixed_rooted_file_publication_succeeds() {
             let witness = run_model(&[0, 0, 2, 0], true).expect("fixture environment");
             assert_eq!(witness.created, 1);
             assert_eq!(witness.successful_publications, 1);
         }
 
         #[test]
-        fn fixed_host_directory_publication_succeeds() {
+        fn test_fixed_host_directory_publication_succeeds() {
             let witness = run_model(&[0, 1, 2, 0], false).expect("fixture environment");
             assert_eq!(witness.created, 1);
             assert_eq!(witness.successful_publications, 1);
         }
 
         #[test]
-        fn fixed_rooted_directory_publication_succeeds() {
+        fn test_fixed_rooted_directory_publication_succeeds() {
             let witness = run_model(&[0, 1, 2, 0], true).expect("fixture environment");
             assert_eq!(witness.created, 1);
             assert_eq!(witness.successful_publications, 1);

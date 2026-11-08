@@ -213,6 +213,13 @@ impl LocalCopyDirError {
     }
 
     /// Attaches a secondary cleanup failure without a staging path.
+    ///
+    /// # Parameters
+    /// - `cleanup_error`: Secondary error raised while removing the failed
+    ///   copy's staging file.
+    ///
+    /// # Returns
+    /// This copy error with the cleanup failure retained for diagnostics.
     #[must_use]
     #[inline]
     pub(crate) fn with_cleanup_error(mut self, cleanup_error: io::Error) -> Self {
@@ -221,6 +228,12 @@ impl LocalCopyDirError {
     }
 
     /// Attaches a proven destination effect that copy statistics cannot show.
+    ///
+    /// # Parameters
+    /// - `state`: Destination effect proven by the native operation.
+    ///
+    /// # Returns
+    /// This copy error with the proven destination effect attached.
     #[must_use]
     #[inline]
     pub(crate) fn with_failure_state(mut self, state: LocalCopyFailureState) -> Self {
@@ -236,6 +249,13 @@ impl LocalCopyDirError {
     }
 
     /// Records the native state of the current atomic destination entry.
+    ///
+    /// # Parameters
+    /// - `state`: Native state observed for the destination entry.
+    ///
+    /// # Returns
+    /// This copy error with the destination state retained for internal
+    /// handling.
     #[must_use]
     #[inline]
     pub(crate) fn with_atomic_destination_state(mut self, state: LocalAtomicDestinationState) -> Self {
@@ -252,6 +272,12 @@ impl LocalCopyDirError {
 
 impl Display for LocalCopyDirError {
     /// Formats the copy stage, paths, partial statistics, and source error.
+    ///
+    /// # Parameters
+    /// - `formatter`: Destination formatter receiving the diagnostic text.
+    ///
+    /// # Returns
+    /// Formatting result from writing the diagnostic.
     fn fmt(&self, formatter: &mut Formatter<'_>) -> FmtResult {
         let source = self.source().expect("copy errors always retain a source");
         write!(

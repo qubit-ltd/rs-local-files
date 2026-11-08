@@ -324,7 +324,7 @@ fn test_copy_failure_omits_staging_after_successful_cleanup() {
 #[cfg(feature = "test-support")]
 #[test]
 fn test_copy_failure_reports_unchanged_for_destination_preparation_fault() {
-    const TEST_NAME: &str = "test_copy_failure_reports_indeterminate_for_destination_preparation_fault";
+    const TEST_NAME: &str = "test_copy_failure_reports_unchanged_for_destination_preparation_fault";
     run_in_test_fault_process(TEST_NAME, "copy-destination-absolute", || {
         let directory = tempfile::tempdir().expect("temporary directory should be created");
         let source = directory.path().join("source");

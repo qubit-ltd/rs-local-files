@@ -5,6 +5,8 @@
 //
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
+use std::sync::Arc;
+
 use qubit_io::Output;
 
 use crate::LocalFileSystem;
@@ -15,27 +17,7 @@ use crate::policy::LocalFileSyncRequirement;
 use crate::writer::internal::LocalCommitSyncObserver;
 
 #[test]
-fn lf3_sync_file_requirement_is_independent() {
-    let fixture = tempfile::tempdir().expect("temporary directory should be created");
-    let fs = LocalFileSystem::host().expect("host filesystem should open");
-    let target = fixture.path().join("sync");
-    let options = LocalWriteOptions::new(LocalWriteMode::CreateNew)
-        .with_file_sync(LocalFileSyncRequirement::Required)
-        .with_durability(LocalDurabilityRequirement::NotRequired);
-    let mut writer = fs
-        .open_writer_with_options(&target, &options)
-        .expect("writer should open");
-    writer.write_fully(b"synced").expect("bytes should be written");
-    let outcome = writer.commit().expect("writer should commit");
-    assert!(outcome.file_synced());
-    assert!(!outcome.durable());
-    assert_eq!(std::fs::read(target).expect("target should be readable"), b"synced");
-}
-
-#[test]
-fn lf3_sync_per_writer_observer_counts_file_and_parent_separately() {
-    use std::sync::Arc;
-
+fn test_per_writer_observer_counts_file_and_parent_syncs_separately() {
     let fixture = tempfile::tempdir().expect("temporary directory should be created");
     let fs = LocalFileSystem::host().expect("host filesystem should open");
     let target = fixture.path().join("sync");
@@ -56,67 +38,9 @@ fn lf3_sync_per_writer_observer_counts_file_and_parent_separately() {
     assert_eq!(0, observer.parent_sync_calls());
 }
 
-#[test]
-fn lf3_sync_requirement_reports_file_sync_for_all_host_modes() {
-    for mode in [
-        LocalWriteMode::CreateNew,
-        LocalWriteMode::CreateOrReplace,
-        LocalWriteMode::Append,
-    ] {
-        let fixture = tempfile::tempdir().expect("temporary directory should be created");
-        let fs = LocalFileSystem::host().expect("host filesystem should open");
-        let target = fixture.path().join("sync");
-        if mode != LocalWriteMode::CreateNew {
-            std::fs::write(&target, b"prefix").expect("existing destination should be created");
-        }
-        let options = LocalWriteOptions::new(mode)
-            .with_file_sync(LocalFileSyncRequirement::Required)
-            .with_durability(LocalDurabilityRequirement::NotRequired);
-        let mut writer = fs
-            .open_writer_with_options(&target, &options)
-            .expect("writer should open");
-        writer.write_fully(b"data").expect("bytes should be written");
-        let outcome = writer.commit().expect("writer should commit");
-        assert!(outcome.file_synced(), "{mode:?} should report file synchronization");
-        assert!(
-            !outcome.durable(),
-            "independent file sync must not imply namespace durability"
-        );
-    }
-}
-
-#[test]
-fn lf3_sync_requirement_reports_file_sync_for_all_rooted_modes() {
-    for mode in [
-        LocalWriteMode::CreateNew,
-        LocalWriteMode::CreateOrReplace,
-        LocalWriteMode::Append,
-    ] {
-        let fixture = tempfile::tempdir().expect("temporary directory should be created");
-        let fs = LocalFileSystem::rooted(fixture.path()).expect("rooted filesystem should open");
-        let target = std::path::Path::new("sync");
-        if mode != LocalWriteMode::CreateNew {
-            std::fs::write(fixture.path().join(target), b"prefix").expect("existing destination should be created");
-        }
-        let options = LocalWriteOptions::new(mode)
-            .with_file_sync(LocalFileSyncRequirement::Required)
-            .with_durability(LocalDurabilityRequirement::NotRequired);
-        let mut writer = fs
-            .open_writer_with_options(target, &options)
-            .expect("writer should open");
-        writer.write_fully(b"data").expect("bytes should be written");
-        let outcome = writer.commit().expect("writer should commit");
-        assert!(outcome.file_synced(), "{mode:?} should report file synchronization");
-        assert!(
-            !outcome.durable(),
-            "independent file sync must not imply namespace durability"
-        );
-    }
-}
-
 #[cfg(feature = "test-support")]
 #[test]
-fn lf3_sync_required_failure_preserves_staged_host_targets() {
+fn test_required_sync_failure_preserves_staged_host_targets() {
     for mode in [LocalWriteMode::CreateNew, LocalWriteMode::CreateOrReplace] {
         let fixture = tempfile::tempdir().expect("temporary directory should be created");
         let fs = LocalFileSystem::host().expect("host filesystem should open");
@@ -148,7 +72,7 @@ fn lf3_sync_required_failure_preserves_staged_host_targets() {
 
 #[cfg(feature = "test-support")]
 #[test]
-fn lf3_sync_required_failure_preserves_staged_rooted_targets() {
+fn test_required_sync_failure_preserves_staged_rooted_targets() {
     for mode in [LocalWriteMode::CreateNew, LocalWriteMode::CreateOrReplace] {
         let fixture = tempfile::tempdir().expect("temporary directory should be created");
         let fs = LocalFileSystem::rooted(fixture.path()).expect("rooted filesystem should open");
@@ -181,7 +105,7 @@ fn lf3_sync_required_failure_preserves_staged_rooted_targets() {
 
 #[cfg(feature = "test-support")]
 #[test]
-fn lf3_sync_preferred_failure_publishes_without_claiming_file_sync() {
+fn test_preferred_sync_failure_publishes_without_claiming_file_sync() {
     let fixture = tempfile::tempdir().expect("temporary directory should be created");
     let fs = LocalFileSystem::host().expect("host filesystem should open");
     let target = fixture.path().join("sync");
@@ -205,7 +129,7 @@ fn lf3_sync_preferred_failure_publishes_without_claiming_file_sync() {
 
 #[cfg(feature = "test-support")]
 #[test]
-fn lf3_sync_required_failure_retains_staging_before_publish() {
+fn test_required_sync_failure_retains_staging_before_publish() {
     let fixture = tempfile::tempdir().expect("temporary directory should be created");
     let fs = LocalFileSystem::host().expect("host filesystem should open");
     let target = fixture.path().join("sync");
@@ -228,7 +152,7 @@ fn lf3_sync_required_failure_retains_staging_before_publish() {
 
 #[cfg(feature = "test-support")]
 #[test]
-fn lf3_sync_append_failure_preserves_already_written_bytes() {
+fn test_append_sync_failure_preserves_already_written_bytes() {
     let fixture = tempfile::tempdir().expect("temporary directory should be created");
     let fs = LocalFileSystem::host().expect("host filesystem should open");
     let target = fixture.path().join("sync");
@@ -254,7 +178,7 @@ fn lf3_sync_append_failure_preserves_already_written_bytes() {
 
 #[cfg(feature = "test-support")]
 #[test]
-fn lf3_sync_append_failure_preserves_rooted_existing_bytes() {
+fn test_append_sync_failure_preserves_rooted_existing_bytes() {
     let fixture = tempfile::tempdir().expect("temporary directory should be created");
     let fs = LocalFileSystem::rooted(fixture.path()).expect("rooted filesystem should open");
     let target = std::path::Path::new("sync");
@@ -276,61 +200,9 @@ fn lf3_sync_append_failure_preserves_rooted_existing_bytes() {
     );
 }
 
-#[cfg(unix)]
-#[test]
-fn lf3_sync_durability_required_reports_file_sync() {
-    let fixture = tempfile::tempdir().expect("temporary directory should be created");
-    let fs = LocalFileSystem::host().expect("host filesystem should open");
-    let target = fixture.path().join("sync");
-    let options =
-        LocalWriteOptions::new(LocalWriteMode::CreateNew).with_durability(LocalDurabilityRequirement::Required);
-    let mut writer = fs
-        .open_writer_with_options(&target, &options)
-        .expect("writer should open");
-    writer.write_fully(b"data").expect("bytes should be written");
-    let outcome = writer.commit().expect("writer should commit");
-    assert!(outcome.file_synced());
-    assert!(outcome.durable());
-}
-
-#[cfg(windows)]
-#[test]
-fn lf3_sync_durability_required_is_rejected_before_open() {
-    let fixture = tempfile::tempdir().expect("temporary directory should be created");
-    let fs = LocalFileSystem::host().expect("host filesystem should open");
-    let target = fixture.path().join("sync");
-    let options =
-        LocalWriteOptions::new(LocalWriteMode::CreateNew).with_durability(LocalDurabilityRequirement::Required);
-    let error = fs
-        .open_writer_with_options(&target, &options)
-        .expect_err("unsupported required durability should be rejected before opening");
-
-    assert_eq!(error.kind(), crate::error::LocalFileErrorKind::RequirementNotMet);
-    assert!(!target.exists(), "preflight rejection must not create the target");
-}
-
-#[cfg(unix)]
-#[test]
-fn lf3_sync_rooted_durability_required_reports_file_sync() {
-    let fixture = tempfile::tempdir().expect("temporary directory should be created");
-    let fs = LocalFileSystem::rooted(fixture.path()).expect("rooted filesystem should open");
-    let target = std::path::Path::new("sync");
-    let options =
-        LocalWriteOptions::new(LocalWriteMode::CreateNew).with_durability(LocalDurabilityRequirement::Required);
-    let mut writer = fs
-        .open_writer_with_options(target, &options)
-        .expect("writer should open");
-    writer.write_fully(b"data").expect("bytes should be written");
-    let outcome = writer.commit().expect("writer should commit");
-    assert!(outcome.file_synced());
-    assert!(outcome.durable());
-}
-
 #[cfg(all(unix, feature = "test-support"))]
 #[test]
-fn lf3_sync_preferred_parent_failure_preserves_file_sync_result() {
-    use std::sync::Arc;
-
+fn test_preferred_parent_sync_failure_preserves_file_sync_result() {
     let fixture = tempfile::tempdir().expect("temporary directory should be created");
     let fs = LocalFileSystem::host().expect("host filesystem should open");
     let target = fixture.path().join("parent/sync");
@@ -354,9 +226,7 @@ fn lf3_sync_preferred_parent_failure_preserves_file_sync_result() {
 
 #[cfg(all(unix, feature = "test-support"))]
 #[test]
-fn lf3_sync_preferred_rooted_parent_failure_preserves_file_sync_result() {
-    use std::sync::Arc;
-
+fn test_preferred_rooted_parent_sync_failure_preserves_file_sync_result() {
     let fixture = tempfile::tempdir().expect("temporary directory should be created");
     let fs = LocalFileSystem::rooted(fixture.path()).expect("rooted filesystem should open");
     let target = std::path::Path::new("sync");
@@ -379,9 +249,7 @@ fn lf3_sync_preferred_rooted_parent_failure_preserves_file_sync_result() {
 
 #[cfg(all(any(target_os = "linux", target_os = "android"), feature = "test-support"))]
 #[test]
-fn lf3_sync_host_recovery_parent_sync_is_counted() {
-    use std::sync::Arc;
-
+fn test_host_recovery_parent_sync_is_counted() {
     let fixture = tempfile::tempdir().expect("temporary directory should be created");
     let fs = LocalFileSystem::host().expect("host filesystem should open");
     let target = fixture.path().join("sync");
@@ -410,9 +278,7 @@ fn lf3_sync_host_recovery_parent_sync_is_counted() {
 
 #[cfg(all(unix, any(target_os = "linux", target_os = "android"), feature = "test-support"))]
 #[test]
-fn lf3_sync_rooted_recovery_parent_sync_is_counted() {
-    use std::sync::Arc;
-
+fn test_rooted_recovery_parent_sync_is_counted() {
     let fixture = tempfile::tempdir().expect("temporary directory should be created");
     let fs = LocalFileSystem::rooted(fixture.path()).expect("rooted filesystem should open");
     let target = std::path::Path::new("sync");

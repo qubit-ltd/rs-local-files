@@ -23,6 +23,11 @@ impl OwnedUnicodeString {
     /// The caller must construct `header` from this allocation, with valid
     /// byte lengths. Moving the vector preserves that allocation; this owner
     /// never resizes or replaces the retained storage.
+    ///
+    /// # Parameters
+    ///
+    /// - `units` is the UTF-16 allocation referenced by `header`.
+    /// - `header` must point into `units` and contain valid byte lengths.
     #[must_use]
     #[inline]
     pub(super) const fn new(units: Vec<u16>, header: UNICODE_STRING) -> Self {

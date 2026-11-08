@@ -15,6 +15,20 @@ use std::ops::BitAnd;
 /// Android's 32-bit stat structure widens `st_mode` beyond `mode_t`; the
 /// generic conversion preserves that platform ABI without target-specific
 /// casts at every call site.
+///
+/// # Type Parameters
+///
+/// * `T` is the native mode type and supports masking with converted Unix
+///   file-type constants.
+///
+/// # Parameters
+///
+/// * `mode` is the native stat mode value to inspect.
+///
+/// # Returns
+///
+/// `true` when the file-type bits identify a regular file, and `false`
+/// otherwise.
 #[must_use]
 #[inline]
 pub(crate) fn is_regular_file_mode<T>(mode: T) -> bool

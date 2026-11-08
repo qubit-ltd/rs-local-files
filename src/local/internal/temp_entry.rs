@@ -18,8 +18,17 @@ use std::io::Result;
 use std::os::unix::fs::DirBuilderExt;
 #[cfg(unix)]
 use std::os::unix::fs::OpenOptionsExt;
+#[cfg(windows)]
+use std::os::windows::fs::OpenOptionsExt;
 use std::path::Path;
 use std::path::PathBuf;
+
+#[cfg(windows)]
+use windows_sys::Win32::Foundation::GENERIC_READ;
+#[cfg(windows)]
+use windows_sys::Win32::Foundation::GENERIC_WRITE;
+#[cfg(windows)]
+use windows_sys::Win32::Storage::FileSystem::DELETE;
 
 use super::file_name_validation::validate_file_name_fragment;
 use super::file_name_validation::validate_portable_generated_component;
@@ -32,6 +41,14 @@ use crate::local::try_random_file_name;
 ///
 /// Returns `InvalidInput` for a forbidden filename fragment, without creating
 /// an entry. Absent affixes need no validation.
+///
+/// # Parameters
+/// - `prefix`: Optional filename prefix supplied by the caller.
+/// - `suffix`: Optional filename suffix supplied by the caller.
+///
+/// # Errors
+/// Returns an I/O error when either affix or the resulting generated filename
+/// violates the filename policy.
 pub(crate) fn validate_temp_affixes(prefix: Option<&str>, suffix: Option<&str>) -> Result<()> {
     if let Some(prefix) = prefix {
         validate_file_name_fragment("prefix", prefix)?;
@@ -72,7 +89,23 @@ pub(crate) fn create_temp_file_in_dir(
     create_temp_file_in_dir_with_access(dir, prefix, suffix, max_tries, false)
 }
 
-/// Creates a temporary file with delete access retained for recovery cleanup.
+/// Creates a unique temporary file with delete access retained for recovery
+/// cleanup.
+///
+/// # Parameters
+/// - `dir`: Directory in which to create the file.
+/// - `prefix`: Optional file-name prefix.
+/// - `suffix`: Optional file-name suffix.
+/// - `max_tries`: Optional maximum number of generated names to try; `None`
+///   permits unbounded collision retries.
+///
+/// # Returns
+/// The created temporary path and open file handle.
+///
+/// # Errors
+/// Returns an I/O error when `dir` does not exist, `max_tries` is zero, all
+/// authorized names collide, file creation fails, or affix/name generation
+/// fails. On Windows, the handle also retains delete access for recovery.
 pub(crate) fn create_temp_file_in_dir_with_delete_access(
     dir: &Path,
     prefix: Option<&str>,
@@ -82,6 +115,26 @@ pub(crate) fn create_temp_file_in_dir_with_delete_access(
     create_temp_file_in_dir_with_access(dir, prefix, suffix, max_tries, true)
 }
 
+/// Opens a uniquely named temporary file with the requested platform access.
+///
+/// Delete access is requested only on Windows; other platforms retain their
+/// native file access semantics. The caller controls whether recovery cleanup
+/// requires that additional access.
+///
+/// # Parameters
+/// - `dir`: Directory in which to create the file.
+/// - `prefix`: Optional file-name prefix.
+/// - `suffix`: Optional file-name suffix.
+/// - `max_tries`: Optional maximum number of generated names to try; `None`
+///   permits unbounded collision retries.
+/// - `delete_access`: Whether to retain delete access for recovery cleanup.
+///
+/// # Returns
+/// The created temporary path and open file handle.
+///
+/// # Errors
+/// Returns an I/O error when the retry count or affixes are invalid, name
+/// generation fails, all authorized names collide, or file creation fails.
 fn create_temp_file_in_dir_with_access(
     dir: &Path,
     prefix: Option<&str>,
@@ -98,12 +151,6 @@ fn create_temp_file_in_dir_with_access(
         options.read(true).write(true).create_new(true);
         #[cfg(windows)]
         if delete_access {
-            use std::os::windows::fs::OpenOptionsExt;
-
-            use windows_sys::Win32::Foundation::GENERIC_READ;
-            use windows_sys::Win32::Foundation::GENERIC_WRITE;
-            use windows_sys::Win32::Storage::FileSystem::DELETE;
-
             options.access_mode(GENERIC_READ | GENERIC_WRITE | DELETE);
         }
         #[cfg(not(windows))]

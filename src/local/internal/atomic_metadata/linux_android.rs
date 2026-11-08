@@ -173,6 +173,16 @@ fn read_xattr_list(file: &File, buffer: &mut [u8]) -> Result<usize> {
 }
 
 /// Parses the NUL-separated name list returned by `flistxattr`.
+///
+/// # Parameters
+/// - `buffer`: Initialized bytes containing zero-terminated attribute names.
+///
+/// # Returns
+/// The distinct attribute names in sorted order; empty segments are ignored.
+///
+/// # Errors
+/// This function currently cannot fail; the result type keeps parsing
+/// composable with the native list operation.
 fn parse_xattr_names(buffer: &[u8]) -> Result<BTreeSet<Vec<u8>>> {
     let mut names = BTreeSet::new();
     for name in buffer.split(|byte| *byte == 0) {
@@ -185,6 +195,12 @@ fn parse_xattr_names(buffer: &[u8]) -> Result<BTreeSet<Vec<u8>>> {
 }
 
 /// Returns names in deterministic order with security attributes last.
+///
+/// # Parameters
+/// - `names`: Attribute names to order without modifying the source set.
+///
+/// # Returns
+/// Borrowed names ordered with ordinary attributes before security ones.
 #[must_use]
 fn ordered_names(names: &BTreeSet<Vec<u8>>) -> Vec<&[u8]> {
     let mut ordinary = Vec::new();
@@ -249,7 +265,18 @@ fn get_optional_xattr(file: &File, name: &[u8]) -> Result<Option<Vec<u8>>> {
     get_xattr_inner(file, name)
 }
 
-/// Implements descriptor-based xattr lookup.
+/// Implements descriptor-based xattr lookup while retrying size races.
+///
+/// # Parameters
+/// - `file`: Open file whose attribute is read.
+/// - `name`: Native attribute name without an interior NUL byte.
+///
+/// # Returns
+/// `Some(value)` if the attribute is read, or `None` if it disappears.
+///
+/// # Errors
+/// Returns an I/O error for invalid names, native failures, or exhausted size
+/// race retries.
 fn get_xattr_inner(file: &File, name: &[u8]) -> Result<Option<Vec<u8>>> {
     let name = native_name(name)?;
     let mut remaining_attempts = XATTR_SIZE_RACE_ATTEMPTS;
@@ -493,7 +520,15 @@ fn xattr_size_result(result: isize, forced_error: Option<i32>) -> Result<usize> 
     }
 }
 
-/// Sets one descriptor-based extended attribute.
+/// Sets one descriptor-based extended attribute, replacing any existing value.
+///
+/// # Parameters
+/// - `file`: Open file that receives the attribute.
+/// - `name`: Attribute name without an interior NUL byte.
+/// - `value`: Attribute value bytes; an empty slice represents an empty value.
+///
+/// # Errors
+/// Returns an I/O error if the name is invalid or the native write fails.
 fn set_xattr(file: &File, name: &[u8], value: &[u8]) -> Result<()> {
     #[cfg(feature = "test-support")]
     let forced_error = super::super::test_support::is_enabled("atomic-metadata-write");
@@ -517,7 +552,15 @@ fn set_xattr(file: &File, name: &[u8], value: &[u8]) -> Result<()> {
     Ok(())
 }
 
-/// Removes one descriptor-based extended attribute.
+/// Removes one descriptor-based extended attribute if it is present.
+///
+/// # Parameters
+/// - `file`: Open file from which the attribute is removed.
+/// - `name`: Attribute name without an interior NUL byte.
+///
+/// # Errors
+/// Returns an I/O error if the name is invalid or removal fails for a reason
+/// other than the attribute already being absent.
 fn remove_xattr(file: &File, name: &[u8]) -> Result<()> {
     #[cfg(feature = "test-support")]
     let forced_error = super::super::test_support::is_enabled("atomic-metadata-remove");
@@ -544,7 +587,16 @@ fn remove_xattr(file: &File, name: &[u8]) -> Result<()> {
     Ok(())
 }
 
-/// Converts an xattr name to a native C string.
+/// Converts an xattr name to a native C string for libc calls.
+///
+/// # Parameters
+/// - `name`: Raw attribute name bytes.
+///
+/// # Returns
+/// The NUL-terminated native name.
+///
+/// # Errors
+/// Returns `InvalidData` when the name contains an interior NUL byte.
 #[inline]
 fn native_name(name: &[u8]) -> Result<CString> {
     match CString::new(name) {
@@ -556,14 +608,26 @@ fn native_name(name: &[u8]) -> Result<CString> {
     }
 }
 
-/// Reports the platform's missing-attribute error.
+/// Reports whether an error indicates that the attribute is absent.
+///
+/// # Parameters
+/// - `error`: Native or synthesized I/O error to inspect.
+///
+/// # Returns
+/// `true` when the platform error code is `ENODATA`.
 #[must_use]
 #[inline]
 fn is_missing_xattr(error: &Error) -> bool {
     error.raw_os_error() == Some(libc::ENODATA)
 }
 
-/// Reports that the filesystem exposes no extended-attribute interface.
+/// Reports whether the filesystem exposes no extended-attribute interface.
+///
+/// # Parameters
+/// - `error`: Native or synthesized I/O error to inspect.
+///
+/// # Returns
+/// `true` when the error code is `ENOTSUP` or `EOPNOTSUPP`.
 #[must_use]
 #[inline]
 fn is_not_supported(error: &Error) -> bool {

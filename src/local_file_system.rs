@@ -9,6 +9,7 @@
 
 // Implements capability and filesystem-space observations.
 mod capability;
+// Implements digest-backed conditional operations.
 #[cfg(feature = "digest")]
 mod conditional;
 // Implements instance scope, policy, and default-option configuration.
@@ -17,7 +18,7 @@ mod configuration;
 mod copy;
 // Implements listing, creation, and deletion operations.
 mod directory;
-// Implements metadata, reader, and writer operations.
+// Implements opening and use of fixed directory capabilities.
 mod fixed_directory;
 pub(crate) mod internal;
 mod io;
@@ -31,7 +32,6 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
 
-use qubit_io::Input;
 use qubit_redact::RedactedText;
 use qubit_redact::Redactor;
 
@@ -117,6 +117,10 @@ pub struct LocalFileSystem {
 impl fmt::Debug for LocalFileSystem {
     /// Formats operational configuration while masking native and virtual
     /// filesystem paths with a fail-closed policy.
+    ///
+    /// # Parameters
+    ///
+    /// - `formatter`: Destination for the formatted diagnostic representation.
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         let diagnostic_root = self.diagnostic_root().map(redacted_path);
         let current_directory = self.current_directory.virtual_path().map(redacted_path);
@@ -246,6 +250,12 @@ impl LocalFileSystem {
     ///
     /// Absolute Host operands avoid PWD lookup. Returns snapshot or resolver
     /// validation errors annotated with the requested operation.
+    ///
+    /// # Parameters
+    ///
+    /// - `path`: Operand whose namespace path will be resolved.
+    /// - `operation`: Operation used to annotate snapshot and validation
+    ///   errors.
     fn resolver_for(&self, path: &Path, operation: LocalFileOperation) -> LocalResult<LocalPathResolver> {
         if self.scope() == LocalFileSystemScope::Host && path.is_absolute() {
             return Ok(LocalPathResolver::absolute_host());
@@ -258,6 +268,13 @@ impl LocalFileSystem {
     /// snapshot.
     /// Absolute Host pairs avoid PWD lookup; otherwise snapshot or resolver
     /// validation errors retain the source operand's operation context.
+    ///
+    /// # Parameters
+    ///
+    /// - `source`: First operand and context path for snapshot errors.
+    /// - `target`: Second operand, considered for absolute Host resolution.
+    /// - `operation`: Operation used to annotate snapshot and validation
+    ///   errors.
     fn resolver_for_pair(
         &self,
         source: &Path,
@@ -274,6 +291,10 @@ impl LocalFileSystem {
     /// Validates a directory using native lookup and the configured policy.
     ///
     /// Returns traversal, policy, type, or directory-opening errors.
+    ///
+    /// # Parameters
+    ///
+    /// - `path`: Namespace path to check as a directory.
     fn validate_directory(&self, path: &LocalNamespacePath) -> LocalResult<()> {
         match &self.core.namespace {
             LocalNamespace::Host => HostLocalFileSystem::list_with_policy(
@@ -292,6 +313,13 @@ impl LocalFileSystem {
     /// Unqualified operands require no lookup. Qualified operands propagate
     /// metadata errors or return `NotDirectory` for a non-directory final
     /// entry.
+    ///
+    /// # Parameters
+    ///
+    /// - `path`: Namespace operand whose syntax may require a directory.
+    /// - `operation`: Operation used to annotate metadata failures.
+    /// - `current_directory`: Optional PWD snapshot to attach to returned
+    ///   errors.
     fn validate_directory_requirement(
         &self,
         path: &LocalNamespacePath,
@@ -317,6 +345,10 @@ impl LocalFileSystem {
     }
 
     /// Reports whether a path denotes the protected Rooted virtual root.
+    ///
+    /// # Parameters
+    ///
+    /// - `path`: Resolved namespace operand to compare with the Rooted root.
     fn is_root_operand(&self, path: &LocalNamespacePath) -> bool {
         self.scope() == LocalFileSystemScope::Rooted && path.authority_relative().as_os_str().is_empty()
     }
@@ -324,6 +356,12 @@ impl LocalFileSystem {
     /// Rejects an operation that may remove or replace the Rooted virtual root.
     ///
     /// Returns `InvalidPath` for the protected root, without native mutation.
+    ///
+    /// # Parameters
+    ///
+    /// - `path`: Resolved operand being protected.
+    /// - `operation`: Operation recorded in a possible rejection error.
+    /// - `current_directory`: Optional PWD snapshot to attach to the error.
     fn reject_root_operand(
         &self,
         path: &LocalNamespacePath,
@@ -342,6 +380,12 @@ impl LocalFileSystem {
 
 /// Resolves one path and attaches the operation input and PWD snapshot on
 /// lexical failure.
+///
+/// # Parameters
+///
+/// - `resolver`: Operation-scoped resolver used to bind the operand.
+/// - `path`: Caller-supplied operand to resolve.
+/// - `operation`: Operation recorded in any resolution error.
 fn resolve_operation_path(
     resolver: &LocalPathResolver,
     path: &Path,
@@ -354,6 +398,14 @@ fn resolve_operation_path(
 }
 
 /// Rewrites a backend error into the public namespace coordinate system.
+///
+/// # Parameters
+///
+/// - `error`: Backend error whose operation and path context will be replaced.
+/// - `operation`: Public operation associated with the failure.
+/// - `path`: Public namespace path for the failed operation.
+/// - `target`: Optional second operand to attach to the error.
+/// - `current_directory`: Optional PWD snapshot to attach to the error.
 fn operation_error(
     error: LocalFileError,
     operation: LocalFileOperation,
@@ -373,6 +425,11 @@ fn operation_error(
 }
 
 /// Attaches a PWD snapshot when path binding actually required one.
+///
+/// # Parameters
+///
+/// - `error`: Error to preserve and optionally enrich.
+/// - `current_directory`: Optional snapshot to attach to the error.
 fn with_current_directory(error: LocalFileError, current_directory: Option<&Path>) -> LocalFileError {
     match current_directory {
         Some(current_directory) => error.with_current_directory(current_directory.to_path_buf()),
@@ -382,6 +439,10 @@ fn with_current_directory(error: LocalFileError, current_directory: Option<&Path
 
 /// Masks one diagnostic filesystem path without consulting mutable process
 /// policy.
+///
+/// # Parameters
+///
+/// - `path`: Filesystem path whose displayed form will be redacted.
 pub(crate) fn redacted_path(path: &Path) -> RedactedText {
     Redactor::strict()
         .redact_field("filesystem_path", &path.display())
@@ -389,6 +450,13 @@ pub(crate) fn redacted_path(path: &Path) -> RedactedText {
 }
 
 /// Selects the public path for an operation that may partially publish.
+///
+/// # Parameters
+///
+/// - `error`: Operation failure used to determine whether publication was
+///   partial.
+/// - `scope`: Namespace used to map any backend path to its public spelling.
+/// - `fallback`: Caller-visible operand used when no partial path is available.
 fn operation_failure_path(error: &LocalFileError, scope: LocalFileSystemScope, fallback: &Path) -> PathBuf {
     if error.kind() != LocalFileErrorKind::PublicationIncomplete {
         return fallback.to_path_buf();
@@ -413,6 +481,11 @@ fn operation_failure_path(error: &LocalFileError, scope: LocalFileSystemScope, f
 /// public operand retains the spelling supplied by the caller. Comparing the
 /// nearest existing ancestors after canonicalization lets us restore the
 /// caller's namespace without requiring the failed tail to exist.
+///
+/// # Parameters
+///
+/// - `path`: Backend-resolved failure path to map into caller spelling.
+/// - `fallback`: Original caller path used to identify the matching ancestor.
 fn map_host_failure_path(path: &Path, fallback: &Path) -> PathBuf {
     let (fallback_base, _) = split_existing_prefix(fallback);
     let mut source = path.to_path_buf();
@@ -437,6 +510,10 @@ fn map_host_failure_path(path: &Path, fallback: &Path) -> PathBuf {
 }
 
 /// Splits a path into its nearest existing ancestor and missing tail.
+///
+/// # Parameters
+///
+/// - `path`: Path whose existing prefix and missing suffix are separated.
 fn split_existing_prefix(path: &Path) -> (PathBuf, PathBuf) {
     let mut base = path.to_path_buf();
     let mut tail = PathBuf::new();

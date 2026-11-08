@@ -17,7 +17,7 @@ use crate::options::LocalReadAllOptions;
 use crate::options::LocalSnapshotOptions;
 
 #[test]
-fn lf3_read_complete_limit_utf8() {
+fn test_lf3_read_complete_limit_utf8() {
     let fixture = tempfile::tempdir().expect("temporary directory");
     let path = fixture.path().join("bytes");
     std::fs::write(&path, [1_u8, 2, 3]).expect("write fixture");
@@ -51,7 +51,7 @@ fn lf3_read_complete_limit_utf8() {
 }
 
 #[test]
-fn lf3_read_all_rejects_growth_at_sentinel() {
+fn test_lf3_read_all_rejects_growth_at_sentinel() {
     use std::io::Write;
 
     let fixture = tempfile::tempdir().expect("temporary directory");
@@ -76,7 +76,7 @@ fn lf3_read_all_rejects_growth_at_sentinel() {
 }
 
 #[test]
-fn lf3_read_snapshot_returns_same_handle_observations() {
+fn test_lf3_read_snapshot_returns_same_handle_observations() {
     let fixture = tempfile::tempdir().expect("temporary directory");
     let path = fixture.path().join("snapshot");
     std::fs::write(&path, b"payload").expect("write fixture");
@@ -250,7 +250,7 @@ fn test_lf3_read_snapshot_match_requires_identity_and_stable_platform_details() 
 }
 
 #[test]
-fn lf3_read_rooted_paths_stay_virtual() {
+fn test_lf3_read_rooted_paths_stay_virtual() {
     let fixture = tempfile::tempdir().expect("temporary directory");
     std::fs::write(fixture.path().join("payload"), b"rooted").expect("write fixture");
     let fs = LocalFileSystem::rooted(fixture.path()).expect("rooted filesystem");
@@ -260,7 +260,7 @@ fn lf3_read_rooted_paths_stay_virtual() {
 }
 
 #[test]
-fn lf3_read_snapshot_detects_same_handle_mutation() {
+fn test_lf3_read_snapshot_detects_same_handle_mutation() {
     use std::io::Seek;
     use std::io::SeekFrom;
     use std::io::Write;
@@ -284,7 +284,7 @@ fn lf3_read_snapshot_detects_same_handle_mutation() {
 }
 
 #[test]
-fn lf3_read_consistent_rejects_mutation_during_collection() {
+fn test_lf3_read_consistent_rejects_mutation_during_collection() {
     let fixture = tempfile::tempdir().expect("temporary directory");
     let path = fixture.path().join("changing");
     std::fs::write(&path, b"before").expect("write initial bytes");
@@ -303,7 +303,7 @@ fn lf3_read_consistent_rejects_mutation_during_collection() {
 
 #[test]
 #[cfg(unix)]
-fn lf3_read_consistent_keeps_atomic_replacement_separate_from_open_handle() {
+fn test_lf3_read_consistent_keeps_atomic_replacement_separate_from_open_handle() {
     let fixture = tempfile::tempdir().expect("temporary directory");
     let path = fixture.path().join("source");
     let moved = fixture.path().join("moved-original");
@@ -325,7 +325,7 @@ fn lf3_read_consistent_keeps_atomic_replacement_separate_from_open_handle() {
 
 #[test]
 #[cfg(unix)]
-fn lf3_read_non_regular_fifo_is_rejected_without_content_read() {
+fn test_lf3_read_non_regular_fifo_is_rejected_without_content_read() {
     use std::ffi::CString;
     use std::os::unix::ffi::OsStrExt;
 
@@ -340,7 +340,7 @@ fn lf3_read_non_regular_fifo_is_rejected_without_content_read() {
 
 #[test]
 #[cfg(unix)]
-fn lf3_read_path_queries_follow_host_target_policy() {
+fn test_lf3_read_path_queries_follow_host_target_policy() {
     use std::os::unix::fs::symlink;
 
     let fixture = tempfile::tempdir().expect("temporary directory");

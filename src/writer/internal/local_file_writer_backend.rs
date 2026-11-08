@@ -39,6 +39,11 @@ pub(crate) enum LocalFileWriterBackend {
 impl LocalFileWriterBackend {
     /// Commits a staged backend and preserves it when retry remains safe.
     ///
+    /// # Parameters
+    ///
+    /// `observer` optionally records native file and parent synchronization
+    /// calls for internal diagnostics; `None` skips that observation.
+    ///
     /// # Returns
     ///
     /// Reports achieved durability and file synchronization separately.

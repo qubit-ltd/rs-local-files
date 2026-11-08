@@ -460,6 +460,10 @@ fn unlink_staging_name(staging_parent: RawFd, staging: &CStr) -> Result<()> {
 /// This preserves non-UTF-8 path bytes. Paths containing an interior NUL are
 /// rejected because native path-taking system calls use NUL termination.
 ///
+/// # Parameters
+///
+/// * `path` - Unix path whose raw bytes will be passed to a native system call.
+///
 /// # Errors
 ///
 /// Returns `InvalidInput` when the path contains an interior NUL byte.
@@ -486,6 +490,7 @@ fn native_path(path: &Path) -> Result<CString> {
 /// # Returns
 ///
 /// Returns the error paired with `Unchanged` and `Present` states.
+#[must_use = "the installation error and recovery states must be handled"]
 #[inline]
 fn unchanged_error(error: Error) -> (Error, LocalAtomicDestinationState, AtomicStagingState) {
     (

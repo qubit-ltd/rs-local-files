@@ -130,38 +130,50 @@ impl LocalCopyDirOptions {
         self.durability
     }
 
-    /// Sets the synchronization policy for staged regular files.
-    #[inline]
-    pub const fn with_durability(mut self, durability: LocalDurabilityRequirement) -> Self {
-        self.durability = durability;
-        self
-    }
-
     /// Returns the maximum descendant depth.
+    ///
+    /// # Returns
+    /// The depth limit, or `None` when depth is unlimited.
     #[must_use]
     #[inline]
     pub const fn max_depth(&self) -> Option<usize> {
         self.max_depth
     }
+
     /// Returns the maximum number of processed source entries.
+    ///
+    /// # Returns
+    /// The entry limit, or `None` when no entry-count limit is configured.
     #[must_use]
     #[inline]
     pub const fn max_entries(&self) -> Option<usize> {
         self.max_entries
     }
+
     /// Returns the maximum number of actual source bytes copied.
+    ///
+    /// # Returns
+    /// The byte limit, or `None` when no byte limit is configured.
     #[must_use]
     #[inline]
     pub const fn max_bytes(&self) -> Option<u64> {
         self.max_bytes
     }
+
     /// Returns the maximum concurrently open source directories.
+    ///
+    /// # Returns
+    /// The open-directory limit, or `None` when no limit is configured.
     #[must_use]
     #[inline]
     pub const fn max_open_directories(&self) -> Option<usize> {
         self.max_open_directories
     }
+
     /// Returns the relative elapsed-time budget.
+    ///
+    /// # Returns
+    /// The elapsed-time budget, or `None` when no deadline is configured.
     #[must_use]
     #[inline]
     pub const fn deadline(&self) -> Option<Duration> {
@@ -169,48 +181,14 @@ impl LocalCopyDirOptions {
     }
 
     /// Returns the monotonic operation-entry instant when one was supplied.
+    ///
+    /// # Returns
+    /// The operation-entry instant, or `None` when the caller did not supply
+    /// it.
     #[must_use]
     #[inline]
     pub const fn started_at(&self) -> Option<Instant> {
         self.started_at
-    }
-
-    /// Sets the maximum descendant depth.
-    #[inline]
-    pub const fn with_max_depth(mut self, value: usize) -> Self {
-        self.max_depth = Some(value);
-        self
-    }
-    /// Sets the maximum number of processed source entries.
-    #[inline]
-    pub const fn with_max_entries(mut self, value: usize) -> Self {
-        self.max_entries = Some(value);
-        self
-    }
-    /// Sets the maximum number of actual source bytes copied.
-    #[inline]
-    pub const fn with_max_bytes(mut self, value: u64) -> Self {
-        self.max_bytes = Some(value);
-        self
-    }
-    /// Sets the maximum concurrently open source directories.
-    #[inline]
-    pub const fn with_max_open_directories(mut self, value: usize) -> Self {
-        self.max_open_directories = Some(value);
-        self
-    }
-    /// Sets the maximum elapsed time for the complete copy.
-    #[inline]
-    pub const fn with_deadline(mut self, value: Duration) -> Self {
-        self.deadline = Some(value);
-        self
-    }
-
-    /// Records the monotonic instant at which the public operation began.
-    #[inline]
-    pub const fn with_started_at(mut self, value: Instant) -> Self {
-        self.started_at = Some(value);
-        self
     }
 
     /// Returns the destination file conflict policy.
@@ -222,19 +200,6 @@ impl LocalCopyDirOptions {
         self.conflict
     }
 
-    /// Sets the policy for existing destination file entries.
-    ///
-    /// # Parameters
-    /// - `conflict`: Conflict policy to use.
-    ///
-    /// # Returns
-    /// Updated directory copy options.
-    #[inline]
-    pub const fn with_conflict(mut self, conflict: LocalCopyConflictPolicy) -> Self {
-        self.conflict = conflict;
-        self
-    }
-
     /// Returns the entry type-conflict policy.
     ///
     /// # Returns
@@ -242,19 +207,6 @@ impl LocalCopyDirOptions {
     #[inline]
     pub const fn type_conflict_policy(&self) -> LocalCopyTypeConflictPolicy {
         self.type_conflict
-    }
-
-    /// Sets the policy for source and destination type mismatches.
-    ///
-    /// # Parameters
-    /// - `type_conflict`: Type-conflict policy to use.
-    ///
-    /// # Returns
-    /// Updated directory copy options.
-    #[inline]
-    pub const fn with_type_conflict(mut self, type_conflict: LocalCopyTypeConflictPolicy) -> Self {
-        self.type_conflict = type_conflict;
-        self
     }
 
     /// Returns the symbolic-link policy used while traversing the source tree.
@@ -267,16 +219,6 @@ impl LocalCopyDirOptions {
         self.symlink_policy
     }
 
-    /// Sets the symbolic-link policy used while traversing the source tree.
-    ///
-    /// # Returns
-    /// Updated directory copy options.
-    #[inline]
-    pub const fn with_symlink_policy(mut self, symlink_policy: LocalSymlinkPolicy) -> Self {
-        self.symlink_policy = symlink_policy;
-        self
-    }
-
     /// Returns whether source permissions will be preserved.
     ///
     /// # Returns
@@ -285,16 +227,6 @@ impl LocalCopyDirOptions {
     #[inline]
     pub const fn preserves_permissions(&self) -> bool {
         self.preserve_permissions
-    }
-
-    /// Enables preservation of source permissions.
-    ///
-    /// # Returns
-    /// Updated directory copy options.
-    #[inline]
-    pub const fn preserve_permissions(mut self) -> Self {
-        self.preserve_permissions = true;
-        self
     }
 
     /// Returns the configured nonblocking-open retry timeout.
@@ -310,6 +242,147 @@ impl LocalCopyDirOptions {
     #[inline]
     pub const fn open_retry_timeout(&self) -> Option<Duration> {
         self.open_retry_timeout
+    }
+
+    /// Sets the synchronization policy for staged regular files.
+    ///
+    /// # Parameters
+    /// - `durability`: Synchronization policy to use for staged files.
+    ///
+    /// # Returns
+    /// Updated directory copy options.
+    #[inline]
+    pub const fn with_durability(mut self, durability: LocalDurabilityRequirement) -> Self {
+        self.durability = durability;
+        self
+    }
+
+    /// Sets the maximum descendant depth.
+    ///
+    /// # Parameters
+    /// - `value`: Maximum depth below the copied tree root.
+    ///
+    /// # Returns
+    /// Updated directory copy options.
+    #[inline]
+    pub const fn with_max_depth(mut self, value: usize) -> Self {
+        self.max_depth = Some(value);
+        self
+    }
+
+    /// Sets the maximum number of processed source entries.
+    ///
+    /// # Parameters
+    /// - `value`: Maximum number of source entries to process.
+    ///
+    /// # Returns
+    /// Updated directory copy options.
+    #[inline]
+    pub const fn with_max_entries(mut self, value: usize) -> Self {
+        self.max_entries = Some(value);
+        self
+    }
+
+    /// Sets the maximum number of actual source bytes copied.
+    ///
+    /// # Parameters
+    /// - `value`: Maximum number of source bytes to copy.
+    ///
+    /// # Returns
+    /// Updated directory copy options.
+    #[inline]
+    pub const fn with_max_bytes(mut self, value: u64) -> Self {
+        self.max_bytes = Some(value);
+        self
+    }
+
+    /// Sets the maximum concurrently open source directories.
+    ///
+    /// # Parameters
+    /// - `value`: Maximum number of source-directory readers to keep open.
+    ///
+    /// # Returns
+    /// Updated directory copy options.
+    #[inline]
+    pub const fn with_max_open_directories(mut self, value: usize) -> Self {
+        self.max_open_directories = Some(value);
+        self
+    }
+
+    /// Sets the maximum elapsed time for the complete copy.
+    ///
+    /// # Parameters
+    /// - `value`: Relative elapsed-time budget for the complete copy.
+    ///
+    /// # Returns
+    /// Updated directory copy options.
+    #[inline]
+    pub const fn with_deadline(mut self, value: Duration) -> Self {
+        self.deadline = Some(value);
+        self
+    }
+
+    /// Records the monotonic instant at which the public operation began.
+    ///
+    /// # Parameters
+    /// - `value`: Monotonic instant captured when the operation begins.
+    ///
+    /// # Returns
+    /// Updated directory copy options.
+    #[inline]
+    pub const fn with_started_at(mut self, value: Instant) -> Self {
+        self.started_at = Some(value);
+        self
+    }
+
+    /// Sets the policy for existing destination file entries.
+    ///
+    /// # Parameters
+    /// - `conflict`: Conflict policy to use.
+    ///
+    /// # Returns
+    /// Updated directory copy options.
+    #[inline]
+    pub const fn with_conflict(mut self, conflict: LocalCopyConflictPolicy) -> Self {
+        self.conflict = conflict;
+        self
+    }
+
+    /// Sets the policy for source and destination type mismatches.
+    ///
+    /// # Parameters
+    /// - `type_conflict`: Type-conflict policy to use.
+    ///
+    /// # Returns
+    /// Updated directory copy options.
+    #[inline]
+    pub const fn with_type_conflict(mut self, type_conflict: LocalCopyTypeConflictPolicy) -> Self {
+        self.type_conflict = type_conflict;
+        self
+    }
+
+    /// Sets the symbolic-link policy used while traversing the source tree.
+    ///
+    /// # Parameters
+    /// - `symlink_policy`: Policy for symbolic links encountered in the source
+    ///   tree.
+    ///
+    /// # Returns
+    /// Updated directory copy options.
+    #[inline]
+    pub const fn with_symlink_policy(mut self, symlink_policy: LocalSymlinkPolicy) -> Self {
+        self.symlink_policy = symlink_policy;
+        self
+    }
+
+    /// Enables preservation of source permissions.
+    ///
+    /// # Returns
+    /// Updated directory copy options.
+    #[inline]
+    pub const fn preserve_permissions(mut self) -> Self {
+        self.preserve_permissions = true;
+        self
     }
 
     /// Sets the nonblocking-open retry timeout.

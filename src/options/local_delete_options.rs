@@ -63,20 +63,6 @@ impl LocalDeleteOptions {
         }
     }
 
-    /// Tightens only resource limits against `ceilings`, preserving this
-    /// request's operation behavior.
-    ///
-    /// `None` means unbounded; finite limits use the smaller value, including
-    /// zero. This performs no I/O or validation and does not restart deadlines.
-    /// Invalid limits are rejected when the resulting options are used.
-    pub fn tighten_resource_limits(mut self, ceilings: &Self) -> Self {
-        self.max_depth = tighter(self.max_depth, ceilings.max_depth);
-        self.max_entries = tighter(self.max_entries, ceilings.max_entries);
-        self.max_pending_path_bytes = tighter(self.max_pending_path_bytes, ceilings.max_pending_path_bytes);
-        self.deadline = tighter(self.deadline, ceilings.deadline);
-        self
-    }
-
     /// Reports whether directory deletion is recursive.
     #[must_use]
     #[inline]
@@ -91,27 +77,25 @@ impl LocalDeleteOptions {
         self.missing_ok
     }
 
-    /// Enables recursive directory deletion.
-    #[inline]
-    pub const fn with_recursive(mut self) -> Self {
-        self.recursive = true;
-        self
-    }
-
-    /// Treats a missing entry as a successful no-op.
-    #[inline]
-    pub const fn with_missing_ok(mut self) -> Self {
-        self.missing_ok = true;
-        self
-    }
     /// Returns the optional limit for entry depth, with the requested directory
     /// at depth zero.
+    ///
+    /// # Returns
+    ///
+    /// `Some(limit)` when a depth limit is configured, or `None` when depth is
+    /// unbounded.
+    #[inline]
     pub const fn max_depth(&self) -> Option<usize> {
         self.max_depth
     }
 
     /// Sets the limit for entry depth, with the requested directory at depth
     /// zero.
+    ///
+    /// # Parameters
+    ///
+    /// * `limit` - Maximum depth, counting the requested directory as depth
+    ///   zero.
     #[inline]
     pub const fn with_max_depth(mut self, limit: usize) -> Self {
         self.max_depth = Some(limit);
@@ -128,12 +112,23 @@ impl LocalDeleteOptions {
 
     /// Returns the optional limit for discovered entries, including the
     /// requested directory.
+    ///
+    /// # Returns
+    ///
+    /// `Some(limit)` when an entry limit is configured, or `None` when the
+    /// number of entries is unbounded.
+    #[inline]
     pub const fn max_entries(&self) -> Option<usize> {
         self.max_entries
     }
 
     /// Sets the limit for discovered entries, including the requested
     /// directory.
+    ///
+    /// # Parameters
+    ///
+    /// * `limit` - Maximum number of discovered entries, including the
+    ///   requested directory.
     #[inline]
     pub const fn with_max_entries(mut self, limit: usize) -> Self {
         self.max_entries = Some(limit);
@@ -150,11 +145,21 @@ impl LocalDeleteOptions {
 
     /// Returns the optional limit for encoded native bytes retained by pending
     /// paths.
+    ///
+    /// # Returns
+    ///
+    /// `Some(limit)` when a pending-path byte limit is configured, or `None`
+    /// when retained path bytes are unbounded.
+    #[inline]
     pub const fn max_pending_path_bytes(&self) -> Option<usize> {
         self.max_pending_path_bytes
     }
 
     /// Sets the limit for encoded native bytes retained by pending paths.
+    ///
+    /// # Parameters
+    ///
+    /// * `limit` - Maximum encoded native path bytes retained for pending work.
     #[inline]
     pub const fn with_max_pending_path_bytes(mut self, limit: usize) -> Self {
         self.max_pending_path_bytes = Some(limit);
@@ -170,11 +175,53 @@ impl LocalDeleteOptions {
 
     /// Returns the optional cooperative elapsed-time limit for recursive
     /// deletion.
+    ///
+    /// # Returns
+    ///
+    /// `Some(limit)` when a deadline is configured, or `None` when no deadline
+    /// is configured.
+    #[inline]
     pub const fn deadline(&self) -> Option<Duration> {
         self.deadline
     }
 
+    /// Tightens only resource limits against `ceilings`, preserving this
+    /// request's operation behavior.
+    ///
+    /// `None` means unbounded; finite limits use the smaller value, including
+    /// zero. This performs no I/O or validation and does not restart deadlines.
+    /// Invalid limits are rejected when the resulting options are used.
+    ///
+    /// # Parameters
+    ///
+    /// * `ceilings` - Resource limits to apply as upper bounds.
+    pub fn tighten_resource_limits(mut self, ceilings: &Self) -> Self {
+        self.max_depth = tighter(self.max_depth, ceilings.max_depth);
+        self.max_entries = tighter(self.max_entries, ceilings.max_entries);
+        self.max_pending_path_bytes = tighter(self.max_pending_path_bytes, ceilings.max_pending_path_bytes);
+        self.deadline = tighter(self.deadline, ceilings.deadline);
+        self
+    }
+
+    /// Enables recursive directory deletion.
+    #[inline]
+    pub const fn with_recursive(mut self) -> Self {
+        self.recursive = true;
+        self
+    }
+
+    /// Treats a missing entry as a successful no-op.
+    #[inline]
+    pub const fn with_missing_ok(mut self) -> Self {
+        self.missing_ok = true;
+        self
+    }
+
     /// Sets the cooperative elapsed-time limit for recursive deletion.
+    ///
+    /// # Parameters
+    ///
+    /// * `limit` - Maximum elapsed time allowed for recursive deletion.
     #[inline]
     pub const fn with_deadline(mut self, limit: Duration) -> Self {
         self.deadline = Some(limit);

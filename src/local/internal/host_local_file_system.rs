@@ -8,6 +8,8 @@
 
 // Implements Host copy operations.
 mod copy;
+// Converts unified copy policy to native copy options.
+mod copy_options;
 // Implements Host deletion operations.
 mod delete;
 // Implements Host directory operations.
@@ -23,21 +25,22 @@ mod rename;
 mod support;
 // Implements Host temporary-resource operations.
 mod temp;
+// Opens the shared staged writer implementation.
+mod staged_writer;
 
 pub(super) use std::fs;
 pub(super) use std::io;
 pub(super) use std::path::Path;
 pub(super) use std::path::PathBuf;
 
-use path_resolution::bind_host_path;
-use path_resolution::bind_host_paths;
-pub(crate) use path_resolution::resolve_host_path;
-pub(super) use rename::destination_is_directory;
-pub(super) use rename::sync_parent_directory;
-pub(super) use support::test_io_fault;
-pub(crate) use temp::internal_copy_options;
-pub(super) use temp::open_staged_writer;
-
+pub(crate) use self::copy_options::internal_copy_options;
+use self::path_resolution::bind_host_path;
+use self::path_resolution::bind_host_paths;
+pub(crate) use self::path_resolution::resolve_host_path;
+pub(super) use self::rename::destination_is_directory;
+pub(super) use self::rename::sync_parent_directory;
+pub(super) use self::staged_writer::open_staged_writer;
+pub(super) use self::support::test_io_fault;
 pub(super) use crate::LocalCopyFailure;
 pub(super) use crate::LocalCopyMethod;
 pub(super) use crate::LocalCopyOptions;
@@ -86,11 +89,10 @@ pub(crate) struct HostLocalFileSystem {
 
 impl HostLocalFileSystem {
     /// Returns the native capabilities compiled for the current host platform.
-    #[must_use = "inspect the host capability snapshot"]
     #[inline]
     pub const fn capabilities() -> LocalFileSystemCapabilities {
         LocalFileSystemCapabilities::detect_host()
     }
 }
 
-pub(crate) use delete::remove_host_non_directory;
+pub(crate) use self::delete::remove_host_non_directory;

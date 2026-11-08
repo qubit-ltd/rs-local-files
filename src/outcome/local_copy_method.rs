@@ -8,6 +8,16 @@
 // Covered by copy integration tests.
 
 /// Native method used to complete a copy operation.
+///
+/// # Examples
+///
+/// ```
+/// use qubit_local_files::outcome::LocalCopyMethod;
+///
+/// let method = LocalCopyMethod::StagedFile;
+/// assert_eq!(method, LocalCopyMethod::StagedFile);
+/// assert_ne!(method, LocalCopyMethod::Recursive);
+/// ```
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 #[must_use]
 #[non_exhaustive]

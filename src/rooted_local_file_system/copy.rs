@@ -260,6 +260,25 @@ impl RootedLocalFileSystem {
     }
 }
 
+/// Preserves copy failure details while adjusting publication state for a
+/// directory request.
+///
+/// A child file may already be published when a recursive directory copy
+/// fails. In that case, the directory operation reports partial publication;
+/// single-file requests retain the state established by the underlying error.
+///
+/// # Parameters
+///
+/// - `source`: Validated source path used to describe the failed operation.
+/// - `target`: Validated destination path used to describe the failed
+///   operation.
+/// - `error`: Directory-copy failure, including its publication state.
+/// - `directory`: Whether the original request copied a directory tree.
+///
+/// # Returns
+///
+/// A copy failure whose state reflects any child file already published by a
+/// failed directory operation.
 fn copy_failure_from_dir_error(
     source: &Path,
     target: &Path,
@@ -284,7 +303,7 @@ mod tests {
     use super::copy_failure_from_dir_error;
 
     #[test]
-    fn rooted_directory_request_downgrades_installed_child_proof() {
+    fn test_directory_copy_reports_partial_publication_after_child_install() {
         let error = || {
             crate::local::LocalCopyDirError::new(
                 crate::LocalCopyDirStage::CommitFile,

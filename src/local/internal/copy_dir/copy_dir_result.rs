@@ -11,4 +11,7 @@
 use crate::LocalCopyDirError;
 
 /// Result returned by recursive directory-copy internals.
+///
+/// # Type Parameters
+/// - `T`: Value returned when the recursive copy operation succeeds.
 pub(super) type CopyDirResult<T> = std::result::Result<T, LocalCopyDirError>;

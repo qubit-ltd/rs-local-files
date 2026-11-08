@@ -444,7 +444,7 @@ fn test_filesystem_namespace_capabilities_and_probe_variants() {
     );
 }
 
-/// Runs one test-support-only facade fault in an isolated child process.
+/// Runs one test-support-only facade fault while excluding competing selectors.
 #[cfg(feature = "test-support")]
 fn run_facade_fault<F>(_test_name: &str, fault: &str, action: F)
 where

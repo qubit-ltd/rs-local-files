@@ -19,6 +19,26 @@ use crate::directory::LocalDirectoryHandle;
 use crate::options::LocalDirectoryOpenOptions;
 
 impl LocalFileSystem {
+    /// Builds a filesystem around an already-opened rooted authority.
+    ///
+    /// This constructor preserves the supplied symlink policy and starts the
+    /// virtual working directory at the root. The caller must provide a root
+    /// authority that has already completed its opening and validation.
+    ///
+    /// # Parameters
+    ///
+    /// - `root`: An already-opened directory authority used as the filesystem
+    ///   root.
+    /// - `symlink_policy`: The symlink policy retained by the new filesystem.
+    ///
+    /// # Returns
+    ///
+    /// A Rooted filesystem with its virtual working directory set to `/`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the supplied authority cannot initialize a rooted
+    /// filesystem.
     pub(crate) fn from_root_authority(
         root: crate::rooted::Root,
         symlink_policy: crate::LocalSymlinkPolicy,
@@ -55,6 +75,15 @@ impl LocalFileSystem {
     /// retain their rooted authority.
     /// Windows Host scope also rejects path binding until the path can be
     /// anchored from its drive root and all ancestors retained.
+    ///
+    /// # Parameters
+    ///
+    /// - `path`: Directory path interpreted in this filesystem's namespace.
+    /// - `options`: Opening and symlink-resolution policy for the directory.
+    ///
+    /// # Returns
+    ///
+    /// A handle retaining authority over the opened directory.
     ///
     /// # Errors
     /// Returns path, policy, type, native I/O, or resource-limit errors.

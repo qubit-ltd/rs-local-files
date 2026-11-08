@@ -75,6 +75,15 @@ pub struct LocalPersistOutcome {
 
 impl LocalPersistOutcome {
     /// Creates a temporary-resource persistence outcome.
+    ///
+    /// # Parameters
+    ///
+    /// * `path` — namespace-absolute path where the resource was published.
+    /// * `method` — native method used to publish the resource.
+    /// * `atomic` — whether publication was atomic.
+    /// * `durable` — whether persistence durability was synchronized.
+    /// * `cleanup_error` — cleanup error retained after successful publication,
+    ///   if cleanup was incomplete.
     pub(crate) const fn new(
         path: PathBuf,
         method: LocalPersistMethod,
@@ -135,6 +144,10 @@ impl LocalPersistOutcome {
     }
 
     /// Returns the cleanup error retained after successful publication.
+    ///
+    /// # Returns
+    ///
+    /// `Some` when sandbox cleanup failed, or `None` when cleanup completed.
     #[inline]
     pub const fn cleanup_error(&self) -> Option<&LocalFileError> {
         self.cleanup_error.as_ref()

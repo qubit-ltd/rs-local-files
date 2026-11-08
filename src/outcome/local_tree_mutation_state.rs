@@ -11,6 +11,15 @@
 /// example, changing permissions before a no-replace installation fails can
 /// yield `Started` together with
 /// [`crate::outcome::LocalTreePublication::NotPublished`].
+///
+/// # Examples
+///
+/// ```
+/// use qubit_local_files::LocalTreeMutationState;
+///
+/// let state = LocalTreeMutationState::Started;
+/// assert_eq!(state, LocalTreeMutationState::Started);
+/// ```
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub enum LocalTreeMutationState {

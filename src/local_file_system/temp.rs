@@ -39,6 +39,11 @@ impl LocalFileSystem {
     /// Returns invalid-affix/attempt, path-resolution, parent, random-name,
     /// collision, or native creation errors. Requested parent creation may
     /// remain after failure. Use explicit cleanup to observe cleanup errors.
+    ///
+    /// # Parameters
+    ///
+    /// - `options`: Complete file naming, parent creation, and privacy options
+    ///   for this allocation.
     pub fn create_temp_file_with_options(&self, options: &LocalTempFileOptions) -> LocalResult<LocalTempFile> {
         let parent = options.parent().unwrap_or_else(|| Path::new(""));
         validate_temp_options(
@@ -88,6 +93,11 @@ impl LocalFileSystem {
     /// Returns invalid-affix/attempt, path-resolution, parent, random-name,
     /// collision, or native creation errors. Requested parent creation may
     /// remain after failure; explicit cleanup exposes cleanup errors.
+    ///
+    /// # Parameters
+    ///
+    /// - `options`: Complete directory naming, parent creation, privacy, and
+    ///   cleanup-limit options for this allocation.
     pub fn create_temp_directory_with_options(
         &self,
         options: &LocalTempDirectoryOptions,

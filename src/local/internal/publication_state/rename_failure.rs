@@ -18,6 +18,11 @@ use crate::LocalRenameFailureState;
 /// Wraps a pre-publication rename error.
 ///
 /// The returned failure proves that the destination namespace is unchanged.
+///
+/// # Parameters
+///
+/// - `error`: Rename error to preserve in the returned failure.
+#[must_use = "handle the rename failure"]
 #[inline]
 pub(crate) fn rename_failure_unchanged(error: LocalFileError) -> LocalRenameFailure {
     LocalRenameFailure::new(error, LocalRenameFailureState::Unchanged)
@@ -27,6 +32,11 @@ pub(crate) fn rename_failure_unchanged(error: LocalFileError) -> LocalRenameFail
 ///
 /// The returned failure records that the destination was renamed before the
 /// subsequent error occurred.
+///
+/// # Parameters
+///
+/// - `error`: Rename error to preserve in the returned failure.
+#[must_use = "handle the rename failure"]
 #[inline]
 pub(crate) fn rename_failure_renamed(error: LocalFileError) -> LocalRenameFailure {
     LocalRenameFailure::new(error, LocalRenameFailureState::Renamed)

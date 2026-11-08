@@ -21,7 +21,7 @@ use sha2::Sha256;
 use support::conditional_temp_directory::tempdir;
 
 #[test]
-fn aborted_conditional_writer_rejects_empty_vectors() {
+fn test_aborted_conditional_writer_rejects_empty_vectors() {
     let dir = tempdir().unwrap();
     let mut fs = LocalFileSystem::host().unwrap();
     fs.set_symlink_policy(LocalSymlinkPolicy::Reject).unwrap();
@@ -43,7 +43,7 @@ fn aborted_conditional_writer_rejects_empty_vectors() {
 }
 
 #[test]
-fn mixed_scalar_and_vectored_writes_publish_expected_digest() {
+fn test_mixed_scalar_and_vectored_writes_publish_expected_digest() {
     let dir = tempdir().unwrap();
     let path = dir.path().join("mixed");
     let mut fs = LocalFileSystem::host().unwrap();
@@ -68,7 +68,7 @@ fn mixed_scalar_and_vectored_writes_publish_expected_digest() {
 }
 
 #[test]
-fn active_empty_vectors_return_zero_without_changing_count() {
+fn test_active_empty_vectors_return_zero_without_changing_count() {
     let dir = tempdir().unwrap();
     let path = dir.path().join("empty-vectors");
     let mut fs = LocalFileSystem::host().unwrap();

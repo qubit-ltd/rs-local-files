@@ -11,6 +11,11 @@ use crate::LocalWriteOptions;
 use crate::capability::LocalConditionalKind;
 
 /// Reports whether this build contains a backend for the requested protocol.
+///
+/// # Parameters
+///
+/// `scope` and `options` describe the filesystem configuration, while `kind`
+/// selects the conditional publication protocol to check.
 pub(crate) fn conditional_protocol_compiled(
     scope: LocalFileSystemScope,
     kind: LocalConditionalKind,
@@ -67,7 +72,7 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn unix_content_protocol_matches_compiled_platform_matrix() {
+    fn test_unix_content_protocol_matches_compiled_platform_matrix() {
         assert_eq!(
             unix_content_protocol_compiled(),
             cfg!(any(target_os = "linux", target_os = "macos"))

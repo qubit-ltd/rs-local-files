@@ -10,15 +10,18 @@
 use std::ffi::OsStr;
 use std::fs;
 use std::fs::File;
+use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::FileTypeExt;
 use std::os::unix::fs::MetadataExt;
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::fs::symlink;
 
+use crate::observation::LocalFileIdentity;
+use crate::policy::LocalOwnerAccessPolicy;
 use crate::temp::internal::privacy_unix;
 
 #[test]
-fn lf3_privacy_unix_private_at_creation() {
+fn test_private_at_creation() {
     let fixture = tempfile::tempdir().expect("create fixture");
     let parent = File::open(fixture.path()).expect("open parent");
 
@@ -40,7 +43,7 @@ fn lf3_privacy_unix_private_at_creation() {
 }
 
 #[test]
-fn lf3_privacy_unix_parent_clone_failure_precedes_mutation() {
+fn test_parent_clone_failure_precedes_mutation() {
     let fixture = tempfile::tempdir().expect("create fixture");
     let parent = File::open(fixture.path()).expect("open parent");
     let file_error = privacy_unix::create_private_file_at_with_clone_hook(&parent, OsStr::new("file"), |_: &File| {
@@ -62,7 +65,7 @@ fn lf3_privacy_unix_parent_clone_failure_precedes_mutation() {
 }
 
 #[test]
-fn lf3_privacy_unix_rejects_symlink_and_non_regular_open_targets() {
+fn test_rejects_symlink_and_non_regular_open_targets() {
     let fixture = tempfile::tempdir().expect("create fixture");
     let parent = File::open(fixture.path()).expect("open parent");
     fs::write(fixture.path().join("target"), b"target").expect("create target");
@@ -78,7 +81,7 @@ fn lf3_privacy_unix_rejects_symlink_and_non_regular_open_targets() {
 }
 
 #[test]
-fn lf3_privacy_unix_creates_relative_to_retained_parent_after_rename() {
+fn test_creates_relative_to_retained_parent_after_rename() {
     let fixture = tempfile::tempdir().expect("create fixture");
     let original = fixture.path().join("parent");
     let moved = fixture.path().join("moved-parent");
@@ -92,7 +95,7 @@ fn lf3_privacy_unix_creates_relative_to_retained_parent_after_rename() {
 }
 
 #[test]
-fn lf3_privacy_unix_directory_swap_after_open_is_indeterminate() {
+fn test_directory_swap_after_open_is_indeterminate() {
     let fixture = tempfile::tempdir().expect("create fixture");
     let parent = File::open(fixture.path()).expect("open parent");
     let replaced_path = fixture.path().join("created");
@@ -128,7 +131,7 @@ fn lf3_privacy_unix_directory_swap_after_open_is_indeterminate() {
 }
 
 #[test]
-fn lf3_privacy_unix_access_modes_are_applied_to_verified_handles() {
+fn test_access_modes_are_applied_to_verified_handles() {
     let fixture = tempfile::tempdir().expect("create fixture");
     let parent = File::open(fixture.path()).expect("open parent");
     let file = privacy_unix::create_private_file_at(&parent, OsStr::new("file")).expect("create file");
@@ -148,7 +151,7 @@ fn lf3_privacy_unix_access_modes_are_applied_to_verified_handles() {
 }
 
 #[test]
-fn lf3_privacy_unix_fifo_is_not_followed_by_private_file_creation() {
+fn test_fifo_is_not_followed_by_private_file_creation() {
     let fixture = tempfile::tempdir().expect("create fixture");
     let parent = File::open(fixture.path()).expect("open parent");
     let fifo = fixture.path().join("fifo");
@@ -161,7 +164,7 @@ fn lf3_privacy_unix_fifo_is_not_followed_by_private_file_creation() {
 }
 
 #[test]
-fn lf3_privacy_unix_missing_name_after_open_retains_original_identity() {
+fn test_missing_name_after_open_retains_original_identity() {
     let fixture = tempfile::tempdir().expect("create fixture");
     let parent = File::open(fixture.path()).expect("open parent");
     let original = fixture.path().join("created");
@@ -194,7 +197,7 @@ fn lf3_privacy_unix_missing_name_after_open_retains_original_identity() {
 }
 
 #[test]
-fn lf3_privacy_unix_invalid_mode_after_open_preserves_partial_directory() {
+fn test_invalid_mode_after_open_preserves_partial_directory() {
     for mode in [0o770, 0o600] {
         let fixture = tempfile::tempdir().expect("create fixture");
         let parent = File::open(fixture.path()).expect("open parent");
@@ -227,7 +230,7 @@ fn lf3_privacy_unix_invalid_mode_after_open_preserves_partial_directory() {
 }
 
 #[test]
-fn lf3_privacy_unix_missing_name_before_open_keeps_identity_unproven() {
+fn test_missing_name_before_open_keeps_identity_unproven() {
     let fixture = tempfile::tempdir().expect("create fixture");
     let parent = File::open(fixture.path()).expect("open parent");
     let original = fixture.path().join("created");
@@ -250,7 +253,172 @@ fn lf3_privacy_unix_missing_name_before_open_keeps_identity_unproven() {
 }
 
 #[test]
-fn lf3_privacy_unix_nul_names_fail_before_creation() {
+fn test_open_failure_after_mkdir_retains_entry_without_unproven_identity() {
+    let fixture = tempfile::tempdir().expect("temporary directory");
+    let parent = File::open(fixture.path()).expect("open parent directory");
+    let error =
+        privacy_unix::create_private_directory_at_with_open_failure_hook(&parent, OsStr::new("retained"), || {
+            Err(std::io::Error::other("injected directory open failure"))
+        })
+        .expect_err("injected open failure");
+
+    assert!(fixture.path().join("retained").is_dir());
+    let entry = error.retained.expect("mkdir entry is retained");
+    assert!(entry.file.is_none());
+    assert!(entry.identity.is_none());
+    assert_eq!(error.source.to_string(), "injected directory open failure");
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn test_owner_policy_unix_creates_exact_modes_and_applies_read_only_policy() {
+    use std::os::unix::fs::MetadataExt;
+
+    let temp = tempfile::tempdir().expect("temporary directory");
+    let parent = File::open(temp.path()).expect("open parent directory");
+    let editable = LocalOwnerAccessPolicy::new().with_unix_modes(0o700, 0o600);
+    let file = privacy_unix::create_owner_entry_at(&parent, OsStr::new("owner-file"), false, &editable)
+        .expect("create owner file");
+    assert_eq!(file.metadata().expect("file metadata").mode() & 0o7777, 0o600);
+    privacy_unix::apply_owner_access(
+        &file,
+        false,
+        &LocalOwnerAccessPolicy::new().with_unix_modes(0o500, 0o400),
+    )
+    .expect("apply read-only access");
+    privacy_unix::verify_owner_access(
+        &file,
+        false,
+        &LocalOwnerAccessPolicy::new().with_unix_modes(0o500, 0o400),
+    )
+    .expect("verify read-only access");
+    assert_eq!(file.metadata().expect("file metadata").mode() & 0o7777, 0o400);
+    privacy_unix::apply_owner_access(&file, false, &editable).expect("restore editable access");
+    assert_eq!(file.metadata().expect("file metadata").mode() & 0o7777, 0o600);
+
+    let editable_directory =
+        privacy_unix::create_owner_entry_at(&parent, OsStr::new("editable-owner-directory"), true, &editable)
+            .expect("create editable owner directory");
+    assert_eq!(
+        editable_directory.metadata().expect("directory metadata").mode() & 0o7777,
+        0o700
+    );
+
+    let readonly = LocalOwnerAccessPolicy::new().with_unix_modes(0o500, 0o400);
+    let readonly_file =
+        privacy_unix::create_owner_entry_at(&parent, OsStr::new("readonly-owner-file"), false, &readonly)
+            .expect("create read-only owner file");
+    assert_eq!(readonly_file.metadata().expect("file metadata").mode() & 0o7777, 0o400);
+    let directory = privacy_unix::create_owner_entry_at(&parent, OsStr::new("owner-directory"), true, &readonly)
+        .expect("create read-only owner directory");
+    assert_eq!(directory.metadata().expect("directory metadata").mode() & 0o7777, 0o500);
+}
+
+#[cfg(not(target_os = "linux"))]
+#[test]
+fn test_owner_policy_unix_is_unsupported_without_creating_entries() {
+    let temp = tempfile::tempdir().expect("temporary directory");
+    let parent = File::open(temp.path()).expect("open parent directory");
+    let policy = LocalOwnerAccessPolicy::new().with_unix_modes(0o700, 0o600);
+    let error = privacy_unix::create_owner_entry_at(&parent, OsStr::new("owner-file"), false, &policy)
+        .expect_err("owner ACL verification is unsupported outside Linux");
+    assert_eq!(error.source.kind(), std::io::ErrorKind::Unsupported);
+    assert!(error.retained.is_none());
+    assert!(!temp.path().join("owner-file").exists());
+}
+
+#[test]
+fn test_owner_policy_unix_rejects_unconfigured_and_invalid_modes_before_mutation() {
+    let temp = tempfile::tempdir().expect("temporary directory");
+    let parent = File::open(temp.path()).expect("open parent directory");
+    for policy in [
+        LocalOwnerAccessPolicy::new(),
+        LocalOwnerAccessPolicy::new().with_unix_modes(0o770, 0o600),
+        LocalOwnerAccessPolicy::new().with_unix_modes(0o4700, 0o600),
+    ] {
+        let error = privacy_unix::create_owner_entry_at(&parent, OsStr::new("invalid"), false, &policy)
+            .expect_err("invalid policy must fail");
+        assert_eq!(error.source.kind(), std::io::ErrorKind::InvalidInput);
+        assert!(!temp.path().join("invalid").exists());
+    }
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn test_owner_policy_unix_rejects_extended_access_acl() {
+    use std::ffi::CString;
+    use std::os::fd::AsRawFd;
+    use std::os::unix::fs::MetadataExt;
+
+    let temp = tempfile::tempdir().expect("temporary directory");
+    let parent = File::open(temp.path()).expect("open parent directory");
+    let policy = LocalOwnerAccessPolicy::new().with_unix_modes(0o700, 0o600);
+    let file = privacy_unix::create_owner_entry_at(&parent, OsStr::new("acl-file"), false, &policy)
+        .expect("create owner file");
+    let acl_name = CString::new("system.posix_acl_access").expect("static xattr name");
+    let acl = [
+        0x02_u8, 0x00, 0x00, 0x00, 0x01, 0x00, 0x07, 0x00, 0xff, 0xff, 0xff, 0xff, 0x02, 0x00, 0x04, 0x00, 0xfe, 0xff,
+        0x00, 0x00, 0x04, 0x00, 0x00, 0x00, 0xff, 0xff, 0xff, 0xff, 0x10, 0x00, 0x00, 0x00, 0xff, 0xff, 0xff, 0xff,
+        0x20, 0x00, 0x00, 0x00, 0xff, 0xff, 0xff, 0xff,
+    ];
+    let set_result = unsafe { libc::fsetxattr(file.as_raw_fd(), acl_name.as_ptr(), acl.as_ptr().cast(), acl.len(), 0) };
+    if set_result < 0 {
+        let error = std::io::Error::last_os_error();
+        panic!("Linux test filesystem must support installing the POSIX ACL fixture: {error}");
+    }
+    let chmod_result = unsafe { libc::fchmod(file.as_raw_fd(), 0o600) };
+    assert_eq!(chmod_result, 0, "preserve exact mode alongside ACL fixture");
+    let error = privacy_unix::verify_owner_access(&file, false, &policy).expect_err("extended ACL is rejected");
+    assert_eq!(error.kind(), std::io::ErrorKind::PermissionDenied);
+    let error = privacy_unix::apply_owner_access(
+        &file,
+        false,
+        &LocalOwnerAccessPolicy::new().with_unix_modes(0o500, 0o400),
+    )
+    .expect_err("extended ACL is rejected before applying a new mode");
+    assert_eq!(error.kind(), std::io::ErrorKind::PermissionDenied);
+    assert_eq!(file.metadata().expect("file metadata").mode() & 0o7777, 0o600);
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn test_owner_policy_failed_open_does_not_adopt_replacement() {
+    use std::ffi::CString;
+    use std::os::fd::AsRawFd;
+    use std::os::unix::fs::MetadataExt;
+
+    let temp = tempfile::tempdir().expect("temporary directory");
+    let parent = File::open(temp.path()).expect("open parent directory");
+    let policy = LocalOwnerAccessPolicy::new().with_unix_modes(0o700, 0o600);
+    privacy_unix::install_owner_open_failure_hook(|parent, name| {
+        let name = CString::new(name.as_bytes()).expect("stage name contains no NUL");
+        let moved = CString::new("moved-original").expect("static name");
+        // SAFETY: names are NUL terminated and parent is an open directory.
+        assert_eq!(
+            unsafe { libc::renameat(parent.as_raw_fd(), name.as_ptr(), parent.as_raw_fd(), moved.as_ptr()) },
+            0
+        );
+        // SAFETY: same authority and a valid directory mode.
+        assert_eq!(unsafe { libc::mkdirat(parent.as_raw_fd(), name.as_ptr(), 0o700) }, 0);
+        Err(std::io::Error::other("injected open failure"))
+    });
+    let error = privacy_unix::create_owner_entry_at(&parent, OsStr::new("owner-stage"), true, &policy)
+        .expect_err("injected open failure");
+    let replacement = fs::metadata(temp.path().join("owner-stage")).expect("replacement metadata");
+    let replacement_identity = LocalFileIdentity::unix(replacement.dev(), replacement.ino());
+    let entry = error.retained.as_ref().expect("native recovery retained");
+    assert!(
+        entry.identity.is_none(),
+        "failed open must not adopt replacement identity"
+    );
+    assert!(entry.file.is_none());
+    assert_eq!(error.source.to_string(), "injected open failure");
+    assert!(temp.path().join("moved-original").is_dir());
+    assert_ne!(Some(&replacement_identity), entry.identity.as_ref());
+}
+
+#[test]
+fn test_nul_names_fail_before_creation() {
     use std::os::unix::ffi::OsStrExt;
 
     let fixture = tempfile::tempdir().expect("create fixture");
@@ -271,12 +439,12 @@ fn lf3_privacy_unix_nul_names_fail_before_creation() {
 }
 
 #[test]
-fn lf3_privacy_unix_sandbox_metadata_failure_retains_verified_recovery_owner() {
+fn test_sandbox_metadata_failure_retains_verified_recovery_owner() {
     verify_private_creation_metadata_failure(1);
 }
 
 #[test]
-fn lf3_privacy_unix_resource_metadata_failure_retains_child_and_sandbox_owners() {
+fn test_resource_metadata_failure_retains_child_and_sandbox_owners() {
     verify_private_creation_metadata_failure(2);
 }
 
@@ -373,12 +541,12 @@ fn verify_private_creation_metadata_failure(occurrence: usize) {
 }
 
 #[test]
-fn lf3_privacy_unix_sandbox_random_name_failure_precedes_private_mutation() {
+fn test_sandbox_random_name_failure_precedes_private_mutation() {
     verify_private_random_name_failure(1);
 }
 
 #[test]
-fn lf3_privacy_unix_resource_random_name_failure_retains_empty_sandbox_owner() {
+fn test_resource_random_name_failure_retains_empty_sandbox_owner() {
     verify_private_random_name_failure(2);
 }
 
@@ -485,7 +653,7 @@ fn verify_private_random_name_failure(occurrence: usize) {
 }
 
 #[test]
-fn lf3_privacy_unix_public_filename_generation_preserves_entropy_failure() {
+fn test_public_filename_generation_preserves_entropy_failure() {
     use crate::LocalFileErrorKind;
     use crate::LocalFileOperation;
     use crate::path::LocalFileNames;

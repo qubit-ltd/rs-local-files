@@ -66,20 +66,11 @@ impl LocalResourceLimitError {
         }
     }
 
-    pub(crate) const fn with_observed(mut self, observed: usize) -> Self {
-        self.observed = Some(observed);
-        self.overflowed = false;
-        self
-    }
-
-    /// Marks a measurement failure caused by integer overflow.
-    pub(crate) const fn with_overflow(mut self) -> Self {
-        self.observed = None;
-        self.overflowed = true;
-        self
-    }
-
     /// Returns the exhausted resource dimension.
+    ///
+    /// # Returns
+    ///
+    /// The resource dimension that exceeded its available budget.
     #[must_use = "the exhausted resource dimension should be inspected"]
     #[inline]
     pub const fn resource(&self) -> LocalResourceKind {
@@ -87,6 +78,10 @@ impl LocalResourceLimitError {
     }
 
     /// Returns the configured resource capacity.
+    ///
+    /// # Returns
+    ///
+    /// The configured capacity in resource-specific units.
     #[must_use]
     #[inline]
     pub const fn limit(&self) -> usize {
@@ -94,6 +89,10 @@ impl LocalResourceLimitError {
     }
 
     /// Returns the capacity remaining at acquisition time.
+    ///
+    /// # Returns
+    ///
+    /// The remaining capacity in resource-specific units.
     #[must_use]
     #[inline]
     pub const fn remaining(&self) -> usize {
@@ -101,23 +100,81 @@ impl LocalResourceLimitError {
     }
 
     /// Returns the number of units requested by the operation.
+    ///
+    /// # Returns
+    ///
+    /// The requested amount in resource-specific units.
     #[must_use]
     #[inline]
     pub const fn requested(&self) -> usize {
         self.requested
     }
-    /// Returns the exact measured value when representable.
+
+    /// Returns the exact measured value when available.
+    ///
+    /// # Returns
+    ///
+    /// Returns `Some` when a representable measurement was recorded, or
+    /// `None` when no exact measurement is available because it was not
+    /// recorded or arithmetic overflowed.
+    #[must_use]
+    #[inline]
     pub const fn observed(&self) -> Option<usize> {
         self.observed
     }
+
     /// Returns whether checked arithmetic overflowed while measuring.
+    #[must_use]
+    #[inline]
     pub const fn overflowed(&self) -> bool {
         self.overflowed
+    }
+
+    /// Records an exact measurement that fits in `usize`.
+    ///
+    /// This clears the overflow flag because the supplied measurement is
+    /// representable.
+    ///
+    /// # Parameters
+    ///
+    /// - `observed`: Exact measured amount.
+    ///
+    /// # Returns
+    ///
+    /// The error facts updated with the exact measurement.
+    pub(crate) const fn with_observed(mut self, observed: usize) -> Self {
+        self.observed = Some(observed);
+        self.overflowed = false;
+        self
+    }
+
+    /// Marks a measurement failure caused by integer overflow.
+    ///
+    /// # Returns
+    ///
+    /// The error facts updated to record the overflow.
+    pub(crate) const fn with_overflow(mut self) -> Self {
+        self.observed = None;
+        self.overflowed = true;
+        self
     }
 }
 
 impl fmt::Display for LocalResourceLimitError {
     /// Formats the complete resource-limit facts.
+    ///
+    /// # Parameters
+    ///
+    /// - `formatter`: Destination for the human-readable diagnostic.
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(())` when all diagnostic facts are written.
+    ///
+    /// # Errors
+    ///
+    /// Returns the formatting error if the destination cannot accept the
+    /// output.
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             formatter,

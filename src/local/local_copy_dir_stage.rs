@@ -9,8 +9,8 @@
 
 /// Stage at which a recursive directory copy failed.
 ///
-/// Additional stages may be added as copy diagnostics evolve. Downstream
-/// matches must retain a wildcard arm.
+/// Additional stages may be added as copy diagnostics evolve. Matches should
+/// retain a wildcard arm.
 #[must_use]
 #[non_exhaustive]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

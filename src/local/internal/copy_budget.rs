@@ -52,6 +52,14 @@ impl CopyBudget {
     ///
     /// The public copy facade rejects unrepresentable deadlines before
     /// dispatching to either backend.
+    ///
+    /// # Parameters
+    ///
+    /// - `options`: Validated limits and deadline settings for one copy.
+    ///
+    /// # Returns
+    ///
+    /// A budget initialized with the configured source limits and deadline.
     #[must_use]
     pub fn new(options: LocalCopyDirOptions) -> Self {
         Self {
@@ -71,39 +79,11 @@ impl CopyBudget {
         }
     }
 
-    /// Projects the copy deadline onto recursive target deletion without
-    /// applying source-entry, depth, or open-directory limits to the target.
-    ///
-    /// The returned instant is the original copy start when a deadline is
-    /// configured; otherwise deletion remains unbounded.
-    #[must_use = "the copy budget's deletion limits and original start time should be used"]
-    pub(crate) fn deletion_options(&self) -> (LocalDeleteOptions, Instant) {
-        let options = LocalDeleteOptions::new().with_recursive();
-        match self.deadline {
-            Some((started, duration)) => (options.with_deadline(duration), started),
-            None => (options, Instant::now()),
-        }
-    }
-
-    /// Returns the original copy deadline as an absolute monotonic instant.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`io::ErrorKind::InvalidInput`] when the configured deadline is
-    /// outside the representable monotonic clock range.
-    pub(crate) fn absolute_deadline(&self) -> io::Result<Option<Instant>> {
-        match self.deadline {
-            None => Ok(None),
-            Some((started, duration)) => started.checked_add(duration).map(Some).ok_or_else(|| {
-                io::Error::new(
-                    io::ErrorKind::InvalidInput,
-                    "copy deadline exceeds the monotonic clock range",
-                )
-            }),
-        }
-    }
-
     /// Rejects work after the configured monotonic deadline.
+    ///
+    /// # Returns
+    ///
+    /// `Ok(())` when the deadline has not been reached.
     ///
     /// # Errors
     ///
@@ -129,6 +109,11 @@ impl CopyBudget {
     ///
     /// - `depth`: Descendant depth, where immediate children have depth one.
     ///
+    ///
+    /// # Returns
+    ///
+    /// `Ok(())` when the depth is allowed.
+    ///
     /// # Errors
     ///
     /// Returns a structured resource-limit error when `depth` exceeds the
@@ -149,6 +134,10 @@ impl CopyBudget {
     }
 
     /// Charges one processed source entry.
+    ///
+    /// # Returns
+    ///
+    /// `Ok(())` when an entry is charged successfully.
     ///
     /// # Errors
     ///
@@ -187,6 +176,11 @@ impl CopyBudget {
     /// The bounded reader permits at most one byte beyond the remaining
     /// capacity so exhaustion is detected without publishing the staging file.
     ///
+    /// # Type Parameters
+    ///
+    /// - `R`: Byte input providing the source data.
+    /// - `W`: Byte output receiving the private staging data.
+    ///
     /// # Parameters
     ///
     /// - `reader`: Open source positioned at the bytes to copy.
@@ -208,8 +202,70 @@ impl CopyBudget {
         self.copy_with_now(reader, writer, Instant::now)
     }
 
+    /// Projects the copy deadline onto recursive target deletion without
+    /// applying source-entry, depth, or open-directory limits to the target.
+    ///
+    /// The returned instant is the original copy start when a deadline is
+    /// configured; otherwise deletion remains unbounded.
+    ///
+    /// # Returns
+    ///
+    /// Recursive deletion options and the copy's original start instant, or
+    /// the current instant when no copy deadline is configured.
+    #[must_use = "the copy budget's deletion limits and original start time should be used"]
+    pub(crate) fn deletion_options(&self) -> (LocalDeleteOptions, Instant) {
+        let options = LocalDeleteOptions::new().with_recursive();
+        match self.deadline {
+            Some((started, duration)) => (options.with_deadline(duration), started),
+            None => (options, Instant::now()),
+        }
+    }
+
+    /// Returns the original copy deadline as an absolute monotonic instant.
+    ///
+    /// # Returns
+    ///
+    /// The absolute deadline, or `None` when no deadline is configured.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`io::ErrorKind::InvalidInput`] when the configured deadline is
+    /// outside the representable monotonic clock range.
+    pub(crate) fn absolute_deadline(&self) -> io::Result<Option<Instant>> {
+        match self.deadline {
+            None => Ok(None),
+            Some((started, duration)) => started.checked_add(duration).map(Some).ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "copy deadline exceeds the monotonic clock range",
+                )
+            }),
+        }
+    }
+
     /// Copies in bounded chunks, checking the cooperative deadline at every
     /// read and write progress boundary.
+    ///
+    /// # Type Parameters
+    ///
+    /// - `R`: Byte input providing the source data.
+    /// - `W`: Byte output receiving the private staging data.
+    /// - `N`: Clock callback returning the current monotonic instant.
+    ///
+    /// # Parameters
+    ///
+    /// - `reader`: Source positioned at the bytes to copy.
+    /// - `writer`: Private destination staging writer.
+    /// - `now`: Clock callback used for cooperative deadline checks.
+    ///
+    /// # Returns
+    ///
+    /// The number of bytes written to staging.
+    ///
+    /// # Errors
+    ///
+    /// Returns an I/O error, a deadline error, or a structured copied-byte
+    /// resource-limit error.
     pub(crate) fn copy_with_now<R, W, N>(&mut self, reader: &mut R, writer: &mut W, mut now: N) -> io::Result<u64>
     where
         R: ByteInput + ?Sized,
@@ -245,6 +301,19 @@ impl CopyBudget {
     }
 
     /// Checks the configured deadline against a supplied monotonic instant.
+    ///
+    /// # Parameters
+    ///
+    /// - `now`: Monotonic instant to compare with the configured deadline.
+    ///
+    /// # Returns
+    ///
+    /// `Ok(())` when the configured deadline has not been reached.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`io::ErrorKind::TimedOut`] when the supplied instant reaches
+    /// the configured deadline.
     #[inline]
     fn check_deadline_at(&self, now: Instant) -> io::Result<()> {
         if self
@@ -257,6 +326,14 @@ impl CopyBudget {
     }
 
     /// Returns the next read size, allowing one byte beyond a bounded source.
+    ///
+    /// # Parameters
+    ///
+    /// - `chunk_size`: Maximum size of the current read buffer.
+    ///
+    /// # Returns
+    ///
+    /// A read size no larger than `chunk_size`.
     #[inline]
     fn read_capacity(&self, chunk_size: usize) -> usize {
         self.remaining_bytes().map_or(chunk_size, |remaining| {
@@ -267,6 +344,10 @@ impl CopyBudget {
     }
 
     /// Returns the remaining copied-byte capacity when it is bounded.
+    ///
+    /// # Returns
+    ///
+    /// `Some(remaining)` when byte copying is bounded, otherwise `None`.
     #[inline]
     fn remaining_bytes(&self) -> Option<u64> {
         self.bytes.as_ref().map(|budget| budget.remaining())
@@ -274,6 +355,26 @@ impl CopyBudget {
 
     /// Writes a chunk completely while committing each successful partial
     /// write to the copied-byte budget.
+    ///
+    /// # Type Parameters
+    ///
+    /// - `W`: Byte output receiving the source slice.
+    /// - `N`: Clock callback returning the current monotonic instant.
+    ///
+    /// # Parameters
+    ///
+    /// - `writer`: Destination staging writer.
+    /// - `source`: Remaining bytes in the chunk to write.
+    /// - `copied`: Total bytes committed to staging so far.
+    /// - `now`: Clock callback used before and after write progress.
+    ///
+    /// # Returns
+    ///
+    /// `Ok(())` after the complete source slice has been written.
+    ///
+    /// # Errors
+    ///
+    /// Returns an I/O error, a deadline error, or a copied-byte budget error.
     fn write_all_with_deadline<W, N>(
         &mut self,
         writer: &mut W,
@@ -307,6 +408,19 @@ impl CopyBudget {
     }
 
     /// Commits actual staging bytes to the configured budget.
+    ///
+    /// # Parameters
+    ///
+    /// - `amount`: Number of bytes successfully written to staging.
+    ///
+    /// # Returns
+    ///
+    /// `Ok(())` when the amount is charged successfully.
+    ///
+    /// # Errors
+    ///
+    /// Returns a structured copied-byte resource-limit error if the amount
+    /// exceeds the remaining capacity.
     #[inline]
     fn charge_bytes(&mut self, amount: usize) -> io::Result<()> {
         if let Some(budget) = self.bytes.as_mut() {
@@ -319,6 +433,14 @@ impl CopyBudget {
 
     /// Constructs the existing copied-byte exhaustion error after staging the
     /// portion that still fit.
+    ///
+    /// # Parameters
+    ///
+    /// - `excess`: Number of observed source bytes beyond the remaining limit.
+    ///
+    /// # Returns
+    ///
+    /// A quota-exceeded error retaining the copied-byte budget facts.
     #[inline]
     fn copied_bytes_exhausted(&mut self, excess: usize) -> io::Error {
         self.bytes
@@ -331,12 +453,28 @@ impl CopyBudget {
 }
 
 /// Wraps structured resource facts in the standard quota-exceeded channel.
+///
+/// # Parameters
+///
+/// - `error`: Structured facts describing the exceeded resource limit.
+///
+/// # Returns
+///
+/// An I/O error in the quota-exceeded channel containing the supplied facts.
 #[inline]
 fn resource_error(error: LocalResourceLimitError) -> io::Error {
     io::Error::new(io::ErrorKind::QuotaExceeded, error)
 }
 
 /// Converts a machine-sized budget failure without discarding its facts.
+///
+/// # Parameters
+///
+/// - `error`: Machine-sized budget failure with resource and limit facts.
+///
+/// # Returns
+///
+/// An I/O error in the quota-exceeded channel retaining the resource facts.
 fn usize_budget_error(error: InsufficientBudgetError<LocalResourceKind, usize>) -> io::Error {
     let InsufficientBudgetError {
         resource,
@@ -348,6 +486,15 @@ fn usize_budget_error(error: InsufficientBudgetError<LocalResourceKind, usize>) 
 }
 
 /// Converts a byte budget failure into structured machine-sized facts.
+///
+/// # Parameters
+///
+/// - `error`: Byte-sized budget failure with resource and limit facts.
+///
+/// # Returns
+///
+/// An I/O error in the quota-exceeded channel retaining converted resource
+/// facts.
 fn u64_budget_error(error: InsufficientBudgetError<LocalResourceKind, u64>) -> io::Error {
     let InsufficientBudgetError {
         resource,
@@ -414,42 +561,6 @@ mod tests {
         }
     }
 
-    struct InterruptOnceOutput {
-        bytes: Vec<u8>,
-        interrupted: bool,
-    }
-
-    impl Output for InterruptOnceOutput {
-        type Item = u8;
-
-        unsafe fn write_unchecked(&mut self, input: &[u8], index: usize, count: usize) -> io::Result<usize> {
-            if !self.interrupted {
-                self.interrupted = true;
-                return Err(io::ErrorKind::Interrupted.into());
-            }
-            self.bytes.extend_from_slice(&input[index..index + count]);
-            Ok(count)
-        }
-
-        fn flush(&mut self) -> io::Result<()> {
-            Ok(())
-        }
-    }
-
-    struct ZeroOutput;
-
-    impl Output for ZeroOutput {
-        type Item = u8;
-
-        unsafe fn write_unchecked(&mut self, _input: &[u8], _index: usize, _count: usize) -> io::Result<usize> {
-            Ok(0)
-        }
-
-        fn flush(&mut self) -> io::Result<()> {
-            Ok(())
-        }
-    }
-
     #[test]
     fn test_copy_budget_charges_partial_write_before_would_block() {
         let mut budget = CopyBudget::new(LocalCopyDirOptions::new().with_max_bytes(3));
@@ -492,47 +603,6 @@ mod tests {
     }
 
     #[test]
-    fn test_copy_budget_checks_deadline_after_eof() {
-        let started = Instant::now();
-        let duration = Duration::from_secs(60);
-        let mut budget = CopyBudget::new(
-            LocalCopyDirOptions::new()
-                .with_started_at(started)
-                .with_deadline(duration),
-        );
-        let mut reader = Cursor::new(&b""[..]);
-        let mut writer = Vec::<u8>::new();
-        let mut calls = 0;
-        let failure = budget
-            .copy_with_now(&mut reader, &mut writer, || {
-                calls += 1;
-                if calls == 1 { started } else { started + duration }
-            })
-            .expect_err("EOF must not bypass the post-read deadline check");
-        assert_eq!(io::ErrorKind::TimedOut, failure.kind());
-        assert!(writer.is_empty());
-        assert!(calls >= 2, "the clock must be read after EOF");
-    }
-
-    #[test]
-    fn test_copy_budget_retries_interrupted_write_and_rejects_zero_progress() {
-        let mut budget = CopyBudget::new(LocalCopyDirOptions::new());
-        let mut reader = Cursor::new(b"retry");
-        let mut writer = InterruptOnceOutput {
-            bytes: Vec::new(),
-            interrupted: false,
-        };
-
-        assert_eq!(5, budget.copy(&mut reader, &mut writer).unwrap());
-        assert_eq!(b"retry", writer.bytes.as_slice());
-
-        let mut budget = CopyBudget::new(LocalCopyDirOptions::new());
-        let mut reader = Cursor::new(b"x");
-        let error = budget.copy(&mut reader, &mut ZeroOutput).unwrap_err();
-        assert_eq!(io::ErrorKind::WriteZero, error.kind());
-    }
-
-    #[test]
     fn test_copy_budget_accepts_exact_limit_and_rejects_one_byte_over() {
         let mut exact_budget = CopyBudget::new(LocalCopyDirOptions::new().with_max_bytes(3));
         let mut exact_reader = Cursor::new(b"abc");
@@ -555,106 +625,5 @@ mod tests {
         assert_eq!(3, facts.limit());
         assert_eq!(0, facts.remaining());
         assert_eq!(1, facts.requested());
-    }
-
-    #[test]
-    fn test_copy_budget_rejects_unrepresentable_absolute_deadline() {
-        let budget = CopyBudget::new(
-            LocalCopyDirOptions::new()
-                .with_started_at(Instant::now())
-                .with_deadline(Duration::MAX),
-        );
-
-        let error = budget
-            .absolute_deadline()
-            .expect_err("an unrepresentable deadline must be rejected");
-
-        assert_eq!(io::ErrorKind::InvalidInput, error.kind());
-        assert!(error.to_string().contains("monotonic clock range"));
-    }
-
-    #[test]
-    fn test_copy_budget_depth_limit_accepts_boundary_and_reports_excess() {
-        let budget = CopyBudget::new(LocalCopyDirOptions::new().with_max_depth(1));
-
-        budget.check_depth(1).expect("the configured depth is allowed");
-        let error = budget.check_depth(2).expect_err("deeper entries must be rejected");
-
-        assert_eq!(io::ErrorKind::QuotaExceeded, error.kind());
-        let facts = error
-            .get_ref()
-            .and_then(|source| source.downcast_ref::<crate::LocalResourceLimitError>())
-            .expect("depth failure must retain resource facts");
-        assert_eq!(crate::LocalResourceKind::Depth, facts.resource());
-        assert_eq!(1, facts.limit());
-        assert_eq!(2, facts.requested());
-    }
-
-    #[test]
-    fn test_copy_budget_directory_permit_exhaustion_recovers_after_drop() {
-        let budget = CopyBudget::new(LocalCopyDirOptions::new().with_max_open_directories(1));
-        let permit = budget
-            .acquire_directory()
-            .expect("first directory permit should be acquired")
-            .expect("configured pool should return a permit");
-        let error = budget
-            .acquire_directory()
-            .expect_err("the single directory slot is occupied");
-        assert_eq!(io::ErrorKind::QuotaExceeded, error.kind());
-        drop(permit);
-        assert!(
-            budget
-                .acquire_directory()
-                .expect("released slot should recover")
-                .is_some()
-        );
-    }
-}
-
-#[cfg(test)]
-mod deletion_projection_tests {
-    use std::time::Duration;
-    use std::time::Instant;
-
-    use super::CopyBudget;
-    use crate::local::LocalCopyDirOptions;
-
-    #[test]
-    fn test_target_deletion_keeps_copy_deadline_without_source_resource_limits() {
-        let started = Instant::now();
-        let duration = Duration::from_secs(10);
-        let budget = CopyBudget::new(
-            LocalCopyDirOptions::new()
-                .with_started_at(started)
-                .with_deadline(duration)
-                .with_max_depth(1)
-                .with_max_entries(2)
-                .with_max_bytes(3)
-                .with_max_open_directories(4),
-        );
-
-        let (options, deletion_started) = budget.deletion_options();
-
-        assert_eq!(deletion_started, started);
-        assert_eq!(options.deadline(), Some(duration));
-        assert!(options.recursive());
-        assert_eq!(options.max_depth(), None);
-        assert_eq!(options.max_entries(), None);
-        assert_eq!(options.max_pending_path_bytes(), None);
-    }
-
-    #[test]
-    fn test_implicit_copy_start_is_preserved_for_target_deletion() {
-        let before = Instant::now();
-        let duration = Duration::from_secs(10);
-        let budget = CopyBudget::new(LocalCopyDirOptions::new().with_deadline(duration));
-        let after = Instant::now();
-
-        let (options, started) = budget.deletion_options();
-
-        assert!(started >= before && started <= after);
-        assert_eq!(options.deadline(), Some(duration));
-        let (_, projected_again) = budget.deletion_options();
-        assert_eq!(projected_again, started);
     }
 }

@@ -14,6 +14,15 @@ use std::io::Error;
 #[cfg(not(any(unix, windows)))]
 use std::io::ErrorKind;
 use std::io::Result;
+#[cfg(windows)]
+use std::os::windows::io::AsRawHandle;
+
+#[cfg(windows)]
+use windows_sys::Win32::Storage::FileSystem::FILE_STANDARD_INFO;
+#[cfg(windows)]
+use windows_sys::Win32::Storage::FileSystem::FileStandardInfo;
+#[cfg(windows)]
+use windows_sys::Win32::Storage::FileSystem::GetFileInformationByHandleEx;
 
 use super::Metadata;
 
@@ -29,23 +38,65 @@ pub(crate) struct RootedResolutionCursor {
 }
 
 impl RootedResolutionCursor {
+    /// Creates a cursor from an already-opened rooted directory authority.
+    ///
+    /// # Parameters
+    ///
+    /// * `current` is the directory handle retained as the cursor's authority.
+    ///
+    /// # Returns
+    ///
+    /// A successful cursor; the `Result` type keeps construction compatible
+    /// with fallible rooted setup.
+    #[inline]
+    pub(crate) fn new(current: File) -> Result<Self> {
+        Ok(Self { current })
+    }
+
+    /// Transfers the cursor's current directory authority to the caller.
+    ///
+    /// This consumes the cursor, so the authority is no longer retained by it.
+    ///
+    /// # Returns
+    ///
+    /// The owned directory handle previously retained by the cursor.
     pub(crate) fn into_file(self) -> File {
         self.current
     }
 
+    /// Creates an independent handle to the current directory authority.
+    ///
+    /// The cursor keeps its original handle; cloning can fail if the operating
+    /// system cannot duplicate the underlying handle.
+    ///
+    /// # Returns
+    ///
+    /// A separately owned handle to the same directory authority.
+    ///
+    /// # Errors
+    ///
+    /// Returns the operating-system error if duplicating the handle fails.
     pub(crate) fn try_clone_current(&self) -> Result<File> {
         #[cfg(test)]
         crate::tests::native_io_fault_tests::check(crate::tests::native_io_fault_tests::NativeIoPoint::CloneCursor)?;
         self.current.try_clone()
     }
 
-    /// Creates a cursor from an already-opened rooted directory authority.
-    #[inline]
-    pub(crate) fn new(current: File) -> Result<Self> {
-        Ok(Self { current })
-    }
-
     /// Reads one child without following a final symbolic link.
+    ///
+    /// # Parameters
+    ///
+    /// * `name` is the single child name to inspect relative to the retained
+    ///   directory authority.
+    ///
+    /// # Returns
+    ///
+    /// The entry metadata observed without following a final symbolic link.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the child cannot be inspected or the platform does
+    /// not support descriptor-relative rooted resolution.
     pub(crate) fn metadata(&self, name: &OsStr) -> Result<Metadata> {
         #[cfg(test)]
         crate::tests::native_io_fault_tests::check(crate::tests::native_io_fault_tests::NativeIoPoint::CursorMetadata)?;
@@ -70,6 +121,21 @@ impl RootedResolutionCursor {
 
     /// Observes the final entry without following a link, and reports its
     /// native hardlink count.
+    ///
+    /// # Parameters
+    ///
+    /// * `name` is the child entry to observe relative to the retained
+    ///   directory authority.
+    ///
+    /// # Returns
+    ///
+    /// The observation and, when available, the native hardlink count. The
+    /// count is `None` on platforms where it is unavailable.
+    ///
+    /// # Errors
+    ///
+    /// Returns a local file error if metadata cannot be read or the platform
+    /// does not support this operation.
     pub(crate) fn observe_entry_with_link_count(
         &self,
         name: &OsStr,
@@ -89,7 +155,6 @@ impl RootedResolutionCursor {
         }
         #[cfg(windows)]
         {
-            use std::os::windows::io::AsRawHandle;
             let file = crate::local::read_rooted_component_metadata(&self.current, name).map_err(|source| {
                 crate::LocalFileError::from_io(crate::LocalFileOperation::Metadata, None, None, source)
             })?;
@@ -97,9 +162,6 @@ impl RootedResolutionCursor {
                 &file,
                 crate::observation::LocalObservationRequirement::Optional,
             )?;
-            use windows_sys::Win32::Storage::FileSystem::FILE_STANDARD_INFO;
-            use windows_sys::Win32::Storage::FileSystem::FileStandardInfo;
-            use windows_sys::Win32::Storage::FileSystem::GetFileInformationByHandleEx;
             let mut standard = FILE_STANDARD_INFO::default();
             // SAFETY: `file` owns a live reparse-point handle and `standard` is a correctly
             // sized writable result buffer.
@@ -134,6 +196,16 @@ impl RootedResolutionCursor {
     /// Descends into one child after verifying that it is a real directory.
     ///
     /// The current handle is left unchanged if opening or verification fails.
+    ///
+    /// # Parameters
+    ///
+    /// * `name` is the child directory to open relative to the current
+    ///   authority.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the child cannot be opened as a directory or the
+    /// platform does not support descriptor-relative rooted resolution.
     pub(crate) fn descend(&mut self, name: &OsStr) -> Result<()> {
         #[cfg(test)]
         crate::tests::native_io_fault_tests::check(crate::tests::native_io_fault_tests::NativeIoPoint::CursorDescend)?;
@@ -153,6 +225,15 @@ impl RootedResolutionCursor {
     }
 }
 
+/// Converts rooted metadata into the local observation metadata shape.
+///
+/// The conversion preserves entry kind, size, timestamps, and the platform's
+/// read-only and Unix mode permission information.
+///
+/// # Parameters
+///
+/// * `metadata` is the rooted metadata to convert into the local observation
+///   shape.
 #[cfg(unix)]
 fn local_file_metadata(metadata: Metadata) -> crate::LocalFileMetadata {
     let kind = match metadata.kind() {

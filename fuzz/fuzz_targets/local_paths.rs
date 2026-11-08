@@ -32,6 +32,16 @@ fuzz_target!(|data: &[u8]| {
     fuzz_host_windows(data);
 });
 
+/// Checks that rooted canonical components round-trip through native paths.
+///
+/// Invalid component sequences are ignored because rejection is an expected
+/// outcome for arbitrary fuzz input. Accepted sequences must encode, decode,
+/// and re-encode without changing their canonical representation.
+///
+/// # Parameters
+///
+/// * `components` contains the candidate canonical path components derived from
+///   the fuzz input.
 fn check_rooted_components(components: &[&str]) {
     let rooted = LocalPaths::rooted();
     let Ok(native) = rooted.from_canonical_components(components.iter().copied()) else {
@@ -50,6 +60,15 @@ fn check_rooted_components(components: &[&str]) {
     assert_eq!(reencoded, encoded);
 }
 
+/// Fuzzes host path round-trips using arbitrary Unix path component bytes.
+///
+/// Empty, current-directory, and parent-directory components are skipped so
+/// each generated path remains rooted beneath `/` without changing its scope.
+///
+/// # Parameters
+///
+/// * `data` supplies arbitrary bytes from which native Unix path components are
+///   built.
 #[cfg(unix)]
 fn fuzz_host_unix(data: &[u8]) {
     use std::ffi::OsString;
@@ -72,6 +91,15 @@ fn fuzz_host_unix(data: &[u8]) {
     assert_eq!(restored, native);
 }
 
+/// Fuzzes host path round-trips using little-endian Windows code units.
+///
+/// Separators and NUL units are skipped so each generated component stays
+/// beneath the `C:\` root; unpaired units are passed through as native input.
+///
+/// # Parameters
+///
+/// * `data` supplies little-endian code-unit bytes for native Windows path
+///   components.
 #[cfg(windows)]
 fn fuzz_host_windows(data: &[u8]) {
     use std::ffi::OsString;

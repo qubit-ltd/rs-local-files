@@ -37,6 +37,11 @@ const DIRECTORY_READ_BUFFER_SIZE: usize = 64 * 1024;
 
 impl RootedDirectoryReader {
     /// Creates a lazy enumerator for an already-opened directory handle.
+    ///
+    /// # Parameters
+    ///
+    /// * `directory` - An open handle to the directory whose children will be
+    ///   enumerated.
     pub(in crate::local::internal) fn new(directory: File) -> Self {
         Self {
             directory,

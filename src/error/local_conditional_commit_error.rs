@@ -103,6 +103,18 @@ pub struct LocalConditionalCommitError {
 impl LocalConditionalCommitError {
     /// Creates the structured terminal failure and transfers retained
     /// resources.
+    ///
+    /// # Parameters
+    ///
+    /// - `error`: structured operation error, including its native source.
+    /// - `reason`: stable classification of the conditional failure.
+    /// - `stage`: commit stage where the attempt stopped.
+    /// - `publication`: observed destination publication state.
+    /// - `recovery_files`: files retained for caller inspection or transfer.
+    ///
+    /// # Returns
+    ///
+    /// A structured error retaining the supplied recovery files.
     pub(crate) fn new(
         error: LocalFileError,
         reason: LocalConditionalFailureReason,
@@ -124,6 +136,14 @@ impl LocalConditionalCommitError {
     ///
     /// The existing error and its native source are retained when a path is
     /// already present.
+    ///
+    /// # Parameters
+    ///
+    /// - `path`: operation path to use only when the error has no path.
+    ///
+    /// # Returns
+    ///
+    /// The error with its existing path preserved or the fallback path added.
     pub(crate) fn with_fallback_path(mut self, path: std::path::PathBuf) -> Self {
         if self.error.path().is_none() {
             self.error = self.error.with_path(path);
@@ -134,6 +154,15 @@ impl LocalConditionalCommitError {
     /// Adds the operation's captured current directory when the native error
     /// does not already carry one. The native source and recovery ownership
     /// are preserved.
+    ///
+    /// # Parameters
+    ///
+    /// - `current_directory`: captured operation directory to use when the
+    ///   error has none; `None` leaves the error unchanged.
+    ///
+    /// # Returns
+    ///
+    /// The error with its existing directory preserved or the fallback added.
     pub(crate) fn with_fallback_current_directory(mut self, current_directory: Option<std::path::PathBuf>) -> Self {
         if self.error.current_directory().is_none()
             && let Some(current_directory) = current_directory
@@ -145,26 +174,51 @@ impl LocalConditionalCommitError {
 
     /// Returns the structured local filesystem error, including its native
     /// source.
+    ///
+    /// # Returns
+    ///
+    /// The structured error retained by this conditional commit error.
+    #[inline]
     pub const fn error(&self) -> &LocalFileError {
         &self.error
     }
 
     /// Returns the stable conditional failure classification.
+    ///
+    /// # Returns
+    ///
+    /// The reason observed for the failed conditional commit.
+    #[inline]
     pub const fn reason(&self) -> LocalConditionalFailureReason {
         self.reason
     }
 
     /// Returns the operation stage at which the attempt stopped.
+    ///
+    /// # Returns
+    ///
+    /// The last commit stage reached by the failed attempt.
+    #[inline]
     pub const fn stage(&self) -> LocalConditionalWriteStage {
         self.stage
     }
 
     /// Returns the observed destination state when the attempt stopped.
+    ///
+    /// # Returns
+    ///
+    /// The publication state observed when the attempt terminated.
+    #[inline]
     pub const fn publication(&self) -> LocalConditionalPublicationState {
         self.publication
     }
 
     /// Returns the independently verified candidate copy, if retained.
+    ///
+    /// # Returns
+    ///
+    /// `Some` contains the retained candidate copy; `None` means no
+    /// independently verified candidate copy is available.
     pub fn candidate(&self) -> Option<&LocalRecoveryFile> {
         self.recovery_files
             .iter()
@@ -172,11 +226,20 @@ impl LocalConditionalCommitError {
     }
 
     /// Returns every file retained to support recovery.
+    ///
+    /// # Returns
+    ///
+    /// A borrowed slice of all recovery files owned by this error.
+    #[inline]
     pub fn recovery_files(&self) -> &[LocalRecoveryFile] {
         &self.recovery_files
     }
 
     /// Consumes the error and transfers every retained recovery file.
+    ///
+    /// # Returns
+    ///
+    /// All recovery files formerly owned by this error.
     #[must_use]
     pub fn into_recovery_files(self) -> Vec<LocalRecoveryFile> {
         self.recovery_files
@@ -184,6 +247,15 @@ impl LocalConditionalCommitError {
 }
 
 impl fmt::Display for LocalConditionalCommitError {
+    /// Formats the failure with its stopping stage and structured error.
+    ///
+    /// # Parameters
+    ///
+    /// - `formatter`: destination receiving the formatted failure.
+    ///
+    /// # Returns
+    ///
+    /// `Ok(())` when formatting succeeds, or the formatter's error otherwise.
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             formatter,
@@ -194,6 +266,11 @@ impl fmt::Display for LocalConditionalCommitError {
 }
 
 impl Error for LocalConditionalCommitError {
+    /// Exposes the structured local filesystem error as the source.
+    ///
+    /// # Returns
+    ///
+    /// `Some` contains the retained structured error; it is never `None`.
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         Some(&self.error)
     }
@@ -212,7 +289,7 @@ mod conditional_types_tests {
     use crate::outcome::LocalConditionalPublicationState;
 
     #[test]
-    fn conditional_commit_error_preserves_native_io_source() {
+    fn test_conditional_commit_error_preserves_native_io_source() {
         let error = LocalConditionalCommitError::new(
             LocalFileError::from_io(
                 LocalFileOperation::Commit,

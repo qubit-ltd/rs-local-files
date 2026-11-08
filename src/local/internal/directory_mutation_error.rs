@@ -17,6 +17,14 @@ use crate::error::LocalFileEffectState;
 
 /// Adds partial-publication state after a directory mutation has changed the
 /// tree.
+///
+/// # Parameters
+///
+/// * `operation` identifies the directory operation that failed.
+/// * `path` is the path associated with the failed operation.
+/// * `changed` indicates whether the operation already changed the directory
+///   tree before failing.
+/// * `source` is the underlying I/O error.
 pub(crate) fn directory_mutation_error(
     operation: LocalFileOperation,
     path: &Path,

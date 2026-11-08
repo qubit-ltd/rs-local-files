@@ -33,6 +33,10 @@ pub struct LocalReadOptions {
 
 impl LocalReadOptions {
     /// Creates default reader options that perform only the initial open.
+    ///
+    /// # Returns
+    ///
+    /// Reader options with no retry timeout or symbolic-link override.
     #[inline]
     pub const fn new() -> Self {
         Self {
@@ -43,13 +47,20 @@ impl LocalReadOptions {
 
     /// Returns the configured Unix open retry timeout.
     ///
-    /// `None` means the library does not retry.
+    /// # Returns
+    ///
+    /// The configured timeout, or `None` when the library does not retry.
     #[inline]
     pub const fn open_retry_timeout(&self) -> Option<Duration> {
         self.open_retry_timeout
     }
 
     /// Returns the symbolic-link policy override, if configured.
+    ///
+    /// # Returns
+    ///
+    /// The configured symbolic-link policy, or `None` to use the filesystem
+    /// policy.
     #[inline]
     pub const fn symlink_policy(&self) -> Option<LocalSymlinkPolicy> {
         self.symlink_policy
@@ -59,6 +70,15 @@ impl LocalReadOptions {
     /// options. This value takes precedence over the filesystem instance
     /// policy; an outer complete-read option, when present, takes precedence
     /// over this value.
+    ///
+    /// # Parameters
+    ///
+    /// - `policy`: Symbolic-link policy to use for readers opened with these
+    ///   options.
+    ///
+    /// # Returns
+    ///
+    /// Updated reader options.
     #[inline]
     pub const fn with_symlink_policy(mut self, policy: LocalSymlinkPolicy) -> Self {
         self.symlink_policy = Some(policy);
@@ -80,6 +100,10 @@ impl LocalReadOptions {
     }
 
     /// Disables library-level open retries.
+    ///
+    /// # Returns
+    ///
+    /// Reader options with no open retry timeout.
     pub const fn without_open_retry_timeout(mut self) -> Self {
         self.open_retry_timeout = None;
         self

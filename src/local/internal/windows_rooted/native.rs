@@ -53,6 +53,12 @@ const IO_REPARSE_TAG_NAME_SURROGATE: u32 = 0x2000_0000;
 /// synchronously without following the final reparse point; the disposition
 /// can create or truncate. Returns encoding/native errors or an invalid-handle
 /// error; success transfers the native handle into the returned `File`.
+///
+/// # Parameters
+///
+/// * `parent` is the retained directory handle used as the relative-open root.
+/// * `name` is the validated child name to open.
+/// * `access`, `disposition`, and `options` are native flags for the operation.
 pub(in crate::local::internal) fn nt_open_at(
     parent: &File,
     name: &OsStr,
@@ -65,6 +71,13 @@ pub(in crate::local::internal) fn nt_open_at(
 
 /// Opens or creates one name relative to a retained directory with explicit
 /// sharing.
+///
+/// # Parameters
+///
+/// * `parent` is the retained directory handle used as the relative-open root.
+/// * `name` is the validated child name to open or create.
+/// * `access`, `disposition`, and `options` are native flags for the operation.
+/// * `share_mode` specifies which access modes other opens may share.
 pub(in crate::local::internal) fn nt_open_at_with_share_mode(
     parent: &File,
     name: &OsStr,
@@ -111,6 +124,12 @@ pub(in crate::local::internal) fn nt_open_at_with_share_mode(
 }
 
 /// Opens one already-validated child name relative to a retained directory.
+///
+/// # Parameters
+///
+/// * `parent` is the retained directory handle used as the relative-open root.
+/// * `name` is the validated child name to open.
+/// * `access`, `disposition`, and `options` are native flags for the operation.
 #[cfg(feature = "digest")]
 pub(in crate::local::internal) fn open_conditional_entry_at(
     parent: &File,
@@ -124,6 +143,10 @@ pub(in crate::local::internal) fn open_conditional_entry_at(
 
 /// Reads file attributes and the reparse tag from an opened handle.
 /// Propagates the native `GetFileInformationByHandleEx` error.
+///
+/// # Parameters
+///
+/// * `file` is the open handle whose attributes are queried.
 pub(super) fn handle_attributes(file: &File) -> Result<FILE_ATTRIBUTE_TAG_INFO> {
     let mut attributes = FILE_ATTRIBUTE_TAG_INFO::default();
     // SAFETY: `file` owns a live handle and `attributes` is a correctly sized
@@ -146,6 +169,10 @@ pub(super) fn handle_attributes(file: &File) -> Result<FILE_ATTRIBUTE_TAG_INFO> 
 /// Rejects name-surrogate reparse points for an opened handle.
 /// Returns `InvalidInput` for a name-surrogate tag or a native attribute-query
 /// error; other reparse tags are accepted.
+///
+/// # Parameters
+///
+/// * `file` is the open handle whose reparse tag is checked.
 pub(super) fn verify_not_name_surrogate(file: &File) -> Result<()> {
     let attributes = handle_attributes(file)?;
     if attributes.FileAttributes & FILE_ATTRIBUTE_REPARSE_POINT != 0
@@ -163,6 +190,10 @@ pub(super) fn verify_not_name_surrogate(file: &File) -> Result<()> {
 /// Verifies an opened handle is a directory without a name-surrogate tag.
 /// Returns `NotADirectory` for a non-directory, `InvalidInput` for a forbidden
 /// reparse point, or the native attribute-query error.
+///
+/// # Parameters
+///
+/// * `directory` is the open handle to validate as a real directory.
 pub(super) fn verify_real_directory(directory: &File) -> Result<()> {
     let attributes = handle_attributes(directory)?;
     if attributes.FileAttributes & FILE_ATTRIBUTE_DIRECTORY == 0 {
@@ -177,6 +208,10 @@ pub(super) fn verify_real_directory(directory: &File) -> Result<()> {
 /// Builds one NT counted Unicode string without a trailing NUL.
 /// Returns `InvalidInput` for native NUL or a UTF-16 byte length exceeding
 /// the native `u16` field. The returned value retains its backing storage.
+///
+/// # Parameters
+///
+/// * `value` is the operating-system string encoded into the counted string.
 fn unicode_string(value: &OsStr) -> Result<OwnedUnicodeString> {
     let mut units: Vec<u16> = value.encode_wide().collect();
     if units.contains(&0) {
@@ -199,6 +234,10 @@ fn unicode_string(value: &OsStr) -> Result<OwnedUnicodeString> {
 }
 
 /// Converts an NTSTATUS result into a standard I/O result.
+///
+/// # Parameters
+///
+/// * `status` is the NTSTATUS value returned by a native operation.
 #[inline]
 pub(in crate::local::internal) fn nt_result(status: i32) -> Result<()> {
     if status >= 0 {

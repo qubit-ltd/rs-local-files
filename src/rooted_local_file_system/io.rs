@@ -58,6 +58,26 @@ impl RootedLocalFileSystem {
         self.open_reader_with_contract(path, options, symlink_policy, self.root.resolution_contract().clone())
     }
 
+    /// Opens a reader using an existing resolution contract.
+    ///
+    /// The contract supplies the path-resolution limits and policies shared
+    /// with the caller; this helper does not replace or broaden them.
+    ///
+    /// # Parameters
+    ///
+    /// - `path`: Validated relative descendant path.
+    /// - `options`: Reader open policy.
+    /// - `symlink_policy`: Intermediate and final link-resolution policy.
+    /// - `contract`: Existing resolution limits and policies.
+    ///
+    /// # Returns
+    ///
+    /// An owned regular-file reader when the rooted path can be opened.
+    ///
+    /// # Errors
+    ///
+    /// Returns `LocalFileError` for path, policy, type, or native open
+    /// failures.
     pub(crate) fn open_reader_with_contract(
         &self,
         path: &Path,
@@ -358,7 +378,7 @@ mod deadline_tests {
     }
 
     #[test]
-    fn rooted_reader_authority_clone_failure_keeps_the_input_path() {
+    fn test_reader_authority_clone_failure_keeps_the_input_path() {
         let scratch = tempfile::tempdir().expect("fixture directory should be created");
         std::fs::write(scratch.path().join("item"), b"payload").expect("fixture file should exist");
         let rooted = RootedLocalFileSystem::open(scratch.path()).expect("rooted authority should open");
@@ -381,7 +401,7 @@ mod deadline_tests {
     }
 
     #[test]
-    fn rooted_listing_rejects_an_unrepresentable_relative_deadline() {
+    fn test_listing_rejects_an_unrepresentable_relative_deadline() {
         let scratch = tempfile::tempdir().expect("fixture directory should be created");
         let rooted = RootedLocalFileSystem::open(scratch.path()).expect("rooted authority should open");
 

@@ -25,6 +25,15 @@ pub struct TestFaultPlan {
 
 impl TestFaultPlan {
     /// Creates a plan that fails once at `point` with `kind`.
+    ///
+    /// # Parameters
+    ///
+    /// - `point`: Operation boundary where the fault is injected.
+    /// - `kind`: I/O error kind returned when the matching operation occurs.
+    ///
+    /// # Returns
+    ///
+    /// A plan containing one fault for the specified operation boundary.
     #[must_use]
     pub fn fail_once(point: TestFaultPoint, kind: io::ErrorKind) -> Self {
         let mut faults = VecDeque::new();
@@ -35,6 +44,14 @@ impl TestFaultPlan {
     }
 
     /// Takes the next matching fault, if one remains.
+    ///
+    /// # Parameters
+    ///
+    /// - `point`: Operation boundary to match against the pending faults.
+    ///
+    /// # Returns
+    ///
+    /// `Some(error)` when a fault is pending for `point`; otherwise, `None`.
     pub(crate) fn take(&self, point: TestFaultPoint) -> Option<io::Error> {
         let mut faults = self.faults.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let index = faults.iter().position(|fault| fault.point == point)?;

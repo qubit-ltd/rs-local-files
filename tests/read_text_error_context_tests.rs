@@ -6,18 +6,19 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 
-// =============================================================================
-//    Copyright (c) 2025 - 2026 Haixing Hu.
-//
-//    SPDX-License-Identifier: Apache-2.0
-//
-//    Licensed under the Apache License, Version 2.0 (the "License");
-//    you may not use this file except in compliance with the License.
-// =============================================================================
-
+use std::env;
 use std::error::Error;
+#[cfg(windows)]
+use std::ffi::OsString;
 use std::fs;
+#[cfg(unix)]
+use std::os::unix::fs::symlink;
+#[cfg(windows)]
+use std::os::windows::ffi::OsStrExt;
+#[cfg(windows)]
+use std::os::windows::ffi::OsStringExt;
 use std::path::Path;
+use std::path::PathBuf;
 use std::process::Command;
 
 use qubit_local_files::LocalFileSystem;
@@ -77,16 +78,13 @@ fn test_rooted_read_limits_keep_bound_path_and_pwd() {
 
 #[test]
 fn test_host_relative_invalid_utf8_keeps_first_pwd_in_subprocess() {
-    if let Some(fixture) = std::env::var_os(HOST_CHILD_FIXTURE) {
-        let fixture = std::path::PathBuf::from(fixture);
+    if let Some(fixture) = env::var_os(HOST_CHILD_FIXTURE) {
+        let fixture = PathBuf::from(fixture);
         #[cfg(windows)]
         let fixture = {
-            use std::os::windows::ffi::OsStrExt;
-            use std::os::windows::ffi::OsStringExt;
-
             let path = fixture.as_os_str().encode_wide().collect::<Vec<_>>();
             if path.starts_with(&[92, 92, 63, 92]) {
-                std::path::PathBuf::from(std::ffi::OsString::from_wide(&path[4..]))
+                PathBuf::from(OsString::from_wide(&path[4..]))
             } else {
                 fixture
             }
@@ -122,7 +120,7 @@ fn test_host_relative_invalid_utf8_keeps_first_pwd_in_subprocess() {
     let scratch = tempdir().expect("scratch");
     let root = fs::canonicalize(scratch.path()).expect("scratch root should resolve");
     fs::write(root.join("bad.txt"), [0xff]).expect("bytes");
-    let output = Command::new(std::env::current_exe().expect("test executable"))
+    let output = Command::new(env::current_exe().expect("test executable"))
         .arg("--exact")
         .arg("test_host_relative_invalid_utf8_keeps_first_pwd_in_subprocess")
         .arg("--nocapture")
@@ -191,8 +189,6 @@ fn test_read_text_preserves_complete_read_options_and_utf8_behavior() {
 #[cfg(unix)]
 #[test]
 fn test_read_text_inherits_filesystem_read_options() {
-    use std::os::unix::fs::symlink;
-
     let scratch = tempdir().expect("scratch");
     fs::write(scratch.path().join("target.txt"), b"hello").expect("target");
     symlink("target.txt", scratch.path().join("link.txt")).expect("symlink");

@@ -6,18 +6,26 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 
+//! Aggregates tests for local filesystem behavior.
+
 mod atomic_commit_error_tests;
 mod atomic_write_error_tests;
 mod atomic_write_options_tests;
 mod copy_destination_policy_tests;
 mod copy_dir_error_tests;
+#[cfg(unix)]
+mod copy_dir_facade_tests;
 mod copy_dir_options_tests;
 mod copy_dir_stats_tests;
 mod copy_failure_state_merge_tests;
 #[cfg(windows)]
 mod copy_failure_state_tests;
+mod internal;
 
 mod copy_tree_tests;
 mod host_directory_tests;
+mod local_atomic_writer_tests;
 mod local_persist_error_tests;
+#[cfg(unix)]
+mod local_root_atomic_writer_tests;
 mod temp_creation_tests;

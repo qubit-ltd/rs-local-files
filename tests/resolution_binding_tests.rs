@@ -18,6 +18,7 @@ use qubit_local_files::options::LocalPathBindingOptions;
 use qubit_local_files::options::LocalReadOptions;
 #[cfg(unix)]
 use qubit_local_files::options::LocalResolutionLimits;
+use qubit_local_files::policy::LocalSymlinkPolicy;
 
 #[cfg(windows)]
 mod support;
@@ -26,7 +27,7 @@ use support::windows_symlink::create_file_link;
 
 #[cfg(unix)]
 #[test]
-fn binding_reopen_replays_the_root_contract_from_its_original_name() {
+fn test_binding_reopen_replays_the_root_contract_from_its_original_name() {
     use std::os::unix::fs::symlink;
 
     let tmp = tempfile::tempdir().expect("temporary directory should be created");
@@ -54,7 +55,7 @@ fn binding_reopen_replays_the_root_contract_from_its_original_name() {
 
 #[cfg(unix)]
 #[test]
-fn binding_reports_unchanged_before_namespace_replacement() {
+fn test_binding_reports_unchanged_before_namespace_replacement() {
     let tmp = tempfile::tempdir().expect("temporary directory should be created");
     std::fs::create_dir(tmp.path().join("dir")).expect("directory should be created");
     std::fs::write(tmp.path().join("dir/source"), b"source").expect("source should be created");
@@ -73,10 +74,8 @@ fn binding_reports_unchanged_before_namespace_replacement() {
 
 #[cfg(unix)]
 #[test]
-fn binding_reuses_explicit_read_symlink_policy() {
+fn test_binding_reuses_explicit_read_symlink_policy() {
     use std::os::unix::fs::symlink;
-
-    use qubit_local_files::policy::LocalSymlinkPolicy;
 
     let tmp = tempfile::tempdir().expect("temporary directory should be created");
     std::fs::write(tmp.path().join("payload"), b"payload").expect("payload should be created");
@@ -99,10 +98,8 @@ fn binding_reuses_explicit_read_symlink_policy() {
 
 #[cfg(unix)]
 #[test]
-fn binding_reuses_per_read_symlink_hop_limit() {
+fn test_binding_reuses_per_read_symlink_hop_limit() {
     use std::os::unix::fs::symlink;
-
-    use qubit_local_files::policy::LocalSymlinkPolicy;
 
     let tmp = tempfile::tempdir().expect("temporary directory should be created");
     std::fs::write(tmp.path().join("payload"), b"payload").expect("payload should be created");
@@ -129,10 +126,8 @@ fn binding_reuses_per_read_symlink_hop_limit() {
 
 #[cfg(unix)]
 #[test]
-fn host_binding_reopens_absolute_and_parent_component_names() {
+fn test_host_binding_reopens_absolute_and_parent_component_names() {
     use std::os::unix::fs::symlink;
-
-    use qubit_local_files::policy::LocalSymlinkPolicy;
 
     let local = tempfile::tempdir().expect("local fixture should be created");
     let external = tempfile::tempdir().expect("external fixture should be created");
@@ -194,7 +189,7 @@ fn test_virtual_absolute_link_detects_replacement_despite_parent_hardlink() {
 
 #[cfg(unix)]
 #[test]
-fn binding_reports_unchanged_for_relative_and_virtual_absolute_links() {
+fn test_binding_reports_unchanged_for_relative_and_virtual_absolute_links() {
     let tmp = tempfile::tempdir().expect("temporary directory should be created");
     std::fs::create_dir(tmp.path().join("sub")).expect("subdirectory should be created");
     std::fs::write(tmp.path().join("payload"), b"root payload").expect("root payload should be created");
@@ -207,7 +202,7 @@ fn binding_reports_unchanged_for_relative_and_virtual_absolute_links() {
         .expect("virtual absolute symlink should be created");
     let mut filesystem = LocalFileSystem::rooted(tmp.path()).expect("root should open");
     filesystem
-        .set_symlink_policy(qubit_local_files::policy::LocalSymlinkPolicy::FollowWithinScope)
+        .set_symlink_policy(LocalSymlinkPolicy::FollowWithinScope)
         .expect("Rooted policy should follow in-scope links");
 
     for path in ["sub/local-link", "sub/parent-link", "sub/absolute-link"] {
@@ -227,9 +222,7 @@ fn binding_reports_unchanged_for_relative_and_virtual_absolute_links() {
 
 #[cfg(windows)]
 #[test]
-fn rooted_binding_verifies_native_file_symlink() {
-    use qubit_local_files::policy::LocalSymlinkPolicy;
-
+fn test_rooted_binding_verifies_native_file_symlink() {
     let root = tempfile::tempdir().expect("temporary root should be created");
     std::fs::write(root.path().join("payload"), b"payload").expect("payload should be created");
     if !create_file_link(std::path::Path::new("payload"), &root.path().join("link")) {
@@ -254,7 +247,7 @@ fn rooted_binding_verifies_native_file_symlink() {
 
 #[cfg(unix)]
 #[test]
-fn binding_reopens_relative_name_after_working_directory_changes() {
+fn test_binding_reopens_relative_name_after_working_directory_changes() {
     let tmp = tempfile::tempdir().expect("temporary directory should be created");
     std::fs::create_dir(tmp.path().join("first")).expect("first directory should be created");
     std::fs::create_dir(tmp.path().join("second")).expect("second directory should be created");
@@ -281,7 +274,7 @@ fn binding_reopens_relative_name_after_working_directory_changes() {
 
 #[cfg(unix)]
 #[test]
-fn binding_preserves_parent_components_and_reports_missing_target() {
+fn test_binding_preserves_parent_components_and_reports_missing_target() {
     let tmp = tempfile::tempdir().expect("temporary directory should be created");
     std::fs::create_dir(tmp.path().join("dir")).expect("directory should be created");
     std::fs::write(tmp.path().join("source"), b"source").expect("source should be created");
@@ -305,7 +298,7 @@ fn binding_preserves_parent_components_and_reports_missing_target() {
 
 #[cfg(unix)]
 #[test]
-fn rooted_directory_binding_reopens_the_original_symlink_recipe() {
+fn test_rooted_directory_binding_reopens_the_original_symlink_recipe() {
     use std::os::unix::fs::symlink;
 
     let tmp = tempfile::tempdir().expect("fixture directory should exist");

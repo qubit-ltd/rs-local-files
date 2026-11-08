@@ -6,6 +6,8 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 
+#[cfg(unix)]
+use std::os::unix::fs::symlink;
 use std::path::Path;
 use std::path::PathBuf;
 
@@ -47,8 +49,6 @@ fn test_review_initial_resolution_budget_keeps_open_reader_context() {
 #[cfg(unix)]
 #[test]
 fn test_review_symlink_target_budget_keeps_open_reader_context() {
-    use std::os::unix::fs::symlink;
-
     let fixture = tempfile::Builder::new()
         .prefix("r")
         .tempdir_in("/tmp")

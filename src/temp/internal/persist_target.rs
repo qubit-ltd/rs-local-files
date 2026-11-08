@@ -27,6 +27,12 @@ use crate::path::LocalPathResolver;
 /// ambiguous prefixes, and Rooted escapes. Native Host parent traversal is
 /// preserved. Errors retain the offending base or target as their structured
 /// path.
+///
+/// # Parameters
+///
+/// * `scope` selects the namespace in which paths are interpreted.
+/// * `base` optionally supplies an absolute base for a relative target.
+/// * `target` is the path to bind and validate.
 pub(crate) fn prepare_persist_target(
     scope: LocalFileSystemScope,
     base: Option<&Path>,
@@ -73,6 +79,12 @@ pub(crate) fn prepare_persist_target(
 /// Performs read-only native traversal with the captured symlink policy.
 /// Returns a contextual native error or `NotDirectory` without closing the
 /// source.
+///
+/// # Parameters
+///
+/// * `backend` provides the authority used to inspect the base.
+/// * `base` is the explicit persistence directory to validate.
+/// * `policy` controls symlink handling during traversal.
 pub(crate) fn validate_persist_base(
     backend: &LocalTempResourceBackend,
     base: &Path,
@@ -123,6 +135,11 @@ pub(crate) fn validate_persist_base(
 }
 
 /// Tests namespace-specific absolute syntax without reading a process PWD.
+///
+/// # Parameters
+///
+/// * `scope` selects the namespace whose absolute syntax is checked.
+/// * `path` is the path to inspect.
 fn namespace_absolute(scope: LocalFileSystemScope, path: &Path) -> bool {
     match scope {
         LocalFileSystemScope::Host => path.is_absolute(),
@@ -133,6 +150,10 @@ fn namespace_absolute(scope: LocalFileSystemScope, path: &Path) -> bool {
 }
 
 /// Detects Unix dots including interior components hidden by Path::components.
+///
+/// # Parameters
+///
+/// * `path` is inspected as raw Unix path bytes.
 #[cfg(unix)]
 fn contains_dot_component(path: &Path) -> bool {
     use std::os::unix::ffi::OsStrExt;
@@ -143,6 +164,10 @@ fn contains_dot_component(path: &Path) -> bool {
 }
 
 /// Detects Windows dot components without normalizing their UTF-16 spelling.
+///
+/// # Parameters
+///
+/// * `path` is inspected as raw Windows UTF-16 units.
 #[cfg(windows)]
 fn contains_dot_component(path: &Path) -> bool {
     use std::os::windows::ffi::OsStrExt;
@@ -153,60 +178,23 @@ fn contains_dot_component(path: &Path) -> bool {
 }
 
 /// Unsupported platforms cannot validate a native persistence base.
+///
+/// # Parameters
+///
+/// * `_path` is unused because validation is unsupported on this platform.
 #[cfg(not(any(unix, windows)))]
 fn contains_dot_component(_path: &Path) -> bool {
     true
 }
 
 /// Returns a structured invalid-operand error preserving its original spelling.
+///
+/// # Parameters
+///
+/// * `path` is retained in the returned error.
+/// * `reason` explains why the operand is invalid.
 fn invalid(path: &Path, reason: &'static str) -> LocalFileError {
     LocalFileError::new(LocalFileErrorKind::InvalidPath, LocalFileOperation::PersistTemp)
         .with_path(path.to_path_buf())
         .with_reason(reason)
-}
-
-#[cfg(test)]
-mod tests {
-    use std::path::Path;
-
-    use super::LocalFileSystemScope;
-    use super::LocalSymlinkPolicy;
-    use super::LocalTempResourceBackend;
-    use super::prepare_persist_target;
-    use super::validate_persist_base;
-    use crate::error::LocalFileErrorKind;
-    use crate::temp::internal::HostTempResourceBackend;
-    use crate::temp::internal::TempEntryIdentity;
-
-    #[test]
-    fn persist_target_validation_covers_bases_and_namespace_rules() {
-        let fixture = tempfile::tempdir().expect("fixture");
-        let directory = std::fs::canonicalize(fixture.path()).expect("canonicalize fixture directory");
-        let file = directory.join("file");
-        std::fs::write(&file, b"base file").expect("file base");
-
-        let backend = LocalTempResourceBackend::Host(HostTempResourceBackend {
-            identity: TempEntryIdentity::from_path(&directory).expect("directory identity"),
-            sandbox_path: directory.clone(),
-        });
-        validate_persist_base(&backend, &directory, LocalSymlinkPolicy::Reject).expect("directory base");
-
-        let error = validate_persist_base(&backend, &file, LocalSymlinkPolicy::Reject)
-            .expect_err("regular file is not a persistence base");
-        assert_eq!(error.kind(), LocalFileErrorKind::NotDirectory);
-        let missing = directory.join("missing");
-        assert!(validate_persist_base(&backend, &missing, LocalSymlinkPolicy::Reject).is_err());
-
-        let target = directory.join("published");
-        assert!(prepare_persist_target(LocalFileSystemScope::Host, None, &target).is_ok());
-        assert!(prepare_persist_target(LocalFileSystemScope::Host, Some(&directory), Path::new("child")).is_ok());
-
-        let dotted = fixture.path().join("..");
-        let error = prepare_persist_target(LocalFileSystemScope::Host, Some(&dotted), Path::new("child"))
-            .expect_err("persistence base cannot contain parent components");
-        assert_eq!(error.kind(), LocalFileErrorKind::InvalidPath);
-        let error = prepare_persist_target(LocalFileSystemScope::Rooted, None, Path::new("../escape"))
-            .expect_err("rooted persistence cannot escape its namespace");
-        assert_eq!(error.kind(), LocalFileErrorKind::InvalidPath);
-    }
 }

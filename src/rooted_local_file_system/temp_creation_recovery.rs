@@ -15,6 +15,18 @@ use crate::LocalFileError;
 use crate::LocalFileOperation;
 use crate::temp::types::NativePrivateEntry;
 
+/// Captures an opened temporary entry and its best-effort filesystem identity.
+///
+/// The parent handle and entry name are retained so later recovery can act
+/// relative to the directory authority. Identity lookup is optional; failure
+/// to observe it does not prevent creating the recovery entry.
+///
+/// # Parameters
+///
+/// * `parent` is the opened directory handle used as the entry's authority.
+/// * `name` is the entry name relative to `parent`.
+/// * `file` is the opened handle for the created file or directory.
+/// * `directory` selects directory cleanup when `true`.
 pub(super) fn entry(parent: File, name: &std::ffi::OsStr, file: File, directory: bool) -> NativePrivateEntry {
     let identity =
         crate::observation::query::query_observation(&file, crate::observation::LocalObservationRequirement::Optional)
@@ -29,6 +41,17 @@ pub(super) fn entry(parent: File, name: &std::ffi::OsStr, file: File, directory:
     }
 }
 
+/// Cleans up temporary entries and preserves recovery state if cleanup fails.
+///
+/// An empty entry list leaves the primary error unchanged. Otherwise cleanup
+/// is attempted, and any cleanup error is attached to the primary error along
+/// with the recovery handle so a caller can retry cleanup later.
+///
+/// # Parameters
+///
+/// * `primary` is the original operation error to preserve.
+/// * `entries` are the temporary entries requiring cleanup, paired with their
+///   diagnostic paths.
 pub(super) fn finish(primary: LocalFileError, entries: Vec<(PathBuf, NativePrivateEntry)>) -> LocalFileError {
     if entries.is_empty() {
         return primary;

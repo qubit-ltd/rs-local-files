@@ -19,6 +19,11 @@ use qubit_io::Input;
 /// error after any successful read returns the accumulated byte count. An error
 /// on the first read is returned unchanged.
 ///
+/// # Type Parameters
+///
+/// - `R`: byte input source whose `read` implementation fills the destination
+///   buffers.
+///
 /// # Parameters
 ///
 /// - `reader`: source of bytes consumed in buffer order.

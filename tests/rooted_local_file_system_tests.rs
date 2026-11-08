@@ -10,6 +10,8 @@
 
 use std::fs;
 use std::io::ErrorKind;
+#[cfg(unix)]
+use std::os::unix::fs::symlink;
 use std::path::Path;
 use std::path::PathBuf;
 
@@ -153,7 +155,7 @@ fn test_rooted_local_file_system_default_copy_and_rename_skip_sync() {
         .output();
     let probe = match probe {
         Ok(output) if output.status.success() => output,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+        Err(error) if error.kind() == ErrorKind::NotFound => {
             eprintln!("skipping default rooted sync trace: strace executable is unavailable");
             return;
         }
@@ -991,8 +993,6 @@ fn test_rooted_writer_commit_reports_state() {
 #[cfg(unix)]
 #[test]
 fn test_rooted_local_file_system_writer_follows_final_symlink() {
-    use std::os::unix::fs::symlink;
-
     let directory = tempdir().expect("temporary directory should be created");
     let referent = directory.path().join("referent");
     let target = directory.path().join("target");

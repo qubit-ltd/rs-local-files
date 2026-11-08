@@ -38,7 +38,7 @@ use qubit_local_files::options::LocalRootOpenOptions;
 
 #[cfg(unix)]
 #[test]
-fn rooted_filesystem_can_open_the_native_root_directory() {
+fn test_rooted_filesystem_can_open_the_native_root_directory() {
     LocalFileSystem::rooted(Path::new("/")).expect("the native root directory should open as a Rooted filesystem");
 }
 
@@ -157,7 +157,7 @@ impl LocalResolutionPolicy for RejectRawNtTarget {
 
 #[cfg(unix)]
 #[test]
-fn zero_hops_rejects_a_real_link_during_opening_root() {
+fn test_zero_hops_rejects_a_real_link_during_opening_root() {
     use std::os::unix::fs::symlink;
 
     let tmp = tempfile::tempdir().expect("temporary directory should be created");
@@ -174,7 +174,7 @@ fn zero_hops_rejects_a_real_link_during_opening_root() {
 
 #[cfg(unix)]
 #[test]
-fn root_target_byte_limit_accepts_exact_limit_and_rejects_next_byte() {
+fn test_root_target_byte_limit_accepts_exact_limit_and_rejects_next_byte() {
     use std::os::unix::fs::symlink;
 
     let tmp = tempfile::tempdir().expect("temporary directory should be created");
@@ -203,7 +203,7 @@ fn root_target_byte_limit_accepts_exact_limit_and_rejects_next_byte() {
 
 #[cfg(unix)]
 #[test]
-fn root_target_hook_receives_raw_target_before_follow_and_keeps_its_error() {
+fn test_root_target_hook_receives_raw_target_before_follow_and_keeps_its_error() {
     use std::os::unix::fs::symlink;
 
     let tmp = tempfile::tempdir().expect("temporary directory should be created");
@@ -224,7 +224,7 @@ fn root_target_hook_receives_raw_target_before_follow_and_keeps_its_error() {
 
 #[cfg(unix)]
 #[test]
-fn opening_root_keeps_input_origin_on_suffix_after_symlink_expansion() {
+fn test_opening_root_keeps_input_origin_on_suffix_after_symlink_expansion() {
     use std::os::unix::fs::symlink;
 
     let tmp = tempfile::tempdir().expect("temporary directory should exist");
@@ -251,7 +251,7 @@ fn opening_root_keeps_input_origin_on_suffix_after_symlink_expansion() {
 
 #[cfg(unix)]
 #[test]
-fn reject_policy_refuses_intermediate_root_symlink() {
+fn test_reject_policy_refuses_intermediate_root_symlink() {
     use std::os::unix::fs::symlink;
 
     use qubit_local_files::policy::LocalSymlinkPolicy;
@@ -268,7 +268,7 @@ fn reject_policy_refuses_intermediate_root_symlink() {
 
 #[cfg(unix)]
 #[test]
-fn root_component_limit_counts_only_normal_components() {
+fn test_root_component_limit_counts_only_normal_components() {
     let tmp = tempfile::tempdir().expect("temporary directory should be created");
     let root = std::fs::canonicalize(tmp.path()).expect("temporary directory should canonicalize");
     let target = root.join("real");
@@ -290,7 +290,7 @@ fn root_component_limit_counts_only_normal_components() {
 
 #[cfg(unix)]
 #[test]
-fn opening_root_checks_missing_and_file_predecessors_before_parent_steps() {
+fn test_opening_root_checks_missing_and_file_predecessors_before_parent_steps() {
     let tmp = tempfile::tempdir().expect("temporary directory should be created");
     std::fs::create_dir(tmp.path().join("ok")).expect("target directory should be created");
     std::fs::write(tmp.path().join("file"), b"not a directory").expect("file should be created");
@@ -305,7 +305,7 @@ fn opening_root_checks_missing_and_file_predecessors_before_parent_steps() {
 
 #[cfg(unix)]
 #[test]
-fn opening_root_enforces_pending_component_budget_after_link_expansion() {
+fn test_opening_root_enforces_pending_component_budget_after_link_expansion() {
     use std::os::unix::fs::symlink;
 
     let scratch = tempfile::tempdir().expect("fixture directory should exist");
@@ -364,7 +364,7 @@ fn opening_root_enforces_pending_component_budget_after_link_expansion() {
 
 #[cfg(unix)]
 #[test]
-fn opening_root_detects_an_active_symlink_identity_cycle() {
+fn test_opening_root_detects_an_active_symlink_identity_cycle() {
     use std::os::unix::fs::symlink;
 
     let tmp = tempfile::tempdir().expect("fixture directory should exist");
@@ -378,7 +378,7 @@ fn opening_root_detects_an_active_symlink_identity_cycle() {
 
 #[cfg(unix)]
 #[test]
-fn rooted_writer_allows_only_the_final_leaf_to_be_missing() {
+fn test_rooted_writer_allows_only_the_final_leaf_to_be_missing() {
     use qubit_io::Output;
 
     let tmp = tempfile::tempdir().expect("fixture directory should exist");
@@ -396,7 +396,7 @@ fn rooted_writer_allows_only_the_final_leaf_to_be_missing() {
 
 #[cfg(windows)]
 #[test]
-fn opening_root_target_hook_sees_and_can_reject_raw_nt_substitute_name() {
+fn test_opening_root_target_hook_sees_and_can_reject_raw_nt_substitute_name() {
     use crate::support::windows_symlink::create_directory_link;
 
     let tmp = tempfile::tempdir().expect("fixture directory should exist");
@@ -426,7 +426,7 @@ fn opening_root_target_hook_sees_and_can_reject_raw_nt_substitute_name() {
 
 #[cfg(unix)]
 #[test]
-fn observed_reader_limits_tighten_the_filesystem_contract() {
+fn test_observed_reader_limits_tighten_the_filesystem_contract() {
     use std::os::unix::fs::symlink;
 
     let tmp = tempfile::tempdir().expect("temporary directory should be created");
@@ -445,7 +445,7 @@ fn observed_reader_limits_tighten_the_filesystem_contract() {
 
 #[cfg(unix)]
 #[test]
-fn child_directory_options_cannot_loosen_parent_resolution_limits() {
+fn test_child_directory_options_cannot_loosen_parent_resolution_limits() {
     use std::os::unix::fs::symlink;
 
     let tmp = tempfile::tempdir().expect("temporary directory should be created");
@@ -473,7 +473,7 @@ fn child_directory_options_cannot_loosen_parent_resolution_limits() {
 
 #[cfg(unix)]
 #[test]
-fn walker_rejects_a_discovered_entry_with_the_inherited_resolution_policy() {
+fn test_walker_rejects_a_discovered_entry_with_the_inherited_resolution_policy() {
     use qubit_local_files::options::LocalListOptions;
 
     let tmp = tempfile::tempdir().expect("temporary directory should be created");

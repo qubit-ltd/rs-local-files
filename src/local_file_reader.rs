@@ -79,6 +79,14 @@ pub struct LocalFileReader {
 }
 
 impl std::fmt::Debug for LocalFileReader {
+    /// Formats the reader without exposing native handle details.
+    ///
+    /// The debug representation includes the metadata captured from the
+    /// retained handle and omits the operating-system-specific file handle.
+    ///
+    /// # Parameters
+    ///
+    /// - `f`: Formatter that receives the reader's debug representation.
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("LocalFileReader")
             .field("metadata", &self.metadata)
@@ -164,8 +172,27 @@ impl LocalFileReader {
 }
 
 impl qubit_io::Input for LocalFileReader {
+    /// Bytes read from the native file handle.
     type Item = u8;
 
+    /// Reads into byte slices from the current native file offset.
+    ///
+    /// Empty input returns `Ok(0)`. A non-empty request may be short or reach
+    /// EOF; the count covers the ordered prefix of the destination slices.
+    /// Windows reads slices sequentially, retaining progress if a later read
+    /// fails; other platforms delegate to the native vectored read operation.
+    ///
+    /// # Parameters
+    ///
+    /// - `buffers`: Mutable destination slices filled in order.
+    ///
+    /// # Returns
+    ///
+    /// The number of bytes written across the ordered prefix of `buffers`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an I/O error if reading fails before any bytes are transferred.
     fn read_vectored(&mut self, buffers: &mut [&mut [u8]]) -> io::Result<usize> {
         if buffers.iter().all(|buffer| buffer.is_empty()) {
             return Ok(0);
@@ -180,6 +207,26 @@ impl qubit_io::Input for LocalFileReader {
         qubit_io::Input::read_vectored(&mut self.file, buffers)
     }
 
+    /// Reads a caller-selected range of the output buffer.
+    ///
+    /// # Parameters
+    ///
+    /// - `output`: Destination storage.
+    /// - `index`: Start of the requested range.
+    /// - `count`: Maximum number of bytes to read.
+    ///
+    /// # Returns
+    ///
+    /// The number of bytes written to the requested range; reads may be short.
+    ///
+    /// # Errors
+    ///
+    /// Returns an I/O error from the retained native file handle.
+    ///
+    /// # Safety
+    ///
+    /// The caller must ensure `index..index + count` is within `output` and
+    /// that calculating the range does not overflow.
     unsafe fn read_unchecked(&mut self, output: &mut [u8], index: usize, count: usize) -> io::Result<usize> {
         #[cfg(test)]
         crate::tests::native_io_fault_tests::check(crate::tests::native_io_fault_tests::NativeIoPoint::Read)?;
@@ -189,6 +236,10 @@ impl qubit_io::Input for LocalFileReader {
 
 impl Seek for LocalFileReader {
     /// Moves the native file cursor and returns its new byte offset.
+    ///
+    /// # Parameters
+    ///
+    /// - `position`: Absolute, relative, or end-relative cursor position.
     fn seek(&mut self, position: SeekFrom) -> io::Result<u64> {
         self.file.seek(position)
     }

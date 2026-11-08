@@ -24,6 +24,13 @@ pub struct Entry {
 
 impl Entry {
     /// Builds a rooted directory entry.
+    ///
+    /// # Parameters
+    ///
+    /// * `name` - Native name of the immediate child, retained without
+    ///   converting it to a Unicode string.
+    /// * `metadata` - Metadata captured for the child without following its
+    ///   final symbolic link.
     #[cfg(any(unix, windows))]
     #[inline]
     pub(crate) const fn new(name: OsString, metadata: Metadata) -> Self {

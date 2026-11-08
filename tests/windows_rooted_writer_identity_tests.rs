@@ -26,7 +26,7 @@ use tempfile::tempdir;
 /// A destination replaced after its commit-time handle is opened remains
 /// untouched, while the pre-publication failure retains its staging writer.
 #[test]
-fn rooted_writer_destination_replacement_before_install_is_not_published() {
+fn test_destination_replacement_before_install_is_not_published() {
     let directory = tempdir().expect("temporary directory should be created");
     let destination = directory.path().join("payload");
     fs::write(&destination, b"original destination").expect("original destination should be written");
@@ -79,7 +79,7 @@ fn rooted_writer_destination_replacement_before_install_is_not_published() {
 
 /// A failure reported after native rename remains terminal and published.
 #[test]
-fn rooted_writer_failure_after_rename_reports_published() {
+fn test_failure_after_rename_reports_published() {
     let directory = tempdir().expect("temporary directory should be created");
     let destination = directory.path().join("payload");
     fs::write(&destination, b"original destination").expect("original destination should be written");

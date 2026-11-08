@@ -8,6 +8,10 @@
 //! Stateful-PWD binding for Host and Rooted native paths.
 
 use std::ffi::OsString;
+#[cfg(unix)]
+use std::os::unix::ffi::OsStrExt;
+#[cfg(windows)]
+use std::os::windows::ffi::OsStrExt;
 use std::path::Component;
 use std::path::Path;
 use std::path::PathBuf;
@@ -42,6 +46,21 @@ impl LocalPathResolver {
     /// namespace root, parent components, or a native prefix in Rooted scope.
     /// Interior dot components normalized away by `Path::components` are
     /// accepted; the exposed PWD snapshot retains the supplied spelling.
+    ///
+    /// # Parameters
+    ///
+    /// * `scope` selects Host-native or Rooted namespace rules.
+    /// * `current_directory` is the namespace-absolute PWD snapshot to bind.
+    ///
+    /// # Returns
+    ///
+    /// Returns a resolver retaining the supplied PWD spelling and parsed
+    /// namespace components.
+    ///
+    /// # Errors
+    ///
+    /// Returns a path-codec error for native NUL or `InvalidPath` when the
+    /// snapshot does not satisfy the selected namespace rules.
     pub(crate) fn new(scope: LocalFileSystemScope, current_directory: &Path) -> LocalResult<Self> {
         reject_native_nul(current_directory)?;
         let (current_prefix, current_components) = parse_current_directory(scope, current_directory)?;
@@ -53,12 +72,6 @@ impl LocalPathResolver {
         })
     }
 
-    /// Returns the PWD snapshot used by this resolver.
-    #[inline]
-    pub(crate) fn current_directory(&self) -> Option<&Path> {
-        self.current_directory.as_deref()
-    }
-
     /// Creates a Host resolver that can resolve absolute paths without a PWD.
     pub(crate) const fn absolute_host() -> Self {
         Self {
@@ -67,6 +80,17 @@ impl LocalPathResolver {
             current_components: Vec::new(),
             current_prefix: None,
         }
+    }
+
+    /// Returns the PWD snapshot used by this resolver.
+    ///
+    /// # Returns
+    ///
+    /// Returns `Some` with the original PWD snapshot for a resolver created
+    /// with [`Self::new`], or `None` for [`Self::absolute_host`].
+    #[inline]
+    pub(crate) fn current_directory(&self) -> Option<&Path> {
+        self.current_directory.as_deref()
     }
 
     /// Binds one absolute or PWD-relative operation path.
@@ -80,6 +104,21 @@ impl LocalPathResolver {
     /// traversal above the namespace root, Rooted native prefixes, or
     /// ambiguous Host drive-relative paths. A relative Host path without a
     /// PWD snapshot returns `InvalidState`.
+    ///
+    /// # Parameters
+    ///
+    /// * `path` is the native operation path to bind.
+    ///
+    /// # Returns
+    ///
+    /// Returns the namespace-absolute path and backend path with directory
+    /// intent preserved from the native operand.
+    ///
+    /// # Errors
+    ///
+    /// Returns a path-codec error for native NUL, `InvalidPath` for invalid
+    /// namespace traversal or ambiguous Host drive-relative input, and
+    /// `InvalidState` when a relative Host path has no PWD snapshot.
     pub(crate) fn resolve(&self, path: &Path) -> LocalResult<LocalNamespacePath> {
         reject_native_nul(path)?;
         if self.current_directory.is_none() && !path.is_absolute() {
@@ -141,6 +180,20 @@ impl LocalPathResolver {
 /// Returns `InvalidPath` for a missing namespace root or any prefix, dot,
 /// or parent component disallowed by the scope and exposed by
 /// `Path::components`; that iterator may normalize interior dots away.
+///
+/// # Parameters
+///
+/// * `scope` selects the namespace root and permitted native prefixes.
+/// * `current_directory` is the PWD snapshot to parse.
+///
+/// # Returns
+///
+/// Returns the optional Host prefix and the PWD's normal components.
+///
+/// # Errors
+///
+/// Returns `InvalidPath` if the PWD lacks the required namespace root or
+/// contains a disallowed component.
 fn parse_current_directory(
     scope: LocalFileSystemScope,
     current_directory: &Path,
@@ -176,6 +229,20 @@ fn parse_current_directory(
 /// Absolute inputs need no PWD. Relative inputs require `pwd`; Windows
 /// root-relative inputs retain its native prefix. Ambiguous drive-relative
 /// input returns `InvalidPath`, and a missing PWD returns `InvalidState`.
+///
+/// # Parameters
+///
+/// * `path` is the Host operand to bind.
+/// * `pwd` is the optional PWD snapshot used for relative operands.
+///
+/// # Returns
+///
+/// Returns the bound Host path, preserving native operand spelling.
+///
+/// # Errors
+///
+/// Returns `InvalidPath` for ambiguous drive-relative input or an unanchored
+/// root-relative input, and `InvalidState` when a relative path has no PWD.
 fn bind_host_operand(path: &Path, pwd: Option<&Path>) -> LocalResult<PathBuf> {
     if path.is_absolute() {
         return Ok(path.to_path_buf());
@@ -211,6 +278,15 @@ fn bind_host_operand(path: &Path, pwd: Option<&Path>) -> LocalResult<PathBuf> {
 }
 
 /// Reports whether a path has the namespace root syntax required for a PWD.
+///
+/// # Parameters
+///
+/// * `scope` selects the namespace root rules.
+/// * `path` is the path whose root syntax is checked.
+///
+/// # Returns
+///
+/// Returns whether `path` has the namespace root required by `scope`.
 fn has_namespace_root(scope: LocalFileSystemScope, path: &Path) -> bool {
     match scope {
         LocalFileSystemScope::Host => path.is_absolute(),
@@ -224,6 +300,16 @@ fn has_namespace_root(scope: LocalFileSystemScope, path: &Path) -> bool {
 }
 
 /// Builds one namespace-absolute path without converting components to text.
+///
+/// # Parameters
+///
+/// * `scope` selects Host prefix handling.
+/// * `prefix` is the optional native Host prefix.
+/// * `components` are the normalized path components to append.
+///
+/// # Returns
+///
+/// Returns a namespace-absolute path assembled from the native components.
 fn namespace_absolute(
     scope: LocalFileSystemScope,
     prefix: Option<&std::ffi::OsStr>,
@@ -243,6 +329,15 @@ fn namespace_absolute(
 }
 
 /// Creates one structured lexical-path error.
+///
+/// # Parameters
+///
+/// * `path` is the offending native path.
+/// * `reason` explains the violated lexical constraint.
+///
+/// # Returns
+///
+/// Returns a structured `InvalidPath` error for `path` and `reason`.
 fn invalid_path(path: &Path, reason: &'static str) -> LocalFileError {
     LocalFileError::new(LocalFileErrorKind::InvalidPath, LocalFileOperation::BindPath)
         .with_path(path.to_path_buf())
@@ -250,6 +345,14 @@ fn invalid_path(path: &Path, reason: &'static str) -> LocalFileError {
 }
 
 /// Rejects embedded native NUL without lossy text conversion.
+///
+/// # Parameters
+///
+/// * `path` is the native path to inspect.
+///
+/// # Errors
+///
+/// Returns a path-codec error when the path contains a native NUL.
 fn reject_native_nul(path: &Path) -> LocalResult<()> {
     if contains_native_nul(path) {
         return Err(LocalFileError::from_path_codec(
@@ -263,37 +366,72 @@ fn reject_native_nul(path: &Path) -> LocalResult<()> {
 
 /// Reports whether native syntax requires the normalized entry to be a
 /// directory.
+///
+/// # Parameters
+///
+/// * `path` is the original native operand whose directory intent is checked.
+///
+/// # Returns
+///
+/// Returns whether the input syntax requires the resolved entry to be a
+/// directory.
 fn directory_required(path: &Path) -> bool {
     path.as_os_str().is_empty() || has_trailing_separator_or_dot(path)
 }
 
 /// Reports whether a Unix path contains a native NUL byte.
+///
+/// # Parameters
+///
+/// * `path` is the Unix path to inspect.
+///
+/// # Returns
+///
+/// Returns whether the native bytes contain a NUL byte.
 #[cfg(unix)]
 fn contains_native_nul(path: &Path) -> bool {
-    use std::os::unix::ffi::OsStrExt;
-
     path.as_os_str().as_bytes().contains(&0)
 }
 
 /// Reports whether a Windows path contains a native NUL code unit.
+///
+/// # Parameters
+///
+/// * `path` is the Windows path to inspect.
+///
+/// # Returns
+///
+/// Returns whether the native code units contain a NUL.
 #[cfg(windows)]
 fn contains_native_nul(path: &Path) -> bool {
-    use std::os::windows::ffi::OsStrExt;
-
     path.as_os_str().encode_wide().any(|unit| unit == 0)
 }
 
 /// Conservatively rejects paths on unsupported platforms.
+///
+/// # Parameters
+///
+/// * `_path` is unused because this platform has no supported native encoding.
+///
+/// # Returns
+///
+/// Always returns `true` so paths on unsupported platforms are rejected.
 #[cfg(not(any(unix, windows)))]
 const fn contains_native_nul(_path: &Path) -> bool {
     true
 }
 
 /// Reports Unix syntax that preserves directory-qualified intent.
+///
+/// # Parameters
+///
+/// * `path` is the Unix operand whose trailing syntax is checked.
+///
+/// # Returns
+///
+/// Returns whether the path ends in a separator, `.` or `..` component.
 #[cfg(unix)]
 fn has_trailing_separator_or_dot(path: &Path) -> bool {
-    use std::os::unix::ffi::OsStrExt;
-
     let bytes = path.as_os_str().as_bytes();
     if bytes.last() == Some(&b'/') {
         return true;
@@ -303,10 +441,16 @@ fn has_trailing_separator_or_dot(path: &Path) -> bool {
 }
 
 /// Reports Windows syntax that preserves directory-qualified intent.
+///
+/// # Parameters
+///
+/// * `path` is the Windows operand whose trailing syntax is checked.
+///
+/// # Returns
+///
+/// Returns whether the path ends in a separator, `.` or `..` component.
 #[cfg(windows)]
 fn has_trailing_separator_or_dot(path: &Path) -> bool {
-    use std::os::windows::ffi::OsStrExt;
-
     let units = path.as_os_str().encode_wide().collect::<Vec<_>>();
     let is_separator = |unit: &u16| *unit == u16::from(b'/') || *unit == u16::from(b'\\');
     if units.last().is_some_and(is_separator) {
@@ -317,6 +461,14 @@ fn has_trailing_separator_or_dot(path: &Path) -> bool {
 }
 
 /// Returns false on unsupported platforms, whose paths are rejected earlier.
+///
+/// # Parameters
+///
+/// * `_path` is unused because unsupported platforms are rejected earlier.
+///
+/// # Returns
+///
+/// Always returns `false`; unsupported-platform paths are rejected earlier.
 #[cfg(not(any(unix, windows)))]
 const fn has_trailing_separator_or_dot(_path: &Path) -> bool {
     false

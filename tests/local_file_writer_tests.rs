@@ -115,7 +115,12 @@ fn test_local_file_writer_append_follows_target_symlink() {
     Output::write_fully(&mut writer, b"-append").expect("append should write to the referent");
     let outcome = writer.commit().expect("append should commit");
     assert_eq!(LocalWritePublicationMethod::DirectAppend, outcome.publication_method());
-    assert_eq!(b"original-append", fs::read(&referent).unwrap().as_slice());
+    assert_eq!(
+        b"original-append",
+        fs::read(&referent)
+            .expect("referent should contain appended bytes")
+            .as_slice(),
+    );
 }
 
 /// Verifies Windows append follows a final name-surrogate reparse point.

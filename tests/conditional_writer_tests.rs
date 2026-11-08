@@ -12,11 +12,14 @@ mod support;
 
 use digest::FixedOutput;
 use digest::HashMarker;
+use digest::Output as DigestOutput;
 use digest::OutputSizeUser;
 use digest::Update;
 use digest::consts::U32;
 use qubit_io::Output;
 use qubit_local_files::LocalFileSystem;
+use qubit_local_files::error::LocalConditionalFailureReason;
+use qubit_local_files::error::LocalConditionalWriteStage;
 use qubit_local_files::error::LocalFileErrorKind;
 #[cfg(any(unix, windows))]
 use qubit_local_files::error::LocalFileOperation;
@@ -25,11 +28,20 @@ use qubit_local_files::options::LocalWriteMetadataPolicy;
 use qubit_local_files::options::LocalWriteMode;
 use qubit_local_files::options::LocalWriteOptions;
 use qubit_local_files::options::LocalWritePrecondition;
+use qubit_local_files::outcome::LocalConditionalPublicationState;
+use qubit_local_files::outcome::LocalWriterState;
+use qubit_local_files::policy::LocalSymlinkPolicy;
+#[cfg(feature = "test-support")]
+use qubit_local_files::test_support::TestConditionalHooks;
+#[cfg(feature = "test-support")]
+use qubit_local_files::test_support::TestConditionalPoint;
 use sha2::Digest;
 use sha2::Sha256;
 use sha2::Sha512;
-use support::conditional_temp_directory::tempdir;
 
+use crate::support::conditional_temp_directory::tempdir;
+
+/// Supplies a digest implementation without `Clone` or `Debug` bounds.
 struct NoCloneNoDebugSha256(Sha256);
 impl Default for NoCloneNoDebugSha256 {
     fn default() -> Self {
@@ -46,18 +58,17 @@ impl Update for NoCloneNoDebugSha256 {
     }
 }
 impl FixedOutput for NoCloneNoDebugSha256 {
-    fn finalize_into(self, out: &mut digest::Output<Self>) {
+    fn finalize_into(self, out: &mut DigestOutput<Self>) {
         out.copy_from_slice(&self.0.finalize());
     }
 }
 
 #[test]
-fn absent_save_returns_actual_digest() {
+fn test_absent_save_returns_actual_digest() {
     let dir = tempdir().unwrap();
     let path = dir.path().join("model");
     let mut fs = LocalFileSystem::host().unwrap();
-    fs.set_symlink_policy(qubit_local_files::policy::LocalSymlinkPolicy::Reject)
-        .unwrap();
+    fs.set_symlink_policy(LocalSymlinkPolicy::Reject).unwrap();
     let mut writer = fs
         .open_conditional_writer::<Sha256>(
             &path,
@@ -74,12 +85,12 @@ fn absent_save_returns_actual_digest() {
 }
 
 #[test]
-fn opening_host_conditional_writer_reports_missing_parent_context() {
+fn test_opening_host_conditional_writer_reports_missing_parent_context() {
     let directory = tempdir().expect("fixture directory should be created");
     let target = directory.path().join("missing-parent").join("target");
     let mut filesystem = LocalFileSystem::host().expect("Host filesystem should open");
     filesystem
-        .set_symlink_policy(qubit_local_files::policy::LocalSymlinkPolicy::Reject)
+        .set_symlink_policy(LocalSymlinkPolicy::Reject)
         .expect("conditional writes should use a non-following policy");
 
     let error = filesystem
@@ -96,7 +107,7 @@ fn opening_host_conditional_writer_reports_missing_parent_context() {
 
 #[test]
 #[cfg(unix)]
-fn opening_host_conditional_writer_rejects_intermediate_symlink() {
+fn test_opening_host_conditional_writer_rejects_intermediate_symlink() {
     let directory = tempdir().expect("fixture directory should be created");
     let real = directory.path().join("real");
     std::fs::create_dir(&real).expect("real parent should be created");
@@ -104,7 +115,7 @@ fn opening_host_conditional_writer_rejects_intermediate_symlink() {
     std::os::unix::fs::symlink(&real, directory.path().join("link")).expect("parent symlink should be created");
     let mut filesystem = LocalFileSystem::host().expect("Host filesystem should open");
     filesystem
-        .set_symlink_policy(qubit_local_files::policy::LocalSymlinkPolicy::Reject)
+        .set_symlink_policy(LocalSymlinkPolicy::Reject)
         .expect("conditional writes should use a non-following policy");
 
     for (name, precondition) in [
@@ -140,7 +151,7 @@ fn opening_host_conditional_writer_rejects_intermediate_symlink() {
 
 #[test]
 #[cfg(unix)]
-fn opening_host_conditional_writer_rejects_symlink_before_creating_missing_parent() {
+fn test_opening_host_conditional_writer_rejects_symlink_before_creating_missing_parent() {
     let directory = tempdir().expect("fixture directory should be created");
     let real = directory.path().join("real");
     std::fs::create_dir(&real).expect("real parent should be created");
@@ -148,7 +159,7 @@ fn opening_host_conditional_writer_rejects_symlink_before_creating_missing_paren
     let target = directory.path().join("link/missing/target");
     let mut filesystem = LocalFileSystem::host().expect("Host filesystem should open");
     filesystem
-        .set_symlink_policy(qubit_local_files::policy::LocalSymlinkPolicy::Reject)
+        .set_symlink_policy(LocalSymlinkPolicy::Reject)
         .expect("conditional writes should use a non-following policy");
 
     let error = filesystem
@@ -172,12 +183,12 @@ fn opening_host_conditional_writer_rejects_symlink_before_creating_missing_paren
 
 #[test]
 #[cfg(unix)]
-fn opening_rooted_conditional_writer_reports_non_directory_parent() {
+fn test_opening_rooted_conditional_writer_reports_non_directory_parent() {
     let directory = tempdir().expect("fixture directory should be created");
     std::fs::write(directory.path().join("blocker"), b"file").expect("parent blocker should be written");
     let mut filesystem = LocalFileSystem::rooted(directory.path()).expect("Rooted filesystem should open");
     filesystem
-        .set_symlink_policy(qubit_local_files::policy::LocalSymlinkPolicy::Reject)
+        .set_symlink_policy(LocalSymlinkPolicy::Reject)
         .expect("conditional writes should use a non-following policy");
     let target = std::path::Path::new("/blocker/target");
 
@@ -194,12 +205,11 @@ fn opening_rooted_conditional_writer_reports_non_directory_parent() {
 }
 
 #[test]
-fn writer_exposes_paths_debug_state_and_all_output_entry_points() {
+fn test_writer_exposes_paths_debug_state_and_all_output_entry_points() {
     let dir = tempdir().unwrap();
     let path = dir.path().join("output-contract");
     let mut fs = LocalFileSystem::host().unwrap();
-    fs.set_symlink_policy(qubit_local_files::policy::LocalSymlinkPolicy::Reject)
-        .unwrap();
+    fs.set_symlink_policy(LocalSymlinkPolicy::Reject).unwrap();
     let mut writer = fs
         .open_conditional_writer::<Sha256>(
             &path,
@@ -210,7 +220,7 @@ fn writer_exposes_paths_debug_state_and_all_output_entry_points() {
 
     assert_eq!(writer.path(), path.as_path());
     assert_eq!(writer.diagnostic_path(), Some(path.as_path()));
-    assert_eq!(writer.state(), qubit_local_files::outcome::LocalWriterState::Open);
+    assert_eq!(writer.state(), LocalWriterState::Open);
     assert!(format!("{writer:?}").contains("LocalConditionalWriter"));
     assert_eq!(Output::write(&mut writer, b"A").unwrap(), 1);
     let vectored = Output::write_vectored(&mut writer, &[b"B", b"C"]).unwrap();
@@ -232,13 +242,12 @@ fn writer_exposes_paths_debug_state_and_all_output_entry_points() {
 
 #[test]
 #[cfg(unix)]
-fn content_precondition_replaces_rooted_file_and_returns_digest() {
+fn test_content_precondition_replaces_rooted_file_and_returns_digest() {
     let dir = tempdir().unwrap();
     let native_path = dir.path().join("rooted-model");
     std::fs::write(&native_path, b"old").unwrap();
     let mut fs = LocalFileSystem::rooted(dir.path()).unwrap();
-    fs.set_symlink_policy(qubit_local_files::policy::LocalSymlinkPolicy::Reject)
-        .unwrap();
+    fs.set_symlink_policy(LocalSymlinkPolicy::Reject).unwrap();
     let mut writer = fs
         .open_conditional_writer::<Sha256>(
             std::path::Path::new("/rooted-model"),
@@ -254,11 +263,10 @@ fn content_precondition_replaces_rooted_file_and_returns_digest() {
 
 #[test]
 #[cfg(windows)]
-fn windows_open_rejects_rooted_content_without_artifacts() {
+fn test_windows_open_rejects_rooted_content_without_artifacts() {
     let dir = tempdir().unwrap();
     let mut fs = LocalFileSystem::rooted(dir.path()).unwrap();
-    fs.set_symlink_policy(qubit_local_files::policy::LocalSymlinkPolicy::Reject)
-        .unwrap();
+    fs.set_symlink_policy(LocalSymlinkPolicy::Reject).unwrap();
     for (parent, create_parent) in [("missing-parent", false), ("created-parent", true)] {
         let target = std::path::PathBuf::from(format!("/{parent}/target"));
         let options = LocalWriteOptions::new(LocalWriteMode::CreateOrReplace);
@@ -294,11 +302,10 @@ fn windows_open_rejects_rooted_content_without_artifacts() {
 
 #[test]
 #[cfg(windows)]
-fn windows_open_rejects_host_content_use_staging_without_artifacts() {
+fn test_windows_open_rejects_host_content_use_staging_without_artifacts() {
     let dir = tempdir().unwrap();
     let mut fs = LocalFileSystem::host().unwrap();
-    fs.set_symlink_policy(qubit_local_files::policy::LocalSymlinkPolicy::Reject)
-        .unwrap();
+    fs.set_symlink_policy(LocalSymlinkPolicy::Reject).unwrap();
     for (parent, create_parent) in [("missing-parent", false), ("created-parent", true)] {
         let missing_parent = dir.path().join(parent);
         let target = missing_parent.join("target");
@@ -336,11 +343,10 @@ fn windows_open_rejects_host_content_use_staging_without_artifacts() {
 
 #[test]
 #[cfg(windows)]
-fn windows_open_accepts_absent_condition() {
+fn test_windows_open_accepts_absent_condition() {
     let dir = tempdir().unwrap();
     let mut fs = LocalFileSystem::host().unwrap();
-    fs.set_symlink_policy(qubit_local_files::policy::LocalSymlinkPolicy::Reject)
-        .unwrap();
+    fs.set_symlink_policy(LocalSymlinkPolicy::Reject).unwrap();
     let target = dir.path().join("absent");
     let writer = fs
         .open_conditional_writer::<Sha256>(
@@ -353,9 +359,7 @@ fn windows_open_accepts_absent_condition() {
     assert!(!target.exists());
 
     let mut rooted = LocalFileSystem::rooted(dir.path()).unwrap();
-    rooted
-        .set_symlink_policy(qubit_local_files::policy::LocalSymlinkPolicy::Reject)
-        .unwrap();
+    rooted.set_symlink_policy(LocalSymlinkPolicy::Reject).unwrap();
     let rooted_target = std::path::Path::new("/rooted-absent");
     let writer = rooted
         .open_conditional_writer::<Sha256>(
@@ -370,11 +374,10 @@ fn windows_open_accepts_absent_condition() {
 
 #[test]
 #[cfg(windows)]
-fn windows_open_accepts_host_preserve_existing_content() {
+fn test_windows_open_accepts_host_preserve_existing_content() {
     let dir = tempdir().unwrap();
     let mut fs = LocalFileSystem::host().unwrap();
-    fs.set_symlink_policy(qubit_local_files::policy::LocalSymlinkPolicy::Reject)
-        .unwrap();
+    fs.set_symlink_policy(LocalSymlinkPolicy::Reject).unwrap();
     let target = dir.path().join("content");
     std::fs::write(&target, b"old").unwrap();
     let mut writer = fs
@@ -392,13 +395,12 @@ fn windows_open_accepts_host_preserve_existing_content() {
 }
 
 #[test]
-fn append_and_follow_policy_are_rejected_before_open() {
+fn test_append_and_follow_policy_are_rejected_before_open() {
     let dir = tempdir().unwrap();
     let path = dir.path().join("existing");
     std::fs::write(&path, b"unchanged").unwrap();
     let mut fs = LocalFileSystem::host().unwrap();
-    fs.set_symlink_policy(qubit_local_files::policy::LocalSymlinkPolicy::Reject)
-        .unwrap();
+    fs.set_symlink_policy(LocalSymlinkPolicy::Reject).unwrap();
     assert!(
         fs.open_conditional_writer::<Sha256>(
             &path,
@@ -408,8 +410,7 @@ fn append_and_follow_policy_are_rejected_before_open() {
         .is_err()
     );
     assert_eq!(std::fs::read(&path).unwrap(), b"unchanged");
-    fs.set_symlink_policy(qubit_local_files::policy::LocalSymlinkPolicy::FollowAcrossScope)
-        .unwrap();
+    fs.set_symlink_policy(LocalSymlinkPolicy::FollowAcrossScope).unwrap();
     assert!(
         fs.open_conditional_writer::<Sha256>(
             &path,
@@ -419,8 +420,7 @@ fn append_and_follow_policy_are_rejected_before_open() {
         .is_err()
     );
     assert_eq!(std::fs::read(&path).unwrap(), b"unchanged");
-    fs.set_symlink_policy(qubit_local_files::policy::LocalSymlinkPolicy::FollowWithinScope)
-        .unwrap();
+    fs.set_symlink_policy(LocalSymlinkPolicy::FollowWithinScope).unwrap();
     assert!(
         fs.open_conditional_writer::<Sha256>(
             &path,
@@ -433,12 +433,11 @@ fn append_and_follow_policy_are_rejected_before_open() {
 }
 
 #[test]
-fn dropping_uncommitted_writer_does_not_publish_candidate() {
+fn test_dropping_uncommitted_writer_does_not_publish_candidate() {
     let dir = tempdir().unwrap();
     let path = dir.path().join("not-published");
     let mut fs = LocalFileSystem::host().unwrap();
-    fs.set_symlink_policy(qubit_local_files::policy::LocalSymlinkPolicy::Reject)
-        .unwrap();
+    fs.set_symlink_policy(LocalSymlinkPolicy::Reject).unwrap();
     let mut writer = fs
         .open_conditional_writer::<Sha256>(
             &path,
@@ -452,13 +451,12 @@ fn dropping_uncommitted_writer_does_not_publish_candidate() {
 }
 
 #[test]
-fn commit_after_abort_reports_invalid_state() {
+fn test_commit_after_abort_reports_invalid_state() {
     let dir = tempdir().unwrap();
     let target = dir.path().join("aborted");
     std::fs::write(&target, b"original").expect("original target should be written");
     let mut fs = LocalFileSystem::host().unwrap();
-    fs.set_symlink_policy(qubit_local_files::policy::LocalSymlinkPolicy::Reject)
-        .unwrap();
+    fs.set_symlink_policy(LocalSymlinkPolicy::Reject).unwrap();
     let mut writer = fs
         .open_conditional_writer::<Sha256>(
             &target,
@@ -466,38 +464,26 @@ fn commit_after_abort_reports_invalid_state() {
             &LocalWriteOptions::new(LocalWriteMode::CreateOrReplace),
         )
         .unwrap();
-    assert_eq!(
-        writer.abort().unwrap().state(),
-        qubit_local_files::outcome::LocalWriterState::Aborted
-    );
+    assert_eq!(writer.abort().unwrap().state(), LocalWriterState::Aborted);
     let error = match writer.commit() {
         Ok(_) => panic!("commit after abort must fail"),
         Err(error) => error,
     };
     assert_eq!(error.error().kind(), LocalFileErrorKind::InvalidState);
-    assert_eq!(
-        error.reason(),
-        qubit_local_files::error::LocalConditionalFailureReason::InvalidState
-    );
-    assert_eq!(
-        error.stage(),
-        qubit_local_files::error::LocalConditionalWriteStage::Prepare
-    );
-    assert_eq!(
-        error.publication(),
-        qubit_local_files::outcome::LocalConditionalPublicationState::NotPublished
-    );
+    assert_eq!(error.reason(), LocalConditionalFailureReason::InvalidState);
+    assert_eq!(error.stage(), LocalConditionalWriteStage::Prepare);
+    assert_eq!(error.publication(), LocalConditionalPublicationState::NotPublished);
     assert_eq!(std::fs::read(target).unwrap(), b"original");
 }
 
 #[test]
-fn commit_after_abort_failure_reports_invalid_state() {
+fn test_commit_after_abort_failure_reports_invalid_state() {
     let dir = tempdir().expect("fixture should be created");
     let target = dir.path().join("abort-failed");
     std::fs::write(&target, b"original").expect("original target should be written");
     let mut filesystem = LocalFileSystem::host().expect("Host filesystem should open");
     filesystem
-        .set_symlink_policy(qubit_local_files::policy::LocalSymlinkPolicy::Reject)
+        .set_symlink_policy(LocalSymlinkPolicy::Reject)
         .expect("conditional writes should use a non-following policy");
     let before: std::collections::HashSet<_> = std::fs::read_dir(dir.path())
         .expect("fixture should be readable")
@@ -522,33 +508,21 @@ fn commit_after_abort_failure_reports_invalid_state() {
 
     let error = writer.commit().expect_err("commit after abort failure must fail");
     assert_eq!(error.error().kind(), LocalFileErrorKind::InvalidState);
-    assert_eq!(
-        error.reason(),
-        qubit_local_files::error::LocalConditionalFailureReason::InvalidState
-    );
-    assert_eq!(
-        error.stage(),
-        qubit_local_files::error::LocalConditionalWriteStage::Prepare
-    );
-    assert_eq!(
-        error.publication(),
-        qubit_local_files::outcome::LocalConditionalPublicationState::NotPublished
-    );
+    assert_eq!(error.reason(), LocalConditionalFailureReason::InvalidState);
+    assert_eq!(error.stage(), LocalConditionalWriteStage::Prepare);
+    assert_eq!(error.publication(), LocalConditionalPublicationState::NotPublished);
     assert_eq!(std::fs::read(target).unwrap(), b"original");
 }
 
 #[cfg(feature = "test-support")]
 #[test]
-fn commit_after_permanent_write_failure_reports_invalid_state() {
-    use qubit_local_files::test_support::TestConditionalHooks;
-    use qubit_local_files::test_support::TestConditionalPoint;
-
+fn test_commit_after_permanent_write_failure_reports_invalid_state() {
     let dir = tempdir().expect("fixture should be created");
     let target = dir.path().join("write-failed");
     std::fs::write(&target, b"original").expect("original target should be written");
     let mut filesystem = LocalFileSystem::host().expect("Host filesystem should open");
     filesystem
-        .set_symlink_policy(qubit_local_files::policy::LocalSymlinkPolicy::Reject)
+        .set_symlink_policy(LocalSymlinkPolicy::Reject)
         .expect("conditional writes should use a non-following policy");
     let filesystem = filesystem
         .with_conditional_test_hooks(TestConditionalHooks::once(TestConditionalPoint::BeforeWrite, || {
@@ -570,27 +544,17 @@ fn commit_after_permanent_write_failure_reports_invalid_state() {
         .commit()
         .expect_err("commit after permanent write failure must fail");
     assert_eq!(error.error().kind(), LocalFileErrorKind::InvalidState);
-    assert_eq!(
-        error.reason(),
-        qubit_local_files::error::LocalConditionalFailureReason::InvalidState
-    );
-    assert_eq!(
-        error.stage(),
-        qubit_local_files::error::LocalConditionalWriteStage::Prepare
-    );
-    assert_eq!(
-        error.publication(),
-        qubit_local_files::outcome::LocalConditionalPublicationState::NotPublished
-    );
+    assert_eq!(error.reason(), LocalConditionalFailureReason::InvalidState);
+    assert_eq!(error.stage(), LocalConditionalWriteStage::Prepare);
+    assert_eq!(error.publication(), LocalConditionalPublicationState::NotPublished);
     assert_eq!(std::fs::read(target).unwrap(), b"original");
 }
 
 #[test]
-fn empty_and_large_candidates_return_sha512_digest() {
+fn test_empty_and_large_candidates_return_sha512_digest() {
     let dir = tempdir().unwrap();
     let mut fs = LocalFileSystem::host().unwrap();
-    fs.set_symlink_policy(qubit_local_files::policy::LocalSymlinkPolicy::Reject)
-        .unwrap();
+    fs.set_symlink_policy(LocalSymlinkPolicy::Reject).unwrap();
     let empty_path = dir.path().join("empty");
     let empty = fs
         .open_conditional_writer::<Sha512>(
@@ -620,12 +584,11 @@ fn empty_and_large_candidates_return_sha512_digest() {
 }
 
 #[test]
-fn no_clone_no_debug_digest_works_through_public_api() {
+fn test_no_clone_no_debug_digest_works_through_public_api() {
     let dir = tempdir().unwrap();
     let path = dir.path().join("custom-digest");
     let mut fs = LocalFileSystem::host().unwrap();
-    fs.set_symlink_policy(qubit_local_files::policy::LocalSymlinkPolicy::Reject)
-        .unwrap();
+    fs.set_symlink_policy(LocalSymlinkPolicy::Reject).unwrap();
     let mut writer = fs
         .open_conditional_writer::<NoCloneNoDebugSha256>(
             &path,
@@ -639,12 +602,11 @@ fn no_clone_no_debug_digest_works_through_public_api() {
 }
 
 #[test]
-fn conditional_commit_error_debug_and_error_do_not_require_digest_debug() {
+fn test_conditional_commit_error_debug_and_error_do_not_require_digest_debug() {
     let dir = tempdir().unwrap();
     let path = dir.path().join("missing-target");
     let mut fs = LocalFileSystem::host().unwrap();
-    fs.set_symlink_policy(qubit_local_files::policy::LocalSymlinkPolicy::Reject)
-        .unwrap();
+    fs.set_symlink_policy(LocalSymlinkPolicy::Reject).unwrap();
     let mut writer = fs
         .open_conditional_writer::<NoCloneNoDebugSha256>(
             &path,
@@ -662,13 +624,12 @@ fn conditional_commit_error_debug_and_error_do_not_require_digest_debug() {
 }
 
 #[test]
-fn content_precondition_rejects_create_new_before_open() {
+fn test_content_precondition_rejects_create_new_before_open() {
     let dir = tempdir().unwrap();
     let path = dir.path().join("existing");
     std::fs::write(&path, b"old").unwrap();
     let mut fs = LocalFileSystem::host().unwrap();
-    fs.set_symlink_policy(qubit_local_files::policy::LocalSymlinkPolicy::Reject)
-        .unwrap();
+    fs.set_symlink_policy(LocalSymlinkPolicy::Reject).unwrap();
     assert!(
         fs.open_conditional_writer::<Sha256>(
             &path,
@@ -681,14 +642,13 @@ fn content_precondition_rejects_create_new_before_open() {
 }
 
 #[test]
-fn content_commit_failure_reports_host_target_path() {
+fn test_content_commit_failure_reports_host_target_path() {
     let dir = tempdir().unwrap();
     let missing = dir.path().join("missing");
     let mismatched = dir.path().join("mismatched");
     std::fs::write(&mismatched, b"current").unwrap();
     let mut fs = LocalFileSystem::host().unwrap();
-    fs.set_symlink_policy(qubit_local_files::policy::LocalSymlinkPolicy::Reject)
-        .unwrap();
+    fs.set_symlink_policy(LocalSymlinkPolicy::Reject).unwrap();
 
     for (path, expected) in [
         (&missing, b"expected".as_slice()),
@@ -713,14 +673,13 @@ fn content_commit_failure_reports_host_target_path() {
 
 #[test]
 #[cfg(not(windows))]
-fn rooted_content_commit_failure_reports_namespace_path_only() {
+fn test_rooted_content_commit_failure_reports_namespace_path_only() {
     let dir = tempdir().unwrap();
     let native_path = dir.path().join("model");
     std::fs::write(&native_path, b"current").unwrap();
     let namespace_path = std::path::Path::new("/model");
     let mut fs = LocalFileSystem::rooted(dir.path()).unwrap();
-    fs.set_symlink_policy(qubit_local_files::policy::LocalSymlinkPolicy::Reject)
-        .unwrap();
+    fs.set_symlink_policy(LocalSymlinkPolicy::Reject).unwrap();
     let mut writer = fs
         .open_conditional_writer::<Sha256>(
             namespace_path,

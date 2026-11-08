@@ -58,18 +58,18 @@ dependencies = [
 
 [[package]]
 name = "qubit-budget"
-version = "0.10.1"
+version = "0.10.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "73e47093e3478946ba918c37151909c72c75a0167b85a9ec5536ceaa07c24039"
+checksum = "cbaf131a60bf8f47c8211e46392d3a27b16b413b131be68d4e33e3372dc86d42"
 dependencies = [
  "thiserror",
 ]
 
 [[package]]
 name = "qubit-io"
-version = "0.19.3"
+version = "0.19.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "be15020e4d41c243b5ef1dd3f0965c10a05252e58fcbccf298fba87eafb45379"
+checksum = "86ee85b8dbf12b74f9da3df2378657290d99baf9a95a000fc883d21195a13e91"
 dependencies = [
  "qubit-utils",
 ]
@@ -89,16 +89,16 @@ dependencies = [
 
 [[package]]
 name = "qubit-redact"
-version = "0.10.0"
+version = "0.10.1"
 dependencies = [
  "qubit-budget",
 ]
 
 [[package]]
 name = "qubit-utils"
-version = "0.3.2"
+version = "0.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0488fb46cb58bfc4f4237a9b15889e6cb2700ad68dc65837e82e6c3f2c5d571e"
+checksum = "584ff83ad66e30417e2b0fd251e36562971fa072236c369b0837df72dc01cce4"
 
 [[package]]
 name = "quote"

@@ -9,22 +9,31 @@
 
 #[cfg(unix)]
 mod unix {
+    use std::env;
     use std::fs;
     #[cfg(target_os = "linux")]
     use std::os::unix::fs::MetadataExt;
     use std::os::unix::fs::PermissionsExt;
     #[cfg(target_os = "linux")]
+    use std::os::unix::fs::chown;
+    #[cfg(target_os = "linux")]
     use std::path::Path;
+    use std::path::PathBuf;
     #[cfg(target_os = "linux")]
     use std::process::Command;
 
+    use libc::geteuid;
+    use libc::getuid;
+    use libc::setresuid;
     use qubit_local_files::LocalFileSystem;
+    use qubit_local_files::directory::LocalDirectoryHandle;
     use qubit_local_files::error::LocalFileErrorKind;
     use qubit_local_files::options::LocalDirectoryOpenOptions;
     use qubit_local_files::options::LocalTempDirectoryOptions;
     use qubit_local_files::options::LocalTreeValidationOptions;
     use qubit_local_files::policy::LocalPrivacyRequirement;
     use tempfile::TempDir;
+    use tempfile::tempdir;
 
     #[cfg(target_os = "linux")]
     const CHILD_SENTINEL: &str = "QUBIT_STAGE_REOPEN_EFFECTIVE_UID_CHILD";
@@ -35,7 +44,7 @@ mod unix {
         LocalTreeValidationOptions::new().with_privacy(LocalPrivacyRequirement::Required)
     }
 
-    fn parent_authority(scratch: &TempDir) -> qubit_local_files::directory::LocalDirectoryHandle {
+    fn parent_authority(scratch: &TempDir) -> LocalDirectoryHandle {
         LocalFileSystem::host()
             .expect("host filesystem")
             .open_directory_with_options(scratch.path(), &LocalDirectoryOpenOptions::new())
@@ -44,12 +53,12 @@ mod unix {
 
     #[test]
     fn test_private_stage_retain_reopen_and_cleanup() {
-        let scratch = tempfile::tempdir().expect("scratch parent");
+        let scratch = tempdir().expect("scratch parent");
         let parent = parent_authority(&scratch);
         let stage = parent
             .create_staged_directory(&LocalTempDirectoryOptions::new().with_privacy(LocalPrivacyRequirement::Required))
             .expect("private stage");
-        let name = std::path::PathBuf::from(stage.relative_name());
+        let name = PathBuf::from(stage.relative_name());
         let identity = stage.identity().expect("stage identity").clone();
         drop(stage.retain_in_place());
 
@@ -68,12 +77,12 @@ mod unix {
 
     #[test]
     fn test_reopen_rejects_replacement_identity_and_group_or_other_permissions() {
-        let scratch = tempfile::tempdir().expect("scratch parent");
+        let scratch = tempdir().expect("scratch parent");
         let parent = parent_authority(&scratch);
         let first = parent
             .create_staged_directory(&LocalTempDirectoryOptions::new().with_privacy(LocalPrivacyRequirement::Required))
             .expect("first private stage");
-        let first_name = std::path::PathBuf::from(first.relative_name());
+        let first_name = PathBuf::from(first.relative_name());
         let first_identity = first.identity().expect("first identity").clone();
         drop(first.retain_in_place());
         let replacement = parent
@@ -107,19 +116,19 @@ mod unix {
     fn test_reopen_uses_effective_uid_child() {
         #[cfg(target_os = "linux")]
         {
-            if std::env::var_os(CHILD_SENTINEL).is_some() {
+            if env::var_os(CHILD_SENTINEL).is_some() {
                 run_effective_uid_child();
                 return;
             }
 
-            if unsafe { libc::geteuid() } != 0 {
+            if unsafe { geteuid() } != 0 {
                 eprintln!("UID-difference scenario NOT EXECUTED: test runner is not privileged");
                 return;
             }
 
-            let marker = tempfile::tempdir().expect("marker directory");
+            let marker = tempdir().expect("marker directory");
             let marker_path = marker.path().join("child-completed");
-            let output = Command::new(std::env::current_exe().expect("test executable"))
+            let output = Command::new(env::current_exe().expect("test executable"))
                 .args(["--exact", "unix::test_reopen_uses_effective_uid_child", "--nocapture"])
                 .env(CHILD_SENTINEL, "run")
                 .env(CHILD_MARKER, &marker_path)
@@ -141,9 +150,9 @@ mod unix {
 
     #[cfg(target_os = "linux")]
     fn run_effective_uid_child() {
-        let marker = std::env::var_os(CHILD_MARKER).expect("child marker path");
-        let scratch = tempfile::tempdir().expect("child scratch parent");
-        std::os::unix::fs::chown(scratch.path(), Some(65_534), None).expect("effective UID should own fixture parent");
+        let marker = env::var_os(CHILD_MARKER).expect("child marker path");
+        let scratch = tempdir().expect("child scratch parent");
+        chown(scratch.path(), Some(65_534), None).expect("effective UID should own fixture parent");
         fs::set_permissions(scratch.path(), fs::Permissions::from_mode(0o700))
             .expect("fixture parent should be private and writable");
         let metadata = fs::metadata(scratch.path()).expect("fixture metadata");
@@ -154,11 +163,11 @@ mod unix {
         // cleanup.
         assert_eq!(
             0,
-            unsafe { libc::setresuid(0, 65_534, 0) },
+            unsafe { setresuid(0, 65_534, 0) },
             "set distinct real/effective UIDs in child"
         );
-        assert_eq!(0, unsafe { libc::getuid() }, "real UID should differ");
-        assert_eq!(65_534, unsafe { libc::geteuid() }, "effective UID should own stage");
+        assert_eq!(0, unsafe { getuid() }, "real UID should differ");
+        assert_eq!(65_534, unsafe { geteuid() }, "effective UID should own stage");
 
         let parent = LocalFileSystem::host()
             .expect("child host filesystem")
@@ -167,7 +176,7 @@ mod unix {
         let stage = parent
             .create_staged_directory(&LocalTempDirectoryOptions::new().with_privacy(LocalPrivacyRequirement::Required))
             .expect("create stage as effective UID");
-        let name = std::path::PathBuf::from(stage.relative_name());
+        let name = PathBuf::from(stage.relative_name());
         let identity = stage.identity().expect("stage identity").clone();
         drop(stage.retain_in_place());
         let reopened = parent
@@ -176,7 +185,7 @@ mod unix {
         assert_eq!(Some(&identity), reopened.identity());
         reopened.cleanup().expect("cleanup stage as effective UID");
 
-        assert_eq!(0, unsafe { libc::setresuid(0, 0, 0) }, "restore child root identity");
+        assert_eq!(0, unsafe { setresuid(0, 0, 0) }, "restore child root identity");
         fs::write(Path::new(&marker), b"completed").expect("write child completion marker");
     }
 }

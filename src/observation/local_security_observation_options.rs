@@ -56,6 +56,11 @@ impl LocalSecurityObservationOptions {
     /// Optional means the query is still attempted. Explicitly unsupported
     /// facts can be absent; permission, ordinary I/O, malformed-data, and
     /// identity-change failures remain errors.
+    ///
+    /// # Returns
+    ///
+    /// Options with every query optional and both ACL limits unset.
+    #[inline]
     pub const fn new() -> Self {
         Self {
             filesystem: LocalObservationRequirement::Optional,
@@ -69,6 +74,15 @@ impl LocalSecurityObservationOptions {
     ///
     /// `Optional` retains available facts and represents unavailable facts as
     /// `None`; `Required` returns an error if the selected facts are missing.
+    ///
+    /// # Parameters
+    ///
+    /// * `v` - Whether filesystem facts may be unavailable.
+    ///
+    /// # Returns
+    ///
+    /// The options with the filesystem fact requirement set to `v`.
+    #[inline]
     pub const fn with_filesystem(mut self, v: LocalObservationRequirement) -> Self {
         self.filesystem = v;
         self
@@ -77,6 +91,15 @@ impl LocalSecurityObservationOptions {
     ///
     /// `Optional` still performs the native query. `Required` fails when the
     /// requested ACL or access facts are unavailable.
+    ///
+    /// # Parameters
+    ///
+    /// * `v` - Whether access-control facts may be unavailable.
+    ///
+    /// # Returns
+    ///
+    /// The options with the access-control fact requirement set to `v`.
+    #[inline]
     pub const fn with_access(mut self, v: LocalObservationRequirement) -> Self {
         self.access = v;
         self
@@ -85,40 +108,97 @@ impl LocalSecurityObservationOptions {
     ///
     /// `Optional` permits an unavailable count; `Required` makes its absence
     /// an unmet requirement.
+    ///
+    /// # Parameters
+    ///
+    /// * `v` - Whether the native link count may be unavailable.
+    ///
+    /// # Returns
+    ///
+    /// The options with the link-count requirement set to `v`.
+    #[inline]
     pub const fn with_link_count(mut self, v: LocalObservationRequirement) -> Self {
         self.link_count = v;
         self
     }
     /// Caps the number of ACL entries decoded; zero rejects any entry.
+    ///
+    /// # Parameters
+    ///
+    /// * `v` - Maximum number of ACL entries to decode.
+    ///
+    /// # Returns
+    ///
+    /// The options with the ACL entry limit set to `Some(v)`.
+    #[inline]
     pub const fn with_max_acl_entries(mut self, v: usize) -> Self {
         self.max_acl_entries = Some(v);
         self
     }
     /// Caps ACL bytes read and retained; zero permits no ACL bytes.
+    ///
+    /// # Parameters
+    ///
+    /// * `v` - Maximum number of ACL bytes to read and retain.
+    ///
+    /// # Returns
+    ///
+    /// The options with the ACL byte limit set to `Some(v)`.
+    #[inline]
     pub const fn with_max_acl_bytes(mut self, v: usize) -> Self {
         self.max_acl_bytes = Some(v);
         self
     }
     /// Returns the selected filesystem fact requirement for native backends.
+    ///
+    /// # Returns
+    ///
+    /// The configured filesystem fact requirement.
+    #[must_use]
+    #[inline]
     pub(crate) const fn filesystem(&self) -> LocalObservationRequirement {
         self.filesystem
     }
     /// Returns the selected access fact requirement for native backends.
+    ///
+    /// # Returns
+    ///
+    /// The configured access-control fact requirement.
+    #[must_use]
+    #[inline]
     pub(crate) const fn access(&self) -> LocalObservationRequirement {
         self.access
     }
-    #[allow(dead_code)] // Read by target-gated Unix and Windows security backends.
     /// Returns the selected link-count requirement for native backends.
+    ///
+    /// # Returns
+    ///
+    /// The configured link-count requirement.
+    #[must_use]
+    #[inline]
+    #[allow(dead_code)] // Read by target-gated Unix and Windows security backends.
     pub(crate) const fn link_count(&self) -> LocalObservationRequirement {
         self.link_count
     }
-    #[cfg(any(target_os = "linux", windows))]
     /// Returns the ACL entry ceiling; `None` means no caller-specified ceiling.
+    ///
+    /// # Returns
+    ///
+    /// `Some(limit)` when an entry ceiling was configured, or `None` when the
+    /// caller left the entry count unrestricted.
+    #[inline]
+    #[cfg(any(target_os = "linux", windows))]
     pub(crate) const fn max_acl_entries(&self) -> Option<usize> {
         self.max_acl_entries
     }
-    #[cfg(any(target_os = "linux", windows))]
     /// Returns the ACL byte ceiling; `None` means no caller-specified ceiling.
+    ///
+    /// # Returns
+    ///
+    /// `Some(limit)` when a byte ceiling was configured, or `None` when the
+    /// caller left the byte count unrestricted.
+    #[inline]
+    #[cfg(any(target_os = "linux", windows))]
     pub(crate) const fn max_acl_bytes(&self) -> Option<usize> {
         self.max_acl_bytes
     }

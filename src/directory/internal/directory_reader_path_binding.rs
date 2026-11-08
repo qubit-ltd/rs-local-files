@@ -35,6 +35,14 @@ pub(crate) struct DirectoryReaderPathBinding {
 }
 
 impl std::fmt::Debug for DirectoryReaderPathBinding {
+    /// Formats the binding while redacting its filesystem paths.
+    ///
+    /// Only the stable type name and read options are exposed; path recipes and
+    /// request coordinates can contain sensitive filesystem locations.
+    ///
+    /// # Parameters
+    ///
+    /// `formatter` receives the redacted debug representation.
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter
             .debug_struct("DirectoryReaderPathBinding")
@@ -46,6 +54,13 @@ impl std::fmt::Debug for DirectoryReaderPathBinding {
 
 impl DirectoryReaderPathBinding {
     /// Captures the fixed authority and original path recipe.
+    ///
+    /// # Parameters
+    ///
+    /// `filesystem`, `component_policy`, and `authority_deadline` preserve the
+    /// fixed directory's access boundary. `original` is the caller's unexpanded
+    /// recipe; `request_path` is the error-reporting coordinate. `options` and
+    /// `identity` capture the reader's verification contract and observed file.
     pub(crate) fn new(
         filesystem: LocalFileSystem,
         original: PathBuf,
@@ -68,6 +83,13 @@ impl DirectoryReaderPathBinding {
 }
 
 impl ReaderPathBinding for DirectoryReaderPathBinding {
+    /// Returns the earliest deadline imposed by read options or directory
+    /// authority.
+    ///
+    /// # Returns
+    ///
+    /// Returns `Some` with the earliest configured deadline, or `None` when
+    /// neither source imposes a deadline.
     fn verification_deadline(&self) -> Option<Duration> {
         self.options
             .path_binding()
@@ -77,6 +99,22 @@ impl ReaderPathBinding for DirectoryReaderPathBinding {
             .min()
     }
 
+    /// Reopens the original recipe and compares its identity with the captured
+    /// identity.
+    ///
+    /// A missing target is reported as `Missing`; other I/O failures are
+    /// preserved. An expired deadline returns a timed-out metadata error at
+    /// the request path.
+    ///
+    /// # Parameters
+    ///
+    /// `deadline` is an optional caller-supplied verification deadline.
+    ///
+    /// # Returns
+    ///
+    /// Returns `Unchanged` when the reopened identity matches, `Changed` when
+    /// it differs, or `Missing` when the target no longer exists. Other
+    /// failures, including an expired deadline, are returned as errors.
     fn verify_until(&self, deadline: Option<Instant>) -> LocalResult<LocalSourceVerification> {
         let result = self.filesystem.open_observed_reader_fixed_with_deadline(
             &self.original,
@@ -103,67 +141,5 @@ impl ReaderPathBinding for DirectoryReaderPathBinding {
             Err(error) if error.kind() == crate::LocalFileErrorKind::NotFound => Ok(LocalSourceVerification::Missing),
             Err(error) => Err(error),
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use std::path::Path;
-    use std::time::Duration;
-    use std::time::Instant;
-
-    use super::DirectoryReaderPathBinding;
-    use crate::LocalFileSystem;
-    use crate::directory::LocalComponentPolicy;
-    use crate::observation::LocalObservationRequirement;
-    use crate::observation::LocalSourceVerification;
-    use crate::observation::reader::ReaderPathBinding;
-    use crate::options::LocalObservedReadOptions;
-
-    #[test]
-    fn fixed_reader_binding_reopens_its_recipe_and_formats_without_exposing_paths() {
-        let fixture = tempfile::tempdir().expect("fixture should be created");
-        std::fs::write(fixture.path().join("payload"), b"data").expect("payload should be written");
-        let filesystem = LocalFileSystem::rooted(fixture.path()).expect("rooted filesystem should open");
-        let options = LocalObservedReadOptions::new().with_native_observation(LocalObservationRequirement::Required);
-        let reader = filesystem
-            .open_observed_reader(Path::new("/payload"), &options)
-            .expect("observed reader should open");
-        let identity = reader
-            .observation()
-            .identity()
-            .cloned()
-            .expect("required observation should include identity");
-        let request_path = fixture.path().join("payload");
-        let binding = DirectoryReaderPathBinding::new(
-            filesystem.clone(),
-            Path::new("payload").to_path_buf(),
-            request_path.clone(),
-            LocalComponentPolicy::allow_all(),
-            options,
-            identity,
-            None,
-        );
-
-        assert_eq!(None, binding.verification_deadline());
-        assert_eq!(LocalSourceVerification::Unchanged, binding.verify_until(None).unwrap());
-        filesystem
-            .open_observed_reader_fixed_with_deadline(
-                Path::new("payload"),
-                &request_path,
-                &LocalComponentPolicy::allow_all(),
-                &options,
-                None,
-                None,
-            )
-            .expect("fixed reader should open with an explicit verification deadline");
-        let debug = format!("{binding:?}");
-        assert!(debug.contains("DirectoryReaderPathBinding"));
-        assert!(!debug.contains(fixture.path().to_string_lossy().as_ref()));
-
-        let expired = Instant::now().checked_sub(Duration::from_secs(1)).unwrap();
-        let error = binding.verify_until(Some(expired)).unwrap_err();
-        assert_eq!(std::io::ErrorKind::TimedOut, error.io_error_kind());
-        assert_eq!(Some(request_path.as_path()), error.path());
     }
 }

@@ -19,6 +19,30 @@ use crate::local_file_system_validation::conditional_protocol_compiled;
 use crate::local_file_system_validation::validate_write_options;
 
 /// Validates conditional writer configuration before resolving its path.
+/// This helper performs no path resolution or filesystem I/O.
+///
+/// # Parameters
+///
+/// - `scope`: Namespace scope used to select the platform publication protocol.
+/// - `capabilities`: Capabilities available to the filesystem instance.
+/// - `symlink_policy`: Policy must reject symlink following for conditional
+///   writes.
+/// - `kind`: Conditional publication precondition; `Content` cannot use
+///   `CreateNew` mode.
+/// - `options`: Writer mode and guarantees; `Append` is unsupported, and
+///   Windows Rooted writes cannot require namespace durability.
+///
+/// # Returns
+///
+/// Returns `Ok(())` when the supplied configuration is valid and its
+/// conditional publication protocol is compiled for this scope and target.
+///
+/// # Errors
+///
+/// Returns `InvalidOptions` for unsupported mode or symlink combinations,
+/// `RequirementNotMet` for unavailable required Windows Rooted durability,
+/// or propagates write-option validation errors. Returns `Unsupported` when
+/// the requested publication protocol is unavailable for this scope and target.
 pub(crate) fn validate_conditional_open(
     scope: LocalFileSystemScope,
     capabilities: LocalFileSystemCapabilities,
@@ -55,10 +79,3 @@ pub(crate) fn validate_conditional_open(
     }
     Ok(())
 }
-// =============================================================================
-//    Copyright (c) 2025 - 2026 Haixing Hu.
-//
-//    SPDX-License-Identifier: Apache-2.0
-//
-//    Licensed under the Apache License, Version 2.0.
-// =============================================================================

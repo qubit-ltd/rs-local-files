@@ -46,6 +46,21 @@ impl RootedLocalFileSystem {
     /// resource retains this exact opened root authority, so later cleanup is
     /// unaffected by rename or replacement of the diagnostic root path.
     ///
+    /// # Parameters
+    ///
+    /// - `options`: Parent, name affixes, privacy requirement, and retry limit
+    ///   for the temporary file.
+    /// - `symlink_policy`: Policy used when resolving the optional parent below
+    ///   the opened root.
+    ///
+    /// # Returns
+    ///
+    /// The cleanup-owned temporary file and its rooted cleanup authority.
+    ///
+    /// # Panics
+    ///
+    /// Panics only if an internally generated sandbox path has no file name.
+    ///
     /// # Errors
     /// Returns `LocalFileError` when options are invalid, entry creation
     /// collides through all attempts, or rooted traversal/opening fails.
@@ -91,13 +106,7 @@ impl RootedLocalFileSystem {
         if options.privacy() == LocalPrivacyRequirement::Required {
             return self.create_private_rooted_temp_file(&parent, options, symlink_policy);
         }
-        let parent_handle = if parent.as_os_str().is_empty() {
-            self.root.open_probe_root()
-        } else {
-            self.root
-                .open_probe_file(&rooted_path(&parent, LocalFileOperation::CreateTempFile)?)
-        }
-        .map_err(|error| rooted_io_error(LocalFileOperation::CreateTempFile, &parent, error))?;
+        let parent_handle = open_rooted_temp_parent(&self.root, &parent, LocalFileOperation::CreateTempFile)?;
         let mut attempts = 0_usize;
         loop {
             attempts = attempts.saturating_add(1);
@@ -293,6 +302,21 @@ impl RootedLocalFileSystem {
     /// directory retains this exact opened root authority for recursive
     /// cleanup.
     ///
+    /// # Parameters
+    ///
+    /// - `options`: Parent, name affixes, privacy requirement, retry limit, and
+    ///   cleanup limits for the temporary directory.
+    /// - `symlink_policy`: Policy used when resolving the optional parent below
+    ///   the opened root.
+    ///
+    /// # Returns
+    ///
+    /// The cleanup-owned temporary directory and its rooted cleanup authority.
+    ///
+    /// # Panics
+    ///
+    /// Panics only if an internally generated sandbox path has no file name.
+    ///
     /// # Errors
     /// Returns `LocalFileError` when options are invalid, entry creation
     /// collides through all attempts, or rooted traversal/creation fails.
@@ -338,13 +362,7 @@ impl RootedLocalFileSystem {
         if options.privacy() == LocalPrivacyRequirement::Required {
             return self.create_private_rooted_temp_directory(&parent, options, symlink_policy);
         }
-        let parent_handle = if parent.as_os_str().is_empty() {
-            self.root.open_probe_root()
-        } else {
-            self.root
-                .open_probe_file(&rooted_path(&parent, LocalFileOperation::CreateTempDirectory)?)
-        }
-        .map_err(|error| rooted_io_error(LocalFileOperation::CreateTempDirectory, &parent, error))?;
+        let parent_handle = open_rooted_temp_parent(&self.root, &parent, LocalFileOperation::CreateTempDirectory)?;
         let mut attempts = 0_usize;
         loop {
             attempts = attempts.saturating_add(1);
@@ -541,19 +559,28 @@ impl RootedLocalFileSystem {
         ))
     }
 
+    /// Creates a private temporary file inside a reserved sandbox directory.
+    ///
+    /// The opened parent handle anchors creation beneath this root, and the
+    /// returned resource retains recovery handles if owner construction fails.
+    ///
+    /// # Parameters
+    ///
+    /// - `parent`: Validated relative directory beneath the opened root.
+    /// - `options`: Name affixes and retry limit for the private file.
+    /// - `symlink_policy`: Policy retained by the resulting temporary resource.
+    ///
+    /// # Returns
+    ///
+    /// The owned private file, or an error carrying any retained recovery
+    /// state.
     fn create_private_rooted_temp_file(
         &self,
         parent: &std::path::Path,
         options: &LocalTempFileOptions,
         symlink_policy: LocalSymlinkPolicy,
     ) -> LocalResult<LocalTempFile> {
-        let parent_handle = if parent.as_os_str().is_empty() {
-            self.root.open_probe_root()
-        } else {
-            self.root
-                .open_probe_file(&rooted_path(parent, LocalFileOperation::CreateTempFile)?)
-        }
-        .map_err(|error| rooted_io_error(LocalFileOperation::CreateTempFile, parent, error))?;
+        let parent_handle = open_rooted_temp_parent(&self.root, parent, LocalFileOperation::CreateTempFile)?;
         let mut attempts = 0_usize;
         loop {
             if attempt_budget_exhausted(attempts, options.max_attempts()) {
@@ -673,19 +700,28 @@ impl RootedLocalFileSystem {
         ))
     }
 
+    /// Creates a private temporary directory inside a reserved sandbox.
+    ///
+    /// The returned resource retains the opened root authority and cleanup
+    /// limits; failures preserve native handles needed for recovery.
+    ///
+    /// # Parameters
+    ///
+    /// - `parent`: Validated relative directory beneath the opened root.
+    /// - `options`: Name affixes, retry limit, and cleanup limits.
+    /// - `symlink_policy`: Policy retained by the resulting temporary resource.
+    ///
+    /// # Returns
+    ///
+    /// The owned private directory, or an error carrying any retained recovery
+    /// state.
     fn create_private_rooted_temp_directory(
         &self,
         parent: &std::path::Path,
         options: &LocalTempDirectoryOptions,
         symlink_policy: LocalSymlinkPolicy,
     ) -> LocalResult<LocalTempDirectory> {
-        let parent_handle = if parent.as_os_str().is_empty() {
-            self.root.open_probe_root()
-        } else {
-            self.root
-                .open_probe_file(&rooted_path(parent, LocalFileOperation::CreateTempDirectory)?)
-        }
-        .map_err(|error| rooted_io_error(LocalFileOperation::CreateTempDirectory, parent, error))?;
+        let parent_handle = open_rooted_temp_parent(&self.root, parent, LocalFileOperation::CreateTempDirectory)?;
         let mut attempts = 0_usize;
         loop {
             if attempt_budget_exhausted(attempts, options.max_attempts()) {
@@ -806,12 +842,63 @@ impl RootedLocalFileSystem {
     }
 }
 
+/// Opens the rooted parent handle used to create and recover a temporary entry.
+///
+/// An empty relative path selects the already-open root; other paths are
+/// converted to a rooted path before opening. Open failures retain the caller's
+/// operation and parent path in the resulting error.
+///
+/// # Parameters
+///
+/// - `root`: Opened rooted authority used to open the parent.
+/// - `parent`: Validated relative parent path, or an empty path for the root.
+/// - `operation`: Operation recorded if opening the parent fails.
+///
+/// # Returns
+///
+/// The opened parent handle, or a rooted error preserving the operation/path.
+fn open_rooted_temp_parent(
+    root: &crate::rooted::Root,
+    parent: &std::path::Path,
+    operation: LocalFileOperation,
+) -> LocalResult<File> {
+    let handle = if parent.as_os_str().is_empty() {
+        root.open_probe_root()
+    } else {
+        root.open_probe_file(&rooted_path(parent, operation)?)
+    };
+    handle.map_err(|error| rooted_io_error(operation, parent, error))
+}
+
 /// Reports whether an explicitly configured collision budget is exhausted.
+///
+/// # Parameters
+///
+/// - `attempts`: Number of collision attempts already made.
+/// - `max_attempts`: Optional configured upper bound.
+///
+/// # Returns
+///
+/// `true` when a configured limit has been reached; an absent limit is never
+/// exhausted by this check.
 #[must_use]
 fn attempt_budget_exhausted(attempts: usize, max_attempts: Option<usize>) -> bool {
     max_attempts.is_some_and(|max_attempts| attempts >= max_attempts)
 }
 
+/// Creates a platform-private file relative to an opened parent handle.
+///
+/// On unsupported platforms, returns an `Unsupported` error. A failed native
+/// creation may retain an entry handle for cleanup or recovery.
+///
+/// # Parameters
+///
+/// - `parent`: Open directory handle that anchors the new file.
+/// - `name`: Single native filename to create beneath `parent`.
+///
+/// # Returns
+///
+/// The opened file handle, or the native error and any retained cleanup entry.
 fn rooted_private_file(parent: &File, name: &OsStr) -> Result<File, NativePrivateCreateError> {
     #[cfg(feature = "test-support")]
     if crate::local::take_repeated_test_support("temp-private-file-collision") {
@@ -838,6 +925,20 @@ fn rooted_private_file(parent: &File, name: &OsStr) -> Result<File, NativePrivat
     }
 }
 
+/// Creates a platform-private directory relative to an opened parent handle.
+///
+/// On unsupported platforms, returns an `Unsupported` error. A failed native
+/// creation may retain an entry handle for cleanup or recovery.
+///
+/// # Parameters
+///
+/// - `parent`: Open directory handle that anchors the new directory.
+/// - `name`: Single native directory name to create beneath `parent`.
+///
+/// # Returns
+///
+/// The opened directory handle, or the native error and any retained cleanup
+/// entry.
 fn rooted_private_directory(parent: &File, name: &OsStr) -> Result<File, NativePrivateCreateError> {
     #[cfg(feature = "test-support")]
     if crate::local::take_repeated_test_support("temp-private-directory-collision") {
@@ -864,6 +965,21 @@ fn rooted_private_directory(parent: &File, name: &OsStr) -> Result<File, NativeP
     }
 }
 
+/// Converts a private-creation failure into a rooted error with recovery state.
+///
+/// Any retained target entry and optional sandbox guard are attached so the
+/// caller can inspect or clean up resources left by a partial creation.
+///
+/// # Parameters
+///
+/// - `operation`: Operation reported by the resulting rooted error.
+/// - `path`: Diagnostic path of the failed private entry.
+/// - `error`: Native failure and optional retained target entry.
+/// - `extra`: Optional recovery entry for the containing sandbox.
+///
+/// # Returns
+///
+/// A rooted error carrying recovery state for every retained entry.
 fn private_rooted_error(
     operation: LocalFileOperation,
     path: &std::path::Path,
@@ -889,6 +1005,21 @@ fn private_rooted_error(
     result
 }
 
+/// Builds a rooted error for a sandbox operation and retains its cleanup entry.
+///
+/// When `entry` is absent, the returned error carries no temporary recovery
+/// state because no native entry remains available to clean up.
+///
+/// # Parameters
+///
+/// - `operation`: Operation reported by the resulting error.
+/// - `path`: Diagnostic sandbox path.
+/// - `source`: Failure encountered while preparing or using the sandbox.
+/// - `entry`: Optional sandbox entry retained for cleanup.
+///
+/// # Returns
+///
+/// A rooted error with cleanup recovery when an entry was retained.
 fn rooted_sandbox_error(
     operation: LocalFileOperation,
     path: &std::path::Path,
@@ -902,6 +1033,19 @@ fn rooted_sandbox_error(
     }
 }
 
+/// Attempts cleanup of a sandbox and returns ownership of failed recovery.
+///
+/// On cleanup failure, the recovery object is attached to the error so cleanup
+/// can be retried by the caller.
+///
+/// # Parameters
+///
+/// - `path`: Diagnostic path of the sandbox.
+/// - `entry`: Native sandbox handle and parent ownership used for cleanup.
+///
+/// # Returns
+///
+/// `Ok(())` after cleanup, or an error that owns the recovery state.
 fn cleanup_rooted_sandbox(path: &std::path::Path, entry: NativePrivateEntry) -> LocalResult<()> {
     let mut owner = crate::LocalTempRecovery::from_native(path.to_path_buf(), entry);
     match owner.cleanup() {
@@ -910,6 +1054,23 @@ fn cleanup_rooted_sandbox(path: &std::path::Path, entry: NativePrivateEntry) -> 
     }
 }
 
+/// Builds recovery state for a rooted temporary entry and optional sandbox.
+///
+/// The entry's identity is recorded when available, allowing later cleanup to
+/// avoid acting on a replacement at the same path.
+///
+/// # Parameters
+///
+/// - `path`: Relative diagnostic path of the created entry.
+/// - `parent`: Open parent handle anchoring the entry.
+/// - `name`: Native name of the entry beneath `parent`.
+/// - `file`: Open handle for the entry.
+/// - `directory`: Whether cleanup must treat the entry as a directory.
+/// - `sandbox`: Optional recovery entry for its containing sandbox.
+///
+/// # Returns
+///
+/// Recovery state owning the entry handles and optional sandbox handle.
 fn rooted_temp_recovery(
     path: std::path::PathBuf,
     parent: File,
@@ -937,6 +1098,18 @@ fn rooted_temp_recovery(
     crate::LocalTempRecovery::from_native_entries_with_paths(path, entries)
 }
 
+/// Clones the opened parent handle for use as a recovery anchor.
+///
+/// The returned handle remains tied to the same directory even if its path is
+/// renamed; clone failures are propagated to the caller.
+///
+/// # Parameters
+///
+/// - `parent`: Opened directory handle to clone as a recovery anchor.
+///
+/// # Returns
+///
+/// A cloned handle to the same directory, or the native clone error.
 fn reserve_rooted_private_parent(parent: &File) -> io::Result<File> {
     #[cfg(feature = "test-support")]
     if crate::local::take_test_support("temp-private-parent-clone") {
@@ -948,6 +1121,20 @@ fn reserve_rooted_private_parent(parent: &File) -> io::Result<File> {
     parent.try_clone()
 }
 
+/// Reserves a cleanup guard for a newly created sandbox directory.
+///
+/// The parent handle is returned with any error so recovery can still remove
+/// the directory even if cloning its handle fails.
+///
+/// # Parameters
+///
+/// - `parent`: Owned handle to the directory containing the sandbox.
+/// - `name`: Native name of the newly created sandbox.
+/// - `directory`: Opened handle for the sandbox directory.
+///
+/// # Returns
+///
+/// A cleanup entry, or the clone error together with the still-owned parent.
 fn reserve_rooted_directory_guard(
     parent: File,
     name: &str,

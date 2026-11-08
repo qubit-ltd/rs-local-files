@@ -16,6 +16,26 @@ use crate::local::LocalAtomicDestinationState;
 use crate::local::internal::AtomicStagingState;
 use crate::local::internal::atomic_file_install::install_new_atomic_file_at;
 
+/// Atomically exchanges two entries relative to the retained parent directory.
+///
+/// Both names must be live single components. Linux and macOS provide the
+/// exchange operation; other Unix targets report it as unsupported.
+///
+/// # Parameters
+///
+/// * `namespace` - Retained directory authority used for both entries.
+/// * `left` - Name of the first entry to exchange.
+/// * `right` - Name of the second entry to exchange.
+///
+/// # Returns
+///
+/// Returns `Ok(())` after the exchange, or the operating-system error if it
+/// fails or the target does not support atomic exchange.
+///
+/// # Errors
+///
+/// Returns the last operating-system error from the native exchange operation,
+/// or `Unsupported` on Unix targets without a supported exchange syscall.
 pub(super) fn exchange(namespace: &Namespace, left: &CString, right: &CString) -> io::Result<()> {
     #[cfg(target_os = "linux")]
     {
@@ -64,6 +84,28 @@ pub(super) fn exchange(namespace: &Namespace, left: &CString, right: &CString) -
     }
 }
 
+/// Installs the staged entry only if the destination name is still absent.
+///
+/// Installation is relative to the retained parent directory and never
+/// replaces an existing destination. On failure, the destination state from
+/// the lower-level installer is translated to the conditional publication
+/// state; the staging state is intentionally not returned from this helper.
+///
+/// # Parameters
+///
+/// * `namespace` - Retained directory authority and destination name.
+/// * `stage` - Single-component name of the staged entry in that directory.
+///
+/// # Returns
+///
+/// Returns `Ok(())` when the staged entry is installed, or the error together
+/// with the known conditional publication state when installation fails.
+///
+/// # Errors
+///
+/// The returned error is the operating-system or installer error. Its paired
+/// publication state distinguishes an unchanged/absent destination from a
+/// completed or indeterminate publication.
 pub(super) fn install_absent(
     namespace: &Namespace,
     stage: &CString,

@@ -100,6 +100,19 @@ pub(crate) fn preserve_atomic_metadata(source: &File, staging: &File) -> Result<
 }
 
 /// Converts portable metadata mode bits to the platform-native mode type.
+///
+/// # Type Parameters
+///
+/// * `T` - Native mode type required by the target platform's `fchmod` API.
+///
+/// # Parameters
+///
+/// * `mode` - Portable Unix mode bits read from the source file metadata.
+///
+/// # Returns
+///
+/// The converted native mode, or an `InvalidData` error if the target type
+/// cannot represent the source mode.
 fn native_mode<T>(mode: u32) -> Result<T>
 where
     T: TryFrom<u32>,
@@ -127,6 +140,12 @@ where
 /// # Errors
 ///
 /// Always returns an `Unsupported` I/O error.
+///
+/// # Parameters
+///
+/// * `_source` - Source file handle, unused because this target has no native
+///   metadata-preservation implementation.
+/// * `_staging` - Staging file handle, likewise unused on this target.
 #[cfg(not(any(
     target_os = "linux",
     target_os = "android",

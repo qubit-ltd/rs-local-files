@@ -6,4 +6,5 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 
+mod host_temp_recovery_tests;
 mod temp_parent_tests;

@@ -225,7 +225,7 @@ fn test_directory_binding_reopened_authority_clone_failure_preserves_reader() {
 }
 
 #[test]
-fn lf_rev_directory_binding_deadline_expires_during_resolution_with_anchor_context() {
+fn test_binding_deadline_expires_during_resolution_with_anchor_context() {
     let (_scratch, native, parent) = fixture();
     fs::write(native.join("nested/deeper/payload"), b"bound payload").expect("payload should exist");
     let options = LocalDirectoryOpenOptions::new()
@@ -266,7 +266,7 @@ fn lf_rev_directory_binding_deadline_expires_during_resolution_with_anchor_conte
 }
 
 #[test]
-fn lf_rev_directory_binding_deadline_stops_final_root_descent() {
+fn test_binding_deadline_stops_final_root_descent() {
     use std::time::Instant;
 
     let (_scratch, native, _parent) = fixture();

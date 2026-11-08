@@ -14,7 +14,13 @@ use std::sync::Arc;
 use crate::rooted::Metadata;
 use crate::rooted::Root;
 
-/// Retains the exact root authority used to create a temporary descendant.
+/// Retains the root authority and root-relative locations needed to manage a
+/// temporary descendant.
+///
+/// The captured identity lets cleanup detect ordinary replacement of the
+/// descendant before removal. The open root handle remains the authority for
+/// both the descendant and its private cleanup sandbox; stored paths only
+/// identify entries relative to that handle.
 #[derive(Debug)]
 pub(crate) struct RootedTempResourceBackend {
     /// Unique identity captured through the retained root authority.

@@ -8,6 +8,8 @@
 //! Public rooted-operation coverage for the component resolution fast path.
 
 use std::fs;
+#[cfg(unix)]
+use std::os::unix::fs::symlink;
 use std::path::Path;
 use std::time::Duration;
 
@@ -96,8 +98,6 @@ fn test_rooted_list_deadline_applies_to_start_resolution() {
 #[cfg(unix)]
 #[test]
 fn test_rooted_link_path_preserves_symlink_fallback_behavior() {
-    use std::os::unix::fs::symlink;
-
     let temporary = tempdir().expect("temporary root should be created");
     fs::create_dir_all(temporary.path().join("a/target")).expect("target directory should be created");
     fs::write(temporary.path().join("a/target/payload"), b"through-link").expect("target payload should be written");
@@ -118,8 +118,6 @@ fn test_rooted_link_path_preserves_symlink_fallback_behavior() {
 #[cfg(unix)]
 #[test]
 fn test_rooted_fast_path_fallback_preserves_symlink_policy_matrix() {
-    use std::os::unix::fs::symlink;
-
     let temporary = tempdir().expect("temporary root should be created");
     fs::create_dir_all(temporary.path().join("target/nested")).expect("target directories should be created");
     fs::write(temporary.path().join("target/nested/payload"), b"through-link")

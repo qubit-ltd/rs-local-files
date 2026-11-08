@@ -79,6 +79,10 @@ pub(super) fn copy_dir_error_with_staging(
 
 /// Adds recursive-copy context to a native I/O result.
 ///
+/// # Type Parameters
+///
+/// * `T` - Successful value carried through unchanged.
+///
 /// # Parameters
 ///
 /// * `result` - Native I/O result to convert.
@@ -102,6 +106,11 @@ pub(super) fn with_copy_context<T>(
 }
 
 /// Records one newly created destination directory.
+///
+/// # Parameters
+///
+/// * `stats` - Statistics whose directory count is updated after a checked
+///   increment.
 ///
 /// # Errors
 ///
@@ -127,6 +136,11 @@ pub(super) fn record_created_directory(stats: &mut LocalCopyDirStats) -> Result<
 
 /// Records one skipped destination entry.
 ///
+/// # Parameters
+///
+/// * `stats` - Statistics whose skipped-entry count is updated after a checked
+///   increment.
+///
 /// # Errors
 ///
 /// Returns `InvalidData` on counter overflow without changing the counters.
@@ -151,6 +165,11 @@ pub(super) fn record_skipped_file(stats: &mut LocalCopyDirStats) -> Result<()> {
 
 /// Records one replaced entry or directory merged under Overwrite policy.
 ///
+/// # Parameters
+///
+/// * `stats` - Statistics whose overwritten-entry count is updated after a
+///   checked increment.
+///
 /// # Errors
 ///
 /// Returns `InvalidData` on counter overflow without changing the counters.
@@ -174,6 +193,11 @@ pub(super) fn record_overwritten_entry(stats: &mut LocalCopyDirStats) -> Result<
 }
 
 /// Atomically records one committed file and its copied byte count.
+///
+/// # Parameters
+///
+/// * `stats` - Statistics updated only after both checked increments succeed.
+/// * `bytes` - Number of bytes committed by the copied file.
 ///
 /// # Errors
 ///

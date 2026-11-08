@@ -6,12 +6,22 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-#[non_exhaustive]
 /// Classification of the filesystem containing an observed object.
 ///
 /// `Unknown` is a successful inconclusive observation and must not be treated
 /// as evidence that the filesystem is local.
+///
+/// # Examples
+///
+/// ```
+/// use qubit_local_files::observation::LocalFileSystemLocality;
+///
+/// let locality = LocalFileSystemLocality::Unknown;
+/// assert_ne!(locality, LocalFileSystemLocality::Local);
+/// ```
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[non_exhaustive]
+#[must_use]
 pub enum LocalFileSystemLocality {
     /// The filesystem is classified as local.
     Local,

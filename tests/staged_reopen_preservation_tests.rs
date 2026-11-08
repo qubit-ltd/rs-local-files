@@ -12,6 +12,7 @@ use std::path::MAIN_SEPARATOR_STR;
 use std::path::Path;
 use std::time::Duration;
 
+use libc::mkfifo;
 use qubit_local_files::LocalFileSystem;
 use qubit_local_files::directory::LocalTreeEntry;
 use qubit_local_files::error::LocalFileErrorKind;
@@ -21,13 +22,14 @@ use qubit_local_files::options::LocalTempDirectoryOptions;
 use qubit_local_files::options::LocalTreeValidationOptions;
 use qubit_local_files::outcome::LocalFileKind;
 use tempfile::TempDir;
+use tempfile::tempdir;
 
 fn native_stage(parent: &TempDir, name: &std::ffi::OsStr) -> std::path::PathBuf {
     parent.path().join(name)
 }
 
 fn failed_reopen_preserves_tree(rooted: bool, options: LocalTreeValidationOptions, mismatched_identity: bool) {
-    let scratch = tempfile::tempdir().expect("scratch parent");
+    let scratch = tempdir().expect("scratch parent");
     let fs = if rooted {
         LocalFileSystem::rooted(scratch.path())
     } else {
@@ -153,7 +155,7 @@ fn test_failed_reopen_rejects_symlink_special_and_external_hardlink_without_clea
                 2_u8,
             ),
         ] {
-            let scratch = tempfile::tempdir().expect("scratch parent");
+            let scratch = tempdir().expect("scratch parent");
             let fs = if rooted {
                 LocalFileSystem::rooted(scratch.path())
             } else {
@@ -188,7 +190,7 @@ fn test_failed_reopen_rejects_symlink_special_and_external_hardlink_without_clea
                         .expect("fifo path");
                     assert_eq!(
                         0,
-                        unsafe { libc::mkfifo(fifo.as_ptr(), 0o600) },
+                        unsafe { mkfifo(fifo.as_ptr(), 0o600) },
                         "fifo fixture should be created"
                     );
                 }
@@ -223,7 +225,7 @@ fn test_failed_reopen_rejects_symlink_special_and_external_hardlink_without_clea
 #[test]
 fn test_successful_reopen_cleanup_and_drop_still_clean_up() {
     for rooted in [false, true] {
-        let scratch = tempfile::tempdir().expect("scratch parent");
+        let scratch = tempdir().expect("scratch parent");
         let fs = if rooted {
             LocalFileSystem::rooted(scratch.path())
         } else {
@@ -279,7 +281,7 @@ fn test_required_privacy_reopen_reports_mode_mismatch_context() {
     use qubit_local_files::error::LocalFileOperation;
     use qubit_local_files::policy::LocalPrivacyRequirement;
 
-    let scratch = tempfile::tempdir().expect("scratch parent");
+    let scratch = tempdir().expect("scratch parent");
     let filesystem = LocalFileSystem::host().expect("filesystem");
     let parent = filesystem
         .open_directory_with_options(scratch.path(), &LocalDirectoryOpenOptions::new())

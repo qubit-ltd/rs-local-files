@@ -46,19 +46,62 @@ static ACTIVE_FAULT: (Mutex<Option<ActiveFault>>, Condvar) = (Mutex::new(None), 
 /// another thread's guard is released, but returns `AlreadyExists` rather
 /// than waiting if this thread already owns a guard. Dropping the returned
 /// guard releases the selector and wakes one waiting installer.
-#[cfg(feature = "test-support")]
+///
+/// # Parameters
+///
+/// * `name` - Static selector name matched at a native operation boundary.
+///
+/// # Errors
+///
+/// Returns `AlreadyExists` if this thread already owns an installed guard.
+/// Other threads wait until the active guard is released.
+///
+/// # Returns
+///
+/// Returns a guard that releases the selector when dropped.
 #[doc(hidden)]
+#[cfg(feature = "test-support")]
 pub fn install_test_fault(name: &str) -> io::Result<TestFaultGuard> {
     install_test_fault_for(name, 1)
 }
 
 /// Installs a fault selector that fails a finite number of matching calls.
+///
+/// # Parameters
+///
+/// * `name` - Static selector name matched at a native operation boundary.
+/// * `count` - Number of matching calls that should fail.
+///
+/// # Errors
+///
+/// Returns `AlreadyExists` if this thread already owns an installed guard.
+/// Other threads wait until the active guard is released.
+///
+/// # Returns
+///
+/// Returns a guard that releases the selector when dropped.
 #[cfg(all(feature = "test-support", test))]
 #[doc(hidden)]
 pub(crate) fn install_test_fault_repeated(name: &str, count: usize) -> io::Result<TestFaultGuard> {
     install_test_fault_for(name, count)
 }
 
+/// Installs a selector and initializes its one-shot or repeated occurrence
+/// state.
+///
+/// # Parameters
+///
+/// * `name` - Static selector name matched at a native operation boundary.
+/// * `repeat_count` - Number of matching calls that should fail.
+///
+/// # Errors
+///
+/// Returns `AlreadyExists` if this thread already owns an installed guard.
+/// Otherwise installation waits for another thread's guard to be released.
+///
+/// # Returns
+///
+/// Returns a guard that releases the selector and wakes a waiting installer.
 #[cfg(feature = "test-support")]
 fn install_test_fault_for(name: &str, repeat_count: usize) -> io::Result<TestFaultGuard> {
     let owner = std::thread::current().id();
@@ -90,21 +133,15 @@ fn install_test_fault_for(name: &str, repeat_count: usize) -> io::Result<TestFau
     Ok(TestFaultGuard { active: true })
 }
 
+/// Releases the process-wide selector and occurrence counters for its guard.
 #[cfg(feature = "test-support")]
-impl Drop for TestFaultGuard {
-    /// Releases the process-wide selector and occurrence counters.
-    fn drop(&mut self) {
-        if !self.active {
-            return;
-        }
-        let mut active = ACTIVE_FAULT.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-        active.take();
-        ONE_SHOT_FAULT_TAKEN.store(false, Ordering::Relaxed);
-        NTH_FAULT_OCCURRENCES.store(0, Ordering::Relaxed);
-        REPEATED_FAULT_COUNT.store(1, Ordering::Relaxed);
-        self.active = false;
-        ACTIVE_FAULT.1.notify_one();
-    }
+pub(super) fn release_test_fault() {
+    let mut active = ACTIVE_FAULT.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    active.take();
+    ONE_SHOT_FAULT_TAKEN.store(false, Ordering::Relaxed);
+    NTH_FAULT_OCCURRENCES.store(0, Ordering::Relaxed);
+    REPEATED_FAULT_COUNT.store(1, Ordering::Relaxed);
+    ACTIVE_FAULT.1.notify_one();
 }
 
 /// Returns a deterministic native I/O error for a selected test fault.
@@ -179,6 +216,14 @@ pub(crate) fn take(name: &str) -> bool {
 }
 
 /// Takes the selected fault for each of its configured matching calls.
+///
+/// # Parameters
+///
+/// * `name` - Static selector name for a repeated fault.
+///
+/// # Returns
+///
+/// `true` while the selected fault has matching occurrences remaining.
 #[cfg(feature = "test-support")]
 #[inline]
 pub(crate) fn take_repeated(name: &str) -> bool {
@@ -186,6 +231,8 @@ pub(crate) fn take_repeated(name: &str) -> bool {
         && NTH_FAULT_OCCURRENCES.fetch_add(1, Ordering::Relaxed) < REPEATED_FAULT_COUNT.load(Ordering::Relaxed)
 }
 
+/// Returns how many matching fault boundaries have been reached in the active
+/// guard.
 #[cfg(all(feature = "test-support", test))]
 pub(crate) fn test_fault_occurrence_count() -> usize {
     NTH_FAULT_OCCURRENCES.load(Ordering::Relaxed)
@@ -230,6 +277,10 @@ fn is_enabled_impl(name: &str) -> bool {
 }
 
 /// Provides the disabled-feature result for fault-selector checks.
+///
+/// # Parameters
+///
+/// * `_name` - Selector ignored because internal test support is disabled.
 ///
 /// # Returns
 /// Always returns `false` when internal test support is disabled.

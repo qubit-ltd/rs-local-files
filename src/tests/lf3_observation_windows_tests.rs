@@ -10,7 +10,7 @@ use crate::observation::LocalObservationRequirement;
 
 #[cfg(windows)]
 #[test]
-fn lf3_native_windows_preserves_full_identity() {
+fn test_lf3_native_windows_preserves_full_identity() {
     use crate::LocalFileKind;
     use crate::observation::windows::query_native;
 
@@ -31,7 +31,7 @@ fn lf3_native_windows_preserves_full_identity() {
 
 #[cfg(windows)]
 #[test]
-fn lf3_native_windows_observes_directories_and_read_only_handles() {
+fn test_lf3_native_windows_observes_directories_and_read_only_handles() {
     use std::fs::File;
     use std::fs::OpenOptions;
     use std::os::windows::fs::OpenOptionsExt;

@@ -8,6 +8,15 @@
 //! Native method used to publish writer output.
 
 /// Native method used by a completed writer session.
+///
+/// # Examples
+///
+/// ```
+/// use qubit_local_files::outcome::LocalWritePublicationMethod;
+///
+/// let method = LocalWritePublicationMethod::AtomicRename;
+/// assert!(matches!(method, LocalWritePublicationMethod::AtomicRename));
+/// ```
 #[must_use]
 #[non_exhaustive]
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]

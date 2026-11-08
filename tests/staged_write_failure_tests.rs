@@ -10,6 +10,7 @@ use std::collections::VecDeque;
 use std::io;
 use std::io::Read;
 use std::path::Path;
+use std::path::PathBuf;
 
 use qubit_local_files::LocalFileSystem;
 use qubit_local_files::directory::LocalDirectoryHandle;
@@ -35,7 +36,7 @@ fn stage(parent: &LocalDirectoryHandle, options: &LocalTempDirectoryOptions) -> 
     parent.create_staged_directory(options).expect("staged directory")
 }
 
-fn native_stage(scratch: &TempDir, stage: &LocalStagedDirectory) -> std::path::PathBuf {
+fn native_stage(scratch: &TempDir, stage: &LocalStagedDirectory) -> PathBuf {
     scratch.path().join(stage.relative_name())
 }
 
@@ -62,13 +63,27 @@ fn test_source_failure_retains_staging_cleanup_failure() {
         .write_file_new(Path::new("payload"), &mut FailingInput, 64)
         .expect_err("source fails");
 
-    assert_eq!(error.operation(), LocalFileOperation::Read);
-    assert!(error.io_error().expect("source").to_string().contains("source failure"));
+    assert_eq!(
+        error.operation(),
+        LocalFileOperation::Read,
+        "source errors must identify the read operation"
+    );
+    assert!(
+        error.io_error().expect("source").to_string().contains("source failure"),
+        "the source error must be preserved"
+    );
     assert!(error.cleanup_error().is_some(), "cleanup failure remains observable");
-    assert_eq!(1, std::fs::read_dir(&stage_path).expect("residual listing").count());
+    assert_eq!(
+        1,
+        std::fs::read_dir(&stage_path).expect("residual listing").count(),
+        "the failed cleanup must leave its staged entry"
+    );
     drop(fault);
     stage.cleanup().expect("the caller retains the stage cleanup owner");
-    assert!(!stage_path.exists());
+    assert!(
+        !stage_path.exists(),
+        "explicit cleanup must remove the staged directory"
+    );
 }
 
 #[cfg(all(feature = "test-support", unix))]
@@ -86,14 +101,28 @@ fn test_resource_limit_retains_staging_cleanup_failure() {
         .write_file_new(Path::new("payload"), &mut &b"payload"[..], 0)
         .expect_err("zero maximum rejects nonempty input");
 
-    assert_eq!(error.kind(), LocalFileErrorKind::ResourceLimit);
-    assert!(error.cleanup_error().is_some());
-    assert_eq!(1, std::fs::read_dir(&stage_path).expect("residual listing").count());
+    assert_eq!(
+        error.kind(),
+        LocalFileErrorKind::ResourceLimit,
+        "oversized input must report a resource limit"
+    );
+    assert!(
+        error.cleanup_error().is_some(),
+        "the injected cleanup failure must remain observable"
+    );
+    assert_eq!(
+        1,
+        std::fs::read_dir(&stage_path).expect("residual listing").count(),
+        "the failed cleanup must leave its staged entry"
+    );
     drop(fault);
     stage
         .cleanup()
         .expect("stage cleanup should recover after the fault is removed");
-    assert!(!stage_path.exists());
+    assert!(
+        !stage_path.exists(),
+        "cleanup must remove the staged directory after the fault is removed"
+    );
 }
 
 #[test]
@@ -107,9 +136,20 @@ fn test_successful_abort_error_path_leaves_no_staging_residue() {
         .write_file_new(Path::new("payload"), &mut FailingInput, 64)
         .expect_err("source fails");
 
-    assert_eq!(error.kind(), LocalFileErrorKind::Io);
-    assert!(error.cleanup_error().is_none());
-    assert_eq!(0, std::fs::read_dir(&stage_path).expect("empty stage").count());
+    assert_eq!(
+        error.kind(),
+        LocalFileErrorKind::Io,
+        "source failure must report an I/O error"
+    );
+    assert!(
+        error.cleanup_error().is_none(),
+        "successful abort must not report a cleanup error"
+    );
+    assert_eq!(
+        0,
+        std::fs::read_dir(&stage_path).expect("empty stage").count(),
+        "successful abort must leave no staged entries"
+    );
     stage.cleanup().expect("stage should clean up");
 }
 
@@ -175,7 +215,8 @@ fn test_staged_write_retries_input_interrupted_for_default_and_private_stages() 
             b"payload",
             std::fs::read(native_stage(&scratch, &stage).join("payload"))
                 .expect("payload")
-                .as_slice()
+                .as_slice(),
+            "interrupted reads must be retried without losing input bytes"
         );
         stage.cleanup().expect("stage cleanup");
     }
@@ -196,8 +237,15 @@ fn test_staged_write_does_not_retry_would_block() {
         .write_file_new(Path::new("payload"), &mut input, 16)
         .expect_err("WouldBlock is not retried");
 
-    assert_eq!(io::ErrorKind::WouldBlock, error.io_error_kind());
-    assert!(!stage_path.join("payload").exists());
+    assert_eq!(
+        io::ErrorKind::WouldBlock,
+        error.io_error_kind(),
+        "WouldBlock must be returned without retrying"
+    );
+    assert!(
+        !stage_path.join("payload").exists(),
+        "a failed write must not leave the payload file"
+    );
     stage.cleanup().expect("stage cleanup");
 }
 
@@ -220,7 +268,8 @@ fn test_staged_write_retries_output_interrupted() {
         b"payload",
         std::fs::read(native_stage(&scratch, &stage).join("payload"))
             .expect("payload")
-            .as_slice()
+            .as_slice(),
+        "interrupted writes must be retried without losing payload bytes"
     );
     stage.cleanup().expect("stage cleanup");
 }

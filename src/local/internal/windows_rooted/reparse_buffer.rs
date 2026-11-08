@@ -35,6 +35,8 @@ impl ReparseBuffer {
     ///
     /// The slice cannot outlive this buffer's allocation; its length excludes
     /// unused capacity in the aligned workspace.
+    #[must_use]
+    #[inline]
     pub(crate) fn as_bytes(&self) -> &[u8] {
         // SAFETY: storage is initialized, aligned native workspace; `length`
         // was checked against the native maximum and DeviceIoControl wrote it.
@@ -43,6 +45,10 @@ impl ReparseBuffer {
 }
 
 /// Retrieves the opaque reparse record for an already-opened link handle.
+///
+/// # Parameters
+/// `link` must refer to an already-opened link handle that remains valid for
+/// the duration of the synchronous native query.
 ///
 /// # Errors
 /// Returns the native query error, or invalid data if the reported length

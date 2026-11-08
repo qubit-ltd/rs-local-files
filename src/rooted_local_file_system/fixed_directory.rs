@@ -15,10 +15,19 @@ use crate::LocalResult;
 use crate::SizeLimit;
 
 impl RootedLocalFileSystem {
-    pub(crate) fn root_authority(&self) -> &crate::rooted::Root {
-        &self.root
-    }
-
+    /// Wraps an already opened root authority and records its initial limits.
+    ///
+    /// The authority is retained even when probing its limits fails; in that
+    /// case both limits use the unknown fallback and rooted operations remain
+    /// available through the opened root.
+    ///
+    /// # Parameters
+    ///
+    /// - `root`: An already opened native directory authority.
+    ///
+    /// # Returns
+    ///
+    /// A filesystem wrapper retaining `root` and its initial capability data.
     pub(crate) fn from_root(root: crate::rooted::Root) -> LocalResult<Self> {
         let root = Arc::new(root);
         let limits = root
@@ -33,6 +42,20 @@ impl RootedLocalFileSystem {
             limits,
         })
     }
+
+    /// Borrows the opened root authority used by this filesystem.
+    ///
+    /// The returned reference is tied to this filesystem and allows internal
+    /// operations to use the same descriptor or handle without resolving the
+    /// original directory path again.
+    ///
+    /// # Returns
+    ///
+    /// The root authority retained by this filesystem.
+    #[inline]
+    pub(crate) fn root_authority(&self) -> &crate::rooted::Root {
+        &self.root
+    }
 }
 
 #[cfg(test)]
@@ -44,7 +67,7 @@ mod tests {
     use crate::tests::native_io_fault_tests::NativeIoPoint;
 
     #[test]
-    fn authority_clone_failure_keeps_root_and_uses_unknown_limit_fallback() {
+    fn test_authority_clone_failure_keeps_root_and_uses_unknown_limit_fallback() {
         let fixture = tempfile::tempdir().expect("root fixture");
         let root = Root::open(fixture.path()).expect("open root authority");
         let guard = NativeIoFaultGuard::fail_on(NativeIoPoint::CloneAuthority, 1);

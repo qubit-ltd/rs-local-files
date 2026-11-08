@@ -159,6 +159,7 @@ fn rooted_directory_type_fault_enabled() -> bool {
 }
 
 /// Returns whether test support should reject an opened file's type.
+#[must_use]
 #[inline]
 fn rooted_file_type_fault_enabled() -> bool {
     #[cfg(feature = "test-support")]

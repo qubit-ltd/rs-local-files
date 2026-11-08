@@ -41,6 +41,12 @@ use crate::temp::types::NativePrivateEntry;
 /// directories keep the rooted sandbox's `0700` mode. If a new directory
 /// cannot be opened after `mkdirat`, the error retains the parent/name with an
 /// unknown identity.
+///
+/// # Parameters
+///
+/// * `parent` is the retained parent directory authority.
+/// * `name` is the native child name to create.
+/// * `directory` selects directory creation instead of file creation.
 pub(crate) fn create_rooted_temp_child(
     parent: &File,
     name: &OsStr,
@@ -103,6 +109,11 @@ pub(crate) fn create_rooted_temp_child(
 /// Opens a lazy reader over the opened root directory.
 ///
 /// Returns an I/O error when the root descriptor cannot be enumerated.
+///
+/// # Parameters
+///
+/// * `root` is the opened root directory descriptor.
+/// * `diagnostic_root` is the path used to contextualize reader errors.
 pub(crate) fn open_root_directory_reader(root: &File, diagnostic_root: &Path) -> Result<RootedDirectoryReader> {
     RootedDirectoryReader::open(root.try_clone()?, diagnostic_root)
 }
@@ -110,6 +121,12 @@ pub(crate) fn open_root_directory_reader(root: &File, diagnostic_root: &Path) ->
 /// Opens a lazy reader over one rooted descendant directory.
 ///
 /// Returns an I/O error when secure traversal or directory opening fails.
+///
+/// # Parameters
+///
+/// * `root` is the opened root directory descriptor.
+/// * `diagnostic_root` is the path used to contextualize errors.
+/// * `path` identifies the descendant directory relative to `root`.
 pub(crate) fn open_rooted_directory_reader(
     root: &File,
     diagnostic_root: &Path,
@@ -136,6 +153,12 @@ pub(crate) fn open_rooted_directory_reader(
 /// Returns children sorted by native name, with no-follow metadata. Traversal,
 /// enumeration, and metadata errors are propagated; no partial list is
 /// returned.
+///
+/// # Parameters
+///
+/// * `root` is the opened root directory descriptor.
+/// * `diagnostic_root` is the path used to contextualize errors.
+/// * `path` identifies the directory relative to `root`.
 pub(crate) fn read_rooted_directory(
     root: &File,
     diagnostic_root: &Path,
@@ -153,6 +176,14 @@ pub(crate) fn read_rooted_directory(
 ///
 /// Returns the stored target without resolving it. Parent traversal and
 /// `readlinkat` errors, including a final entry that is not a link, propagate.
+///
+/// # Parameters
+///
+/// * `root` is the opened root directory descriptor.
+/// * `diagnostic_root` is the path used to contextualize errors.
+/// * `path` identifies the link relative to `root`.
+/// * `maximum_bytes` limits retained target bytes; `None` permits any target
+///   size.
 pub(crate) fn read_rooted_link(
     root: &File,
     diagnostic_root: &Path,
@@ -214,6 +245,13 @@ pub(crate) fn read_rooted_link(
 ///
 /// Stores `target` as supplied, without opening its referent or creating
 /// missing parents. Returns parent traversal or native creation errors.
+///
+/// # Parameters
+///
+/// * `root` is the opened root directory descriptor.
+/// * `diagnostic_root` is the path used to contextualize errors.
+/// * `target` is stored verbatim as the link target.
+/// * `path` identifies the link to create relative to `root`.
 pub(crate) fn create_rooted_symlink(
     root: &File,
     diagnostic_root: &Path,
@@ -238,6 +276,14 @@ pub(crate) fn create_rooted_symlink(
 /// `exists_ok` accepts an existing real directory, never a final link.
 /// Traversal, inspection, or creation failures propagate. In recursive mode,
 /// ancestors created before an error remain in place.
+///
+/// # Parameters
+///
+/// * `root` is the opened root directory descriptor.
+/// * `diagnostic_root` is the path used to contextualize errors.
+/// * `path` identifies the directory to create relative to `root`.
+/// * `recursive` permits creation of missing ancestors.
+/// * `exists_ok` accepts an existing real directory.
 pub(crate) fn create_rooted_directory(
     root: &File,
     diagnostic_root: &Path,
@@ -270,6 +316,12 @@ pub(crate) fn create_rooted_directory(
 /// Removes one rooted leaf or empty directory without following symbolic links.
 /// Traversal, inspection and unlink errors propagate. Recursive callers use
 /// the shared deletion scheduler before reaching this native boundary.
+///
+/// # Parameters
+///
+/// * `root` is the opened root directory descriptor.
+/// * `diagnostic_root` is the path used to contextualize errors.
+/// * `path` identifies the entry to remove relative to `root`.
 #[cfg(feature = "test-support")]
 pub(crate) fn remove_rooted_entry(root: &File, diagnostic_root: &Path, path: &LocalRelativePath) -> Result<()> {
     let status = rooted_status(root, diagnostic_root, path)?;
@@ -282,6 +334,13 @@ pub(crate) fn remove_rooted_entry(root: &File, diagnostic_root: &Path, path: &Lo
 }
 
 /// Removes an entry using the caller's fixed leaf-versus-directory request.
+///
+/// # Parameters
+///
+/// * `root` is the opened root directory descriptor.
+/// * `diagnostic_root` is the path used to contextualize errors.
+/// * `path` identifies the entry to remove relative to `root`.
+/// * `directory` selects directory removal and requires an empty directory.
 pub(crate) fn remove_rooted_entry_typed(
     root: &File,
     diagnostic_root: &Path,
@@ -297,6 +356,13 @@ pub(crate) fn remove_rooted_entry_typed(
 ///
 /// Returns an I/O error when the parent cannot be opened securely or the
 /// entry cannot be removed.
+///
+/// # Parameters
+///
+/// * `root` is the opened root directory descriptor.
+/// * `diagnostic_root` is the path used to contextualize errors.
+/// * `path` identifies the entry to remove relative to `root`.
+/// * `directory` selects directory removal and requires an empty directory.
 pub(crate) fn unlink_rooted_entry(
     root: &File,
     diagnostic_root: &Path,
@@ -325,6 +391,14 @@ pub(crate) fn unlink_rooted_entry(
 /// `overwrite` selects native replacement; otherwise the platform must offer
 /// atomic no-replace rename. Returns traversal or native rename errors, or
 /// `Unsupported` when no no-replace implementation is compiled.
+///
+/// # Parameters
+///
+/// * `root` is the opened root directory descriptor.
+/// * `diagnostic_root` is the path used to contextualize errors.
+/// * `source` identifies the entry to move relative to `root`.
+/// * `destination` identifies its destination relative to `root`.
+/// * `overwrite` selects replacement instead of no-replace behavior.
 pub(crate) fn rename_rooted_entry(
     root: &File,
     diagnostic_root: &Path,
@@ -375,6 +449,13 @@ pub(crate) fn rename_rooted_entry(
 ///
 /// Masks `mode` to `0o7777` and applies it through a no-follow opened handle.
 /// Returns parent traversal, metadata, open, or `fchmod` errors.
+///
+/// # Parameters
+///
+/// * `root` is the opened root directory descriptor.
+/// * `diagnostic_root` is the path used to contextualize errors.
+/// * `path` identifies the entry whose permissions are changed.
+/// * `mode` supplies portable permission bits; other bits are ignored.
 pub(crate) fn set_rooted_permissions(
     root: &File,
     diagnostic_root: &Path,
@@ -418,6 +499,11 @@ pub(crate) fn set_rooted_permissions(
 ///
 /// Returns children sorted by native name, excluding `.` and `..`.
 /// Enumeration and no-follow child metadata failures discard the partial list.
+///
+/// # Parameters
+///
+/// * `directory` is the already-open directory descriptor to enumerate.
+/// * `diagnostic_path` identifies that directory for child metadata errors.
 fn read_directory_handle(directory: &File, diagnostic_path: &Path) -> Result<Vec<RootedDirectoryEntry>> {
     let mut stream = Dir::read_from(directory).map_err(Error::from)?;
     let mut entries = Vec::new();
@@ -439,6 +525,11 @@ fn read_directory_handle(directory: &File, diagnostic_path: &Path) -> Result<Vec
 /// Opens a no-follow child directory from an already-open parent.
 ///
 /// Returns `openat` errors, including missing, non-directory, and link entries.
+///
+/// # Parameters
+///
+/// * `parent` is the already-open parent directory descriptor.
+/// * `name` is the NUL-terminated child name to open.
 #[inline]
 fn open_directory_component(parent: &File, name: &CString) -> Result<File> {
     super::rooted_file_io::open_file_at(
@@ -452,6 +543,12 @@ fn open_directory_component(parent: &File, name: &CString) -> Result<File> {
 /// Reads no-follow metadata for a rooted path.
 ///
 /// Propagates secure parent-traversal and final metadata errors.
+///
+/// # Parameters
+///
+/// * `root` is the opened root directory descriptor.
+/// * `diagnostic_root` is the path used to contextualize errors.
+/// * `path` identifies the entry to inspect relative to `root`.
 #[cfg(feature = "test-support")]
 #[inline]
 fn rooted_status(root: &File, diagnostic_root: &Path, path: &LocalRelativePath) -> Result<libc::stat> {
@@ -459,6 +556,10 @@ fn rooted_status(root: &File, diagnostic_root: &Path, path: &LocalRelativePath) 
 }
 
 /// Returns whether one native mode represents a directory.
+///
+/// # Parameters
+///
+/// * `mode` is the native mode value to inspect.
 #[inline]
 const fn is_directory(mode: libc::mode_t) -> bool {
     mode & libc::S_IFMT == libc::S_IFDIR
@@ -468,6 +569,11 @@ const fn is_directory(mode: libc::mode_t) -> bool {
 ///
 /// Returns the raw native status inside `Ok`; `-1` requires the caller to
 /// capture `last_os_error` immediately, before another syscall.
+///
+/// # Parameters
+///
+/// * `source_parent` and `source_name` identify the source entry.
+/// * `destination_parent` and `destination_name` identify the destination.
 #[cfg(any(target_os = "linux", target_os = "android"))]
 #[inline]
 fn rename_without_replacing(
@@ -493,6 +599,11 @@ fn rename_without_replacing(
 ///
 /// Returns the raw native status inside `Ok`; `-1` requires the caller to
 /// capture `last_os_error` immediately, before another syscall.
+///
+/// # Parameters
+///
+/// * `source_parent` and `source_name` identify the source entry.
+/// * `destination_parent` and `destination_name` identify the destination.
 #[cfg(any(target_os = "macos", target_os = "ios"))]
 #[inline]
 fn rename_without_replacing(
@@ -515,6 +626,11 @@ fn rename_without_replacing(
 }
 
 /// Reports platforms without an atomic descriptor-relative no-replace rename.
+///
+/// # Parameters
+///
+/// * `source_parent` and `source_name` identify the source entry.
+/// * `destination_parent` and `destination_name` identify the destination.
 #[cfg(not(any(target_os = "linux", target_os = "android", target_os = "macos", target_os = "ios",)))]
 #[inline]
 fn rename_without_replacing(
