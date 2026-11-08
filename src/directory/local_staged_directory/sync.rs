@@ -192,7 +192,7 @@ fn test_not_required_file_sync_skips_depth_limit_for_nonempty_stage() {
     stage.cleanup().expect("cleanup stage");
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 #[test]
 fn test_tree_sync_keeps_nonempty_stage_available_for_cleanup() {
     let fixture = tempfile::tempdir().expect("fixture");
