@@ -192,6 +192,37 @@ fn test_not_required_file_sync_skips_depth_limit_for_nonempty_stage() {
     stage.cleanup().expect("cleanup stage");
 }
 
+#[cfg(test)]
+#[test]
+fn test_tree_sync_keeps_nonempty_stage_available_for_cleanup() {
+    let fixture = tempfile::tempdir().expect("fixture");
+    let filesystem = crate::LocalFileSystem::host().expect("host filesystem");
+    let parent = filesystem
+        .open_directory_with_options(fixture.path(), &crate::options::LocalDirectoryOpenOptions::new())
+        .expect("parent authority");
+    let mut stage = parent
+        .create_staged_directory(&crate::options::LocalTempDirectoryOptions::new())
+        .expect("stage");
+    let stage_path = fixture.path().join(stage.relative_name());
+    let mut payload = &b"payload"[..];
+    stage
+        .write_file_new(Path::new("payload"), &mut payload, 32)
+        .expect("write staged payload");
+
+    stage
+        .sync_tree_with_options(&parent, &LocalListOptions::new())
+        .expect("synchronize staged tree and creating parent");
+    let staged_payload = std::fs::read(stage_path.join("payload")).expect("read staged payload");
+    assert_eq!(&b"payload"[..], staged_payload.as_slice());
+    assert!(
+        stage_path.is_dir(),
+        "sync does not publish or relinquish the staged directory"
+    );
+
+    stage.cleanup().expect("cleanup synchronized stage");
+    assert!(!stage_path.exists(), "explicit cleanup removes the unpublished stage");
+}
+
 #[cfg(all(test, target_os = "linux"))]
 mod owner_policy_sync_order_tests {
     use std::ffi::OsStr;
