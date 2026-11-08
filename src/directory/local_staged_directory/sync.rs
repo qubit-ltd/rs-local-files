@@ -194,6 +194,35 @@ fn test_not_required_file_sync_skips_depth_limit_for_nonempty_stage() {
 
 #[cfg(all(test, unix))]
 #[test]
+fn test_preferred_file_sync_reports_injected_sync_failure_without_aborting() {
+    let fixture = tempfile::tempdir().expect("fixture");
+    let filesystem = crate::LocalFileSystem::host().expect("host filesystem");
+    let parent = filesystem
+        .open_directory_with_options(fixture.path(), &crate::options::LocalDirectoryOpenOptions::new())
+        .expect("parent authority");
+    let mut stage = parent
+        .create_staged_directory(&crate::options::LocalTempDirectoryOptions::new())
+        .expect("stage");
+    let mut payload = &b"payload"[..];
+    stage
+        .write_file_new(Path::new("payload"), &mut payload, 32)
+        .expect("write staged payload");
+
+    fail_tree_sync_after(0);
+    let synced = stage
+        .sync_files_with_options(&LocalListOptions::new(), LocalFileSyncRequirement::Preferred)
+        .expect("Preferred synchronization degrades a file sync failure");
+    assert!(!synced, "a failed file synchronization must be reported");
+    assert_eq!(
+        b"payload".as_slice(),
+        std::fs::read(fixture.path().join(stage.relative_name()).join("payload")).expect("read staged payload")
+    );
+
+    stage.cleanup().expect("cleanup stage");
+}
+
+#[cfg(all(test, unix))]
+#[test]
 fn test_tree_sync_keeps_nonempty_stage_available_for_cleanup() {
     let fixture = tempfile::tempdir().expect("fixture");
     let filesystem = crate::LocalFileSystem::host().expect("host filesystem");
