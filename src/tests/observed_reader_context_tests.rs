@@ -11,6 +11,7 @@ use std::fs;
 use std::io::ErrorKind;
 use std::path::Path;
 use std::path::absolute;
+#[cfg(unix)]
 use std::process::Command;
 
 use crate::LocalFileOperation;
@@ -24,24 +25,6 @@ use crate::tests::native_io_fault_tests::NativeIoPoint;
 
 #[test]
 fn test_observed_reader_observation_failure_keeps_namespace_and_pwd_context() {
-    const CHILD: &str = "RS_LOCAL_FILES_OBSERVED_READER_DELETED_CWD_CHILD";
-    const TEST: &str = "tests::observed_reader_context_tests::test_observed_reader_observation_failure_keeps_namespace_and_pwd_context";
-    if env::var_os(CHILD).is_none() {
-        let output = Command::new(env::current_exe().expect("test executable should be available"))
-            .args(["--exact", TEST, "--test-threads=1", "--nocapture"])
-            .env(CHILD, "1")
-            .output()
-            .expect("isolated child test should start");
-        assert!(
-            output.status.success(),
-            "isolated child failed: stdout={} stderr={}",
-            String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr)
-        );
-        assert!(String::from_utf8_lossy(&output.stdout).contains("OBSERVED_READER_DELETED_CWD_COMPLETE"));
-        return;
-    }
-
     let cwd = env::current_dir().expect("process current directory");
     let host_fixture = tempfile::Builder::new()
         .prefix("observed-reader-context-")
@@ -106,6 +89,29 @@ fn test_observed_reader_observation_failure_keeps_namespace_and_pwd_context() {
     assert_eq!(error.operation(), LocalFileOperation::OpenReader);
     assert_eq!(error.path(), Some(Path::new("/work/item")));
     assert_eq!(error.current_directory(), Some(Path::new("/work")));
+}
+
+#[cfg(unix)]
+#[test]
+fn test_observed_reader_retains_directory_after_cwd_is_deleted() {
+    const CHILD: &str = "RS_LOCAL_FILES_OBSERVED_READER_DELETED_CWD_CHILD";
+    const TEST: &str =
+        "tests::observed_reader_context_tests::test_observed_reader_retains_directory_after_cwd_is_deleted";
+    if env::var_os(CHILD).is_none() {
+        let output = Command::new(env::current_exe().expect("test executable should be available"))
+            .args(["--exact", TEST, "--test-threads=1", "--nocapture"])
+            .env(CHILD, "1")
+            .output()
+            .expect("isolated child test should start");
+        assert!(
+            output.status.success(),
+            "isolated child failed: stdout={} stderr={}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(String::from_utf8_lossy(&output.stdout).contains("OBSERVED_READER_DELETED_CWD_COMPLETE"));
+        return;
+    }
 
     let original = env::current_dir().expect("child's original cwd should be available");
     let fixture = tempfile::tempdir().expect("fixture");
