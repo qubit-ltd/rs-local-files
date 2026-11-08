@@ -104,20 +104,29 @@ jobs:
           local name="$2"
           shift 2
           local output
+          local alternate_name
           local target_args=(--test "$target")
           if [ "$target" = "--lib" ]; then
             target_args=(--lib)
           fi
-          if output=$(cargo test --locked "$@" "${target_args[@]}" "$name" -- --exact --nocapture 2>&1); then
-            printf '%s\n' "$output"
+          if [[ "$name" == test_* ]]; then
+            alternate_name="${name#test_}"
           else
-            printf '%s\n' "$output"
-            return 1
+            alternate_name="test_${name}"
           fi
-          if ! grep -Fq "test $name ... ok" <<<"$output"; then
-            echo "expected exact test body to run: $target::$name" >&2
-            return 1
-          fi
+          for candidate in "$name" "$alternate_name"; do
+            if output=$(cargo test --locked "$@" "${target_args[@]}" "$candidate" -- --exact --nocapture 2>&1); then
+              printf '%s\n' "$output"
+            else
+              printf '%s\n' "$output"
+              return 1
+            fi
+            if grep -Fq "test $candidate ... ok" <<<"$output"; then
+              return 0
+            fi
+          done
+          echo "expected exact test body to run: $target::$name (or $alternate_name)" >&2
+          return 1
         }
         cargo test --locked --no-default-features --no-fail-fast
         cargo test --locked --all-features --no-fail-fast
