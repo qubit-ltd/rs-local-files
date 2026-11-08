@@ -33,7 +33,7 @@ impl LocalStagedDirectory {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 pub(crate) fn fail_tree_sync_after(successful_steps: usize) {
     sync::fail_tree_sync_after(successful_steps);
 }

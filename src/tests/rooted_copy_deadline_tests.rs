@@ -24,6 +24,7 @@ use crate::LocalCopyTypeConflictPolicy;
 use crate::LocalFileErrorKind;
 use crate::LocalFileOperation;
 use crate::LocalFileSystem;
+#[cfg(unix)]
 use crate::LocalSymlinkPolicy;
 use crate::local::CopyBudget;
 use crate::tests::rooted::support::resolution_observation_tests as observations;

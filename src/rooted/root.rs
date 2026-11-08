@@ -1350,10 +1350,14 @@ impl Root {
 
 #[cfg(test)]
 mod authority_and_native_failure_tests {
+    #[cfg(unix)]
     use std::fs;
+    #[cfg(unix)]
     use std::path::Path;
 
+    #[cfg(unix)]
     use super::Root;
+    #[cfg(unix)]
     use crate::local::LocalRelativePath;
 
     #[cfg(unix)]

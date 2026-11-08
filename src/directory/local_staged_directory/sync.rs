@@ -49,7 +49,7 @@ thread_local! {
     pub(super) static OWNER_POLICY_SYNC_EVENTS: RefCell<Option<Vec<OwnerPolicySyncEvent>>> = const { RefCell::new(None) };
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 pub(super) fn fail_tree_sync_after(successful_steps: usize) {
     TREE_SYNC_FAILURE_AFTER.with(|slot| slot.set(Some(successful_steps)));
 }

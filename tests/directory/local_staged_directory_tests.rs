@@ -12,6 +12,7 @@ use std::path::Path;
 use qubit_local_files::LocalFileSystem;
 use qubit_local_files::directory::LocalDirectoryHandle;
 use qubit_local_files::error::LocalFileErrorKind;
+#[cfg(unix)]
 use qubit_local_files::options::LocalCreateDirectoryOptions;
 use qubit_local_files::options::LocalDirectoryOpenOptions;
 use qubit_local_files::options::LocalListOptions;

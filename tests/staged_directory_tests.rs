@@ -17,7 +17,9 @@ use qubit_local_files::options::LocalTempDirectoryOptions;
 use qubit_local_files::options::LocalTreeValidationOptions;
 use qubit_local_files::outcome::LocalFileKind;
 use qubit_local_files::outcome::LocalTreeAccessState;
+#[cfg(target_os = "linux")]
 use qubit_local_files::policy::LocalOwnerAccessPolicy;
+#[cfg(unix)]
 use qubit_local_files::policy::LocalPrivacyRequirement;
 use qubit_local_files::policy::LocalTreeFinalAccess;
 

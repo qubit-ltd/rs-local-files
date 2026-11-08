@@ -22,8 +22,6 @@ use windows_sys::Win32::Security::SECURITY_DESCRIPTOR;
 use windows_sys::Win32::Security::SetSecurityDescriptorDacl;
 
 use super::CurrentUser;
-#[cfg(test)]
-use super::FailurePoint;
 use super::default_access_mask;
 use super::last_os_error;
 

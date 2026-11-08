@@ -6,6 +6,7 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 use std::fs;
+#[cfg(unix)]
 use std::fs::OpenOptions;
 
 use crate::LocalFileSystem;

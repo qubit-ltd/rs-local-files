@@ -6,6 +6,8 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 
+#![cfg(unix)]
+
 #[cfg(unix)]
 use std::os::unix::fs::symlink;
 use std::path::Path;

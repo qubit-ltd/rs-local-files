@@ -16,8 +16,6 @@ use crate::LocalFileSystem;
 use crate::LocalWriteMode;
 use crate::LocalWriteOptions;
 use crate::options::LocalWritePrecondition;
-#[cfg(windows)]
-use crate::policy::LocalDurabilityRequirement;
 use crate::policy::LocalFileSyncRequirement;
 use crate::policy::LocalSymlinkPolicy;
 
