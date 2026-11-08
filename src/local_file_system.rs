@@ -21,6 +21,11 @@ mod directory;
 // Implements opening and use of fixed directory capabilities.
 mod fixed_directory;
 pub(crate) mod internal;
+// Implements bounded content collection and consistent snapshots.
+mod content_read;
+// Implements observed readers and retained path bindings.
+mod observed_read;
+// Implements ordinary file opening and metadata operations.
 mod io;
 // Implements temporary-file and temporary-directory operations.
 mod temp;
