@@ -350,7 +350,9 @@ evidence; compile checks and Linux filters that execute zero Windows-only tests
 do not establish runtime behavior. See the
 [Windows staging and cleanup evidence](doc/review-rlf4-windows-staging-cleanup-evidence.md)
 and [Windows enumeration evidence](doc/review-rlf3-windows-evidence.md) for
-the recorded scope and limitations. This crate's CI validates this crate only;
+the recorded scope and limitations. The enumeration record contains a historical
+Windows run for an earlier revision; staging and sealed cleanup remain unverified
+on the current revision. This crate's CI validates this crate only;
 adapter compatibility belongs to the adapter repository or a separate
 integration job. This crate makes no runtime guarantee for those targets.
 `capabilities()` reports whether this build
