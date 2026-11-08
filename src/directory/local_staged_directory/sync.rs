@@ -223,6 +223,39 @@ fn test_preferred_file_sync_reports_injected_sync_failure_without_aborting() {
 
 #[cfg(all(test, unix))]
 #[test]
+fn test_required_file_sync_preserves_failure_and_allows_retry() {
+    let fixture = tempfile::tempdir().expect("fixture");
+    let filesystem = crate::LocalFileSystem::host().expect("host filesystem");
+    let parent = filesystem
+        .open_directory_with_options(fixture.path(), &crate::options::LocalDirectoryOpenOptions::new())
+        .expect("parent authority");
+    let mut stage = parent
+        .create_staged_directory(&crate::options::LocalTempDirectoryOptions::new())
+        .expect("stage");
+    let mut payload = &b"payload"[..];
+    stage
+        .write_file_new(Path::new("payload"), &mut payload, 32)
+        .expect("write staged payload");
+
+    fail_tree_sync_after(0);
+    let error = stage
+        .sync_files_with_options(&LocalListOptions::new(), LocalFileSyncRequirement::Required)
+        .expect_err("Required synchronization propagates a file sync failure");
+    assert_eq!(LocalFileOperation::Commit, error.operation());
+    assert_eq!(
+        "injected tree file sync failure",
+        error.io_error().expect("the injected source is retained").to_string()
+    );
+    assert!(
+        stage
+            .sync_files_with_options(&LocalListOptions::new(), LocalFileSyncRequirement::Required)
+            .expect("the retained stage can be retried")
+    );
+    stage.cleanup().expect("cleanup stage");
+}
+
+#[cfg(all(test, unix))]
+#[test]
 fn test_tree_sync_keeps_nonempty_stage_available_for_cleanup() {
     let fixture = tempfile::tempdir().expect("fixture");
     let filesystem = crate::LocalFileSystem::host().expect("host filesystem");
