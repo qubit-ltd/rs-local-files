@@ -14,7 +14,7 @@ use windows_sys::Win32::Foundation::ERROR_UNABLE_TO_REMOVE_REPLACED;
 /// Identifies how far a native `ReplaceFileW` operation progressed before
 /// failing.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(super) enum ReplaceFailure {
+pub(in crate::local::internal::conditional::windows) enum ReplaceFailure {
     /// Windows could not remove the file that was being replaced.
     UnableToRemoveReplaced,
     /// Windows could not move the replacement file into place.
@@ -39,7 +39,9 @@ pub(super) enum ReplaceFailure {
 ///
 /// The `ReplaceFileW` partial-failure class associated with the code, or
 /// [`ReplaceFailure::Other`] when the code is missing or unrecognized.
-pub(super) fn classify_replace_failure(raw_os_error: Option<i32>) -> ReplaceFailure {
+pub(in crate::local::internal::conditional::windows) fn classify_replace_failure(
+    raw_os_error: Option<i32>,
+) -> ReplaceFailure {
     match raw_os_error.map(|code| code as u32) {
         Some(ERROR_UNABLE_TO_REMOVE_REPLACED) => ReplaceFailure::UnableToRemoveReplaced,
         Some(ERROR_UNABLE_TO_MOVE_REPLACEMENT) => ReplaceFailure::UnableToMoveReplacement,

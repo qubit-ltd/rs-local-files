@@ -10,4 +10,5 @@ mod internal;
 #[cfg(unix)]
 mod local_temp_recovery_tests;
 mod persist_target_tests;
+#[cfg(unix)]
 mod recovery_cleanup_tests;

@@ -16,6 +16,7 @@ use windows_sys::Win32::Security::GetTokenInformation;
 use windows_sys::Win32::Security::PSID;
 use windows_sys::Win32::Security::TOKEN_QUERY;
 use windows_sys::Win32::Security::TOKEN_USER;
+use windows_sys::Win32::Security::TokenUser;
 use windows_sys::Win32::System::Threading::GetCurrentProcess;
 use windows_sys::Win32::System::Threading::OpenProcessToken;
 

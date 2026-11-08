@@ -7,7 +7,7 @@
 // =============================================================================
 //! Concrete local filesystem APIs and their private implementation.
 
-mod internal;
+pub(crate) mod internal;
 #[cfg(unix)]
 #[cfg(test)]
 pub(crate) use internal::clear_nonblocking;

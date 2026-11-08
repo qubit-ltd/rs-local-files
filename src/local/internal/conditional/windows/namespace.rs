@@ -51,7 +51,7 @@ use crate::local::internal::windows_rooted::rename_conditional_entry_at;
 use crate::options::LocalWriteOptions;
 use crate::recovery::LocalRecoveryFileRole;
 mod entry_access;
-mod file_identity;
+pub(super) mod file_identity;
 mod scope;
 mod windows_handle;
 pub(super) use self::file_identity::FileIdentity;

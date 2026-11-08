@@ -22,8 +22,8 @@ use windows_sys::Win32::Security::SECURITY_DESCRIPTOR;
 use windows_sys::Win32::Security::SetSecurityDescriptorDacl;
 
 use super::CurrentUser;
+#[cfg(test)]
 use super::FailurePoint;
-use super::check_failure;
 use super::default_access_mask;
 use super::last_os_error;
 
@@ -39,7 +39,7 @@ pub(super) struct SecurityDescriptor {
     /// Absolute descriptor whose DACL pointer refers to the owned `acl` buffer.
     descriptor: SECURITY_DESCRIPTOR,
     /// Owns the initialized ACL and ACE bytes for the descriptor's lifetime.
-    acl: Vec<usize>,
+    pub(super) acl: Vec<usize>,
 }
 
 impl SecurityDescriptor {
@@ -89,7 +89,8 @@ impl SecurityDescriptor {
     ///
     /// Returns an error if native access, validation, or verification fails.
     pub(super) fn for_current_user_with_mask(access: u32) -> io::Result<Self> {
-        check_failure!(Descriptor);
+        #[cfg(test)]
+        super::fail_if(super::FailurePoint::Descriptor)?;
         let current_user = CurrentUser::acquire()?;
         let current_sid = current_user.sid()?;
 

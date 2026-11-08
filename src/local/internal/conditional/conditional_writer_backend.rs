@@ -116,7 +116,7 @@ impl ConditionalWriterBackend {
     ///
     /// Returns an error if the path cannot be opened for conditional writing.
     pub(crate) fn host(path: &Path, options: &LocalWriteOptions) -> io::Result<Self> {
-        super::windows::WindowsConditionalBackend::open_host(path, options).map(Self::Native)
+        super::super::windows::WindowsConditionalBackend::open_host(path, options).map(Self::Native)
     }
 
     /// Opens a conditional writer relative to an already-open root directory.
@@ -145,8 +145,14 @@ impl ConditionalWriterBackend {
         diagnostic: Option<&Path>,
         options: &LocalWriteOptions,
     ) -> io::Result<Self> {
-        super::windows::WindowsConditionalBackend::open_rooted(root, relative, namespace_absolute, diagnostic, options)
-            .map(Self::Native)
+        super::super::windows::WindowsConditionalBackend::open_rooted(
+            root,
+            relative,
+            namespace_absolute,
+            diagnostic,
+            options,
+        )
+        .map(Self::Native)
     }
 }
 

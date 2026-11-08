@@ -8,9 +8,9 @@
 
 use std::cell::RefCell;
 
-use super::super::MAX_OWNER_DESCRIPTOR_BYTES;
-use super::super::decode_dacl_descriptor;
-use super::super::query_security_descriptor_with;
+use super::MAX_OWNER_DESCRIPTOR_BYTES;
+use super::decode_dacl_descriptor;
+use super::query_security_descriptor_with;
 use crate::error::LocalFileErrorKind;
 use crate::error::LocalResourceKind;
 

@@ -11,9 +11,9 @@ use std::io::Error;
 use std::io::ErrorKind;
 #[cfg(unix)]
 use std::os::unix::fs::symlink;
-#[cfg(unix)]
 use std::path::Path;
 use std::path::PathBuf;
+#[cfg(target_os = "linux")]
 use std::process::id;
 use std::time::Duration;
 

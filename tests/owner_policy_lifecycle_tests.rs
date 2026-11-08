@@ -26,7 +26,7 @@ use qubit_local_files::observation::LocalSecurityObservationOptions;
 #[cfg(target_os = "linux")]
 use qubit_local_files::options::LocalCreateDirectoryOptions;
 use qubit_local_files::options::LocalDirectoryOpenOptions;
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 use qubit_local_files::options::LocalListOptions;
 #[cfg(target_os = "linux")]
 use qubit_local_files::options::LocalTempCleanupLimits;

@@ -1081,6 +1081,7 @@ fn test_unix_access_failure_after_child_mutation_reports_mixed_and_keeps_stage()
     );
 }
 
+#[cfg(unix)]
 #[test]
 fn test_required_sync_failure_keeps_unpublished_stage_for_cleanup() {
     let fixture = tempfile::tempdir().expect("fixture should be created");

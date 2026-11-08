@@ -9,5 +9,6 @@
 
 mod replace_failure;
 
+#[cfg(test)]
 pub(super) use replace_failure::ReplaceFailure;
 pub(super) use replace_failure::classify_replace_failure;

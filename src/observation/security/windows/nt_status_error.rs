@@ -9,6 +9,7 @@
 use std::fmt;
 
 /// Carries an NTSTATUS value through the standard I/O error interface.
+#[derive(Debug)]
 pub(super) struct NtStatusError(
     /// The raw status returned by the Windows native API.
     pub(super) i32,

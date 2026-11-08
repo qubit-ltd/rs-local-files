@@ -19,12 +19,12 @@ use std::path::PathBuf;
 
 use qubit_io::Output;
 
-use super::ConditionalBackend;
-use super::ConditionalEntry;
-use super::ConditionalHookAction;
-use super::ConditionalHooks;
-use super::ConditionalPoint;
-use super::NativeAttempt;
+use super::super::ConditionalBackend;
+use super::super::ConditionalEntry;
+use super::super::ConditionalHookAction;
+use super::super::ConditionalHooks;
+use super::super::ConditionalPoint;
+use super::super::NativeAttempt;
 use super::combine_observation_error;
 use super::install::install_absent;
 use super::install::replace_with_backup;
@@ -53,9 +53,9 @@ const COPY_BUFFER_SIZE: usize = 64 * 1024;
 #[derive(Debug)]
 pub(crate) struct WindowsConditionalBackend {
     /// The namespace that constrains all candidate and recovery names.
-    namespace: Namespace,
+    pub(super) namespace: Namespace,
     /// The private namespace name currently bound to the staged candidate.
-    candidate_name: OsString,
+    pub(super) candidate_name: OsString,
     /// The writable handle for candidate bytes until publication begins.
     candidate_file: Option<File>,
     /// The verified candidate entry used for identity checks and cleanup.
@@ -422,7 +422,7 @@ impl WindowsConditionalBackend {
     /// # Errors
     ///
     /// Returns an I/O error if creating the recovery container fails.
-    fn make_backup(&mut self) -> io::Result<(PathBuf, PathBuf)> {
+    pub(super) fn make_backup(&mut self) -> io::Result<(PathBuf, PathBuf)> {
         let (container, backup) = self.namespace.backup_container()?;
         self.recovery_containers.push(container.clone());
         Ok((container, backup))
@@ -528,7 +528,7 @@ impl WindowsConditionalBackend {
     /// # Returns
     ///
     /// The receipt after any eligible recovery-container cleanup.
-    fn cleanup_empty_container(
+    pub(super) fn cleanup_empty_container(
         &mut self,
         container: PathBuf,
         backup: PathBuf,
@@ -629,6 +629,53 @@ impl WindowsConditionalBackend {
             },
             installed,
             displaced: replacement_displaced.into_iter().collect(),
+        }
+    }
+
+    /// Observes the names and cleans up the candidate after an absent install.
+    ///
+    /// # Returns
+    ///
+    /// The receipt classified from the observed names and cleanup result.
+    fn collect_absent_receipt(&self) -> NativeAttempt {
+        let (installed, installed_error) = observe_with_error(
+            self.entry_if_present(LocalRecoveryFileRole::StagedCandidate, self.namespace.target_name()),
+        );
+        let (candidate, candidate_error) = if !self.namespace.is_rooted() {
+            observe_with_error(self.observe_candidate_entry())
+        } else {
+            (None, None)
+        };
+        let observation_error = installed_error.or(candidate_error);
+        let observation_failed = observation_error.is_some();
+        if let Some(candidate) = candidate
+            && let Err(error) = self.namespace.remove(&candidate)
+        {
+            return NativeAttempt {
+                publication_method: crate::outcome::LocalWritePublicationMethod::AtomicRename,
+                error: combine_observation_error(Some(error), observation_error),
+                publication: if observation_failed {
+                    LocalConditionalPublicationState::Indeterminate
+                } else {
+                    LocalConditionalPublicationState::Published
+                },
+                installed,
+                displaced: vec![candidate],
+            };
+        }
+        let publication = if observation_failed {
+            LocalConditionalPublicationState::Indeterminate
+        } else if installed.is_some() {
+            LocalConditionalPublicationState::Published
+        } else {
+            LocalConditionalPublicationState::Indeterminate
+        };
+        NativeAttempt {
+            publication_method: crate::outcome::LocalWritePublicationMethod::AtomicRename,
+            error: observation_error,
+            publication,
+            installed,
+            displaced: Vec::new(),
         }
     }
 }
@@ -948,53 +995,6 @@ impl ConditionalBackend for WindowsConditionalBackend {
         match install_absent(&self.namespace, &self.candidate_name) {
             Ok(()) => self.collect_absent_receipt(),
             Err(error) => self.collect_native_receipt(Some(error), None, None),
-        }
-    }
-
-    /// Observes the names and cleans up the candidate after an absent install.
-    ///
-    /// # Returns
-    ///
-    /// The receipt classified from the observed names and cleanup result.
-    fn collect_absent_receipt(&self) -> NativeAttempt {
-        let (installed, installed_error) = observe_with_error(
-            self.entry_if_present(LocalRecoveryFileRole::StagedCandidate, self.namespace.target_name()),
-        );
-        let (candidate, candidate_error) = if !self.namespace.is_rooted() {
-            observe_with_error(self.observe_candidate_entry())
-        } else {
-            (None, None)
-        };
-        let observation_error = installed_error.or(candidate_error);
-        let observation_failed = observation_error.is_some();
-        if let Some(candidate) = candidate
-            && let Err(error) = self.namespace.remove(&candidate)
-        {
-            return NativeAttempt {
-                publication_method: crate::outcome::LocalWritePublicationMethod::AtomicRename,
-                error: combine_observation_error(Some(error), observation_error),
-                publication: if observation_failed {
-                    LocalConditionalPublicationState::Indeterminate
-                } else {
-                    LocalConditionalPublicationState::Published
-                },
-                installed,
-                displaced: vec![candidate],
-            };
-        }
-        let publication = if observation_failed {
-            LocalConditionalPublicationState::Indeterminate
-        } else if installed.is_some() {
-            LocalConditionalPublicationState::Published
-        } else {
-            LocalConditionalPublicationState::Indeterminate
-        };
-        NativeAttempt {
-            publication_method: crate::outcome::LocalWritePublicationMethod::AtomicRename,
-            error: observation_error,
-            publication,
-            installed,
-            displaced: Vec::new(),
         }
     }
 

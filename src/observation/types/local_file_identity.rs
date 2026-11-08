@@ -71,7 +71,6 @@ impl LocalFileIdentity {
     ///   object.
     /// * `file_id` - The complete 128-bit identifier supplied by Windows.
     #[must_use]
-    #[inline]
     #[cfg(windows)]
     #[inline]
     pub(crate) const fn windows(volume_serial: u64, file_id: [u8; 16]) -> Self {

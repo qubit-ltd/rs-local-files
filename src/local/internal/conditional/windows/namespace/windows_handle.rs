@@ -7,7 +7,6 @@
 // =============================================================================
 //! Windows handle operations used by the conditional namespace.
 
-use std::ffi::OsStr;
 use std::fs::File;
 use std::io;
 use std::io::ErrorKind;
@@ -54,7 +53,7 @@ const FILE_ATTRIBUTE_DIRECTORY: u32 = 0x10;
 /// # Errors
 ///
 /// Returns an error if Windows cannot read the identifier from the open handle.
-pub(super) fn file_identity(file: &File) -> io::Result<FileIdentity> {
+pub(in crate::local::internal::conditional::windows) fn file_identity(file: &File) -> io::Result<FileIdentity> {
     let mut identity = FILE_ID_INFO::default();
     // SAFETY: `file` owns a live handle and `identity` is a correctly sized
     // writable buffer for FileIdInfo.

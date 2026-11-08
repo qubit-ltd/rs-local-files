@@ -12,6 +12,7 @@ use std::path::MAIN_SEPARATOR_STR;
 use std::path::Path;
 use std::time::Duration;
 
+#[cfg(unix)]
 use libc::mkfifo;
 use qubit_local_files::LocalFileSystem;
 use qubit_local_files::directory::LocalTreeEntry;

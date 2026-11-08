@@ -13,10 +13,10 @@ use std::io;
 use std::io::ErrorKind;
 use std::path::PathBuf;
 
+use windows_sys::Wdk::Storage::FileSystem::FILE_NON_DIRECTORY_FILE;
 use windows_sys::Wdk::Storage::FileSystem::FILE_OPEN;
 use windows_sys::Win32::Foundation::GENERIC_READ;
 use windows_sys::Win32::Foundation::GENERIC_WRITE;
-use windows_sys::Win32::Storage::FileSystem::FILE_NON_DIRECTORY_FILE;
 use windows_sys::Win32::Storage::FileSystem::FILE_READ_ATTRIBUTES;
 use windows_sys::Win32::Storage::FileSystem::SYNCHRONIZE;
 

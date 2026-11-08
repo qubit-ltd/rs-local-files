@@ -470,6 +470,7 @@ fn test_lf3_temp_recovery_unknown_or_replaced_entries_are_not_removed() {
     directory_recovery.cleanup().expect("remove retained directory");
     assert!(!directory_path.exists());
 }
+#[cfg(unix)]
 #[test]
 fn test_lf_revision_recovery_fifo_original_cleanup_and_symlink_are_safe() {
     use std::ffi::OsString;

@@ -12,6 +12,7 @@ use core::ffi::c_void;
 use std::fs::File;
 use std::io;
 use std::mem::size_of;
+#[cfg(test)]
 use std::ops::Range;
 use std::os::windows::io::AsRawHandle;
 use std::os::windows::io::FromRawHandle;
@@ -757,6 +758,9 @@ fn ntstatus_error(status: i32) -> LocalFileError {
 }
 
 #[cfg(test)]
+mod acl_budget_tests;
+
+#[cfg(test)]
 mod tests {
     use std::io;
 
@@ -773,8 +777,6 @@ mod tests {
     use crate::error::LocalFileErrorKind;
     use crate::error::LocalResourceKind;
     use crate::observation::LocalSecurityObservationOptions;
-
-    mod acl_budget_tests;
 
     #[test]
     fn test_sid_decode_validates_length_and_formats_authority() {

@@ -1144,6 +1144,7 @@ impl LocalRootAtomicWriter {
     ///
     /// Returns a structured synchronization error while staging remains
     /// available.
+    #[cfg(unix)]
     fn sync_temporary_file(
         &mut self,
         observer: Option<&LocalCommitSyncObserver>,

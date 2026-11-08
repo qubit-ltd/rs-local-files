@@ -12,6 +12,7 @@ use std::io::ErrorKind;
 use std::path::Path;
 use std::path::PathBuf;
 
+#[cfg(unix)]
 use libc::geteuid;
 
 use crate::LocalFileError;

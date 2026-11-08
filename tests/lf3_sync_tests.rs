@@ -10,6 +10,8 @@ use std::path::Path;
 
 use qubit_io::Output;
 use qubit_local_files::LocalFileSystem;
+#[cfg(windows)]
+use qubit_local_files::error::LocalFileErrorKind;
 use qubit_local_files::options::LocalWriteMode;
 use qubit_local_files::options::LocalWriteOptions;
 use qubit_local_files::policy::LocalDurabilityRequirement;

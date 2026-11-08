@@ -35,6 +35,76 @@ use super::ConditionalEntry;
 use crate::outcome::LocalConditionalPublicationState;
 use crate::recovery::LocalRecoveryFileRole;
 
+/// Returns the publication method used when replacing a destination with a
+/// backup.
+#[cfg(feature = "digest")]
+fn replace_with_backup_publication_method() -> crate::outcome::LocalWritePublicationMethod {
+    crate::outcome::LocalWritePublicationMethod::AtomicReplaceWithBackup
+}
+
+/// Returns the publication method used when replacing a destination without
+/// digest support.
+#[cfg(not(feature = "digest"))]
+fn replace_with_backup_publication_method() -> crate::outcome::LocalWritePublicationMethod {
+    crate::outcome::LocalWritePublicationMethod::AtomicRename
+}
+
+/// Opens an optional entry, treating a missing entry as absent.
+///
+/// # Type Parameters
+///
+/// * `T` is the type of the opened entry.
+///
+/// # Parameters
+///
+/// * `open` opens the entry when it exists.
+fn observe_optional_entry<T>(open: impl FnOnce() -> io::Result<T>) -> io::Result<Option<T>> {
+    match open() {
+        Ok(entry) => Ok(Some(entry)),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(error),
+    }
+}
+
+/// Separates an optional observed entry from any error produced while observing
+/// it.
+///
+/// # Type Parameters
+///
+/// * `T` is the type of the observed entry.
+///
+/// # Parameters
+///
+/// * `result` is the result of observing the optional entry.
+fn observe_with_error<T>(result: io::Result<Option<T>>) -> (Option<T>, Option<io::Error>) {
+    match result {
+        Ok(entry) => (entry, None),
+        Err(error) => (None, Some(error)),
+    }
+}
+
+/// Combines native operation and observation failures while preserving the
+/// native error kind.
+///
+/// # Parameters
+///
+/// * `native_error` is the error returned by the native operation, if any.
+/// * `observation_error` is the error returned while observing the operation,
+///   if any.
+fn combine_observation_error(
+    native_error: Option<io::Error>,
+    observation_error: Option<io::Error>,
+) -> Option<io::Error> {
+    match (native_error, observation_error) {
+        (Some(native), Some(observation)) => {
+            let kind = native.kind();
+            Some(io::Error::new(kind, NativeReceiptError { native, observation }))
+        }
+        (Some(error), None) | (None, Some(error)) => Some(error),
+        (None, None) => None,
+    }
+}
+
 /// Classifies what the post-operation namespace observation proves.
 ///
 /// An observation error makes the result indeterminate; otherwise an installed
@@ -90,7 +160,7 @@ pub(super) fn receipt_publication(
 ///
 /// Returns an I/O error if identity inspection or reopening fails; cleanup is
 /// attempted before the error is returned.
-pub(super) fn open_verified_candidate_entry(
+pub(in crate::local::internal::conditional::windows) fn open_verified_candidate_entry(
     namespace: &Namespace,
     candidate_name: &OsStr,
     candidate_file: &mut File,
@@ -134,7 +204,7 @@ pub(super) fn open_verified_candidate_entry(
 /// # Errors
 ///
 /// Returns an I/O error if the entry cannot be opened or its identity differs.
-pub(super) fn open_verified_private_entry(
+pub(in crate::local::internal::conditional::windows) fn open_verified_private_entry(
     namespace: &Namespace,
     role: LocalRecoveryFileRole,
     name: &OsStr,
