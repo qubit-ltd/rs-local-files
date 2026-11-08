@@ -577,6 +577,7 @@ fn check_acl_length(length: usize, options: &LocalSecurityObservationOptions) ->
 }
 #[cfg(test)]
 mod tests {
+    #[cfg(target_os = "linux")]
     use std::fs;
 
     use super::File;
@@ -587,6 +588,7 @@ mod tests {
     #[cfg(target_os = "linux")]
     use super::LocalResourceKind;
     use super::LocalResult;
+    #[cfg(target_os = "linux")]
     use super::LocalSecurityObservationOptions;
     use super::acl_read_requires_retry;
     #[cfg(target_os = "linux")]

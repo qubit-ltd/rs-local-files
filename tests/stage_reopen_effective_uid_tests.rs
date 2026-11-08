@@ -9,6 +9,7 @@
 
 #[cfg(unix)]
 mod unix {
+    #[cfg(target_os = "linux")]
     use std::env;
     use std::fs;
     #[cfg(target_os = "linux")]
@@ -22,7 +23,9 @@ mod unix {
     #[cfg(target_os = "linux")]
     use std::process::Command;
 
+    #[cfg(target_os = "linux")]
     use libc::geteuid;
+    #[cfg(target_os = "linux")]
     use libc::getuid;
     #[cfg(target_os = "linux")]
     use libc::setresuid;

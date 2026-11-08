@@ -552,6 +552,7 @@ mod commit_cleanup_tests {
 
 #[cfg(all(test, unix))]
 mod native_write_failure_tests {
+    #[cfg(target_os = "linux")]
     use std::os::unix::fs::MetadataExt;
     use std::path::Path;
 

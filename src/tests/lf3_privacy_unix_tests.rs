@@ -10,12 +10,12 @@
 use std::ffi::OsStr;
 use std::fs;
 use std::fs::File;
-use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::FileTypeExt;
 use std::os::unix::fs::MetadataExt;
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::fs::symlink;
 
+#[cfg(target_os = "linux")]
 use crate::observation::LocalFileIdentity;
 use crate::policy::LocalOwnerAccessPolicy;
 use crate::temp::internal::privacy_unix;
@@ -385,6 +385,7 @@ fn test_owner_policy_unix_rejects_extended_access_acl() {
 fn test_owner_policy_failed_open_does_not_adopt_replacement() {
     use std::ffi::CString;
     use std::os::fd::AsRawFd;
+    use std::os::unix::ffi::OsStrExt;
     use std::os::unix::fs::MetadataExt;
 
     let temp = tempfile::tempdir().expect("temporary directory");
