@@ -11,6 +11,7 @@ use std::fs;
 use std::io::ErrorKind;
 use std::path::Path;
 use std::path::absolute;
+use std::process::Command;
 
 use crate::LocalFileOperation;
 use crate::LocalFileSystem;
@@ -23,6 +24,24 @@ use crate::tests::native_io_fault_tests::NativeIoPoint;
 
 #[test]
 fn test_observed_reader_observation_failure_keeps_namespace_and_pwd_context() {
+    const CHILD: &str = "RS_LOCAL_FILES_OBSERVED_READER_DELETED_CWD_CHILD";
+    const TEST: &str = "tests::observed_reader_context_tests::test_observed_reader_observation_failure_keeps_namespace_and_pwd_context";
+    if env::var_os(CHILD).is_none() {
+        let output = Command::new(env::current_exe().expect("test executable should be available"))
+            .args(["--exact", TEST, "--test-threads=1", "--nocapture"])
+            .env(CHILD, "1")
+            .output()
+            .expect("isolated child test should start");
+        assert!(
+            output.status.success(),
+            "isolated child failed: stdout={} stderr={}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(String::from_utf8_lossy(&output.stdout).contains("OBSERVED_READER_DELETED_CWD_COMPLETE"));
+        return;
+    }
+
     let cwd = env::current_dir().expect("process current directory");
     let host_fixture = tempfile::Builder::new()
         .prefix("observed-reader-context-")
@@ -87,6 +106,26 @@ fn test_observed_reader_observation_failure_keeps_namespace_and_pwd_context() {
     assert_eq!(error.operation(), LocalFileOperation::OpenReader);
     assert_eq!(error.path(), Some(Path::new("/work/item")));
     assert_eq!(error.current_directory(), Some(Path::new("/work")));
+
+    let original = env::current_dir().expect("child's original cwd should be available");
+    let fixture = tempfile::tempdir().expect("fixture");
+    let deleted_cwd = fixture.path().join("deleted-cwd");
+    let directory_path = fixture.path().join("directory");
+    fs::create_dir(&deleted_cwd).expect("disposable cwd should exist");
+    fs::create_dir(&directory_path).expect("observed directory should exist");
+    fs::write(directory_path.join("item"), b"payload").expect("host payload");
+    let host = LocalFileSystem::host().expect("Host construction should not query cwd");
+    env::set_current_dir(&deleted_cwd).expect("only this child should enter the disposable cwd");
+    let directory = host
+        .open_directory_with_options(Path::new("../directory"), &LocalDirectoryOpenOptions::new())
+        .expect("open retained directory while cwd is available");
+    fs::remove_dir(&deleted_cwd).expect("only the empty disposable child cwd should be removed");
+    let reader_result = directory.open_observed_reader(Path::new("item"), &LocalObservedReadOptions::new());
+    env::set_current_dir(&original).expect("child should restore a live cwd");
+    let mut reader = reader_result.expect("fixed observed reads retain authority when cwd is unavailable");
+    let contents = reader.read_to_end_limited(32).expect("read observed payload");
+    assert_eq!(b"payload".as_slice(), contents.as_slice());
+    println!("OBSERVED_READER_DELETED_CWD_COMPLETE");
 }
 
 #[test]

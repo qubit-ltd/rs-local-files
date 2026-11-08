@@ -615,5 +615,22 @@ mod tests {
                 if source.kind() == std::io::ErrorKind::Other
                     && source.to_string() == "observation-source-sentinel"
         ));
+
+        let fixture = tempfile::tempdir().expect("fixture");
+        let path = fixture.path().join("text.txt");
+        std::fs::write(&path, b"payload").expect("text fixture");
+        let filesystem = LocalFileSystem::host().expect("host filesystem");
+        let fault = crate::tests::native_io_fault_tests::NativeIoFaultGuard::fail_on(
+            crate::tests::native_io_fault_tests::NativeIoPoint::Read,
+            1,
+        );
+        let error = filesystem
+            .read_text_with_options(&path, &crate::options::LocalReadAllOptions::new())
+            .expect_err("a native read failure should retain the read operation context");
+        assert!(fault.fired(), "the native read fault should be consumed");
+        assert_eq!(LocalFileOperation::Read, error.operation());
+        assert_eq!(Some(path.as_path()), error.path());
+        assert_eq!(std::io::ErrorKind::Other, error.io_error_kind());
+        assert!(error.to_string().contains("injected native I/O contract failure"));
     }
 }
