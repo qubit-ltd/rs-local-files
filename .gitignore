@@ -115,3 +115,6 @@ public/
 /public/
 /pages-artifact.tar.gz
 __pycache__/
+
+# Runtime files created by local temp-file tests
+/qubit-local-files-*
