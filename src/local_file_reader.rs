@@ -138,11 +138,11 @@ impl LocalFileReader {
     /// earlier buffers received bytes, the accumulated count is returned and
     /// that later error is suppressed; an error before any progress is
     /// returned. Other platforms use the underlying vectored input
-    /// operation. The adapter allocates a vector of borrowed slice
-    /// descriptors for every non-empty call; it does not copy buffer
-    /// contents. Multi-buffer requests adapt their descriptors in a temporary
-    /// vector; a single-buffer request uses a stack descriptor. Backend
-    /// allocations are outside this adapter guarantee.
+    /// operation. Empty requests return without allocating adapter descriptors.
+    /// A single-buffer request uses a stack descriptor; multi-buffer requests
+    /// allocate a temporary vector of borrowed slice descriptors without
+    /// copying buffer contents. Backend allocations are outside this adapter
+    /// guarantee.
     ///
     /// # Parameters
     ///
