@@ -16,10 +16,38 @@ use crate::observation::LocalObservationRequirement;
 use crate::options::LocalObservedReadOptions;
 use crate::options::LocalPathBindingOptions;
 use crate::options::LocalSnapshotOptions;
+#[cfg(feature = "test-support")]
+use crate::test_support::TestFaultPlan;
+#[cfg(feature = "test-support")]
+use crate::test_support::TestFaultPoint;
 use crate::tests::native_io_fault_tests::NativeIoFaultGuard;
 use crate::tests::native_io_fault_tests::NativeIoPoint;
 
 const CONTENT: &[u8] = b"preserved payload";
+
+#[cfg(feature = "test-support")]
+#[test]
+fn test_host_canonicalize_reports_qualified_directory_metadata_failure() {
+    let fixture = tempfile::tempdir().expect("fixture");
+    let qualified_directory = fixture.path().join(".");
+    let filesystem =
+        LocalFileSystem::host()
+            .expect("host filesystem")
+            .with_test_faults(Some(TestFaultPlan::fail_once(
+                TestFaultPoint::Metadata,
+                std::io::ErrorKind::Other,
+            )));
+
+    let error = filesystem
+        .canonicalize(&qualified_directory)
+        .expect_err("the final directory metadata check should fail");
+
+    assert_eq!(error.operation(), LocalFileOperation::Metadata);
+    assert_eq!(error.path(), Some(qualified_directory.as_path()));
+    assert_eq!(error.current_directory(), None);
+    assert_eq!(error.io_error_kind(), std::io::ErrorKind::Other);
+    assert!(error.to_string().contains("injected local filesystem fault"));
+}
 
 fn rooted_fixture() -> (tempfile::TempDir, LocalFileSystem) {
     let fixture = tempfile::tempdir().expect("fixture");

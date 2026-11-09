@@ -313,7 +313,10 @@ impl LocalFileSystem {
         })?;
         if resolved.directory_required() {
             let metadata = match &self.core.namespace {
-                LocalNamespace::Host => std::fs::metadata(resolved.authority_relative())
+                LocalNamespace::Host => self
+                    .core
+                    .fail_if_requested(TestFaultPoint::Metadata)
+                    .and_then(|()| std::fs::metadata(resolved.authority_relative()))
                     .map(|metadata| LocalFileMetadata::from_native(&metadata))
                     .map_err(|error| {
                         LocalFileError::from_io(
