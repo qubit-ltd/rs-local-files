@@ -2,6 +2,8 @@
 //    Copyright (c) 2026 Haixing Hu.
 //
 //    SPDX-License-Identifier: Apache-2.0
+//
+//    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 //! Fixed regression sequences for the conditional-write state machine.
 
@@ -10,7 +12,7 @@ mod conditional_model;
 mod support;
 
 #[test]
-fn fixed_conditional_sequences_hit_their_oracles() {
+fn test_fixed_conditional_sequences_hit_their_oracles() {
     for rooted in [false, true] {
         for (name, data) in conditional_model::regression_sequences() {
             let witness = conditional_model::run_model(data, rooted)

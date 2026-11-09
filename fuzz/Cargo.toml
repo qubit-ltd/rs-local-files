@@ -32,7 +32,6 @@ path = "fuzz_targets/conditional_lifecycle.rs"
 test = false
 doc = false
 bench = false
-required-features = ["conditional"]
 
 [[bin]]
 name = "path_codec"
