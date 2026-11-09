@@ -1047,6 +1047,9 @@ fn test_windows_access_failure_after_child_mutation_reports_mixed_and_keeps_stag
             .access_state(),
         LocalTreeAccessState::CurrentUserOnly
     );
+    stage
+        .cleanup()
+        .expect("recovered stage should be explicitly cleanable");
 }
 
 #[cfg(unix)]

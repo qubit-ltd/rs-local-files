@@ -1726,10 +1726,12 @@ policy that requires it returns `Unsupported`. Mode bits alone are not a claim
 that extended ACLs exclude other identities; the library does not claim
 `CurrentUserOnly` access against an unverified Darwin ACL.
 
-Windows access transitions have not been verified on a native runner. Setting
-`read_only=false` restores the DACL but does not clear a pre-existing
-`FILE_ATTRIBUTE_READONLY`; restoring the current-user ACL therefore does not
-guarantee that a file which already had that attribute becomes writable.
+Native Windows CI at the reviewed baseline verified the DACL transition and
+confirmed that restoring the current-user ACL does not clear
+`FILE_ATTRIBUTE_READONLY`; a file retaining that attribute may remain
+unwritable. The baseline run did not begin with the attribute already set
+before policy conversion. The added regression for that case still needs a
+native Windows run. See the [RLF5 Windows access evidence](review-rlf5-windows-access-evidence.md).
 
 ### Recover a read-only staged tree
 

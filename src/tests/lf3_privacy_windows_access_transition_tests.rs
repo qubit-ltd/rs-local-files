@@ -128,6 +128,67 @@ fn test_review_windows_access_transition_preserves_readonly_attribute_and_acl() 
 
 #[cfg(windows)]
 #[test]
+fn test_review_windows_owner_policy_preserves_preexisting_readonly_attribute() {
+    let (directory, parent) = test_parent();
+    let file = create_private_file_at(&parent, OsStr::new("preexisting-readonly"))
+        .expect("create current-user-only file");
+    let path = directory.path().join("preexisting-readonly");
+
+    let mut information = basic_info(&file);
+    information.FileAttributes |= FILE_ATTRIBUTE_READONLY;
+    assert_ne!(
+        unsafe {
+            windows_sys::Win32::Storage::FileSystem::SetFileInformationByHandle(
+                file.as_raw_handle().cast(),
+                FileBasicInfo,
+                (&information as *const FILE_BASIC_INFO).cast(),
+                std::mem::size_of::<FILE_BASIC_INFO>() as u32,
+            )
+        },
+        0,
+        "set pre-existing FILE_ATTRIBUTE_READONLY",
+    );
+    assert_ne!(
+        basic_info(&file).FileAttributes & FILE_ATTRIBUTE_READONLY,
+        0
+    );
+
+    apply_current_user_access(&file, false, true).expect("apply read-only owner policy");
+    verify_current_user_access(&file, false, true).expect("verify read-only owner DACL");
+    apply_current_user_access(&file, false, false).expect("restore current-user-only owner policy");
+    verify_current_user_access(&file, false, false).expect("verify restored owner DACL");
+    assert_ne!(
+        basic_info(&file).FileAttributes & FILE_ATTRIBUTE_READONLY,
+        0,
+        "restoring the DACL must preserve the pre-existing read-only attribute",
+    );
+    assert!(
+        OpenOptions::new().write(true).open(&path).is_err(),
+        "the preserved read-only attribute must continue to deny a write handle",
+    );
+
+    let mut information = basic_info(&file);
+    information.FileAttributes &= !FILE_ATTRIBUTE_READONLY;
+    assert_ne!(
+        unsafe {
+            windows_sys::Win32::Storage::FileSystem::SetFileInformationByHandle(
+                file.as_raw_handle().cast(),
+                FileBasicInfo,
+                (&information as *const FILE_BASIC_INFO).cast(),
+                std::mem::size_of::<FILE_BASIC_INFO>() as u32,
+            )
+        },
+        0,
+        "clear the read-only attribute for fixture cleanup",
+    );
+    OpenOptions::new()
+        .write(true)
+        .open(&path)
+        .expect("clearing the attribute restores write access");
+}
+
+#[cfg(windows)]
+#[test]
 fn test_review_windows_access_transition_does_not_set_readonly_on_directories() {
     let (_directory, parent) = test_parent();
     let directory = create_private_directory_at(&parent, OsStr::new("access-transition-directory"))

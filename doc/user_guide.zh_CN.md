@@ -1379,8 +1379,9 @@ macOS 上尚未实现精确 Unix owner-access ACL 验证，因此需要该验证
 `Unsupported`。单独设置 mode bits 不表示扩展 ACL 已排除其他身份；库不声称在未经验证的 Darwin ACL
 上实现了 `CurrentUserOnly`。
 
-Windows 的访问转换尚无原生运行验证。实现设置 `read_only=false` 时只恢复 DACL，不会清除已有的
-`FILE_ATTRIBUTE_READONLY`；因此恢复当前用户 ACL 不保证一个原先带只读属性的文件可重新写入。
+已审查基线的原生 Windows CI 验证了 DACL 转换，并确认恢复当前用户 ACL 不会清除
+`FILE_ATTRIBUTE_READONLY`；保留该属性的文件仍可能不可写。基线运行未覆盖在策略转换前就已设置该属性的对象；
+新增回归仍需在原生 Windows 上运行。详见 [RLF5 Windows 访问证据](review-rlf5-windows-access-evidence.md)。
 
 ### 恢复只读暂存树
 
