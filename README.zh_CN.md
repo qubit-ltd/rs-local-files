@@ -258,10 +258,10 @@ Host 目录复制预检可能跟随已有的最终目标链接来判断重叠。
 ## 平台范围
 
 CI 配置了 Linux、Windows 和 macOS 运行时测试；本次修改是否通过，以对应 CI 结果为准。部分 Windows
-清理、条件写入、私有资源和 sealed cleanup 行为仍需原生执行证据；编译检查和 Linux 上执行数为 0 的 Windows
-专属测试筛选，均不能证明运行行为。详见[Windows 暂存与清理证据](doc/review-rlf4-windows-staging-cleanup-evidence.md)
-和 [Windows 枚举证据](doc/review-rlf3-windows-evidence.md)，了解已记录的范围与限制。
-枚举索引中的原生通过记录属于较早源码版本；暂存和 sealed cleanup 在当前版本仍待验证。
+Windows 暂存清理和 sealed cleanup 在历史 revision
+[`251e103bd9c60bf749e60453e688cf9ac4bde6f2`](https://github.com/qubit-ltd/rs-local-files/commit/251e103bd9c60bf749e60453e688cf9ac4bde6f2)
+有 Windows Server 2025 NTFS 原生记录：默认及 `--all-features` 配置下各 3 项暂存测试通过；所选 sealed cleanup 测试在默认配置下为 7/7、在 `--all-features` 配置下为 11/11。该记录只覆盖此 revision 与所列测试，实施基线 `c5639417080648da263216f698893c3a6c3c7f2d` 尚无对应原生覆盖；其他条件打开和私有资源行为也不在该记录范围内。
+详见[Windows 暂存与清理证据](doc/review-rlf4-windows-staging-cleanup-evidence.md)及独立的[Windows 枚举证据](doc/review-rlf3-windows-evidence.md)。所引 run 的两个 Windows job 成功，但整个 workflow 因 coverage 门槛失败。
 本 crate CI 只验证当前 crate；adapter 兼容性由 adapter 仓库或独立集成 job 负责。FreeBSD 暂不支持：当前原生检查只覆盖编译和少量兼容性合同，
 不再运行完整行为测试套件。各 API 失败用例及原因见 [FreeBSD 兼容性说明](doc/freebsd-compatibility.zh_CN.md)。Android 仍配置为编译检查。
 本 crate 不承诺这些目标上的运行时保证。`capabilities()` 只报告当前 build 是否实现了

@@ -1529,9 +1529,8 @@ Rooted metadata 等操作对不含链接的普通路径使用私有的一次顺�
 
 CI 配置了 Linux、Windows 和 macOS 运行时测试；具体修改的验证状态以实际 CI 结果为准。
 FreeBSD 暂不支持；原生 workflow 只做编译和少量合同检查，不运行完整行为套件。详细失败 API 和用例见[兼容性说明](freebsd-compatibility.zh_CN.md)。
-Android 仍配置为编译检查。T3/T4 的 Windows 清理与条件写入行为，以及 LF-09 私有资源和
-LF-10 sealed 清理，尚无原生 Windows runner 证据时必须视为待验证：Linux 对应筛选为 0 tests，Windows
-GNU `cargo check --lib` 只能证明可编译，不能证明运行行为。
+Android 仍配置为编译检查。暂存清理及 LF-10 sealed 清理已有 Windows Server 2025 NTFS 历史原生结果，revision 为
+[`251e103bd9c60bf749e60453e688cf9ac4bde6f2`](https://github.com/qubit-ltd/rs-local-files/commit/251e103bd9c60bf749e60453e688cf9ac4bde6f2)：默认与 `--all-features` 下各 3 项暂存测试通过；所选 sealed cleanup 测试在默认配置下 7/7、在 `--all-features` 配置下 11/11。该结果不证明实施基线 `c5639417080648da263216f698893c3a6c3c7f2d` 的覆盖；T3/T4 恢复、条件打开及 LF-09 私有资源行为不在记录范围内。详见 [Windows 暂存与清理证据](review-rlf4-windows-staging-cleanup-evidence.md)。Linux 筛选执行 0 个 Windows 测试、Windows GNU `cargo check --lib` 均不构成运行证据。
 本 crate CI 仅验证本 crate；下游 adapter 的兼容性和集成由 adapter 仓库或独立集成负责。
 同级 path dependency 的源码提交固定在 `.infra/ci/local-path-dependencies.tsv`，并由 conditional-write
 和 FreeBSD 准备步骤重复引用。更新基线时须同步修改这些位置，并核对准备后的仓库 `HEAD`。
@@ -1589,4 +1588,4 @@ FreeBSD 当前支持边界见 [FreeBSD 兼容性说明](freebsd-compatibility.zh
 
 固定目录句柄按调用方原始相对路径逐组件解析，并在解析期间应用句柄与调用预算，不会先将路径词法归一化后替代原始解析配方。`LocalWriteOutcome::bytes_written()` 现返回 `u64`，单次 I/O 调用和切片长度仍为 `usize`。将累计值绑定到 `usize` 的调用方应迁移到 `u64`；只有需要索引时才进行可检查的转换。
 
-RLF2-Q02 已证实并修复：Unix 清理通过保留的父目录执行 no-follow metadata 身份验证，因此 owner-read 权限不是额外清理前提。当前源码版本的 Windows sealed cleanup 和暂存清理仍待验证。RLF2-Q03/RLF3-Q01 采用当前 fail-closed 合同：无法重新打开独立 Windows 目录句柄时，枚举返回 `Unsupported`。历史记录称源码版本 `daa0e0282a575885c904182cc1c456ba2e28329f` 的原生 Windows 精确测试在两种 feature 配置下各执行 1 项并通过；日志未记录卷类型或相关账户权限，且本轮未取得当前版本原生日志，不能外推。详见 [Windows 枚举证据](review-rlf3-windows-evidence.md)。当前合同不再要求历史六次 fallback 游标测试。
+RLF2-Q02 已证实并修复：Unix 清理通过保留的父目录执行 no-follow metadata 身份验证，因此 owner-read 权限不是额外清理前提。暂存清理与所选 LF-10 sealed cleanup 测试已有 Windows Server 2025 NTFS 历史原生结果，revision 为 [`251e103bd9c60bf749e60453e688cf9ac4bde6f2`](https://github.com/qubit-ltd/rs-local-files/commit/251e103bd9c60bf749e60453e688cf9ac4bde6f2)：两种 feature 配置下暂存各 3 项通过；sealed cleanup 在默认配置下 7/7、在 `--all-features` 配置下 11/11。记录没有证明实施基线 `c5639417080648da263216f698893c3a6c3c7f2d` 已覆盖。RLF2-Q03/RLF3-Q01 采用当前 fail-closed 合同：无法重新打开独立 Windows 目录句柄时，枚举返回 `Unsupported`。其独立历史记录称源码版本 `daa0e0282a575885c904182cc1c456ba2e28329f` 的原生 Windows 精确测试在两种 feature 配置下各执行 1 项并通过；日志未记录卷类型或相关账户权限，且未取得当前版本原生日志，不能外推。详见 [Windows 枚举证据](review-rlf3-windows-evidence.md)。当前合同不再要求历史六次 fallback 游标测试。
