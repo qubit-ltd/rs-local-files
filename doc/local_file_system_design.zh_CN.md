@@ -1654,6 +1654,11 @@ Conditional writer 错误在可用时保留创建时的 PWD context。commit、a
 读取 helper 即使在打开 reader 阶段失败，也保留公开的 `Read` operation；完整读取的结构化错误还会保留
 解析后的命名空间路径和本次请求捕获的 PWD。
 
+读取字节上限错误通过 `LocalFileError::read_limit_error()` 查询，其中的
+`LocalReadLimitError { limit, observed }` 保留上限和证据。`observed` 是预检时看到的 metadata
+长度，或读取证明的下界（增长哨兵处为上限加一），不代表文件最终长度。分配失败仍分类为
+`ResourceLimit`，并保留原生分配错误及稳定原因；容量运算溢出使用独立原因，不伪报为输入超限。
+
 ### 19.3 Error kind
 
 `LocalFileErrorKind` 至少区分：

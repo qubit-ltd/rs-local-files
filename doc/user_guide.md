@@ -1622,6 +1622,33 @@ inspect `effect_state()` and `cause_kind()` separately before retrying. A basic
 error whose `effect_state()` is `None` carries insufficient effect evidence and
 must not be treated as `Unchanged`.
 
+For bounded reads, branch on `read_limit_error()` to distinguish a proven
+input-limit violation from a memory-allocation failure. The `observed()` value
+is a metadata length or lower bound, not necessarily the file's final length.
+Allocation failures remain `ResourceLimit` and retain their underlying I/O
+source; avoid matching diagnostic text.
+
+```rust,no_run
+use std::path::Path;
+
+use qubit_local_files::LocalFileSystem;
+use qubit_local_files::error::LocalFileErrorKind;
+use qubit_local_files::options::LocalReadAllOptions;
+
+let filesystem = LocalFileSystem::host()?;
+if let Err(error) = filesystem.read_all_with_options(
+    Path::new("input.bin"),
+    &LocalReadAllOptions::new().with_max_bytes(1 << 20),
+) {
+    if let Some(limit) = error.read_limit_error() {
+        eprintln!("observed {} bytes above limit {}", limit.observed(), limit.limit());
+    } else if error.kind() == LocalFileErrorKind::ResourceLimit {
+        eprintln!("read allocation failed: {:?}", error.reason());
+    }
+}
+# Ok::<(), Box<dyn std::error::Error>>(())
+```
+
 
 ## Bounded resolution and security policy
 

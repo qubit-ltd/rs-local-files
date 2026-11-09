@@ -1508,6 +1508,14 @@ Read helpers retain the public `Read` operation even when opening a reader
 fails; complete reads also preserve their resolved namespace path and captured
 PWD in structured errors.
 
+Read byte-limit failures retain `LocalReadLimitError { limit, observed }` and
+are queried through `LocalFileError::read_limit_error()`. `observed` is either
+the metadata length seen during preflight or a proven lower bound (the
+configured limit plus one at the growth sentinel), not a claim about final file
+length. Allocation failures remain `ResourceLimit` and retain their native
+allocation error and a stable reason; capacity arithmetic overflow has a
+separate reason and is not reported as an input limit breach.
+
 ```text
 kind: InvalidPath
 operation: OpenReader

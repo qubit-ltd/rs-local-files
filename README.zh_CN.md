@@ -310,7 +310,13 @@ cargo test --all-features
 
 # 检查代码覆盖率
 ./.infra/bin/coverage.sh
+
+# 生成带本地运行来源信息的覆盖率报告
+./scripts/run-coverage-with-provenance.sh
 ```
+
+项目 wrapper 为本地覆盖率运行记录来源信息。共享 CI 的覆盖率产物仍附属于对应 workflow run，
+wrapper 不会替代这些产物。
 
 ## 许可证
 

@@ -405,7 +405,13 @@ cargo test --all-features
 
 # Check code coverage
 ./.infra/bin/coverage.sh
+
+# Create a local coverage report with revision and run provenance
+./scripts/run-coverage-with-provenance.sh
 ```
+
+The project wrapper records provenance for local coverage runs. Shared CI coverage
+artifacts remain attached to their workflow runs; the wrapper does not replace them.
 
 ## License
 

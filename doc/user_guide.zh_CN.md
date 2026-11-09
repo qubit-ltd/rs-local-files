@@ -1509,6 +1509,31 @@ assert!(!matches!(
 `effect_state()` 返回 `None` 表示基础错误没有足够证据推断命名空间副作用；它不表示
 `Unchanged`。
 
+对有上限的读取，可用 `read_limit_error()` 区分已证明的输入超限与内存分配失败。
+`observed()` 是 metadata 长度或读取证明的下界，不一定是文件最终长度。分配失败仍分类为
+`ResourceLimit`，并保留底层 I/O source；不要匹配诊断文本。
+
+```rust,no_run
+use std::path::Path;
+
+use qubit_local_files::LocalFileSystem;
+use qubit_local_files::error::LocalFileErrorKind;
+use qubit_local_files::options::LocalReadAllOptions;
+
+let filesystem = LocalFileSystem::host()?;
+if let Err(error) = filesystem.read_all_with_options(
+    Path::new("input.bin"),
+    &LocalReadAllOptions::new().with_max_bytes(1 << 20),
+) {
+    if let Some(limit) = error.read_limit_error() {
+        eprintln!("观察到 {} 字节，超过上限 {}", limit.observed(), limit.limit());
+    } else if error.kind() == LocalFileErrorKind::ResourceLimit {
+        eprintln!("读取分配失败：{:?}", error.reason());
+    }
+}
+# Ok::<(), Box<dyn std::error::Error>>(())
+```
+
 Unix 上，默认 feature 与 `test-support` 构建中的 `LocalFileReader::read_vectored` 都使用
 文件描述符的原生向量读取路径。Windows 继续使用平台所需的顺序读取回退；如果后续 buffer
 读取失败，回退实现会返回已经累计读取的字节数，保持 `Read` 的进度语义。
