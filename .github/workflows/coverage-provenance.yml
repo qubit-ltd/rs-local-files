@@ -1,0 +1,43 @@
+name: Coverage with provenance
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  coverage:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.94.0
+          components: llvm-tools-preview
+      - name: Install cargo-llvm-cov
+        run: cargo install cargo-llvm-cov --locked
+      - name: Prepare local path dependencies
+        run: ./.infra/bin/prepare-local-path-dependencies.sh
+      - name: Collect coverage and provenance
+        run: ./scripts/run-coverage-with-provenance.sh
+      - name: Upload coverage reports and provenance
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: coverage-provenance-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: warn
+          path: |
+            coverage-summary.md
+            coverage-metadata.json
+            coverage-provenance.log
+            coverage.json
+            ci-summary.json
+            coverage.txt
+            coverage-badge.json
+            lcov.info
+            target/infra/coverage/raw.json
+            target/llvm-cov/cobertura.xml
+            target/llvm-cov/html/
