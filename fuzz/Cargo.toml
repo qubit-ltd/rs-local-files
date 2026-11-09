@@ -12,10 +12,27 @@ cargo-fuzz = true
 libfuzzer-sys = "^0.4"
 qubit-io = "^0.19"
 qubit-local-files = { path = ".." }
+sha2 = { version = "^0.11", optional = true }
+
+[features]
+conditional = ["dep:sha2", "qubit-local-files/digest", "qubit-local-files/test-support"]
 
 [[test]]
 name = "lifecycle_model_tests"
 path = "fuzz_targets/lifecycle_model_tests.rs"
+
+[[test]]
+name = "conditional_model_tests"
+path = "fuzz_targets/conditional_model_tests.rs"
+required-features = ["conditional"]
+
+[[bin]]
+name = "conditional_lifecycle"
+path = "fuzz_targets/conditional_lifecycle.rs"
+test = false
+doc = false
+bench = false
+required-features = ["conditional"]
 
 [[bin]]
 name = "path_codec"
