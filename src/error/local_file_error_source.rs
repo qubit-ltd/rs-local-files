@@ -13,6 +13,7 @@ use std::io;
 
 use super::LocalFileError;
 use super::LocalPathCodecError;
+use super::LocalReadLimitError;
 use super::LocalResourceLimitError;
 
 /// Typed source retained by a local filesystem operation failure.
@@ -20,6 +21,8 @@ use super::LocalResourceLimitError;
 /// Debug output for [`Self::InvalidEncoding`] reports byte-length and decoding
 /// position metadata without printing the input body. The typed source still
 /// retains the original bytes for callers that explicitly need to inspect them.
+/// [`Self::ReadLimit`] retains an observed length and configured limit, while
+/// allocation failures remain available through [`Self::Io`].
 ///
 /// # Examples
 ///
@@ -54,6 +57,11 @@ pub enum LocalFileErrorSource {
         /// Retained structured resource-budget error.
         LocalResourceLimitError,
     ),
+    /// Observed read length exceeded its configured limit.
+    ReadLimit(
+        /// Retained read-limit facts.
+        LocalReadLimitError,
+    ),
     /// Structured failure retaining an explicit recovery resource.
     Recovery(
         /// The complete error and its owned recovery resource.
@@ -83,6 +91,7 @@ impl fmt::Debug for LocalFileErrorSource {
             Self::Io(error) => formatter.debug_tuple("Io").field(error).finish(),
             Self::PathCodec(error) => formatter.debug_tuple("PathCodec").field(error).finish(),
             Self::ResourceLimit(error) => formatter.debug_tuple("ResourceLimit").field(error).finish(),
+            Self::ReadLimit(error) => formatter.debug_tuple("ReadLimit").field(error).finish(),
             Self::Recovery(error) => formatter.debug_tuple("Recovery").field(error).finish(),
         }
     }
@@ -104,6 +113,7 @@ impl fmt::Display for LocalFileErrorSource {
             Self::Io(error) => error.fmt(formatter),
             Self::PathCodec(error) => error.fmt(formatter),
             Self::ResourceLimit(error) => error.fmt(formatter),
+            Self::ReadLimit(error) => error.fmt(formatter),
             Self::Recovery(error) => error.fmt(formatter),
         }
     }
@@ -127,6 +137,7 @@ impl Error for LocalFileErrorSource {
             Self::Io(error) => Some(error),
             Self::PathCodec(error) => Some(error),
             Self::ResourceLimit(error) => Some(error),
+            Self::ReadLimit(error) => Some(error),
             Self::Recovery(error) => Some(error.as_ref()),
         }
     }

@@ -19,6 +19,7 @@ use super::LocalFileErrorKind;
 use super::LocalFileErrorSource;
 use super::LocalFileOperation;
 use super::LocalPathCodecError;
+use super::LocalReadLimitError;
 use super::LocalResourceLimitError;
 use crate::LocalTempRecovery;
 
@@ -217,6 +218,36 @@ impl LocalFileError {
         }
     }
 
+    /// Creates a read-limit error retaining the configured limit and evidence.
+    ///
+    /// # Parameters
+    /// - `operation`: Filesystem operation associated with the read.
+    /// - `path`: Optional path in the caller's namespace.
+    /// - `source`: Read-limit facts to retain.
+    ///
+    /// # Returns
+    /// A `ResourceLimit` error with a typed read-limit source.
+    #[inline]
+    pub(crate) fn from_read_limit(
+        operation: LocalFileOperation,
+        path: Option<PathBuf>,
+        source: LocalReadLimitError,
+    ) -> Self {
+        Self {
+            kind: LocalFileErrorKind::ResourceLimit,
+            operation,
+            current_directory: None,
+            path,
+            target: None,
+            reason: None,
+            detail: None,
+            source: Some(LocalFileErrorSource::ReadLimit(source)),
+            effect_state: None,
+            cleanup_error: None,
+            temp_recovery: None,
+        }
+    }
+
     /// Creates an invalid-encoding error while retaining the UTF-8 failure.
     ///
     /// # Parameters
@@ -273,6 +304,7 @@ impl LocalFileError {
             Some(LocalFileErrorSource::Recovery(error)) => error.cause_kind(),
             Some(LocalFileErrorSource::Io(source)) => Some(classify_io_error(source)),
             Some(LocalFileErrorSource::ResourceLimit(_)) => Some(LocalFileErrorKind::ResourceLimit),
+            Some(LocalFileErrorSource::ReadLimit(_)) => Some(LocalFileErrorKind::ResourceLimit),
             Some(LocalFileErrorSource::PathCodec(_)) => Some(LocalFileErrorKind::InvalidPath),
             None => None,
         }
@@ -409,6 +441,20 @@ impl LocalFileError {
         match self.source.as_ref() {
             Some(LocalFileErrorSource::ResourceLimit(error)) => Some(error),
             Some(LocalFileErrorSource::Recovery(error)) => error.resource_limit_error(),
+            _ => None,
+        }
+    }
+
+    /// Returns typed evidence that an observed read exceeded its byte limit.
+    ///
+    /// This accessor also searches a retained recovery error. Allocation
+    /// failures are classified as `ResourceLimit` but do not produce this
+    /// value.
+    #[inline]
+    pub fn read_limit_error(&self) -> Option<&LocalReadLimitError> {
+        match self.source.as_ref() {
+            Some(LocalFileErrorSource::ReadLimit(error)) => Some(error),
+            Some(LocalFileErrorSource::Recovery(error)) => error.read_limit_error(),
             _ => None,
         }
     }
@@ -757,6 +803,7 @@ fn standard_io_error_kind(error: &LocalFileError) -> io::ErrorKind {
         Some(LocalFileErrorSource::Recovery(error)) => error.io_error_kind(),
         Some(LocalFileErrorSource::PathCodec(_)) => io::ErrorKind::InvalidInput,
         Some(LocalFileErrorSource::ResourceLimit(_)) => io::ErrorKind::Other,
+        Some(LocalFileErrorSource::ReadLimit(_)) => io::ErrorKind::Other,
         None => match error.kind {
             LocalFileErrorKind::AlreadyExists => io::ErrorKind::AlreadyExists,
             LocalFileErrorKind::InvalidPath | LocalFileErrorKind::InvalidOptions | LocalFileErrorKind::InvalidState => {

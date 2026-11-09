@@ -73,6 +73,9 @@ fn test_rooted_read_limits_keep_bound_path_and_pwd() {
         assert_eq!(error.operation(), LocalFileOperation::Read);
         assert_eq!(error.path(), Some(Path::new("/sub/local")));
         assert_eq!(error.current_directory(), Some(Path::new("/sub")));
+        let facts = error.read_limit_error().expect("typed read-limit details");
+        assert_eq!(facts.limit(), 1);
+        assert_eq!(facts.observed(), 5);
     }
 }
 

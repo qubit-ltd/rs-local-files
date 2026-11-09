@@ -22,6 +22,7 @@ use super::operation_error;
 use super::resolve_operation_path;
 use super::validate_scope_symlink_policy;
 use super::with_current_directory;
+use crate::error::LocalReadLimitError;
 #[cfg(feature = "test-support")]
 use crate::local::take_test_support;
 use crate::observation::LocalObservationRequirement;
@@ -163,7 +164,11 @@ impl LocalFileSystem {
         let before = observed.observation().clone();
         if before.metadata().len() > options.max_bytes() {
             return Err(operation_error(
-                LocalFileError::new(LocalFileErrorKind::ResourceLimit, LocalFileOperation::Read),
+                LocalFileError::from_read_limit(
+                    LocalFileOperation::Read,
+                    None,
+                    LocalReadLimitError::new(options.max_bytes(), before.metadata().len()),
+                ),
                 LocalFileOperation::Read,
                 resolved.namespace_absolute(),
                 None,
@@ -310,8 +315,14 @@ impl LocalFileSystem {
         )?;
         let maximum = options.max_bytes();
         if maximum.is_some_and(|limit| reader.metadata().len() > limit) {
+            let observed = reader.metadata().len();
+            let limit = maximum.expect("metadata preflight requires a limit");
             return Err(operation_error(
-                LocalFileError::new(LocalFileErrorKind::ResourceLimit, LocalFileOperation::Read),
+                LocalFileError::from_read_limit(
+                    LocalFileOperation::Read,
+                    None,
+                    LocalReadLimitError::new(limit, observed),
+                ),
                 LocalFileOperation::Read,
                 resolved.namespace_absolute(),
                 None,
@@ -407,8 +418,11 @@ where
         if count == 0 {
             break;
         }
-        reserve(&mut result, count)
-            .map_err(|_| LocalFileError::new(LocalFileErrorKind::ResourceLimit, LocalFileOperation::Read))?;
+        reserve(&mut result, count).map_err(|source| {
+            LocalFileError::from_io(LocalFileOperation::Read, None, None, source)
+                .with_kind(LocalFileErrorKind::ResourceLimit)
+                .with_reason("unable to reserve memory for read data")
+        })?;
         result.extend_from_slice(&buffer[..count]);
     }
     Ok(result)

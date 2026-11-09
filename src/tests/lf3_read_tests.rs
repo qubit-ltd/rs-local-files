@@ -5,6 +5,7 @@
 //
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
+use std::error::Error;
 use std::path::Path;
 
 use crate::LocalFileSystem;
@@ -27,17 +28,40 @@ fn test_lf3_read_complete_limit_utf8() {
             .unwrap(),
         [1, 2, 3]
     );
+    let error = fs
+        .read_all_with_options(&path, &LocalReadAllOptions::new().with_max_bytes(2))
+        .unwrap_err();
+    assert_eq!(error.kind(), LocalFileErrorKind::ResourceLimit);
+    let facts = error.read_limit_error().expect("typed read limit");
+    assert_eq!(facts.limit(), 2);
+    assert_eq!(facts.observed(), 3);
+    assert_eq!(facts.to_string(), "observed read length 3 exceeds limit 2");
     assert_eq!(
-        fs.read_all_with_options(&path, &LocalReadAllOptions::new().with_max_bytes(2))
-            .unwrap_err()
-            .kind(),
-        LocalFileErrorKind::ResourceLimit
+        Error::source(&error).and_then(|source| source.downcast_ref::<crate::error::LocalReadLimitError>()),
+        Some(facts),
     );
+}
+
+#[test]
+fn test_lf3_read_text_complete_utf8_and_invalid_encoding() {
+    let fixture = tempfile::tempdir().expect("temporary directory");
+    let path = fixture.path().join("text");
+    std::fs::write(&path, b"complete text").expect("write UTF-8 text");
+    let fs = LocalFileSystem::host().expect("host filesystem");
+    assert_eq!(fs.read_text(&path).expect("read UTF-8 text"), "complete text");
     std::fs::write(&path, [255_u8]).expect("write invalid UTF-8");
     assert_eq!(
         fs.read_text(Path::new(path.as_os_str())).unwrap_err().kind(),
         LocalFileErrorKind::InvalidEncoding
     );
+}
+
+#[test]
+fn test_lf3_read_all_accepts_maximum_and_empty_zero_limit() {
+    let fixture = tempfile::tempdir().expect("temporary directory");
+    let path = fixture.path().join("bytes");
+    std::fs::write(&path, [1_u8, 2, 3]).expect("write fixture");
+    let fs = LocalFileSystem::host().expect("host filesystem");
     assert!(
         fs.read_all_with_options(&path, &LocalReadAllOptions::new().with_max_bytes(u64::MAX))
             .is_ok()
@@ -67,12 +91,13 @@ fn test_lf3_read_all_rejects_growth_at_sentinel() {
             .write_all(b"d")
             .expect("append growth byte");
     });
-    assert_eq!(
-        fs.read_all_with_options(&path, &LocalReadAllOptions::new().with_max_bytes(3))
-            .unwrap_err()
-            .kind(),
-        LocalFileErrorKind::ResourceLimit,
-    );
+    let error = fs
+        .read_all_with_options(&path, &LocalReadAllOptions::new().with_max_bytes(3))
+        .unwrap_err();
+    assert_eq!(error.kind(), LocalFileErrorKind::ResourceLimit);
+    let facts = error.read_limit_error().expect("sentinel identifies growth");
+    assert_eq!(facts.limit(), 3);
+    assert_eq!(facts.observed(), 4);
 }
 
 #[test]
