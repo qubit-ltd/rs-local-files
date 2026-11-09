@@ -60,6 +60,9 @@ Callers choose depth, entry, byte, open-handle, deadline, retry, and name-attemp
 budgets through options. Initial budgets for general operations are unbounded. The crate validates
 explicit options, reports structured limit failures, prevents internal cycles,
 and maps operating-system resource errors without inventing business limits.
+Resolution restrictions fixed when an authority is opened are shared authority
+constraints: descendants inherit them and may only tighten them. Instance
+defaults and operation-local budgets remain outside the shared core.
 The staged-directory owner-access policy is a local safety exception: when its
 `LocalListOptions::max_entries` is `None`, collection is capped at 256 child
 entries before any permission mutation; the root is not counted. An explicit
@@ -182,6 +185,9 @@ pub struct LocalFileSystem {
 ```
 
 - authority and its capability snapshot are immutable;
+- resolution restrictions and validation policy fixed when the authority is
+  opened are immutable and inherited by descendants, which may only tighten
+  them;
 - PWD and defaults belong to one instance and are copied on clone;
 - defaults are never placed in the shared `Arc`;
 - mutating a clone never mutates another clone's configuration;
@@ -191,9 +197,11 @@ pub struct LocalFileSystem {
 ### 5.2 LocalAuthorityCore
 
 The authority core owns namespace kind, the opened root, diagnostic anchor,
-capability snapshot, objective filesystem limits, and shared platform resource
-state. Caller budgets, options, PWD, and business authorization remain outside
-that core.
+capability snapshot, objective filesystem limits, immutable resolution limits
+and validation policy fixed when the authority is opened, and shared platform
+resource state. These restrictions are inherited by descendants and may only
+be tightened. Instance defaults and operation-local budgets remain outside the
+shared core, as do PWD and business authorization.
 
 ### 5.3 Construction
 
@@ -734,8 +742,9 @@ identity does not define a content version. Rechecking resolves the original
 name under its retained authority and resolution contract. Resolution limits
 from path binding combine with enclosing filesystem or directory-handle limits
 by taking the stricter configured bound; they cannot loosen an enclosing
-limit. Ancestor count, retained path bytes, resolution budgets, and a
-cooperative deadline bound the work.
+limit. That enclosing contract includes restrictions retained by the authority
+core. Ancestor count, retained path bytes, resolution budgets, and a cooperative
+deadline bound the work.
 
 ### 13.3 Filesystem limits and space
 

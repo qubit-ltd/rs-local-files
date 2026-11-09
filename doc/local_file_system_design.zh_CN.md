@@ -57,7 +57,9 @@
 ### 2.2 调用方拥有策略决定权
 
 资源安全策略属于调用方。深度、条目数、字节数、打开句柄数、deadline 和重试次数等预算
-由调用方通过操作 Options 提供，一般操作的初始资源预算不限制。唯一局部例外是 staged-directory
+由调用方通过操作 Options 提供，一般操作的初始资源预算不限制。authority 打开时固定的解析约束
+属于共享 authority 限制，子 authority 会继承且只能收紧；实例默认选项和单次操作预算仍不共享。
+唯一局部例外是 staged-directory
 owner-access policy 收集：`LocalListOptions::max_entries` 为 `None` 时，默认最多收集 256 个子项，root
 不计入子项；超限会在权限 mutation 前以 `ResourceLimit` 失败。显式额度会替换 256 默认值，可以调高或调低，
 不会与 256 取较小值。调高额度可能同时保留更多 identity 和管理句柄。最小配置示例：
@@ -184,6 +186,7 @@ pub struct LocalFileSystem {
 这只是职责划分，不要求源码把所有字段写在一个文件中。关键不变量是：
 
 - authority 与能力快照不可变；
+- 打开 authority 时固定的解析限制和校验策略不可变，子 authority 会继承且只能收紧；
 - PWD 和默认策略属于具体实例；
 - 默认 Options 不放入共享 `Arc`；
 - 对一个 clone 的配置修改不影响其他 clone；
@@ -192,7 +195,8 @@ pub struct LocalFileSystem {
 
 ### 5.2 LocalAuthorityCore
 
-`LocalAuthorityCore` 只承担资源和平台 authority 生命周期：
+`LocalAuthorityCore` 承担资源和平台 authority 生命周期，并保留打开 authority 时固定的不可变解析限制与校验策略；
+子 authority 会继承且只能收紧这些约束。实例默认选项和单次操作预算不属于共享 core。
 
 - namespace kind：Host 或 Rooted；
 - Rooted 的唯一根 descriptor/handle；
@@ -201,7 +205,7 @@ pub struct LocalFileSystem {
 - authority 级文件系统客观限制；
 - 已打开资源需要共享的私有平台状态。
 
-Options、PWD、调用方预算和业务认证不属于 authority core。
+Options、PWD、单次操作预算和业务认证不属于 authority core。
 
 ### 5.3 构造
 
@@ -971,8 +975,8 @@ Path 泄漏。
 这些都是成功验证结果；未启用绑定时调用该方法返回 `InvalidState`。Windows Host 无法提供
 此绑定，会返回 `Unsupported`。检查只代表当时的路径观察，不会锁定名称，也不保证内容不变；
 对象 identity 不定义内容版本。复核会在保留的 authority 和解析合同下重新解析原名称。路径绑定的解析预算
-会与外层 filesystem 或 directory handle 的限制取较严格值，不能放宽外层限制。祖先数量、保留路径字节数、
-解析预算和协作式 deadline 限制绑定开销。
+会与外层 filesystem 或 directory handle 的限制取较严格值，不能放宽外层限制。外层合同包含 authority core
+保留的解析约束。祖先数量、保留路径字节数、解析预算和协作式 deadline 限制绑定开销。
 
 打开重试只在 `LocalReadOptions` 明确提供窗口时发生。重试不得吞掉不可重试错误，也不得在
 deadline 后继续。
