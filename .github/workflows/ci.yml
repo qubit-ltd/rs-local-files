@@ -140,6 +140,16 @@ jobs:
           run_named_test rooted_windows_symlink_tests test_rooted_copy_preserves_link_to_existing_external_file
           run_named_test rooted_windows_symlink_tests test_rooted_copy_uses_actual_reparse_target_instead_of_display_name
           run_named_test resolution_contract_tests test_opening_root_target_hook_sees_and_can_reject_raw_nt_substitute_name
+          run_named_test --lib tests::temp::internal::privacy_windows_tests::test_owner_policy_windows_create_apply_verify_uses_exact_dacl_mask
+          run_named_test --lib tests::temp::internal::privacy_windows_tests::test_owner_policy_windows_directory_create_apply_verify_uses_exact_dacl_mask
+          run_named_test --lib tests::lf3_privacy_windows_access_transition_tests::test_review_windows_access_transition_preserves_readonly_attribute_and_acl
+          run_named_test --lib tests::lf3_privacy_windows_access_transition_tests::test_review_windows_owner_policy_preserves_preexisting_readonly_attribute
+          run_named_test --lib tests::lf3_tree_publish_tests::test_windows_access_failure_after_child_mutation_reports_mixed_and_keeps_stage
+          run_named_test --lib tests::temp::internal::privacy_windows_tests::test_owner_policy_windows_create_apply_verify_uses_exact_dacl_mask --all-features
+          run_named_test --lib tests::temp::internal::privacy_windows_tests::test_owner_policy_windows_directory_create_apply_verify_uses_exact_dacl_mask --all-features
+          run_named_test --lib tests::lf3_privacy_windows_access_transition_tests::test_review_windows_access_transition_preserves_readonly_attribute_and_acl --all-features
+          run_named_test --lib tests::lf3_privacy_windows_access_transition_tests::test_review_windows_owner_policy_preserves_preexisting_readonly_attribute --all-features
+          run_named_test --lib tests::lf3_tree_publish_tests::test_windows_access_failure_after_child_mutation_reports_mixed_and_keeps_stage --all-features
           run_named_test --lib tests::rooted_copy_deadline_tests::test_rooted_link_kind_deadline_keeps_existing_file
           run_named_test windows_rooted_staging_cleanup_tests test_rooted_staging_abort_preserves_competitor_at_old_name
           run_named_test windows_rooted_staging_cleanup_tests test_rooted_staging_drop_preserves_competitor_at_old_name
@@ -160,6 +170,16 @@ jobs:
           printf '%s\n' "$model_test_output"
           if ! grep -Eq 'test result: ok\. [1-9][0-9]* passed;' <<< "$model_test_output"; then
             echo 'lifecycle model suite did not execute at least one test' >&2
+            exit 1
+          fi
+          cargo check --locked --manifest-path fuzz/Cargo.toml --features conditional --bins
+          conditional_model_output=$(cargo test --locked --manifest-path fuzz/Cargo.toml --features conditional --test conditional_model_tests 2>&1) || {
+            printf '%s\n' "$conditional_model_output"
+            exit 1
+          }
+          printf '%s\n' "$conditional_model_output"
+          if ! grep -Eq 'test result: ok\. [1-9][0-9]* passed;' <<< "$conditional_model_output"; then
+            echo 'conditional model suite did not execute at least one test' >&2
             exit 1
           fi
           cargo test --locked --test owner_policy_lifecycle_tests

@@ -130,8 +130,8 @@ fn test_review_windows_access_transition_preserves_readonly_attribute_and_acl() 
 #[test]
 fn test_review_windows_owner_policy_preserves_preexisting_readonly_attribute() {
     let (directory, parent) = test_parent();
-    let file = create_private_file_at(&parent, OsStr::new("preexisting-readonly"))
-        .expect("create current-user-only file");
+    let file =
+        create_private_file_at(&parent, OsStr::new("preexisting-readonly")).expect("create current-user-only file");
     let path = directory.path().join("preexisting-readonly");
 
     let mut information = basic_info(&file);
@@ -148,10 +148,7 @@ fn test_review_windows_owner_policy_preserves_preexisting_readonly_attribute() {
         0,
         "set pre-existing FILE_ATTRIBUTE_READONLY",
     );
-    assert_ne!(
-        basic_info(&file).FileAttributes & FILE_ATTRIBUTE_READONLY,
-        0
-    );
+    assert_ne!(basic_info(&file).FileAttributes & FILE_ATTRIBUTE_READONLY, 0);
 
     apply_current_user_access(&file, false, true).expect("apply read-only owner policy");
     verify_current_user_access(&file, false, true).expect("verify read-only owner DACL");
