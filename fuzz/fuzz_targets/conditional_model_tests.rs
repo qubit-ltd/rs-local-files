@@ -15,7 +15,7 @@ fn fixed_conditional_sequences_hit_their_oracles() {
         for (name, data) in conditional_model::regression_sequences() {
             let witness = conditional_model::run_model(data, rooted)
                 .unwrap_or_else(|| panic!("{name}: scratch root setup failed"));
-            conditional_model::assert_regression(name, &witness);
+            conditional_model::assert_regression(name, &witness, rooted);
         }
     }
 }

@@ -20,6 +20,7 @@ use std::path::Path;
 
 use qubit_io::Output;
 use qubit_io::Streams;
+use qubit_local_files::LocalConditionalWriter;
 use qubit_local_files::LocalFileSystem;
 use qubit_local_files::options::LocalWriteMode;
 use qubit_local_files::options::LocalWriteOptions;
@@ -37,6 +38,52 @@ use crate::support::FuzzRoot;
 const MAX_OPERATIONS: usize = 32;
 const MAX_PAYLOAD: usize = 256;
 
+fn read_optional(path: &Path) -> Option<Vec<u8>> {
+    match fs::read(path) {
+        Ok(bytes) => Some(bytes),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+        Err(error) => panic!("read model target: {error}"),
+    }
+}
+
+/// Whether this target, scope, and condition has documented support. Linux
+/// and macOS claim both scopes and conditions; Windows excludes Rooted Content;
+/// other platforms have no claimed conditional backend.
+fn unsupported_is_allowed(rooted: bool, content: bool) -> bool {
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    {
+        let _ = (rooted, content);
+        false
+    }
+    #[cfg(windows)]
+    {
+        rooted && content
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
+    {
+        let _ = (rooted, content);
+        true
+    }
+}
+
+fn require_open(
+    result: qubit_local_files::LocalResult<LocalConditionalWriter<Sha256>>,
+    unsupported_allowed: bool,
+    witness: &mut ConditionalWitness,
+) -> Option<LocalConditionalWriter<Sha256>> {
+    match result {
+        Ok(opened) => Some(opened),
+        Err(error)
+            if error.kind() == qubit_local_files::error::LocalFileErrorKind::Unsupported
+                && unsupported_allowed =>
+        {
+            witness.unsupported += 1;
+            None
+        }
+        Err(error) => panic!("unexpected conditional writer open failure: {error}"),
+    }
+}
+
 #[derive(Default, Debug)]
 pub(crate) struct ConditionalWitness {
     pub successful_commit: usize,
@@ -46,6 +93,7 @@ pub(crate) struct ConditionalWitness {
     pub drop: usize,
     pub race: usize,
     pub hook_io_error: usize,
+    pub ordinary_commit_io_error: usize,
     pub cleanup_error: usize,
     pub retained_candidate: usize,
     pub unsupported: usize,
@@ -74,9 +122,11 @@ pub(crate) fn run_model(data: &[u8], rooted: bool) -> Option<ConditionalWitness>
     let options = LocalWriteOptions::new(LocalWriteMode::CreateOrReplace);
     let mut writer = None;
     let mut candidate = Vec::new();
-    let mut before_writer: Option<Option<Vec<u8>>> = None;
+    let mut expected_target: Option<Vec<u8>> = None;
+    let mut target_known = true;
     let mut witness = ConditionalWitness::default();
     let mut pending_race = false;
+    let mut pending_hook_io_error = false;
     let mut race_sentinel: Option<Vec<u8>> = None;
     let mut cursor = 0;
 
@@ -93,18 +143,26 @@ pub(crate) fn run_model(data: &[u8], rooted: bool) -> Option<ConditionalWitness>
         match opcode {
             0 => {
                 if payload.is_empty() {
-                    let _ = fs::remove_file(&native_target);
+                    if let Err(error) = fs::remove_file(&native_target) {
+                        assert_eq!(error.kind(), std::io::ErrorKind::NotFound);
+                    }
+                    expected_target = None;
                 } else {
-                    let _ = fs::write(&native_target, payload);
+                    fs::write(&native_target, payload).expect("write model target");
+                    expected_target = Some(payload.to_vec());
                 }
+                target_known = true;
+                assert_eq!(read_optional(&native_target), expected_target);
             }
             1 | 2 | 7 | 8 | 9 => {
                 if writer.is_some() {
                     continue;
                 }
-                before_writer = Some(fs::read(&native_target).ok());
+                if (opcode == 2 || opcode == 9) && !target_known {
+                    continue;
+                }
                 let precondition = if opcode == 2 || opcode == 9 {
-                    let current = fs::read(&native_target).unwrap_or_default();
+                    let current = expected_target.clone().unwrap_or_default();
                     LocalWritePrecondition::Content(Sha256::digest(current))
                 } else {
                     LocalWritePrecondition::Absent
@@ -132,87 +190,123 @@ pub(crate) fn run_model(data: &[u8], rooted: bool) -> Option<ConditionalWitness>
                         .clone()
                         .with_conditional_test_hooks(TestConditionalHooks::once(point, action));
                     pending_race = opcode == 7;
+                    pending_hook_io_error = opcode == 8;
                     race_sentinel = (opcode == 7).then(|| payload.to_vec());
                     candidate.clear();
-                    match operation_filesystem.open_conditional_writer::<Sha256>(
-                        namespace_target,
-                        precondition,
-                        &options,
-                    ) {
-                        Ok(opened) => writer = Some(opened),
-                        Err(error)
-                            if error.kind()
-                                == qubit_local_files::error::LocalFileErrorKind::Unsupported =>
-                        {
-                            witness.unsupported += 1
-                        }
-                        Err(_) => {}
-                    }
+                    let content = opcode == 2 || opcode == 9;
+                    writer = require_open(
+                        operation_filesystem.open_conditional_writer::<Sha256>(
+                            namespace_target,
+                            precondition,
+                            &options,
+                        ),
+                        unsupported_is_allowed(rooted, content),
+                        &mut witness,
+                    );
                     continue;
                 }
                 candidate.clear();
-                match filesystem.open_conditional_writer::<Sha256>(
-                    namespace_target,
-                    precondition,
-                    &options,
-                ) {
-                    Ok(opened) => writer = Some(opened),
-                    Err(error)
-                        if error.kind()
-                            == qubit_local_files::error::LocalFileErrorKind::Unsupported =>
-                    {
-                        witness.unsupported += 1
-                    }
-                    Err(_) => {}
-                }
+                let content = opcode == 2 || opcode == 9;
+                writer = require_open(
+                    filesystem.open_conditional_writer::<Sha256>(
+                        namespace_target,
+                        precondition,
+                        &options,
+                    ),
+                    unsupported_is_allowed(rooted, content),
+                    &mut witness,
+                );
             }
             3 => {
                 if let Some(opened) = writer.as_mut() {
                     let bytes = &payload[..payload
                         .len()
                         .min(MAX_PAYLOAD.saturating_sub(candidate.len()))];
-                    if opened.write_fully(bytes).is_ok() {
-                        candidate.extend_from_slice(bytes);
-                    }
+                    opened.write_fully(bytes).unwrap_or_else(|error| {
+                        panic!("unexpected conditional candidate write failure: {error}")
+                    });
+                    candidate.extend_from_slice(bytes);
                 }
             }
             4 => {
                 if let Some(opened) = writer.take() {
                     match opened.commit() {
                         Ok(saved) => {
+                            assert!(
+                                !pending_hook_io_error,
+                                "injected hook I/O error was ignored"
+                            );
+                            assert!(!pending_race, "publication race unexpectedly succeeded");
                             witness.successful_commit += 1;
                             assert_eq!(saved.digest(), &Sha256::digest(&candidate));
-                            assert_eq!(
-                                fs::read(&native_target).expect("published target readable"),
-                                candidate
-                            );
+                            expected_target = Some(candidate.clone());
+                            target_known = true;
+                            assert_eq!(read_optional(&native_target), expected_target);
                             if !saved.cleanup_errors().is_empty() {
                                 witness.cleanup_error += 1;
                             }
+                            pending_race = false;
+                            pending_hook_io_error = false;
                         }
                         Err(error) => {
-                            if pending_race
-                                && error.publication()
-                                    == LocalConditionalPublicationState::NotPublished
-                            {
-                                witness.race += 1;
+                            let was_race = pending_race;
+                            if was_race {
                                 assert_eq!(
-                                    fs::read(&native_target)
-                                        .expect("race sentinel remains readable"),
-                                    race_sentinel.take().expect("race sentinel was captured"),
+                                    error.publication(),
+                                    LocalConditionalPublicationState::NotPublished
                                 );
+                                assert_eq!(
+                                    error.reason(),
+                                    qubit_local_files::error::LocalConditionalFailureReason::TargetExists
+                                );
+                                witness.race += 1;
+                                expected_target =
+                                    Some(race_sentinel.take().expect("race sentinel was captured"));
+                                target_known = true;
                             }
                             pending_race = false;
+                            match error.publication() {
+                                LocalConditionalPublicationState::NotPublished => {
+                                    if target_known {
+                                        assert_eq!(read_optional(&native_target), expected_target);
+                                    }
+                                }
+                                LocalConditionalPublicationState::Published => {
+                                    expected_target = Some(candidate.clone());
+                                    target_known = true;
+                                    assert_eq!(read_optional(&native_target), expected_target);
+                                }
+                                LocalConditionalPublicationState::Restored => {
+                                    if target_known {
+                                        assert_eq!(read_optional(&native_target), expected_target);
+                                    }
+                                }
+                                LocalConditionalPublicationState::Indeterminate => {
+                                    target_known = false;
+                                }
+                                _ => unreachable!("publication state handled"),
+                            }
                             if error.publication() == LocalConditionalPublicationState::NotPublished
                             {
                                 if error.reason() == qubit_local_files::error::LocalConditionalFailureReason::TargetExists { witness.absent_conflict += 1; }
                                 if error.reason() == qubit_local_files::error::LocalConditionalFailureReason::PreconditionMismatch { witness.content_mismatch += 1; }
                             }
-                            if error.reason()
+                            if pending_hook_io_error {
+                                assert_eq!(
+                                    error.reason(),
+                                    qubit_local_files::error::LocalConditionalFailureReason::Io
+                                );
+                                assert_eq!(
+                                    error.error().io_error_kind(),
+                                    std::io::ErrorKind::Other
+                                );
+                                witness.hook_io_error += 1;
+                            } else if error.reason()
                                 == qubit_local_files::error::LocalConditionalFailureReason::Io
                             {
-                                witness.hook_io_error += 1;
+                                witness.ordinary_commit_io_error += 1;
                             }
+                            pending_hook_io_error = false;
                             if error.candidate().is_some_and(|file| {
                                 file.role() == LocalRecoveryFileRole::CandidateCopy
                             }) {
@@ -234,21 +328,21 @@ pub(crate) fn run_model(data: &[u8], rooted: bool) -> Option<ConditionalWitness>
             5 => {
                 if let Some(mut opened) = writer.take() {
                     let _ = opened.abort().expect("abort candidate");
-                    assert_eq!(
-                        fs::read(&native_target).ok(),
-                        before_writer.take().expect("writer snapshot exists")
-                    );
+                    if target_known {
+                        assert_eq!(read_optional(&native_target), expected_target);
+                    }
                     pending_race = false;
+                    pending_hook_io_error = false;
                     witness.abort += 1;
                 }
             }
             6 => {
                 if writer.take().is_some() {
-                    assert_eq!(
-                        fs::read(&native_target).ok(),
-                        before_writer.take().expect("writer snapshot exists")
-                    );
+                    if target_known {
+                        assert_eq!(read_optional(&native_target), expected_target);
+                    }
                     pending_race = false;
+                    pending_hook_io_error = false;
                     witness.drop += 1;
                 }
             }
@@ -256,10 +350,13 @@ pub(crate) fn run_model(data: &[u8], rooted: bool) -> Option<ConditionalWitness>
         }
     }
     drop(writer);
+    if target_known {
+        assert_eq!(read_optional(&native_target), expected_target);
+    }
     Some(witness)
 }
 
-pub(crate) fn regression_sequences() -> [(&'static str, &'static [u8]); 8] {
+pub(crate) fn regression_sequences() -> [(&'static str, &'static [u8]); 9] {
     [
         ("absent commit", &[0, 0, 1, 0, 3, 1, b'B', 4, 0]),
         (
@@ -269,6 +366,10 @@ pub(crate) fn regression_sequences() -> [(&'static str, &'static [u8]); 8] {
         (
             "abort and drop",
             &[1, 0, 3, 1, b'X', 5, 0, 1, 0, 3, 1, b'Y', 6, 0],
+        ),
+        (
+            "external mutation then abort",
+            &[0, 1, b'A', 2, 0, 3, 1, b'B', 0, 1, b'C', 5, 0],
         ),
         ("content success", &[0, 1, b'A', 2, 0, 3, 1, b'B', 4, 0]),
         (
@@ -281,7 +382,14 @@ pub(crate) fn regression_sequences() -> [(&'static str, &'static [u8]); 8] {
     ]
 }
 
-pub(crate) fn assert_regression(name: &str, witness: &ConditionalWitness) {
+pub(crate) fn assert_regression(name: &str, witness: &ConditionalWitness, rooted: bool) {
+    let content = matches!(
+        name,
+        "content success" | "content mismatch" | "cleanup error"
+    );
+    if unsupported_is_allowed(rooted, content) && witness.unsupported > 0 {
+        return;
+    }
     match name {
         "absent commit" => assert!(witness.successful_commit > 0, "{witness:?}"),
         "absent conflict retains candidate" => assert!(
@@ -289,6 +397,7 @@ pub(crate) fn assert_regression(name: &str, witness: &ConditionalWitness) {
             "{witness:?}"
         ),
         "abort and drop" => assert!(witness.abort > 0 && witness.drop > 0, "{witness:?}"),
+        "external mutation then abort" => assert!(witness.abort > 0, "{witness:?}"),
         "content success" => assert!(witness.successful_commit > 0, "{witness:?}"),
         "content mismatch" => assert!(witness.content_mismatch > 0, "{witness:?}"),
         "publication race" => assert!(
