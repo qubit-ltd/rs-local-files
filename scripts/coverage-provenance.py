@@ -25,7 +25,6 @@ OUTPUTS = (
     "coverage-badge.json",
     "ci-summary.json",
     "target/llvm-cov",
-    "target/infra/coverage/raw.json",
 )
 CONFIG_FILES = (
     ".infra/coverage/coverage.json",
@@ -63,7 +62,8 @@ def git_info(root: Path) -> dict[str, Any]:
     return {"head": head, "dirty": bool(status)}
 
 
-def load_configuration(root: Path, *, test_mode: bool) -> tuple[dict[str, Any], dict[str, str | None]]:
+def load_configuration(root: Path, *, test_mode: bool,
+                       coverage_args: list[str] | None = None) -> tuple[dict[str, Any], dict[str, str | None]]:
     config_path = root / ".infra/coverage/coverage.json"
     if config_path.exists():
         try:
@@ -151,10 +151,6 @@ def load_configuration(root: Path, *, test_mode: bool) -> tuple[dict[str, Any], 
                 raise RuntimeError("effective coverage package selection is empty")
         except (KeyError, TypeError, json.JSONDecodeError) as error:
             raise RuntimeError(f"could not resolve effective coverage packages: {error}") from error
-    collection_args = (["--package", selected_packages[0]] if scope == "package" and len(selected_packages) == 1
-                       else ([argument for package in selected_packages for argument in ("--package", package)]
-                             if scope == "package" else ["--workspace"] +
-                             [argument for package in unselected_packages for argument in ("--exclude", package)]))
     effective = {
         "config_path": ".infra/coverage/coverage.json",
         "scope": scope,
@@ -164,11 +160,13 @@ def load_configuration(root: Path, *, test_mode: bool) -> tuple[dict[str, Any], 
         "unconfigured_source_dirs_default": ["src"],
         "threshold_exempt_files": config.get("threshold_exempt_files", {}),
         "thresholds": thresholds,
-        "collector_output": "target/infra/coverage/raw.json",
+        "collector_output": "coverage.json",
+        "report_outputs": ["coverage-summary.md", "coverage.json", "lcov.info", "coverage.txt",
+                           "coverage-badge.json", "ci-summary.json", "target/llvm-cov/cobertura.xml",
+                           "target/llvm-cov/html/"],
         "selected_packages": selected_packages,
         "unselected_packages": unselected_packages,
-        "collection_argv": ["cargo", "llvm-cov", *collection_args, "--all-features", "--json",
-                            "--output-path", "target/infra/coverage/raw.json"],
+        "collection_argv": [".infra/bin/coverage.sh", *(coverage_args or [])],
         "report_config_path": ".infra/ci/coverage.json",
         "report_scope": report_scope,
         "report_exclude_packages": report_excluded,
@@ -235,7 +233,9 @@ def main() -> int:
                [str(root / ".infra/bin/coverage.sh")]) + options.coverage_args
     log_path = root / "coverage-provenance.log"
     try:
-        effective, config_digests = load_configuration(root, test_mode=test_mode)
+        effective, config_digests = load_configuration(
+            root, test_mode=test_mode, coverage_args=options.coverage_args,
+        )
         git = git_info(root)
     except (OSError, RuntimeError) as error:
         print(f"coverage provenance: {error}", file=sys.stderr)
@@ -272,7 +272,7 @@ def main() -> int:
                 raise RuntimeError(f"coverage command failed with exit code {result.returncode}")
             required = ["coverage-summary.md", "coverage.json", "lcov.info", "coverage.txt",
                         "coverage-badge.json", "ci-summary.json", "target/llvm-cov/html/index.html",
-                        "target/llvm-cov/cobertura.xml", "target/infra/coverage/raw.json"]
+                        "target/llvm-cov/cobertura.xml"]
             missing = [path for path in required if not (root / path).is_file()]
             if missing:
                 raise RuntimeError("coverage reports missing: " + ", ".join(missing))

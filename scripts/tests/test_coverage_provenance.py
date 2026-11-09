@@ -38,8 +38,6 @@ if os.environ.get('FAKE_COVERAGE_FAIL'):
 (root / 'target/llvm-cov/html').mkdir(parents=True, exist_ok=True)
 (root / 'target/llvm-cov/html/index.html').write_text('html')
 (root / 'target/llvm-cov/cobertura.xml').write_text('<coverage/>')
-(root / 'target/infra/coverage').mkdir(parents=True, exist_ok=True)
-(root / 'target/infra/coverage/raw.json').write_text('{\"data\":[{}]}')
 """,
             encoding="utf-8",
         )
@@ -70,11 +68,14 @@ if os.environ.get('FAKE_COVERAGE_FAIL'):
         self.assertEqual(metadata["run"]["kind"], "local")
         self.assertEqual(metadata["coverage"]["features"], ["all-features"])
         self.assertEqual(metadata["coverage"]["scope"], "default-members")
+        self.assertEqual(metadata["coverage"]["collector_output"], "coverage.json")
+        self.assertEqual(metadata["coverage"]["collection_argv"], [".infra/bin/coverage.sh"])
         self.assertTrue(metadata["config_sha256"][".infra/coverage/coverage.json"])
         self.assertIn("## New coverage\n", (self.root / "coverage-summary.md").read_text())
         hashes = metadata["artifact_sha256"]
         self.assertIn("coverage-summary.md", hashes)
         self.assertIn("coverage-provenance.log", hashes)
+        self.assertIn("coverage.json", hashes)
         self.assertIn("target/llvm-cov/html/index.html", hashes)
         self.assertNotIn("coverage-metadata.json", hashes)
         self.assertEqual(metadata["artifacts"], sorted(hashes))

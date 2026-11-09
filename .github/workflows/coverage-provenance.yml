@@ -38,6 +38,5 @@ jobs:
             coverage.txt
             coverage-badge.json
             lcov.info
-            target/infra/coverage/raw.json
             target/llvm-cov/cobertura.xml
             target/llvm-cov/html/
