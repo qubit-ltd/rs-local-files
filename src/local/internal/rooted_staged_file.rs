@@ -266,7 +266,7 @@ impl RootedStagedFile {
         let status = unsafe { status.assume_init() };
         if !is_regular_file_mode(status.st_mode)
             || i128::from(status.st_dev) != i128::from(identity.0)
-            || status.st_ino != identity.1
+            || i128::from(status.st_ino) != i128::from(identity.1)
         {
             return Err(Error::new(
                 ErrorKind::InvalidInput,
