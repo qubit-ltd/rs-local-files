@@ -25,6 +25,7 @@ use crate::LocalResult;
 use crate::error::LocalFileError;
 use crate::error::LocalFileErrorKind;
 use crate::error::LocalFileOperation;
+use crate::error::LocalReadLimitError;
 
 const BLOCK_SIZE: usize = 8 * 1024;
 
@@ -55,8 +56,8 @@ pub(crate) fn collect_limited<S: ByteInput + ?Sized>(input: &mut S, maximum: Opt
 
 /// Collects bytes while using a caller-supplied reservation strategy.
 ///
-/// Reservation failures are converted to `ResourceLimit`; the input may
-/// already have been consumed when a later read or reservation fails.
+/// Reads into a fixed stack buffer before reserving output capacity. The input
+/// may already have been consumed when reservation fails.
 ///
 /// # Type Parameters
 /// - `S`: Byte input implementation, which may be dynamically sized.
@@ -65,7 +66,7 @@ pub(crate) fn collect_limited<S: ByteInput + ?Sized>(input: &mut S, maximum: Opt
 /// # Parameters
 /// - `input`: Input stream consumed by the collector.
 /// - `maximum`: Maximum byte count; `None` collects until EOF without a limit.
-/// - `reserve`: Callback that reserves capacity before the next read.
+/// - `reserve`: Callback that reserves capacity before bytes are appended.
 ///
 /// # Returns
 /// The collected bytes when EOF occurs within the limit.
@@ -80,41 +81,36 @@ where
 {
     let mut output = Vec::new();
     let mut count = 0_u64;
+    let mut buffer = [0_u8; BLOCK_SIZE];
     loop {
         let (request, sentinel) = match maximum {
             Some(limit) if count == limit => (1, true),
             Some(limit) => {
                 let remaining = limit - count;
                 let available = usize::try_from(remaining).unwrap_or(usize::MAX);
-                (BLOCK_SIZE.min(available.max(1)), false)
+                (BLOCK_SIZE.min(available), false)
             }
             None => (BLOCK_SIZE, false),
         };
         if sentinel {
-            let mut byte = [0_u8; 1];
-            match Input::read(input, &mut byte) {
+            match Input::read(input, &mut buffer[..1]) {
                 Ok(0) => return Ok(output),
-                Ok(_) => return Err(resource_limit()),
+                Ok(_) => {
+                    let observed = count.checked_add(1).ok_or_else(length_overflow)?;
+                    return Err(read_limit(maximum.expect("sentinel requires a limit"), observed));
+                }
                 Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
                 Err(error) => return Err(read_error(error)),
             }
         }
-        let new_len = output.len().checked_add(request).ok_or_else(resource_limit)?;
-        let additional = new_len.saturating_sub(output.len());
-        reserve(&mut output, additional).map_err(|_| resource_limit())?;
-        let start = output.len();
-        output.resize(new_len, 0);
         let read = loop {
-            match Input::read(input, &mut output[start..]) {
+            match Input::read(input, &mut buffer[..request]) {
                 Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
                 result => break result,
             }
         };
         match read {
-            Ok(0) => {
-                output.truncate(start);
-                return Ok(output);
-            }
+            Ok(0) => return Ok(output),
             Ok(read) => {
                 if read > request {
                     return Err(LocalFileError::new(
@@ -122,13 +118,19 @@ where
                         LocalFileOperation::Read,
                     ));
                 }
-                output.truncate(start + read);
-                count = count
-                    .checked_add(u64::try_from(read).map_err(|_| resource_limit())?)
-                    .ok_or_else(resource_limit)?;
-                if maximum.is_some_and(|limit| count > limit) {
-                    return Err(resource_limit());
+                let new_count = count
+                    .checked_add(u64::try_from(read).map_err(|_| length_overflow())?)
+                    .ok_or_else(length_overflow)?;
+                let new_len = output.len().checked_add(read).ok_or_else(length_overflow)?;
+                reserve(&mut output, read).map_err(allocation_error)?;
+                output.extend_from_slice(&buffer[..read]);
+                count = new_count;
+                if let Some(limit) = maximum
+                    && count > limit
+                {
+                    return Err(read_limit(limit, count));
                 }
+                debug_assert_eq!(output.len(), new_len);
             }
             Err(error) => return Err(read_error(error)),
         }
@@ -174,6 +176,40 @@ fn resource_limit() -> LocalFileError {
     LocalFileError::new(LocalFileErrorKind::ResourceLimit, LocalFileOperation::Read)
 }
 
+/// Creates typed facts for an observed byte-limit violation.
+///
+/// # Parameters
+/// - `limit`: Configured maximum byte count.
+/// - `observed`: Observed length or proven lower bound.
+///
+/// # Returns
+/// A structured `ResourceLimit` error with typed read-limit facts.
+fn read_limit(limit: u64, observed: u64) -> LocalFileError {
+    LocalFileError::from_read_limit(
+        LocalFileOperation::Read,
+        None,
+        LocalReadLimitError::new(limit, observed),
+    )
+}
+
+/// Preserves the allocator error while keeping the stable resource category.
+///
+/// # Parameters
+/// - `source`: Error returned while reserving output capacity.
+///
+/// # Returns
+/// A `ResourceLimit` error retaining the original source.
+fn allocation_error(source: io::Error) -> LocalFileError {
+    LocalFileError::from_io(LocalFileOperation::Read, None, None, source)
+        .with_kind(LocalFileErrorKind::ResourceLimit)
+        .with_reason("unable to reserve memory for read data")
+}
+
+/// Reports arithmetic overflow without describing it as an input-limit breach.
+fn length_overflow() -> LocalFileError {
+    resource_limit().with_reason("read length exceeds addressable capacity")
+}
+
 /// Converts a native read error while retaining it as the structured source.
 ///
 /// # Parameters
@@ -183,4 +219,19 @@ fn resource_limit() -> LocalFileError {
 /// A structured read error containing the native source.
 fn read_error(error: io::Error) -> LocalFileError {
     LocalFileError::from_io(LocalFileOperation::Read, None, None, error)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::length_overflow;
+    use crate::error::LocalFileErrorKind;
+
+    #[test]
+    fn test_read_length_overflow_is_not_a_typed_byte_limit() {
+        let error = length_overflow();
+
+        assert_eq!(error.kind(), LocalFileErrorKind::ResourceLimit);
+        assert!(error.read_limit_error().is_none());
+        assert_eq!(error.reason(), Some("read length exceeds addressable capacity"));
+    }
 }

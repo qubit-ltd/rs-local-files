@@ -26,6 +26,10 @@ fn test_lf3_observation_collect_limit_and_sentinel() {
             .kind(),
         LocalFileErrorKind::ResourceLimit,
     );
+    let mut short = bytes.as_slice();
+    let error = crate::observation::reader::collect_limited(&mut short, Some(2)).unwrap_err();
+    let facts = error.read_limit_error().expect("sentinel should retain facts");
+    assert_eq!((facts.limit(), facts.observed()), (2, 3));
     let mut empty = [].as_slice();
     assert!(
         crate::observation::reader::collect_limited(&mut empty, Some(0))
@@ -61,6 +65,13 @@ fn test_lf3_observation_collect_accepts_u64_maximum() {
 }
 
 #[test]
+fn test_lf3_read_limit_facts_preserve_full_u64_values() {
+    let facts = crate::error::LocalReadLimitError::new(u64::MAX - 1, u64::MAX);
+    assert_eq!(facts.limit(), u64::MAX - 1);
+    assert_eq!(facts.observed(), u64::MAX);
+}
+
+#[test]
 fn test_lf3_observation_collect_uses_one_byte_at_the_limit() {
     let mut input = ProbeCountingInput {
         offset: 0,
@@ -81,6 +92,15 @@ fn test_lf3_observation_collect_allocation_failure_is_resource_limit() {
     })
     .unwrap_err();
     assert_eq!(error.kind(), LocalFileErrorKind::ResourceLimit);
+    assert_eq!(error.reason(), Some("unable to reserve memory for read data"));
+    assert_eq!(
+        error
+            .io_error()
+            .and_then(io::Error::get_ref)
+            .map(ToString::to_string)
+            .as_deref(),
+        Some("injected reservation failure")
+    );
 
     let mut independent_input = b"ok".as_slice();
     let bytes = crate::observation::reader::collect_limited_with_test_reserver(
@@ -90,6 +110,44 @@ fn test_lf3_observation_collect_allocation_failure_is_resource_limit() {
     )
     .expect("independent reserver remains unaffected");
     assert_eq!(bytes, b"ok");
+}
+
+#[test]
+fn test_lf3_observation_collect_reserves_only_bytes_read() {
+    let empty = [];
+    let mut input = empty.as_slice();
+    let mut reservations = Vec::new();
+    assert!(
+        crate::observation::reader::collect_limited_with_test_reserver(&mut input, None, |_, size| {
+            reservations.push(size);
+            Ok(())
+        })
+        .unwrap()
+        .is_empty()
+    );
+    assert!(reservations.is_empty());
+
+    let one_block = vec![7_u8; 8192];
+    let mut input = one_block.as_slice();
+    reservations.clear();
+    let result = crate::observation::reader::collect_limited_with_test_reserver(&mut input, None, |_, size| {
+        reservations.push(size);
+        Ok(())
+    })
+    .unwrap();
+    assert_eq!(result, one_block);
+    assert_eq!(reservations, [8192]);
+
+    let over_block = vec![8_u8; 8193];
+    let mut input = over_block.as_slice();
+    reservations.clear();
+    let result = crate::observation::reader::collect_limited_with_test_reserver(&mut input, None, |_, size| {
+        reservations.push(size);
+        Ok(())
+    })
+    .unwrap();
+    assert_eq!(result, over_block);
+    assert_eq!(reservations, [8192, 1]);
 }
 
 /// Emits an interruption, a fixed payload, then EOF for collector retry tests.

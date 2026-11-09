@@ -1129,6 +1129,37 @@ fn bench_read_prefix(c: &mut Criterion) {
     group.finish();
 }
 
+fn bench_read_all(c: &mut Criterion) {
+    let directory = tempdir().expect("benchmark directory should be created");
+    let path = directory.path().join("read-all-payload");
+    let filesystem = LocalFileSystem::host().expect("Host filesystem should open");
+    let mut group = c.benchmark_group("read_all");
+    for (name, size) in [("empty", 0), ("8192", 8192), ("8193", 8193), ("1MiB", 1 << 20)] {
+        let payload = vec![0x5a_u8; size];
+        fs::write(&path, &payload).expect("benchmark read-all payload should be written");
+        let allocations = sampled_allocations(|| {
+            black_box(
+                filesystem
+                    .read_all(black_box(&path))
+                    .expect("benchmark read-all should succeed"),
+            );
+        });
+        eprintln!("ALLOC_SAMPLE read_all case={name} bytes={size} alloc_calls={allocations} scope=single_read_all");
+        if size > 0 {
+            group.throughput(criterion::Throughput::Bytes(size as u64));
+        }
+        group.bench_function(name, |bench| {
+            bench.iter(|| {
+                let bytes = filesystem
+                    .read_all(black_box(&path))
+                    .expect("benchmark read-all should succeed");
+                black_box(bytes.len());
+            });
+        });
+    }
+    group.finish();
+}
+
 /// Compares std, Host, and Rooted metadata across repeatable path depths.
 fn bench_deep_metadata(c: &mut Criterion) {
     let mut group = c.benchmark_group("deep_metadata");
@@ -1223,6 +1254,7 @@ criterion_group!(
     bench_writer_scenarios,
     bench_temp_directory_cleanup,
     bench_read_prefix,
+    bench_read_all,
     bench_deep_metadata
 );
 criterion_main!(local_files);
