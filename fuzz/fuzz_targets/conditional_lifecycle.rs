@@ -17,6 +17,8 @@ mod conditional_model;
 mod support;
 
 fuzz_target!(|data: &[u8]| {
-    conditional_model::run_model(data, false);
-    conditional_model::run_model(data, true);
+    for rooted in [false, true] {
+        conditional_model::run_model(data, rooted)
+            .unwrap_or_else(|error| panic!("conditional fuzz harness setup failure: {error}"));
+    }
 });

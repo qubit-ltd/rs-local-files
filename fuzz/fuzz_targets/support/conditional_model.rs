@@ -104,11 +104,29 @@ pub(crate) struct ConditionalWitness {
     pub unsupported: usize,
 }
 
-pub(crate) fn run_model(data: &[u8], rooted: bool) -> Option<ConditionalWitness> {
+pub(crate) fn prepare_filesystem(root: &Path, rooted: bool) -> Result<LocalFileSystem, String> {
+    let scope = if rooted { "Rooted" } else { "Host" };
+    let mut filesystem = if rooted {
+        LocalFileSystem::rooted(root)
+    } else {
+        LocalFileSystem::host()
+    }
+    .map_err(|error| format!("{scope}: filesystem open failed: {error}"))?;
+    filesystem
+        .set_symlink_policy(LocalSymlinkPolicy::Reject)
+        .map_err(|error| format!("{scope}: symlink policy setup failed: {error}"))?;
+    Ok(filesystem)
+}
+
+pub(crate) fn run_model(data: &[u8], rooted: bool) -> Result<ConditionalWitness, String> {
+    let scope = if rooted { "Rooted" } else { "Host" };
     let root = FuzzRoot::create(if rooted {
         "conditional-rooted"
     } else {
         "conditional-host"
+    })
+    .ok_or_else(|| {
+        format!("{scope}: scratch-root creation failed or collision attempts exhausted; OS cause unavailable")
     })?;
     let native_target = root.path().join("target");
     let namespace_target = if rooted {
@@ -116,12 +134,7 @@ pub(crate) fn run_model(data: &[u8], rooted: bool) -> Option<ConditionalWitness>
     } else {
         native_target.as_path()
     };
-    let mut filesystem = if rooted {
-        LocalFileSystem::rooted(root.path()).ok()?
-    } else {
-        LocalFileSystem::host().ok()?
-    };
-    filesystem.set_symlink_policy(LocalSymlinkPolicy::Reject).ok()?;
+    let filesystem = prepare_filesystem(root.path(), rooted)?;
     let options = LocalWriteOptions::new(LocalWriteMode::CreateOrReplace);
     let mut writer = None;
     let mut candidate = Vec::new();
@@ -364,7 +377,7 @@ pub(crate) fn run_model(data: &[u8], rooted: bool) -> Option<ConditionalWitness>
     if target_known {
         assert_eq!(read_optional(&native_target), expected_target);
     }
-    Some(witness)
+    Ok(witness)
 }
 
 pub(crate) fn regression_sequences() -> [(&'static str, &'static [u8]); 10] {
