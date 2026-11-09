@@ -181,6 +181,21 @@ def load_configuration(root: Path, *, test_mode: bool) -> tuple[dict[str, Any], 
     return effective, digests
 
 
+def artifact_hashes(root: Path, required: list[str], log_path: Path) -> dict[str, str]:
+    paths = {relative for relative in required if (root / relative).is_file()}
+    html_root = root / "target/llvm-cov/html"
+    paths.update(path.relative_to(root).as_posix() for path in html_root.rglob("*") if path.is_file())
+    paths.add(log_path.relative_to(root).as_posix())
+    digests: dict[str, str] = {}
+    for relative in sorted(paths):
+        digest = hashlib.sha256()
+        with (root / relative).open("rb") as artifact:
+            for chunk in iter(lambda: artifact.read(1024 * 1024), b""):
+                digest.update(chunk)
+        digests[relative] = digest.hexdigest()
+    return digests
+
+
 def configured_build_toolchain(root: Path) -> str:
     defaults = root / ".infra/tools/defaults.toml"
     try:
@@ -263,6 +278,9 @@ def main() -> int:
                 raise RuntimeError("coverage reports missing: " + ", ".join(missing))
             host = next((line.removeprefix("host: ") for line in (rustc or "").splitlines()
                          if line.startswith("host: ")), platform.machine())
+            with (root / "coverage-summary.md").open("a", encoding="utf-8") as summary:
+                summary.write("\n- Provenance: `coverage-metadata.json` (same-run metadata).\n")
+            hashes = artifact_hashes(root, required, log_path)
             metadata = {
                 "schema": 1,
                 "generated_at_utc": dt.datetime.now(dt.timezone.utc).isoformat().replace("+00:00", "Z"),
@@ -277,11 +295,10 @@ def main() -> int:
                 "config_sha256": config_digests,
                 "entrypoint": {"argv": command, "path": ".infra/bin/coverage.sh"},
                 "run": run_url(env),
-                "artifacts": required,
+                "artifacts": sorted(hashes),
+                "artifact_sha256": hashes,
                 "log": "coverage-provenance.log",
             }
-            with (root / "coverage-summary.md").open("a", encoding="utf-8") as summary:
-                summary.write("\n- Provenance: `coverage-metadata.json` (same-run metadata).\n")
             (root / "coverage-metadata.json").write_text(
                 json.dumps(metadata, indent=2, sort_keys=True) + "\n", encoding="utf-8")
         except (OSError, RuntimeError) as error:

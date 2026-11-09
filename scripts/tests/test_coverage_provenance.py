@@ -1,3 +1,4 @@
+import hashlib
 import json
 import os
 import subprocess
@@ -71,6 +72,18 @@ if os.environ.get('FAKE_COVERAGE_FAIL'):
         self.assertEqual(metadata["coverage"]["scope"], "default-members")
         self.assertTrue(metadata["config_sha256"][".infra/coverage/coverage.json"])
         self.assertIn("## New coverage\n", (self.root / "coverage-summary.md").read_text())
+        hashes = metadata["artifact_sha256"]
+        self.assertIn("coverage-summary.md", hashes)
+        self.assertIn("coverage-provenance.log", hashes)
+        self.assertIn("target/llvm-cov/html/index.html", hashes)
+        self.assertNotIn("coverage-metadata.json", hashes)
+        self.assertEqual(metadata["artifacts"], sorted(hashes))
+        for relative, expected in hashes.items():
+            self.assertEqual(
+                hashlib.sha256((self.root / relative).read_bytes()).hexdigest(),
+                expected,
+                relative,
+            )
 
     def test_coverage_failure_does_not_publish_success_summary(self):
         result = self.run_provenance({"FAKE_COVERAGE_FAIL": "1"})
