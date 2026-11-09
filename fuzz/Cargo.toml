@@ -15,6 +15,7 @@ qubit-local-files = { path = ".." }
 sha2 = { version = "^0.11", optional = true }
 
 [features]
+default = ["conditional"]
 conditional = ["dep:sha2", "qubit-local-files/digest", "qubit-local-files/test-support"]
 
 [[test]]
@@ -29,6 +30,7 @@ required-features = ["conditional"]
 [[bin]]
 name = "conditional_lifecycle"
 path = "fuzz_targets/conditional_lifecycle.rs"
+required-features = ["conditional"]
 test = false
 doc = false
 bench = false

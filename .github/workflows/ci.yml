@@ -182,6 +182,12 @@ jobs:
             echo 'conditional model suite did not execute at least one test' >&2
             exit 1
           fi
+          rustup toolchain install nightly-2026-06-05 --profile minimal
+          if ! cargo fuzz --version 2>/dev/null | grep -Fxq 'cargo-fuzz 0.13.2'; then
+            cargo install cargo-fuzz --version 0.13.2 --locked --force
+          fi
+          set -o pipefail
+          cargo +nightly-2026-06-05 fuzz run conditional_lifecycle --features conditional -- -max_total_time=10 -max_len=4096 2>&1 | tee "$RUNNER_TEMP/conditional-fuzz.log"
           cargo test --locked --test owner_policy_lifecycle_tests
           uid_build_log="$RUNNER_TEMP/local-files-uid-build.jsonl"
           cargo test --locked --test stage_reopen_effective_uid_tests --no-run --message-format=json > "$uid_build_log"

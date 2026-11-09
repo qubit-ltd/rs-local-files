@@ -11,18 +11,12 @@
 
 use libfuzzer_sys::fuzz_target;
 
-#[cfg(feature = "conditional")]
 #[path = "support/conditional_model.rs"]
 mod conditional_model;
 
 mod support;
 
-#[cfg(feature = "conditional")]
 fuzz_target!(|data: &[u8]| {
     conditional_model::run_model(data, false);
-});
-
-#[cfg(not(feature = "conditional"))]
-fuzz_target!(|data: &[u8]| {
-    support::lifecycle::run(data, false);
+    conditional_model::run_model(data, true);
 });
