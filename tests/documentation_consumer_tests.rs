@@ -70,7 +70,8 @@ fn cargo_manifest_path(path: &str) -> String {
 
 fn diagnose_consumer_lock_update(project: &Path) -> String {
     fn entries(lock: &str) -> Vec<String> {
-        lock.split("\n[[package]]\n")
+        lock.replace("\r\n", "\n")
+            .split("\n[[package]]\n")
             .skip(1)
             .map(|entry| {
                 let identity = entry.lines().take(3).collect::<Vec<_>>().join(" ");

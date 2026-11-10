@@ -10,6 +10,10 @@
 #[must_use]
 pub(crate) fn lock_with_parent_sources(consumer: &str, parent: &str) -> String {
     const PACKAGE: &str = "\n[[package]]\n";
+    // Fixtures checked out on Windows may use CRLF line endings. Normalize
+    // before splitting so every package entry participates in synchronization.
+    let consumer = consumer.replace("\r\n", "\n");
+    let parent = parent.replace("\r\n", "\n");
     let mut entries = consumer.split(PACKAGE).map(str::to_owned).collect::<Vec<_>>();
     for entry in entries.iter_mut().skip(1) {
         let identity = entry.lines().take(2).collect::<Vec<_>>().join("\n");
@@ -135,6 +139,11 @@ fn test_consumer_lock_adopts_path_dependencies_and_packaged_sources_for_same_ver
             "dependencies = [\"qubit-budget\"]",
         );
     assert_eq!(lock_with_parent_sources(&consumer, &packaged), expected);
+    assert_eq!(
+        lock_with_parent_sources(&consumer.replace('\n', "\r\n"), &packaged.replace('\n', "\r\n")),
+        expected,
+        "CRLF checkouts still synchronize package entries"
+    );
     assert_eq!(lock_with_parent_sources(&consumer, &consumer), consumer);
     let different_version = base_packaged.replace("version = \"0.10.0\"", "version = \"0.11.0\"");
     assert_eq!(
