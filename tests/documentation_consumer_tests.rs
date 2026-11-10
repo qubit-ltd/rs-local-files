@@ -59,6 +59,25 @@ fn lock_documentation_consumer() -> MutexGuard<'static, ()> {
         .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
+fn cargo_manifest_path(path: &str) -> String {
+    let path = path
+        .strip_prefix(r"\\?\UNC\")
+        .map(|unc_path| format!(r"\\{unc_path}"))
+        .or_else(|| path.strip_prefix(r"\\?\").map(str::to_owned))
+        .unwrap_or_else(|| path.to_owned());
+    path.replace('\\', "\\\\").replace('"', "\\\"")
+}
+
+#[test]
+fn test_cargo_manifest_path_normalizes_windows_extended_paths() {
+    assert_eq!(cargo_manifest_path(r"\\?\D:\repo\crate"), r"D:\\repo\\crate");
+    assert_eq!(
+        cargo_manifest_path(r"\\?\UNC\server\share\crate"),
+        r"\\\\server\\share\\crate"
+    );
+    assert_eq!(cargo_manifest_path("/workspace/crate"), "/workspace/crate");
+}
+
 #[test]
 fn test_documented_conditional_write_runs_as_a_consumer_without_a_digest_feature() {
     let _guard = lock_documentation_consumer();
@@ -84,7 +103,7 @@ fn test_documented_conditional_write_runs_as_a_consumer_without_a_digest_feature
             "{language} dependency block has one qubit-local-files entry"
         );
         assert!(dependency_line.contains("features = [\"digest\"]"));
-        let dependency_path = crate_path.to_string_lossy().replace('\\', "\\\\").replace('"', "\\\"");
+        let dependency_path = cargo_manifest_path(&crate_path.to_string_lossy());
         let dependencies = dependencies.replace(
             dependency_line,
             &dependency_line.replace("version = \"0.5.0\"", &format!("path = \"{dependency_path}\"")),
@@ -167,7 +186,7 @@ fn test_documented_failed_seal_cleanup_retains_owner_for_retry() {
             .lines()
             .find(|line| line.trim_start().starts_with("qubit-local-files ="))
             .expect("marked dependencies contain qubit-local-files");
-        let dependency_path = crate_path.to_string_lossy().replace('\\', "\\\\").replace('"', "\\\"");
+        let dependency_path = cargo_manifest_path(&crate_path.to_string_lossy());
         let dependencies = dependencies.replace(
             dependency_line,
             &dependency_line
@@ -304,7 +323,7 @@ fn test_documented_inspection_cleanup_retains_owner_for_retry() {
             .lines()
             .find(|line| line.trim_start().starts_with("qubit-local-files ="))
             .expect("marked dependencies contain qubit-local-files");
-        let dependency_path = crate_path.to_string_lossy().replace('\\', "\\\\").replace('"', "\\\"");
+        let dependency_path = cargo_manifest_path(&crate_path.to_string_lossy());
         let dependencies = dependencies.replace(
             dependency_line,
             &dependency_line
@@ -476,7 +495,7 @@ fn test_documented_tree_sync_compiles_with_introductory_dependencies() {
             .lines()
             .find(|line| line.trim_start().starts_with("qubit-local-files ="))
             .expect("introductory dependencies contain qubit-local-files");
-        let dependency_path = crate_path.to_string_lossy().replace('\\', "\\\\").replace('"', "\\\"");
+        let dependency_path = cargo_manifest_path(&crate_path.to_string_lossy());
         let dependencies = dependencies.replace(
             dependency_line,
             &format!("qubit-local-files = {{ path = \"{dependency_path}\" }}"),
@@ -537,7 +556,7 @@ fn test_documented_readonly_stage_recovery_preserves_destination() {
             .lines()
             .find(|line| line.trim_start().starts_with("qubit-local-files ="))
             .expect("introductory dependencies contain qubit-local-files");
-        let dependency_path = crate_path.to_string_lossy().replace('\\', "\\\\").replace('"', "\\\"");
+        let dependency_path = cargo_manifest_path(&crate_path.to_string_lossy());
         let dependencies = dependencies.replace(
             dependency_line,
             &format!("qubit-local-files = {{ path = \"{dependency_path}\" }}"),
@@ -607,7 +626,7 @@ fn test_documented_export_runs_twice_in_existing_output_directory() {
             .lines()
             .find(|line| line.trim_start().starts_with("qubit-local-files ="))
             .expect("introductory dependencies contain qubit-local-files");
-        let dependency_path = crate_path.to_string_lossy().replace('\\', "\\\\").replace('"', "\\\"");
+        let dependency_path = cargo_manifest_path(&crate_path.to_string_lossy());
         let dependencies = dependencies.replace(
             dependency_line,
             &format!("qubit-local-files = {{ path = \"{dependency_path}\" }}"),

@@ -13,15 +13,18 @@ pub(crate) fn lock_with_parent_sources(consumer: &str, parent: &str) -> String {
     let mut entries = consumer.split(PACKAGE).map(str::to_owned).collect::<Vec<_>>();
     for entry in entries.iter_mut().skip(1) {
         let identity = entry.lines().take(2).collect::<Vec<_>>().join("\n");
-        if entry.lines().any(|line| line.starts_with("source = "))
-            || identity.starts_with("name = \"documentation-consumer\"\n")
+        if identity.starts_with("name = \"documentation-consumer\"\n")
             || identity.starts_with("name = \"tree-outcome-lint-consumer\"\n")
             || identity.starts_with("name = \"qubit-local-files\"\n")
         {
             continue;
         }
         let header = format!("{identity}\n");
-        let Some(parent_entry) = parent.split(PACKAGE).skip(1).find(|entry| entry.starts_with(&header)) else {
+        let source = entry.lines().find(|line| line.starts_with("source = "));
+        let Some(parent_entry) = parent.split(PACKAGE).skip(1).find(|parent_entry| {
+            parent_entry.starts_with(&header)
+                && source.is_none_or(|source| parent_entry.lines().any(|line| line == source))
+        }) else {
             continue;
         };
         if let (Some(consumer_dependencies), Some(parent_dependencies)) = (
@@ -34,7 +37,7 @@ pub(crate) fn lock_with_parent_sources(consumer: &str, parent: &str) -> String {
             .lines()
             .filter(|line| line.starts_with("source = ") || line.starts_with("checksum = "))
             .collect::<Vec<_>>();
-        if !source.is_empty() {
+        if !source.is_empty() && !entry.lines().any(|line| line.starts_with("source = ")) {
             *entry = entry.replacen(&header, &format!("{header}{}\n", source.join("\n")), 1);
         }
     }
@@ -140,4 +143,35 @@ fn test_consumer_lock_adopts_path_dependencies_and_packaged_sources_for_same_ver
     );
     let different_source = base_packaged.replace("github.com/rust-lang/crates.io-index", "example.invalid/index");
     assert_eq!(lock_with_parent_sources(&expected, &different_source), expected);
+}
+
+#[test]
+fn test_consumer_lock_adopts_dependency_edges_for_registry_packages() {
+    let source =
+        "source = \"registry+https://github.com/rust-lang/crates.io-index\"\nchecksum = \"reviewed-checksum\"\n";
+    let consumer = format!(
+        "version = 4\n\n[[package]]\nname = \"consumer\"\nversion = \"0.1.0\"\ndependencies = [\"registry-package\"]\n\n[[package]]\nname = \"registry-package\"\nversion = \"1.0.0\"\n{source}dependencies = [\"transitive-old\"]\n\n[[package]]\nname = \"transitive-old\"\nversion = \"1.0.0\"\n{source}dependencies = []\n\n[[package]]\nname = \"transitive-new\"\nversion = \"1.0.0\"\n{source}dependencies = []\n"
+    );
+    let parent = format!(
+        "version = 4\n\n[[package]]\nname = \"registry-package\"\nversion = \"1.0.0\"\n{source}dependencies = [\"transitive-new\"]\n\n[[package]]\nname = \"transitive-old\"\nversion = \"1.0.0\"\n{source}dependencies = []\n\n[[package]]\nname = \"transitive-new\"\nversion = \"1.0.0\"\n{source}dependencies = []\n"
+    );
+    let expected = consumer.replace(
+        "dependencies = [\"transitive-old\"]",
+        "dependencies = [\"transitive-new\"]",
+    );
+    assert_eq!(lock_with_parent_sources(&consumer, &parent), expected);
+}
+
+#[test]
+fn test_consumer_lock_does_not_adopt_edges_from_a_different_source() {
+    let consumer_source = "source = \"registry+https://example.invalid/index\"\nchecksum = \"consumer-checksum\"\n";
+    let parent_source =
+        "source = \"registry+https://github.com/rust-lang/crates.io-index\"\nchecksum = \"parent-checksum\"\n";
+    let consumer = format!(
+        "version = 4\n\n[[package]]\nname = \"registry-package\"\nversion = \"1.0.0\"\n{consumer_source}dependencies = [\"consumer-edge\"]\n"
+    );
+    let parent = format!(
+        "version = 4\n\n[[package]]\nname = \"registry-package\"\nversion = \"1.0.0\"\n{parent_source}dependencies = [\"parent-edge\"]\n"
+    );
+    assert_eq!(lock_with_parent_sources(&consumer, &parent), consumer);
 }
