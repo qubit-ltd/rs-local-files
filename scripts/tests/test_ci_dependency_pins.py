@@ -88,6 +88,10 @@ class DependencyPinsTests(unittest.TestCase):
         self.write_workflows(conditional=fixture_conditional(red="a" * 40))
         self.assertTrue(any("checkout for qubit-ltd/rs-redact" in e for e in self.errors()))
 
+    def test_rs_json_checkout_revision_mismatch_fails(self):
+        self.write_workflows(conditional=fixture_conditional(js="a" * 40))
+        self.assertTrue(any("checkout for qubit-ltd/rs-json" in e for e in self.errors()))
+
     def test_missing_ref_fails(self):
         workflow = fixture_conditional().replace(f"          ref: {RED}\n", "")
         self.write_workflows(conditional=workflow)
@@ -120,14 +124,37 @@ class DependencyPinsTests(unittest.TestCase):
         self.write_workflows(ci=fixture_workflow(red="a" * 40))
         self.assertTrue(any("fetch revision differs" in e for e in self.errors()))
 
+    def test_rs_json_freebsd_fetch_revision_mismatch_fails(self):
+        workflow = fixture_workflow().replace(
+            f"git -C ../rs-json fetch --depth 1 origin {JSON}",
+            f"git -C ../rs-json fetch --depth 1 origin {'a' * 40}",
+        )
+        self.write_workflows(ci=workflow)
+        self.assertTrue(any("FreeBSD rs-json fetch revision differs" in e for e in self.errors()))
+
     def test_changed_freebsd_head_assertion_fails(self):
         workflow = fixture_workflow().replace(f"= {RED}", f"= {'a' * 40}")
         self.write_workflows(ci=workflow)
         self.assertTrue(any("HEAD assertion differs" in e for e in self.errors()))
 
+    def test_rs_json_freebsd_head_assertion_mismatch_fails(self):
+        workflow = fixture_workflow().replace(
+            f"rev-parse HEAD)\" = {JSON}", f"rev-parse HEAD)\" = {'a' * 40}"
+        )
+        self.write_workflows(ci=workflow)
+        self.assertTrue(any("FreeBSD rs-json HEAD assertion differs" in e for e in self.errors()))
+
     def test_changed_freebsd_url_fails(self):
         self.write_workflows(ci=fixture_workflow().replace("rs-redact.git", "other.git"))
         self.assertTrue(any("remote URL differs" in e for e in self.errors()))
+
+    def test_rs_json_freebsd_url_mismatch_fails(self):
+        workflow = fixture_workflow().replace(
+            "https://github.com/qubit-ltd/rs-json.git",
+            "https://github.com/qubit-ltd/other.git",
+        )
+        self.write_workflows(ci=workflow)
+        self.assertTrue(any("FreeBSD rs-json remote URL differs" in e for e in self.errors()))
 
     def test_duplicate_manifest_path_fails(self):
         path = self.root / ".infra/ci/local-path-dependencies.tsv"
