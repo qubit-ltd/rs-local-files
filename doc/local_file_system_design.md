@@ -1983,6 +1983,22 @@ CI and coverage gates pass, and configured release checks pass.
 
 ## 29. Refactoring Support Matrix (2026-10-28)
 
+This section is a historical snapshot dated 2026-10-28, not a current-revision
+platform validation report. Later Windows access evidence is recorded in
+[RLF5-Q01 Windows access evidence](review-rlf5-windows-access-evidence.md).
+That repository evidence records native Windows Server 2025 NTFS CI at
+implementation revision `5291d57ab1889b80559283610d0bb5f9f671d279` (Rust
+1.94.0, default and `--all-features`): exact DACL application, read-only
+attribute and ACL transition, pre-existing read-only owner-policy conversion,
+partial child-mutation failure with stage recovery, and explicit cleanup of
+temporary and staged resources. The five named access-transition and partial
+failure regressions and the exact-DACL checks ran in both feature configurations.
+This evidence does not establish behavior at this document's current revision,
+does not show that every Windows scenario passes, and does not change the
+separate Darwin, FreeBSD, or unsupported Windows publication states. The linked
+record identifies its workflow and job logs; this summary follows that
+repository evidence record.
+
 This matrix records the accepted implementation state for the L01-L05
 refactoring and is not a claim that every native platform runtime suite has
 passed. `GateResult::Blocked` is a report state, not a public Rust type.

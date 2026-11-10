@@ -58,6 +58,7 @@ pub(crate) fn byte_slices<'a>(buffers: &'a [IoSlice<'_>]) -> io::Result<Vec<&'a 
 ///
 /// Returns `OutOfMemory` if storage for the slice descriptors cannot be
 /// reserved.
+#[cfg_attr(unix, allow(dead_code))]
 pub(crate) fn byte_slices_mut<'a>(buffers: &'a mut [IoSliceMut<'_>]) -> io::Result<Vec<&'a mut [u8]>> {
     let mut slices = Vec::new();
     slices

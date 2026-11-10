@@ -137,12 +137,12 @@ impl LocalFileReader {
     /// On Windows, buffers are read sequentially. If a later read fails after
     /// earlier buffers received bytes, the accumulated count is returned and
     /// that later error is suppressed; an error before any progress is
-    /// returned. Other platforms use the underlying vectored input
-    /// operation. Empty requests return without allocating adapter descriptors.
-    /// A single-buffer request uses a stack descriptor; multi-buffer requests
-    /// allocate a temporary vector of borrowed slice descriptors without
-    /// copying buffer contents. Backend allocations are outside this adapter
-    /// guarantee.
+    /// returned. Unix calls the standard file vectored-read operation directly
+    /// and does not allocate adapter descriptors. Other platforms use the
+    /// underlying vectored input operation; a single-buffer request uses a
+    /// stack descriptor and multi-buffer requests may allocate temporary
+    /// borrowed slice descriptors without copying buffer contents. Backend
+    /// allocations are outside this adapter guarantee.
     ///
     /// # Parameters
     ///
@@ -156,18 +156,33 @@ impl LocalFileReader {
     /// # Errors
     ///
     /// Returns an underlying read error when no bytes were read, or
-    /// `OutOfMemory` if the multi-buffer adapter cannot allocate its slice
-    /// descriptors.
+    /// `InvalidInput` if the total destination length overflows. On platforms
+    /// using the adapter, returns `OutOfMemory` if its multi-buffer slice
+    /// descriptors cannot be allocated.
     pub fn read_vectored(&mut self, buffers: &mut [IoSliceMut<'_>]) -> io::Result<usize> {
         if buffers.iter().all(|buffer| buffer.is_empty()) {
             return Ok(0);
         }
-        if let [buffer] = buffers {
-            let mut slices = [&mut buffer[..]];
-            return qubit_io::Input::read_vectored(self, &mut slices);
+        #[cfg(unix)]
+        {
+            buffers.iter().try_fold(0_usize, |total, buffer| {
+                total
+                    .checked_add(buffer.len())
+                    .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "vectored read length overflow"))
+            })?;
+            #[cfg(test)]
+            crate::tests::native_io_fault_tests::check(crate::tests::native_io_fault_tests::NativeIoPoint::Read)?;
+            std::io::Read::read_vectored(&mut self.file, buffers)
         }
-        let mut slices = crate::vectored::byte_slices_mut(buffers)?;
-        qubit_io::Input::read_vectored(self, &mut slices)
+        #[cfg(not(unix))]
+        {
+            if let [buffer] = buffers {
+                let mut slices = [&mut buffer[..]];
+                return qubit_io::Input::read_vectored(self, &mut slices);
+            }
+            let mut slices = crate::vectored::byte_slices_mut(buffers)?;
+            qubit_io::Input::read_vectored(self, &mut slices)
+        }
     }
 }
 

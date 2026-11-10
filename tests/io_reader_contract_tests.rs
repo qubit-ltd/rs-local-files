@@ -134,6 +134,23 @@ fn test_inherent_vectored_read_preserves_nonzero_file_offset() {
 }
 
 #[test]
+fn test_rooted_inherent_vectored_read_preserves_order_and_offset() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("source"), b"012345").unwrap();
+    let filesystem = LocalFileSystem::rooted(dir.path()).unwrap();
+    let mut reader = filesystem.open_reader(std::path::Path::new("source")).unwrap();
+    reader.seek(SeekFrom::Start(1)).unwrap();
+    let mut first = [0; 2];
+    let mut second = [0; 2];
+    let mut buffers = [IoSliceMut::new(&mut first), IoSliceMut::new(&mut second)];
+
+    assert_eq!(reader.read_vectored(&mut buffers).unwrap(), 4);
+    assert_eq!(&first, b"12");
+    assert_eq!(&second, b"34");
+    assert_eq!(reader.stream_position().unwrap(), 5);
+}
+
+#[test]
 fn test_inherent_single_buffer_read_handles_offset_eof_and_empty_inputs() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("source");

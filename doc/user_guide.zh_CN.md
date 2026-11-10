@@ -1558,8 +1558,10 @@ FreeBSD 暂不支持；原生 workflow 只做编译和少量合同检查，不�
 Android 仍配置为编译检查。暂存清理及 LF-10 sealed 清理已有 Windows Server 2025 NTFS 历史原生结果，revision 为
 [`251e103bd9c60bf749e60453e688cf9ac4bde6f2`](https://github.com/qubit-ltd/rs-local-files/commit/251e103bd9c60bf749e60453e688cf9ac4bde6f2)：默认与 `--all-features` 下各 3 项暂存测试通过；所选 sealed cleanup 测试在默认配置下 7/7、在 `--all-features` 配置下 11/11。该结果不证明实施基线 `c5639417080648da263216f698893c3a6c3c7f2d` 的覆盖；T3/T4 恢复、条件打开及 LF-09 私有资源行为不在记录范围内。详见 [Windows 暂存与清理证据](review-rlf4-windows-staging-cleanup-evidence.md)。Linux 筛选执行 0 个 Windows 测试、Windows GNU `cargo check --lib` 均不构成运行证据。
 本 crate CI 仅验证本 crate；下游 adapter 的兼容性和集成由 adapter 仓库或独立集成负责。
-同级 path dependency 的源码提交固定在 `.infra/ci/local-path-dependencies.tsv`，并由 conditional-write
-和 FreeBSD 准备步骤重复引用。更新基线时须同步修改这些位置，并核对准备后的仓库 `HEAD`。
+同级 path dependency 的源码提交以 `.infra/ci/local-path-dependencies.tsv` 为权威清单。CI 使用
+`python3 scripts/check-ci-dependency-pins.py` 检查 conditional-write checkout 与 FreeBSD 准备步骤中的重复值；
+对应 unittest fixture 也在 Ubuntu CI job 中运行。更新基线时须同步修改清单和所有准备引用，保留准备后的仓库
+`HEAD` 断言，并在本地运行检查器。
 `capabilities()` 返回所选 authority 的 build capability 快照；Rooted 实例在打开
 authority 时缓存该快照。`scope()` 供集成层区分两种命名空间；Rooted 实例的诊断锚点通过
 `diagnostic_root()` 单独读取。Host 命名空间的 `limits()` 返回 `SizeLimit::VariesByPath`；使用

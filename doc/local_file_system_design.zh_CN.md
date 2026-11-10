@@ -2201,6 +2201,15 @@ CI 记录为准，CI 配置本身不证明本次修改通过。
 
 ## 29. 本轮重构支持矩阵（2026-10-28）
 
+本节是截至 2026-10-28 的历史快照，不是当前 revision 的平台验证报告。后续 Windows
+access 证据记录在 [RLF5-Q01 Windows access evidence](review-rlf5-windows-access-evidence.md)。
+该仓库证据记录了实现 revision `5291d57ab1889b80559283610d0bb5f9f671d279` 上的 Windows Server 2025
+NTFS 原生 CI（Rust 1.94.0，默认与 `--all-features`）：精确 DACL 应用、只读属性与 ACL 转换、
+预先存在只读属性时的 owner-policy 转换、子项修改后部分失败及 stage 恢复，以及临时和 staged 资源的显式清理。
+所列五项 access transition 与部分失败回归、精确 DACL 检查均在两种 feature 配置下运行。
+该证据不能证明当前文档 revision 的行为，也不表示所有 Windows 场景均已通过；Darwin、FreeBSD
+及不支持的 Windows 发布状态保持独立。链接记录列出了 workflow 和 job 日志；本摘要依据该仓库证据记录。
+
 本表记录 L01—L05 重构的已接受实现状态，不代表所有原生平台运行测试都已通过。
 `GateResult::Blocked` 是报告状态，不是公开 Rust 类型。
 

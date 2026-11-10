@@ -17,6 +17,21 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  ci-dependency-pins:
+    name: CI dependency pin consistency
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.x'
+      - name: Check repeated dependency pins
+        run: |
+          python3 -m unittest discover -s scripts/tests -p 'test_ci_dependency_pins.py'
+          python3 scripts/check-ci-dependency-pins.py
+
   freebsd-ci:
     name: FreeBSD compatibility checks
     runs-on: ubuntu-latest

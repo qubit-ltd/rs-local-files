@@ -12,7 +12,13 @@ use std::io::ErrorKind;
 
 use qubit_io::Input;
 
+#[cfg(unix)]
+use crate::LocalFileSystem;
 use crate::read::read_vectored_fallback;
+#[cfg(unix)]
+use crate::tests::native_io_fault_tests::NativeIoFaultGuard;
+#[cfg(unix)]
+use crate::tests::native_io_fault_tests::NativeIoPoint;
 
 enum ScriptedAction {
     Bytes(Vec<u8>),
@@ -175,4 +181,32 @@ fn test_vectored_fallback_all_empty_buffers_preserve_pending_action() {
     let error = read_vectored_fallback(&mut reader, &mut buffers)
         .expect_err("the pending action should remain after an all-empty call");
     assert_eq!(error.kind(), ErrorKind::PermissionDenied);
+}
+
+/// Verifies the Unix inherent vectored entry reports its native read fault
+/// without moving the retained descriptor's offset.
+#[cfg(unix)]
+#[test]
+fn test_inherent_vectored_read_fault_preserves_file_offset() {
+    let fixture = tempfile::tempdir().expect("create fixture");
+    let path = fixture.path().join("payload");
+    std::fs::write(&path, b"payload").expect("write fixture");
+    let mut reader = LocalFileSystem::host()
+        .expect("host filesystem")
+        .open_reader(&path)
+        .expect("open reader");
+    let fault = NativeIoFaultGuard::fail_on(NativeIoPoint::Read, 1);
+    assert_eq!(reader.read_vectored(&mut []).unwrap(), 0);
+    assert!(!fault.fired(), "an empty request must not consume the read fault");
+    let mut first = [0_u8; 2];
+    let mut second = [0_u8; 2];
+    let error = reader
+        .read_vectored(&mut [
+            std::io::IoSliceMut::new(&mut first),
+            std::io::IoSliceMut::new(&mut second),
+        ])
+        .expect_err("injected read fault should be returned");
+    assert!(fault.fired());
+    assert_eq!(error.kind(), io::ErrorKind::Other);
+    assert_eq!(std::io::Seek::stream_position(&mut reader).unwrap(), 0);
 }
