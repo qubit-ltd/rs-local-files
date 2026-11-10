@@ -8,6 +8,6 @@ drop-result = []
 drop-validation-options = []
 
 [dependencies]
-qubit-local-files = { path = "../../.." }
+qubit-local-files = { path = "../../../", version = "^0.5" }
 
 [workspace]
