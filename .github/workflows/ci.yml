@@ -108,7 +108,7 @@ jobs:
       contract-tests: '[]'
       # Fuzz binaries are compiled explicitly in the Linux verify-extra-script below.
       fuzz-check: false
-      verify-extra-script: |
+      verify-extra-script: |2
         if [ "$RUNNER_OS" = Windows ]; then
           export TEMP="$RUNNER_TEMP"
           export TMP="$RUNNER_TEMP"
@@ -202,7 +202,87 @@ jobs:
             cargo install cargo-fuzz --version 0.13.2 --locked --force
           fi
           set -o pipefail
-          cargo +nightly-2026-06-05 fuzz run conditional_lifecycle --features conditional -- -max_total_time=10 -max_len=4096 2>&1 | tee "$RUNNER_TEMP/conditional-fuzz.log"
+          snapshot_fuzz_artifacts() {
+            python3 - "$1" "$2" <<'PYCODE'
+        import hashlib
+        import json
+        import os
+        import sys
+
+        root, snapshot = sys.argv[1:]
+        artifacts = {}
+        for directory, _, names in os.walk(root):
+            for name in names:
+                path = os.path.join(directory, name)
+                relative = os.path.relpath(path, root)
+                stat = os.stat(path)
+                with open(path, "rb") as stream:
+                    digest = hashlib.sha256(stream.read()).hexdigest()
+                artifacts[relative] = [stat.st_size, stat.st_mtime_ns, digest]
+        with open(snapshot, "w", encoding="utf-8") as stream:
+            json.dump(artifacts, stream, sort_keys=True)
+        PYCODE
+          }
+          write_changed_fuzz_artifacts() {
+            python3 - "$1" "$2" "$3" "$4" <<'PYCODE'
+        import json
+        import os
+        import sys
+
+        root, before_path, after_path, output_path = sys.argv[1:]
+        with open(before_path, encoding="utf-8") as stream:
+            before = json.load(stream)
+        with open(after_path, encoding="utf-8") as stream:
+            after = json.load(stream)
+        changed = sorted(
+            (relative for relative, metadata in after.items()
+             if before.get(relative) != metadata),
+            key=os.fsencode,
+        )
+        with open(output_path, "wb") as stream:
+            for relative in changed:
+                stream.write(os.fsencode(os.path.join(root, relative)) + b"\0")
+        PYCODE
+          }
+          for target in conditional_lifecycle path_codec local_paths lifecycle rooted_lifecycle copy_lifecycle; do
+            echo "FUZZ START: $target"
+            fuzz_log="$RUNNER_TEMP/fuzz-$target.log"
+            fuzz_artifacts="fuzz/artifacts/$target"
+            before_artifacts="$RUNNER_TEMP/fuzz-$target-before.txt"
+            after_artifacts="$RUNNER_TEMP/fuzz-$target-after.txt"
+            new_artifacts="$RUNNER_TEMP/fuzz-$target-new.txt"
+            mkdir -p "$fuzz_artifacts"
+            snapshot_fuzz_artifacts "$fuzz_artifacts" "$before_artifacts"
+            if cargo +nightly-2026-06-05 fuzz run "$target" --features conditional -- -max_total_time=10 -max_len=4096 2>&1 | tee "$fuzz_log"; then
+              fuzz_status=0
+            else
+              fuzz_status=$?
+            fi
+            if [ "$fuzz_status" -eq 0 ] && grep -Eq '^Done [1-9][0-9]* runs in [0-9]+ second\(s\)$' "$fuzz_log"; then
+              echo "FUZZ PASS: $target"
+            else
+              if [ "$fuzz_status" -eq 0 ]; then
+                fuzz_status=1
+                echo "FUZZ FAIL: $target (libFuzzer did not report a positive completed run count)" >&2
+              else
+                echo "FUZZ FAIL: $target (exit $fuzz_status)" >&2
+              fi
+              echo "log: $fuzz_log" >&2
+              snapshot_fuzz_artifacts "$fuzz_artifacts" "$after_artifacts"
+              write_changed_fuzz_artifacts "$fuzz_artifacts" "$before_artifacts" "$after_artifacts" "$new_artifacts"
+              if [ -s "$new_artifacts" ]; then
+                while IFS= read -r -d '' artifact; do
+                  echo "failure input: $artifact" >&2
+                  printf 'replay: cargo +nightly-2026-06-05 fuzz run %q %q --features conditional\n' "$target" "$artifact" >&2
+                  echo 'input bytes (hex):' >&2
+                  od -An -v -tx1 "$artifact" >&2
+                done < "$new_artifacts"
+              else
+                echo 'no failure input files were created during this run' >&2
+              fi
+              exit 1
+            fi
+          done
           cargo test --locked --test owner_policy_lifecycle_tests
           uid_build_log="$RUNNER_TEMP/local-files-uid-build.jsonl"
           cargo test --locked --test stage_reopen_effective_uid_tests --no-run --message-format=json > "$uid_build_log"
