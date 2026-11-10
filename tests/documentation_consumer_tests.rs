@@ -68,6 +68,62 @@ fn cargo_manifest_path(path: &str) -> String {
     path.replace('\\', "\\\\").replace('"', "\\\"")
 }
 
+fn diagnose_consumer_lock_update(project: &Path) -> String {
+    fn entries(lock: &str) -> Vec<String> {
+        lock.split("\n[[package]]\n")
+            .skip(1)
+            .map(|entry| {
+                let identity = entry.lines().take(3).collect::<Vec<_>>().join(" ");
+                let dependencies = entry
+                    .find("dependencies = [")
+                    .and_then(|start| entry[start..].find(']').map(|end| &entry[start..start + end + 1]))
+                    .unwrap_or("dependencies = []");
+                format!("{identity} {dependencies}")
+            })
+            .collect()
+    }
+
+    let lock_path = project.join("Cargo.lock");
+    let before = fs::read_to_string(&lock_path).unwrap_or_default();
+    let result = Command::new("cargo")
+        .arg("metadata")
+        .arg("--offline")
+        .arg("--format-version")
+        .arg("1")
+        .arg("--manifest-path")
+        .arg(project.join("Cargo.toml"))
+        .current_dir(project)
+        .env_remove("CARGO_ENCODED_RUSTFLAGS")
+        .env_remove("RUSTFLAGS")
+        .env_remove("CARGO_BUILD_TARGET")
+        .output();
+    let after = fs::read_to_string(&lock_path).unwrap_or_default();
+    let result = match result {
+        Ok(result) => result,
+        Err(error) => return format!("cargo metadata diagnostic could not start: {error}"),
+    };
+    let before_entries = entries(&before);
+    let after_entries = entries(&after);
+    let changes = before_entries
+        .iter()
+        .filter(|entry| !after_entries.contains(entry))
+        .map(|entry| format!("- {entry}"))
+        .chain(
+            after_entries
+                .iter()
+                .filter(|entry| !before_entries.contains(entry))
+                .map(|entry| format!("+ {entry}")),
+        )
+        .collect::<Vec<_>>()
+        .join("\n");
+    format!(
+        "cargo metadata --offline exited {}; lock entry changes:\n{}\nstderr:\n{}",
+        result.status,
+        if changes.is_empty() { "<none>" } else { &changes },
+        String::from_utf8_lossy(&result.stderr)
+    )
+}
+
 #[test]
 fn test_cargo_manifest_path_normalizes_windows_extended_paths() {
     assert_eq!(cargo_manifest_path(r"\\?\D:\repo\crate"), r"D:\\repo\\crate");
@@ -151,10 +207,11 @@ fn test_documented_conditional_write_runs_as_a_consumer_without_a_digest_feature
             .expect("consumer cargo process starts");
         if !status.status.success() {
             panic!(
-                "{language} consumer failed with {}\nstdout:\n{}\nstderr:\n{}",
+                "{language} consumer failed with {}\nstdout:\n{}\nstderr:\n{}\nLock resolution diagnostic:\n{}",
                 status.status,
                 String::from_utf8_lossy(&status.stdout),
-                String::from_utf8_lossy(&status.stderr)
+                String::from_utf8_lossy(&status.stderr),
+                diagnose_consumer_lock_update(&project)
             );
         }
         assert_eq!(
