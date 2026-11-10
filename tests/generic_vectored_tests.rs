@@ -90,6 +90,7 @@ fn test_closed_temp_file_checks_state_before_empty_vectored_write() {
     let fs = LocalFileSystem::host().unwrap();
     let mut temporary = fs.create_temp_file().unwrap();
     temporary.close();
+    let empty = [IoSlice::new(b"")];
     assert_eq!(
         Output::write_vectored(&mut temporary, &[]).unwrap_err().kind(),
         std::io::ErrorKind::BrokenPipe
@@ -98,6 +99,23 @@ fn test_closed_temp_file_checks_state_before_empty_vectored_write() {
         temporary.write_vectored(&[]).unwrap_err().kind(),
         std::io::ErrorKind::BrokenPipe
     );
+    assert_eq!(
+        temporary.write_vectored(&empty).unwrap_err().kind(),
+        std::io::ErrorKind::BrokenPipe
+    );
+}
+
+#[test]
+fn test_temp_file_vectored_writer_handles_single_and_empty_buffers() {
+    let fs = LocalFileSystem::host().unwrap();
+    let mut temporary = fs.create_temp_file().unwrap();
+    let path = temporary.path().to_path_buf();
+
+    assert_eq!(temporary.write_vectored(&[IoSlice::new(b"payload")]).unwrap(), 7);
+    assert_eq!(temporary.write_vectored(&[IoSlice::new(b"")]).unwrap(), 0);
+
+    temporary.close();
+    assert_eq!(std::fs::read(path).unwrap(), b"payload");
 }
 
 #[test]

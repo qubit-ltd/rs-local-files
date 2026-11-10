@@ -210,6 +210,46 @@ fn sampled_allocations(call: impl FnOnce()) -> usize {
     SAMPLED_ALLOCATION_COUNT.load(Ordering::Relaxed)
 }
 
+fn sample_temp_file_vectored_allocations() {
+    let filesystem = LocalFileSystem::host().expect("Host filesystem should open");
+    let mut inherent_file = filesystem.create_temp_file().expect("temporary file should be created");
+    let mut trait_file = filesystem.create_temp_file().expect("temporary file should be created");
+    let inherent_path = inherent_file.path().to_path_buf();
+    let trait_path = trait_file.path().to_path_buf();
+    let buffers = [IoSlice::new(b"payload")];
+    let slices: [&[u8]; 1] = [b"payload"];
+
+    let inherent_allocations = sampled_allocations(|| {
+        let result = inherent_file.write_vectored(&buffers);
+        black_box(result).expect("single-buffer temp write succeeds");
+    });
+    let trait_allocations = sampled_allocations(|| {
+        let result = Output::write_vectored(&mut trait_file, &slices);
+        black_box(result).expect("single-buffer trait write succeeds");
+    });
+
+    inherent_file.close();
+    trait_file.close();
+    assert_eq!(
+        fs::read(&inherent_path).expect("inherent temp output should be readable"),
+        b"payload"
+    );
+    assert_eq!(
+        fs::read(&trait_path).expect("trait temp output should be readable"),
+        b"payload"
+    );
+    drop(inherent_file);
+    drop(trait_file);
+    assert!(!inherent_path.exists(), "inherent temp file should be cleaned up");
+    assert!(!trait_path.exists(), "trait temp file should be cleaned up");
+    eprintln!(
+        "ALLOC_SAMPLE vectored_io backend=LocalTempFile buffers=1 segment=7 method=inherent_write_vectored write_alloc_calls={inherent_allocations} scope=single_adapter_call"
+    );
+    eprintln!(
+        "ALLOC_SAMPLE vectored_io backend=LocalTempFile buffers=1 segment=7 method=Output_trait write_alloc_calls={trait_allocations} scope=single_adapter_call"
+    );
+}
+
 fn sample_vectored_allocations(payload: &[Vec<u8>; 64], count: usize, size: usize) {
     for direct in [false, true] {
         let method = if direct { "trait_direct" } else { "local_adapter" };
@@ -261,6 +301,7 @@ fn sample_vectored_allocations(payload: &[Vec<u8>; 64], count: usize, size: usiz
 
 fn bench_vectored_io(c: &mut Criterion) {
     let mut group = c.benchmark_group("vectored_io");
+    sample_temp_file_vectored_allocations();
     for count in VECTORED_BUFFER_COUNTS {
         for size in VECTORED_SEGMENT_SIZES {
             let payload = vectored_payload(count, size);

@@ -336,6 +336,8 @@ impl LocalTempFile {
 
     /// Writes vectored bytes to the still-open temporary file.
     ///
+    /// A single buffer uses a stack descriptor; multiple buffers may allocate.
+    ///
     /// # Parameters
     ///
     /// `buffers` contains the byte slices to write in order.
@@ -351,6 +353,10 @@ impl LocalTempFile {
     #[inline]
     pub fn write_vectored(&mut self, buffers: &[IoSlice<'_>]) -> Result<usize> {
         self.as_file_mut()?;
+        if let [buffer] = buffers {
+            let slices = [&buffer[..]];
+            return Output::write_vectored(self, &slices);
+        }
         let slices = crate::vectored::byte_slices(buffers)?;
         Output::write_vectored(self, &slices)
     }
