@@ -111,6 +111,13 @@ impl LocalFileReader {
     }
 
     /// Returns the underlying native file handle.
+    ///
+    /// This is the same open file retained by the reader. Standard reads and
+    /// seeks through this handle change the file position subsequently used by
+    /// the reader. A handle returned by [`File::try_clone`] shares that file
+    /// position as well; it does not provide an independent cursor. Callers
+    /// that mix reader operations with operations on this handle or its clones
+    /// must coordinate access to the shared position.
     #[must_use]
     #[cfg_attr(coverage, inline(never))]
     #[cfg_attr(not(coverage), inline)]

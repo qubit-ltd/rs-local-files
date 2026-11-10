@@ -223,6 +223,36 @@ fn test_local_file_reader_reads_and_seeks() {
     assert_eq!(&last, b"def");
 }
 
+/// Verifies native handles and cloned handles share the reader's file offset.
+#[test]
+fn test_native_handle_and_clone_share_reader_offset() {
+    let directory = tempdir().expect("temporary directory should be created");
+    let path = directory.path().join("payload");
+    std::fs::write(&path, b"abcdef").expect("fixture should be written");
+    let mut reader = LocalFileSystem::host()
+        .expect("Host filesystem should open")
+        .open_reader(&path)
+        .expect("reader should open");
+    let mut bytes = [0_u8; 2];
+    {
+        let mut native = reader.as_file();
+        std::io::Read::read_exact(&mut native, &mut bytes).expect("native read should succeed");
+    }
+    assert_eq!(&bytes, b"ab");
+    Input::read_exactly(&mut reader, &mut bytes).expect("reader should share native progress");
+    assert_eq!(&bytes, b"cd");
+    {
+        let mut native = reader.as_file();
+        Seek::seek(&mut native, SeekFrom::Start(1)).expect("native seek should succeed");
+    }
+    Input::read_exactly(&mut reader, &mut bytes).expect("reader should share native seek");
+    assert_eq!(&bytes, b"bc");
+    let mut cloned = reader.as_file().try_clone().expect("handle should clone");
+    Seek::seek(&mut cloned, SeekFrom::Start(4)).expect("clone seek should succeed");
+    Input::read_exactly(&mut reader, &mut bytes).expect("reader should share clone seek");
+    assert_eq!(&bytes, b"ef");
+}
+
 /// Verifies vectored reads fill the returned buffer prefix in order.
 #[test]
 fn test_local_file_reader_supports_vectored_reads() {
