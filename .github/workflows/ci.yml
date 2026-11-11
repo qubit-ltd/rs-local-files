@@ -27,9 +27,9 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: '3.x'
-      - name: Check repeated dependency pins
+      - name: Run project Python regression tests and check dependency pins
         run: |
-          python3 -m unittest discover -s scripts/tests -p 'test_ci_dependency_pins.py'
+          python3 -m unittest discover -s scripts/tests -p 'test_*.py'
           python3 scripts/check-ci-dependency-pins.py
 
   freebsd-ci:
