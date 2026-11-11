@@ -315,8 +315,9 @@ cargo test --all-features
 ./scripts/run-coverage-with-provenance.sh
 ```
 
-项目 wrapper 为本地覆盖率运行记录来源信息。共享 CI 的覆盖率产物仍附属于对应 workflow run，
-wrapper 不会替代这些产物。
+wrapper 会在采集开始和结束时检查项目输入；观察到状态变化就会失败。这不是不可变构建快照，
+无法保证发现瞬时修改，也不检查外部依赖的内容。失败后应停止修改、固定输入并重新运行。共享 CI
+的覆盖率产物仍附属于对应 workflow run，wrapper 不会替代这些产物。
 
 ## 许可证
 

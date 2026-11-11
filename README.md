@@ -410,8 +410,11 @@ cargo test --all-features
 ./scripts/run-coverage-with-provenance.sh
 ```
 
-The project wrapper records provenance for local coverage runs. Shared CI coverage
-artifacts remain attached to their workflow runs; the wrapper does not replace them.
+The wrapper checks project inputs at the start and end of collection and fails if
+their observed state changes. This is not an immutable build snapshot; transient
+changes and external dependency contents are outside this check. Stop editing and
+rerun with fixed inputs after a failure. Shared CI coverage artifacts remain
+attached to their workflow runs; the wrapper does not replace them.
 
 ## License
 
