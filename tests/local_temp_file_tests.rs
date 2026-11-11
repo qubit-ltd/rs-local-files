@@ -1064,6 +1064,104 @@ fn test_local_temp_file_reads_back_written_content_before_cleanup() {
     assert!(!path.exists());
 }
 
+/// Verifies vectored temporary-file writes preserve the order of their buffers.
+#[test]
+fn test_local_temp_file_vectored_write_preserves_ordered_prefix() {
+    let parent = tempdir().expect("temporary parent should be created");
+    let mut temporary = LocalFileSystem::host()
+        .expect("Host filesystem should open")
+        .create_temp_file_with_options(&LocalTempFileOptions::new().with_parent(parent.path()))
+        .expect("temporary file should be created");
+    let path = temporary.path().to_path_buf();
+    let buffers = [IoSlice::new(b"first"), IoSlice::new(b"-"), IoSlice::new(b"last")];
+    let expected = b"first-last";
+
+    let written = temporary
+        .write_vectored(&buffers)
+        .expect("temporary file should accept vectored bytes");
+
+    assert!(written <= expected.len());
+    assert_eq!(
+        &expected[..written],
+        fs::read(&path).expect("temporary output should read").as_slice()
+    );
+    temporary.cleanup().expect("temporary file should clean up");
+}
+
+/// Verifies empty vectored buffers write zero bytes while still validating
+/// that the temporary-file handle remains open.
+#[test]
+fn test_local_temp_file_vectored_write_empty_buffers_and_closed_state() {
+    let parent = tempdir().expect("temporary parent should be created");
+    let mut temporary = LocalFileSystem::host()
+        .expect("Host filesystem should open")
+        .create_temp_file_with_options(&LocalTempFileOptions::new().with_parent(parent.path()))
+        .expect("temporary file should be created");
+    let path = temporary.path().to_path_buf();
+
+    assert_eq!(
+        0,
+        temporary.write_vectored(&[]).expect("empty buffer list should succeed")
+    );
+    let written = temporary
+        .write_vectored(&[IoSlice::new(b""), IoSlice::new(b"data"), IoSlice::new(b"")])
+        .expect("mixed empty and nonempty buffers should write successfully");
+    assert!(written > 0 && written <= b"data".len());
+    assert_eq!(
+        &b"data"[..written],
+        fs::read(&path).expect("temporary output should read").as_slice()
+    );
+
+    temporary.close();
+    assert_eq!(
+        ErrorKind::BrokenPipe,
+        temporary
+            .write_vectored(&[])
+            .expect_err("closed handle must reject even an empty vectored write")
+            .kind()
+    );
+}
+
+/// Verifies vectored writes are rejected after source replacement has made
+/// the retained temporary-file authority indeterminate.
+#[test]
+fn test_local_temp_file_vectored_write_rejects_indeterminate_source() {
+    let parent = tempdir().expect("temporary parent should be created");
+    let target = parent.path().join("published");
+    let temporary = LocalFileSystem::host()
+        .expect("Host filesystem should open")
+        .create_temp_file_with_options(&LocalTempFileOptions::new().with_parent(parent.path()))
+        .expect("temporary file should be created");
+    let path = temporary.path().to_path_buf();
+    let original = parent.path().join("original");
+    fs::rename(&path, &original).expect("fixture should retain original temporary file");
+    fs::write(&path, b"replacement").expect("fixture should replace temporary path");
+
+    let error = temporary
+        .persist(&target)
+        .expect_err("persistence must detect the replaced source");
+    let LocalPersistErrorParts {
+        resource: mut temporary,
+        ..
+    } = error.into_parts();
+    assert_eq!(LocalTempSourceState::Indeterminate, temporary.source_state());
+    assert_eq!(
+        ErrorKind::InvalidInput,
+        temporary
+            .write_vectored(&[IoSlice::new(b"must not write")])
+            .expect_err("indeterminate source must reject vectored writes")
+            .kind()
+    );
+
+    drop(temporary);
+    assert_eq!(
+        b"replacement",
+        fs::read(&path).expect("replacement should remain").as_slice()
+    );
+    fs::remove_file(path).expect("replacement fixture should be removed");
+    fs::remove_file(original).expect("original fixture should be removed");
+}
+
 /// Verifies mutable native-file access remains available until an explicit
 /// close and writes through the temporary-file guard.
 #[test]

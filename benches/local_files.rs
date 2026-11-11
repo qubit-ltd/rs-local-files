@@ -210,44 +210,61 @@ fn sampled_allocations(call: impl FnOnce()) -> usize {
     SAMPLED_ALLOCATION_COUNT.load(Ordering::Relaxed)
 }
 
+fn sampled_call<R>(call: impl FnOnce() -> R) -> (usize, R) {
+    SAMPLED_ALLOCATION_COUNT.store(0, Ordering::Relaxed);
+    SAMPLE_ALLOCATIONS.store(true, Ordering::SeqCst);
+    let result = call();
+    SAMPLE_ALLOCATIONS.store(false, Ordering::SeqCst);
+    (SAMPLED_ALLOCATION_COUNT.load(Ordering::Relaxed), result)
+}
+
 fn sample_temp_file_vectored_allocations() {
     let filesystem = LocalFileSystem::host().expect("Host filesystem should open");
-    let mut inherent_file = filesystem.create_temp_file().expect("temporary file should be created");
-    let mut trait_file = filesystem.create_temp_file().expect("temporary file should be created");
-    let inherent_path = inherent_file.path().to_path_buf();
-    let trait_path = trait_file.path().to_path_buf();
-    let buffers = [IoSlice::new(b"payload")];
-    let slices: [&[u8]; 1] = [b"payload"];
+    for count in [1, 2, 8, 64] {
+        let payload = vectored_payload(count, 7);
+        let buffers = std::array::from_fn::<_, 64, _>(|index| IoSlice::new(&payload[index]));
+        let slices = payload.iter().map(Vec::as_slice).collect::<Vec<_>>();
+        let expected = payload[..count].iter().flatten().copied().collect::<Vec<_>>();
 
-    let inherent_allocations = sampled_allocations(|| {
-        let result = inherent_file.write_vectored(&buffers);
-        black_box(result).expect("single-buffer temp write succeeds");
-    });
-    let trait_allocations = sampled_allocations(|| {
-        let result = Output::write_vectored(&mut trait_file, &slices);
-        black_box(result).expect("single-buffer trait write succeeds");
-    });
+        let mut inherent_file = filesystem.create_temp_file().expect("temporary file should be created");
+        let inherent_path = inherent_file.path().to_path_buf();
+        let (inherent_allocations, inherent_written) = sampled_call(|| {
+            inherent_file
+                .write_vectored(&buffers[..count])
+                .expect("inherent temp write succeeds")
+        });
+        inherent_file.close();
+        let inherent_output = fs::read(&inherent_path).expect("inherent temp output should be readable");
+        assert_eq!(
+            inherent_output,
+            expected[..inherent_written],
+            "inherent write should preserve ordered prefix"
+        );
+        drop(inherent_file);
+        assert!(!inherent_path.exists(), "inherent temp file should be cleaned up");
 
-    inherent_file.close();
-    trait_file.close();
-    assert_eq!(
-        fs::read(&inherent_path).expect("inherent temp output should be readable"),
-        b"payload"
-    );
-    assert_eq!(
-        fs::read(&trait_path).expect("trait temp output should be readable"),
-        b"payload"
-    );
-    drop(inherent_file);
-    drop(trait_file);
-    assert!(!inherent_path.exists(), "inherent temp file should be cleaned up");
-    assert!(!trait_path.exists(), "trait temp file should be cleaned up");
-    eprintln!(
-        "ALLOC_SAMPLE vectored_io backend=LocalTempFile buffers=1 segment=7 method=inherent_write_vectored write_alloc_calls={inherent_allocations} scope=single_adapter_call"
-    );
-    eprintln!(
-        "ALLOC_SAMPLE vectored_io backend=LocalTempFile buffers=1 segment=7 method=Output_trait write_alloc_calls={trait_allocations} scope=single_adapter_call"
-    );
+        let mut trait_file = filesystem.create_temp_file().expect("temporary file should be created");
+        let trait_path = trait_file.path().to_path_buf();
+        let (trait_allocations, trait_written) = sampled_call(|| {
+            Output::write_vectored(&mut trait_file, &slices[..count]).expect("trait temp write succeeds")
+        });
+        trait_file.close();
+        let trait_output = fs::read(&trait_path).expect("trait temp output should be readable");
+        assert_eq!(
+            trait_output,
+            expected[..trait_written],
+            "trait write should preserve ordered prefix"
+        );
+        drop(trait_file);
+        assert!(!trait_path.exists(), "trait temp file should be cleaned up");
+
+        eprintln!(
+            "ALLOC_SAMPLE vectored_io backend=LocalTempFile buffers={count} segment=7 method=inherent_write_vectored write_alloc_calls={inherent_allocations} returned_bytes={inherent_written} scope=single_adapter_call"
+        );
+        eprintln!(
+            "ALLOC_SAMPLE vectored_io backend=LocalTempFile buffers={count} segment=7 method=Output_trait write_alloc_calls={trait_allocations} returned_bytes={trait_written} scope=single_adapter_call"
+        );
+    }
 }
 
 fn sample_vectored_allocations(payload: &[Vec<u8>; 64], count: usize, size: usize) {

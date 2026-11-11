@@ -336,7 +336,9 @@ impl LocalTempFile {
 
     /// Writes vectored bytes to the still-open temporary file.
     ///
-    /// A single buffer uses a stack descriptor; multiple buffers may allocate.
+    /// This method passes the supplied descriptors directly to the standard
+    /// library file writer and does not allocate adapter descriptors. The
+    /// standard library or operating-system backend may still allocate.
     ///
     /// # Parameters
     ///
@@ -352,13 +354,16 @@ impl LocalTempFile {
     /// the vectored write fails.
     #[inline]
     pub fn write_vectored(&mut self, buffers: &[IoSlice<'_>]) -> Result<usize> {
-        self.as_file_mut()?;
-        if let [buffer] = buffers {
-            let slices = [&buffer[..]];
-            return Output::write_vectored(self, &slices);
+        let file = self.as_file_mut()?;
+        let total = buffers.iter().try_fold(0_usize, |total, buffer| {
+            total
+                .checked_add(buffer.len())
+                .ok_or_else(|| Error::new(ErrorKind::InvalidInput, "vectored write length overflow"))
+        })?;
+        if total == 0 {
+            return Ok(0);
         }
-        let slices = crate::vectored::byte_slices(buffers)?;
-        Output::write_vectored(self, &slices)
+        std::io::Write::write_vectored(file, buffers)
     }
 
     /// Closes the file I/O handle while retaining cleanup and persistence
