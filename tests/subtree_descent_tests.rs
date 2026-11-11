@@ -46,6 +46,7 @@ fn test_host_descent_visits_target_ancestors_and_target_but_skips_sibling_descen
         .with_descend_subtree(Path::new("wanted/leaf"))
         .expect("relative subtree should be accepted");
 
+    assert_eq!(directory.path(), walker.root());
     assert_eq!(
         vec![
             PathBuf::from("other"),
