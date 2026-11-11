@@ -192,12 +192,16 @@ fn test_subtree_pruning_preserves_symlink_policy_and_reopen_behavior() {
     let directory = tempdir().expect("fixture directory should exist");
     fixture(directory.path());
     symlink("other/deep", directory.path().join("outside-link")).expect("link should be created");
+    // macOS commonly exposes its temporary directory through a `/var` symlink.
+    // The host resolver intentionally rejects symlink components in its root,
+    // so give it the canonical path while keeping the fixture writes simple.
+    let root = directory.path().canonicalize().expect("fixture root should resolve");
     let mut filesystem = LocalFileSystem::host().expect("host filesystem should open");
     filesystem
         .set_symlink_policy(LocalSymlinkPolicy::Reject)
         .expect("reject policy should be accepted");
     let rejected = filesystem
-        .list_with_options(directory.path(), &LocalListOptions::new().with_recursive())
+        .list_with_options(&root, &LocalListOptions::new().with_recursive())
         .expect("walker should open")
         .with_descend_subtree(Path::new("wanted/leaf"))
         .expect("subtree should be valid");
@@ -207,7 +211,7 @@ fn test_subtree_pruning_preserves_symlink_policy_and_reopen_behavior() {
         .set_symlink_policy(LocalSymlinkPolicy::FollowAcrossScope)
         .expect("follow policy should be accepted");
     let followed = filesystem
-        .list_with_options(directory.path(), &LocalListOptions::new().with_recursive())
+        .list_with_options(&root, &LocalListOptions::new().with_recursive())
         .expect("walker should open")
         .with_descend_subtree(Path::new("wanted/leaf"))
         .expect("subtree should be valid");
@@ -215,7 +219,7 @@ fn test_subtree_pruning_preserves_symlink_policy_and_reopen_behavior() {
 
     let reopened = filesystem
         .list_with_options(
-            directory.path(),
+            &root,
             &LocalListOptions::new()
                 .with_recursive()
                 .with_max_open_directories(1)
@@ -242,7 +246,7 @@ fn test_subtree_configuration_is_rejected_after_iteration_starts() {
     assert_eq!(LocalFileErrorKind::InvalidState, error.kind());
 }
 
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 #[test]
 fn test_subtree_descent_compares_unix_non_utf8_native_components() {
     use std::os::unix::ffi::OsStringExt;
