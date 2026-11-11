@@ -159,13 +159,16 @@ fn test_sync_budget_errors_leave_stage_owned_and_unpublished() {
     let path = scratch.path().join(stage.relative_name());
     std::fs::create_dir(path.join("nested")).expect("nested directory");
     write(&mut stage, "nested/payload");
+    let file_entry_name_bytes = Path::new("nested").as_os_str().as_encoded_bytes().len()
+        + Path::new("payload").as_os_str().as_encoded_bytes().len();
+    let retained_path_limit = file_entry_name_bytes + 1;
     for limits in [
         LocalListOptions::new().with_max_depth(1),
         LocalListOptions::new().with_max_entries(0),
         LocalListOptions::new().with_max_seen_name_bytes(0),
         // The walker charges each entry name, while tree synchronization also
         // accounts for the cumulative relative paths it retains for reopening.
-        LocalListOptions::new().with_max_seen_name_bytes(15),
+        LocalListOptions::new().with_max_seen_name_bytes(retained_path_limit),
     ] {
         assert!(
             !stage
@@ -173,7 +176,7 @@ fn test_sync_budget_errors_leave_stage_owned_and_unpublished() {
                 .expect("disabled sync performs no traversal")
         );
         let required_sync = stage.sync_files_with_options(&limits, LocalFileSyncRequirement::Required);
-        if limits.max_seen_name_bytes() == Some(15) {
+        if limits.max_seen_name_bytes() == Some(retained_path_limit) {
             assert!(required_sync.expect("file traversal fits the name budget"));
         } else {
             let error = required_sync.expect_err("required sync enforces traversal budget");

@@ -181,7 +181,9 @@ fn test_tree_sync_enforces_retained_relative_path_byte_budget() {
         .write_file_new(Path::new("nested/payload"), &mut payload, 32)
         .expect("write staged payload");
 
-    let limits = LocalListOptions::new().with_max_seen_name_bytes(15);
+    let entry_name_bytes = Path::new("nested").as_os_str().as_encoded_bytes().len()
+        + Path::new("payload").as_os_str().as_encoded_bytes().len();
+    let limits = LocalListOptions::new().with_max_seen_name_bytes(entry_name_bytes + 1);
     assert!(
         stage
             .sync_files_with_options(&limits, LocalFileSyncRequirement::Required)
