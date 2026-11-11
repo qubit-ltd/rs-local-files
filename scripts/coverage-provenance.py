@@ -10,6 +10,7 @@ import json
 import os
 import platform
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -37,6 +38,120 @@ DEFAULT_THRESHOLDS = {"lines": {"minimum": 90, "inclusive": False},
                       "regions": {"minimum": 85, "inclusive": False}}
 ALLOWED_CONFIG = {"scope", "exclude_packages", "source_dirs", "threshold_exempt_files",
                   "thresholds", "clippy", "coverage_cfg_clippy", "run_coverage_cfg_clippy"}
+
+
+def _excluded_source_path(relative: str) -> bool:
+    parts = relative.split("/")
+    for output_path in OUTPUTS:
+        output_parts = output_path.split("/")
+        if parts[:len(output_parts)] == output_parts:
+            return True
+    return relative == "coverage-provenance.log" or (
+        len(parts) > 1 and parts[0].startswith(".coverage-provenance-backup-")
+    )
+
+
+class _SourceInputRace(Exception):
+    def __init__(self, relative: str):
+        super().__init__(relative)
+        self.relative = relative
+
+
+def _capture_source_state_once(root: Path, *, allow_missing_git_paths: set[str] | None = None) -> dict[str, Any]:
+    try:
+        head_result = subprocess.run(["git", "rev-parse", "HEAD"], cwd=root,
+                                     stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
+        files_result = subprocess.run(
+            ["git", "ls-files", "--cached", "--others", "--exclude-standard", "-z"], cwd=root,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False,
+        )
+    except OSError as error:
+        raise RuntimeError("could not enumerate Git project inputs") from error
+    if head_result.returncode or files_result.returncode:
+        raise RuntimeError("could not enumerate Git project inputs")
+    try:
+        head = head_result.stdout.decode("ascii").strip()
+        listed = [os.fsdecode(item) for item in files_result.stdout.split(b"\0") if item]
+    except UnicodeError as error:
+        raise RuntimeError("Git returned an invalid project input name") from error
+    listed_paths = set(listed)
+    paths = set(listed_paths)
+    paths.update(CONFIG_FILES)
+    entries: dict[str, dict[str, str]] = {}
+    for relative in sorted(paths, key=os.fsencode):
+        if _excluded_source_path(relative):
+            continue
+        path = root / relative
+        try:
+            info = path.lstat()
+        except FileNotFoundError:
+            if relative in listed_paths and relative not in (allow_missing_git_paths or set()):
+                raise _SourceInputRace(relative)
+            entries[relative] = {"kind": "missing", "sha256": hashlib.sha256(b"missing").hexdigest()}
+            continue
+        except OSError as error:
+            raise RuntimeError(f"could not read project input {relative!r}") from error
+        if stat.S_ISLNK(info.st_mode):
+            try:
+                target = os.fsencode(os.readlink(path))
+            except FileNotFoundError as error:
+                raise _SourceInputRace(relative) from error
+            except OSError as error:
+                raise RuntimeError(f"could not read project input {relative!r}") from error
+            kind = "symlink"
+            digest = hashlib.sha256(target).hexdigest()
+        elif stat.S_ISREG(info.st_mode):
+            kind = "file"
+            digest_object = hashlib.sha256()
+            try:
+                with path.open("rb") as source:
+                    for chunk in iter(lambda: source.read(1024 * 1024), b""):
+                        digest_object.update(chunk)
+            except FileNotFoundError as error:
+                raise _SourceInputRace(relative) from error
+            except OSError as error:
+                raise RuntimeError(f"could not read project input {relative!r}") from error
+            digest = digest_object.hexdigest()
+        else:
+            raise RuntimeError(f"unsupported project input kind at {relative!r}")
+        entries[relative] = {"kind": kind, "sha256": digest}
+
+    config_digests = {
+        relative: (entries[relative]["sha256"] if entries[relative]["kind"] == "file" else None)
+        for relative in CONFIG_FILES
+    }
+    aggregate = hashlib.sha256()
+    def feed(value: bytes) -> None:
+        aggregate.update(len(value).to_bytes(8, "big"))
+        aggregate.update(value)
+    feed(head.encode("ascii"))
+    for relative, entry in sorted(entries.items(), key=lambda pair: os.fsencode(pair[0])):
+        feed(os.fsencode(relative))
+        feed(entry["kind"].encode("ascii"))
+        feed(entry["sha256"].encode("ascii"))
+    return {"head": head, "files": entries, "config_sha256": config_digests,
+            "fingerprint_sha256": aggregate.hexdigest()}
+
+
+def capture_source_state(root: Path) -> dict[str, Any]:
+    """Return content-only fingerprints, retrying once if an input vanishes mid-read."""
+    try:
+        return _capture_source_state_once(root)
+    except _SourceInputRace as first_race:
+        try:
+            return _capture_source_state_once(root, allow_missing_git_paths={first_race.relative})
+        except _SourceInputRace as error:
+            raise RuntimeError("project input changed while it was being read") from error
+
+
+def _source_difference(before: dict[str, Any], after: dict[str, Any]) -> list[str]:
+    changes: list[str] = []
+    if before["head"] != after["head"]:
+        changes.append("HEAD")
+    for relative in sorted(set(before["files"]) | set(after["files"]), key=os.fsencode):
+        if before["files"].get(relative) != after["files"].get(relative):
+            changes.append(relative)
+    return changes
 
 
 def run(command: list[str], *, cwd: Path, env: dict[str, str] | None = None,
@@ -233,10 +348,16 @@ def main() -> int:
                [str(root / ".infra/bin/coverage.sh")]) + options.coverage_args
     log_path = root / "coverage-provenance.log"
     try:
+        initial_source = capture_source_state(root)
         effective, config_digests = load_configuration(
             root, test_mode=test_mode, coverage_args=options.coverage_args,
         )
         git = git_info(root)
+        checked_source = capture_source_state(root)
+        if (_source_difference(initial_source, checked_source) or
+                initial_source["config_sha256"] != config_digests or
+                git["head"] != initial_source["head"]):
+            raise RuntimeError("coverage source changed during initial verification")
     except (OSError, RuntimeError) as error:
         print(f"coverage provenance: {error}", file=sys.stderr)
         return 2
@@ -296,6 +417,11 @@ def main() -> int:
             "generated_at_utc": dt.datetime.now(dt.timezone.utc).isoformat().replace("+00:00", "Z"),
             "project_root": str(root),
             "git": git,
+            "source_verification": {
+                "mode": "start-end",
+                "scope": "project-git-files-and-config",
+                "fingerprint_sha256": initial_source["fingerprint_sha256"],
+            },
             "host": {"platform": platform.platform(), "triple": host, "target": os.environ.get("CARGO_BUILD_TARGET", host)},
             "tools": {"build_toolchain": build_toolchain,
                       "rustc_verbose_version": rustc or "unavailable",
@@ -309,6 +435,14 @@ def main() -> int:
             "artifact_sha256": hashes,
             "log": "coverage-provenance.log",
         }
+        final_source = capture_source_state(root)
+        changes = _source_difference(initial_source, final_source)
+        if initial_source["config_sha256"] != final_source["config_sha256"] and not changes:
+            changes.append("configuration")
+        if changes:
+            raise RuntimeError("coverage source changed during collection: " + ", ".join(changes))
+        if final_source["fingerprint_sha256"] != metadata["source_verification"]["fingerprint_sha256"]:
+            raise RuntimeError("coverage source changed during collection")
         (root / "coverage-metadata.json").write_text(
             json.dumps(metadata, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     except (OSError, RuntimeError) as error:
@@ -350,7 +484,7 @@ def main() -> int:
                 details.append(f"remove backup directory {backup}: {cleanup_error}")
                 details.append(f"recovery files retained in {backup}")
         if collection_started:
-            details.append(f"see {log_path}")
+            details.append("see coverage-provenance.log")
         print("; ".join(details), file=sys.stderr)
         return result.returncode if result is not None and result.returncode else 1
 
