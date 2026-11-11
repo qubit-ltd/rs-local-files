@@ -165,6 +165,38 @@ fn test_tree_sync_rejects_a_stage_without_observed_identity() {
 
 #[cfg(test)]
 #[test]
+fn test_tree_sync_enforces_retained_relative_path_byte_budget() {
+    let fixture = tempfile::tempdir().expect("fixture");
+    let filesystem = crate::LocalFileSystem::host().expect("host filesystem");
+    let parent = filesystem
+        .open_directory_with_options(fixture.path(), &crate::options::LocalDirectoryOpenOptions::new())
+        .expect("parent authority");
+    let mut stage = parent
+        .create_staged_directory(&crate::options::LocalTempDirectoryOptions::new())
+        .expect("stage");
+    let stage_path = fixture.path().join(stage.relative_name());
+    std::fs::create_dir(stage_path.join("nested")).expect("nested directory");
+    let mut payload = &b"payload"[..];
+    stage
+        .write_file_new(Path::new("nested/payload"), &mut payload, 32)
+        .expect("write staged payload");
+
+    let limits = LocalListOptions::new().with_max_seen_name_bytes(15);
+    assert!(
+        stage
+            .sync_files_with_options(&limits, LocalFileSyncRequirement::Required)
+            .expect("file traversal only charges entry names")
+    );
+    let error = stage
+        .sync_tree_with_options(&parent, &limits)
+        .expect_err("tree sync also charges retained relative paths");
+    assert_eq!(LocalFileErrorKind::ResourceLimit, error.kind());
+
+    stage.cleanup().expect("cleanup unpublished stage");
+}
+
+#[cfg(test)]
+#[test]
 fn test_not_required_file_sync_skips_depth_limit_for_nonempty_stage() {
     let fixture = tempfile::tempdir().expect("fixture");
     let filesystem = crate::LocalFileSystem::host().expect("host filesystem");
