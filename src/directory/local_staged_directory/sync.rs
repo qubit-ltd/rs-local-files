@@ -164,6 +164,19 @@ fn test_tree_sync_rejects_a_stage_without_observed_identity() {
 }
 
 #[cfg(test)]
+fn sync_test_name_bytes(name: &std::ffi::OsStr) -> usize {
+    #[cfg(windows)]
+    {
+        use std::os::windows::ffi::OsStrExt;
+        name.encode_wide().count().saturating_mul(2)
+    }
+    #[cfg(not(windows))]
+    {
+        name.as_encoded_bytes().len()
+    }
+}
+
+#[cfg(test)]
 #[test]
 fn test_tree_sync_enforces_retained_relative_path_byte_budget() {
     let fixture = tempfile::tempdir().expect("fixture");
@@ -175,14 +188,14 @@ fn test_tree_sync_enforces_retained_relative_path_byte_budget() {
         .create_staged_directory(&crate::options::LocalTempDirectoryOptions::new())
         .expect("stage");
     let stage_path = fixture.path().join(stage.relative_name());
-    std::fs::create_dir(stage_path.join("nested")).expect("nested directory");
+    std::fs::create_dir_all(stage_path.join("a/b/c/d/e")).expect("nested directories");
     let mut payload = &b"payload"[..];
     stage
-        .write_file_new(Path::new("nested/payload"), &mut payload, 32)
+        .write_file_new(Path::new("a/b/c/d/e/payload"), &mut payload, 32)
         .expect("write staged payload");
 
-    let entry_name_bytes = Path::new("nested").as_os_str().as_encoded_bytes().len()
-        + Path::new("payload").as_os_str().as_encoded_bytes().len();
+    let entry_name_bytes =
+        5 * sync_test_name_bytes(std::ffi::OsStr::new("a")) + sync_test_name_bytes(std::ffi::OsStr::new("payload"));
     let limits = LocalListOptions::new().with_max_seen_name_bytes(entry_name_bytes + 1);
     assert!(
         stage

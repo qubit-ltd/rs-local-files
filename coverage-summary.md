@@ -2,9 +2,9 @@
 
 | Metric | Covered | Total | Coverage |
 | --- | ---: | ---: | ---: |
-| functions | 3272 | 3444 | 95.01% |
-| lines | 31256 | 34042 | 91.82% |
-| regions | 47086 | 51573 | 91.3% |
+| functions | 3273 | 3445 | 95.01% |
+| lines | 31259 | 34045 | 91.82% |
+| regions | 47091 | 51578 | 91.3% |
 
 - HTML report: artifact `coverage-reports`, path `target/llvm-cov/html/index.html`.
 - LCOV report: artifact `coverage-reports`, path `lcov.info`.
