@@ -4,7 +4,7 @@
 | --- | ---: | ---: | ---: |
 | functions | 3271 | 3443 | 95% |
 | lines | 31227 | 34014 | 91.81% |
-| regions | 47017 | 51504 | 91.29% |
+| regions | 47018 | 51504 | 91.29% |
 
 - HTML report: artifact `coverage-reports`, path `target/llvm-cov/html/index.html`.
 - LCOV report: artifact `coverage-reports`, path `lcov.info`.
