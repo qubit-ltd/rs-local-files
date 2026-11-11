@@ -308,3 +308,90 @@ fn test_subtree_descent_compares_windows_unicode_native_components() {
         assert!(!observed.contains(&PathBuf::from("其他目录/深层")));
     }
 }
+
+#[test]
+fn test_default_walker_remains_unrestricted_without_subtree_configuration() {
+    let directory = tempdir().expect("fixture directory should exist");
+    fixture(directory.path());
+    let host = LocalFileSystem::host().expect("host filesystem should open");
+    let host_paths = paths(
+        host.list_with_options(directory.path(), &LocalListOptions::new().with_recursive())
+            .expect("host walker should open"),
+    );
+    let rooted = LocalFileSystem::rooted(directory.path()).expect("rooted filesystem should open");
+    let rooted_paths = paths(
+        rooted
+            .list_with_options(Path::new("."), &LocalListOptions::new().with_recursive())
+            .expect("rooted walker should open"),
+    );
+
+    for observed in [host_paths, rooted_paths] {
+        assert!(observed.contains(&PathBuf::from("other/deep/leaf/item")));
+        assert!(observed.contains(&PathBuf::from("wanted/leaf/item")));
+    }
+}
+
+#[cfg(feature = "test-support")]
+#[test]
+fn test_pruned_host_branch_does_not_trigger_descent_fault_hook() {
+    use qubit_local_files::test_support::install_test_fault;
+
+    let directory = tempdir().expect("fixture directory should exist");
+    fs::create_dir_all(directory.path().join("other/deep")).expect("unrelated branch should be created");
+    fs::write(directory.path().join("wanted"), b"target").expect("target file should be created");
+    let _fault = install_test_fault("walker-descend-canonicalize").expect("descent fault should install");
+    let host = LocalFileSystem::host().expect("host filesystem should open");
+    let walker = host
+        .list_with_options(directory.path(), &LocalListOptions::new().with_recursive())
+        .expect("host walker should open")
+        .with_descend_subtree(Path::new("wanted"))
+        .expect("file subtree should be accepted");
+
+    let observed = paths(walker);
+
+    assert!(observed.contains(&PathBuf::from("wanted")));
+    assert!(observed.contains(&PathBuf::from("other")));
+    assert!(!observed.contains(&PathBuf::from("other/deep")));
+}
+
+#[test]
+fn test_subtree_pruning_uses_less_entry_budget_than_unfiltered_walk() {
+    let directory = tempdir().expect("fixture directory should exist");
+    for branch in ["branch-a", "branch-b", "branch-c", "branch-d"] {
+        fs::create_dir_all(directory.path().join(branch)).expect("sibling directory should be created");
+        fs::write(directory.path().join(branch).join("child"), b"unrelated")
+            .expect("sibling descendant should be created");
+    }
+    fs::write(directory.path().join("wanted"), b"target").expect("target file should be created");
+    let filesystem = LocalFileSystem::host().expect("host filesystem should open");
+    let options = LocalListOptions::new().with_recursive().with_max_entries(5);
+    let filtered = filesystem
+        .list_with_options(directory.path(), &options)
+        .expect("filtered walker should open")
+        .with_descend_subtree(Path::new("wanted"))
+        .expect("target file subtree should be accepted")
+        .collect::<Result<Vec<_>, _>>()
+        .expect("root entries should fit the exact budget when siblings are pruned");
+    let mut filtered_paths = filtered
+        .iter()
+        .map(|entry| entry.relative_path().to_path_buf())
+        .collect::<Vec<_>>();
+    filtered_paths.sort();
+    assert_eq!(
+        vec![
+            PathBuf::from("branch-a"),
+            PathBuf::from("branch-b"),
+            PathBuf::from("branch-c"),
+            PathBuf::from("branch-d"),
+            PathBuf::from("wanted"),
+        ],
+        filtered_paths,
+    );
+
+    let unfiltered = filesystem
+        .list_with_options(directory.path(), &options)
+        .expect("unfiltered walker should open")
+        .collect::<Result<Vec<_>, _>>()
+        .expect_err("descending into sibling contents should exceed the root-entry budget");
+    assert_eq!(LocalFileErrorKind::ResourceLimit, unfiltered.kind());
+}
