@@ -89,6 +89,10 @@ pub struct LocalDirectoryWalker {
     seen_name_budget: Option<ResourceBudget<LocalResourceKind, usize>>,
     /// Monotonic deadline fixed when the walker is created.
     deadline: Option<Instant>,
+    /// Optional root-relative subtree controlling recursive descent.
+    descend_subtree: Option<PathBuf>,
+    /// Whether iteration has advanced and configuration is now fixed.
+    started: bool,
 }
 
 impl std::fmt::Debug for LocalDirectoryWalker {
@@ -218,6 +222,8 @@ impl LocalDirectoryWalker {
                 .max_seen_name_bytes()
                 .map(|limit| ResourceBudget::new(LocalResourceKind::SeenNameBytes, limit)),
             deadline,
+            descend_subtree: None,
+            started: false,
         })
     }
 
@@ -346,6 +352,7 @@ impl LocalDirectoryWalker {
                 },
                 followed_directories,
                 symlink_policy,
+                descend_subtree: None,
             }),
             terminated: false,
             symlink_policy,
@@ -356,6 +363,8 @@ impl LocalDirectoryWalker {
                 .max_seen_name_bytes()
                 .map(|limit| ResourceBudget::new(LocalResourceKind::SeenNameBytes, limit)),
             deadline,
+            descend_subtree: None,
+            started: false,
         })
     }
 
@@ -368,6 +377,50 @@ impl LocalDirectoryWalker {
     #[inline]
     pub fn root(&self) -> &Path {
         &self.root
+    }
+
+    /// Limits recursive descent to the requested root-relative subtree.
+    ///
+    /// Entries are still yielded normally; only opening directories outside
+    /// the target path and its ancestors is skipped. The path is copied and
+    /// must be relative and contain only normal components. An empty path
+    /// leaves descent unrestricted. Configure this before calling `next`.
+    ///
+    /// # Parameters
+    ///
+    /// - `subtree`: Native path relative to the walker's listing root.
+    ///
+    /// # Returns
+    ///
+    /// The walker configured with the descent restriction.
+    ///
+    /// # Errors
+    ///
+    /// Returns `InvalidPath` for an absolute or non-normal path and
+    /// `InvalidState` if iteration has already started.
+    pub fn with_descend_subtree(mut self, subtree: &Path) -> LocalResult<Self> {
+        if self.started {
+            return Err(
+                LocalFileError::new(LocalFileErrorKind::InvalidState, LocalFileOperation::List)
+                    .with_path(self.root.clone()),
+            );
+        }
+        if subtree.is_absolute()
+            || subtree
+                .components()
+                .any(|component| !matches!(component, std::path::Component::Normal(_)))
+            || has_current_directory_component(subtree)
+        {
+            return Err(
+                LocalFileError::new(LocalFileErrorKind::InvalidPath, LocalFileOperation::List)
+                    .with_path(self.root.join(subtree)),
+            );
+        }
+        self.descend_subtree = (!subtree.as_os_str().is_empty()).then(|| subtree.to_path_buf());
+        if let Some(rooted) = self.rooted.as_mut() {
+            rooted.descend_subtree = self.descend_subtree.clone();
+        }
+        Ok(self)
     }
 
     /// Binds the filesystem PWD snapshot used by yielded errors.
@@ -398,8 +451,13 @@ impl LocalDirectoryWalker {
     /// `true` when recursion and the configured depth limit permit descent.
     #[must_use]
     #[inline]
-    fn may_descend(&self, entry_depth: usize) -> bool {
-        self.options.recursive() && self.options.max_depth().is_none_or(|max_depth| entry_depth < max_depth)
+    fn may_descend(&self, entry_depth: usize, relative: &Path) -> bool {
+        self.options.recursive()
+            && self.options.max_depth().is_none_or(|max_depth| entry_depth < max_depth)
+            && self
+                .descend_subtree
+                .as_ref()
+                .is_none_or(|subtree| relative.starts_with(subtree) || subtree.starts_with(relative))
     }
 
     /// Closes every currently open host reader while retaining its frame.
@@ -611,6 +669,25 @@ impl LocalDirectoryWalker {
         }
         Err(error)
     }
+}
+
+/// Detects lexical `.` components that `Path::components` normalizes away.
+///
+/// # Parameters
+///
+/// - `path`: Relative path whose original components are checked.
+///
+/// # Returns
+///
+/// `true` when the path contains an explicit current-directory component.
+fn has_current_directory_component(path: &Path) -> bool {
+    #[cfg(windows)]
+    let separators = ['/', '\\'];
+    #[cfg(not(windows))]
+    let separators = ['/'];
+    path.to_string_lossy()
+        .split(separators)
+        .any(|component| component == ".")
 }
 
 /// Reports whether the test-only inner deadline fault is active.
@@ -831,7 +908,7 @@ impl LocalDirectoryWalker {
                 return Err(walk_io_error(&path, error));
             }
         };
-        let may_descend = self.may_descend(entry_depth);
+        let may_descend = self.may_descend(entry_depth, &relative);
         let descent_metadata =
             if entry_metadata.file_type().is_symlink() && may_descend && self.symlink_policy.follows() {
                 match fs::metadata(&path) {
@@ -871,6 +948,7 @@ impl LocalDirectoryWalker {
     ///
     /// The next entry or error, or `None` after exhaustion or termination.
     fn next_entry(&mut self) -> Option<LocalResult<LocalDirectoryEntry>> {
+        self.started = true;
         if self.terminated {
             return None;
         }
@@ -1273,7 +1351,12 @@ fn next_rooted_entry(
         let output_path = output_parent.join(entry.name());
         let entry_metadata = entry.metadata();
         let metadata = crate::rooted_local_file_system::rooted_metadata(entry_metadata);
-        let may_descend = options.recursive() && options.max_depth().is_none_or(|max_depth| entry_depth < max_depth);
+        let may_descend = options.recursive()
+            && options.max_depth().is_none_or(|max_depth| entry_depth < max_depth)
+            && state
+                .descend_subtree
+                .as_deref()
+                .is_none_or(|subtree| output_path.starts_with(subtree) || subtree.starts_with(&output_path));
         {
             if let Err(error) = crate::rooted_local_file_system::resolve_rooted_path_allow_root_with_deadline(
                 &state.root,

@@ -24,4 +24,6 @@ pub(in crate::walk) struct RootedWalkState {
     pub(in crate::walk) followed_directories: HashSet<crate::local::DirectoryIdentity>,
     /// Symbolic-link policy fixed for this rooted walk.
     pub(in crate::walk) symlink_policy: crate::LocalSymlinkPolicy,
+    /// Optional requested-root-relative subtree controlling descent.
+    pub(in crate::walk) descend_subtree: Option<std::path::PathBuf>,
 }

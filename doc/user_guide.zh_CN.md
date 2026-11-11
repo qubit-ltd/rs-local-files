@@ -6,7 +6,7 @@
 
 ## 手册目标与读者
 
-本手册面向 Rust 1.94 及以上版本的 `qubit-local-files` 0.5.0 使用者，适用于直接操作主机
+本手册面向 Rust 1.94 及以上版本的 `qubit-local-files` 0.5.1 使用者，适用于直接操作主机
 文件系统，或需要把操作限制在一个已打开目录之下的应用。它不是 provider 注册表、远程
 文件系统 API，也不替代 provider 层的逻辑路径模型。本 crate 提供同步 API；异步应用应在
 合适的 blocking 执行环境中调用。
@@ -18,7 +18,7 @@
 ```toml
 # BEGIN guide introductory dependencies
 [dependencies]
-qubit-local-files = "0.5.0"
+qubit-local-files = "0.5.1"
 qubit-io = "0.19"
 tempfile = "3.27"
 # END guide introductory dependencies
@@ -541,7 +541,7 @@ FreeBSD 暂不支持。其 CI 只检查编译和少量兼容性合同，不再�
 ```toml
 # BEGIN executable application dependencies
 [dependencies]
-qubit-local-files = { version = "0.5.0", features = ["digest"] }
+qubit-local-files = { version = "0.5.1", features = ["digest"] }
 qubit-io = "0.19"
 sha2 = "0.11"
 tempfile = "^3.27"

@@ -163,7 +163,7 @@ fn test_documented_conditional_write_runs_as_a_consumer_without_a_digest_feature
         let dependency_path = cargo_manifest_path(&crate_path.to_string_lossy());
         let dependencies = dependencies.replace(
             dependency_line,
-            &dependency_line.replace("version = \"0.5.0\"", &format!("path = \"{dependency_path}\"")),
+            &dependency_line.replace("version = \"0.5.1\"", &format!("path = \"{dependency_path}\"")),
         );
         let visible_code = extract_marked(guide, START, END, language)
             .lines()
@@ -248,7 +248,7 @@ fn test_documented_failed_seal_cleanup_retains_owner_for_retry() {
         let dependencies = dependencies.replace(
             dependency_line,
             &dependency_line
-                .replace("version = \"0.5.0\"", &format!("path = \"{dependency_path}\""))
+                .replace("version = \"0.5.1\"", &format!("path = \"{dependency_path}\""))
                 .replace("features = [\"digest\"]", "features = [\"digest\", \"test-support\"]"),
         );
         let helper = extract_marked(guide, SEAL_START, SEAL_END, language);
@@ -385,7 +385,7 @@ fn test_documented_inspection_cleanup_retains_owner_for_retry() {
         let dependencies = dependencies.replace(
             dependency_line,
             &dependency_line
-                .replace("version = \"0.5.0\"", &format!("path = \"{dependency_path}\""))
+                .replace("version = \"0.5.1\"", &format!("path = \"{dependency_path}\""))
                 .replace("features = [\"digest\"]", "features = [\"digest\", \"test-support\"]"),
         );
         let helper = extract_marked(guide, INSPECT_START, INSPECT_END, language);
