@@ -1,13 +1,25 @@
 import hashlib
+import importlib.util
+import io
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
 import unittest
+from contextlib import redirect_stderr
+from unittest import mock
 from pathlib import Path
 
 SCRIPT = Path(__file__).resolve().parents[1] / "coverage-provenance.py"
+
+
+def load_script():
+    spec = importlib.util.spec_from_file_location("coverage_provenance_under_test", SCRIPT)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 class CoverageProvenanceTests(unittest.TestCase):
@@ -60,6 +72,191 @@ if os.environ.get('FAKE_COVERAGE_FAIL'):
             env=env,
             check=False,
         )
+
+    def run_inline(self, *, replace_side_effect=None, collector_side_effect=None,
+                   rmtree_side_effect=None):
+        module = load_script()
+        real_rmtree = shutil.rmtree
+        stderr = io.StringIO()
+        env = {"RLF_COVERAGE_TEST_MODE": "1"}
+        with (mock.patch.dict(os.environ, env, clear=False),
+              mock.patch.object(sys, "argv", [str(SCRIPT), "--project-root", str(self.root)]),
+              mock.patch.object(module, "load_configuration", return_value=({}, {})),
+              mock.patch.object(module, "git_info", return_value={"head": "test", "dirty": False}),
+              mock.patch.object(module, "configured_build_toolchain", return_value="stable"),
+              mock.patch.object(module.platform, "platform", return_value="test-platform"),
+              mock.patch.object(module, "output", return_value="tool version"),
+              mock.patch.object(module.shutil, "which", return_value="rustup"),
+              mock.patch.object(module.os, "replace", side_effect=replace_side_effect),
+              mock.patch.object(module.shutil, "move", side_effect=replace_side_effect),
+              mock.patch.object(module.shutil, "rmtree", side_effect=rmtree_side_effect or real_rmtree),
+              mock.patch.object(module.subprocess, "run", side_effect=collector_side_effect),
+              redirect_stderr(stderr)):
+            try:
+                return module.main(), stderr.getvalue()
+            except OSError as error:
+                return error, stderr.getvalue()
+
+    def write_old_outputs(self):
+        outputs = {
+            "coverage-summary.md": b"old summary\n",
+            "coverage-metadata.json": b"old metadata\n",
+            "coverage.json": b"old coverage\n",
+            "lcov.info": b"old lcov\n",
+            "coverage.txt": b"old text\n",
+            "coverage-badge.json": b"old badge\n",
+            "ci-summary.json": b"old ci summary\n",
+            "target/llvm-cov/html/index.html": b"old html\n",
+        }
+        for relative, content in outputs.items():
+            path = self.root / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(content)
+        return outputs
+
+    def assert_outputs_equal(self, outputs):
+        for relative, content in outputs.items():
+            path = self.root / relative
+            self.assertTrue(path.is_file(), f"{relative} was lost")
+            self.assertEqual(path.read_bytes(), content, relative)
+
+    def fake_collection(self, returncode=0):
+        def collect(command, *, cwd, **kwargs):
+            reports = {
+                "coverage-summary.md": "## New coverage\n",
+                "coverage.json": '{"data":[{}]}',
+                "lcov.info": "TN:\n",
+                "coverage.txt": "coverage report\n",
+                "coverage-badge.json": "{}",
+                "ci-summary.json": "{}",
+                "target/llvm-cov/html/index.html": "html",
+                "target/llvm-cov/cobertura.xml": "<coverage/>",
+            }
+            for relative, content in reports.items():
+                path = cwd / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(content, encoding="utf-8")
+            return subprocess.CompletedProcess(command, returncode)
+        return collect
+
+    def backup_directories(self):
+        return list(self.root.glob(".coverage-provenance-backup-*"))
+
+    def test_first_backup_move_failure_keeps_old_outputs_and_skips_collection(self):
+        outputs = self.write_old_outputs()
+        collector = mock.Mock()
+
+        def fail_first_move(source, destination):
+            raise OSError("injected first backup move failure")
+
+        result, stderr = self.run_inline(
+            replace_side_effect=fail_first_move,
+            collector_side_effect=collector,
+        )
+
+        collector.assert_not_called()
+        self.assert_outputs_equal(outputs)
+        self.assertEqual(result, 1, stderr)
+        self.assertNotIn("coverage-provenance.log", stderr)
+        self.assertEqual(self.backup_directories(), [])
+
+    def test_second_backup_move_failure_restores_all_old_outputs_and_skips_collection(self):
+        outputs = self.write_old_outputs()
+        move_count = 0
+        real_replace = os.replace
+
+        def fail_second_move(source, destination):
+            nonlocal move_count
+            move_count += 1
+            if move_count == 2:
+                raise OSError("injected second backup move failure")
+            real_replace(source, destination)
+
+        collector = mock.Mock()
+        result, stderr = self.run_inline(
+            replace_side_effect=fail_second_move,
+            collector_side_effect=collector,
+        )
+
+        collector.assert_not_called()
+        self.assert_outputs_equal(outputs)
+        self.assertEqual(result, 1, stderr)
+        self.assertNotIn("coverage-provenance.log", stderr)
+        self.assertEqual(self.backup_directories(), [])
+
+    def test_collection_failure_restores_old_html_tree_without_old_metadata(self):
+        outputs = self.write_old_outputs()
+        result, stderr = self.run_inline(
+            replace_side_effect=os.replace,
+            collector_side_effect=self.fake_collection(returncode=17),
+        )
+
+        self.assertEqual(result, 17, stderr)
+        self.assertIn("see ", stderr)
+        self.assertFalse((self.root / "coverage-metadata.json").exists())
+        for relative, content in outputs.items():
+            if relative == "coverage-metadata.json":
+                continue
+            self.assertEqual((self.root / relative).read_bytes(), content, relative)
+        self.assertEqual(self.backup_directories(), [])
+
+    def test_failed_restore_keeps_backup_and_continues_restoring_other_outputs(self):
+        outputs = self.write_old_outputs()
+        real_replace = os.replace
+
+        def fail_coverage_restore(source, destination):
+            source = Path(source)
+            if source.parent.name.startswith(".coverage-provenance-backup-") and source.name == "coverage.json":
+                raise OSError("injected restore failure")
+            real_replace(source, destination)
+
+        result, stderr = self.run_inline(
+            replace_side_effect=fail_coverage_restore,
+            collector_side_effect=self.fake_collection(returncode=17),
+        )
+
+        self.assertEqual(result, 17, stderr)
+        backups = self.backup_directories()
+        self.assertEqual(len(backups), 1)
+        self.assertIn(str(backups[0]), stderr)
+        self.assertTrue((backups[0] / "coverage.json").is_file())
+        self.assertEqual((self.root / "coverage-summary.md").read_bytes(), outputs["coverage-summary.md"])
+        self.assertEqual((self.root / "coverage.txt").read_bytes(), outputs["coverage.txt"])
+
+    def test_success_removes_backup_and_preserves_new_reports(self):
+        self.write_old_outputs()
+        result, stderr = self.run_inline(
+            replace_side_effect=os.replace,
+            collector_side_effect=self.fake_collection(),
+        )
+
+        self.assertEqual(result, 0, stderr)
+        self.assertEqual((self.root / "coverage-summary.md").read_text(),
+                         "## New coverage\n\n- Provenance: `coverage-metadata.json` (same-run metadata).\n")
+        self.assertTrue((self.root / "coverage-metadata.json").is_file())
+        self.assertEqual(self.backup_directories(), [])
+
+    def test_backup_cleanup_failure_keeps_new_reports_and_reports_retained_backup(self):
+        self.write_old_outputs()
+        real_rmtree = shutil.rmtree
+
+        def fail_backup_cleanup(path, *args, **kwargs):
+            if Path(path).name.startswith(".coverage-provenance-backup-"):
+                raise OSError("injected backup cleanup failure")
+            real_rmtree(path, *args, **kwargs)
+
+        result, stderr = self.run_inline(
+            replace_side_effect=os.replace,
+            collector_side_effect=self.fake_collection(),
+            rmtree_side_effect=fail_backup_cleanup,
+        )
+
+        self.assertEqual(result, 1, stderr)
+        backups = self.backup_directories()
+        self.assertEqual(len(backups), 1)
+        self.assertIn(str(backups[0]), stderr)
+        self.assertTrue((self.root / "coverage-metadata.json").is_file())
+        self.assertIn("## New coverage", (self.root / "coverage-summary.md").read_text())
 
     def test_success_records_local_provenance_and_effective_configuration(self):
         result = self.run_provenance()

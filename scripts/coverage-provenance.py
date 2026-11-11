@@ -242,80 +242,124 @@ def main() -> int:
         return 2
 
     root.mkdir(parents=True, exist_ok=True)
-    with tempfile.TemporaryDirectory(prefix="coverage-provenance-") as temporary:
-        backup = Path(temporary)
-        existing: list[str] = []
+    try:
+        backup = Path(tempfile.mkdtemp(prefix=".coverage-provenance-backup-", dir=root))
+    except OSError as error:
+        print(f"coverage provenance: could not create backup directory: {error}", file=sys.stderr)
+        return 1
+
+    existing: list[str] = []
+    backup_complete = False
+    collection_started = False
+    result: subprocess.CompletedProcess[str] | None = None
+    try:
         for relative in OUTPUTS:
             original = root / relative
             if original.exists():
                 destination = backup / relative
                 destination.parent.mkdir(parents=True, exist_ok=True)
-                shutil.move(str(original), str(destination))
+                os.replace(original, destination)
                 existing.append(relative)
-        try:
-            build_toolchain = configured_build_toolchain(root)
-            rustc = output(["rustc", "-vV"], root) if not shutil.which("rustup") else None
-            if shutil.which("rustup"):
-                rustc = output(["rustup", "run", build_toolchain, "rustc", "-vV"], root)
-                cargo = output(["rustup", "run", build_toolchain, "cargo", "--version"], root)
-                llvm = output(["rustup", "run", build_toolchain, "cargo", "llvm-cov", "--version"], root)
-            else:
-                cargo = output(["cargo", "--version"], root)
-                llvm = output(["cargo", "llvm-cov", "--version"], root)
-            env = os.environ.copy()
-            if test_mode:
-                env.pop("GITHUB_STEP_SUMMARY", None)
-            with log_path.open("w", encoding="utf-8") as log:
-                result = subprocess.run(command, cwd=root, env=env, text=True,
-                                        stdout=log, stderr=subprocess.STDOUT, check=False)
-            if result.returncode:
-                raise RuntimeError(f"coverage command failed with exit code {result.returncode}")
-            required = ["coverage-summary.md", "coverage.json", "lcov.info", "coverage.txt",
-                        "coverage-badge.json", "ci-summary.json", "target/llvm-cov/html/index.html",
-                        "target/llvm-cov/cobertura.xml"]
-            missing = [path for path in required if not (root / path).is_file()]
-            if missing:
-                raise RuntimeError("coverage reports missing: " + ", ".join(missing))
-            host = next((line.removeprefix("host: ") for line in (rustc or "").splitlines()
-                         if line.startswith("host: ")), platform.machine())
-            with (root / "coverage-summary.md").open("a", encoding="utf-8") as summary:
-                summary.write("\n- Provenance: `coverage-metadata.json` (same-run metadata).\n")
-            hashes = artifact_hashes(root, required, log_path)
-            metadata = {
-                "schema": 1,
-                "generated_at_utc": dt.datetime.now(dt.timezone.utc).isoformat().replace("+00:00", "Z"),
-                "project_root": str(root),
-                "git": git,
-                "host": {"platform": platform.platform(), "triple": host, "target": os.environ.get("CARGO_BUILD_TARGET", host)},
-                "tools": {"build_toolchain": build_toolchain,
-                          "rustc_verbose_version": rustc or "unavailable",
-                          "cargo_version": cargo or "unavailable",
-                          "cargo_llvm_cov_version": llvm or "unavailable"},
-                "coverage": effective,
-                "config_sha256": config_digests,
-                "entrypoint": {"argv": command, "path": ".infra/bin/coverage.sh"},
-                "run": run_url(env),
-                "artifacts": sorted(hashes),
-                "artifact_sha256": hashes,
-                "log": "coverage-provenance.log",
-            }
-            (root / "coverage-metadata.json").write_text(
-                json.dumps(metadata, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-        except (OSError, RuntimeError) as error:
+        backup_complete = True
+
+        build_toolchain = configured_build_toolchain(root)
+        rustc = output(["rustc", "-vV"], root) if not shutil.which("rustup") else None
+        if shutil.which("rustup"):
+            rustc = output(["rustup", "run", build_toolchain, "rustc", "-vV"], root)
+            cargo = output(["rustup", "run", build_toolchain, "cargo", "--version"], root)
+            llvm = output(["rustup", "run", build_toolchain, "cargo", "llvm-cov", "--version"], root)
+        else:
+            cargo = output(["cargo", "--version"], root)
+            llvm = output(["cargo", "llvm-cov", "--version"], root)
+        env = os.environ.copy()
+        if test_mode:
+            env.pop("GITHUB_STEP_SUMMARY", None)
+        with log_path.open("w", encoding="utf-8") as log:
+            collection_started = True
+            result = subprocess.run(command, cwd=root, env=env, text=True,
+                                    stdout=log, stderr=subprocess.STDOUT, check=False)
+        if result.returncode:
+            raise RuntimeError(f"coverage command failed with exit code {result.returncode}")
+        required = ["coverage-summary.md", "coverage.json", "lcov.info", "coverage.txt",
+                    "coverage-badge.json", "ci-summary.json", "target/llvm-cov/html/index.html",
+                    "target/llvm-cov/cobertura.xml"]
+        missing = [path for path in required if not (root / path).is_file()]
+        if missing:
+            raise RuntimeError("coverage reports missing: " + ", ".join(missing))
+        host = next((line.removeprefix("host: ") for line in (rustc or "").splitlines()
+                     if line.startswith("host: ")), platform.machine())
+        with (root / "coverage-summary.md").open("a", encoding="utf-8") as summary:
+            summary.write("\n- Provenance: `coverage-metadata.json` (same-run metadata).\n")
+        hashes = artifact_hashes(root, required, log_path)
+        metadata = {
+            "schema": 1,
+            "generated_at_utc": dt.datetime.now(dt.timezone.utc).isoformat().replace("+00:00", "Z"),
+            "project_root": str(root),
+            "git": git,
+            "host": {"platform": platform.platform(), "triple": host, "target": os.environ.get("CARGO_BUILD_TARGET", host)},
+            "tools": {"build_toolchain": build_toolchain,
+                      "rustc_verbose_version": rustc or "unavailable",
+                      "cargo_version": cargo or "unavailable",
+                      "cargo_llvm_cov_version": llvm or "unavailable"},
+            "coverage": effective,
+            "config_sha256": config_digests,
+            "entrypoint": {"argv": command, "path": ".infra/bin/coverage.sh"},
+            "run": run_url(env),
+            "artifacts": sorted(hashes),
+            "artifact_sha256": hashes,
+            "log": "coverage-provenance.log",
+        }
+        (root / "coverage-metadata.json").write_text(
+            json.dumps(metadata, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    except (OSError, RuntimeError) as error:
+        cleanup_errors: list[str] = []
+        if collection_started:
             for relative in OUTPUTS:
                 path = root / relative
-                if path.is_dir():
-                    shutil.rmtree(path)
-                elif path.exists():
-                    path.unlink()
-            for relative in existing:
-                source = backup / relative
-                destination = root / relative
+                try:
+                    if path.is_dir():
+                        shutil.rmtree(path)
+                    elif path.exists():
+                        path.unlink()
+                except OSError as cleanup_error:
+                    cleanup_errors.append(f"remove {path}: {cleanup_error}")
+
+        restore_errors: list[str] = []
+        restore_paths = existing if not collection_started else [
+            relative for relative in existing if relative != "coverage-metadata.json"
+        ]
+        for relative in restore_paths:
+            source = backup / relative
+            destination = root / relative
+            try:
                 destination.parent.mkdir(parents=True, exist_ok=True)
-                shutil.move(str(source), str(destination))
-            (root / "coverage-metadata.json").unlink(missing_ok=True)
-            print(f"coverage provenance: {error}; see {log_path}", file=sys.stderr)
-            return result.returncode if "result" in locals() and result.returncode else 1
+                os.replace(source, destination)
+            except OSError as restore_error:
+                restore_errors.append(f"restore {source} to {destination}: {restore_error}")
+
+        phase = "backup preparation" if not backup_complete else "report generation"
+        details = [f"coverage provenance: {phase} failed: {error}"]
+        details.extend(cleanup_errors)
+        details.extend(restore_errors)
+        if restore_errors:
+            details.append(f"recovery files retained in {backup}")
+        else:
+            try:
+                shutil.rmtree(backup)
+            except OSError as cleanup_error:
+                details.append(f"remove backup directory {backup}: {cleanup_error}")
+                details.append(f"recovery files retained in {backup}")
+        if collection_started:
+            details.append(f"see {log_path}")
+        print("; ".join(details), file=sys.stderr)
+        return result.returncode if result is not None and result.returncode else 1
+
+    try:
+        shutil.rmtree(backup)
+    except OSError as error:
+        print(f"coverage provenance: new reports are ready but backup cleanup failed: {error}; "
+              f"recovery files retained in {backup}", file=sys.stderr)
+        return 1
     print(f"coverage artifacts and provenance written under {root}")
     return 0
 
