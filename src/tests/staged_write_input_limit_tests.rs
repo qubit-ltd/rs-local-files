@@ -318,6 +318,73 @@ fn required_privacy_stage_uses_limited_input_reads() {
 }
 
 #[test]
+fn required_privacy_stage_limits_block_boundary_reads() {
+    let options = LocalTempDirectoryOptions::new().with_privacy(LocalPrivacyRequirement::Required);
+    let (fixture, mut stage) = stage_with_options(options);
+    let root = fixture.path().join(stage.relative_name());
+
+    let mut over_limit = RecordingInput::new(vec![b'z'; 8193]);
+    let error = stage
+        .write_file_new(Path::new("over-limit"), &mut over_limit, 8192)
+        .expect_err("private input beyond the quota must fail");
+    assert_eq!(error.kind(), LocalFileErrorKind::ResourceLimit);
+    assert_eq!(over_limit.requests, vec![8192, 1]);
+    assert_eq!(over_limit.returns, vec![8192, 1]);
+    assert_eq!(over_limit.position, 8193);
+    assert!(!root.join("over-limit").exists());
+
+    stage
+        .cleanup()
+        .expect("private stage cleanup should succeed");
+}
+
+#[test]
+fn required_privacy_stage_accepts_exact_block_boundary_quota() {
+    let options = LocalTempDirectoryOptions::new().with_privacy(LocalPrivacyRequirement::Required);
+    let (fixture, mut stage) = stage_with_options(options);
+    let root = fixture.path().join(stage.relative_name());
+
+    let mut exact = RecordingInput::new(vec![b'q'; 8193]);
+    stage
+        .write_file_new(Path::new("exact"), &mut exact, 8193)
+        .expect("private content at the exact quota should succeed");
+    assert_eq!(exact.requests, vec![8192, 1, 1]);
+    assert_eq!(exact.returns, vec![8192, 1, 0]);
+    assert_eq!(exact.position, 8193);
+    assert_eq!(
+        std::fs::read(root.join("exact")).expect("private file exists"),
+        vec![b'q'; 8193]
+    );
+
+    stage
+        .cleanup()
+        .expect("private stage cleanup should succeed");
+}
+
+#[test]
+fn required_privacy_stage_probe_errors_keep_read_context_and_cleanup() {
+    let options = LocalTempDirectoryOptions::new().with_privacy(LocalPrivacyRequirement::Required);
+    let (fixture, mut stage) = stage_with_options(options);
+    let root = fixture.path().join(stage.relative_name());
+
+    let mut input = RecordingInput::new(b"x".to_vec()).with_error_at(1, io::ErrorKind::BrokenPipe);
+    let error = stage
+        .write_file_new(Path::new("probe-error"), &mut input, 1)
+        .expect_err("private probe error should be returned");
+    assert_eq!(error.operation(), LocalFileOperation::Read);
+    assert_eq!(error.io_error_kind(), io::ErrorKind::BrokenPipe);
+    assert_eq!(input.requests, vec![1, 1]);
+    assert_eq!(input.position, 1);
+    assert!(!root.join("probe-error").exists());
+    assert!(root.exists(), "stage remains owned after probe failure");
+
+    stage
+        .cleanup()
+        .expect("private stage should remain cleanable");
+    assert!(!root.exists());
+}
+
+#[test]
 fn maximum_quota_does_not_overflow_for_small_input() {
     let (fixture, mut stage) = ordinary_stage();
     let mut input = RecordingInput::new(b"small".to_vec());
