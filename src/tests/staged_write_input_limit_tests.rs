@@ -100,6 +100,13 @@ fn ordinary_stage() -> (tempfile::TempDir, crate::directory::LocalStagedDirector
 fn over_limit_reads_only_the_first_unaccepted_byte() {
     let (fixture, mut stage) = ordinary_stage();
     let stage_path = fixture.path().join(stage.relative_name());
+    stage
+        .write_file_new(
+            Path::new("kept"),
+            &mut RecordingInput::new(b"seed".to_vec()),
+            4,
+        )
+        .expect("existing stage file should be created");
     let mut input = RecordingInput::new(b"longer".to_vec());
 
     let error = stage
@@ -108,8 +115,13 @@ fn over_limit_reads_only_the_first_unaccepted_byte() {
 
     assert_eq!(error.kind(), LocalFileErrorKind::ResourceLimit);
     assert_eq!(input.requests, vec![1, 1]);
-    assert_eq!(input.returns, vec![2]);
+    assert_eq!(input.returns, vec![1, 1]);
     assert_eq!(input.position, 2);
+    assert!(stage_path.join("kept").exists());
+    assert_eq!(
+        std::fs::read(stage_path.join("kept")).expect("seed remains"),
+        b"seed"
+    );
     assert!(!stage_path.join("payload").exists());
     stage.cleanup().expect("stage cleanup should succeed");
     assert!(!stage_path.exists());
@@ -278,6 +290,28 @@ fn required_privacy_stage_uses_limited_input_reads() {
     assert_eq!(input.returns, vec![1, 1]);
     assert_eq!(input.position, 2);
     assert!(!root.join("payload").exists());
+
+    let mut short = RecordingInput::new(b"abc".to_vec()).with_short_read(1);
+    stage
+        .write_file_new(Path::new("short"), &mut short, 2)
+        .expect("private stage handles short reads within quota");
+    assert_eq!(short.requests, vec![2, 1, 1]);
+    assert_eq!(short.returns, vec![1, 1, 0]);
+    assert_eq!(short.position, 2);
+    assert_eq!(
+        std::fs::read(root.join("short")).expect("private file exists"),
+        b"ab"
+    );
+
+    let mut interrupted_probe =
+        RecordingInput::new(b"x".to_vec()).with_error_at(1, io::ErrorKind::Interrupted);
+    stage
+        .write_file_new(Path::new("interrupted-probe"), &mut interrupted_probe, 1)
+        .expect("private probe retries Interrupted");
+    assert_eq!(interrupted_probe.requests, vec![1, 1, 1]);
+    assert_eq!(interrupted_probe.returns, vec![1, 0]);
+    assert_eq!(interrupted_probe.position, 1);
+
     stage
         .cleanup()
         .expect("private stage cleanup should succeed");
