@@ -6,7 +6,23 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 
-/// Condition that must hold for a conditional write to be published.
+/// Selects the destination condition and verification protocol for a
+/// conditional write.
+///
+/// `Absent` uses a publication protocol that does not overwrite an existing
+/// destination. `Content` checks the expected digest before publication and
+/// verifies the displaced content afterward; it is not a strict
+/// compare-and-swap. A concurrent change may be detected after the candidate
+/// becomes visible, and rollback or recovery may fail. Whether
+/// [`LocalConditionalWriter::commit`] succeeds or returns a
+/// [`LocalConditionalCommitError`], determine the actual effect from its result
+/// or the error's [`LocalConditionalPublicationState`]. `Restored` means
+/// publication occurred and the previous destination was restored; it does not
+/// mean the candidate was never visible.
+///
+/// [`LocalConditionalWriter::commit`]: crate::writer::LocalConditionalWriter::commit
+/// [`LocalConditionalPublicationState`]: crate::outcome::LocalConditionalPublicationState
+/// [`LocalConditionalCommitError`]: crate::error::LocalConditionalCommitError
 ///
 /// # Type Parameters
 ///
@@ -28,9 +44,10 @@
 pub enum LocalWritePrecondition<T> {
     /// Publish only when the destination does not exist.
     Absent,
-    /// Publish only when the destination content has the expected digest.
+    /// Requests digest-based verification of the destination content around
+    /// publication; this is not a strict compare-and-swap.
     Content(
-        /// Digest the destination must match before the write can be published.
+        /// Expected digest used by the `Content` verification protocol.
         T,
     ),
 }

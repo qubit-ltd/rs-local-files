@@ -22,8 +22,9 @@ use crate::options::LocalWritePrecondition;
 use crate::writer::LocalConditionalWriter;
 
 impl LocalFileSystem {
-    /// Opens a writer that publishes only when the supplied destination
-    /// condition holds.
+    /// Opens a writer for conditional publication using the supplied
+    /// destination condition and verification protocol. See
+    /// [`LocalWritePrecondition`] for the guarantees of each protocol.
     ///
     /// Enable the optional `digest` feature, which uses `digest` 0.11, and
     /// select an algorithm crate such as `sha2` 0.11. `Content` compares the
