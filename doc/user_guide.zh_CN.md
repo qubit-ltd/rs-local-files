@@ -185,8 +185,10 @@ let one_level = filesystem.list_with_options(
 
 `max_entries` 统计通过深度检查的不同具名子项；成功检查和具名检查错误都计一次。无法关联
 具体名称的目录流错误不计 entry。frame 重开后已处理的名称不会重复计数。预算可恰好用满；尝试
-处理第 N+1 个符合条件的不同名称时才返回结构化 `Entry` ResourceLimit，并优先于该名称的
-seen-name 字节超限。深度为零时不检查子项，也不扣减 entry 预算。
+处理第 N+1 个符合条件的不同名称时才返回结构化 `Entry` ResourceLimit，其返回优先于该名称的
+seen-name 字节超限或具名检查错误。这是错误返回的优先级，不代表原生调用的执行顺序。Rooted
+枚举可能先打开子项或查询元数据，再由 walker 应用 entry 预算或跳过重开后遇到的重复名称；该预算
+不是元数据查询次数或系统调用次数的严格上限。深度为零时不检查子项，也不扣减 entry 预算。
 
 初始 Options 不包含隐藏的业务资源上限。遍历和复制预算、重试时长、deadline 与临时名称
 尝试次数，只有调用方显式设置后才生效。clone filesystem 会复制 Rooted 虚拟 PWD 与全部配置；
@@ -766,8 +768,10 @@ namespace 路径作为公开 root；可选的 diagnostic path 仍可记录实际
 `max_depth` 为零时结果为空，并且不读取目录子项；深度、条目数和 seen-name 字节预算都为零时，
 同样不会读取子项。`max_entries` 统计通过深度检查的不同具名子项，包括具名检查错误；无法关联
 名称的目录流错误不计入，frame 重开后已处理名称也不重复计数。预算可恰好用满；尝试处理第 N+1
-个符合条件的不同名称时，才会在检查该名称前返回 `Entry` ResourceLimit，并优先于同一名称的
-seen-name 字节超限。返回 `None` 或终止错误前，walker 会关闭活动 reader、释放 reader permit 和遍历
+个符合条件的不同名称时，才会返回 `Entry` ResourceLimit，其返回优先于同一名称的 seen-name 字节
+超限或具名检查错误。这是错误返回的优先级，不代表原生调用的执行顺序。Rooted 枚举可能先打开子项
+或查询元数据，再由 walker 应用 entry 预算或跳过重开后遇到的重复名称；该预算不是元数据查询次数或
+系统调用次数的严格上限。返回 `None` 或终止错误前，walker 会关闭活动 reader、释放 reader permit 和遍历
 缓存，并保留共享 Rooted authority。`Continue` 下的局部子目录打开错误只丢弃该分支，安全同层条目仍可继续。
 Host walker 在跳过已见名称期间及下一次目录读取前检查 deadline。Rooted 列表也会在
 路径与符号链接解析期间（包括每次展开）检查期限，并复用已解析的起始目录。这些期限都是协作式的，

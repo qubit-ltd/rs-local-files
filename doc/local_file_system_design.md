@@ -1000,9 +1000,13 @@ distinct named children that pass the depth check, including named inspection
 errors; an unnamed stream error does not count. Reopening a frame does not
 charge an already processed name again. The allowance may be used in full;
 only an attempt to process the next eligible distinct name reports `Entry`
-ResourceLimit, before inspecting that name and ahead of its name-byte limit. A
-zero entry budget therefore processes no children, including when the depth
-limit is zero. Rooted and Host tree copies advance
+ResourceLimit, taking precedence over a name-byte limit or a named inspection
+error. This describes the returned error, not the order of native operations.
+Rooted enumeration may open a child or query its metadata before the walker
+applies the entry budget or suppresses a repeated name after reopening. The
+budget does not strictly bound native metadata queries or system calls. A zero
+entry budget therefore processes no children, including when the depth limit
+is zero. Rooted and Host tree copies advance
 directory readers lazily. A bounded copy may inspect one child ahead while
 retaining the reader permit, does not promise entry ordering, and never turns
 the native directory buffer into an application entry budget.

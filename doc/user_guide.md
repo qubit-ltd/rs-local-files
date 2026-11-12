@@ -213,10 +213,14 @@ let one_level = filesystem.list_with_options(
 `max_entries` counts distinct named children that pass the depth check, whether
 their inspection succeeds or returns a named error. An unnamed directory-stream
 error does not consume an entry. Reopening a frame does not count an already
-processed name again. The configured allowance may be used in full; the next
-eligible distinct name returns an `Entry` resource-limit error before its
-inspection, taking precedence over a name-byte limit for that name. A zero
-depth limit examines no children and consumes no entry budget.
+processed name again. The configured allowance may be used in full. The next
+eligible distinct name returns an `Entry` resource-limit error, taking
+precedence over a name-byte limit or a named inspection error. This describes
+the returned error, not the order of native operations. Rooted enumeration may
+open a child or query its metadata before the walker applies the entry budget
+or suppresses a repeated name after reopening. The budget does not strictly
+bound native metadata queries or system calls. A zero depth limit examines no
+children and consumes no entry budget.
 
 The initial Options contain no hidden business resource caps. Traversal and
 copy budgets, retry durations, deadlines, and temporary-name attempt limits
@@ -964,8 +968,12 @@ entry, and seen-name-byte budgets are all zero. `max_entries` counts distinct,
 depth-eligible named children, including named inspection errors. An unnamed
 directory-stream error does not count, and reopening does not charge a name
 again. The allowance may be used in full; the next eligible distinct name
-returns an `Entry` resource-limit error before inspection, ahead of a name-byte
-limit for that name. Before returning `None` or a terminal error, the walker
+returns an `Entry` resource-limit error, taking precedence over a name-byte
+limit or a named inspection error. This describes the returned error, not the
+order of native operations. Rooted enumeration may open a child or query its
+metadata before the walker applies the entry budget or suppresses a repeated
+name after reopening. The budget does not strictly bound native metadata
+queries or system calls. Before returning `None` or a terminal error, the walker
 closes active readers, releases their permits and traversal caches, and keeps
 the shared Rooted authority. A `Continue` child-open error drops only that
 branch so safe siblings remain available. The deadline is checked while

@@ -41,7 +41,9 @@ pub struct LocalListOptions {
     /// one.
     max_depth: Option<usize>,
     /// Optional cap on distinct, depth-eligible named entries processed by this
-    /// walker.
+    /// walker. Rooted enumeration may open a child or query metadata before the
+    /// walker applies this budget; see
+    /// [`LocalDirectoryWalker`](crate::LocalDirectoryWalker).
     max_entries: Option<usize>,
     /// Optional cap on cumulative names observed by duplicate-name tracking.
     max_seen_name_bytes: Option<usize>,
@@ -189,6 +191,11 @@ impl LocalListOptions {
 
     /// Limits the number of distinct, depth-eligible named entries processed
     /// by the walker, including entries whose metadata inspection fails.
+    ///
+    /// Rooted enumeration may open a child or query metadata before this budget
+    /// is applied; it does not strictly bound native metadata queries or system
+    /// calls. See [`LocalDirectoryWalker`](crate::LocalDirectoryWalker) for
+    /// returned-error precedence and traversal behavior.
     ///
     /// # Parameters
     ///
