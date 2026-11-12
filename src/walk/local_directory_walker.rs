@@ -69,10 +69,10 @@ use crate::local::DirectoryIdentity;
 /// charged. Reaching the configured limit is allowed; the next eligible
 /// distinct name returns an `Entry` resource-limit error, taking precedence
 /// over a name-byte limit or a named inspection error. This describes the
-/// returned error, not the order of native operations. Rooted enumeration may open a child or query
-/// its metadata before the walker applies the entry budget or suppresses a
-/// repeated name after reopening. The budget does not strictly bound native
-/// metadata queries or system calls.
+/// returned error, not the order of native operations. Rooted enumeration may
+/// open a child or query its metadata before the walker applies the entry
+/// budget or suppresses a repeated name after reopening. The budget does not
+/// strictly bound native metadata queries or system calls.
 ///
 /// Before returning `None` or a terminal error, the walker closes active
 /// enumeration readers, releases their permits, and frees frame and
