@@ -291,7 +291,7 @@ fn required_privacy_stage_uses_limited_input_reads() {
     assert_eq!(input.position, 2);
     assert!(!root.join("payload").exists());
 
-    let mut short = RecordingInput::new(b"abc".to_vec()).with_short_read(1);
+    let mut short = RecordingInput::new(b"ab".to_vec()).with_short_read(1);
     stage
         .write_file_new(Path::new("short"), &mut short, 2)
         .expect("private stage handles short reads within quota");
@@ -413,7 +413,7 @@ fn owner_policy_stage_uses_limited_private_input_reads() {
         .expect_err("input exceeds limit");
     assert_eq!(error.kind(), LocalFileErrorKind::ResourceLimit);
     assert_eq!(input.requests, vec![1, 1]);
-    assert_eq!(input.returns, vec![2]);
+    assert_eq!(input.returns, vec![1, 1]);
     assert_eq!(input.position, 2);
     assert!(
         !fixture

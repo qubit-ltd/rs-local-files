@@ -83,7 +83,9 @@ impl LocalStagedDirectory {
             let mut total = 0_u64;
             let mut block = [0_u8; 8192];
             loop {
-                let count = match qubit_io::Input::read(input, &mut block) {
+                let sentinel = total == maximum;
+                let request = stage_read_request(total, maximum, block.len());
+                let count = match qubit_io::Input::read(input, &mut block[..request]) {
                     Ok(count) => count,
                     Err(source) if source.kind() == std::io::ErrorKind::Interrupted => continue,
                     Err(source) => {
@@ -98,6 +100,10 @@ impl LocalStagedDirectory {
                 };
                 if count == 0 {
                     break;
+                }
+                if sentinel {
+                    let cause = resource_limit().with_path(writer.path().to_path_buf());
+                    return Err(abort_failed_stage_write(&mut writer, cause));
                 }
                 total = match total.checked_add(count as u64) {
                     Some(total) => total,
@@ -249,7 +255,9 @@ impl LocalStagedDirectory {
         let mut total = 0_u64;
         let mut block = [0_u8; 8192];
         loop {
-            let count = match qubit_io::Input::read(input, &mut block) {
+            let sentinel = total == maximum;
+            let request = stage_read_request(total, maximum, block.len());
+            let count = match qubit_io::Input::read(input, &mut block[..request]) {
                 Ok(count) => count,
                 Err(source) if source.kind() == std::io::ErrorKind::Interrupted => continue,
                 Err(source) => {
@@ -266,6 +274,16 @@ impl LocalStagedDirectory {
             };
             if count == 0 {
                 break;
+            }
+            if sentinel {
+                return Err(cleanup_partial_private_file(
+                    resource_limit(),
+                    parent_file,
+                    name,
+                    file,
+                    Some(identity),
+                    &path,
+                ));
             }
             total = match total.checked_add(count as u64) {
                 Some(total) => total,
@@ -421,6 +439,35 @@ impl LocalStagedDirectory {
             }
         }
         Ok(())
+    }
+}
+
+/// Returns the bounded input request for a staged write.
+///
+/// The caller maintains `total <= maximum`, and supplies a non-empty buffer.
+/// At the limit, one byte is requested only to distinguish EOF from overflow;
+/// before the limit, the request fits both the remaining quota and buffer.
+fn stage_read_request(total: u64, maximum: u64, capacity: usize) -> usize {
+    let remaining = maximum - total;
+    if remaining == 0 {
+        1
+    } else {
+        usize::try_from(remaining).unwrap_or(usize::MAX).min(capacity)
+    }
+}
+
+#[cfg(test)]
+mod stage_read_request_tests {
+    use super::stage_read_request;
+
+    #[test]
+    fn requests_one_byte_at_the_limit() {
+        assert_eq!(stage_read_request(4, 4, 8192), 1);
+    }
+
+    #[test]
+    fn caps_large_remaining_quota_without_truncation() {
+        assert_eq!(stage_read_request(0, u64::MAX, 8192), 8192);
     }
 }
 
