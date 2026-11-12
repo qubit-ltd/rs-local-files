@@ -61,6 +61,7 @@ pub(crate) mod rooted;
 mod rooted_copy_deadline_tests;
 mod security_observation_value_tests;
 mod staged_sync_native_failure_tests;
+mod staged_write_input_limit_tests;
 mod temp;
 #[cfg(all(feature = "digest", feature = "test-support"))]
 mod test_conditional_hooks_tests;
