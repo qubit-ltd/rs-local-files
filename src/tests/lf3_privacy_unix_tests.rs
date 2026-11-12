@@ -396,7 +396,7 @@ fn test_owner_policy_failed_open_does_not_adopt_replacement() {
         let moved = CString::new("moved-original").expect("static name");
         // SAFETY: names are NUL terminated and parent is an open directory.
         assert_eq!(
-            unsafe { libc::renameat(parent.as_raw_fd(), name.as_ptr(), parent.as_raw_fd(), moved.as_ptr()) },
+            unsafe { libc::renameat(parent.as_raw_fd(), name.as_ptr(), parent.as_raw_fd(), moved.as_ptr(),) },
             0
         );
         // SAFETY: same authority and a valid directory mode.
