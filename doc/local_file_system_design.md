@@ -986,9 +986,10 @@ capacity is invalid. No such limit is implied when the caller leaves it unset.
 
 Host listing keeps the requested namespace root in public entry paths even when
 the access path follows a symbolic link; an optional diagnostic path may expose
-the physical access location. A zero depth limit yields no children and does
-not read the directory; with depth, entry, and seen-name-byte limits all zero,
-both backends return an empty listing without child reads or seen-name charges.
+the physical access location. A zero depth limit yields no child entries,
+does not enumerate directory children, and does not consume the entry budget.
+With depth, entry, and seen-name-byte limits all zero, neither backend
+enumerates child entries or charges the seen-name budget.
 The Host walker checks its deadline while skipping seen names and before its
 next directory read. Rooted listing also checks the deadline during path and
 symbolic-link resolution, including each expansion step, and reuses its
@@ -1005,9 +1006,9 @@ error. This describes the returned error, not the order of native operations.
 Rooted enumeration may open a child or query its metadata before the walker
 applies the entry budget or suppresses a repeated name after reopening. The
 budget does not strictly bound native metadata queries or system calls. A zero
-entry budget therefore processes no children, including when the depth limit
-is zero. Rooted and Host tree copies advance
-directory readers lazily. A bounded copy may inspect one child ahead while
+entry budget yields no child entries; Rooted may still inspect a child before
+reporting exhaustion when depth permits enumeration. Rooted and Host tree copies
+advance directory readers lazily. A bounded copy may inspect one child ahead while
 retaining the reader permit, does not promise entry ordering, and never turns
 the native directory buffer into an application entry budget.
 

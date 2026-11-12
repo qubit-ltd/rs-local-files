@@ -1197,8 +1197,8 @@ Iterator<Item = LocalResult<LocalDirectoryEntry>>
 `LocalDirectoryReopenPolicy` 决定达到预算时重新打开 frame 还是返回 `ResourceLimit`。
 
 Host 列举即使通过符号链接访问了另一个物理目录，公开 entry path 仍保留请求的 namespace
-root，diagnostic path 才可记录实际访问位置。深度限制为零时不会读取子项；当深度、条目数和
-seen-name 字节预算均为零时，两种后端都返回空列表，不读取子项，也不扣减 seen-name 预算。
+root，diagnostic path 才可记录实际访问位置。深度限制为零时不会枚举目录子项、返回子项或扣减 entry
+预算。当深度、条目数和 seen-name 字节预算均为零时，两种后端都不会枚举子项或扣减 seen-name 预算。
 Host walker 在跳过已见名称期间及下一次目录读取前检查 deadline。Rooted 列表也会在路径和符号链接
 解析期间（包括每次展开）检查期限，并复用已解析的起始目录。协作式期限不能中断已阻塞的原生操作；
 未配置期限时，Rooted 解析不会施加隐藏的符号链接展开上限。
@@ -1207,7 +1207,8 @@ Host walker 在跳过已见名称期间及下一次目录读取前检查 deadlin
 第 N+1 个符合条件的不同名称时，才会报告 `Entry` ResourceLimit，其返回优先于同一名称的
 seen-name 字节超限或具名检查错误。这是错误返回的优先级，不代表原生调用的执行顺序。Rooted
 枚举可能先打开子项或查询元数据，再由 walker 应用 entry 预算或跳过重开后遇到的重复名称；该预算
-不是元数据查询次数或系统调用次数的严格上限。条目预算为零时不处理子项，包括深度限制为零的情况。
+不是元数据查询次数或系统调用次数的严格上限。条目预算为零时不返回子项；在深度允许枚举时，Rooted
+仍可能先检查一个子项，再报告预算耗尽。深度限制为零时不枚举子项。
 walker 仅在配置 seen-name 字节预算，或有限打开目录预算下 `Reopen` 可能重新访问 frame 时保留
 已返回名称。无缓存时，并发目录变化遵循原生 reader 语义，不提供快照或全局 exactly-once 保证；
 重开的 frame 仍会抑制先前已返回的名称。

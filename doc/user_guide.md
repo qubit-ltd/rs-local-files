@@ -219,8 +219,9 @@ precedence over a name-byte limit or a named inspection error. This describes
 the returned error, not the order of native operations. Rooted enumeration may
 open a child or query its metadata before the walker applies the entry budget
 or suppresses a repeated name after reopening. The budget does not strictly
-bound native metadata queries or system calls. A zero depth limit examines no
-children and consumes no entry budget.
+bound native metadata queries or system calls. A zero depth limit yields no
+child entries, does not enumerate directory children, and consumes no entry
+budget.
 
 The initial Options contain no hidden business resource caps. Traversal and
 copy budgets, retry durations, deadlines, and temporary-name attempt limits
@@ -962,9 +963,10 @@ streams each directory instead of first collecting it into a vector. Dropping
 the walker releases its resources. Host enumeration keeps the requested
 namespace path as the public root even when a followed symbolic link points to
 another physical directory; the optional diagnostic path may still identify
-that physical access path. A zero `max_depth` produces no entries and does not
-read directory children; the same empty traversal applies when the depth,
-entry, and seen-name-byte budgets are all zero. `max_entries` counts distinct,
+that physical access path. A zero `max_depth` produces no child entries, does
+not enumerate directory children, and does not consume the entry budget. With
+depth, entry, and seen-name-byte budgets all zero, neither backend enumerates
+child entries or charges the seen-name budget. `max_entries` counts distinct,
 depth-eligible named children, including named inspection errors. An unnamed
 directory-stream error does not count, and reopening does not charge a name
 again. The allowance may be used in full; the next eligible distinct name
@@ -972,8 +974,9 @@ returns an `Entry` resource-limit error, taking precedence over a name-byte
 limit or a named inspection error. This describes the returned error, not the
 order of native operations. Rooted enumeration may open a child or query its
 metadata before the walker applies the entry budget or suppresses a repeated
-name after reopening. The budget does not strictly bound native metadata
-queries or system calls. Before returning `None` or a terminal error, the walker
+name after reopening. The budget does not strictly bound native
+metadata queries or system calls. Before returning `None` or a terminal error,
+the walker
 closes active readers, releases their permits and traversal caches, and keeps
 the shared Rooted authority. A `Continue` child-open error drops only that
 branch so safe siblings remain available. The deadline is checked while
