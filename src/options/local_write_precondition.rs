@@ -13,10 +13,9 @@
 /// destination. `Content` checks the expected digest before publication and
 /// verifies the displaced content afterward; it is not a strict
 /// compare-and-swap. A concurrent change may be detected after the candidate
-/// becomes visible, and rollback or recovery may fail. Whether
-/// [`LocalConditionalWriter::commit`] succeeds or returns a
-/// [`LocalConditionalCommitError`], determine the actual effect from its result
-/// or the error's [`LocalConditionalPublicationState`]. `Restored` means
+/// becomes visible, and rollback or recovery may fail. To determine the actual
+/// effect, inspect the result of [`LocalConditionalWriter::commit`] or the
+/// error's [`LocalConditionalPublicationState`]. `Restored` means
 /// publication occurred and the previous destination was restored; it does not
 /// mean the candidate was never visible.
 ///
