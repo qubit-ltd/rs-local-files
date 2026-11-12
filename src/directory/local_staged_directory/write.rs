@@ -25,11 +25,16 @@ use crate::options::LocalWriteOptions;
 use crate::policy::LocalFileSyncRequirement;
 
 impl LocalStagedDirectory {
-    /// Creates a new file beneath the stage and streams at most `maximum`
-    /// bytes.
+    /// Creates a new file beneath the stage and writes at most `maximum`
+    /// bytes from `input`.
     ///
-    /// The destination is never replaced. Input bytes consumed before an I/O or
-    /// limit error cannot be restored; a successful result carries the
+    /// Once `maximum` bytes have been written, the method may request one more
+    /// byte to distinguish EOF from excess input. EOF means the write succeeds;
+    /// a non-EOF probe byte is consumed but not written, and the method returns
+    /// [`LocalFileErrorKind::ResourceLimit`]. Bytes consumed before a read or
+    /// limit error cannot be restored. This bound covers bytes requested from
+    /// `input`, not any additional bytes its reader may prefetch internally.
+    /// The destination is never replaced, and a successful result carries the
     /// created file's observation. On failure, the stage remains owned by the
     /// caller. Any `cleanup_error` reports a failed attempt to remove this
     /// write's staging file; it is distinct from private temporary recovery.
@@ -46,7 +51,8 @@ impl LocalStagedDirectory {
     ///   directory's checked-path rules.
     /// * `input` supplies bytes; bytes already consumed cannot be restored on
     ///   failure.
-    /// * `maximum` is the greatest number of bytes accepted from `input`.
+    /// * `maximum` is the greatest number of bytes written from `input`; after
+    ///   reaching it, one EOF probe byte may be consumed and discarded.
     ///
     /// # Returns
     ///

@@ -331,6 +331,18 @@ and directories. If an item fails after earlier entries changed, inspect the
 error's `access_state()`; `Mixed` reports partial conversion and the stage
 remains with the caller. The library does not claim to roll back a whole tree.
 
+`write_file_new(relative, input, maximum)` limits the bytes written to the new
+stage file. After writing exactly `maximum` bytes, it requests at most one more
+byte to check for EOF. An empty probe means success; a returned byte is consumed
+but discarded and produces `ResourceLimit`. This also applies when `maximum`
+is zero: empty input can succeed after the EOF probe, while non-empty input
+consumes one byte and fails. If reading or writing fails, the input already
+consumed cannot be restored, and a legal prefix may already have been written
+to the stage file. The failed operation attempts to clean up its own staged
+file; inspect any `cleanup_error`, and keep the stage owner for explicit
+recovery or cleanup. This request limit does not bound extra bytes that the
+input reader may prefetch internally.
+
 ### Select one final access policy for publication
 
 `LocalTreePublishOptions` keeps the ordinary final access policy and an exact

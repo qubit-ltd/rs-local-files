@@ -265,6 +265,13 @@ opaque identity，不含权限句柄；重新操作前须通过同一个 parent 
 只修改经过 identity 复核的文件和目录。如果前面的条目已修改、后续某项失败，应检查错误中的
 `access_state()`；`Mixed` 表示权限只转换了一部分，stage 仍由调用方持有。库不会声称整棵树可回滚。
 
+`write_file_new(relative, input, maximum)` 限制写入 stage 新文件的字节数。写满 `maximum` 后，
+方法最多再请求 1 字节来判断输入是否已到 EOF；探测结果为 EOF 时写入成功，若读到字节，则该字节已从
+输入中消费但不会写入文件，并返回 `ResourceLimit`。`maximum` 为 0 时也会执行 EOF 探测：空输入可以成功，
+非空输入会消费 1 字节后报错。读取或写入失败时，已消费的输入无法恢复，stage 文件中也可能已有合法前缀。
+失败路径会尝试清理本次写入的文件；若错误带有 `cleanup_error`，应检查该清理错误，并继续保留 stage
+所有权，以便显式恢复或清理。这个请求上限不约束输入 reader 在内部额外预取的字节。
+
 ### 为发布选择一种最终访问策略
 
 `LocalTreePublishOptions` 分别保存常规访问策略和精确的
