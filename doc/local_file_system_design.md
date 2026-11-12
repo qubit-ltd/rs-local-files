@@ -970,8 +970,13 @@ allowed, a final link is returned from its own metadata without resolving its
 target, including a Host dangling link in non-recursive mode. Recursive
 traversal attempts to follow eligible directory links and reports dangling or
 out-of-scope failures. Directory identity detects recursive followed-link cycles
-while output retains logical link paths. Dropping a walker releases resources
-only.
+while output retains logical link paths. Before returning `None` or a terminal
+error, the walker closes active enumeration readers, releases their permits,
+and frees frame and duplicate-name storage. A Rooted walker retains its shared
+root authority.
+Under `Continue`, a local child-open error drops only that branch and traversal
+continues with safe siblings; it does not terminate the walker. Dropping an
+unfinished walker also releases its resources.
 
 ### 15.2 Budgets
 
@@ -990,9 +995,14 @@ symbolic-link resolution, including each expansion step, and reuses its
 resolved starting directory. A deadline remains cooperative and cannot
 interrupt one blocked native operation. Without a configured deadline,
 Rooted resolution has no hidden symbolic-link expansion limit. Listing does
-not charge the starting directory against the entry budget; only yielded child
-entries are charged. A zero entry budget therefore yields no children,
-including when the depth limit is zero. Rooted and Host tree copies advance
+not charge the starting directory against the entry budget. The budget counts
+distinct named children that pass the depth check, including named inspection
+errors; an unnamed stream error does not count. Reopening a frame does not
+charge an already processed name again. The allowance may be used in full;
+only an attempt to process the next eligible distinct name reports `Entry`
+ResourceLimit, before inspecting that name and ahead of its name-byte limit. A
+zero entry budget therefore processes no children, including when the depth
+limit is zero. Rooted and Host tree copies advance
 directory readers lazily. A bounded copy may inspect one child ahead while
 retaining the reader permit, does not promise entry ordering, and never turns
 the native directory buffer into an application entry budget.
@@ -1006,9 +1016,11 @@ suppress names already yielded.
 ### 15.3 Error policy
 
 The list starting directory is not yielded or charged against the entry budget;
-budget accounting begins with its children. Continuation mode yields the current
-error and continues only branches whose authority and frame state are still
-valid; it does not rescan indefinitely after concurrent additions or deletions.
+budget accounting begins with its children. A terminal error closes active
+readers and releases traversal caches before it is returned. Continuation mode
+yields the current local branch error and continues only branches whose
+authority and frame state are still valid; it does not rescan indefinitely
+after concurrent additions or deletions.
 A walker captures its policy and authority at `list()` creation,
 and its deadline starts there rather than at the first `next()` call.
 

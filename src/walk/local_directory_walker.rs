@@ -21,10 +21,10 @@ use super::internal::RootedWalkFrame;
 use super::internal::RootedWalkState;
 use super::internal::WalkFrame;
 use super::local_directory_walker_support::close_host_frame;
+use super::local_directory_walker_support::consume_entry_budgets;
 use super::local_directory_walker_support::directory_limit_error;
 use super::local_directory_walker_support::directory_pool;
 use super::local_directory_walker_support::is_terminal_walk_error;
-use super::local_directory_walker_support::name_bytes;
 #[cfg(feature = "test-support")]
 use super::local_directory_walker_support::scripted_open_directory_error;
 use super::local_directory_walker_support::validate_options;
@@ -62,6 +62,19 @@ use crate::local::DirectoryIdentity;
 /// # Ok(())
 /// # }
 /// ```
+///
+/// The entry budget counts distinct named entries that pass the depth check,
+/// including entries whose inspection returns an error. Reopening a frame does
+/// not charge a name again, and a stream error without an entry name is not
+/// charged. Reaching the configured limit is allowed; the next eligible name
+/// returns an `Entry` resource-limit error before inspection. Entry exhaustion
+/// takes precedence over a name-byte limit for that same name.
+///
+/// Before returning `None` or a terminal error, the walker closes active
+/// enumeration readers, releases their permits, and frees frame and
+/// duplicate-name storage. A Rooted walker retains its shared root authority.
+/// Under `Continue`, a local child-open error drops only that branch and
+/// traversal continues with safe siblings.
 pub struct LocalDirectoryWalker {
     /// Namespace-absolute traversal root exposed publicly.
     root: PathBuf,
@@ -126,6 +139,23 @@ impl std::fmt::Debug for LocalDirectoryWalker {
 }
 
 impl LocalDirectoryWalker {
+    /// Releases traversal-owned readers, permits, frames, and duplicate caches.
+    /// The rooted authority remains available for the lifetime of this walker.
+    fn finish_traversal(&mut self) {
+        self.terminated = true;
+        for frame in &mut self.stack {
+            close_host_frame(frame);
+        }
+        drop(std::mem::take(&mut self.stack));
+        drop(std::mem::take(&mut self.followed_directories));
+        if let Some(state) = self.rooted.as_mut() {
+            close_all_rooted_frames(state);
+            drop(std::mem::take(&mut state.stack));
+            drop(std::mem::take(&mut state.followed_directories));
+        }
+        self.open_directories = None;
+    }
+
     /// Opens a host walker with separate backend and diagnostic roots.
     ///
     /// Validates options, inspects the root without following its final link,
@@ -857,17 +887,15 @@ impl LocalDirectoryWalker {
     /// Returns the configured resource-limit error and terminates the walker
     /// when either cumulative budget is exhausted.
     fn consume_host_entry_budgets(&mut self, entry: &fs::DirEntry, relative_parent: &Path) -> LocalResult<()> {
-        if let Some(budget) = self.entry_budget.as_mut()
-            && let Err(error) = budget.try_consume(1)
-        {
+        let name = entry.file_name();
+        if let Err(error) = consume_entry_budgets(
+            &mut self.entry_budget,
+            &mut self.seen_name_budget,
+            &name,
+            &self.root.join(relative_parent),
+        ) {
             self.terminated = true;
-            return Err(directory_limit_error(&self.root.join(relative_parent), error));
-        }
-        if let Some(budget) = self.seen_name_budget.as_mut()
-            && let Err(error) = budget.try_consume(name_bytes(&entry.file_name()))
-        {
-            self.terminated = true;
-            return Err(directory_limit_error(&self.root.join(relative_parent), error));
+            return Err(error);
         }
         Ok(())
     }
@@ -1026,7 +1054,18 @@ impl Iterator for LocalDirectoryWalker {
     /// failure, or `None` after exhaustion or termination.
     fn next(&mut self) -> Option<Self::Item> {
         let current_directory = self.current_directory.clone();
-        self.next_entry().map(|result| {
+        let result = self.next_entry();
+        if result.is_none()
+            || self.terminated
+            || result.as_ref().is_some_and(|result| {
+                result
+                    .as_ref()
+                    .is_err_and(|error| is_terminal_walk_error(error, self.options.error_policy()))
+            })
+        {
+            self.finish_traversal();
+        }
+        result.map(|result| {
             result.map_err(|error| match current_directory {
                 Some(current_directory) => error.with_current_directory(current_directory),
                 None => error,
@@ -1313,15 +1352,14 @@ fn next_rooted_entry(
                     if !is_new_name {
                         continue;
                     }
-                    if let Some(budget) = seen_name_budget.as_mut()
-                        && let Err(error) = budget.try_consume(name_bytes(&name))
-                    {
-                        return Some(Err(directory_limit_error(namespace_root, error)));
+                    if options.max_depth().is_some_and(|max_depth| entry_depth > max_depth) {
+                        continue;
                     }
-                    return Some(Err(walk_io_error(
-                        &namespace_root.join(&output_parent).join(name),
-                        error.into_io_error(),
-                    )));
+                    let failed_path = namespace_root.join(&output_parent).join(&name);
+                    if let Err(error) = consume_entry_budgets(entry_budget, seen_name_budget, &name, &failed_path) {
+                        return Some(Err(error));
+                    }
+                    return Some(Err(walk_io_error(&failed_path, error.into_io_error())));
                 }
                 if let Some(frame) = pop_rooted_frame(state)
                     && let Some(identity) = frame.identity
@@ -1337,15 +1375,8 @@ fn next_rooted_entry(
         if options.max_depth().is_some_and(|max_depth| entry_depth > max_depth) {
             continue;
         }
-        if let Some(budget) = entry_budget.as_mut()
-            && let Err(error) = budget.try_consume(1)
-        {
-            return Some(Err(directory_limit_error(namespace_root, error)));
-        }
-        if let Some(budget) = seen_name_budget.as_mut()
-            && let Err(error) = budget.try_consume(name_bytes(entry.name()))
-        {
-            return Some(Err(directory_limit_error(namespace_root, error)));
+        if let Err(error) = consume_entry_budgets(entry_budget, seen_name_budget, entry.name(), namespace_root) {
+            return Some(Err(error));
         }
         let authority_path = authority_parent.join(entry.name());
         let output_path = output_parent.join(entry.name());
@@ -1489,6 +1520,9 @@ fn native_directory_identity(metadata: &fs::Metadata, path: &Path) -> LocalResul
 fn walk_io_error(path: &Path, error: std::io::Error) -> LocalFileError {
     LocalFileError::from_io(LocalFileOperation::List, Some(path.to_path_buf()), None, error)
 }
+
+#[cfg(test)]
+mod lifecycle_tests;
 
 #[cfg(test)]
 mod seen_name_cache_tests {

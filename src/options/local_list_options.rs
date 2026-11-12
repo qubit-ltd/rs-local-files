@@ -40,7 +40,8 @@ pub struct LocalListOptions {
     /// Maximum yielded descendant depth, where immediate children have depth
     /// one.
     max_depth: Option<usize>,
-    /// Optional cap on entries yielded by this walker.
+    /// Optional cap on distinct, depth-eligible named entries processed by this
+    /// walker.
     max_entries: Option<usize>,
     /// Optional cap on cumulative names observed by duplicate-name tracking.
     max_seen_name_bytes: Option<usize>,
@@ -108,7 +109,9 @@ impl LocalListOptions {
         self.max_depth
     }
 
-    /// Returns the maximum number of entries yielded by this walker.
+    /// Returns the maximum number of distinct, depth-eligible named entries
+    /// processed by this walker. Successful entries and named inspection
+    /// errors each consume one; repeated names after reopening do not.
     #[inline]
     pub const fn max_entries(&self) -> Option<usize> {
         self.max_entries
@@ -184,19 +187,21 @@ impl LocalListOptions {
         self
     }
 
-    /// Limits the number of entries yielded by the walker.
+    /// Limits the number of distinct, depth-eligible named entries processed
+    /// by the walker, including entries whose metadata inspection fails.
     ///
     /// # Parameters
     ///
-    /// - `max_entries`: Maximum number of entries to yield; zero yields no
-    ///   entries.
+    /// - `max_entries`: Maximum number of entries to process; zero permits no
+    ///   named child entries. The limit is reported when processing the
+    ///   `(max_entries + 1)`th eligible distinct name would exceed it.
     #[inline]
     pub const fn with_max_entries(mut self, max_entries: usize) -> Self {
         self.max_entries = Some(max_entries);
         self
     }
 
-    /// Removes the yielded-entry budget.
+    /// Removes the processed-entry budget.
     #[inline]
     pub const fn without_max_entries(mut self) -> Self {
         self.max_entries = None;

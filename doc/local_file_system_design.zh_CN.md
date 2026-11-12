@@ -1202,21 +1202,27 @@ seen-name 字节预算均为零时，两种后端都返回空列表，不读取�
 Host walker 在跳过已见名称期间及下一次目录读取前检查 deadline。Rooted 列表也会在路径和符号链接
 解析期间（包括每次展开）检查期限，并复用已解析的起始目录。协作式期限不能中断已阻塞的原生操作；
 未配置期限时，Rooted 解析不会施加隐藏的符号链接展开上限。
+条目预算不计起始目录，而统计通过深度检查的不同具名子项，包括具名检查错误；无法关联具体
+名称的目录流错误不计 entry。frame 重开后已处理的名称不重复计数。预算可恰好用满；尝试处理
+第 N+1 个符合条件的不同名称时，才会在检查该名称前报告 `Entry` ResourceLimit，并优先于同一名称
+的 seen-name 字节超限。条目预算为零时不处理子项，包括深度限制为零的情况。
 walker 仅在配置 seen-name 字节预算，或有限打开目录预算下 `Reopen` 可能重新访问 frame 时保留
 已返回名称。无缓存时，并发目录变化遵循原生 reader 语义，不提供快照或全局 exactly-once 保证；
 重开的 frame 仍会抑制先前已返回的名称。
-list 的起始目录不扣减条目预算，只有返回的子项才计费。因此条目预算为零时不会返回子项，
-深度限制为零时同样返回空列表。
 Rooted 和 Host 的 tree copy 都按需推进 directory reader；受限复制允许在仍持有 reader 预算时预读一个子项，不承诺条目排序，也不会
 把 native 目录缓冲区误当成应用已处理条目预算。
 
 ### 15.3 错误策略
 
-`LocalWalkErrorPolicy::FailFast` 在第一个错误终止。`Continue` 会返回进入子目录时的局部
-错误，丢弃该分支并继续访问安全的同层条目；全局条目/名称预算和 deadline 耗尽仍会终止遍历。
+`LocalWalkErrorPolicy::FailFast` 在第一个错误终止，并在返回终止错误前关闭活动 reader、释放其
+permit，并释放遍历栈与名称去重缓存。`Continue` 会返回进入子目录时的局部错误，丢弃该分支并继续访问安全的同层条目；全局
+条目/名称预算和 deadline 耗尽仍会终止遍历。
 不允许向下遍历时，最终链接按自身 metadata 返回，不解析链接目标；例如 Host 非递归遍历会
 返回悬空链接条目。递归遍历会尝试跟随符合策略的目录链接，并报告悬空或越界错误。循环通过
-目录 identity 检测；输出路径仍保留逻辑链接路径。Drop 只释放资源，不修改 namespace。
+目录 identity 检测；输出路径仍保留逻辑链接路径。返回 `None` 或终止错误前，walker 会关闭活动
+枚举 reader、释放 reader permit，并释放 frame 与名称去重缓存；Rooted walker 保留共享 root authority。`Continue` 下局部
+子目录打开错误只丢弃该分支，并继续访问安全的同层条目，不会终止整个 walker。提前 Drop 未耗尽
+的 walker 也会释放其资源，不修改 namespace。
 
 ## 16. Copy
 

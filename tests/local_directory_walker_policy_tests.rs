@@ -1094,3 +1094,148 @@ fn test_rooted_entry_inspection_error_consumes_seen_name_budget() {
         );
     });
 }
+
+/// Verifies a named inspection failure consumes the entry budget before it is
+/// reported, and the following distinct name is rejected as Entry exhaustion.
+#[cfg(feature = "test-support")]
+#[test]
+fn test_rooted_named_inspection_failure_consumes_entry_budget() {
+    const TEST_NAME: &str = "test_rooted_named_inspection_failure_consumes_entry_budget";
+    run_walker_fault_process(TEST_NAME, "rooted-child-inspection", || {
+        let directory = tempdir().expect("temporary directory should be created");
+        for name in ["aa", "bb", "cc"] {
+            fs::write(directory.path().join(name), b"payload").expect("fixture file should be written");
+        }
+        let filesystem = LocalFileSystem::rooted(directory.path()).expect("Rooted filesystem should open");
+        let mut walker = filesystem
+            .list_with_options(
+                Path::new("/"),
+                &LocalListOptions::new()
+                    .with_max_entries(1)
+                    .with_error_policy(LocalWalkErrorPolicy::Continue),
+            )
+            .expect("Rooted walker should open");
+        assert!(walker.next().expect("first entry should be returned").is_ok());
+        let error = walker
+            .next()
+            .expect("entry budget exhaustion should be returned")
+            .expect_err("the inspected name must be charged before its metadata failure");
+        assert_eq!(LocalFileErrorKind::ResourceLimit, error.kind());
+        assert_eq!(
+            LocalResourceKind::Entry,
+            error
+                .resource_limit_error()
+                .expect("resource details should be retained")
+                .resource()
+        );
+        assert!(error.path().is_some(), "the entry limit should retain its path");
+        assert!(
+            walker.next().is_none(),
+            "global entry exhaustion should terminate Continue"
+        );
+    });
+}
+
+/// Verifies a first named inspection failure consumes the full one-entry
+/// allowance before another distinct name is considered.
+#[cfg(feature = "test-support")]
+#[test]
+fn test_rooted_first_named_inspection_failure_consumes_entry_budget() {
+    const TEST_NAME: &str = "test_rooted_first_named_inspection_failure_consumes_entry_budget";
+    run_walker_fault_process(TEST_NAME, "rooted-child-inspection-first", || {
+        let directory = tempdir().expect("temporary directory should be created");
+        for name in ["aa", "bb", "cc"] {
+            fs::write(directory.path().join(name), b"payload").expect("fixture file should be written");
+        }
+        let filesystem = LocalFileSystem::rooted(directory.path()).expect("Rooted filesystem should open");
+        let mut walker = filesystem
+            .list_with_options(
+                Path::new("/"),
+                &LocalListOptions::new()
+                    .with_max_entries(1)
+                    .with_error_policy(LocalWalkErrorPolicy::Continue),
+            )
+            .expect("Rooted walker should open");
+        let error = walker
+            .next()
+            .expect("the first named inspection failure should be returned")
+            .expect_err("the selected child should fail inspection");
+        assert!(error.path().is_some(), "the named failure should retain its path");
+        let limit = walker
+            .next()
+            .expect("entry budget exhaustion should be returned")
+            .expect_err("the next distinct entry must exceed the budget");
+        assert_eq!(LocalFileErrorKind::ResourceLimit, limit.kind());
+        assert_eq!(
+            LocalResourceKind::Entry,
+            limit
+                .resource_limit_error()
+                .expect("resource details should be retained")
+                .resource()
+        );
+        assert!(
+            walker.next().is_none(),
+            "global entry exhaustion should terminate Continue"
+        );
+    });
+}
+
+/// Verifies a two-entry allowance includes one named inspection failure and
+/// one successful sibling before the third distinct name is rejected.
+#[cfg(feature = "test-support")]
+#[test]
+fn test_rooted_named_inspection_failure_uses_one_of_two_entry_budget() {
+    const TEST_NAME: &str = "test_rooted_named_inspection_failure_uses_one_of_two_entry_budget";
+    run_walker_fault_process(TEST_NAME, "rooted-child-inspection-first", || {
+        let directory = tempdir().expect("temporary directory should be created");
+        for name in ["aa", "bb", "cc"] {
+            fs::write(directory.path().join(name), b"payload").expect("fixture file should be written");
+        }
+        let filesystem = LocalFileSystem::rooted(directory.path()).expect("Rooted filesystem should open");
+        let mut walker = filesystem
+            .list_with_options(
+                Path::new("/"),
+                &LocalListOptions::new()
+                    .with_max_entries(2)
+                    .with_error_policy(LocalWalkErrorPolicy::Continue),
+            )
+            .expect("Rooted walker should open");
+
+        let inspection_error = walker
+            .next()
+            .expect("the first named inspection failure should be returned")
+            .expect_err("the selected child should fail inspection");
+        assert_eq!(LocalFileErrorKind::Io, inspection_error.kind());
+        assert!(
+            inspection_error.path().is_some(),
+            "the failed name should retain its path"
+        );
+
+        let successful_entry = walker
+            .next()
+            .expect("the second distinct name should be returned")
+            .expect("the next child inspection should succeed");
+        assert_ne!(
+            inspection_error.path(),
+            Some(successful_entry.path()),
+            "the successful entry should have a different name"
+        );
+
+        let limit = walker
+            .next()
+            .expect("the third distinct name should exceed the budget")
+            .expect_err("only two names may be processed");
+        assert_eq!(LocalFileErrorKind::ResourceLimit, limit.kind());
+        assert_eq!(
+            LocalResourceKind::Entry,
+            limit
+                .resource_limit_error()
+                .expect("entry limit details should be retained")
+                .resource()
+        );
+        assert!(
+            walker.next().is_none(),
+            "global entry exhaustion should terminate Continue"
+        );
+    });
+}

@@ -183,6 +183,11 @@ let one_level = filesystem.list_with_options(
 # Ok::<(), Box<dyn std::error::Error>>(())
 ```
 
+`max_entries` 统计通过深度检查的不同具名子项；成功检查和具名检查错误都计一次。无法关联
+具体名称的目录流错误不计 entry。frame 重开后已处理的名称不会重复计数。预算可恰好用满；尝试
+处理第 N+1 个符合条件的不同名称时才返回结构化 `Entry` ResourceLimit，并优先于该名称的
+seen-name 字节超限。深度为零时不检查子项，也不扣减 entry 预算。
+
 初始 Options 不包含隐藏的业务资源上限。遍历和复制预算、重试时长、deadline 与临时名称
 尝试次数，只有调用方显式设置后才生效。clone filesystem 会复制 Rooted 虚拟 PWD 与全部配置；
 Host clone 继续观察同一进程 PWD；
@@ -756,10 +761,15 @@ staging，再删除冲突目标。打开源、复制内容或预算耗尽等删�
 深度、条目数、名称内存、deadline 或打开目录数预算。调用方设置打开目录预算后，
 `Reopen` 会按需关闭并重新打开活动 frame，`Fail` 则会在边界返回 `ResourceLimit`。
 零句柄预算无效并返回 `InvalidOptions`。Rooted 会逐项读取目录，避免先收集到 `Vec`；
-drop walker 只释放句柄。Host 列举即使跟随符号链接进入另一个物理目录，也会保留请求的
+drop walker 会释放其资源。Host 列举即使跟随符号链接进入另一个物理目录，也会保留请求的
 namespace 路径作为公开 root；可选的 diagnostic path 仍可记录实际访问的物理路径。
 `max_depth` 为零时结果为空，并且不读取目录子项；深度、条目数和 seen-name 字节预算都为零时，
-同样不会读取子项。Host walker 在跳过已见名称期间及下一次目录读取前检查 deadline。Rooted 列表也会在
+同样不会读取子项。`max_entries` 统计通过深度检查的不同具名子项，包括具名检查错误；无法关联
+名称的目录流错误不计入，frame 重开后已处理名称也不重复计数。预算可恰好用满；尝试处理第 N+1
+个符合条件的不同名称时，才会在检查该名称前返回 `Entry` ResourceLimit，并优先于同一名称的
+seen-name 字节超限。返回 `None` 或终止错误前，walker 会关闭活动 reader、释放 reader permit 和遍历
+缓存，并保留共享 Rooted authority。`Continue` 下的局部子目录打开错误只丢弃该分支，安全同层条目仍可继续。
+Host walker 在跳过已见名称期间及下一次目录读取前检查 deadline。Rooted 列表也会在
 路径与符号链接解析期间（包括每次展开）检查期限，并复用已解析的起始目录。这些期限都是协作式的，
 不能中断已经阻塞的原生操作。未配置期限时，Rooted 解析不会施加隐藏的符号链接展开上限。
 只有配置 seen-name 字节预算，或有限打开目录预算下的 `Reopen` 可能重新访问 frame 时，walker 才保留

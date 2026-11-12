@@ -13,6 +13,7 @@ use std::time::Instant;
 
 use qubit_budget::InsufficientBudgetError;
 use qubit_budget::ManagedResourcePool;
+use qubit_budget::ResourceBudget;
 
 use super::internal::WalkFrame;
 use crate::LocalFileError;
@@ -160,6 +161,42 @@ pub(super) fn name_bytes(name: &OsStr) -> usize {
     {
         name.to_string_lossy().len()
     }
+}
+
+/// Charges entry-count and native-name budgets for one new, depth-eligible
+/// name.
+///
+/// The entry allowance is checked first so a full processing budget takes
+/// precedence over a later name-byte or metadata error.
+///
+/// # Parameters
+///
+/// - `entry_budget`: Optional cumulative count of processed named entries.
+/// - `seen_name_budget`: Optional cumulative storage allowance for names.
+/// - `name`: The native name being admitted.
+/// - `error_path`: Path used for any resource-limit diagnostic.
+///
+/// # Errors
+///
+/// Returns the structured resource-limit error when either allowance is
+/// exhausted.
+pub(super) fn consume_entry_budgets(
+    entry_budget: &mut Option<ResourceBudget<LocalResourceKind, usize>>,
+    seen_name_budget: &mut Option<ResourceBudget<LocalResourceKind, usize>>,
+    name: &OsStr,
+    error_path: &Path,
+) -> LocalResult<()> {
+    if let Some(budget) = entry_budget.as_mut() {
+        budget
+            .try_consume(1)
+            .map_err(|error| directory_limit_error(error_path, error))?;
+    }
+    if let Some(budget) = seen_name_budget.as_mut() {
+        budget
+            .try_consume(name_bytes(name))
+            .map_err(|error| directory_limit_error(error_path, error))?;
+    }
+    Ok(())
 }
 
 /// Reports whether an iterator error must terminate global traversal state.
