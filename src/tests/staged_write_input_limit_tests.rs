@@ -52,12 +52,7 @@ impl RecordingInput {
 impl qubit_io::Input for RecordingInput {
     type Item = u8;
 
-    unsafe fn read_unchecked(
-        &mut self,
-        output: &mut [u8],
-        index: usize,
-        count: usize,
-    ) -> io::Result<usize> {
+    unsafe fn read_unchecked(&mut self, output: &mut [u8], index: usize, count: usize) -> io::Result<usize> {
         self.requests.push(count);
         if self
             .error_at_position
@@ -67,11 +62,8 @@ impl qubit_io::Input for RecordingInput {
             return Err(io::Error::new(kind, "configured input error"));
         }
         let available = self.bytes.len() - self.position;
-        let count = count
-            .min(available)
-            .min(self.short_read.unwrap_or(usize::MAX));
-        output[index..index + count]
-            .copy_from_slice(&self.bytes[self.position..self.position + count]);
+        let count = count.min(available).min(self.short_read.unwrap_or(usize::MAX));
+        output[index..index + count].copy_from_slice(&self.bytes[self.position..self.position + count]);
         self.position += count;
         self.returns.push(count);
         Ok(count)
@@ -97,15 +89,11 @@ fn ordinary_stage() -> (tempfile::TempDir, crate::directory::LocalStagedDirector
 }
 
 #[test]
-fn over_limit_reads_only_the_first_unaccepted_byte() {
+fn test_over_limit_reads_only_the_first_unaccepted_byte() {
     let (fixture, mut stage) = ordinary_stage();
     let stage_path = fixture.path().join(stage.relative_name());
     stage
-        .write_file_new(
-            Path::new("kept"),
-            &mut RecordingInput::new(b"seed".to_vec()),
-            4,
-        )
+        .write_file_new(Path::new("kept"), &mut RecordingInput::new(b"seed".to_vec()), 4)
         .expect("existing stage file should be created");
     let mut input = RecordingInput::new(b"longer".to_vec());
 
@@ -118,17 +106,14 @@ fn over_limit_reads_only_the_first_unaccepted_byte() {
     assert_eq!(input.returns, vec![1, 1]);
     assert_eq!(input.position, 2);
     assert!(stage_path.join("kept").exists());
-    assert_eq!(
-        std::fs::read(stage_path.join("kept")).expect("seed remains"),
-        b"seed"
-    );
+    assert_eq!(std::fs::read(stage_path.join("kept")).expect("seed remains"), b"seed");
     assert!(!stage_path.join("payload").exists());
     stage.cleanup().expect("stage cleanup should succeed");
     assert!(!stage_path.exists());
 }
 
 #[test]
-fn quota_matrix_preserves_exact_eof_probe_behavior() {
+fn test_quota_matrix_preserves_exact_eof_probe_behavior() {
     let (fixture, mut stage) = ordinary_stage();
     let root = fixture.path().join(stage.relative_name());
 
@@ -138,10 +123,7 @@ fn quota_matrix_preserves_exact_eof_probe_behavior() {
         .expect("empty input fits");
     assert_eq!(empty.requests, vec![1]);
     assert_eq!(empty.position, 0);
-    assert_eq!(
-        std::fs::read(root.join("empty")).expect("empty file exists"),
-        b""
-    );
+    assert_eq!(std::fs::read(root.join("empty")).expect("empty file exists"), b"");
 
     let mut over_zero = RecordingInput::new(b"x".to_vec());
     let error = stage
@@ -159,10 +141,7 @@ fn quota_matrix_preserves_exact_eof_probe_behavior() {
         .expect("exact limit fits");
     assert_eq!(exact.requests, vec![1, 1]);
     assert_eq!(exact.position, 1);
-    assert_eq!(
-        std::fs::read(root.join("exact")).expect("file exists"),
-        b"x"
-    );
+    assert_eq!(std::fs::read(root.join("exact")).expect("file exists"), b"x");
 
     let mut block_plus_one = RecordingInput::new(vec![b'a'; 8193]);
     let error = stage
@@ -176,11 +155,7 @@ fn quota_matrix_preserves_exact_eof_probe_behavior() {
 
     let mut exact_block_plus_one = RecordingInput::new(vec![b'b'; 8193]);
     stage
-        .write_file_new(
-            Path::new("exact-block-plus-one"),
-            &mut exact_block_plus_one,
-            8193,
-        )
+        .write_file_new(Path::new("exact-block-plus-one"), &mut exact_block_plus_one, 8193)
         .expect("exact content fits");
     assert_eq!(exact_block_plus_one.requests, vec![8192, 1, 1]);
     assert_eq!(exact_block_plus_one.returns, vec![8192, 1, 0]);
@@ -195,7 +170,7 @@ fn quota_matrix_preserves_exact_eof_probe_behavior() {
 }
 
 #[test]
-fn short_reads_and_interrupted_data_reads_retain_request_budget() {
+fn test_short_reads_and_interrupted_data_reads_retain_request_budget() {
     let (fixture, mut stage) = ordinary_stage();
     let mut short = RecordingInput::new(b"abcdef".to_vec()).with_short_read(2);
     stage
@@ -205,13 +180,11 @@ fn short_reads_and_interrupted_data_reads_retain_request_budget() {
     assert_eq!(short.returns, vec![2, 2, 2, 0]);
     assert_eq!(short.position, 6);
     assert_eq!(
-        std::fs::read(fixture.path().join(stage.relative_name()).join("short"))
-            .expect("file exists"),
+        std::fs::read(fixture.path().join(stage.relative_name()).join("short")).expect("file exists"),
         b"abcdef"
     );
 
-    let mut interrupted =
-        RecordingInput::new(b"abcd".to_vec()).with_error_at(0, io::ErrorKind::Interrupted);
+    let mut interrupted = RecordingInput::new(b"abcd".to_vec()).with_error_at(0, io::ErrorKind::Interrupted);
     stage
         .write_file_new(Path::new("interrupted"), &mut interrupted, 4)
         .expect("interrupted read retries");
@@ -222,19 +195,14 @@ fn short_reads_and_interrupted_data_reads_retain_request_budget() {
 }
 
 #[test]
-fn probe_interrupted_and_non_interrupted_errors_preserve_stage() {
+fn test_probe_interrupted_and_non_interrupted_errors_preserve_stage() {
     let (fixture, mut stage) = ordinary_stage();
     let root = fixture.path().join(stage.relative_name());
     stage
-        .write_file_new(
-            Path::new("kept"),
-            &mut RecordingInput::new(b"ok".to_vec()),
-            2,
-        )
+        .write_file_new(Path::new("kept"), &mut RecordingInput::new(b"ok".to_vec()), 2)
         .expect("seed file writes");
 
-    let mut interrupted_probe =
-        RecordingInput::new(b"x".to_vec()).with_error_at(1, io::ErrorKind::Interrupted);
+    let mut interrupted_probe = RecordingInput::new(b"x".to_vec()).with_error_at(1, io::ErrorKind::Interrupted);
     stage
         .write_file_new(Path::new("probe-interrupted"), &mut interrupted_probe, 1)
         .expect("probe retries to EOF");
@@ -242,8 +210,7 @@ fn probe_interrupted_and_non_interrupted_errors_preserve_stage() {
     assert_eq!(interrupted_probe.returns, vec![1, 0]);
     assert_eq!(interrupted_probe.position, 1);
 
-    let mut failed_probe =
-        RecordingInput::new(b"x".to_vec()).with_error_at(1, io::ErrorKind::BrokenPipe);
+    let mut failed_probe = RecordingInput::new(b"x".to_vec()).with_error_at(1, io::ErrorKind::BrokenPipe);
     let error = stage
         .write_file_new(Path::new("probe-error"), &mut failed_probe, 1)
         .expect_err("probe error is returned");
@@ -258,7 +225,7 @@ fn probe_interrupted_and_non_interrupted_errors_preserve_stage() {
 }
 
 #[test]
-fn required_privacy_stage_uses_limited_input_reads() {
+fn test_required_privacy_stage_uses_limited_input_reads() {
     let options = LocalTempDirectoryOptions::new().with_privacy(LocalPrivacyRequirement::Required);
     let (fixture, mut stage) = stage_with_options(options);
     let root = fixture.path().join(stage.relative_name());
@@ -276,10 +243,7 @@ fn required_privacy_stage_uses_limited_input_reads() {
         .expect("exact content fits");
     assert_eq!(exact.requests, vec![1, 1]);
     assert_eq!(exact.position, 1);
-    assert_eq!(
-        std::fs::read(root.join("exact")).expect("private file exists"),
-        b"x"
-    );
+    assert_eq!(std::fs::read(root.join("exact")).expect("private file exists"), b"x");
 
     let mut input = RecordingInput::new(b"xy".to_vec());
     let error = stage
@@ -298,13 +262,9 @@ fn required_privacy_stage_uses_limited_input_reads() {
     assert_eq!(short.requests, vec![2, 1, 1]);
     assert_eq!(short.returns, vec![1, 1, 0]);
     assert_eq!(short.position, 2);
-    assert_eq!(
-        std::fs::read(root.join("short")).expect("private file exists"),
-        b"ab"
-    );
+    assert_eq!(std::fs::read(root.join("short")).expect("private file exists"), b"ab");
 
-    let mut interrupted_probe =
-        RecordingInput::new(b"x".to_vec()).with_error_at(1, io::ErrorKind::Interrupted);
+    let mut interrupted_probe = RecordingInput::new(b"x".to_vec()).with_error_at(1, io::ErrorKind::Interrupted);
     stage
         .write_file_new(Path::new("interrupted-probe"), &mut interrupted_probe, 1)
         .expect("private probe retries Interrupted");
@@ -312,13 +272,11 @@ fn required_privacy_stage_uses_limited_input_reads() {
     assert_eq!(interrupted_probe.returns, vec![1, 0]);
     assert_eq!(interrupted_probe.position, 1);
 
-    stage
-        .cleanup()
-        .expect("private stage cleanup should succeed");
+    stage.cleanup().expect("private stage cleanup should succeed");
 }
 
 #[test]
-fn required_privacy_stage_limits_block_boundary_reads() {
+fn test_required_privacy_stage_limits_block_boundary_reads() {
     let options = LocalTempDirectoryOptions::new().with_privacy(LocalPrivacyRequirement::Required);
     let (fixture, mut stage) = stage_with_options(options);
     let root = fixture.path().join(stage.relative_name());
@@ -333,13 +291,11 @@ fn required_privacy_stage_limits_block_boundary_reads() {
     assert_eq!(over_limit.position, 8193);
     assert!(!root.join("over-limit").exists());
 
-    stage
-        .cleanup()
-        .expect("private stage cleanup should succeed");
+    stage.cleanup().expect("private stage cleanup should succeed");
 }
 
 #[test]
-fn required_privacy_stage_accepts_exact_block_boundary_quota() {
+fn test_required_privacy_stage_accepts_exact_block_boundary_quota() {
     let options = LocalTempDirectoryOptions::new().with_privacy(LocalPrivacyRequirement::Required);
     let (fixture, mut stage) = stage_with_options(options);
     let root = fixture.path().join(stage.relative_name());
@@ -356,13 +312,11 @@ fn required_privacy_stage_accepts_exact_block_boundary_quota() {
         vec![b'q'; 8193]
     );
 
-    stage
-        .cleanup()
-        .expect("private stage cleanup should succeed");
+    stage.cleanup().expect("private stage cleanup should succeed");
 }
 
 #[test]
-fn required_privacy_stage_probe_errors_keep_read_context_and_cleanup() {
+fn test_required_privacy_stage_probe_errors_keep_read_context_and_cleanup() {
     let options = LocalTempDirectoryOptions::new().with_privacy(LocalPrivacyRequirement::Required);
     let (fixture, mut stage) = stage_with_options(options);
     let root = fixture.path().join(stage.relative_name());
@@ -378,14 +332,12 @@ fn required_privacy_stage_probe_errors_keep_read_context_and_cleanup() {
     assert!(!root.join("probe-error").exists());
     assert!(root.exists(), "stage remains owned after probe failure");
 
-    stage
-        .cleanup()
-        .expect("private stage should remain cleanable");
+    stage.cleanup().expect("private stage should remain cleanable");
     assert!(!root.exists());
 }
 
 #[test]
-fn maximum_quota_does_not_overflow_for_small_input() {
+fn test_maximum_quota_does_not_overflow_for_small_input() {
     let (fixture, mut stage) = ordinary_stage();
     let mut input = RecordingInput::new(b"small".to_vec());
     stage
@@ -394,8 +346,7 @@ fn maximum_quota_does_not_overflow_for_small_input() {
     assert_eq!(input.requests, vec![8192, 8192]);
     assert_eq!(input.position, 5);
     assert_eq!(
-        std::fs::read(fixture.path().join(stage.relative_name()).join("payload"))
-            .expect("file exists"),
+        std::fs::read(fixture.path().join(stage.relative_name()).join("payload")).expect("file exists"),
         b"small"
     );
     stage.cleanup().expect("stage cleanup should succeed");
@@ -403,7 +354,7 @@ fn maximum_quota_does_not_overflow_for_small_input() {
 
 #[cfg(target_os = "linux")]
 #[test]
-fn owner_policy_stage_uses_limited_private_input_reads() {
+fn test_owner_policy_stage_uses_limited_private_input_reads() {
     let policy = LocalOwnerAccessPolicy::new().with_unix_modes(0o700, 0o600);
     let options = LocalTempDirectoryOptions::new().with_owner_access_policy(policy);
     let (fixture, mut stage) = stage_with_options(options);
@@ -415,14 +366,6 @@ fn owner_policy_stage_uses_limited_private_input_reads() {
     assert_eq!(input.requests, vec![1, 1]);
     assert_eq!(input.returns, vec![1, 1]);
     assert_eq!(input.position, 2);
-    assert!(
-        !fixture
-            .path()
-            .join(stage.relative_name())
-            .join("payload")
-            .exists()
-    );
-    stage
-        .cleanup()
-        .expect("owner-policy stage cleanup should succeed");
+    assert!(!fixture.path().join(stage.relative_name()).join("payload").exists());
+    stage.cleanup().expect("owner-policy stage cleanup should succeed");
 }

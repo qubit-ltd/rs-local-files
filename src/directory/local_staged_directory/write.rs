@@ -453,6 +453,12 @@ impl LocalStagedDirectory {
 /// The caller maintains `total <= maximum`, and supplies a non-empty buffer.
 /// At the limit, one byte is requested only to distinguish EOF from overflow;
 /// before the limit, the request fits both the remaining quota and buffer.
+///
+/// # Parameters
+///
+/// * `total` is the number of bytes already accepted from the input.
+/// * `maximum` is the maximum number of bytes to write.
+/// * `capacity` is the length of the non-empty read buffer.
 fn stage_read_request(total: u64, maximum: u64, capacity: usize) -> usize {
     let remaining = maximum - total;
     if remaining == 0 {
@@ -467,12 +473,12 @@ mod stage_read_request_tests {
     use super::stage_read_request;
 
     #[test]
-    fn requests_one_byte_at_the_limit() {
+    fn test_requests_one_byte_at_the_limit() {
         assert_eq!(stage_read_request(4, 4, 8192), 1);
     }
 
     #[test]
-    fn caps_large_remaining_quota_without_truncation() {
+    fn test_caps_large_remaining_quota_without_truncation() {
         assert_eq!(stage_read_request(0, u64::MAX, 8192), 8192);
     }
 }
