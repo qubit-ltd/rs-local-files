@@ -61,6 +61,8 @@ if os.environ.get('FAKE_COVERAGE_FAIL'):
 
     def run_provenance(self, extra_env=None):
         env = os.environ.copy()
+        for key in ("GITHUB_SERVER_URL", "GITHUB_REPOSITORY", "GITHUB_RUN_ID", "GITHUB_RUN_ATTEMPT"):
+            env.pop(key, None)
         env["RLF_COVERAGE_COMMAND"] = str(self.coverage)
         env["RLF_COVERAGE_TEST_MODE"] = "1"
         if extra_env:

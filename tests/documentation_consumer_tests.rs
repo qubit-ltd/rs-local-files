@@ -68,6 +68,15 @@ fn cargo_manifest_path(path: &str) -> String {
     path.replace('\\', "\\\\").replace('"', "\\\"")
 }
 
+fn local_files_path_dependency(dependency_line: &str, path: &str) -> String {
+    let published_version = format!("version = \"{}\"", env!("CARGO_PKG_VERSION"));
+    assert!(
+        dependency_line.contains(&published_version),
+        "documented dependency matches the package version"
+    );
+    dependency_line.replace(&published_version, &format!("path = \"{path}\""))
+}
+
 fn diagnose_consumer_lock_update(project: &Path) -> String {
     fn entries(lock: &str) -> Vec<String> {
         lock.replace("\r\n", "\n")
@@ -163,7 +172,7 @@ fn test_documented_conditional_write_runs_as_a_consumer_without_a_digest_feature
         let dependency_path = cargo_manifest_path(&crate_path.to_string_lossy());
         let dependencies = dependencies.replace(
             dependency_line,
-            &dependency_line.replace("version = \"0.5.1\"", &format!("path = \"{dependency_path}\"")),
+            &local_files_path_dependency(dependency_line, &dependency_path),
         );
         let visible_code = extract_marked(guide, START, END, language)
             .lines()
@@ -247,8 +256,7 @@ fn test_documented_failed_seal_cleanup_retains_owner_for_retry() {
         let dependency_path = cargo_manifest_path(&crate_path.to_string_lossy());
         let dependencies = dependencies.replace(
             dependency_line,
-            &dependency_line
-                .replace("version = \"0.5.1\"", &format!("path = \"{dependency_path}\""))
+            &local_files_path_dependency(dependency_line, &dependency_path)
                 .replace("features = [\"digest\"]", "features = [\"digest\", \"test-support\"]"),
         );
         let helper = extract_marked(guide, SEAL_START, SEAL_END, language);
@@ -384,8 +392,7 @@ fn test_documented_inspection_cleanup_retains_owner_for_retry() {
         let dependency_path = cargo_manifest_path(&crate_path.to_string_lossy());
         let dependencies = dependencies.replace(
             dependency_line,
-            &dependency_line
-                .replace("version = \"0.5.1\"", &format!("path = \"{dependency_path}\""))
+            &local_files_path_dependency(dependency_line, &dependency_path)
                 .replace("features = [\"digest\"]", "features = [\"digest\", \"test-support\"]"),
         );
         let helper = extract_marked(guide, INSPECT_START, INSPECT_END, language);
