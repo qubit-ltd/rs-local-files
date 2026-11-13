@@ -468,21 +468,6 @@ fn stage_read_request(total: u64, maximum: u64, capacity: usize) -> usize {
     }
 }
 
-#[cfg(test)]
-mod stage_read_request_tests {
-    use super::stage_read_request;
-
-    #[test]
-    fn test_requests_one_byte_at_the_limit() {
-        assert_eq!(stage_read_request(4, 4, 8192), 1);
-    }
-
-    #[test]
-    fn test_caps_large_remaining_quota_without_truncation() {
-        assert_eq!(stage_read_request(0, u64::MAX, 8192), 8192);
-    }
-}
-
 /// Aborts a failed staged write while preserving both its original cause and
 /// any cleanup failure produced by the abort attempt.
 ///
@@ -517,6 +502,21 @@ fn abort_failed_stage_commit(error: crate::writer::LocalFileCommitError) -> Loca
     match retry {
         Some(mut retry) => abort_failed_stage_write(&mut retry, cause),
         None => cause,
+    }
+}
+
+#[cfg(test)]
+mod stage_read_request_tests {
+    use super::stage_read_request;
+
+    #[test]
+    fn test_requests_one_byte_at_the_limit() {
+        assert_eq!(stage_read_request(4, 4, 8192), 1);
+    }
+
+    #[test]
+    fn test_caps_large_remaining_quota_without_truncation() {
+        assert_eq!(stage_read_request(0, u64::MAX, 8192), 8192);
     }
 }
 
