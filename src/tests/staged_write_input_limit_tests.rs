@@ -14,6 +14,7 @@ use crate::error::LocalFileErrorKind;
 use crate::error::LocalFileOperation;
 use crate::options::LocalDirectoryOpenOptions;
 use crate::options::LocalTempDirectoryOptions;
+#[cfg(target_os = "linux")]
 use crate::policy::LocalOwnerAccessPolicy;
 use crate::policy::LocalPrivacyRequirement;
 
