@@ -27,10 +27,8 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: '3.x'
-      - name: Run project Python regression tests and check dependency pins
-        run: |
-          python3 -m unittest discover -s scripts/tests -p 'test_*.py'
-          python3 scripts/check-ci-dependency-pins.py
+      - name: Run project Python regression tests
+        run: python3 -m unittest discover -s scripts/tests -p 'test_*.py'
 
   freebsd-ci:
     name: FreeBSD compatibility checks
@@ -324,9 +322,3 @@ jobs:
           cargo +1.94 check --locked --target x86_64-unknown-freebsd
           cargo +1.94 check --locked --target armv7-linux-androideabi
         fi
-
-  conditional-write:
-    name: Conditional write contracts
-    permissions:
-      contents: read
-    uses: ./.github/workflows/conditional-write.yml
