@@ -122,6 +122,7 @@ impl AsyncLocalFileSystem {
                 super::LocalSubmitRejection::CapacityExceeded,
             ));
         };
+        let handle = Arc::new(handle);
         let Some(fact) = self.executor.reserve_fact() else {
             return Err(super::LocalSubmitError::new(
                 path,
@@ -134,12 +135,13 @@ impl AsyncLocalFileSystem {
         let filesystem = self.filesystem.clone();
         let executor = self.executor.clone();
         let worker_budget = Arc::clone(&budget);
-        let job = super::internal::prepared_local_job::PreparedLocalJob::new_scoped(
+        let worker_handle = Arc::clone(&handle);
+        let job = super::internal::prepared_local_job::PreparedLocalJob::new_scoped_with_shared_handle_permit(
             Arc::clone(&self.executor.inner),
             path.clone(),
             slot,
             Arc::clone(&budget),
-            handle,
+            Arc::clone(&handle),
             observer.clone(),
             move |_, scope| match filesystem.list_with_options(&execution_path, &options) {
                 Err(error) => OperationOutcome::Failed(error),
@@ -149,6 +151,7 @@ impl AsyncLocalFileSystem {
                         executor,
                         walker,
                         worker_budget,
+                        worker_handle,
                     );
                     match resource.and_then(super::stream::AsyncLocalDirectoryWalker::new) {
                         Ok(walker) => OperationOutcome::Succeeded(walker),
@@ -258,6 +261,7 @@ impl AsyncLocalFileSystem {
                 super::LocalSubmitRejection::CapacityExceeded,
             ));
         };
+        let handle = Arc::new(handle);
         let Some(fact) = self.executor.reserve_fact() else {
             return Err(super::LocalSubmitError::new(
                 path,
@@ -270,12 +274,13 @@ impl AsyncLocalFileSystem {
         let filesystem = self.filesystem.clone();
         let executor = self.executor.clone();
         let worker_budget = Arc::clone(&bytes);
-        let job = super::internal::prepared_local_job::PreparedLocalJob::new_scoped(
+        let worker_handle = Arc::clone(&handle);
+        let job = super::internal::prepared_local_job::PreparedLocalJob::new_scoped_with_shared_handle_permit(
             Arc::clone(&self.executor.inner),
             path.clone(),
             slot,
             Arc::clone(&bytes),
-            handle,
+            Arc::clone(&handle),
             observer.clone(),
             move |_, scope| {
                 let opened = filesystem.open_reader_with_options(&execution_path, &options);
@@ -287,6 +292,8 @@ impl AsyncLocalFileSystem {
                             executor,
                             super::stream::LocalNativeStream::Reader(reader),
                             worker_budget,
+                            worker_handle,
+                            None,
                         );
                         match resource.and_then(super::stream::AsyncLocalFileReader::new) {
                             Ok(reader) => OperationOutcome::Succeeded(reader),
@@ -327,7 +334,7 @@ impl AsyncLocalFileSystem {
     }
 
     /// Submits a worker-backed writer open. Accepted bytes are sent to the
-    /// native writer on the executor; `close` commits and reports publication.
+    /// native writer on the executor; the returned observer reports the final commit fact.
     pub fn submit_open_writer(
         &self,
         manager: &qubit_operation::OperationManager,
@@ -335,7 +342,10 @@ impl AsyncLocalFileSystem {
         path: PathBuf,
         options: crate::LocalWriteOptions,
     ) -> Result<
-        super::LocalOperation<super::stream::AsyncLocalFileWriter>,
+        (
+            super::LocalOperation<super::stream::AsyncLocalFileWriter>,
+            super::LocalFactObserver,
+        ),
         super::LocalSubmitError<PathBuf>,
     > {
         use qubit_operation::OperationOutcome;
@@ -397,6 +407,7 @@ impl AsyncLocalFileSystem {
                 super::LocalSubmitRejection::CapacityExceeded,
             ));
         };
+        let handle = Arc::new(handle);
         let Some(fact) = self.executor.reserve_fact() else {
             return Err(super::LocalSubmitError::new(
                 path,
@@ -409,12 +420,14 @@ impl AsyncLocalFileSystem {
         let filesystem = self.filesystem.clone();
         let executor = self.executor.clone();
         let worker_budget = Arc::clone(&budget);
-        let job = super::internal::prepared_local_job::PreparedLocalJob::new_scoped(
+        let worker_handle = Arc::clone(&handle);
+        let worker_observer = observer.clone();
+        let job = super::internal::prepared_local_job::PreparedLocalJob::new_scoped_with_shared_handle_permit(
             Arc::clone(&self.executor.inner),
             path.clone(),
             slot,
             Arc::clone(&budget),
-            handle,
+            Arc::clone(&handle),
             observer.clone(),
             move |_, scope| match filesystem.open_writer_with_options(&execution_path, &options) {
                 Err(error) => OperationOutcome::Failed(error),
@@ -424,6 +437,8 @@ impl AsyncLocalFileSystem {
                         executor,
                         super::stream::LocalNativeStream::Writer(writer),
                         worker_budget,
+                        worker_handle,
+                        Some(worker_observer),
                     );
                     match resource.and_then(super::stream::AsyncLocalFileWriter::new) {
                         Ok(writer) => OperationOutcome::Succeeded(writer),
@@ -438,7 +453,7 @@ impl AsyncLocalFileSystem {
             },
         );
         match scoped.try_submit_external(operation, Arc::clone(&job)) {
-            Ok(handle) => Ok(super::LocalOperation::new(handle, budget)),
+            Ok(handle) => Ok((super::LocalOperation::new(handle, budget), observer)),
             Err(error) => {
                 let (reason, _) = error.into_parts();
                 let request = job.take_request().unwrap_or(path);

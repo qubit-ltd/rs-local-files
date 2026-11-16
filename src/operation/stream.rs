@@ -39,6 +39,7 @@ pub enum LocalStreamCommand {
     },
     Flush,
     Seek(SeekFrom),
+    Commit,
     Close,
     /// Aborts and releases the native owner when the public port is dropped.
     Abort,
@@ -58,6 +59,11 @@ pub enum LocalStreamCompletion {
     Written(usize),
     Flushed,
     Seeked(u64),
+    Committed(crate::LocalWriteOutcome),
+    CommitFailed {
+        error: crate::LocalFileCommitError,
+        retryable: bool,
+    },
     Closed,
     /// Worker/driver disappeared after command submission, so its side effect
     /// cannot be confirmed.
@@ -65,6 +71,42 @@ pub enum LocalStreamCompletion {
         operation: &'static str,
         detail: String,
     },
+}
+
+/// A structured stream commit error. When `retryable()` is true, the native
+/// writer remains owned by the async stream handle and `commit` may be retried.
+#[derive(Debug)]
+pub struct LocalStreamCommitError {
+    error: crate::LocalFileCommitError,
+    retryable: bool,
+}
+
+impl LocalStreamCommitError {
+    fn new(error: crate::LocalFileCommitError, retryable: bool) -> Self {
+        Self { error, retryable }
+    }
+
+    /// Returns the structured local file commit error.
+    pub fn commit_error(&self) -> &crate::LocalFileCommitError {
+        &self.error
+    }
+
+    /// Whether the async writer handle still owns a retryable native writer.
+    pub const fn retryable(&self) -> bool {
+        self.retryable
+    }
+}
+
+impl std::fmt::Display for LocalStreamCommitError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.error.fmt(formatter)
+    }
+}
+
+impl std::error::Error for LocalStreamCommitError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(&self.error)
+    }
 }
 
 /// Non-blocking driver implemented by a local serial worker or a deterministic fake.
@@ -258,9 +300,14 @@ struct WorkerWalkCommand {
     waker: Option<Waker>,
 }
 
+struct WorkerWalkCursor {
+    walker: Option<crate::LocalDirectoryWalker>,
+    pending_entry: Option<PathBuf>,
+}
+
 struct WorkerWalkInner {
     executor: super::LocalIoExecutor,
-    walker: Mutex<Option<crate::LocalDirectoryWalker>>,
+    walker: Mutex<WorkerWalkCursor>,
     commands: Mutex<HashMap<u64, WorkerWalkCommand>>,
     stop_requested: AtomicBool,
     closed: AtomicBool,
@@ -268,6 +315,7 @@ struct WorkerWalkInner {
     close_waker: Mutex<Option<Waker>>,
     cleanup_permit: Mutex<Option<super::internal::permits::Permit>>,
     _buffer_budget: Arc<Mutex<super::internal::permits::Permit>>,
+    _handle_budget: Arc<super::internal::permits::Permit>,
 }
 
 pub(crate) struct WorkerWalkDriver(Arc<WorkerWalkInner>);
@@ -278,6 +326,7 @@ impl WorkerWalkDriver {
         executor: super::LocalIoExecutor,
         walker: crate::LocalDirectoryWalker,
         buffer_budget: Arc<Mutex<super::internal::permits::Permit>>,
+        handle_budget: Arc<super::internal::permits::Permit>,
     ) -> io::Result<ResourceRef<LocalWalkResource>> {
         let cleanup_permit = executor.reserve_cleanup().ok_or_else(|| {
             io::Error::new(io::ErrorKind::WouldBlock, "local cleanup capacity is full")
@@ -285,7 +334,10 @@ impl WorkerWalkDriver {
         let cleanup = WorkerCleanup::<LocalWalkResource>::policy();
         let resource = LocalWalkResource::new(Self(Arc::new(WorkerWalkInner {
             executor,
-            walker: Mutex::new(Some(walker)),
+            walker: Mutex::new(WorkerWalkCursor {
+                walker: Some(walker),
+                pending_entry: None,
+            }),
             commands: Mutex::new(HashMap::new()),
             stop_requested: AtomicBool::new(false),
             closed: AtomicBool::new(false),
@@ -293,6 +345,7 @@ impl WorkerWalkDriver {
             close_waker: Mutex::new(None),
             cleanup_permit: Mutex::new(Some(cleanup_permit)),
             _buffer_budget: buffer_budget,
+            _handle_budget: handle_budget,
         })));
         let resources = scope
             .resource_scope(qubit_operation::ResourceScopeOptions { capacity: 1 })
@@ -351,35 +404,54 @@ impl LocalWalkDriver for WorkerWalkDriver {
                     if inner.stop_requested.load(Ordering::Acquire) {
                         return Ok(None);
                     }
-                    let mut walker_slot = inner.walker.lock().unwrap_or_else(|e| e.into_inner());
-                    let Some(walker) = walker_slot.as_mut() else {
+                    let mut cursor = inner.walker.lock().unwrap_or_else(|e| e.into_inner());
+                    if cursor.walker.is_none() {
                         return Ok(None);
-                    };
+                    }
                     let mut entries = Vec::new();
                     let mut total_bytes = 0usize;
                     for _ in 0..max_entries {
-                        match walker.next() {
+                        let next_entry = if let Some(path) = cursor.pending_entry.take() {
+                            Some(Ok(path))
+                        } else {
+                            match cursor.walker.as_mut().expect("walker retained").next() {
+                                Some(Ok(entry)) => Some(Ok(entry.path().to_path_buf())),
+                                Some(Err(error)) => Some(Err(error)),
+                                None => None,
+                            }
+                        };
+                        match next_entry {
                             None => {
-                                *walker_slot = None;
+                                cursor.walker.take();
                                 break;
                             }
                             Some(Err(error)) => return Err(io::Error::other(error)),
-                            Some(Ok(entry)) => {
-                                let path = entry.path().to_path_buf();
+                            Some(Ok(path)) => {
                                 let size = path.as_os_str().as_encoded_bytes().len();
-                                if size > max_bytes || total_bytes.saturating_add(size) > max_bytes
-                                {
-                                    return Err(io::Error::new(
-                                        io::ErrorKind::OutOfMemory,
-                                        "walker batch path budget exceeded",
-                                    ));
+                                if size > max_bytes {
+                                    if entries.is_empty() {
+                                        // Return the single oversized path so the public
+                                        // bounded-batch validator reports the resource limit.
+                                        entries.push(path);
+                                    } else {
+                                        cursor.pending_entry = Some(path);
+                                    }
+                                    break;
                                 }
-                                total_bytes += size;
+                                let Some(next_total) = total_bytes.checked_add(size) else {
+                                    cursor.pending_entry = Some(path);
+                                    break;
+                                };
+                                if next_total > max_bytes {
+                                    cursor.pending_entry = Some(path);
+                                    break;
+                                }
+                                total_bytes = next_total;
                                 entries.push(path);
                             }
                         }
                     }
-                    if entries.is_empty() && walker_slot.is_none() {
+                    if entries.is_empty() && cursor.walker.is_none() {
                         Ok(None)
                     } else {
                         Ok(Some(entries))
@@ -422,11 +494,12 @@ impl LocalWalkDriver for WorkerWalkDriver {
             return;
         }
         let inner = Arc::clone(&self.0);
-        let job = Box::new(move || {
+        let job: Box<dyn FnOnce() + Send> = Box::new(move || {
             inner
                 .walker
                 .lock()
                 .unwrap_or_else(|e| e.into_inner())
+                .walker
                 .take();
             inner.closed.store(true, Ordering::Release);
             if let Some(waker) = inner
@@ -445,15 +518,34 @@ impl LocalWalkDriver for WorkerWalkDriver {
             .unwrap_or_else(|e| e.into_inner())
             .take()
         {
-            if let Err((job, _permit)) = self.0.executor.enqueue_cleanup(job, permit) {
-                if self.0.executor.enqueue_task(job).is_err() {
-                    *self.0.close_error.lock().unwrap_or_else(|e| e.into_inner()) = Some((
-                        io::ErrorKind::WouldBlock,
-                        "local cleanup queues are unavailable".to_owned(),
-                    ));
-                    let retained = Arc::clone(&self.0);
-                    std::mem::forget(retained);
+            let mut permit = Some(permit);
+            let mut job = Some(job);
+            let mut queued = false;
+            for _ in 0..8 {
+                match self.0.executor.enqueue_cleanup(
+                    job.take().expect("cleanup job retained"),
+                    permit.take().expect("cleanup permit retained"),
+                ) {
+                    Ok(()) => {
+                        queued = true;
+                        break;
+                    }
+                    Err((retry_job, retry_permit)) => {
+                        job = Some(retry_job);
+                        permit = Some(retry_permit);
+                    }
                 }
+            }
+            if !queued {
+                *self.0.close_error.lock().unwrap_or_else(|e| e.into_inner()) = Some((
+                    io::ErrorKind::WouldBlock,
+                    "reserved local walker cleanup queue is unavailable".to_owned(),
+                ));
+                *self
+                    .0
+                    .cleanup_permit
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner()) = permit;
             }
         }
     }
@@ -497,6 +589,9 @@ struct WorkerStreamInner {
     active: AtomicBool,
     cleanup_permit: Mutex<Option<super::internal::permits::Permit>>,
     _buffer_budget: Arc<Mutex<super::internal::permits::Permit>>,
+    _handle_budget: Arc<super::internal::permits::Permit>,
+    observer: Option<super::LocalFactObserver>,
+    written_bytes: std::sync::atomic::AtomicU64,
 }
 
 pub(crate) struct WorkerStreamDriver(Arc<WorkerStreamInner>);
@@ -507,6 +602,8 @@ impl WorkerStreamDriver {
         executor: super::LocalIoExecutor,
         native: LocalNativeStream,
         buffer_budget: Arc<Mutex<super::internal::permits::Permit>>,
+        handle_budget: Arc<super::internal::permits::Permit>,
+        observer: Option<super::LocalFactObserver>,
     ) -> io::Result<ResourceRef<LocalStreamResource>> {
         let cleanup_permit = executor.reserve_cleanup().ok_or_else(|| {
             io::Error::new(
@@ -525,6 +622,9 @@ impl WorkerStreamDriver {
             active: AtomicBool::new(false),
             cleanup_permit: Mutex::new(Some(cleanup_permit)),
             _buffer_budget: buffer_budget,
+            _handle_budget: handle_budget,
+            observer,
+            written_bytes: std::sync::atomic::AtomicU64::new(0),
         })));
         let resources = scope
             .resource_scope(qubit_operation::ResourceScopeOptions { capacity: 1 })
@@ -554,30 +654,46 @@ impl WorkerStreamDriver {
             !self.0.active.swap(true, Ordering::AcqRel)
         };
         if should_start {
-            start_stream_drain(Arc::clone(&self.0))?;
+            let terminal = matches!(
+                request.command,
+                LocalStreamCommand::Close | LocalStreamCommand::Abort
+            );
+            if let Err(error) = start_stream_drain(Arc::clone(&self.0), terminal) {
+                fail_stream_queue(&self.0, io::Error::new(error.kind(), error.to_string()));
+                return Err(error);
+            }
         }
         Ok(())
     }
 }
 
-fn start_stream_drain(inner: Arc<WorkerStreamInner>) -> io::Result<()> {
+fn start_stream_drain(inner: Arc<WorkerStreamInner>, terminal: bool) -> io::Result<()> {
     let task_inner = Arc::clone(&inner);
     let task = move || drain_stream_commands(task_inner);
     if inner.executor.enqueue_task(task).is_ok() {
         return Ok(());
     }
 
-    // Every opened stream reserves one cleanup slot before it can escape its
-    // operation. Use it when normal queue admission is exhausted (especially
-    // for Drop-triggered Abort).
+    if !terminal {
+        inner.active.store(false, Ordering::Release);
+        return Err(io::Error::new(
+            io::ErrorKind::WouldBlock,
+            "local worker queue is full",
+        ));
+    }
+
+    // Only terminal commands may use the cleanup lane reserved for this stream.
     let task_inner = Arc::clone(&inner);
-    let fallback: Box<dyn FnOnce() + Send> = Box::new(move || drain_stream_commands(task_inner));
-    if let Some(permit) = inner
-        .cleanup_permit
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .take()
-    {
+    let mut fallback: Box<dyn FnOnce() + Send> =
+        Box::new(move || drain_stream_commands(task_inner));
+    for _ in 0..8 {
+        let permit = inner
+            .cleanup_permit
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .take()
+            .or_else(|| inner.executor.reserve_cleanup());
+        let Some(permit) = permit else { break };
         match inner.executor.enqueue_cleanup(fallback, permit) {
             Ok(()) => return Ok(()),
             Err((job, permit)) => {
@@ -585,18 +701,40 @@ fn start_stream_drain(inner: Arc<WorkerStreamInner>) -> io::Result<()> {
                     .cleanup_permit
                     .lock()
                     .unwrap_or_else(|e| e.into_inner()) = Some(permit);
-                // Preserve the native owner if the executor is already stopping.
-                std::mem::forget(job);
+                fallback = job;
             }
         }
-    } else {
-        std::mem::forget(fallback);
     }
+    // Preserve the owner if all scheduling lanes are unavailable.
     inner.active.store(false, Ordering::Release);
     Err(io::Error::new(
         io::ErrorKind::WouldBlock,
         "local worker queue and cleanup lane are unavailable",
     ))
+}
+
+fn fail_stream_queue(inner: &WorkerStreamInner, error: io::Error) {
+    let requests = {
+        let mut queue = inner.queue.lock().unwrap_or_else(|e| e.into_inner());
+        inner.active.store(false, Ordering::Release);
+        queue
+            .drain(..)
+            .map(|request| request.id)
+            .collect::<Vec<_>>()
+    };
+    for id in requests {
+        let waker = {
+            let mut state = inner.state.lock().unwrap_or_else(|e| e.into_inner());
+            let Some(command) = state.commands.get_mut(&id) else {
+                continue;
+            };
+            command.result = Some(Err(io::Error::new(error.kind(), error.to_string())));
+            command.waker.take()
+        };
+        if let Some(waker) = waker {
+            let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| waker.wake()));
+        }
+    }
 }
 
 fn drain_stream_commands(inner: Arc<WorkerStreamInner>) {
@@ -620,6 +758,59 @@ fn drain_stream_commands(inner: Arc<WorkerStreamInner>) {
                 "Unconfirmed: local stream worker panicked",
             ))
         });
+        if let Ok(completion) = &result {
+            match completion {
+                LocalStreamCompletion::Written(bytes) => {
+                    inner
+                        .written_bytes
+                        .fetch_add(*bytes as u64, Ordering::AcqRel);
+                }
+                LocalStreamCompletion::Committed(outcome) => {
+                    if let Some(observer) = &inner.observer {
+                        observer.update(super::LocalFactSnapshot {
+                            modified_count: 1,
+                            modified_bytes: inner.written_bytes.load(Ordering::Acquire),
+                            publication: super::LocalPublicationState::Published,
+                            durability: if outcome.durable() {
+                                super::LocalDurabilityState::Durable
+                            } else {
+                                super::LocalDurabilityState::Unknown
+                            },
+                            ..Default::default()
+                        });
+                    }
+                }
+                LocalStreamCompletion::CommitFailed { error, .. } => {
+                    if let Some(observer) = &inner.observer {
+                        let publication = match error.state() {
+                            crate::LocalWriteFailureState::NotPublished => {
+                                super::LocalPublicationState::NotPublished
+                            }
+                            crate::LocalWriteFailureState::Published => {
+                                super::LocalPublicationState::Published
+                            }
+                            crate::LocalWriteFailureState::Indeterminate => {
+                                super::LocalPublicationState::Unknown
+                            }
+                        };
+                        observer.update(super::LocalFactSnapshot {
+                            modified_count: u64::from(
+                                publication == super::LocalPublicationState::Published,
+                            ),
+                            modified_bytes: inner.written_bytes.load(Ordering::Acquire),
+                            publication,
+                            durability: if publication == super::LocalPublicationState::Published {
+                                super::LocalDurabilityState::Failed
+                            } else {
+                                super::LocalDurabilityState::Unknown
+                            },
+                            ..Default::default()
+                        });
+                    }
+                }
+                _ => {}
+            }
+        }
         let waker = {
             let mut state = inner.state.lock().unwrap_or_else(|e| e.into_inner());
             let Some(slot) = state.commands.get_mut(&request.id) else {
@@ -695,13 +886,29 @@ impl LocalStreamDriver for WorkerStreamDriver {
                 },
             );
         }
-        if let Err(error) = self.schedule(&request) {
+        let mut scheduled = false;
+        let mut last_error = None;
+        for _ in 0..8 {
+            match self.schedule(&request) {
+                Ok(()) => {
+                    scheduled = true;
+                    break;
+                }
+                Err(error) => last_error = Some(error),
+            }
+        }
+        if !scheduled {
             let wake = {
                 let mut state = self.0.state.lock().unwrap_or_else(|e| e.into_inner());
                 let Some(slot) = state.commands.get_mut(&request_id) else {
                     return;
                 };
-                slot.result = Some(Err(error));
+                slot.result = Some(Err(last_error.unwrap_or_else(|| {
+                    io::Error::new(
+                        io::ErrorKind::WouldBlock,
+                        "local stream cleanup scheduling failed",
+                    )
+                })));
                 slot.waker.take()
             };
             if let Some(waker) = wake {
@@ -715,6 +922,28 @@ fn execute_stream_command(
     native: &mut Option<LocalNativeStream>,
     command: &LocalStreamCommand,
 ) -> io::Result<LocalStreamCompletion> {
+    if matches!(command, LocalStreamCommand::Commit) {
+        let Some(LocalNativeStream::Writer(writer)) = native.take() else {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "commit requires a writer",
+            ));
+        };
+        return match writer.commit() {
+            Ok(outcome) => Ok(LocalStreamCompletion::Committed(outcome)),
+            Err(error) => {
+                let (file_error, state, retry_writer) = error.into_parts();
+                let retryable = retry_writer.is_some();
+                if let Some(writer) = retry_writer {
+                    *native = Some(LocalNativeStream::Writer(writer));
+                }
+                Ok(LocalStreamCompletion::CommitFailed {
+                    error: crate::LocalFileCommitError::new(file_error, state, None),
+                    retryable,
+                })
+            }
+        };
+    }
     if matches!(
         command,
         LocalStreamCommand::Close | LocalStreamCommand::Abort
@@ -722,13 +951,7 @@ fn execute_stream_command(
         let Some(previous) = native.take() else {
             return Ok(LocalStreamCompletion::Closed);
         };
-        if let LocalNativeStream::Writer(writer) = previous {
-            if matches!(command, LocalStreamCommand::Abort) {
-                drop(writer);
-                return Ok(LocalStreamCompletion::Closed);
-            }
-            let _ = writer.commit().map_err(io::Error::other)?;
-        }
+        drop(previous);
         return Ok(LocalStreamCompletion::Closed);
     }
     let Some(native) = native.as_mut() else {
@@ -761,6 +984,8 @@ fn execute_stream_command(
         )),
         (LocalNativeStream::Reader(_), LocalStreamCommand::Write { .. })
         | (LocalNativeStream::Reader(_), LocalStreamCommand::Flush)
+        | (LocalNativeStream::Reader(_), LocalStreamCommand::Commit)
+        | (LocalNativeStream::Writer(_), LocalStreamCommand::Commit)
         | (LocalNativeStream::Writer(_), LocalStreamCommand::Read { .. }) => Err(io::Error::new(
             io::ErrorKind::InvalidInput,
             "stream command has the wrong direction",
@@ -881,6 +1106,7 @@ impl Drop for AsyncLocalFileReader {
 pub struct AsyncLocalFileWriter {
     resource: Option<ResourceRef<LocalStreamResource>>,
     state: StreamState,
+    commit_request: Option<LocalStreamRequest>,
 }
 
 impl AsyncLocalFileWriter {
@@ -890,6 +1116,7 @@ impl AsyncLocalFileWriter {
         Ok(Self {
             resource: Some(resource),
             state: StreamState::new(Direction::Write),
+            commit_request: None,
         })
     }
 
@@ -903,6 +1130,91 @@ impl AsyncLocalFileWriter {
         };
         let state = &mut self.state;
         std::future::poll_fn(move |cx| state.poll_settle(resource, cx)).await
+    }
+
+    /// Commits the staged file and returns its publication and durability result.
+    /// A retryable typed error leaves the writer available for another call.
+    pub async fn commit(&mut self) -> Result<crate::LocalWriteOutcome, LocalStreamCommitError> {
+        self.settle().await.map_err(|error| {
+            LocalStreamCommitError::new(
+                crate::LocalFileCommitError::new(
+                    crate::LocalFileError::from_io(
+                        crate::LocalFileOperation::Commit,
+                        None,
+                        None,
+                        error,
+                    ),
+                    crate::LocalWriteFailureState::NotPublished,
+                    None,
+                ),
+                false,
+            )
+        })?;
+        let Some(resource) = self.resource.as_deref() else {
+            return Err(LocalStreamCommitError::new(
+                crate::LocalFileCommitError::new(
+                    crate::LocalFileError::from_io(
+                        crate::LocalFileOperation::Commit,
+                        None,
+                        None,
+                        StreamState::closed_error(),
+                    ),
+                    crate::LocalWriteFailureState::Indeterminate,
+                    None,
+                ),
+                false,
+            ));
+        };
+        let id = self
+            .commit_request
+            .get_or_insert_with(|| LocalStreamRequest {
+                id: 0x8000_0000_0000_0001,
+                command: LocalStreamCommand::Commit,
+            })
+            .id;
+        let request = self
+            .commit_request
+            .as_ref()
+            .expect("commit request inserted");
+        let result = std::future::poll_fn(|cx| match resource.poll_command(cx, request) {
+            Poll::Pending => Poll::Pending,
+            Poll::Ready(Ok(LocalStreamCompletion::Committed(outcome))) => Poll::Ready(Ok(outcome)),
+            Poll::Ready(Ok(LocalStreamCompletion::CommitFailed { error, retryable })) => {
+                Poll::Ready(Err(LocalStreamCommitError::new(error, retryable)))
+            }
+            Poll::Ready(Ok(_)) => Poll::Ready(Err(LocalStreamCommitError::new(
+                crate::LocalFileCommitError::new(
+                    crate::LocalFileError::from_io(
+                        crate::LocalFileOperation::Commit,
+                        None,
+                        None,
+                        io::Error::new(io::ErrorKind::InvalidData, "unexpected commit completion"),
+                    ),
+                    crate::LocalWriteFailureState::Indeterminate,
+                    None,
+                ),
+                false,
+            ))),
+            Poll::Ready(Err(error)) => Poll::Ready(Err(LocalStreamCommitError::new(
+                crate::LocalFileCommitError::new(
+                    crate::LocalFileError::from_io(
+                        crate::LocalFileOperation::Commit,
+                        None,
+                        None,
+                        error,
+                    ),
+                    crate::LocalWriteFailureState::Indeterminate,
+                    None,
+                ),
+                false,
+            ))),
+        })
+        .await;
+        if result.is_ok() || result.as_ref().is_err_and(|error| !error.retryable()) {
+            self.commit_request = None;
+        }
+        let _ = id;
+        result
     }
 
     /// Closes this port without waiting for operation settlement.

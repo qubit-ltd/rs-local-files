@@ -53,7 +53,7 @@ pub(crate) struct PreparedLocalJob<R, T, E> {
     _slot: Mutex<Option<Permit>>,
     _owned_permit: Mutex<Option<Arc<Mutex<Permit>>>>,
     _fact_observer: Mutex<Option<LocalFactObserver>>,
-    _handle_permit: Mutex<Option<Permit>>,
+    _handle_permit: Mutex<Option<Arc<Permit>>>,
     claimed: AtomicBool,
     activation_started: AtomicBool,
     port: Mutex<Port<T, E>>,
@@ -95,6 +95,31 @@ where
         slot: Permit,
         owned_permit: Arc<Mutex<Permit>>,
         handle_permit: Permit,
+        fact_observer: LocalFactObserver,
+        task: F,
+    ) -> Arc<Self>
+    where
+        F: for<'scope> FnOnce(R, &'scope OperationScope) -> OperationOutcome<T, E> + Send + 'static,
+    {
+        Self::new_scoped_with_shared_handle_permit(
+            executor,
+            request,
+            slot,
+            owned_permit,
+            Arc::new(handle_permit),
+            fact_observer,
+            task,
+        )
+    }
+
+    /// Creates a job whose native-handle permit can also be retained by a
+    /// resource returned from the operation outcome.
+    pub(crate) fn new_scoped_with_shared_handle_permit<F>(
+        executor: Arc<ExecutorInner>,
+        request: R,
+        slot: Permit,
+        owned_permit: Arc<Mutex<Permit>>,
+        handle_permit: Arc<Permit>,
         fact_observer: LocalFactObserver,
         task: F,
     ) -> Arc<Self>

@@ -179,6 +179,7 @@ impl LocalStreamDriver for FakeWorker {
                 state.close_count += 1;
                 Ok(LocalStreamCompletion::Closed)
             }
+            LocalStreamCommand::Commit => Ok(LocalStreamCompletion::Closed),
         };
         Poll::Ready(result)
     }
@@ -408,7 +409,7 @@ fn async_filesystem_opens_real_reader_writer_and_bounded_walker() {
     drop(reader);
     opening.wait_settlement().unwrap();
 
-    let mut opening = filesystem
+    let (mut opening, observer) = filesystem
         .submit_open_writer(
             &manager,
             Default::default(),
@@ -424,13 +425,21 @@ fn async_filesystem_opens_real_reader_writer_and_bounded_walker() {
         poll_worker(|cx| Pin::new(&mut writer).poll_write(cx, b"written on worker")).unwrap(),
         17
     );
-    poll_worker(|cx| Box::pin(writer.close()).as_mut().poll(cx)).unwrap();
+    let outcome = poll_worker(|cx| Box::pin(writer.commit()).as_mut().poll(cx)).unwrap();
+    assert_eq!(
+        outcome.state(),
+        qubit_local_files::outcome::LocalWriterState::Committed
+    );
+    assert_eq!(
+        observer.snapshot().publication,
+        qubit_local_files::LocalPublicationState::Published
+    );
     drop(writer);
     opening.wait_settlement().unwrap();
     assert_eq!(std::fs::read(&output).unwrap(), b"written on worker");
 
     let aborted = directory.path().join("aborted.txt");
-    let mut opening = filesystem
+    let (mut opening, _) = filesystem
         .submit_open_writer(
             &manager,
             Default::default(),
@@ -484,6 +493,172 @@ fn async_filesystem_opens_real_reader_writer_and_bounded_walker() {
     );
     drop(walker);
     opening.wait_settlement().unwrap();
+}
+
+#[test]
+fn real_writer_commit_preserves_typed_error_and_observer() {
+    use qubit_local_files::LocalFileSystem;
+    use qubit_local_files::operation::{LocalExecutionConfig, LocalIoExecutor};
+    use qubit_local_files::options::{LocalWriteMode, LocalWriteOptions};
+    use qubit_operation::{ManagerOptions, OperationManager, OperationOutcome};
+
+    let directory = tempfile::tempdir().unwrap();
+    let destination = directory.path().join("race.txt");
+    let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+    let executor = LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).unwrap();
+    let filesystem = LocalFileSystem::host()
+        .unwrap()
+        .into_async(executor)
+        .unwrap();
+    let (mut opening, observer) = filesystem
+        .submit_open_writer(
+            &manager,
+            Default::default(),
+            destination.clone(),
+            LocalWriteOptions::new(LocalWriteMode::CreateNew),
+        )
+        .unwrap();
+    let mut writer = match opening.wait_outcome().unwrap() {
+        OperationOutcome::Succeeded(writer) => writer,
+        _ => panic!("writer open failed"),
+    };
+    poll_worker(|cx| Pin::new(&mut writer).poll_write(cx, b"staged")).unwrap();
+    std::fs::write(&destination, b"racer").unwrap();
+    let error = poll_worker(|cx| Box::pin(writer.commit()).as_mut().poll(cx)).unwrap_err();
+    assert!(!error.retryable(), "{error:?}, {}", error.commit_error());
+    assert_eq!(
+        error.commit_error().state(),
+        qubit_local_files::outcome::LocalWriteFailureState::NotPublished,
+        "{error}"
+    );
+    assert_eq!(
+        observer.snapshot().publication,
+        qubit_local_files::LocalPublicationState::NotPublished
+    );
+    drop(writer);
+    opening.wait_settlement().unwrap();
+    assert_eq!(std::fs::read(&destination).unwrap(), b"racer");
+}
+
+#[test]
+fn walker_cumulative_path_budget_returns_every_entry() {
+    use qubit_local_files::LocalFileSystem;
+    use qubit_local_files::operation::{LocalExecutionConfig, LocalIoExecutor};
+    use qubit_local_files::options::LocalListOptions;
+    use qubit_operation::{ManagerOptions, OperationManager, OperationOutcome};
+
+    let directory = tempfile::tempdir().unwrap();
+    let mut root = directory.path().to_path_buf();
+    for index in 0..13 {
+        root.push(format!("d{index}_{}", "x".repeat(170)));
+        std::fs::create_dir(&root).unwrap();
+    }
+    for index in 0..128 {
+        std::fs::write(root.join(format!("item-{index:03}.txt")), b"").unwrap();
+    }
+    let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+    let executor = LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).unwrap();
+    let filesystem = LocalFileSystem::host()
+        .unwrap()
+        .into_async(executor)
+        .unwrap();
+    let mut opening = filesystem
+        .submit_open_walker(
+            &manager,
+            Default::default(),
+            directory.path().to_path_buf(),
+            LocalListOptions::default().with_recursive(),
+        )
+        .unwrap();
+    let mut walker = match opening.wait_outcome().unwrap() {
+        OperationOutcome::Succeeded(walker) => walker,
+        _ => panic!("walker open failed"),
+    };
+    let mut found = Vec::new();
+    while let Some(batch) =
+        poll_worker(|cx| Box::pin(walker.next_batch()).as_mut().poll(cx)).unwrap()
+    {
+        found.extend(batch);
+    }
+    assert_eq!(
+        found
+            .iter()
+            .filter(|path| path
+                .file_name()
+                .is_some_and(|name| name.to_string_lossy().starts_with("item-")))
+            .count(),
+        128
+    );
+    drop(walker);
+    opening.wait_settlement().unwrap();
+}
+
+#[test]
+fn stream_handle_permit_lives_until_worker_cleanup_settles() {
+    use qubit_local_files::LocalFileSystem;
+    use qubit_local_files::operation::{LocalExecutionConfig, LocalIoExecutor};
+    use qubit_local_files::options::LocalReadOptions;
+    use qubit_operation::{ManagerOptions, OperationManager, OperationOutcome};
+
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("input.txt");
+    std::fs::write(&path, b"x").unwrap();
+    let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+    let executor = LocalIoExecutor::new(
+        manager.clone(),
+        LocalExecutionConfig {
+            max_open_handles: 1,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let filesystem = LocalFileSystem::host()
+        .unwrap()
+        .into_async(executor)
+        .unwrap();
+    let mut opening = filesystem
+        .submit_open_reader(
+            &manager,
+            Default::default(),
+            path.clone(),
+            LocalReadOptions::default(),
+        )
+        .unwrap();
+    let mut reader = match opening.wait_outcome().unwrap() {
+        OperationOutcome::Succeeded(reader) => reader,
+        _ => panic!("reader open failed"),
+    };
+    let rejected = match filesystem.submit_open_reader(
+        &manager,
+        Default::default(),
+        path.clone(),
+        LocalReadOptions::default(),
+    ) {
+        Ok(_) => panic!("second stream should exceed handle capacity"),
+        Err(error) => error,
+    };
+    assert_eq!(
+        rejected.rejection(),
+        qubit_local_files::operation::LocalSubmitRejection::CapacityExceeded
+    );
+    poll_worker(|cx| Box::pin(reader.close()).as_mut().poll(cx)).unwrap();
+    drop(reader);
+    opening.wait_settlement().unwrap();
+    let mut second = filesystem
+        .submit_open_reader(
+            &manager,
+            Default::default(),
+            path,
+            LocalReadOptions::default(),
+        )
+        .unwrap();
+    let mut reader = match second.wait_outcome().unwrap() {
+        OperationOutcome::Succeeded(reader) => reader,
+        _ => panic!("second reader open failed"),
+    };
+    poll_worker(|cx| Box::pin(reader.close()).as_mut().poll(cx)).unwrap();
+    drop(reader);
+    second.wait_settlement().unwrap();
 }
 
 #[test]
