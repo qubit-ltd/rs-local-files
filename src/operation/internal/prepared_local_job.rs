@@ -22,6 +22,7 @@ use qubit_operation::SettlementReport;
 use qubit_operation::SettlementStatus;
 use qubit_operation::StopReason;
 
+use super::super::LocalFactObserver;
 use super::super::executor::ExecutorInner;
 use super::permits::Permit;
 
@@ -33,7 +34,7 @@ struct Port<T, E> {
     summary: Option<ChildOutcomeSummary>,
     released: bool,
     settlement: Option<Arc<SettlementReport>>,
-    wakers: Vec<Waker>,
+    wakers: [Option<Waker>; 4],
 }
 
 /// Owned job prepared before manager admission. Binding and activation are one-shot.
@@ -42,7 +43,8 @@ pub(crate) struct PreparedLocalJob<R, T, E> {
     request: Mutex<Option<R>>,
     task: Mutex<Option<Box<dyn FnOnce(R) -> OperationOutcome<T, E> + Send + 'static>>>,
     _slot: Mutex<Option<Permit>>,
-    _owned_permit: Mutex<Option<Permit>>,
+    _owned_permit: Mutex<Option<Arc<Mutex<Permit>>>>,
+    _fact_observer: LocalFactObserver,
     _handle_permit: Mutex<Option<Permit>>,
     claimed: AtomicBool,
     port: Mutex<Port<T, E>>,
@@ -58,8 +60,9 @@ where
         executor: Arc<ExecutorInner>,
         request: R,
         slot: Permit,
-        owned_permit: Permit,
+        owned_permit: Arc<Mutex<Permit>>,
         handle_permit: Permit,
+        fact_observer: LocalFactObserver,
         task: F,
     ) -> Arc<Self>
     where
@@ -71,6 +74,7 @@ where
             task: Mutex::new(Some(Box::new(task))),
             _slot: Mutex::new(Some(slot)),
             _owned_permit: Mutex::new(Some(owned_permit)),
+            _fact_observer: fact_observer,
             _handle_permit: Mutex::new(Some(handle_permit)),
             claimed: AtomicBool::new(false),
             port: Mutex::new(Port {
@@ -81,21 +85,29 @@ where
                 summary: None,
                 released: false,
                 settlement: None,
-                wakers: Vec::new(),
+                wakers: [None, None, None, None],
             }),
         })
     }
 
     fn wake_all(port: &mut Port<T, E>) {
-        for waker in port.wakers.drain(..) {
-            waker.wake();
+        let wakers = std::mem::replace(&mut port.wakers, [None, None, None, None]);
+        for (index, waker) in wakers.iter().enumerate() {
+            let Some(waker) = waker else {
+                continue;
+            };
+            let duplicate = wakers[..index]
+                .iter()
+                .flatten()
+                .any(|prior| prior.will_wake(waker));
+            if !duplicate {
+                waker.wake_by_ref();
+            }
         }
     }
 
-    fn register(port: &mut Port<T, E>, waker: &Waker) {
-        if !port.wakers.iter().any(|existing| existing.will_wake(waker)) {
-            port.wakers.push(waker.clone());
-        }
+    fn register(port: &mut Port<T, E>, slot: usize, waker: &Waker) {
+        port.wakers[slot] = Some(waker.clone());
     }
 }
 
@@ -109,7 +121,14 @@ impl<R: Send + 'static, T: Send + 'static, E: Send + 'static> PreparedLocalJob<R
 
     fn finish_released(&self, id: OperationId) {
         let mut port = self.port.lock().unwrap_or_else(|e| e.into_inner());
+        let outcome = OperationOutcome::ExecutionFailed(ExecutionFailure {
+            operation_id: id,
+            summary: DiagnosticSummary::new("local worker activation failed"),
+            source: None,
+        });
         port.phase = ExecutionPhase::Finished;
+        port.summary = Some(outcome_summary(id, &outcome));
+        port.outcome = Some(outcome);
         port.released = true;
         port.settlement = Some(empty_settlement(id));
         Self::wake_all(&mut port);
@@ -178,7 +197,7 @@ where
         if let Some(value) = &port.summary {
             return Poll::Ready(value.clone());
         }
-        Self::register(&mut port, cx.waker());
+        Self::register(&mut port, 1, cx.waker());
         Poll::Pending
     }
 
@@ -190,7 +209,7 @@ where
                 confirmed_at: None,
             });
         }
-        Self::register(&mut port, cx.waker());
+        Self::register(&mut port, 2, cx.waker());
         Poll::Pending
     }
 
@@ -199,7 +218,7 @@ where
         if let Some(value) = &port.settlement {
             return Poll::Ready(Arc::clone(value));
         }
-        Self::register(&mut port, cx.waker());
+        Self::register(&mut port, 3, cx.waker());
         Poll::Pending
     }
 }
@@ -358,7 +377,7 @@ where
                 .take();
             return Poll::Ready(value);
         }
-        Self::register(&mut port, cx.waker());
+        Self::register(&mut port, 0, cx.waker());
         Poll::Pending
     }
 }

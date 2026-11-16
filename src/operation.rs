@@ -12,6 +12,8 @@ mod types;
 pub use async_local_file_system::AsyncLocalFileSystem;
 #[cfg(feature = "async")]
 pub use executor::LocalIoExecutor;
+#[cfg(feature = "async")]
+pub use types::AsyncLocalOperation;
 pub use types::LocalDurabilityState;
 pub use types::LocalExecutionConfig;
 pub use types::LocalExecutorConfigError;

@@ -122,7 +122,10 @@ impl LocalObservedReader {
     ///
     /// # Errors
     /// Returns the initial observation's structured query error.
-    pub(crate) fn from_reader(reader: LocalFileReader, requirement: LocalObservationRequirement) -> LocalResult<Self> {
+    pub(crate) fn from_reader(
+        reader: LocalFileReader,
+        requirement: LocalObservationRequirement,
+    ) -> LocalResult<Self> {
         let observation = super::super::query::query_observation(reader.as_file(), requirement)?;
         Ok(Self {
             reader,
@@ -201,7 +204,12 @@ impl LocalObservedReader {
         let result = (|| {
             self.binding
                 .as_ref()
-                .ok_or_else(|| LocalFileError::new(LocalFileErrorKind::InvalidState, LocalFileOperation::Metadata))?
+                .ok_or_else(|| {
+                    LocalFileError::new(
+                        LocalFileErrorKind::InvalidState,
+                        LocalFileOperation::Metadata,
+                    )
+                })?
                 .verify()
         })();
         result.map_err(|error| self.contextualize_error(error))
@@ -235,7 +243,11 @@ impl LocalObservedReader {
     /// # Returns
     /// The same reader with diagnostic coordinates attached.
     #[must_use = "the reader with diagnostic coordinates should be retained"]
-    pub(crate) fn bind_error_context(mut self, path: PathBuf, current_directory: Option<PathBuf>) -> Self {
+    pub(crate) fn bind_error_context(
+        mut self,
+        path: PathBuf,
+        current_directory: Option<PathBuf>,
+    ) -> Self {
         self.error_path = Some(path);
         self.error_current_directory = current_directory;
         self
@@ -324,7 +336,12 @@ impl Input for LocalObservedReader {
     /// # Safety
     /// The caller must guarantee that `index..index + count` is a valid range
     /// inside `output` and that the addition does not overflow.
-    unsafe fn read_unchecked(&mut self, output: &mut [u8], index: usize, count: usize) -> io::Result<usize> {
+    unsafe fn read_unchecked(
+        &mut self,
+        output: &mut [u8],
+        index: usize,
+        count: usize,
+    ) -> io::Result<usize> {
         // The Input caller guarantees this range; LocalFileReader applies the same
         // contract.
         unsafe { Input::read_unchecked(&mut self.reader, output, index, count) }
@@ -365,7 +382,10 @@ mod binding_tests {
         }
 
         fn verify_until(&self, deadline: Option<Instant>) -> LocalResult<LocalSourceVerification> {
-            *self.seen.lock().expect("deadline mutex should be available") = deadline;
+            *self
+                .seen
+                .lock()
+                .expect("deadline mutex should be available") = deadline;
             Ok(LocalSourceVerification::Unchanged)
         }
     }
@@ -411,7 +431,8 @@ mod binding_tests {
             .bind_error_context(source_path.clone(), Some(fixture.path().to_path_buf()));
 
         let native = io::Error::other("native source");
-        let cleanup = LocalFileError::new(LocalFileErrorKind::NotFound, LocalFileOperation::DeleteFile);
+        let cleanup =
+            LocalFileError::new(LocalFileErrorKind::NotFound, LocalFileOperation::DeleteFile);
         let original = LocalFileError::from_io(
             LocalFileOperation::Read,
             Some(fixture.path().join("more-specific")),
@@ -424,14 +445,23 @@ mod binding_tests {
         .with_cleanup_error(cleanup);
         let result = reader.contextualize_error(original);
         assert_eq!(result.operation(), LocalFileOperation::Read);
-        assert_eq!(result.path(), Some(fixture.path().join("more-specific").as_path()));
-        assert_eq!(result.target(), Some(fixture.path().join("target").as_path()));
+        assert_eq!(
+            result.path(),
+            Some(fixture.path().join("more-specific").as_path())
+        );
+        assert_eq!(
+            result.target(),
+            Some(fixture.path().join("target").as_path())
+        );
         assert_eq!(
             result.current_directory(),
             Some(fixture.path().join("existing-pwd").as_path())
         );
         assert_eq!(result.reason(), Some("preserve this reason"));
-        assert_eq!(result.effect_state(), Some(LocalFileEffectState::PartiallyApplied));
+        assert_eq!(
+            result.effect_state(),
+            Some(LocalFileEffectState::PartiallyApplied)
+        );
         assert_eq!(
             result.cleanup_error().map(LocalFileError::kind),
             Some(LocalFileErrorKind::NotFound)
@@ -440,13 +470,19 @@ mod binding_tests {
             matches!(result.typed_source(), Some(LocalFileErrorSource::Io(source)) if source.to_string() == "native source")
         );
 
-        let missing = LocalFileError::from_io(LocalFileOperation::Read, None, None, io::Error::other("native source"));
+        let missing = LocalFileError::from_io(
+            LocalFileOperation::Read,
+            None,
+            None,
+            io::Error::other("native source"),
+        );
         let filled = reader.contextualize_error(missing);
         assert_eq!(filled.path(), Some(source_path.as_path()));
         assert_eq!(filled.current_directory(), Some(fixture.path()));
 
-        let unbound = LocalObservedReader::from_reader(reader.reader, LocalObservationRequirement::Required)
-            .expect("construct unbound reader");
+        let unbound =
+            LocalObservedReader::from_reader(reader.reader, LocalObservationRequirement::Required)
+                .expect("construct unbound reader");
         let unbound_error = unbound.contextualize_error(LocalFileError::new(
             LocalFileErrorKind::InvalidState,
             LocalFileOperation::Metadata,

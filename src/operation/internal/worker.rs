@@ -6,6 +6,7 @@ pub(crate) struct QueueState {
     ordinary: VecDeque<Box<dyn FnOnce() + Send + 'static>>,
     cleanup: VecDeque<Box<dyn FnOnce() + Send + 'static>>,
     stopping: bool,
+    last_was_cleanup: bool,
 }
 
 pub(crate) struct WorkerQueue {
@@ -20,6 +21,7 @@ impl Default for WorkerQueue {
                 ordinary: VecDeque::new(),
                 cleanup: VecDeque::new(),
                 stopping: false,
+                last_was_cleanup: false,
             }),
             wake: Condvar::new(),
         }
@@ -60,10 +62,19 @@ impl WorkerQueue {
                 if state.stopping && state.ordinary.is_empty() && state.cleanup.is_empty() {
                     return;
                 }
-                state
-                    .cleanup
-                    .pop_front()
-                    .or_else(|| state.ordinary.pop_front())
+                let choose_cleanup = if state.cleanup.is_empty() {
+                    false
+                } else if state.ordinary.is_empty() {
+                    true
+                } else {
+                    !state.last_was_cleanup
+                };
+                state.last_was_cleanup = choose_cleanup;
+                if choose_cleanup {
+                    state.cleanup.pop_front()
+                } else {
+                    state.ordinary.pop_front()
+                }
             };
             if let Some(job) = job {
                 let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(job));

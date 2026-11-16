@@ -1,5 +1,8 @@
+use std::future::poll_fn;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::Mutex;
+use std::task::Waker;
 
 use super::LocalIoExecutor;
 
@@ -23,13 +26,12 @@ impl AsyncLocalFileSystem {
             host_base,
         }
     }
-}
 
-impl crate::LocalFileSystem {
-    /// Moves this filesystem and its retained authority into an async facade.
-    pub fn into_async(self, executor: LocalIoExecutor) -> crate::LocalResult<AsyncLocalFileSystem> {
-        let host_base = if self.scope() == crate::path::LocalFileSystemScope::Host {
-            Some(std::env::current_dir().map_err(|source| {
+    /// Creates a Host facade after reading the process cwd on a local I/O worker.
+    pub async fn host(executor: LocalIoExecutor) -> crate::LocalResult<Self> {
+        let filesystem = crate::LocalFileSystem::host()?;
+        let host_base = run_on_worker(&executor, || {
+            std::env::current_dir().map_err(|source| {
                 crate::LocalFileError::from_io(
                     crate::LocalFileOperation::CurrentDirectory,
                     None,
@@ -37,15 +39,19 @@ impl crate::LocalFileSystem {
                     source,
                 )
                 .with_reason("failed to capture process directory for async local filesystem")
-            })?)
-        } else {
-            None
-        };
-        Ok(AsyncLocalFileSystem::new(self, executor, host_base))
+            })
+        })
+        .await?;
+        Ok(Self::new(filesystem, executor, Some(host_base)))
     }
-}
 
-impl AsyncLocalFileSystem {
+    /// Opens a Rooted authority on a local I/O worker and returns its async facade.
+    pub async fn rooted(executor: LocalIoExecutor, root: PathBuf) -> crate::LocalResult<Self> {
+        let filesystem =
+            run_on_worker(&executor, move || crate::LocalFileSystem::rooted(&root)).await?;
+        Ok(Self::new(filesystem, executor, None))
+    }
+
     /// Submits a complete file read and returns its independent local fact observer.
     pub fn submit_read_all_with_observer(
         &self,
@@ -93,6 +99,15 @@ impl AsyncLocalFileSystem {
                 super::LocalSubmitRejection::CapacityExceeded,
             ));
         }
+        if self.filesystem.scope() == crate::path::LocalFileSystemScope::Host
+            && self.host_base.is_none()
+            && request.path.is_relative()
+        {
+            return Err(super::LocalSubmitError::new(
+                request,
+                super::LocalSubmitRejection::AuthorityNotCaptured,
+            ));
+        }
         let read_limit = request
             .read
             .max_bytes()
@@ -108,12 +123,13 @@ impl AsyncLocalFileSystem {
                 super::LocalSubmitRejection::CapacityExceeded,
             ));
         };
-        let Some(byte_permit) = self.executor.reserve_bytes(byte_limit) else {
+        let Some(byte_permit) = self.executor.reserve_bytes(0) else {
             return Err(super::LocalSubmitError::new(
                 request,
                 super::LocalSubmitRejection::CapacityExceeded,
             ));
         };
+        let byte_permit = Arc::new(Mutex::new(byte_permit));
         if limits.max_open_handles == Some(0)
             || limits
                 .max_open_handles
@@ -130,23 +146,44 @@ impl AsyncLocalFileSystem {
                 super::LocalSubmitRejection::CapacityExceeded,
             ));
         };
-        let observer = super::LocalFactObserver::new();
+        let Some(fact_permit) = self.executor.reserve_fact() else {
+            return Err(super::LocalSubmitError::new(
+                request,
+                super::LocalSubmitRejection::CapacityExceeded,
+            ));
+        };
+        let fact_permit: Arc<dyn Send + Sync> = Arc::new(fact_permit);
+        let observer = super::LocalFactObserver::with_permit(Arc::clone(&fact_permit));
         let filesystem = self.filesystem.clone();
+        let budget_for_task = Arc::clone(&byte_permit);
         let job = super::internal::prepared_local_job::PreparedLocalJob::new(
             Arc::clone(&self.executor.inner),
             request,
             slot,
-            byte_permit,
+            Arc::clone(&byte_permit),
             handle_permit,
-            move |_request| match filesystem
-                .read_all_with_options(&execution_path, &execution_options)
-            {
-                Ok(value) => qubit_operation::OperationOutcome::Succeeded(value),
-                Err(error) => qubit_operation::OperationOutcome::Failed(error),
+            observer.clone(),
+            move |_request| {
+                let read = filesystem.read_all_with_options_and_reserver(
+                    &execution_path,
+                    &execution_options,
+                    |output, additional| {
+                        reserve_vec_capacity(output, additional, &budget_for_task, byte_limit)
+                    },
+                );
+                match read {
+                    Ok(value) => qubit_operation::OperationOutcome::Succeeded(value),
+                    Err(error) => {
+                        let mut permit = budget_for_task.lock().unwrap_or_else(|e| e.into_inner());
+                        let amount = permit.amount();
+                        permit.shrink(amount);
+                        qubit_operation::OperationOutcome::Failed(error)
+                    }
+                }
             },
         );
         match scoped.try_submit_external(operation, Arc::clone(&job)) {
-            Ok(handle) => Ok((handle, observer)),
+            Ok(handle) => Ok((super::LocalOperation::new(handle, byte_permit), observer)),
             Err(error) => {
                 let (reason, _prepared) = error.into_parts();
                 let request = job
@@ -175,4 +212,105 @@ impl AsyncLocalFileSystem {
             }
         }
     }
+}
+
+impl crate::LocalFileSystem {
+    /// Moves this filesystem and its already-open authority into an async facade.
+    ///
+    /// Relative Host paths are rejected because this conversion does not query
+    /// process-global cwd. Use [`AsyncLocalFileSystem::host`] for Host paths.
+    pub fn into_async(self, executor: LocalIoExecutor) -> crate::LocalResult<AsyncLocalFileSystem> {
+        Ok(AsyncLocalFileSystem::new(self, executor, None))
+    }
+}
+
+fn reserve_vec_capacity(
+    output: &mut Vec<u8>,
+    additional: usize,
+    permit: &Arc<Mutex<super::internal::permits::Permit>>,
+    maximum: usize,
+) -> std::io::Result<()> {
+    let old_capacity = output.capacity();
+    let requested_capacity = output
+        .len()
+        .checked_add(additional)
+        .ok_or_else(|| std::io::Error::other("read capacity overflow"))?;
+    let target_capacity = requested_capacity.max(old_capacity);
+    let delta = target_capacity - old_capacity;
+    let mut lease = permit.lock().unwrap_or_else(|e| e.into_inner());
+    if target_capacity > maximum || !lease.grow(delta) {
+        return Err(std::io::Error::other("executor owned-byte limit exceeded"));
+    }
+    if let Err(error) = output.try_reserve_exact(additional) {
+        lease.shrink(delta);
+        return Err(std::io::Error::other(error));
+    }
+    let actual_delta = output.capacity().saturating_sub(old_capacity);
+    if actual_delta < delta {
+        lease.shrink(delta - actual_delta);
+    } else if actual_delta > delta && !lease.grow(actual_delta - delta) {
+        let reserved = lease.amount();
+        lease.shrink(reserved);
+        return Err(std::io::Error::other(
+            "allocator capacity exceeds executor owned-byte limit",
+        ));
+    }
+    Ok(())
+}
+
+struct Completion<T> {
+    value: Option<T>,
+    waker: Option<Waker>,
+}
+
+async fn run_on_worker<T, F>(executor: &LocalIoExecutor, task: F) -> crate::LocalResult<T>
+where
+    T: Send + 'static,
+    F: FnOnce() -> crate::LocalResult<T> + Send + 'static,
+{
+    let completion = Arc::new(Mutex::new(Completion {
+        value: None,
+        waker: None,
+    }));
+    let completion_for_worker = Arc::clone(&completion);
+    let scheduled = executor.enqueue_task(move || {
+        let value =
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(task)).unwrap_or_else(|_| {
+                Err(crate::LocalFileError::from_io(
+                    crate::LocalFileOperation::Configure,
+                    None,
+                    None,
+                    std::io::Error::other("async filesystem constructor panicked"),
+                ))
+            });
+        let mut completion = completion_for_worker
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        completion.value = Some(value);
+        if let Some(waker) = completion.waker.take() {
+            waker.wake();
+        }
+    });
+    if scheduled.is_err() {
+        return Err(crate::LocalFileError::new(
+            crate::LocalFileErrorKind::ResourceLimit,
+            crate::LocalFileOperation::Configure,
+        )
+        .with_reason("local worker queue is full while constructing async filesystem"));
+    }
+    poll_fn(|cx| {
+        let mut completion = completion.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(value) = completion.value.take() {
+            return std::task::Poll::Ready(value);
+        }
+        if !completion
+            .waker
+            .as_ref()
+            .is_some_and(|waker| waker.will_wake(cx.waker()))
+        {
+            completion.waker = Some(cx.waker().clone());
+        }
+        std::task::Poll::Pending
+    })
+    .await
 }

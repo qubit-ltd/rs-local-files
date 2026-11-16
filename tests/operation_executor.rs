@@ -3,19 +3,57 @@ use std::path::PathBuf;
 use qubit_local_files::LocalExecutionConfig;
 use qubit_local_files::LocalFileSystem;
 use qubit_local_files::LocalReadRequest;
+use qubit_local_files::operation::AsyncLocalFileSystem;
 use qubit_local_files::operation::LocalIoExecutor;
 use qubit_local_files::options::LocalReadAllOptions;
 use qubit_operation::ManagerOptions;
 use qubit_operation::OperationManager;
 
+fn block_on<F: std::future::Future>(future: F) -> F::Output {
+    use std::sync::{Arc, Condvar, Mutex};
+    use std::task::{Context, Wake, Waker};
+    struct Signal {
+        ready: Mutex<bool>,
+        changed: Condvar,
+    }
+    impl Wake for Signal {
+        fn wake(self: Arc<Self>) {
+            *self.ready.lock().unwrap() = true;
+            self.changed.notify_one();
+        }
+        fn wake_by_ref(self: &Arc<Self>) {
+            *self.ready.lock().unwrap() = true;
+            self.changed.notify_one();
+        }
+    }
+    let signal = Arc::new(Signal {
+        ready: Mutex::new(false),
+        changed: Condvar::new(),
+    });
+    let waker = Waker::from(Arc::clone(&signal));
+    let mut context = Context::from_waker(&waker);
+    let mut future = std::pin::pin!(future);
+    loop {
+        if let std::task::Poll::Ready(value) = future.as_mut().poll(&mut context) {
+            return value;
+        }
+        let mut ready = signal.ready.lock().unwrap();
+        while !*ready {
+            ready = signal.changed.wait(ready).unwrap();
+        }
+        *ready = false;
+    }
+}
+
+fn host_async(manager: OperationManager) -> AsyncLocalFileSystem {
+    let executor = LocalIoExecutor::new(manager, LocalExecutionConfig::default()).unwrap();
+    block_on(AsyncLocalFileSystem::host(executor)).unwrap()
+}
+
 #[test]
 fn host_facade_retains_a_fact_observer_for_submitted_reads() {
     let manager = OperationManager::new(ManagerOptions::default()).unwrap();
-    let executor = LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).unwrap();
-    let filesystem = LocalFileSystem::host()
-        .unwrap()
-        .into_async(executor)
-        .unwrap();
+    let filesystem = host_async(manager.clone());
 
     let (operation, observer) = filesystem
         .submit_read_all_with_observer(
@@ -52,11 +90,7 @@ fn invalid_executor_configuration_is_rejected_before_starting_workers() {
 fn wrong_manager_rejection_returns_the_unmodified_request() {
     let owner = OperationManager::new(ManagerOptions::default()).unwrap();
     let other = OperationManager::new(ManagerOptions::default()).unwrap();
-    let executor = LocalIoExecutor::new(owner, LocalExecutionConfig::default()).unwrap();
-    let filesystem = LocalFileSystem::host()
-        .unwrap()
-        .into_async(executor)
-        .unwrap();
+    let filesystem = host_async(owner);
     let original_read = LocalReadAllOptions::new().with_max_bytes(11);
     let request = LocalReadRequest {
         path: PathBuf::from("./original-path"),
@@ -89,10 +123,7 @@ fn oversized_owned_read_limit_is_rejected_with_original_request() {
         ..LocalExecutionConfig::default()
     };
     let executor = LocalIoExecutor::new(manager.clone(), config).unwrap();
-    let filesystem = LocalFileSystem::host()
-        .unwrap()
-        .into_async(executor)
-        .unwrap();
+    let filesystem = block_on(AsyncLocalFileSystem::host(executor)).unwrap();
     let path = PathBuf::from("./owned-limit-original");
     let rejected = match filesystem.submit_read_all_with_observer(
         &manager,
@@ -122,11 +153,7 @@ fn stopped_parent_rejects_child_read_before_worker_io() {
     use std::time::Duration;
 
     let manager = OperationManager::new(ManagerOptions::default()).unwrap();
-    let executor = LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).unwrap();
-    let filesystem = LocalFileSystem::host()
-        .unwrap()
-        .into_async(executor)
-        .unwrap();
+    let filesystem = host_async(manager.clone());
     let (entered_tx, entered_rx) = mpsc::channel();
     let (release_tx, release_rx) = mpsc::channel();
     let (result_tx, result_rx) = mpsc::channel();
@@ -179,11 +206,7 @@ fn host_relative_reads_use_cwd_captured_by_async_conversion() {
 
     std::env::set_current_dir(first.path()).unwrap();
     let manager = OperationManager::new(ManagerOptions::default()).unwrap();
-    let executor = LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).unwrap();
-    let filesystem = LocalFileSystem::host()
-        .unwrap()
-        .into_async(executor)
-        .unwrap();
+    let filesystem = host_async(manager.clone());
     std::env::set_current_dir(second.path()).unwrap();
 
     let (mut operation, _observer) = filesystem
@@ -212,10 +235,7 @@ fn rooted_facade_keeps_open_authority_after_root_path_replacement() {
 
     let manager = OperationManager::new(ManagerOptions::default()).unwrap();
     let executor = LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).unwrap();
-    let filesystem = LocalFileSystem::rooted(&root)
-        .unwrap()
-        .into_async(executor)
-        .unwrap();
+    let filesystem = block_on(AsyncLocalFileSystem::rooted(executor, root.clone())).unwrap();
     std::fs::rename(&root, scratch.path().join("moved-root")).unwrap();
     std::fs::create_dir(&root).unwrap();
     std::fs::write(root.join("payload"), b"replacement-path").unwrap();
@@ -235,4 +255,31 @@ fn rooted_facade_keeps_open_authority_after_root_path_replacement() {
         matches!(operation.wait_outcome().unwrap(), qubit_operation::OperationOutcome::Succeeded(bytes) if bytes == b"original-authority")
     );
     operation.wait_settlement().unwrap();
+}
+
+#[test]
+fn into_async_does_not_capture_host_cwd_and_rejects_relative_paths() {
+    let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+    let executor = LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).unwrap();
+    let filesystem = LocalFileSystem::host()
+        .unwrap()
+        .into_async(executor)
+        .unwrap();
+    let rejected = filesystem
+        .submit_read_all_with_observer(
+            &manager,
+            Default::default(),
+            LocalReadRequest {
+                path: PathBuf::from("relative"),
+                read: Default::default(),
+            },
+            Default::default(),
+        )
+        .err()
+        .unwrap();
+    assert_eq!(
+        rejected.rejection(),
+        qubit_local_files::operation::LocalSubmitRejection::AuthorityNotCaptured
+    );
+    assert_eq!(rejected.into_request().path, PathBuf::from("relative"));
 }
