@@ -20,6 +20,9 @@ use completion::Completion;
 
 use super::LocalIoExecutor;
 
+#[path = "async_local_file_system/publish.rs"]
+mod publish;
+
 /// Asynchronous facade retaining its synchronous filesystem authority and
 /// executor.
 #[derive(Clone)]
