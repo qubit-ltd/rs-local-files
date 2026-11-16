@@ -765,7 +765,7 @@ impl AsyncLocalFileSystem {
         )
     }
 
-    fn submit_owned<R, T, E, F>(
+    pub(super) fn submit_owned<R, T, E, F>(
         &self,
         manager: &OperationManager,
         operation: OperationOptions,
