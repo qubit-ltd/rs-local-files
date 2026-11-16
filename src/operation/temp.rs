@@ -26,6 +26,35 @@ use super::executor::LocalIoExecutor;
 mod local_cleanup;
 use local_cleanup::LocalCleanup;
 
+mod async_receiver;
+mod async_result;
+mod async_sender;
+mod local_create_failure;
+mod local_temp_cleanup_anchor;
+mod local_temp_command_error;
+mod local_temp_command_receiver;
+mod local_temp_file_access;
+mod local_temp_native;
+mod local_temp_resource;
+mod local_temp_submit_error;
+
+use async_receiver::AsyncReceiver;
+use async_result::async_result;
+use async_sender::AsyncSender;
+pub use local_create_failure::LocalCreateFailure;
+pub(crate) use local_temp_cleanup_anchor::LocalTempCleanupAnchor;
+pub(crate) use local_temp_command_error::LocalTempCommandError;
+pub use local_temp_command_receiver::LocalTempCommandReceiver;
+pub use local_temp_file_access::LocalTempFileAccess;
+pub(crate) use local_temp_native::LocalTempNative;
+pub use local_temp_resource::LocalTempResource;
+pub use local_temp_submit_error::LocalTempSubmitError;
+
+/// Clones a task waker without allowing a hostile implementation to unwind.
+///
+/// # Parameters
+///
+/// * `waker` — task notification handle to retain for a later poll.
 pub(super) fn safe_clone_waker(waker: &Waker) -> Option<Waker> {
     match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| waker.clone())) {
         Ok(clone) => Some(clone),
@@ -36,224 +65,37 @@ pub(super) fn safe_clone_waker(waker: &Waker) -> Option<Waker> {
     }
 }
 
+/// Drops a stored waker while containing panics from custom waker data.
+///
+/// # Parameters
+///
+/// * `waker` — optional task notification handle being replaced or cleared.
 pub(super) fn safe_drop_waker(waker: Option<Waker>) {
     if let Err(payload) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| drop(waker))) {
         std::mem::forget(payload);
     }
 }
 
+/// Wakes a task while preventing custom waker panics from escaping the worker.
+///
+/// # Parameters
+///
+/// * `waker` — task notification handle taken from a pending receiver.
 fn safe_wake(waker: Waker) {
     if let Err(payload) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| waker.wake())) {
         std::mem::forget(payload);
     }
 }
 
-/// A thread-safe control port owning a native temporary file and its permits.
-pub struct LocalTempResource {
-    pub(crate) native: Mutex<Option<LocalTempNative>>,
-    _disk: Mutex<Vec<super::internal::permits::DiskPermit>>,
-    _handle: Mutex<Option<super::internal::permits::Permit>>,
-    pub(crate) cleanup_permit: Mutex<Option<super::internal::permits::Permit>>,
-    pub(crate) id: Arc<Mutex<Option<ResourceId>>>,
-}
-
-pub(crate) enum LocalTempNative {
-    File(crate::LocalTempFile),
-    Sealed(crate::LocalSealedTempFile),
-    Directory(crate::LocalTempDirectory),
-    Recovery(crate::LocalTempRecovery),
-    /// A consuming command panicked after taking its owner. The cleanup-only
-    /// clone retains the same Host/Rooted authority and identity checks.
-    Unconfirmed(LocalTempCleanupAnchor),
-}
-
-/// Cleanup-only owner retained when a consuming File or Directory transition
-/// unwinds. Each variant preserves its native Host/Rooted identity authority.
-pub(crate) enum LocalTempCleanupAnchor {
-    File(crate::LocalTempFile),
-    Directory(crate::LocalTempDirectory),
-}
-
-impl LocalTempResource {
-    fn new(
-        native: LocalTempNative,
-        disk: super::internal::permits::DiskPermit,
-        handle: super::internal::permits::Permit,
-        cleanup_permit: super::internal::permits::Permit,
-    ) -> Self {
-        Self {
-            native: Mutex::new(Some(native)),
-            _disk: Mutex::new(vec![disk]),
-            _handle: Mutex::new(Some(handle)),
-            cleanup_permit: Mutex::new(Some(cleanup_permit)),
-            id: Arc::new(Mutex::new(None)),
-        }
-    }
-}
-
 /// Typed result of an asynchronous temporary-file creation request.
-pub type LocalTempCreateOperation =
-    qubit_operation::AsyncOperationHandle<LocalTempFileAccess, LocalCreateFailure>;
+pub type LocalTempCreateOperation = qubit_operation::AsyncOperationHandle<LocalTempFileAccess, LocalCreateFailure>;
 
-/// Public read-only access token for a managed temporary file.
-pub struct LocalTempFileAccess {
-    resource: ResourceRef<LocalTempResource>,
-}
-impl LocalTempFileAccess {
-    /// Returns the stable public resource identity.
-    pub fn resource_id(&self) -> ResourceId {
-        self.resource.id()
-    }
-
-    /// Clones this access token without registering another resource.
-    pub(crate) fn clone_access(&self) -> Self {
-        Self {
-            resource: self.resource.clone(),
-        }
-    }
-
-    /// Retains the same registered owner for a related operation/helper.
-    pub(crate) fn clone_resource_ref(&self) -> ResourceRef<LocalTempResource> {
-        self.resource.clone()
-    }
-
-    /// Retains an additional disk reservation on the registered native owner.
-    pub(crate) fn retain_disk_permit(&self, permit: super::internal::permits::DiskPermit) {
-        self.resource
-            ._disk
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .push(permit);
-    }
-
-    /// Queues one serialized native-resource command on the local I/O worker.
-    /// The cloned resource reference remains alive until the command returns.
-    pub(crate) fn enqueue_native_command<T, F>(
-        &self,
-        executor: &LocalIoExecutor,
-        command: F,
-    ) -> Result<LocalTempCommandReceiver<T>, LocalTempCommandError>
-    where
-        T: Send + 'static,
-        F: FnOnce(&mut LocalTempNative) -> T + Send + 'static,
-    {
-        let resource = self.clone_resource_ref();
-        let (sender, receiver) = async_result();
-        executor
-            .enqueue_task(move || {
-                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    let mut native = resource.native.lock().unwrap_or_else(|e| e.into_inner());
-                    let Some(native) = native.as_mut() else {
-                        return Err(LocalTempCommandError::ResourceUnavailable);
-                    };
-                    Ok(command(native))
-                }))
-                .unwrap_or(Err(LocalTempCommandError::Panicked));
-                let _ = sender.send(result);
-                drop(resource);
-            })
-            .map_err(|()| LocalTempCommandError::Capacity)?;
-        Ok(LocalTempCommandReceiver(receiver))
-    }
-
-    /// Queues an internal consuming command. Callbacks are crate-controlled,
-    /// never caller-supplied; ordinary error paths must return the owner. A
-    /// File or Directory owner is disarmed while the callback runs, and its
-    /// cleanup-only anchor is retained if the callback panics. A terminal
-    /// publication callback must still avoid panicking after publication has
-    /// moved the source away from its cleanup coordinate.
-    pub(crate) fn enqueue_native_transition<T, E, F>(
-        &self,
-        executor: &LocalIoExecutor,
-        command: F,
-    ) -> Result<LocalTempCommandReceiver<Result<T, E>>, LocalTempCommandError>
-    where
-        T: Send + 'static,
-        E: Send + 'static,
-        F: FnOnce(LocalTempNative) -> Result<(Option<LocalTempNative>, T), (LocalTempNative, E)>
-            + Send
-            + 'static,
-    {
-        let resource = self.clone_resource_ref();
-        let (sender, receiver) = async_result();
-        executor
-            .enqueue_task(move || {
-                let mut native = resource.native.lock().unwrap_or_else(|e| e.into_inner());
-                // Preserve a cleanup-only copy before moving the owner into a
-                // consuming callback. Disarm the original so its unwind Drop
-                // cannot race the retained anchor.
-                let fallback = match native.as_mut() {
-                    Some(LocalTempNative::File(file)) => {
-                        let anchor = file.cleanup_anchor();
-                        file.disarm_cleanup_on_drop();
-                        LocalTempCleanupAnchor::File(anchor)
-                    }
-                    Some(LocalTempNative::Directory(directory)) => {
-                        let anchor = directory.cleanup_anchor();
-                        directory.disarm_cleanup_on_drop();
-                        LocalTempCleanupAnchor::Directory(anchor)
-                    }
-                    Some(LocalTempNative::Sealed(sealed)) => {
-                        let anchor = sealed.cleanup_anchor();
-                        sealed.disarm_cleanup_on_drop();
-                        LocalTempCleanupAnchor::File(anchor)
-                    }
-                    Some(LocalTempNative::Recovery(_)) => {
-                        // Recovery owners remain registered for the lifecycle
-                        // adapter's typed Unsupported result.
-                        drop(native);
-                        let _ = sender.send(Err(LocalTempCommandError::UnsupportedKind));
-                        drop(resource);
-                        return;
-                    }
-                    None | Some(LocalTempNative::Unconfirmed(_)) => {
-                        drop(native);
-                        let _ = sender.send(Err(LocalTempCommandError::ResourceUnavailable));
-                        drop(resource);
-                        return;
-                    }
-                };
-                let outcome =
-                    match native.take() {
-                        None => Err(LocalTempCommandError::ResourceUnavailable),
-                        Some(owner) => {
-                            match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                                command(owner)
-                            })) {
-                                Ok(Ok((mut owner, value))) => {
-                                    if let Some(owner) = owner.as_mut() {
-                                        arm_native_cleanup_on_drop(owner);
-                                    }
-                                    *native = owner;
-                                    Ok(Ok(value))
-                                }
-                                Ok(Err((owner, error))) => {
-                                    let mut owner = owner;
-                                    arm_native_cleanup_on_drop(&mut owner);
-                                    *native = Some(owner);
-                                    Ok(Err(error))
-                                }
-                                Err(payload) => {
-                                    if let Err(payload) = std::panic::catch_unwind(
-                                        std::panic::AssertUnwindSafe(|| drop(payload)),
-                                    ) {
-                                        std::mem::forget(payload);
-                                    }
-                                    *native = Some(LocalTempNative::Unconfirmed(fallback));
-                                    Err(LocalTempCommandError::Panicked)
-                                }
-                            }
-                        }
-                    };
-                drop(native);
-                let _ = sender.send(outcome);
-                drop(resource);
-            })
-            .map_err(|()| LocalTempCommandError::Capacity)?;
-        Ok(LocalTempCommandReceiver(receiver))
-    }
-}
-
+/// Arms the native owner's fallback cleanup before it is restored to the
+/// manager.
+///
+/// # Parameters
+///
+/// * `native` — owner whose destructor cleanup is enabled for panic safety.
 fn arm_native_cleanup_on_drop(native: &mut LocalTempNative) {
     match native {
         LocalTempNative::File(file) => file.arm_cleanup_on_drop(),
@@ -264,6 +106,19 @@ fn arm_native_cleanup_on_drop(native: &mut LocalTempNative) {
     }
 }
 
+/// Queues one serialized access command and retains the resource through
+/// completion.
+///
+/// # Type Parameters
+///
+/// * `T` — value produced by the command closure.
+/// * `F` — one-shot action executed while the native owner is locked.
+///
+/// # Parameters
+///
+/// * `executor` — bounded worker that serializes native operations.
+/// * `resource` — registered owner retained until the queued command returns.
+/// * `command` — crate-controlled operation applied to the native owner.
 pub(super) fn enqueue_resource_command<T, F>(
     executor: &LocalIoExecutor,
     resource: ResourceRef<LocalTempResource>,
@@ -291,66 +146,16 @@ where
     Ok(LocalTempCommandReceiver(receiver))
 }
 
-/// Failure to schedule or execute a managed native-resource command.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum LocalTempCommandError {
-    Capacity,
-    ResourceUnavailable,
-    UnsupportedKind,
-    Panicked,
-}
-
-/// Future receiving a local worker command result without doing native I/O in
-/// poll.
-pub(crate) struct LocalTempCommandReceiver<T>(AsyncReceiver<Result<T, LocalTempCommandError>>);
-
-impl<T> Future for LocalTempCommandReceiver<T> {
-    type Output = Result<T, LocalTempCommandError>;
-
-    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        Pin::new(&mut self.0).poll(cx)
-    }
-}
-
-/// Creation failure, including the resource identity when cleanup was retained.
-#[derive(Debug)]
-pub enum LocalCreateFailure {
-    /// Scope capacity was unavailable before native creation.
-    Reservation(ResourceCapacityError),
-    /// Existing synchronous temp creation failed.
-    Local(crate::LocalFileError),
-    /// Native creation was partial and its cleanup owner was retained.
-    PartialRetained {
-        error: crate::LocalFileError,
-        resource_id: ResourceId,
-    },
-    /// Commit was rejected and the original resource was retained for cleanup.
-    Retained {
-        reason: qubit_operation::ResourceManageErrorKind,
-        resource_id: ResourceId,
-    },
-    /// Executor capacity was unavailable before native creation.
-    Capacity,
-}
-
-/// Admission failure returned before a temporary-resource operation is
-/// accepted.
-#[derive(Debug)]
-pub struct LocalTempSubmitError<R> {
-    /// Upstream operation admission rejection.
-    pub reason: qubit_operation::AdmissionError,
-    request: R,
-}
-
-impl<R> LocalTempSubmitError<R> {
-    /// Returns the original options supplied for the rejected request.
-    pub fn into_request(self) -> R {
-        self.request
-    }
-}
-
-/// Create a temporary file without performing blocking filesystem work on the
-/// caller executor.
+/// Creates a managed temporary file without blocking the caller's executor.
+/// Capacity and ownership transfer happen before the native creation task runs.
+///
+/// # Parameters
+///
+/// * `filesystem` — local filesystem that creates and later cleans the file.
+/// * `executor` — bounded worker that performs blocking filesystem operations.
+/// * `manager` — asynchronous operation manager handling admission and cleanup.
+/// * `options` — cancellation and resource options for the operation.
+/// * `temp_options` — filesystem-specific privacy and creation options.
 pub fn submit_temp_file(
     filesystem: crate::LocalFileSystem,
     executor: LocalIoExecutor,
@@ -361,9 +166,7 @@ pub fn submit_temp_file(
     let rejected_request = temp_options.clone();
     let task_executor = executor.clone();
     let result = manager.try_submit(options, move |scope| async move {
-        let reservation = scope
-            .reserve_resource()
-            .map_err(LocalCreateFailure::Reservation)?;
+        let reservation = scope.reserve_resource().map_err(LocalCreateFailure::Reservation)?;
         let Some(handle) = task_executor.reserve_handle() else {
             return Err(LocalCreateFailure::Capacity);
         };
@@ -404,8 +207,7 @@ pub fn submit_temp_file(
                 return Err(LocalCreateFailure::Local(primary));
             }
         };
-        let resource =
-            LocalTempResource::new(LocalTempNative::File(file), disk, handle, cleanup_permit);
+        let resource = LocalTempResource::new(LocalTempNative::File(file), disk, handle, cleanup_permit);
         let id_slot = Arc::clone(&resource.id);
         let cleanup = LocalCleanup {
             executor: task_executor,
@@ -413,9 +215,7 @@ pub fn submit_temp_file(
         match reservation.commit_with(resource, cleanup) {
             Ok(reference) => {
                 *id_slot.lock().unwrap_or_else(|e| e.into_inner()) = Some(reference.id());
-                Ok(LocalTempFileAccess {
-                    resource: reference,
-                })
+                Ok(LocalTempFileAccess { resource: reference })
             }
             Err(error) => {
                 let (reason, owner, cleanup, reservation) = error.into_parts();
@@ -423,10 +223,7 @@ pub fn submit_temp_file(
                 let mut id = id_slot.lock().unwrap_or_else(|e| e.into_inner());
                 let resource_id = reservation.retain_with_for_cleanup(owner, cleanup);
                 *id = Some(resource_id);
-                Err(LocalCreateFailure::Retained {
-                    reason,
-                    resource_id,
-                })
+                Err(LocalCreateFailure::Retained { reason, resource_id })
             }
         }
     });
@@ -439,21 +236,28 @@ pub fn submit_temp_file(
     })
 }
 
-/// Creates a managed temporary directory on the local blocking worker queue.
+/// Creates a managed temporary directory on the bounded local worker queue.
+/// The directory remains registered until its cleanup future releases it.
+///
+/// # Parameters
+///
+/// * `filesystem` — local filesystem that creates and later cleans the
+///   directory.
+/// * `executor` — bounded worker that performs blocking filesystem operations.
+/// * `manager` — asynchronous operation manager handling admission and cleanup.
+/// * `options` — cancellation and resource options for the operation.
+/// * `temp_options` — filesystem-specific privacy and creation options.
 pub fn submit_temp_directory(
     filesystem: crate::LocalFileSystem,
     executor: LocalIoExecutor,
     manager: &qubit_operation::AsyncOperationManager,
     options: OperationOptions,
     temp_options: crate::options::LocalTempDirectoryOptions,
-) -> Result<LocalTempCreateOperation, LocalTempSubmitError<crate::options::LocalTempDirectoryOptions>>
-{
+) -> Result<LocalTempCreateOperation, LocalTempSubmitError<crate::options::LocalTempDirectoryOptions>> {
     let rejected_request = temp_options.clone();
     let task_executor = executor.clone();
     let result = manager.try_submit(options, move |scope| async move {
-        let reservation = scope
-            .reserve_resource()
-            .map_err(LocalCreateFailure::Reservation)?;
+        let reservation = scope.reserve_resource().map_err(LocalCreateFailure::Reservation)?;
         let Some(handle) = task_executor.reserve_handle() else {
             return Err(LocalCreateFailure::Capacity);
         };
@@ -493,12 +297,7 @@ pub fn submit_temp_directory(
                 return Err(LocalCreateFailure::Local(primary));
             }
         };
-        let resource = LocalTempResource::new(
-            LocalTempNative::Directory(directory),
-            disk,
-            handle,
-            cleanup_permit,
-        );
+        let resource = LocalTempResource::new(LocalTempNative::Directory(directory), disk, handle, cleanup_permit);
         let id_slot = Arc::clone(&resource.id);
         let cleanup = LocalCleanup {
             executor: task_executor,
@@ -506,9 +305,7 @@ pub fn submit_temp_directory(
         match reservation.commit_with(resource, cleanup) {
             Ok(reference) => {
                 *id_slot.lock().unwrap_or_else(|e| e.into_inner()) = Some(reference.id());
-                Ok(LocalTempFileAccess {
-                    resource: reference,
-                })
+                Ok(LocalTempFileAccess { resource: reference })
             }
             Err(error) => {
                 let (reason, owner, cleanup, reservation) = error.into_parts();
@@ -516,10 +313,7 @@ pub fn submit_temp_directory(
                 let mut id = id_slot.lock().unwrap_or_else(|e| e.into_inner());
                 let resource_id = reservation.retain_with_for_cleanup(owner, cleanup);
                 *id = Some(resource_id);
-                Err(LocalCreateFailure::Retained {
-                    reason,
-                    resource_id,
-                })
+                Err(LocalCreateFailure::Retained { reason, resource_id })
             }
         }
     });
@@ -532,6 +326,20 @@ pub fn submit_temp_directory(
     })
 }
 
+/// Registers a recovery owner after native creation partially failed.
+///
+/// This keeps the failed resource and its cleanup reservations visible to the
+/// manager rather than dropping a potentially live filesystem object.
+///
+/// # Parameters
+///
+/// * `reservation` — resource slot reserved before native creation.
+/// * `error` — original creation failure returned to the caller.
+/// * `recovery` — native cleanup authority for the partial object.
+/// * `executor` — worker responsible for eventual cleanup.
+/// * `disk` — disk reservation retained with the owner.
+/// * `handle` — handle reservation retained with the owner.
+/// * `cleanup_permit` — pre-reserved capacity for cleanup scheduling.
 fn retain_partial(
     reservation: qubit_operation::ResourceReservation,
     error: crate::LocalFileError,
@@ -541,12 +349,7 @@ fn retain_partial(
     handle: super::internal::permits::Permit,
     cleanup_permit: super::internal::permits::Permit,
 ) -> LocalCreateFailure {
-    let owner = LocalTempResource::new(
-        LocalTempNative::Recovery(recovery),
-        disk,
-        handle,
-        cleanup_permit,
-    );
+    let owner = LocalTempResource::new(LocalTempNative::Recovery(recovery), disk, handle, cleanup_permit);
     let id_slot = Arc::clone(&owner.id);
     let cleanup = LocalCleanup { executor };
     match reservation.commit_with(owner, cleanup) {
@@ -567,27 +370,37 @@ fn retain_partial(
     }
 }
 
-struct AsyncResult<T> {
-    value: Mutex<Option<T>>,
-    waker: Mutex<Option<Waker>>,
-}
-fn async_result<T: Send + 'static>() -> (AsyncSender<T>, AsyncReceiver<T>) {
-    let state = Arc::new(AsyncResult {
-        value: Mutex::new(None),
-        waker: Mutex::new(None),
-    });
-    (AsyncSender(Arc::clone(&state)), AsyncReceiver(state))
-}
-
 #[cfg(test)]
 mod tests {
+    use std::future::Future;
+    use std::pin::Pin;
+    use std::sync::Arc;
+    use std::sync::Mutex;
+    use std::task::Context;
+    use std::task::Poll;
+    use std::task::Waker;
+
     use qubit_operation::ManagerOptions;
     use qubit_operation::OperationManager;
     use qubit_operation::StopReason;
 
-    use super::*;
+    use super::AsyncReceiver;
+    use super::AsyncSender;
+    use super::LocalCreateFailure;
+    use super::LocalTempCleanupAnchor;
+    use super::LocalTempCommandError;
+    use super::LocalTempCommandReceiver;
+    use super::LocalTempFileAccess;
+    use super::LocalTempNative;
+    use super::LocalTempResource;
+    use super::async_result;
+    use super::enqueue_resource_command;
+    use super::safe_clone_waker;
+    use super::safe_drop_waker;
+    use super::safe_wake;
     use crate::LocalFileOperation;
     use crate::LocalFileSystem;
+    use crate::operation::LocalIoExecutor;
     use crate::options::LocalTempDirectoryOptions;
     use crate::options::LocalTempFileOptions;
     #[cfg(feature = "test-support")]
@@ -597,20 +410,15 @@ mod tests {
     fn test_cloning_access_keeps_the_same_registered_resource_until_last_clone_drops() {
         let parent = tempfile::tempdir().expect("temp parent");
         let manager = OperationManager::new(ManagerOptions::default()).expect("manager");
-        let executor = LocalIoExecutor::new(
-            manager.clone(),
-            super::super::LocalExecutionConfig::default(),
-        )
-        .expect("local executor");
+        let executor = LocalIoExecutor::new(manager.clone(), super::super::LocalExecutionConfig::default())
+            .expect("local executor");
         let filesystem = LocalFileSystem::host().expect("filesystem");
         let parent_path = parent.path().to_path_buf();
         let completion = manager
             .run_and_settle(qubit_operation::OperationOptions::default(), move |scope| {
                 let reservation = scope.reserve_resource().expect("resource reservation");
                 let file = filesystem
-                    .create_temp_file_with_options(
-                        &LocalTempFileOptions::new().with_parent(&parent_path),
-                    )
+                    .create_temp_file_with_options(&LocalTempFileOptions::new().with_parent(&parent_path))
                     .expect("temporary file");
                 let owner = LocalTempResource::new(
                     LocalTempNative::File(file),
@@ -623,9 +431,7 @@ mod tests {
                     .commit_with(owner, LocalCleanup { executor })
                     .expect("managed temp resource");
                 *id_slot.lock().unwrap_or_else(|e| e.into_inner()) = Some(reference.id());
-                let original = LocalTempFileAccess {
-                    resource: reference,
-                };
+                let original = LocalTempFileAccess { resource: reference };
                 let clone = original.clone_access();
                 assert_eq!(original.resource_id(), clone.resource_id());
 
@@ -643,20 +449,15 @@ mod tests {
     fn test_normal_transition_rearms_the_returned_file_owner() {
         let parent = tempfile::tempdir().expect("temp parent");
         let manager = OperationManager::new(ManagerOptions::default()).expect("manager");
-        let executor = LocalIoExecutor::new(
-            manager.clone(),
-            super::super::LocalExecutionConfig::default(),
-        )
-        .expect("local executor");
+        let executor = LocalIoExecutor::new(manager.clone(), super::super::LocalExecutionConfig::default())
+            .expect("local executor");
         let filesystem = LocalFileSystem::host().expect("filesystem");
         let parent_path = parent.path().to_path_buf();
         let completion = manager
             .run_and_settle(qubit_operation::OperationOptions::default(), move |scope| {
                 let reservation = scope.reserve_resource().expect("resource reservation");
                 let file = filesystem
-                    .create_temp_file_with_options(
-                        &LocalTempFileOptions::new().with_parent(&parent_path),
-                    )
+                    .create_temp_file_with_options(&LocalTempFileOptions::new().with_parent(&parent_path))
                     .expect("temporary file");
                 let owner = LocalTempResource::new(
                     LocalTempNative::File(file),
@@ -674,17 +475,11 @@ mod tests {
                     )
                     .expect("managed temp resource");
                 *id_slot.lock().unwrap_or_else(|e| e.into_inner()) = Some(reference.id());
-                let access = LocalTempFileAccess {
-                    resource: reference,
-                };
+                let access = LocalTempFileAccess { resource: reference };
                 let receiver = access
-                    .enqueue_native_transition(&executor, |owner| {
-                        Ok::<_, (LocalTempNative, ())>((Some(owner), ()))
-                    })
+                    .enqueue_native_transition(&executor, |owner| Ok::<_, (LocalTempNative, ())>((Some(owner), ())))
                     .expect("command queued");
-                block_on(receiver)
-                    .expect("command result")
-                    .expect("transition result");
+                block_on(receiver).expect("command result").expect("transition result");
                 let owner = access
                     .resource
                     .native
@@ -706,11 +501,8 @@ mod tests {
     fn test_sealed_access_returns_unsupported_without_consuming_its_owner() {
         let parent = tempfile::tempdir().expect("temp parent");
         let manager = OperationManager::new(ManagerOptions::default()).expect("manager");
-        let executor = LocalIoExecutor::new(
-            manager.clone(),
-            super::super::LocalExecutionConfig::default(),
-        )
-        .expect("local executor");
+        let executor = LocalIoExecutor::new(manager.clone(), super::super::LocalExecutionConfig::default())
+            .expect("local executor");
         let filesystem = LocalFileSystem::host().expect("filesystem");
         let parent_path = parent.path().to_path_buf();
         let invoked = Arc::new(std::sync::atomic::AtomicUsize::new(0));
@@ -718,9 +510,7 @@ mod tests {
             .run_and_settle(qubit_operation::OperationOptions::default(), move |scope| {
                 let reservation = scope.reserve_resource().expect("resource reservation");
                 let file = filesystem
-                    .create_temp_file_with_options(
-                        &LocalTempFileOptions::new().with_parent(&parent_path),
-                    )
+                    .create_temp_file_with_options(&LocalTempFileOptions::new().with_parent(&parent_path))
                     .expect("temporary file");
                 let sealed = file
                     .seal_with_options(&crate::options::LocalSealOptions::new())
@@ -741,9 +531,7 @@ mod tests {
                     )
                     .expect("managed temp resource");
                 *id_slot.lock().unwrap_or_else(|e| e.into_inner()) = Some(reference.id());
-                let access = LocalTempFileAccess {
-                    resource: reference,
-                };
+                let access = LocalTempFileAccess { resource: reference };
                 let resource_id = access.resource_id();
                 for _ in 0..3 {
                     let invoked = Arc::clone(&invoked);
@@ -760,9 +548,7 @@ mod tests {
                                     LocalFileOperation::PersistTemp,
                                 );
                                 match owner {
-                                    LocalTempNative::Sealed(sealed) => {
-                                        Err((LocalTempNative::Sealed(sealed), cause))
-                                    }
+                                    LocalTempNative::Sealed(sealed) => Err((LocalTempNative::Sealed(sealed), cause)),
                                     owner => Err((owner, cause)),
                                 }
                             },
@@ -786,23 +572,15 @@ mod tests {
         assert_eq!(std::fs::read_dir(parent.path()).unwrap().count(), 0);
     }
 
-    fn assert_panicked_transition_cleans_anchor(
-        filesystem: LocalFileSystem,
-        parent_path: std::path::PathBuf,
-    ) {
+    fn assert_panicked_transition_cleans_anchor(filesystem: LocalFileSystem, parent_path: std::path::PathBuf) {
         let manager = OperationManager::new(ManagerOptions::default()).expect("manager");
-        let executor = LocalIoExecutor::new(
-            manager.clone(),
-            super::super::LocalExecutionConfig::default(),
-        )
-        .expect("local executor");
+        let executor = LocalIoExecutor::new(manager.clone(), super::super::LocalExecutionConfig::default())
+            .expect("local executor");
         let completion = manager
             .run_and_settle(qubit_operation::OperationOptions::default(), move |scope| {
                 let reservation = scope.reserve_resource().expect("resource reservation");
                 let file = filesystem
-                    .create_temp_file_with_options(
-                        &LocalTempFileOptions::new().with_parent(&parent_path),
-                    )
+                    .create_temp_file_with_options(&LocalTempFileOptions::new().with_parent(&parent_path))
                     .expect("temporary file");
                 let owner = LocalTempResource::new(
                     LocalTempNative::File(file),
@@ -820,9 +598,7 @@ mod tests {
                     )
                     .expect("managed temp resource");
                 *id_slot.lock().unwrap_or_else(|e| e.into_inner()) = Some(reference.id());
-                let access = LocalTempFileAccess {
-                    resource: reference,
-                };
+                let access = LocalTempFileAccess { resource: reference };
                 let receiver = access
                     .enqueue_native_transition(
                         &executor,
@@ -831,10 +607,7 @@ mod tests {
                         },
                     )
                     .expect("command queued");
-                assert!(matches!(
-                    block_on(receiver),
-                    Err(LocalTempCommandError::Panicked)
-                ));
+                assert!(matches!(block_on(receiver), Err(LocalTempCommandError::Panicked)));
                 let retry_receiver = access
                     .enqueue_native_transition(
                         &executor,
@@ -849,19 +622,15 @@ mod tests {
                 ));
                 #[cfg(feature = "test-support")]
                 {
-                    let _fault =
-                        crate::test_support::install_test_fault("temp-file-sandbox-remove")
-                            .expect("first sandbox cleanup should fail");
+                    let _fault = crate::test_support::install_test_fault("temp-file-sandbox-remove")
+                        .expect("first sandbox cleanup should fail");
                     let mut native = access.resource.native.lock().expect("native lock");
-                    let Some(LocalTempNative::Unconfirmed(LocalTempCleanupAnchor::File(anchor))) =
-                        native.as_mut()
+                    let Some(LocalTempNative::Unconfirmed(LocalTempCleanupAnchor::File(anchor))) = native.as_mut()
                     else {
                         panic!("a panicked transition should retain its cleanup anchor");
                     };
                     assert!(anchor.cleanup().is_err());
-                    anchor
-                        .cleanup()
-                        .expect("retained anchor should retry cleanup");
+                    anchor.cleanup().expect("retained anchor should retry cleanup");
                     assert_eq!(anchor.source_state(), LocalTempSourceState::Released);
                 }
                 drop(access);
@@ -897,18 +666,13 @@ mod tests {
         parent_path: std::path::PathBuf,
     ) {
         let manager = OperationManager::new(ManagerOptions::default()).expect("manager");
-        let executor = LocalIoExecutor::new(
-            manager.clone(),
-            super::super::LocalExecutionConfig::default(),
-        )
-        .expect("local executor");
+        let executor = LocalIoExecutor::new(manager.clone(), super::super::LocalExecutionConfig::default())
+            .expect("local executor");
         let completion = manager
             .run_and_settle(qubit_operation::OperationOptions::default(), move |scope| {
                 let reservation = scope.reserve_resource().expect("resource reservation");
                 let directory = filesystem
-                    .create_temp_directory_with_options(
-                        &LocalTempDirectoryOptions::new().with_parent(&parent_path),
-                    )
+                    .create_temp_directory_with_options(&LocalTempDirectoryOptions::new().with_parent(&parent_path))
                     .expect("temporary directory");
                 let owner = LocalTempResource::new(
                     LocalTempNative::Directory(directory),
@@ -926,9 +690,7 @@ mod tests {
                     )
                     .expect("managed temp resource");
                 *id_slot.lock().unwrap_or_else(|e| e.into_inner()) = Some(reference.id());
-                let access = LocalTempFileAccess {
-                    resource: reference,
-                };
+                let access = LocalTempFileAccess { resource: reference };
                 let receiver = access
                     .enqueue_native_transition(
                         &executor,
@@ -937,10 +699,7 @@ mod tests {
                         },
                     )
                     .expect("directory transition queued");
-                assert!(matches!(
-                    block_on(receiver),
-                    Err(LocalTempCommandError::Panicked)
-                ));
+                assert!(matches!(block_on(receiver), Err(LocalTempCommandError::Panicked)));
                 let retry_receiver = access
                     .enqueue_native_transition(
                         &executor,
@@ -955,20 +714,15 @@ mod tests {
                 ));
                 #[cfg(feature = "test-support")]
                 {
-                    let _fault =
-                        crate::test_support::install_test_fault("temp-directory-sandbox-remove")
-                            .expect("first directory sandbox cleanup should fail");
+                    let _fault = crate::test_support::install_test_fault("temp-directory-sandbox-remove")
+                        .expect("first directory sandbox cleanup should fail");
                     let mut native = access.resource.native.lock().expect("native lock");
-                    let Some(LocalTempNative::Unconfirmed(LocalTempCleanupAnchor::Directory(
-                        anchor,
-                    ))) = native.as_mut()
+                    let Some(LocalTempNative::Unconfirmed(LocalTempCleanupAnchor::Directory(anchor))) = native.as_mut()
                     else {
                         panic!("a panicked directory transition should retain its anchor");
                     };
                     assert!(anchor.cleanup().is_err());
-                    anchor
-                        .cleanup()
-                        .expect("directory anchor should retry cleanup");
+                    anchor.cleanup().expect("directory anchor should retry cleanup");
                     assert_eq!(anchor.source_state(), LocalTempSourceState::Released);
                 }
                 drop(access);
@@ -1002,18 +756,13 @@ mod tests {
         target: Option<std::path::PathBuf>,
     ) -> std::path::PathBuf {
         let manager = OperationManager::new(ManagerOptions::default()).expect("manager");
-        let executor = LocalIoExecutor::new(
-            manager.clone(),
-            super::super::LocalExecutionConfig::default(),
-        )
-        .expect("local executor");
+        let executor = LocalIoExecutor::new(manager.clone(), super::super::LocalExecutionConfig::default())
+            .expect("local executor");
         let completion = manager
             .run_and_settle(qubit_operation::OperationOptions::default(), move |scope| {
                 let reservation = scope.reserve_resource().expect("resource reservation");
                 let directory = filesystem
-                    .create_temp_directory_with_options(
-                        &LocalTempDirectoryOptions::new().with_parent(&parent_path),
-                    )
+                    .create_temp_directory_with_options(&LocalTempDirectoryOptions::new().with_parent(&parent_path))
                     .expect("temporary directory");
                 let owner = LocalTempResource::new(
                     LocalTempNative::Directory(directory),
@@ -1031,9 +780,7 @@ mod tests {
                     )
                     .expect("managed temp resource");
                 *id_slot.lock().unwrap_or_else(|e| e.into_inner()) = Some(reference.id());
-                let access = LocalTempFileAccess {
-                    resource: reference,
-                };
+                let access = LocalTempFileAccess { resource: reference };
                 let receiver = access
                     .enqueue_native_transition(&executor, move |native| {
                         let LocalTempNative::Directory(directory) = native else {
@@ -1108,18 +855,8 @@ mod tests {
         let rooted_keep_relative = rooted_keep_path
             .strip_prefix(std::path::Path::new("/"))
             .expect("Rooted Keep result should be virtual absolute");
-        assert!(
-            rooted_keep_parent
-                .path()
-                .join(rooted_keep_relative)
-                .is_dir()
-        );
-        assert_eq!(
-            std::fs::read_dir(rooted_keep_parent.path())
-                .unwrap()
-                .count(),
-            1
-        );
+        assert!(rooted_keep_parent.path().join(rooted_keep_relative).is_dir());
+        assert_eq!(std::fs::read_dir(rooted_keep_parent.path()).unwrap().count(), 1);
 
         let rooted_persist_parent = tempfile::tempdir().expect("Rooted Persist parent");
         let rooted_target = std::path::PathBuf::from("/published");
@@ -1130,32 +867,22 @@ mod tests {
         );
         assert_eq!(rooted_persist_path, std::path::PathBuf::from("/published"));
         assert!(rooted_persist_parent.path().join("published").is_dir());
-        assert_eq!(
-            std::fs::read_dir(rooted_persist_parent.path())
-                .unwrap()
-                .count(),
-            1
-        );
+        assert_eq!(std::fs::read_dir(rooted_persist_parent.path()).unwrap().count(), 1);
     }
 
     #[test]
     fn test_normal_directory_transition_rearms_the_returned_owner() {
         let parent = tempfile::tempdir().expect("temp parent");
         let manager = OperationManager::new(ManagerOptions::default()).expect("manager");
-        let executor = LocalIoExecutor::new(
-            manager.clone(),
-            super::super::LocalExecutionConfig::default(),
-        )
-        .expect("local executor");
+        let executor = LocalIoExecutor::new(manager.clone(), super::super::LocalExecutionConfig::default())
+            .expect("local executor");
         let filesystem = LocalFileSystem::host().expect("filesystem");
         let parent_path = parent.path().to_path_buf();
         let completion = manager
             .run_and_settle(qubit_operation::OperationOptions::default(), move |scope| {
                 let reservation = scope.reserve_resource().expect("resource reservation");
                 let directory = filesystem
-                    .create_temp_directory_with_options(
-                        &LocalTempDirectoryOptions::new().with_parent(&parent_path),
-                    )
+                    .create_temp_directory_with_options(&LocalTempDirectoryOptions::new().with_parent(&parent_path))
                     .expect("temporary directory");
                 let owner = LocalTempResource::new(
                     LocalTempNative::Directory(directory),
@@ -1173,17 +900,11 @@ mod tests {
                     )
                     .expect("managed temp resource");
                 *id_slot.lock().unwrap_or_else(|e| e.into_inner()) = Some(reference.id());
-                let access = LocalTempFileAccess {
-                    resource: reference,
-                };
+                let access = LocalTempFileAccess { resource: reference };
                 let receiver = access
-                    .enqueue_native_transition(&executor, |owner| {
-                        Ok::<_, (LocalTempNative, ())>((Some(owner), ()))
-                    })
+                    .enqueue_native_transition(&executor, |owner| Ok::<_, (LocalTempNative, ())>((Some(owner), ())))
                     .expect("directory transition queued");
-                block_on(receiver)
-                    .expect("command result")
-                    .expect("transition result");
+                block_on(receiver).expect("command result").expect("transition result");
                 let owner = access
                     .resource
                     .native
@@ -1208,9 +929,7 @@ mod tests {
         let target = tempfile::tempdir().expect("symlink target");
         let mut directory = LocalFileSystem::host()
             .expect("filesystem")
-            .create_temp_directory_with_options(
-                &LocalTempDirectoryOptions::new().with_parent(parent.path()),
-            )
+            .create_temp_directory_with_options(&LocalTempDirectoryOptions::new().with_parent(parent.path()))
             .expect("temporary directory");
         let path = directory.path().to_path_buf();
         let mut anchor = directory.cleanup_anchor();
@@ -1221,12 +940,7 @@ mod tests {
         std::fs::rename(&path, &moved).expect("move original directory");
         std::os::unix::fs::symlink(target.path(), &path).expect("install symlink replacement");
         assert!(anchor.cleanup().is_err());
-        assert!(
-            std::fs::symlink_metadata(&path)
-                .unwrap()
-                .file_type()
-                .is_symlink()
-        );
+        assert!(std::fs::symlink_metadata(&path).unwrap().file_type().is_symlink());
         assert!(target.path().is_dir());
         assert!(moved.is_dir());
     }
@@ -1240,12 +954,10 @@ mod tests {
         file.disarm_cleanup_on_drop();
         drop(file);
 
-        let _fault = crate::test_support::install_test_fault("temp-file-sandbox-remove")
-            .expect("sandbox cleanup fault");
+        let _fault =
+            crate::test_support::install_test_fault("temp-file-sandbox-remove").expect("sandbox cleanup fault");
         assert!(anchor.cleanup().is_err());
-        anchor
-            .cleanup()
-            .expect("anchor should retry sandbox cleanup");
+        anchor.cleanup().expect("anchor should retry sandbox cleanup");
     }
 
     #[cfg(feature = "test-support")]
@@ -1282,11 +994,8 @@ mod tests {
     fn test_partial_creation_recovery_is_retained_when_stopped_commit_is_rejected() {
         let parent = tempfile::tempdir().expect("temp parent");
         let manager = OperationManager::new(ManagerOptions::default()).expect("manager");
-        let executor = LocalIoExecutor::new(
-            manager.clone(),
-            super::super::LocalExecutionConfig::default(),
-        )
-        .expect("local executor");
+        let executor = LocalIoExecutor::new(manager.clone(), super::super::LocalExecutionConfig::default())
+            .expect("local executor");
         let filesystem = LocalFileSystem::host().expect("filesystem");
         let parent_path = parent.path().to_path_buf();
         let id = Arc::new(Mutex::new(None));
@@ -1294,13 +1003,9 @@ mod tests {
             .run_and_settle(qubit_operation::OperationOptions::default(), {
                 let id = Arc::clone(&id);
                 move |scope| {
-                    let reservation = scope
-                        .reserve_resource()
-                        .expect("reservation before native creation");
+                    let reservation = scope.reserve_resource().expect("reservation before native creation");
                     let file = filesystem
-                        .create_temp_file_with_options(
-                            &LocalTempFileOptions::new().with_parent(&parent_path),
-                        )
+                        .create_temp_file_with_options(&LocalTempFileOptions::new().with_parent(&parent_path))
                         .expect("construct partial native owner");
                     let recovery = crate::LocalTempRecovery::from_file(file);
                     let handle = executor.reserve_handle().expect("handle permit");
@@ -1313,15 +1018,8 @@ mod tests {
                         None,
                         std::io::Error::other("injected partial create failure"),
                     );
-                    let failure = super::retain_partial(
-                        reservation,
-                        error,
-                        recovery,
-                        executor,
-                        disk,
-                        handle,
-                        cleanup_permit,
-                    );
+                    let failure =
+                        super::retain_partial(reservation, error, recovery, executor, disk, handle, cleanup_permit);
                     match failure {
                         LocalCreateFailure::PartialRetained { resource_id, .. } => {
                             *id.lock().expect("id lock") = Some(resource_id);
@@ -1334,12 +1032,7 @@ mod tests {
             .expect("operation completion");
         assert!(id.lock().expect("id lock").is_some());
         assert_eq!(completion.settlement.recovery_count, 0);
-        assert_eq!(
-            std::fs::read_dir(parent.path())
-                .expect("read parent")
-                .count(),
-            0
-        );
+        assert_eq!(std::fs::read_dir(parent.path()).expect("read parent").count(), 0);
     }
 
     struct WakePanics;
@@ -1365,67 +1058,6 @@ mod tests {
         assert!(sender.send(42_u8).is_ok());
         let waker = Waker::from(Arc::new(ThreadWake(std::thread::current())));
         let mut context = Context::from_waker(&waker);
-        assert!(matches!(
-            Pin::new(&mut receiver).poll(&mut context),
-            Poll::Ready(42)
-        ));
-    }
-}
-struct AsyncSender<T>(Arc<AsyncResult<T>>);
-impl<T> AsyncSender<T> {
-    fn send(self, value: T) -> Result<(), T> {
-        *self.0.value.lock().unwrap_or_else(|e| e.into_inner()) = Some(value);
-        let waker = self
-            .0
-            .waker
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .take();
-        if let Some(waker) = waker {
-            safe_wake(waker);
-        }
-        Ok(())
-    }
-}
-struct AsyncReceiver<T>(Arc<AsyncResult<T>>);
-impl<T> Future for AsyncReceiver<T> {
-    type Output = T;
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<T> {
-        if let Some(value) = self
-            .0
-            .value
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .take()
-        {
-            return Poll::Ready(value);
-        }
-        let Some(new_waker) = safe_clone_waker(cx.waker()) else {
-            return self
-                .0
-                .value
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .take()
-                .map_or(Poll::Pending, Poll::Ready);
-        };
-        let old_waker = self
-            .0
-            .waker
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .replace(new_waker);
-        safe_drop_waker(old_waker);
-        if let Some(value) = self
-            .0
-            .value
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .take()
-        {
-            Poll::Ready(value)
-        } else {
-            Poll::Pending
-        }
+        assert!(matches!(Pin::new(&mut receiver).poll(&mut context), Poll::Ready(42)));
     }
 }

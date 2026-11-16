@@ -32,153 +32,37 @@ use super::temp::LocalTempNative;
 use super::temp::LocalTempResource;
 use super::temp::submit_temp_file;
 
-/// Bounds and controls for one staged payload.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct LocalStageOptions {
-    /// Maximum accepted payload length.
-    pub max_content_bytes: usize,
-    /// Disk reservation retained for the staged file.
-    pub disk_reservation_bytes: u64,
-    /// Privacy requested while creating the host temporary resource.
-    pub privacy: crate::policy::LocalPrivacyRequirement,
-    /// File synchronization requested when sealing the staged file.
-    pub file_sync: crate::policy::LocalFileSyncRequirement,
-    /// Explicitly permits exporting a Rooted resource's read-only handle.
-    /// Defaults to false; no namespace or host path is exposed.
-    pub export_read_handle: bool,
-}
+mod local_read_export;
+mod local_read_lease;
+mod local_read_resource;
+mod local_stage_failure;
+mod local_stage_options;
+mod local_stage_stream_submit_error;
+mod local_stage_submit_error;
 
-impl Default for LocalStageOptions {
-    fn default() -> Self {
-        Self {
-            max_content_bytes: 64 * 1024 * 1024,
-            disk_reservation_bytes: 64 * 1024 * 1024,
-            privacy: crate::policy::LocalPrivacyRequirement::Required,
-            file_sync: crate::policy::LocalFileSyncRequirement::Required,
-            export_read_handle: false,
-        }
-    }
-}
-
-/// Managed resource identity shared by stage, helper, and export wrappers.
-pub struct LocalReadResource {
-    reference: ResourceRef<LocalTempResource>,
-    export_read_handle: bool,
-}
-
-/// A clonable lease. Each clone keeps the same single registered resource
-/// alive.
-#[derive(Clone)]
-pub struct LocalReadLease {
-    resource: Arc<LocalReadResource>,
-}
-
-impl LocalReadLease {
-    /// Builds a lease around the same registered temp resource, without
-    /// creating a new resource entry.
-    pub(crate) fn from_temp_access(access: &LocalTempFileAccess, export_rooted: bool) -> Self {
-        Self {
-            resource: Arc::new(LocalReadResource {
-                reference: access.clone_access().clone_resource_ref(),
-                export_read_handle: export_rooted,
-            }),
-        }
-    }
-
-    /// Returns the original registered resource identity.
-    pub fn resource_id(&self) -> qubit_operation::ResourceId {
-        self.resource.reference.id()
-    }
-
-    /// Exports a clone of the already-open sealed handle and retains this
-    /// lease. Rooted exports require the explicit option supplied at
-    /// staging time.
-    pub async fn export_read_handle(
-        &self,
-        executor: &LocalIoExecutor,
-    ) -> Result<LocalReadExport, LocalStageFailure> {
-        let reference = self.resource.reference.clone();
-        let allow_rooted = self.resource.export_read_handle;
-        let result = enqueue_resource_command(executor, reference, move |native| match native {
-            LocalTempNative::Sealed(file) => {
-                if file.native_path().is_none() && !allow_rooted {
-                    return Err(LocalStageFailure::RootedExportDenied);
-                }
-                file.try_clone_readonly_file()
-                    .map_err(LocalStageFailure::Local)
-            }
-            _ => Err(LocalStageFailure::NotSealed),
-        })
-        .map_err(command_error)?
-        .await
-        .map_err(command_error)?;
-        Ok(LocalReadExport {
-            file: result?,
-            lease: self.clone(),
-        })
-    }
-}
-
-/// Read-only file handle and the lease that must accompany its use.
-/// Any additional `File::try_clone` used by a helper must be paired with an
-/// additional cloned lease for the entire duration of that helper's use.
-pub struct LocalReadExport {
-    /// Read-only handle cloned from the managed sealed file.
-    pub file: File,
-    /// Keeps the managed owner and cleanup responsibility alive.
-    pub lease: LocalReadLease,
-}
+pub use local_read_export::LocalReadExport;
+pub use local_read_lease::LocalReadLease;
+use local_read_resource::LocalReadResource;
+pub use local_stage_failure::LocalStageFailure;
+pub use local_stage_options::LocalStageOptions;
+pub use local_stage_stream_submit_error::LocalStageStreamSubmitError;
+pub use local_stage_submit_error::LocalStageSubmitError;
 
 /// Typed operation returned by [`stage_bytes`].
 pub type LocalStageOperation = AsyncOperationHandle<LocalReadLease, LocalStageFailure>;
 
-/// Failure after a stage operation has been accepted.
-#[derive(Debug)]
-pub enum LocalStageFailure {
-    Capacity,
-    Child(LocalCreateFailure),
-    ChildOutcome,
-    Command(String),
-    Local(crate::LocalFileError),
-    Io(std::io::Error),
-    Seal {
-        cause: crate::LocalFileError,
-        access_state: crate::outcome::LocalTempAccessState,
-    },
-    ContentTooLarge,
-    Stopped,
-    RootedExportDenied,
-    NotSealed,
-    Retained {
-        reason: qubit_operation::ResourceManageErrorKind,
-        resource_id: qubit_operation::ResourceId,
-    },
-}
-
-/// Rejection before stage admission, preserving the original owned allocation.
-#[derive(Debug)]
-pub enum LocalStageSubmitError {
-    Budget {
-        bytes: Vec<u8>,
-    },
-    Admission {
-        reason: qubit_operation::AdmissionError,
-        bytes: Vec<u8>,
-    },
-}
-
-impl LocalStageSubmitError {
-    /// Returns the original payload after pre-admission rejection.
-    pub fn into_bytes(self) -> Vec<u8> {
-        match self {
-            Self::Budget { bytes } | Self::Admission { bytes, .. } => bytes,
-        }
-    }
-}
-
 /// Stages owned bytes, seals the managed temporary file, and returns a lease.
 /// The owned byte capacity is reserved before admission and returned on any
 /// pre-admission rejection.
+///
+/// # Parameters
+///
+/// * `filesystem` — local filesystem used to create the managed temporary file.
+/// * `executor` — bounded worker used for blocking filesystem operations.
+/// * `manager` — operation manager that owns admission and cleanup scope.
+/// * `operation` — cancellation and resource options for this stage.
+/// * `bytes` — payload transferred to the accepted operation.
+/// * `stage` — payload, disk, privacy, and export limits.
 pub fn stage_bytes(
     filesystem: crate::LocalFileSystem,
     executor: LocalIoExecutor,
@@ -240,6 +124,21 @@ pub fn stage_bytes(
     }
 }
 
+/// Writes one accepted payload and seals the resulting managed temporary file.
+/// The reservations are transferred to the resource before the input allocation
+/// reservation is released.
+///
+/// # Parameters
+///
+/// * `filesystem` — filesystem used to create the temporary file.
+/// * `executor` — worker that performs all blocking file operations.
+/// * `scope` — accepted operation scope that owns cancellation and resources.
+/// * `operation` — child operation options passed to temporary-file creation.
+/// * `bytes` — payload written to the new file.
+/// * `stage` — limits and privacy/export requirements for the stage.
+/// * `owned` — reservation for the caller's owned payload allocation.
+/// * `disk` — additional disk capacity reserved for the staged contents.
+/// * `temp_options` — native temporary-file creation policy.
 async fn stage_bytes_in_scope(
     filesystem: crate::LocalFileSystem,
     executor: LocalIoExecutor,
@@ -255,15 +154,7 @@ async fn stage_bytes_in_scope(
     if context.stop_reason().is_some() {
         return Err(LocalStageFailure::Stopped);
     }
-    let access = create_temp_access(
-        filesystem,
-        executor.clone(),
-        &scope,
-        operation,
-        temp_options,
-        disk,
-    )
-    .await?;
+    let access = create_temp_access(filesystem, executor.clone(), &scope, operation, temp_options, disk).await?;
     if context.stop_reason().is_some() {
         return Err(LocalStageFailure::Stopped);
     }
@@ -277,6 +168,16 @@ async fn stage_bytes_in_scope(
     seal_access(access, executor, stage, context).await
 }
 
+/// Creates a child temporary file within the accepted operation scope.
+///
+/// # Parameters
+///
+/// * `filesystem` — filesystem used to create the native temporary file.
+/// * `executor` — worker that performs the native creation operation.
+/// * `scope` — parent operation scope used to create and own the child.
+/// * `operation` — options applied to the child operation.
+/// * `temp_options` — privacy and creation requirements for the temporary file.
+/// * `disk` — disk reservation retained by the new resource.
 async fn create_temp_access(
     filesystem: crate::LocalFileSystem,
     executor: LocalIoExecutor,
@@ -290,14 +191,8 @@ async fn create_temp_access(
     }
     let child_manager = scope.manager();
     let async_manager = child_manager.as_async();
-    let mut create = submit_temp_file(
-        filesystem,
-        executor.clone(),
-        &async_manager,
-        operation,
-        temp_options,
-    )
-    .map_err(|_| LocalStageFailure::Capacity)?;
+    let mut create = submit_temp_file(filesystem, executor.clone(), &async_manager, operation, temp_options)
+        .map_err(|_| LocalStageFailure::Capacity)?;
     let access = match create
         .wait_outcome()
         .await
@@ -315,6 +210,15 @@ async fn create_temp_access(
     Ok(access)
 }
 
+/// Writes one complete payload chunk through the serialized native command
+/// queue.
+///
+/// # Parameters
+///
+/// * `access` — registered file access token for the writable temporary file.
+/// * `executor` — worker queue that serializes access to the native file.
+/// * `bytes` — owned chunk written without copying into a second buffer.
+/// * `context` — operation context checked before the write begins.
 async fn write_access_chunk(
     access: &LocalTempFileAccess,
     executor: &LocalIoExecutor,
@@ -339,6 +243,14 @@ async fn write_access_chunk(
     Ok(())
 }
 
+/// Converts the writable temporary file into a sealed read-only resource.
+///
+/// # Parameters
+///
+/// * `access` — registered owner whose file is being sealed.
+/// * `executor` — worker that performs the native seal transition.
+/// * `stage` — synchronization and export policy applied to sealing.
+/// * `context` — operation context checked before committing the transition.
 async fn seal_access(
     access: LocalTempFileAccess,
     executor: LocalIoExecutor,
@@ -356,18 +268,15 @@ async fn seal_access(
             }
             #[cfg(test)]
             tests::SEAL_ATTEMPTS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-            let transition = match file.seal_with_options(
-                &crate::options::LocalSealOptions::new().with_file_sync(stage.file_sync),
-            ) {
+            let transition = match file
+                .seal_with_options(&crate::options::LocalSealOptions::new().with_file_sync(stage.file_sync))
+            {
                 Ok(sealed) => Ok((Some(LocalTempNative::Sealed(sealed)), ())),
                 Err(error) => {
                     let (cause, access_state, file) = error.into_parts();
                     Err((
                         LocalTempNative::File(file),
-                        LocalStageFailure::Seal {
-                            cause,
-                            access_state,
-                        },
+                        LocalStageFailure::Seal { cause, access_state },
                     ))
                 }
             };
@@ -387,10 +296,7 @@ async fn seal_access(
         // normal scope cleanup remove the sealed file.
         return Err(LocalStageFailure::Stopped);
     }
-    Ok(LocalReadLease::from_temp_access(
-        &access,
-        stage.export_read_handle,
-    ))
+    Ok(LocalReadLease::from_temp_access(&access, stage.export_read_handle))
 }
 
 /// Reads and stages an owned asynchronous input in bounded chunks.
@@ -398,6 +304,19 @@ async fn seal_access(
 /// When the configured content limit is reached, one additional byte is read
 /// as an EOF sentinel. The input is polled by the operation future; filesystem
 /// access and sealing remain on the bounded local worker.
+///
+/// # Type Parameters
+///
+/// * `I` — asynchronous byte input transferred to the accepted operation.
+///
+/// # Parameters
+///
+/// * `filesystem` — filesystem used to create the staged temporary file.
+/// * `executor` — bounded worker for blocking file operations.
+/// * `manager` — operation manager that owns admission and resource cleanup.
+/// * `operation` — cancellation and resource options for this stage.
+/// * `input` — asynchronous payload source owned by the stage.
+/// * `stage` — content, disk, privacy, and export requirements.
 pub fn stage_stream<I>(
     filesystem: crate::LocalFileSystem,
     executor: LocalIoExecutor,
@@ -498,32 +417,19 @@ where
 /// Chunk bound used while polling an asynchronous stage input.
 pub const LOCAL_STAGE_STREAM_CHUNK_SIZE: usize = 64 * 1024;
 
-/// Failure to admit a stream stage while preserving its owned input.
-pub enum LocalStageStreamSubmitError<I> {
-    Budget {
-        input: I,
-    },
-    Admission {
-        reason: qubit_operation::AdmissionError,
-        input: I,
-    },
-}
-
-impl<I> std::fmt::Debug for LocalStageStreamSubmitError<I> {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Budget { .. } => {
-                formatter.write_str("LocalStageStreamSubmitError::Budget { input: <owned> }")
-            }
-            Self::Admission { reason, .. } => formatter
-                .debug_struct("LocalStageStreamSubmitError::Admission")
-                .field("reason", reason)
-                .field("input", &"<owned>")
-                .finish(),
-        }
-    }
-}
-
+/// Schedules one command while retaining the resource reference until
+/// completion.
+///
+/// # Type Parameters
+///
+/// * `T` — value produced by the native command.
+/// * `F` — command closure executed by the local worker.
+///
+/// # Parameters
+///
+/// * `executor` — bounded worker queue receiving the command.
+/// * `reference` — registered resource retained for the command's lifetime.
+/// * `command` — operation performed while the native owner is locked.
 fn enqueue_resource_command<T, F>(
     executor: &LocalIoExecutor,
     reference: ResourceRef<LocalTempResource>,
@@ -536,14 +442,17 @@ where
     super::temp::enqueue_resource_command(executor, reference, command)
 }
 
+/// Converts a worker command failure into the public stage error type.
+///
+/// # Parameters
+///
+/// * `error` — internal scheduling or native-command failure.
 fn command_error(error: LocalTempCommandError) -> LocalStageFailure {
     let detail = match error {
         LocalTempCommandError::Capacity => "local worker queue capacity exhausted",
         LocalTempCommandError::ResourceUnavailable => "managed temp resource is unavailable",
         LocalTempCommandError::UnsupportedKind => "managed temp resource kind is unsupported",
-        LocalTempCommandError::Panicked => {
-            "managed temp command panicked; completion is unconfirmed"
-        }
+        LocalTempCommandError::Panicked => "managed temp command panicked; completion is unconfirmed",
     };
     LocalStageFailure::Command(detail.to_owned())
 }
@@ -556,7 +465,19 @@ mod tests {
     use std::task::Wake;
     use std::task::Waker;
 
-    use super::*;
+    use super::LOCAL_STAGE_STREAM_CHUNK_SIZE;
+    use super::LocalReadLease;
+    use super::LocalStageFailure;
+    use super::LocalStageOptions;
+    use super::LocalStageStreamSubmitError;
+    use super::LocalTempCommandError;
+    use super::LocalTempCommandReceiver;
+    use super::LocalTempNative;
+    use super::LocalTempResource;
+    use super::command_error;
+    use super::enqueue_resource_command;
+    use super::seal_access;
+    use super::stage_bytes;
 
     pub(super) static SEAL_ATTEMPTS: AtomicUsize = AtomicUsize::new(0);
 
@@ -585,13 +506,9 @@ mod tests {
     #[test]
     fn test_lease_from_temp_access_reuses_the_registered_resource() {
         let manager =
-            qubit_operation::OperationManager::new(qubit_operation::ManagerOptions::default())
-                .expect("manager");
-        let executor = LocalIoExecutor::new(
-            manager.clone(),
-            crate::operation::LocalExecutionConfig::default(),
-        )
-        .expect("local executor");
+            qubit_operation::OperationManager::new(qubit_operation::ManagerOptions::default()).expect("manager");
+        let executor = LocalIoExecutor::new(manager.clone(), crate::operation::LocalExecutionConfig::default())
+            .expect("local executor");
         let filesystem = crate::LocalFileSystem::host().expect("filesystem");
         let mut create = submit_temp_file(
             filesystem,
@@ -618,16 +535,11 @@ mod tests {
     #[test]
     fn test_stop_after_queued_write_prevents_the_following_seal_command() {
         let manager =
-            qubit_operation::OperationManager::new(qubit_operation::ManagerOptions::default())
-                .expect("manager");
-        let executor = LocalIoExecutor::new(
-            manager.clone(),
-            crate::operation::LocalExecutionConfig::default(),
-        )
-        .expect("local executor");
+            qubit_operation::OperationManager::new(qubit_operation::ManagerOptions::default()).expect("manager");
+        let executor = LocalIoExecutor::new(manager.clone(), crate::operation::LocalExecutionConfig::default())
+            .expect("local executor");
         let filesystem = crate::LocalFileSystem::host().expect("filesystem");
-        let gate = crate::test_support::install_test_gate("lf6-stage-bytes-after-write")
-            .expect("write boundary gate");
+        let gate = crate::test_support::install_test_gate("lf6-stage-bytes-after-write").expect("write boundary gate");
         SEAL_ATTEMPTS.store(0, std::sync::atomic::Ordering::SeqCst);
         let mut operation = stage_bytes(
             filesystem,
@@ -653,16 +565,11 @@ mod tests {
     #[test]
     fn test_stop_after_native_seal_keeps_the_sealed_owner_for_managed_cleanup() {
         let manager =
-            qubit_operation::OperationManager::new(qubit_operation::ManagerOptions::default())
-                .expect("manager");
-        let executor = LocalIoExecutor::new(
-            manager.clone(),
-            crate::operation::LocalExecutionConfig::default(),
-        )
-        .expect("local executor");
+            qubit_operation::OperationManager::new(qubit_operation::ManagerOptions::default()).expect("manager");
+        let executor = LocalIoExecutor::new(manager.clone(), crate::operation::LocalExecutionConfig::default())
+            .expect("local executor");
         let filesystem = crate::LocalFileSystem::host().expect("filesystem");
-        let gate = crate::test_support::install_test_gate("lf6-stage-bytes-after-native-seal")
-            .expect("post-seal gate");
+        let gate = crate::test_support::install_test_gate("lf6-stage-bytes-after-native-seal").expect("post-seal gate");
         SEAL_ATTEMPTS.store(0, std::sync::atomic::Ordering::SeqCst);
         let mut operation = stage_bytes(
             filesystem,

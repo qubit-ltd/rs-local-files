@@ -30,8 +30,13 @@ use qubit_operation::OperationOutcome;
 use qubit_operation::StopReason;
 
 fn block_on<F: std::future::Future>(future: F) -> F::Output {
-    use std::sync::{Arc, Condvar, Mutex};
-    use std::task::{Context, Poll, Wake, Waker};
+    use std::sync::Arc;
+    use std::sync::Condvar;
+    use std::sync::Mutex;
+    use std::task::Context;
+    use std::task::Poll;
+    use std::task::Wake;
+    use std::task::Waker;
 
     struct Signal((Mutex<bool>, Condvar));
     impl Wake for Signal {
@@ -90,8 +95,7 @@ impl AsyncInput for SliceInput {
         let this = self.get_mut();
         this.polls.fetch_add(1, Ordering::SeqCst);
         let count = count.min(this.bytes.len().saturating_sub(this.position));
-        output[index..index + count]
-            .copy_from_slice(&this.bytes[this.position..this.position + count]);
+        output[index..index + count].copy_from_slice(&this.bytes[this.position..this.position + count]);
         this.position += count;
         Poll::Ready(Ok(count))
     }
@@ -211,19 +215,10 @@ fn test_stream_uses_one_sentinel_read_for_exact_eof_and_rejects_over_limit() {
     let OperationOutcome::Succeeded(lease) = block_on(exact.wait_outcome()).unwrap() else {
         panic!("exact EOF at the limit should stage successfully");
     };
-    assert_eq!(
-        polls.load(Ordering::SeqCst),
-        2,
-        "one full read plus the EOF sentinel"
-    );
+    assert_eq!(polls.load(Ordering::SeqCst), 2, "one full read plus the EOF sentinel");
     let export = block_on(lease.export_read_handle(&executor)).unwrap();
     let mut contents = Vec::new();
-    export
-        .file
-        .try_clone()
-        .unwrap()
-        .read_to_end(&mut contents)
-        .unwrap();
+    export.file.try_clone().unwrap().read_to_end(&mut contents).unwrap();
     assert_eq!(contents, b"abc");
     drop(export);
     drop(lease);
@@ -247,11 +242,7 @@ fn test_stream_uses_one_sentinel_read_for_exact_eof_and_rejects_over_limit() {
         block_on(over.wait_outcome()).unwrap(),
         OperationOutcome::Failed(LocalStageFailure::ContentTooLarge)
     ));
-    assert_eq!(
-        polls.load(Ordering::SeqCst),
-        2,
-        "the second read is the sentinel"
-    );
+    assert_eq!(polls.load(Ordering::SeqCst), 2, "the second read is the sentinel");
     assert_eq!(block_on(over.wait_settlement()).recovery_count, 0);
 }
 
