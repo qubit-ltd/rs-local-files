@@ -41,6 +41,12 @@ impl<T: WorkerClosable> WorkerCleanup<T> {
 
 impl<T: WorkerClosable> qubit_operation::AsyncCleanup<T> for WorkerCleanup<T> {
     /// Polls worker cleanup while preserving ownership until confirmation.
+    ///
+    /// # Parameters
+    ///
+    /// * `self` - Shared cleanup policy associated with the resource type.
+    /// * `resource` - Managed resource retained until close is confirmed.
+    /// * `_context` - Operation cleanup context, unused by worker cleanup.
     fn cleanup(
         self: Arc<Self>,
         resource: T,

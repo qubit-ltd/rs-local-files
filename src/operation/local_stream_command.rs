@@ -38,7 +38,7 @@ pub enum LocalStreamCommand {
     /// Flushes buffered bytes to the underlying stream.
     Flush,
     /// Moves the reader to an absolute or relative position.
-    Seek(SeekFrom),
+    Seek(#[doc = "Target position applied before subsequent reads."] SeekFrom),
     /// Publishes the writer contents and returns the publication outcome.
     Commit,
     /// Closes the stream while preserving already completed operations.

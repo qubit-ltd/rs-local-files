@@ -27,6 +27,7 @@ use super::map_walk_error;
 /// }
 /// ```
 pub struct LocalWalkCloseObserver {
+    /// Worker resource whose close acknowledgement this observer polls.
     pub(super) resource: ResourceRef<LocalWalkResource>,
 }
 

@@ -9,7 +9,11 @@
 /// Native reader or writer owned by a local serial worker.
 pub(crate) enum LocalNativeStream {
     /// The worker-owned read handle.
-    Reader(crate::LocalFileReader),
+    Reader(
+        #[doc = "Native reader retained exclusively by its serial worker."] crate::LocalFileReader,
+    ),
     /// The worker-owned write handle.
-    Writer(crate::LocalFileWriter),
+    Writer(
+        #[doc = "Native writer retained exclusively until commit or abort."] crate::LocalFileWriter,
+    ),
 }

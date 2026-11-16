@@ -190,6 +190,23 @@ impl AsyncOutput for AsyncLocalFileWriter {
         true
     }
 
+    /// Polls a worker-backed write from the requested input range.
+    ///
+    /// The bytes are copied into an owned command before the caller may reuse
+    /// its input buffer; publication remains deferred until `commit`.
+    ///
+    /// # Parameters
+    ///
+    /// * `self` - Pinned writer whose serial worker owns the native handle.
+    /// * `cx` - Task context notified when the write completion is available.
+    /// * `input` - Caller bytes to submit to the worker.
+    /// * `index` - First input-buffer position selected for this write.
+    /// * `count` - Number of bytes selected from the input buffer.
+    ///
+    /// # Safety
+    ///
+    /// The caller must provide a valid input range of `count` bytes beginning
+    /// at `index`; this implementation checks the range before accessing it.
     unsafe fn poll_write_unchecked(
         mut self: Pin<&mut Self>,
         cx: &mut Context<'_>,

@@ -23,6 +23,11 @@ pub(super) trait WorkerClosable: Send + Sync + 'static {
     /// Enqueues idempotent native cleanup on the owning serial worker.
     fn request_cleanup(&self);
     /// Waits until the worker confirms cleanup and releases the native handle.
+    ///
+    /// # Parameters
+    ///
+    /// * `self` - Worker resource whose terminal request is observed.
+    /// * `cx` - Task context registered for the next cleanup state change.
     fn poll_cleanup(&self, cx: &mut Context<'_>) -> Poll<io::Result<()>>;
     /// Returns the operation resource identifier associated with this port.
     fn resource_id(&self) -> Arc<Mutex<Option<qubit_operation::ResourceId>>>;

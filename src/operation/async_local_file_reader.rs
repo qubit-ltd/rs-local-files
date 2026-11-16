@@ -112,6 +112,23 @@ impl AsyncInput for AsyncLocalFileReader {
         true
     }
 
+    /// Polls a worker-backed read into the requested output range.
+    ///
+    /// A pending request remains associated with this reader and is settled
+    /// before later stream commands can overtake it.
+    ///
+    /// # Parameters
+    ///
+    /// * `self` - Pinned reader whose serial worker owns the native handle.
+    /// * `cx` - Task context notified when the read completion is available.
+    /// * `output` - Caller buffer receiving the returned bytes.
+    /// * `index` - First output-buffer position available to this read.
+    /// * `count` - Maximum number of bytes to place in the selected range.
+    ///
+    /// # Safety
+    ///
+    /// The caller must provide a valid output range of `count` bytes beginning
+    /// at `index`; this implementation checks the range before accessing it.
     unsafe fn poll_read_unchecked(
         mut self: Pin<&mut Self>,
         cx: &mut Context<'_>,

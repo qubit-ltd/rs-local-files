@@ -56,7 +56,7 @@ pub use local_stream_resource::LocalStreamResource;
 #[path = "worker_stream_inner.rs"]
 mod worker_stream_inner;
 use worker_stream_inner::WorkerStreamInner;
-#[path = "worker_stream_command.rs"]
+#[path = "worker_command.rs"]
 mod worker_stream_command;
 #[path = "worker_stream_state.rs"]
 mod worker_stream_state;
