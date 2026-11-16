@@ -1040,6 +1040,50 @@ fn failed_abort_after_stop_returns_retryable_writer_and_cleanup_error() {
 
 #[cfg(feature = "test-support")]
 #[test]
+fn append_effect_is_published_before_worker_panic_and_cleanup_releases_writer() {
+    use qubit_local_files::test_support::install_test_fault_shared;
+
+    let _support_lock = PUBLISH_TEST_SUPPORT_LOCK
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
+    let directory = tempfile::tempdir().unwrap();
+    let destination = directory.path().join("append-panic");
+    std::fs::write(&destination, b"prefix:").unwrap();
+    let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+    let filesystem = facade(&manager);
+    let fault = install_test_fault_shared("lf7-append-panic-after-write").unwrap();
+    let (mut operation, observer) = filesystem
+        .submit_writer_commit(
+            &manager,
+            Default::default(),
+            LocalWriterCommitRequest {
+                path: destination.clone(),
+                options: LocalWriteOptions::new(LocalWriteMode::Append),
+                bytes: b"suffix".to_vec(),
+            },
+            LocalOperationOptions::default(),
+        )
+        .unwrap();
+    assert!(matches!(
+        operation.wait_outcome().unwrap(),
+        OperationOutcome::ExecutionFailed(_)
+    ));
+    drop(fault);
+    assert_eq!(std::fs::read(destination).unwrap(), b"prefix:suffix");
+    let facts = observer.snapshot();
+    assert_eq!(
+        facts.publication,
+        qubit_local_files::operation::LocalPublicationState::Published
+    );
+    assert_eq!(facts.modified_bytes, 6);
+    assert_eq!(facts.modified_count, 1);
+    let settlement = operation.wait_settlement().unwrap();
+    assert_eq!(settlement.released_count, 1);
+    assert_eq!(settlement.recovery_count, 0);
+}
+
+#[cfg(feature = "test-support")]
+#[test]
 fn stop_during_native_publish_preserves_published_fact_when_parent_sync_fails() {
     use qubit_local_files::operation::publish::LocalWriterCommandError;
     use qubit_local_files::outcome::LocalWriteFailureState;

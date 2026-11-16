@@ -444,6 +444,8 @@ impl AsyncLocalFileSystem {
                     .lock()
                     .unwrap_or_else(|error| error.into_inner()) = Some(writer);
                 let submitted_bytes = request.bytes.len() as u64;
+                let append_mode = request.options.mode() == crate::LocalWriteMode::Append;
+                let mut append_effect_recorded = false;
                 let mut offset = 0;
                 while offset < request.bytes.len() {
                     if let Some(stop) = stop_report(scope) {
@@ -453,6 +455,7 @@ impl AsyncLocalFileSystem {
                             offset as u64,
                             scope,
                             &observer,
+                            append_effect_recorded,
                         );
                     }
                     let slices = [IoSlice::new(&request.bytes[offset..])];
@@ -479,9 +482,20 @@ impl AsyncLocalFileSystem {
                                 offset as u64,
                                 scope,
                                 &observer,
+                                append_effect_recorded,
                             ));
                         }
-                        Ok(written) => offset += written,
+                        Ok(written) => {
+                            offset += written;
+                            if append_mode {
+                                record_append_writer_bytes(
+                                    scope,
+                                    &observer,
+                                    written as u64,
+                                    &mut append_effect_recorded,
+                                );
+                            }
+                        }
                         Err(source) => {
                             let error = LocalFileError::from_io(
                                 crate::LocalFileOperation::Commit,
@@ -495,6 +509,7 @@ impl AsyncLocalFileSystem {
                                 offset as u64,
                                 scope,
                                 &observer,
+                                append_effect_recorded,
                             ));
                         }
                     }
@@ -519,7 +534,15 @@ impl AsyncLocalFileSystem {
                         submitted_bytes,
                         scope,
                         &observer,
+                        append_effect_recorded,
                     ));
+                }
+                #[cfg(feature = "test-support")]
+                if append_effect_recorded
+                    && crate::local::test_support_enabled("lf7-append-panic-after-write")
+                {
+                    let _ = crate::local::test_fault_error();
+                    panic!("injected panic after direct append");
                 }
                 // Cancellation is honored up to this gate. There is no stop check
                 // after entering commit: the native publication result is authoritative.
@@ -532,6 +555,7 @@ impl AsyncLocalFileSystem {
                         submitted_bytes,
                         scope,
                         &observer,
+                        append_effect_recorded,
                     );
                 }
                 let writer = writer_resource
@@ -542,17 +566,28 @@ impl AsyncLocalFileSystem {
                     .expect("managed writer is available at publication");
                 match writer.commit() {
                     Ok(outcome) => {
-                        record_writer_effect(
-                            scope,
-                            &observer,
-                            outcome.bytes_written(),
-                            LocalPublicationState::Published,
-                            if outcome.durable() {
-                                LocalDurabilityState::Durable
-                            } else {
-                                LocalDurabilityState::Unknown
-                            },
-                        );
+                        let durability = if outcome.durable() {
+                            LocalDurabilityState::Durable
+                        } else {
+                            LocalDurabilityState::Unknown
+                        };
+                        if append_effect_recorded {
+                            update_writer_effect_observer(
+                                &observer,
+                                0,
+                                0,
+                                LocalPublicationState::Published,
+                                durability,
+                            );
+                        } else {
+                            record_writer_effect(
+                                scope,
+                                &observer,
+                                outcome.bytes_written(),
+                                LocalPublicationState::Published,
+                                durability,
+                            );
+                        }
                         OperationOutcome::Succeeded(outcome)
                     }
                     Err(error) => {
@@ -567,7 +602,9 @@ impl AsyncLocalFileSystem {
                                 LocalPublicationState::Unknown
                             }
                         };
-                        if publication != LocalPublicationState::NotPublished {
+                        if publication != LocalPublicationState::NotPublished
+                            && !append_effect_recorded
+                        {
                             record_writer_effect(
                                 scope,
                                 &observer,
@@ -590,6 +627,7 @@ fn abort_managed_writer_after_error(
     accepted_bytes: u64,
     scope: &qubit_operation::OperationScope,
     observer: &LocalFactObserver,
+    effect_already_recorded: bool,
 ) -> LocalWriterCommandError {
     let mut native = resource
         .native
@@ -599,7 +637,9 @@ fn abort_managed_writer_after_error(
     match writer.abort() {
         Ok(outcome) => {
             native.take();
-            if outcome.failure_state() == Some(crate::LocalWriteFailureState::Published) {
+            if !effect_already_recorded
+                && outcome.failure_state() == Some(crate::LocalWriteFailureState::Published)
+            {
                 record_writer_effect(
                     scope,
                     observer,
@@ -616,6 +656,14 @@ fn abort_managed_writer_after_error(
             }
         }
         Err(cleanup_error) => {
+            if effect_already_recorded {
+                return LocalWriterCommandError::Write {
+                    cause,
+                    cleanup_error: Some(cleanup_error),
+                    retryable_writer: None,
+                    recovery_resource: Some(resource.id()),
+                };
+            }
             match writer.failure_state() {
                 Some(crate::LocalWriteFailureState::Published) => record_writer_effect(
                     scope,
@@ -649,6 +697,7 @@ fn abort_managed_writer_after_stop(
     accepted_bytes: u64,
     scope: &qubit_operation::OperationScope,
     observer: &LocalFactObserver,
+    effect_already_recorded: bool,
 ) -> OperationOutcome<LocalWriteOutcome, LocalWriterCommandError> {
     let mut native = resource
         .native
@@ -660,7 +709,9 @@ fn abort_managed_writer_after_stop(
     match writer.abort() {
         Ok(outcome) => {
             native.take();
-            if outcome.failure_state() == Some(crate::LocalWriteFailureState::Published) {
+            if !effect_already_recorded
+                && outcome.failure_state() == Some(crate::LocalWriteFailureState::Published)
+            {
                 record_writer_effect(
                     scope,
                     observer,
@@ -672,6 +723,9 @@ fn abort_managed_writer_after_stop(
             OperationOutcome::Stopped(stop)
         }
         Err(_cleanup_error) => {
+            if effect_already_recorded {
+                return OperationOutcome::Stopped(stop);
+            }
             match writer.failure_state() {
                 Some(crate::LocalWriteFailureState::Published) => record_writer_effect(
                     scope,
@@ -704,6 +758,49 @@ fn record_writer_effect(
     record_local_effect(scope, observer, 1, bytes, publication, durability);
 }
 
+fn record_append_writer_bytes(
+    scope: &qubit_operation::OperationScope,
+    observer: &LocalFactObserver,
+    bytes: u64,
+    effect_recorded: &mut bool,
+) {
+    if *effect_recorded {
+        update_writer_effect_observer(
+            observer,
+            0,
+            bytes,
+            LocalPublicationState::Published,
+            LocalDurabilityState::Unknown,
+        );
+    } else {
+        record_writer_effect(
+            scope,
+            observer,
+            bytes,
+            LocalPublicationState::Published,
+            LocalDurabilityState::Unknown,
+        );
+        *effect_recorded = true;
+    }
+}
+
+fn update_writer_effect_observer(
+    observer: &LocalFactObserver,
+    modified_count: u64,
+    bytes: u64,
+    publication: LocalPublicationState,
+    durability: LocalDurabilityState,
+) {
+    let mut snapshot: LocalFactSnapshot = observer.snapshot();
+    snapshot.modified_count = snapshot.modified_count.saturating_add(modified_count);
+    snapshot.modified_bytes = snapshot.modified_bytes.saturating_add(bytes);
+    snapshot.modified_range = None;
+    snapshot.range_unknown = true;
+    snapshot.publication = publication;
+    snapshot.durability = durability;
+    observer.update(snapshot);
+}
+
 fn record_local_effect(
     scope: &qubit_operation::OperationScope,
     observer: &LocalFactObserver,
@@ -724,15 +821,12 @@ fn record_local_effect(
             description: DiagnosticSummary::new("local writer publication"),
         })
         .err();
-    let mut snapshot: LocalFactSnapshot = observer.snapshot();
-    snapshot.modified_count = snapshot.modified_count.saturating_add(modified_count);
-    snapshot.modified_bytes = snapshot.modified_bytes.saturating_add(bytes);
-    snapshot.modified_range = None;
-    snapshot.range_unknown = true;
-    snapshot.publication = publication;
-    snapshot.durability = durability;
-    snapshot.effect_record_error = effect_record_error.or(snapshot.effect_record_error);
-    observer.update(snapshot);
+    update_writer_effect_observer(observer, modified_count, bytes, publication, durability);
+    if let Some(effect_record_error) = effect_record_error {
+        let mut snapshot = observer.snapshot();
+        snapshot.effect_record_error = Some(effect_record_error);
+        observer.update(snapshot);
+    }
 }
 
 fn record_stage_write(
