@@ -14,48 +14,30 @@ use std::task::Context;
 use std::task::Poll;
 use std::task::Waker;
 
+mod port;
+
+use port::Port;
 use qubit_operation::ChildOutcomeKind;
-use qubit_operation::ChildOutcomeSummary;
 use qubit_operation::ChildRelease;
 use qubit_operation::ChildSnapshot;
 use qubit_operation::DiagnosticSummary;
 use qubit_operation::ExecutionFailure;
-use qubit_operation::ExecutionPhase;
 use qubit_operation::OperationControl;
-use qubit_operation::OperationId;
-use qubit_operation::OperationOutcome;
 use qubit_operation::OperationScope;
 use qubit_operation::PreparedExternalOperation;
-use qubit_operation::SettlementReport;
 use qubit_operation::SettlementStatus;
-use qubit_operation::StopReason;
 
 use super::super::LocalFactObserver;
 use super::super::executor::ExecutorInner;
 use super::permits::Permit;
 
-/// Represents port within the local operation subsystem.
-struct Port<T, E> {
-    /// Stores the id associated with this value.
-    id: Option<OperationId>,
-    /// Stores the phase associated with this value.
-    phase: ExecutionPhase,
-    /// Stores the stop associated with this value.
-    stop: Option<StopReason>,
-    /// Stores the outcome associated with this value.
-    outcome: Option<OperationOutcome<T, E>>,
-    /// Stores the summary associated with this value.
-    summary: Option<ChildOutcomeSummary>,
-    /// Stores the released associated with this value.
-    released: bool,
-    /// Stores the settlement associated with this value.
-    settlement: Option<Arc<SettlementReport>>,
-    /// Stores the wakers associated with this value.
-    wakers: [Option<Waker>; 4],
-}
-
 /// Owned job prepared before manager admission. Binding and activation are
 /// one-shot.
+///
+/// # Type Parameters
+/// - `R` — owned request retained until admission resolves.
+/// - `T` — operation result delivered through the external control port.
+/// - `E` — operation error delivered through the external control port.
 pub(crate) struct PreparedLocalJob<R, T, E> {
     /// Stores the executor associated with this value.
     executor: Arc<ExecutorInner>,
@@ -63,13 +45,7 @@ pub(crate) struct PreparedLocalJob<R, T, E> {
     request: Mutex<Option<R>>,
     /// Stores the task associated with this value.
     task: Mutex<
-        Option<
-            Box<
-                dyn for<'scope> FnOnce(R, &'scope OperationScope) -> OperationOutcome<T, E>
-                    + Send
-                    + 'static,
-            >,
-        >,
+        Option<Box<dyn for<'scope> FnOnce(R, &'scope OperationScope) -> OperationOutcome<T, E> + Send + 'static>>,
     >,
     /// Stores the  slot associated with this value.
     _slot: Mutex<Option<Permit>>,
@@ -93,7 +69,8 @@ where
     T: Send + 'static,
     E: Send + 'static,
 {
-    /// Runs the new behavior while preserving the operation lifecycle invariants.
+    /// Runs the new behavior while preserving the operation lifecycle
+    /// invariants.
 
     /// # Type Parameters
     /// - `F` — type used by this operation.
@@ -130,6 +107,19 @@ where
 
     /// Creates a prepared job whose synchronous worker can inspect its
     /// operation scope.
+    /// # Type Parameters
+    /// - `F` — owned worker closure that produces the typed operation outcome.
+    ///
+    /// # Parameters
+    /// - `executor` — executor state retaining the operation group and resource
+    ///   limits.
+    /// - `request` — owned input transferred to the worker after activation.
+    /// - `slot` — queue or waiter reservation held until the task starts.
+    /// - `owned_permit` — memory reservation retained with the result lifetime.
+    /// - `handle_permit` — native-handle reservation retained through cleanup.
+    /// - `fact_observer` — local effect snapshot channel associated with the
+    ///   job.
+    /// - `task` — worker closure that performs the operation.
     pub(crate) fn new_scoped<F>(
         executor: Arc<ExecutorInner>,
         request: R,
@@ -155,6 +145,19 @@ where
 
     /// Creates a job whose native-handle permit can also be retained by a
     /// resource returned from the operation outcome.
+    /// # Type Parameters
+    /// - `F` — owned worker closure that produces the typed operation outcome.
+    ///
+    /// # Parameters
+    /// - `executor` — executor state retaining the operation group and resource
+    ///   limits.
+    /// - `request` — owned input transferred to the worker after activation.
+    /// - `slot` — queue or waiter reservation held until the task starts.
+    /// - `owned_permit` — memory reservation retained with the result lifetime.
+    /// - `handle_permit` — native-handle reservation retained through cleanup.
+    /// - `fact_observer` — local effect snapshot channel associated with the
+    ///   job.
+    /// - `task` — worker closure that performs the operation.
     pub(crate) fn new_scoped_with_shared_handle_permit<F>(
         executor: Arc<ExecutorInner>,
         request: R,
@@ -190,7 +193,8 @@ where
         })
     }
 
-    /// Runs the take wakers behavior while preserving the operation lifecycle invariants.
+    /// Runs the take wakers behavior while preserving the operation lifecycle
+    /// invariants.
 
     /// # Parameters
     /// - `port` — supplies data or policy for this operation.
@@ -198,7 +202,8 @@ where
         std::mem::replace(&mut port.wakers, [None, None, None, None])
     }
 
-    /// Runs the wake all behavior while preserving the operation lifecycle invariants.
+    /// Runs the wake all behavior while preserving the operation lifecycle
+    /// invariants.
 
     /// # Parameters
     /// - `wakers` — supplies data or policy for this operation.
@@ -208,10 +213,7 @@ where
             let Some(current) = wakers[index].as_ref() else {
                 continue;
             };
-            duplicate[index] = wakers[..index]
-                .iter()
-                .flatten()
-                .any(|prior| prior.will_wake(current));
+            duplicate[index] = wakers[..index].iter().flatten().any(|prior| prior.will_wake(current));
         }
         for index in 0..wakers.len() {
             let Some(waker) = wakers[index].take() else {
@@ -226,7 +228,8 @@ where
         }
     }
 
-    /// Runs the register behavior while preserving the operation lifecycle invariants.
+    /// Runs the register behavior while preserving the operation lifecycle
+    /// invariants.
 
     /// # Parameters
     /// - `port` — supplies data or policy for this operation.
@@ -242,7 +245,8 @@ where
         std::mem::replace(&mut port.wakers[slot], waker.take())
     }
 
-    /// Runs the discard waker behavior while preserving the operation lifecycle invariants.
+    /// Runs the discard waker behavior while preserving the operation lifecycle
+    /// invariants.
 
     /// # Parameters
     /// - `waker` — supplies data or policy for this operation.
@@ -254,37 +258,24 @@ where
 }
 
 impl<R: Send + 'static, T: Send + 'static, E: Send + 'static> PreparedLocalJob<R, T, E> {
-    /// Runs the take request behavior while preserving the operation lifecycle invariants.
+    /// Runs the take request behavior while preserving the operation lifecycle
+    /// invariants.
     pub(crate) fn take_request(&self) -> Option<R> {
-        self.request
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .take()
+        self.request.lock().unwrap_or_else(|e| e.into_inner()).take()
     }
 
-    /// Runs the finish released behavior while preserving the operation lifecycle invariants.
+    /// Runs the finish released behavior while preserving the operation
+    /// lifecycle invariants.
 
     /// # Parameters
     /// - `id` — supplies data or policy for this operation.
     fn finish_released(&self, id: OperationId) {
         self.task.lock().unwrap_or_else(|e| e.into_inner()).take();
-        self.request
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .take();
+        self.request.lock().unwrap_or_else(|e| e.into_inner()).take();
         self._slot.lock().unwrap_or_else(|e| e.into_inner()).take();
-        self._owned_permit
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .take();
-        self._handle_permit
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .take();
-        self._fact_observer
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .take();
+        self._owned_permit.lock().unwrap_or_else(|e| e.into_inner()).take();
+        self._handle_permit.lock().unwrap_or_else(|e| e.into_inner()).take();
+        self._fact_observer.lock().unwrap_or_else(|e| e.into_inner()).take();
         let wakers = {
             let mut port = self.port.lock().unwrap_or_else(|e| e.into_inner());
             port.phase = ExecutionPhase::Finished;
@@ -296,7 +287,8 @@ impl<R: Send + 'static, T: Send + 'static, E: Send + 'static> PreparedLocalJob<R
     }
 }
 
-/// Runs the empty settlement behavior while preserving the operation lifecycle invariants.
+/// Runs the empty settlement behavior while preserving the operation lifecycle
+/// invariants.
 
 /// # Parameters
 /// - `id` — supplies data or policy for this operation.
@@ -334,7 +326,8 @@ where
     T: Send + 'static,
     E: Send + 'static,
 {
-    /// Runs the request stop behavior while preserving the operation lifecycle invariants.
+    /// Runs the request stop behavior while preserving the operation lifecycle
+    /// invariants.
 
     /// # Parameters
     /// - `reason` — supplies data or policy for this operation.
@@ -349,7 +342,8 @@ where
         Self::wake_all(wakers);
     }
 
-    /// Runs the snapshot behavior while preserving the operation lifecycle invariants.
+    /// Runs the snapshot behavior while preserving the operation lifecycle
+    /// invariants.
     fn snapshot(&self) -> ChildSnapshot {
         let port = self.port.lock().unwrap_or_else(|e| e.into_inner());
         ChildSnapshot {
@@ -365,7 +359,8 @@ where
         }
     }
 
-    /// Runs the poll outcome behavior while preserving the operation lifecycle invariants.
+    /// Runs the poll outcome behavior while preserving the operation lifecycle
+    /// invariants.
 
     /// # Parameters
     /// - `cx` — supplies data or policy for this operation.
@@ -385,7 +380,8 @@ where
         Poll::Pending
     }
 
-    /// Runs the poll release behavior while preserving the operation lifecycle invariants.
+    /// Runs the poll release behavior while preserving the operation lifecycle
+    /// invariants.
 
     /// # Parameters
     /// - `cx` — supplies data or policy for this operation.
@@ -408,7 +404,8 @@ where
         Poll::Pending
     }
 
-    /// Runs the poll settlement behavior while preserving the operation lifecycle invariants.
+    /// Runs the poll settlement behavior while preserving the operation
+    /// lifecycle invariants.
 
     /// # Parameters
     /// - `cx` — supplies data or policy for this operation.
@@ -435,7 +432,8 @@ where
     T: Send + 'static,
     E: Send + 'static,
 {
-    /// Runs the bind behavior while preserving the operation lifecycle invariants.
+    /// Runs the bind behavior while preserving the operation lifecycle
+    /// invariants.
 
     /// # Parameters
     /// - `id` — supplies data or policy for this operation.
@@ -452,7 +450,8 @@ where
         Ok(())
     }
 
-    /// Runs the activate behavior while preserving the operation lifecycle invariants.
+    /// Runs the activate behavior while preserving the operation lifecycle
+    /// invariants.
 
     /// # Parameters
     /// - `scope` — supplies data or policy for this operation.
@@ -483,11 +482,7 @@ where
             });
         };
         let this = Arc::clone(&self);
-        let request = self
-            .request
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .take();
+        let request = self.request.lock().unwrap_or_else(|e| e.into_inner()).take();
         let Some(request) = request else {
             self.finish_released(id);
             return Err(ExecutionFailure {
@@ -515,10 +510,7 @@ where
                     reason,
                     accepted_at: None,
                 });
-                this._handle_permit
-                    .lock()
-                    .unwrap_or_else(|e| e.into_inner())
-                    .take();
+                this._handle_permit.lock().unwrap_or_else(|e| e.into_inner()).take();
                 let wakers = {
                     let mut port = this.port.lock().unwrap_or_else(|e| e.into_inner());
                     port.phase = ExecutionPhase::Finished;
@@ -531,13 +523,8 @@ where
                 Self::wake_all(wakers);
                 return;
             }
-            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                task(request, &scope_guard)
-            }));
-            this._handle_permit
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .take();
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| task(request, &scope_guard)));
+            this._handle_permit.lock().unwrap_or_else(|e| e.into_inner()).take();
             let outcome = match result {
                 Ok(outcome) => outcome,
                 Err(_) => OperationOutcome::ExecutionFailed(ExecutionFailure {
@@ -578,26 +565,15 @@ where
         Ok(())
     }
 
-    /// Runs the abandon behavior while preserving the operation lifecycle invariants.
+    /// Runs the abandon behavior while preserving the operation lifecycle
+    /// invariants.
     fn abandon(self: Arc<Self>) {
         self.task.lock().unwrap_or_else(|e| e.into_inner()).take();
-        self.request
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .take();
+        self.request.lock().unwrap_or_else(|e| e.into_inner()).take();
         self._slot.lock().unwrap_or_else(|e| e.into_inner()).take();
-        self._owned_permit
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .take();
-        self._handle_permit
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .take();
-        self._fact_observer
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .take();
+        self._owned_permit.lock().unwrap_or_else(|e| e.into_inner()).take();
+        self._handle_permit.lock().unwrap_or_else(|e| e.into_inner()).take();
+        self._fact_observer.lock().unwrap_or_else(|e| e.into_inner()).take();
         let wakers = {
             let mut port = self.port.lock().unwrap_or_else(|e| e.into_inner());
             if let Some(id) = port.id {
@@ -610,7 +586,8 @@ where
         Self::wake_all(wakers);
     }
 
-    /// Runs the poll take outcome behavior while preserving the operation lifecycle invariants.
+    /// Runs the poll take outcome behavior while preserving the operation
+    /// lifecycle invariants.
 
     /// # Parameters
     /// - `cx` — supplies data or policy for this operation.
@@ -619,10 +596,7 @@ where
         let mut port = self.port.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(value) = port.outcome.take() {
             drop(port);
-            self._owned_permit
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .take();
+            self._owned_permit.lock().unwrap_or_else(|e| e.into_inner()).take();
             Self::discard_waker(new_waker.take());
             return Poll::Ready(value);
         }
@@ -634,7 +608,8 @@ where
     }
 }
 
-/// Runs the outcome summary behavior while preserving the operation lifecycle invariants.
+/// Runs the outcome summary behavior while preserving the operation lifecycle
+/// invariants.
 
 /// # Type Parameters
 /// - `T` — type used by this operation.
@@ -646,14 +621,10 @@ where
 fn outcome_summary<T, E>(id: OperationId, outcome: &OperationOutcome<T, E>) -> ChildOutcomeSummary {
     let (kind, text) = match outcome {
         OperationOutcome::Succeeded(_) => (ChildOutcomeKind::Succeeded, "child succeeded"),
-        OperationOutcome::Failed(_) | OperationOutcome::ChildFailed(_) => {
-            (ChildOutcomeKind::Failed, "child failed")
-        }
+        OperationOutcome::Failed(_) | OperationOutcome::ChildFailed(_) => (ChildOutcomeKind::Failed, "child failed"),
         OperationOutcome::Stopped(_) => (ChildOutcomeKind::Stopped, "child stopped"),
         OperationOutcome::Panicked(panic) => (ChildOutcomeKind::Panicked, panic.summary.as_str()),
-        OperationOutcome::ExecutionFailed(error) => {
-            (ChildOutcomeKind::ExecutionFailed, error.summary.as_str())
-        }
+        OperationOutcome::ExecutionFailed(error) => (ChildOutcomeKind::ExecutionFailed, error.summary.as_str()),
     };
     ChildOutcomeSummary {
         operation_id: id,
