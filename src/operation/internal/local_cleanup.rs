@@ -229,7 +229,11 @@ mod tests {
     use crate::LocalFileSystem;
     use crate::operation::LocalExecutionConfig;
     use crate::operation::LocalTempResource;
+    #[cfg(feature = "test-support")]
+    use crate::operation::temp::LocalTempCleanupAnchor;
     use crate::operation::temp::LocalTempNative;
+    #[cfg(feature = "test-support")]
+    use crate::options::LocalTempDirectoryOptions;
     use crate::options::LocalTempFileOptions;
     use qubit_operation::{
         CleanupContext, ManagerOptions, OperationManager, OperationOptions, OperationOutcome,
@@ -324,6 +328,71 @@ mod tests {
         );
         *owner.id.lock().expect("resource id lock") = Some(id);
         owner
+    }
+
+    #[cfg(feature = "test-support")]
+    fn assert_cleanup_dispatch_retries(
+        resource: LocalTempResource,
+        parent: &std::path::Path,
+        fault: &str,
+    ) {
+        let _fault = crate::test_support::install_test_fault(fault).expect("cleanup fault");
+        let Some((_error, resource)) = cleanup_resource(resource) else {
+            panic!("first cleanup should retain the owner after injected failure");
+        };
+        drop(_fault);
+        assert!(cleanup_resource(resource).is_none());
+        assert_eq!(std::fs::read_dir(parent).unwrap().count(), 0);
+    }
+
+    #[cfg(feature = "test-support")]
+    #[test]
+    fn local_cleanup_dispatch_retries_file_and_directory_anchors() {
+        let parent = tempfile::tempdir().expect("temp parent");
+        let manager = OperationManager::new(ManagerOptions::default()).expect("manager");
+        let executor = LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default())
+            .expect("executor");
+
+        let file_resource = test_owner(&manager, &executor, parent.path());
+        {
+            let mut native = file_resource.native.lock().expect("native lock");
+            let Some(LocalTempNative::File(mut file)) = native.take() else {
+                panic!("test owner should contain a file");
+            };
+            let anchor = file.cleanup_anchor();
+            file.disarm_cleanup_on_drop();
+            drop(file);
+            *native = Some(LocalTempNative::Unconfirmed(LocalTempCleanupAnchor::File(
+                anchor,
+            )));
+        }
+        assert_cleanup_dispatch_retries(file_resource, parent.path(), "temp-file-sandbox-remove");
+
+        let directory_resource = test_owner(&manager, &executor, parent.path());
+        {
+            let mut native = directory_resource.native.lock().expect("native lock");
+            let Some(LocalTempNative::File(file)) = native.take() else {
+                panic!("test owner should contain a file");
+            };
+            drop(file);
+            let mut directory = LocalFileSystem::host()
+                .expect("filesystem")
+                .create_temp_directory_with_options(
+                    &LocalTempDirectoryOptions::new().with_parent(parent.path()),
+                )
+                .expect("temporary directory");
+            let anchor = directory.cleanup_anchor();
+            directory.disarm_cleanup_on_drop();
+            drop(directory);
+            *native = Some(LocalTempNative::Unconfirmed(
+                LocalTempCleanupAnchor::Directory(anchor),
+            ));
+        }
+        assert_cleanup_dispatch_retries(
+            directory_resource,
+            parent.path(),
+            "temp-directory-sandbox-remove",
+        );
     }
 
     fn cleanup_error() -> crate::LocalFileError {

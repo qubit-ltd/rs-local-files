@@ -179,7 +179,20 @@ impl LocalTempFileAccess {
                         directory.disarm_cleanup_on_drop();
                         LocalTempCleanupAnchor::Directory(anchor)
                     }
-                    _ => {
+                    Some(LocalTempNative::Sealed(sealed)) => {
+                        let anchor = sealed.cleanup_anchor();
+                        sealed.disarm_cleanup_on_drop();
+                        LocalTempCleanupAnchor::File(anchor)
+                    }
+                    Some(LocalTempNative::Recovery(_)) => {
+                        // Recovery owners remain registered for the lifecycle
+                        // adapter's typed Unsupported result.
+                        drop(native);
+                        let _ = sender.send(Err(LocalTempCommandError::UnsupportedKind));
+                        drop(resource);
+                        return;
+                    }
+                    None | Some(LocalTempNative::Unconfirmed(_)) => {
                         drop(native);
                         let _ = sender.send(Err(LocalTempCommandError::ResourceUnavailable));
                         drop(resource);
@@ -269,6 +282,7 @@ where
 pub(crate) enum LocalTempCommandError {
     Capacity,
     ResourceUnavailable,
+    UnsupportedKind,
     Panicked,
 }
 
@@ -668,6 +682,90 @@ mod tests {
         assert!(completion.settlement.cleanup_failures.is_empty());
     }
 
+    #[test]
+    fn sealed_access_returns_unsupported_without_consuming_its_owner() {
+        let parent = tempfile::tempdir().expect("temp parent");
+        let manager = OperationManager::new(ManagerOptions::default()).expect("manager");
+        let executor = LocalIoExecutor::new(
+            manager.clone(),
+            super::super::LocalExecutionConfig::default(),
+        )
+        .expect("local executor");
+        let filesystem = LocalFileSystem::host().expect("filesystem");
+        let parent_path = parent.path().to_path_buf();
+        let invoked = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let completion = manager
+            .run_and_settle(qubit_operation::OperationOptions::default(), move |scope| {
+                let reservation = scope.reserve_resource().expect("resource reservation");
+                let file = filesystem
+                    .create_temp_file_with_options(
+                        &LocalTempFileOptions::new().with_parent(&parent_path),
+                    )
+                    .expect("temporary file");
+                let sealed = file
+                    .seal_with_options(&crate::options::LocalSealOptions::new())
+                    .expect("temp file should seal");
+                let owner = LocalTempResource::new(
+                    LocalTempNative::Sealed(sealed),
+                    executor.reserve_disk(1).expect("disk permit"),
+                    executor.reserve_handle().expect("handle permit"),
+                    executor.reserve_cleanup().expect("cleanup permit"),
+                );
+                let id_slot = Arc::clone(&owner.id);
+                let reference = reservation
+                    .commit_with(
+                        owner,
+                        LocalCleanup {
+                            executor: executor.clone(),
+                        },
+                    )
+                    .expect("managed temp resource");
+                *id_slot.lock().unwrap_or_else(|e| e.into_inner()) = Some(reference.id());
+                let access = LocalTempFileAccess {
+                    resource: reference,
+                };
+                let resource_id = access.resource_id();
+                for _ in 0..3 {
+                    let invoked = Arc::clone(&invoked);
+                    let receiver = access
+                        .enqueue_native_transition(
+                            &executor,
+                            move |owner| -> Result<
+                                (Option<LocalTempNative>, ()),
+                                (LocalTempNative, crate::LocalFileError),
+                            > {
+                                invoked.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                                let cause = crate::LocalFileError::new(
+                                    crate::LocalFileErrorKind::Unsupported,
+                                    LocalFileOperation::PersistTemp,
+                                );
+                                match owner {
+                                    LocalTempNative::Sealed(sealed) => {
+                                        Err((LocalTempNative::Sealed(sealed), cause))
+                                    }
+                                    owner => Err((owner, cause)),
+                                }
+                            },
+                        )
+                        .expect("unsupported command dispatch");
+                    let Err(cause) = block_on(receiver).expect("callback should run") else {
+                        panic!("sealed lifecycle command should report typed Unsupported");
+                    };
+                    assert_eq!(cause.kind(), crate::LocalFileErrorKind::Unsupported);
+                    assert_eq!(access.resource_id(), resource_id);
+                    let native = access.resource.native.lock().expect("native lock");
+                    assert!(matches!(native.as_ref(), Some(LocalTempNative::Sealed(_))));
+                }
+                assert_eq!(invoked.load(std::sync::atomic::Ordering::SeqCst), 3);
+                drop(access);
+                Ok::<(), ()>(())
+            })
+            .expect("operation completed");
+        assert_eq!(completion.settlement.recovery_count, 0);
+        assert!(completion.settlement.cleanup_failures.is_empty());
+        assert_eq!(std::fs::read_dir(parent.path()).unwrap().count(), 0);
+    }
+
     fn assert_panicked_transition_cleans_anchor(
         filesystem: LocalFileSystem,
         parent_path: std::path::PathBuf,
@@ -716,6 +814,18 @@ mod tests {
                 assert!(matches!(
                     block_on(receiver),
                     Err(LocalTempCommandError::Panicked)
+                ));
+                let retry_receiver = access
+                    .enqueue_native_transition(
+                        &executor,
+                        |_owner| -> Result<(Option<LocalTempNative>, ()), (LocalTempNative, ())> {
+                            panic!("Unconfirmed resources must not reach another transition");
+                        },
+                    )
+                    .expect("Unconfirmed preflight queued");
+                assert!(matches!(
+                    block_on(retry_receiver),
+                    Err(LocalTempCommandError::ResourceUnavailable)
                 ));
                 #[cfg(feature = "test-support")]
                 {
@@ -810,6 +920,18 @@ mod tests {
                 assert!(matches!(
                     block_on(receiver),
                     Err(LocalTempCommandError::Panicked)
+                ));
+                let retry_receiver = access
+                    .enqueue_native_transition(
+                        &executor,
+                        |_owner| -> Result<(Option<LocalTempNative>, ()), (LocalTempNative, ())> {
+                            panic!("Unconfirmed resources must not reach another transition");
+                        },
+                    )
+                    .expect("Unconfirmed preflight queued");
+                assert!(matches!(
+                    block_on(retry_receiver),
+                    Err(LocalTempCommandError::ResourceUnavailable)
                 ));
                 #[cfg(feature = "test-support")]
                 {

@@ -524,6 +524,7 @@ fn command_error(error: LocalTempCommandError) -> LocalStageFailure {
     let detail = match error {
         LocalTempCommandError::Capacity => "local worker queue capacity exhausted",
         LocalTempCommandError::ResourceUnavailable => "managed temp resource is unavailable",
+        LocalTempCommandError::UnsupportedKind => "managed temp resource kind is unsupported",
         LocalTempCommandError::Panicked => {
             "managed temp command panicked; completion is unconfirmed"
         }

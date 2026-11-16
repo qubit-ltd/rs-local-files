@@ -86,6 +86,18 @@ impl LocalSealedTempFile {
         self.resource.arm_cleanup_on_drop();
     }
 
+    /// Clones the bound cleanup authority without cloning or exposing the
+    /// sealed file handle.
+    pub(crate) fn cleanup_anchor(&self) -> LocalTempFile {
+        self.resource.cleanup_anchor()
+    }
+
+    /// Prevents this sealed wrapper from cleaning during unwind while a
+    /// separate cleanup anchor is retained by the managed transition.
+    pub(crate) fn disarm_cleanup_on_drop(&mut self) {
+        self.resource.disarm_cleanup_on_drop();
+    }
+
     /// Returns the namespace path of the sealed file.
     ///
     /// # Returns
