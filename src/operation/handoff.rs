@@ -329,17 +329,18 @@ async fn seal_access(
     stage: LocalStageOptions,
     context: qubit_operation::OperationContext,
 ) -> Result<LocalReadLease, LocalStageFailure> {
+    let command_context = context.clone();
     let receiver = access
         .enqueue_native_transition(&executor, move |native| {
             let LocalTempNative::File(file) = native else {
                 return Err((native, LocalStageFailure::NotSealed));
             };
-            if context.stop_reason().is_some() {
+            if command_context.stop_reason().is_some() {
                 return Err((LocalTempNative::File(file), LocalStageFailure::Stopped));
             }
             #[cfg(test)]
             tests::SEAL_ATTEMPTS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-            match file.seal_with_options(
+            let transition = match file.seal_with_options(
                 &crate::options::LocalSealOptions::new().with_file_sync(stage.file_sync),
             ) {
                 Ok(sealed) => Ok((Some(LocalTempNative::Sealed(sealed)), ())),
@@ -353,10 +354,23 @@ async fn seal_access(
                         },
                     ))
                 }
-            }
+            };
+            // Hold the command result after the native seal has completed so
+            // cancellation can be requested deterministically in tests. The
+            // transition bridge still stores the sealed owner before waking
+            // the operation future.
+            #[cfg(feature = "test-support")]
+            crate::test_support::hit_test_gate("lf6-stage-bytes-after-native-seal");
+            transition
         })
         .map_err(command_error)?;
     receiver.await.map_err(command_error)??;
+    if context.stop_reason().is_some() {
+        // The transition has already installed the sealed owner in the
+        // managed resource. Returning Stopped drops this access and lets the
+        // normal scope cleanup remove the sealed file.
+        return Err(LocalStageFailure::Stopped);
+    }
     Ok(LocalReadLease::from_temp_access(
         &access,
         stage.export_read_handle,
@@ -612,5 +626,42 @@ mod tests {
         ));
         assert_eq!(SEAL_ATTEMPTS.load(std::sync::atomic::Ordering::SeqCst), 0);
         assert_eq!(block_on(operation.wait_settlement()).recovery_count, 0);
+    }
+
+    #[cfg(feature = "test-support")]
+    #[test]
+    fn stop_after_native_seal_keeps_the_sealed_owner_for_managed_cleanup() {
+        let manager =
+            qubit_operation::OperationManager::new(qubit_operation::ManagerOptions::default())
+                .expect("manager");
+        let executor = LocalIoExecutor::new(
+            manager.clone(),
+            crate::operation::LocalExecutionConfig::default(),
+        )
+        .expect("local executor");
+        let filesystem = crate::LocalFileSystem::host().expect("filesystem");
+        let gate = crate::test_support::install_test_gate("lf6-stage-bytes-after-native-seal")
+            .expect("post-seal gate");
+        SEAL_ATTEMPTS.store(0, std::sync::atomic::Ordering::SeqCst);
+        let mut operation = stage_bytes(
+            filesystem,
+            executor,
+            &manager.as_async(),
+            OperationOptions::default(),
+            b"payload".to_vec(),
+            LocalStageOptions::default(),
+        )
+        .expect("stage admitted");
+        gate.wait_until_entered();
+        let _ = operation.request_stop(qubit_operation::StopReason::UserCancelled);
+        gate.release();
+        assert!(matches!(
+            block_on(operation.wait_outcome()).expect("operation outcome"),
+            OperationOutcome::Stopped(_) | OperationOutcome::Failed(LocalStageFailure::Stopped)
+        ));
+        assert_eq!(SEAL_ATTEMPTS.load(std::sync::atomic::Ordering::SeqCst), 1);
+        let settlement = block_on(operation.wait_settlement());
+        assert_eq!(settlement.recovery_count, 0);
+        assert!(settlement.cleanup_failures.is_empty());
     }
 }
