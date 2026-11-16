@@ -21,6 +21,11 @@ pub struct LocalStagedTreeRecovery {
 }
 
 impl LocalStagedTreeRecovery {
+    /// Creates a recovery owner that keeps the stage and quota alive together.
+    ///
+    /// # Parameters
+    /// * `stage` — unpublished native stage retained after a failed operation.
+    /// * `reservation` — quota held while recovery remains possible.
     pub(super) fn new(
         /// Stage retained for inspection and cleanup after publication failure.
         stage: crate::directory::LocalStagedDirectory,
@@ -73,6 +78,9 @@ impl Deref for LocalStagedTreeRecovery {
     type Target = crate::directory::LocalStagedDirectory;
 
     /// Borrows the native stage for its full recovery-owner lifetime.
+    ///
+    /// # Returns
+    /// The retained native stage.
     fn deref(&self) -> &Self::Target {
         self.stage
             .as_ref()
@@ -82,6 +90,9 @@ impl Deref for LocalStagedTreeRecovery {
 
 impl DerefMut for LocalStagedTreeRecovery {
     /// Mutably borrows the native stage to configure recovery behavior.
+    ///
+    /// # Returns
+    /// Mutable access to the retained native stage.
     fn deref_mut(&mut self) -> &mut Self::Target {
         self.stage
             .as_mut()
@@ -91,6 +102,12 @@ impl DerefMut for LocalStagedTreeRecovery {
 
 impl std::fmt::Debug for LocalStagedTreeRecovery {
     /// Formats the stage owner and its retained quota for diagnostics.
+    ///
+    /// # Parameters
+    /// * `formatter` — destination for the diagnostic representation.
+    ///
+    /// # Returns
+    /// Formatting success or the formatter error.
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter
             .debug_struct("LocalStagedTreeRecovery")

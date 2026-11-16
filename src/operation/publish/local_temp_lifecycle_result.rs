@@ -10,8 +10,8 @@ use super::super::handoff::LocalReadLease;
 
 /// Successful result of one temporary lifecycle transition.
 pub enum LocalTempLifecycleResult {
-    /// The temporary resource was published outside its private sandbox.
+    /// The temporary resource was moved to a caller-visible destination and the outcome describes the publication guarantees.
     Persisted(crate::outcome::LocalPersistOutcome),
-    /// The same managed resource now contains a sealed read-only file.
+    /// Sealing succeeded and returns a read lease for the resource now protected against writes.
     Sealed(LocalReadLease),
 }

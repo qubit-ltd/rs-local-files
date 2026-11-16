@@ -6,17 +6,16 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 
-use crate::LocalFileError;
-
 use super::LocalStagedTreeRecovery;
 use super::LocalStagedTreeReservedError;
+use crate::LocalFileError;
 
 /// Errors keep the stage or native recovery owners attached for retry/cleanup.
 #[derive(Debug)]
 pub enum LocalStagedTreePublishError {
-    /// Parent authority could not be opened.
+    /// Opening the requested parent under captured authority failed before a stage was created.
     Parent(LocalFileError),
-    /// Stage creation failed with its native cleanup ownership.
+    /// Native stage creation failed and returns its cleanup owner with the disk reservation.
     Create(LocalStagedTreeReservedError<crate::directory::LocalTreeCreateError>),
     /// A staged file could not be created; the stage remains available for
     /// cleanup.
@@ -26,9 +25,8 @@ pub enum LocalStagedTreePublishError {
         /// Unpublished stage retained for caller-directed cleanup.
         stage: LocalStagedTreeRecovery,
     },
-    /// Verification or publication failed with the existing native recovery
-    /// report.
+    /// Native verification or atomic installation failed; its report retains the exact recovery state.
     Publish(LocalStagedTreeReservedError<crate::directory::LocalTreePublishError>),
-    /// A cancellation cleanup failed and retains the cleanup owner.
+    /// Cleanup after cancellation failed, leaving a native cleanup owner for retry.
     Cleanup(LocalStagedTreeReservedError<crate::directory::LocalTreeCleanupError>),
 }

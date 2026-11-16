@@ -10,7 +10,7 @@
 /// state.
 #[derive(Debug)]
 pub enum LocalTempLifecycleError {
-    /// Structured persistence failure.
+    /// Persistence failed; requested and resolved target facts remain available in the payload.
     Persist(LocalTempPersistFailure),
     /// Structured sealing failure.
     Seal {
@@ -21,9 +21,9 @@ pub enum LocalTempLifecycleError {
         /// Access capabilities that remain after the failed transition.
         access_state: crate::LocalTempAccessState,
     },
-    /// The resource kind does not support this command.
+    /// This command cannot be applied to the managed resource kind, with the native rejection attached.
     Unsupported(LocalFileError),
-    /// The bounded local worker could not accept or complete the command.
+    /// Worker admission or execution failed before the lifecycle result could be returned.
     Worker(LocalTempWorkerCommandFailure),
     /// The operation was stopped before the native transition began.
     Stopped,

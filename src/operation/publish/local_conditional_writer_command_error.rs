@@ -18,11 +18,11 @@ use crate::LocalFileError;
 #[cfg(feature = "digest")]
 #[derive(Debug)]
 pub enum LocalConditionalWriterCommandError<D: digest::Digest + Send + 'static> {
-    /// Scope capacity for retryable writer cleanup was unavailable.
+    /// The operation could not reserve capacity for retaining a failed candidate writer.
     ResourceCapacity(qubit_operation::ResourceCapacityError),
-    /// The cleanup resource could not be committed to the operation scope.
+    /// Recovery ownership could not be registered, so the operation cannot promise scoped retry cleanup.
     ResourceCommit(qubit_operation::ResourceManageErrorKind),
-    /// Opening the candidate writer failed.
+    /// The native filesystem rejected opening the candidate before any candidate bytes were written.
     Open(LocalFileError),
     /// Writing/flushing the candidate failed.
     Write {
@@ -35,6 +35,6 @@ pub enum LocalConditionalWriterCommandError<D: digest::Digest + Send + 'static> 
         /// Candidate writer retained when cleanup can be retried.
         retryable_writer: Option<crate::LocalConditionalWriter<D>>,
     },
-    /// Conditional publication failed with native recovery state.
+    /// The native conditional commit rejected the precondition or failed during atomic replacement.
     Commit(crate::error::LocalConditionalCommitError),
 }
