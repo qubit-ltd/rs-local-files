@@ -4,6 +4,7 @@
 mod async_local_file_system;
 #[cfg(feature = "async")]
 pub mod complete;
+pub mod publish;
 #[cfg(feature = "async")]
 mod executor;
 #[cfg(feature = "async")]
