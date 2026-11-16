@@ -4,7 +4,9 @@
 mod async_local_file_system;
 #[cfg(feature = "async")]
 pub mod complete;
+#[cfg(feature = "async")]
 pub mod handoff;
+#[cfg(feature = "async")]
 pub mod publish;
 #[cfg(feature = "async")]
 mod executor;
