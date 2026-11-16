@@ -116,6 +116,71 @@ fn read_text_preserves_utf8_conversion_error() {
 }
 
 #[test]
+fn invalid_text_keeps_its_owned_byte_permit_until_the_outcome_is_taken() {
+    let directory = tempfile::tempdir().unwrap();
+    let invalid = directory.path().join("invalid-utf8");
+    let valid = directory.path().join("valid");
+    std::fs::write(&invalid, [0xff, b'a', b'b', b'c']).unwrap();
+    std::fs::write(&valid, b"data").unwrap();
+    let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+    let config = LocalExecutionConfig {
+        max_owned_bytes: 4,
+        max_open_handles: 2,
+        ..LocalExecutionConfig::default()
+    };
+    let executor = LocalIoExecutor::new(manager.clone(), config).unwrap();
+    let filesystem = block_on(AsyncLocalFileSystem::host(executor)).unwrap();
+    let mut text = filesystem
+        .submit_read_text(
+            &manager,
+            Default::default(),
+            LocalReadRequest {
+                path: invalid,
+                read: Default::default(),
+            },
+            Default::default(),
+        )
+        .unwrap()
+        .0;
+
+    text.wait_settlement().unwrap();
+    let mut blocked = filesystem
+        .submit_read_all(
+            &manager,
+            Default::default(),
+            LocalReadRequest {
+                path: valid.clone(),
+                read: Default::default(),
+            },
+            Default::default(),
+        )
+        .unwrap()
+        .0;
+    assert!(matches!(
+        blocked.wait_outcome().unwrap(),
+        qubit_operation::OperationOutcome::Failed(_)
+    ));
+
+    assert!(matches!(text.wait_outcome().unwrap(),
+        qubit_operation::OperationOutcome::Failed(error)
+            if error.kind() == qubit_local_files::error::LocalFileErrorKind::InvalidEncoding));
+    let mut available = filesystem
+        .submit_read_all(
+            &manager,
+            Default::default(),
+            LocalReadRequest {
+                path: valid,
+                read: Default::default(),
+            },
+            Default::default(),
+        )
+        .unwrap()
+        .0;
+    assert!(matches!(available.wait_outcome().unwrap(),
+        qubit_operation::OperationOutcome::Succeeded(bytes) if bytes == b"data"));
+}
+
+#[test]
 fn read_at_seeks_and_reads_the_same_opened_object() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("payload");
@@ -219,6 +284,75 @@ fn prefix_bound_larger_than_executor_budget_only_charges_retained_capacity() {
     assert!(matches!(operation.wait_outcome().unwrap(),
         qubit_operation::OperationOutcome::Succeeded(prefix)
             if prefix.bytes == b"short" && prefix.complete));
+}
+
+#[test]
+fn operation_handle_limits_reserve_the_required_native_handle_count() {
+    let directory = tempfile::tempdir().unwrap();
+    let source = directory.path().join("source");
+    let destination = directory.path().join("destination");
+    std::fs::write(&source, b"copy").unwrap();
+    let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+    let filesystem = facade(&manager);
+
+    let copy_request = LocalCopyRequest {
+        source: source.clone(),
+        destination: destination.clone(),
+        options: LocalCopyOptions::new(),
+    };
+    let rejected = match filesystem.submit_copy(
+        &manager,
+        Default::default(),
+        copy_request,
+        qubit_local_files::LocalOperationOptions {
+            max_open_handles: Some(2),
+            ..Default::default()
+        },
+    ) {
+        Ok(_) => {
+            panic!("copy admission must reserve source, destination, and source-directory handles")
+        }
+        Err(error) => error,
+    };
+    assert_eq!(
+        rejected.rejection(),
+        qubit_local_files::operation::LocalSubmitRejection::CapacityExceeded
+    );
+    assert_eq!(rejected.into_request().source, source);
+
+    let (mut metadata, _) = filesystem
+        .submit_metadata(
+            &manager,
+            Default::default(),
+            source.clone(),
+            qubit_local_files::LocalOperationOptions {
+                max_open_handles: Some(1),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    assert!(matches!(metadata.wait_outcome().unwrap(),
+        qubit_operation::OperationOutcome::Succeeded(metadata) if metadata.len() == 4));
+
+    let (mut copy, _) = filesystem
+        .submit_copy(
+            &manager,
+            Default::default(),
+            LocalCopyRequest {
+                source,
+                destination: destination.clone(),
+                options: LocalCopyOptions::new(),
+            },
+            qubit_local_files::LocalOperationOptions {
+                max_open_handles: Some(3),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    assert!(matches!(
+        copy.wait_outcome().unwrap(),
+        qubit_operation::OperationOutcome::Succeeded(_)
+    ));
 }
 
 #[test]

@@ -143,6 +143,7 @@ impl AsyncLocalFileSystem {
             operation,
             request,
             execution_path.is_relative(),
+            1,
             limits,
             move |request, scope, _observer, budget, maximum| {
                 let read_limit = request
@@ -181,6 +182,7 @@ impl AsyncLocalFileSystem {
             operation,
             request,
             execution_path.is_relative(),
+            1,
             limits,
             move |request, scope, _observer, budget, maximum| {
                 let read_limit = request
@@ -198,14 +200,11 @@ impl AsyncLocalFileSystem {
                 ) {
                     OperationOutcome::Succeeded(bytes) => match String::from_utf8(bytes) {
                         Ok(text) => OperationOutcome::Succeeded(text),
-                        Err(source) => {
-                            shrink_to_zero(&budget);
-                            OperationOutcome::Failed(LocalFileError::from_utf8(
-                                LocalFileOperation::Read,
-                                Some(execution_path.clone()),
-                                source,
-                            ))
-                        }
+                        Err(source) => OperationOutcome::Failed(LocalFileError::from_utf8(
+                            LocalFileOperation::Read,
+                            Some(execution_path.clone()),
+                            source,
+                        )),
                     },
                     OperationOutcome::Failed(error) => {
                         shrink_to_zero(&budget);
@@ -248,14 +247,20 @@ impl AsyncLocalFileSystem {
             operation,
             request,
             execution_path.is_relative(),
+            1,
             limits,
             move |request, _scope, _observer, budget, maximum| {
                 let requested = request.max_bytes.saturating_add(1);
-                let mut reader =
-                    match filesystem.open_reader_with_options(&execution_path, &request.read) {
-                        Ok(reader) => reader,
-                        Err(error) => return OperationOutcome::Failed(error),
-                    };
+                let reader_result = match before_native_call(_scope, || {
+                    filesystem.open_reader_with_options(&execution_path, &request.read)
+                }) {
+                    Ok(result) => result,
+                    Err(stop) => return OperationOutcome::Stopped(stop),
+                };
+                let mut reader = match reader_result {
+                    Ok(reader) => reader,
+                    Err(error) => return OperationOutcome::Failed(error),
+                };
                 if let Some(stopped) = stop_outcome(_scope) {
                     return stopped;
                 }
@@ -360,13 +365,19 @@ impl AsyncLocalFileSystem {
             operation,
             request,
             execution_path.is_relative(),
+            1,
             limits,
             move |request, _scope, _observer, budget, maximum| {
-                let mut reader =
-                    match filesystem.open_reader_with_options(&execution_path, &request.read) {
-                        Ok(reader) => reader,
-                        Err(error) => return OperationOutcome::Failed(error),
-                    };
+                let reader_result = match before_native_call(_scope, || {
+                    filesystem.open_reader_with_options(&execution_path, &request.read)
+                }) {
+                    Ok(result) => result,
+                    Err(stop) => return OperationOutcome::Stopped(stop),
+                };
+                let mut reader = match reader_result {
+                    Ok(reader) => reader,
+                    Err(error) => return OperationOutcome::Failed(error),
+                };
                 if let Some(stopped) = stop_outcome(_scope) {
                     return stopped;
                 }
@@ -437,12 +448,15 @@ impl AsyncLocalFileSystem {
             operation,
             path,
             execution_path.is_relative(),
+            1,
             limits,
-            move |_request, _scope, _observer, _budget, _maximum| match filesystem
-                .metadata(&execution_path)
-            {
-                Ok(metadata) => OperationOutcome::Succeeded(metadata),
-                Err(error) => OperationOutcome::Failed(error),
+            move |_request, _scope, _observer, _budget, _maximum| match before_native_call(
+                _scope,
+                || filesystem.metadata(&execution_path),
+            ) {
+                Ok(Ok(metadata)) => OperationOutcome::Succeeded(metadata),
+                Ok(Err(error)) => OperationOutcome::Failed(error),
+                Err(stop) => OperationOutcome::Stopped(stop),
             },
         )
     }
@@ -463,18 +477,26 @@ impl AsyncLocalFileSystem {
     > {
         let source = bind_host_path(&self.host_base, &request.source);
         let destination = bind_host_path(&self.host_base, &request.destination);
+        let required_handles =
+            2_usize.saturating_add(request.options.max_open_directories().unwrap_or(1));
         let filesystem = self.filesystem.clone();
         self.submit_owned(
             manager,
             operation,
             request,
             source.is_relative() || destination.is_relative(),
+            required_handles,
             limits,
             move |request, scope, observer, _budget, _maximum| {
                 if let Some(stopped) = stop_outcome(scope) {
                     return stopped;
                 }
-                match filesystem.copy_with_options(&source, &destination, &request.options) {
+                let options = if request.options.max_open_directories().is_none() {
+                    request.options.with_max_open_directories(1)
+                } else {
+                    request.options
+                };
+                match filesystem.copy_with_options(&source, &destination, &options) {
                     Ok(outcome) => {
                         let stats = outcome.stats();
                         record_local_effect(
@@ -550,6 +572,7 @@ impl AsyncLocalFileSystem {
             operation,
             request,
             source.is_relative() || destination.is_relative(),
+            2,
             limits,
             move |request, scope, observer, _budget, _maximum| {
                 if let Some(stopped) = stop_outcome(scope) {
@@ -627,6 +650,7 @@ impl AsyncLocalFileSystem {
             operation,
             request,
             path.is_relative(),
+            1,
             limits,
             move |request, scope, observer, _budget, _maximum| {
                 if let Some(stopped) = stop_outcome(scope) {
@@ -693,6 +717,7 @@ impl AsyncLocalFileSystem {
             operation,
             request,
             path.is_relative(),
+            1,
             limits,
             move |request, scope, observer, _budget, _maximum| {
                 if let Some(stopped) = stop_outcome(scope) {
@@ -746,6 +771,7 @@ impl AsyncLocalFileSystem {
         operation: OperationOptions,
         request: R,
         path_is_relative: bool,
+        required_handles: usize,
         limits: LocalOperationOptions,
         task: F,
     ) -> Result<(LocalOperation<T, E>, LocalFactObserver), LocalSubmitError<R>>
@@ -799,10 +825,11 @@ impl AsyncLocalFileSystem {
                 LocalSubmitRejection::AuthorityNotCaptured,
             ));
         }
-        if limits.max_open_handles == Some(0)
-            || limits
-                .max_open_handles
-                .is_some_and(|limit| limit > self.executor.inner.config.max_open_handles)
+        let handle_limit = limits
+            .max_open_handles
+            .unwrap_or(self.executor.inner.config.max_open_handles);
+        if handle_limit > self.executor.inner.config.max_open_handles
+            || required_handles > handle_limit
         {
             return Err(LocalSubmitError::new(
                 request,
@@ -822,7 +849,12 @@ impl AsyncLocalFileSystem {
             ));
         };
         let byte_permit = Arc::new(Mutex::new(byte_permit));
-        let Some(handle_permit) = self.executor.reserve_handle() else {
+        let Some(handle_permit) = self
+            .executor
+            .inner
+            .handle_slots
+            .try_acquire(required_handles)
+        else {
             return Err(LocalSubmitError::new(
                 request,
                 LocalSubmitRejection::CapacityExceeded,
@@ -904,15 +936,20 @@ fn read_complete_cancellable(
     if let Some(stopped) = stop_outcome(scope) {
         return stopped;
     }
-    let reader_result = match (options.read_options(), options.symlink_policy()) {
-        (None, None) => filesystem.open_reader(path),
-        (read_options, policy) => {
-            let mut read_options = read_options.copied().unwrap_or_default();
-            if let Some(policy) = policy {
-                read_options = read_options.with_symlink_policy(policy);
+    let reader_result = match before_native_call(scope, || {
+        match (options.read_options(), options.symlink_policy()) {
+            (None, None) => filesystem.open_reader(path),
+            (read_options, policy) => {
+                let mut read_options = read_options.copied().unwrap_or_default();
+                if let Some(policy) = policy {
+                    read_options = read_options.with_symlink_policy(policy);
+                }
+                filesystem.open_reader_with_options(path, &read_options)
             }
-            filesystem.open_reader_with_options(path, &read_options)
         }
+    }) {
+        Ok(result) => result,
+        Err(stop) => return OperationOutcome::Stopped(stop),
     };
     let reader = match reader_result {
         Ok(reader) => reader,
@@ -1017,6 +1054,19 @@ fn stop_outcome<T, E>(scope: &OperationScope) -> Option<OperationOutcome<T, E>> 
     })
 }
 
+fn before_native_call<T>(
+    scope: &OperationScope,
+    native_call: impl FnOnce() -> T,
+) -> Result<T, StopReport> {
+    match scope.context().stop_reason() {
+        Some(reason) => Err(StopReport {
+            reason,
+            accepted_at: None,
+        }),
+        None => Ok(native_call()),
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn record_local_effect(
     scope: &OperationScope,
@@ -1051,6 +1101,43 @@ fn shrink_to_zero(permit: &Arc<Mutex<Permit>>) {
     let mut permit = permit.lock().unwrap_or_else(|e| e.into_inner());
     let amount = permit.amount();
     permit.shrink(amount);
+}
+
+#[cfg(test)]
+mod stop_gate_tests {
+    use super::before_native_call;
+    use qubit_operation::{ManagerOptions, OperationManager, OperationOutcome, StopReason};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::{Arc, mpsc};
+
+    #[test]
+    fn stopped_scope_skips_the_first_native_call() {
+        let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+        let native_calls = Arc::new(AtomicUsize::new(0));
+        let native_calls_for_task = Arc::clone(&native_calls);
+        let (entered_tx, entered_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        let mut operation = manager
+            .try_submit(Default::default(), move |scope| {
+                entered_tx.send(()).unwrap();
+                release_rx.recv().unwrap();
+                let result = before_native_call(&scope, || {
+                    native_calls_for_task.fetch_add(1, Ordering::SeqCst)
+                });
+                Ok::<_, ()>(result.map_err(|stop| stop.reason))
+            })
+            .unwrap();
+
+        entered_rx.recv().unwrap();
+        let _ = operation.request_stop(StopReason::UserCancelled);
+        release_tx.send(()).unwrap();
+
+        assert!(matches!(
+            operation.wait_outcome().unwrap(),
+            OperationOutcome::Stopped(report) if report.reason == StopReason::UserCancelled
+        ));
+        assert_eq!(native_calls.load(Ordering::SeqCst), 0);
+    }
 }
 
 fn reserve_capacity(
