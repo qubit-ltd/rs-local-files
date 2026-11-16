@@ -1,6 +1,6 @@
 #![cfg(feature = "async")]
 
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::future::Future;
 use std::io::{self, SeekFrom};
 use std::path::PathBuf;
@@ -11,9 +11,9 @@ use std::task::{Context, Poll, Waker};
 
 use qubit_io::{AsyncInput, AsyncOutput};
 use qubit_local_files::operation::stream::{
-    AsyncLocalDirectoryWalker, AsyncLocalFileReader, AsyncLocalFileWriter, LocalStreamCommand,
-    LocalStreamCompletion, LocalStreamDriver, LocalStreamRequest, LocalStreamResource,
-    LocalWalkDriver, LocalWalkResource,
+    AsyncLocalDirectoryWalker, AsyncLocalFileReader, AsyncLocalFileWriter,
+    LOCAL_STREAM_BUFFER_SIZE, LocalStreamCommand, LocalStreamCompletion, LocalStreamDriver,
+    LocalStreamRequest, LocalStreamResource, LocalWalkDriver, LocalWalkResource,
 };
 use qubit_operation::ResourceRef;
 use qubit_operation::{ManagerOptions, OperationManager, ResourceScopeOptions};
@@ -34,6 +34,9 @@ struct FakeState {
     panic_next: bool,
     unconfirmed_next: bool,
     fail_seek: bool,
+    oversized_read: Option<Vec<u8>>,
+    hold_read_after_execute: bool,
+    completed_reads: HashMap<u64, Vec<u8>>,
 }
 
 #[derive(Default)]
@@ -84,6 +87,14 @@ impl FakeWorker {
     fn fail_next_seek(&self) {
         self.0.lock().unwrap().fail_seek = true;
     }
+
+    fn overread_next(&self, bytes: Vec<u8>) {
+        self.0.lock().unwrap().oversized_read = Some(bytes);
+    }
+
+    fn hold_next_read_after_execute(&self) {
+        self.0.lock().unwrap().hold_read_after_execute = true;
+    }
 }
 
 impl LocalStreamDriver for FakeWorker {
@@ -109,6 +120,9 @@ impl LocalStreamDriver for FakeWorker {
             state.wake = Some(cx.waker().clone());
             return Poll::Pending;
         }
+        if let Some(bytes) = state.completed_reads.remove(&request.id) {
+            return Poll::Ready(Ok(LocalStreamCompletion::Read(bytes)));
+        }
         if state.hold_next {
             state.hold_next = false;
             state.held.push(request.id);
@@ -117,12 +131,22 @@ impl LocalStreamDriver for FakeWorker {
         }
         let result = match &request.command {
             LocalStreamCommand::Read { max_bytes } => {
+                if let Some(bytes) = state.oversized_read.take() {
+                    return Poll::Ready(Ok(LocalStreamCompletion::Read(bytes)));
+                }
                 let end = state
                     .bytes
                     .len()
                     .min(state.position.saturating_add(*max_bytes));
                 let bytes = state.bytes[state.position..end].to_vec();
                 state.position = end;
+                if state.hold_read_after_execute {
+                    state.hold_read_after_execute = false;
+                    state.completed_reads.insert(request.id, bytes);
+                    state.held.push(request.id);
+                    state.wake = Some(cx.waker().clone());
+                    return Poll::Pending;
+                }
                 Ok(LocalStreamCompletion::Read(bytes))
             }
             LocalStreamCommand::Write { bytes } => {
@@ -351,6 +375,47 @@ fn pending_read_future_drop_keeps_the_first_chunk_for_the_next_read() {
 }
 
 #[test]
+fn settle_rejects_and_latches_over_limit_read_completion() {
+    let worker = Arc::new(FakeWorker::default());
+    worker.hold_next();
+    worker.overread_next(vec![b'x'; LOCAL_STREAM_BUFFER_SIZE + 1]);
+    let mut reader = reader(&worker);
+    let mut output = [0; 1];
+    assert!(poll(|cx| Pin::new(&mut reader).poll_read(cx, &mut output)).is_pending());
+
+    worker.release();
+    let error = match poll(|cx| Box::pin(reader.settle()).as_mut().poll(cx)) {
+        Poll::Ready(Err(error)) => error,
+        other => panic!("expected over-limit read to fail during settle, got {other:?}"),
+    };
+    assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+    assert!(matches!(
+        poll(|cx| Pin::new(&mut reader).poll_read(cx, &mut output)),
+        Poll::Ready(Err(error)) if error.kind() == io::ErrorKind::InvalidData
+    ));
+}
+
+#[test]
+fn close_rejects_over_limit_read_completion_before_release() {
+    let worker = Arc::new(FakeWorker::default());
+    worker.hold_next();
+    worker.overread_next(vec![b'x'; LOCAL_STREAM_BUFFER_SIZE + 1]);
+    let mut reader = reader(&worker);
+    let mut output = [0; 1];
+    assert!(poll(|cx| Pin::new(&mut reader).poll_read(cx, &mut output)).is_pending());
+
+    let mut close = Box::pin(reader.close());
+    assert!(poll(|cx| close.as_mut().poll(cx)).is_pending());
+    worker.release();
+    let error = match poll(|cx| close.as_mut().poll(cx)) {
+        Poll::Ready(Err(error)) => error,
+        other => panic!("expected over-limit read to fail during close, got {other:?}"),
+    };
+    assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+    assert_eq!(worker.0.lock().unwrap().close_count, 1);
+}
+
+#[test]
 fn writes_are_accepted_only_when_owned_capacity_is_available() {
     let worker = Arc::new(FakeWorker::default());
     worker.hold_next();
@@ -464,6 +529,32 @@ fn cancelled_seek_remains_a_barrier_until_its_position_is_decided() {
         Poll::Ready(Ok(1))
     ));
     assert_eq!(&next, b"1");
+}
+
+#[test]
+fn current_seek_settles_completed_but_unconsumed_read_before_adjusting_offset() {
+    let mut bytes = vec![b'a'; 128 * 1024];
+    bytes[1] = b'b';
+    let worker = Arc::new(FakeWorker::with_bytes(&bytes));
+    worker.hold_next_read_after_execute();
+    let mut reader = reader(&worker);
+    let mut output = [0; 1];
+    assert!(poll(|cx| Pin::new(&mut reader).poll_read(cx, &mut output)).is_pending());
+
+    let mut seek = Box::pin(reader.seek(SeekFrom::Current(1)));
+    assert!(poll(|cx| seek.as_mut().poll(cx)).is_pending());
+    worker.release();
+    assert!(matches!(
+        poll(|cx| seek.as_mut().poll(cx)),
+        Poll::Ready(Ok(1))
+    ));
+    drop(seek);
+
+    assert!(matches!(
+        poll(|cx| Pin::new(&mut reader).poll_read(cx, &mut output)),
+        Poll::Ready(Ok(1))
+    ));
+    assert_eq!(output, [b'b']);
 }
 
 #[test]

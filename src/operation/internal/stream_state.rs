@@ -276,10 +276,15 @@ impl StreamState {
                 match result {
                     Ok(LocalStreamCompletion::Read(bytes)) => {
                         if bytes.len() > LOCAL_STREAM_BUFFER_SIZE {
-                            return Poll::Ready(Err(io::Error::new(
+                            let error = io::Error::new(
                                 io::ErrorKind::InvalidData,
                                 "stream worker exceeded read buffer limit",
+                            );
+                            self.write_error = Some(SavedError::capture(io::Error::new(
+                                error.kind(),
+                                error.to_string(),
                             )));
+                            return Poll::Ready(Err(error));
                         }
                         self.eof = bytes.is_empty();
                         self.read_buffer.extend(bytes);
@@ -537,6 +542,12 @@ impl StreamState {
                 return Poll::Ready(Err(error));
             }
         }
+        if let Poll::Pending = self.poll_pending_read(resource, cx) {
+            return Poll::Pending;
+        }
+        if let Some(error) = &self.write_error {
+            return Poll::Ready(Err(error.make()));
+        }
         if self.seek_request.is_none() {
             let adjusted = match position {
                 SeekFrom::Current(offset) => {
@@ -619,6 +630,65 @@ impl StreamState {
         }
     }
 
+    fn poll_pending_read(
+        &mut self,
+        resource: &LocalStreamResource,
+        cx: &mut Context<'_>,
+    ) -> Poll<io::Result<()>> {
+        let Some(request) = self.read_request.as_ref().cloned() else {
+            return Poll::Ready(Ok(()));
+        };
+        match resource.poll_command(cx, &request) {
+            Poll::Pending => Poll::Pending,
+            Poll::Ready(Ok(LocalStreamCompletion::Read(bytes))) => {
+                self.read_request = None;
+                if bytes.len() > LOCAL_STREAM_BUFFER_SIZE {
+                    let error = io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "stream worker exceeded read buffer limit",
+                    );
+                    self.write_error = Some(SavedError::capture(io::Error::new(
+                        error.kind(),
+                        error.to_string(),
+                    )));
+                    return Poll::Ready(Err(error));
+                }
+                self.eof = bytes.is_empty();
+                self.read_buffer.extend(bytes);
+                Poll::Ready(Ok(()))
+            }
+            Poll::Ready(Ok(LocalStreamCompletion::Unconfirmed { operation, detail })) => {
+                self.read_request = None;
+                let error = io::Error::other(format!("Unconfirmed {operation}: {detail}"));
+                self.write_error = Some(SavedError::capture(io::Error::new(
+                    error.kind(),
+                    error.to_string(),
+                )));
+                Poll::Ready(Err(error))
+            }
+            Poll::Ready(Ok(_)) => {
+                self.read_request = None;
+                let error = io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "stream worker returned an unexpected read completion",
+                );
+                self.write_error = Some(SavedError::capture(io::Error::new(
+                    error.kind(),
+                    error.to_string(),
+                )));
+                Poll::Ready(Err(error))
+            }
+            Poll::Ready(Err(error)) => {
+                self.read_request = None;
+                self.write_error = Some(SavedError::capture(io::Error::new(
+                    error.kind(),
+                    error.to_string(),
+                )));
+                Poll::Ready(Err(error))
+            }
+        }
+    }
+
     pub(super) fn poll_settle(
         &mut self,
         resource: &LocalStreamResource,
@@ -637,44 +707,10 @@ impl StreamState {
             return Poll::Ready(Err(error));
         }
         if self.direction == Direction::Read {
-            if let Some(request) = self.read_request.as_ref() {
-                match resource.poll_command(cx, request) {
-                    Poll::Pending => return Poll::Pending,
-                    Poll::Ready(Ok(LocalStreamCompletion::Read(bytes))) => {
-                        self.read_request = None;
-                        self.eof = bytes.is_empty();
-                        self.read_buffer.extend(bytes);
-                    }
-                    Poll::Ready(Ok(LocalStreamCompletion::Unconfirmed { operation, detail })) => {
-                        self.read_request = None;
-                        let error = io::Error::other(format!("Unconfirmed {operation}: {detail}"));
-                        self.write_error = Some(SavedError::capture(io::Error::new(
-                            error.kind(),
-                            error.to_string(),
-                        )));
-                        return Poll::Ready(Err(error));
-                    }
-                    Poll::Ready(Ok(_)) => {
-                        self.read_request = None;
-                        let error = io::Error::new(
-                            io::ErrorKind::InvalidData,
-                            "unexpected read completion",
-                        );
-                        self.write_error = Some(SavedError::capture(io::Error::new(
-                            error.kind(),
-                            error.to_string(),
-                        )));
-                        return Poll::Ready(Err(error));
-                    }
-                    Poll::Ready(Err(error)) => {
-                        self.read_request = None;
-                        self.write_error = Some(SavedError::capture(io::Error::new(
-                            error.kind(),
-                            error.to_string(),
-                        )));
-                        return Poll::Ready(Err(error));
-                    }
-                }
+            match self.poll_pending_read(resource, cx) {
+                Poll::Pending => return Poll::Pending,
+                Poll::Ready(Err(error)) => return Poll::Ready(Err(error)),
+                Poll::Ready(Ok(())) => {}
             }
         } else {
             if let Poll::Pending = self.poll_writes(resource, cx) {
@@ -705,30 +741,9 @@ impl StreamState {
             self.write_error = Some(SavedError::capture(error));
         }
         if self.direction == Direction::Read {
-            if let Some(request) = self.read_request.as_ref() {
-                match resource.poll_command(cx, request) {
-                    Poll::Pending => return Poll::Pending,
-                    Poll::Ready(result) => {
-                        self.read_request = None;
-                        match result {
-                            Err(error) => self.write_error = Some(SavedError::capture(error)),
-                            Ok(LocalStreamCompletion::Read(bytes)) => {
-                                self.read_buffer.extend(bytes)
-                            }
-                            Ok(LocalStreamCompletion::Unconfirmed { operation, detail }) => {
-                                self.write_error = Some(SavedError::capture(io::Error::other(
-                                    format!("Unconfirmed {operation}: {detail}"),
-                                )));
-                            }
-                            Ok(_) => {
-                                self.write_error = Some(SavedError::capture(io::Error::new(
-                                    io::ErrorKind::InvalidData,
-                                    "unexpected read completion while closing",
-                                )))
-                            }
-                        }
-                    }
-                }
+            match self.poll_pending_read(resource, cx) {
+                Poll::Pending => return Poll::Pending,
+                Poll::Ready(Err(_)) | Poll::Ready(Ok(())) => {}
             }
         } else {
             if let Poll::Pending = self.poll_writes(resource, cx) {
