@@ -283,12 +283,15 @@ where
                     std::io::Error::other("async filesystem constructor panicked"),
                 ))
             });
-        let mut completion = completion_for_worker
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
-        completion.value = Some(value);
-        if let Some(waker) = completion.waker.take() {
-            waker.wake();
+        let waker = {
+            let mut completion = completion_for_worker
+                .lock()
+                .unwrap_or_else(|e| e.into_inner());
+            completion.value = Some(value);
+            completion.waker.take()
+        };
+        if let Some(waker) = waker {
+            let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| waker.wake()));
         }
     });
     if scheduled.is_err() {
@@ -299,18 +302,76 @@ where
         .with_reason("local worker queue is full while constructing async filesystem"));
     }
     poll_fn(|cx| {
+        let mut new_waker = Some(cx.waker().clone());
         let mut completion = completion.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(value) = completion.value.take() {
+            drop(completion);
+            if let Some(waker) = new_waker.take() {
+                let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| drop(waker)));
+            }
             return std::task::Poll::Ready(value);
         }
-        if !completion
+        let old_waker = if completion
             .waker
             .as_ref()
-            .is_some_and(|waker| waker.will_wake(cx.waker()))
+            .is_some_and(|waker| waker.will_wake(new_waker.as_ref().expect("new waker")))
         {
-            completion.waker = Some(cx.waker().clone());
+            None
+        } else {
+            std::mem::replace(&mut completion.waker, new_waker.take())
+        };
+        drop(completion);
+        if let Some(waker) = old_waker {
+            let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| drop(waker)));
+        }
+        if let Some(waker) = new_waker {
+            let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| drop(waker)));
         }
         std::task::Poll::Pending
     })
     .await
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::{Arc, Mutex};
+
+    use crate::operation::LocalExecutionConfig;
+    use crate::operation::LocalIoExecutor;
+    use qubit_operation::{ManagerOptions, OperationManager};
+
+    use super::reserve_vec_capacity;
+
+    #[test]
+    fn read_buffer_growth_reserves_actual_capacity_before_allocation() {
+        let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+        let executor = LocalIoExecutor::new(
+            manager,
+            LocalExecutionConfig {
+                max_owned_bytes: 16,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let permit = Arc::new(Mutex::new(executor.reserve_bytes(0).unwrap()));
+        let mut output = Vec::new();
+
+        reserve_vec_capacity(&mut output, 4, &permit, 16).unwrap();
+        output.extend_from_slice(b"four");
+        let first_capacity = output.capacity();
+        assert_eq!(executor.inner.byte_slots.used(), first_capacity);
+
+        reserve_vec_capacity(&mut output, 12, &permit, 16).unwrap();
+        assert!(output.capacity() > first_capacity);
+        assert_eq!(executor.inner.byte_slots.used(), output.capacity());
+        output.extend_from_slice(b"twelve bytes");
+        let reserved = executor.inner.byte_slots.used();
+        let capacity = output.capacity();
+
+        assert!(reserve_vec_capacity(&mut output, 1, &permit, 16).is_err());
+        assert_eq!(output.capacity(), capacity);
+        assert_eq!(executor.inner.byte_slots.used(), reserved);
+        drop(permit);
+        assert_eq!(executor.inner.byte_slots.used(), 0);
+    }
 }

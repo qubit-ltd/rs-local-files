@@ -189,6 +189,40 @@ fn stopped_parent_rejects_child_read_before_worker_io() {
 }
 
 #[test]
+fn parent_manager_view_can_submit_through_executor_runtime_group() {
+    let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+    let filesystem = host_async(manager.clone());
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml");
+    let filesystem_for_parent = filesystem.clone();
+    let mut parent = manager
+        .try_submit(Default::default(), move |scope| {
+            let child_manager = scope.manager();
+            let (mut child, _observer) = filesystem_for_parent
+                .submit_read_all_with_observer(
+                    &child_manager,
+                    Default::default(),
+                    LocalReadRequest {
+                        path,
+                        read: Default::default(),
+                    },
+                    Default::default(),
+                )
+                .map_err(|_| ())?;
+            match child.wait_outcome().map_err(|_| ())? {
+                qubit_operation::OperationOutcome::Succeeded(bytes) => Ok::<_, ()>(bytes),
+                _ => Err(()),
+            }
+        })
+        .unwrap();
+
+    assert!(matches!(
+        parent.wait_outcome().unwrap(),
+        qubit_operation::OperationOutcome::Succeeded(bytes) if !bytes.is_empty()
+    ));
+    parent.wait_settlement().unwrap();
+}
+
+#[test]
 fn host_relative_reads_use_cwd_captured_by_async_conversion() {
     struct RestoreCwd(PathBuf);
     impl Drop for RestoreCwd {

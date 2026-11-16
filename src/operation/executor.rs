@@ -152,14 +152,10 @@ impl LocalIoExecutor {
         &self,
         job: Box<dyn FnOnce() + Send + 'static>,
         permit: Permit,
-    ) -> Result<(), Box<dyn FnOnce() + Send + 'static>> {
-        let wrapped = Box::new(move || {
-            job();
-            drop(permit);
-        });
+    ) -> Result<(), (Box<dyn FnOnce() + Send + 'static>, Permit)> {
         self.inner
             .queue
-            .push(wrapped, true, self.inner.config.max_open_handles)
+            .push_cleanup(job, permit, self.inner.config.max_open_handles)
     }
 }
 
@@ -295,7 +291,7 @@ mod tests {
     }
 
     #[test]
-    fn activate_queue_failure_publishes_terminal_outcome_and_release() {
+    fn activate_queue_failure_leaves_typed_outcome_to_manager_and_releases_permits() {
         use std::task::{Context, Wake, Waker};
 
         struct Noop;
@@ -306,44 +302,162 @@ mod tests {
         let manager = OperationManager::new(ManagerOptions::default()).unwrap();
         let executor =
             LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).unwrap();
+        let owned = std::sync::Arc::new(std::sync::Mutex::new(executor.reserve_bytes(7).unwrap()));
+        let owned_for_task = std::sync::Arc::clone(&owned);
+        let fact = std::sync::Arc::new(executor.reserve_fact().unwrap());
+        let prepared = PreparedLocalJob::new(
+            std::sync::Arc::clone(&executor.inner),
+            (),
+            executor.reserve_slot().unwrap(),
+            owned,
+            executor.reserve_handle().unwrap(),
+            LocalFactObserver::with_permit(fact),
+            move |_| {
+                drop(owned_for_task);
+                OperationOutcome::<(), ()>::Succeeded(())
+            },
+        );
+        executor.inner.queue.stop();
+        let mut handle = manager
+            .try_submit_external(Default::default(), std::sync::Arc::clone(&prepared))
+            .unwrap();
+        assert!(matches!(
+            handle.wait_outcome().unwrap(),
+            OperationOutcome::ExecutionFailed(_)
+        ));
+        handle.wait_settlement().unwrap();
+        let waker = Waker::from(std::sync::Arc::new(Noop));
+        let mut context = Context::from_waker(&waker);
+        assert!(
+            matches!(
+                qubit_operation::PreparedExternalOperation::poll_take_outcome(
+                    &*prepared,
+                    &mut context,
+                ),
+                std::task::Poll::Pending
+            ),
+            "manager owns the sole typed ExecutionFailed outcome"
+        );
+        assert!(
+            qubit_operation::OperationControl::poll_release(&*prepared, &mut context).is_ready()
+        );
+        assert!(
+            qubit_operation::OperationControl::poll_settlement(&*prepared, &mut context).is_ready()
+        );
+        assert_eq!(executor.inner.queue_slots.used(), 0);
+        assert_eq!(executor.inner.byte_slots.used(), 0);
+        assert_eq!(executor.inner.handle_slots.used(), 0);
+        assert_eq!(executor.inner.fact_slots.used(), 0);
+        assert!(qubit_operation::OperationControl::snapshot(&*prepared).input_released);
+    }
+
+    #[test]
+    fn reentrant_waker_can_observe_control_without_deadlocking() {
+        use std::task::{Context, Wake, Waker};
+
+        struct Reentrant {
+            prepared: std::sync::Arc<PreparedLocalJob<(), (), ()>>,
+            notified: mpsc::Sender<()>,
+        }
+        impl Wake for Reentrant {
+            fn wake(self: std::sync::Arc<Self>) {
+                self.wake_by_ref();
+            }
+            fn wake_by_ref(self: &std::sync::Arc<Self>) {
+                let _ = qubit_operation::OperationControl::snapshot(&*self.prepared);
+                let _ = self.notified.send(());
+            }
+        }
+
+        let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+        let executor =
+            LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).unwrap();
         let prepared = make_job(&executor, |_| OperationOutcome::Succeeded(()));
-        let executor_for_parent = executor.clone();
+        let prepared_for_parent = std::sync::Arc::clone(&prepared);
+        let manager_for_thread = manager.clone();
+        let (done_tx, done_rx) = mpsc::channel();
+        let thread = std::thread::spawn(move || {
+            let mut parent = manager_for_thread
+                .try_submit(Default::default(), move |scope| {
+                    qubit_operation::PreparedExternalOperation::bind(
+                        &*prepared_for_parent,
+                        scope.id(),
+                    )
+                    .unwrap();
+                    let (wake_tx, wake_rx) = mpsc::channel();
+                    let waker = Waker::from(std::sync::Arc::new(Reentrant {
+                        prepared: std::sync::Arc::clone(&prepared_for_parent),
+                        notified: wake_tx,
+                    }));
+                    let mut context = Context::from_waker(&waker);
+                    assert!(
+                        qubit_operation::OperationControl::poll_outcome(
+                            &*prepared_for_parent,
+                            &mut context,
+                        )
+                        .is_pending()
+                    );
+                    qubit_operation::OperationControl::request_stop(
+                        &*prepared_for_parent,
+                        qubit_operation::StopReason::UserCancelled,
+                    );
+                    wake_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+                    Ok::<_, ()>(())
+                })
+                .unwrap();
+            assert!(matches!(
+                parent.wait_outcome().unwrap(),
+                OperationOutcome::Succeeded(())
+            ));
+            done_tx.send(()).unwrap();
+        });
+        done_rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("reentrant Waker callback should complete outside the control lock");
+        thread.join().unwrap();
+    }
+
+    #[test]
+    fn panicking_waker_does_not_unwind_or_corrupt_control_state() {
+        use std::task::{Context, Wake, Waker};
+
+        struct Panics;
+        impl Wake for Panics {
+            fn wake(self: std::sync::Arc<Self>) {
+                panic!("injected Waker panic");
+            }
+            fn wake_by_ref(self: &std::sync::Arc<Self>) {
+                panic!("injected Waker panic");
+            }
+        }
+
+        let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+        let executor =
+            LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).unwrap();
+        let prepared = make_job(&executor, |_| OperationOutcome::Succeeded(()));
         let prepared_for_parent = std::sync::Arc::clone(&prepared);
         let mut parent = manager
             .try_submit(Default::default(), move |scope| {
                 qubit_operation::PreparedExternalOperation::bind(&*prepared_for_parent, scope.id())
                     .unwrap();
-                executor_for_parent.inner.queue.stop();
-                assert!(
-                    qubit_operation::PreparedExternalOperation::activate(
-                        std::sync::Arc::clone(&prepared_for_parent),
-                        scope,
-                    )
-                    .is_err()
-                );
-
-                let waker = Waker::from(std::sync::Arc::new(Noop));
+                let waker = Waker::from(std::sync::Arc::new(Panics));
                 let mut context = Context::from_waker(&waker);
-                assert!(matches!(
-                    qubit_operation::PreparedExternalOperation::poll_take_outcome(
-                        &*prepared_for_parent,
-                        &mut context,
-                    ),
-                    std::task::Poll::Ready(OperationOutcome::ExecutionFailed(_))
-                ));
                 assert!(
-                    qubit_operation::OperationControl::poll_release(
+                    qubit_operation::OperationControl::poll_outcome(
                         &*prepared_for_parent,
                         &mut context,
                     )
-                    .is_ready()
+                    .is_pending()
                 );
-                assert!(
-                    qubit_operation::OperationControl::poll_settlement(
-                        &*prepared_for_parent,
-                        &mut context,
-                    )
-                    .is_ready()
+                qubit_operation::OperationControl::request_stop(
+                    &*prepared_for_parent,
+                    qubit_operation::StopReason::UserCancelled,
+                );
+                assert_eq!(
+                    qubit_operation::OperationControl::snapshot(&*prepared_for_parent)
+                        .stop
+                        .map(|report| report.reason),
+                    Some(qubit_operation::StopReason::UserCancelled)
                 );
                 Ok::<_, ()>(())
             })
@@ -352,6 +466,49 @@ mod tests {
             parent.wait_outcome().unwrap(),
             OperationOutcome::Succeeded(())
         ));
+    }
+
+    #[test]
+    fn abandon_releases_all_unstarted_permits_even_with_retained_arc() {
+        let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+        let executor =
+            LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).unwrap();
+        let owned = std::sync::Arc::new(std::sync::Mutex::new(executor.reserve_bytes(9).unwrap()));
+        let owned_for_task = std::sync::Arc::clone(&owned);
+        let observer_permit = std::sync::Arc::new(executor.reserve_fact().unwrap());
+        let prepared = PreparedLocalJob::new(
+            std::sync::Arc::clone(&executor.inner),
+            (),
+            executor.reserve_slot().unwrap(),
+            owned,
+            executor.reserve_handle().unwrap(),
+            LocalFactObserver::with_permit(observer_permit),
+            move |_| {
+                drop(owned_for_task);
+                OperationOutcome::<(), ()>::Succeeded(())
+            },
+        );
+        let prepared_for_parent = std::sync::Arc::clone(&prepared);
+        let executor_for_parent = executor.clone();
+        let mut parent = manager
+            .try_submit(Default::default(), move |scope| {
+                qubit_operation::PreparedExternalOperation::bind(&*prepared_for_parent, scope.id())
+                    .unwrap();
+                qubit_operation::PreparedExternalOperation::abandon(std::sync::Arc::clone(
+                    &prepared_for_parent,
+                ));
+                assert_eq!(executor_for_parent.inner.queue_slots.used(), 0);
+                assert_eq!(executor_for_parent.inner.byte_slots.used(), 0);
+                assert_eq!(executor_for_parent.inner.handle_slots.used(), 0);
+                assert_eq!(executor_for_parent.inner.fact_slots.used(), 0);
+                Ok::<_, ()>(())
+            })
+            .unwrap();
+        assert!(matches!(
+            parent.wait_outcome().unwrap(),
+            OperationOutcome::Succeeded(())
+        ));
+        assert!(qubit_operation::OperationControl::snapshot(&*prepared).input_released);
     }
 
     #[test]
@@ -688,6 +845,113 @@ mod tests {
         assert!(executor.reserve_disk(1).is_none());
         drop(permit);
         assert_eq!(executor.reserve_disk(8).unwrap().amount(), 8);
+    }
+
+    #[test]
+    fn cleanup_permit_quota_and_rejected_enqueue_preserve_job_and_permit() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+        let executor = LocalIoExecutor::new(
+            manager,
+            LocalExecutionConfig {
+                max_open_handles: 1,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let permit = executor.reserve_cleanup().unwrap();
+        assert!(executor.reserve_cleanup().is_none());
+
+        executor.inner.queue.stop();
+        let calls = std::sync::Arc::new(AtomicUsize::new(0));
+        let calls_for_job = std::sync::Arc::clone(&calls);
+        let result = executor.enqueue_cleanup(
+            Box::new(move || {
+                calls_for_job.fetch_add(1, Ordering::SeqCst);
+            }),
+            permit,
+        );
+        let (job, permit) = result.expect_err("stopped queue must reject cleanup");
+        assert_eq!(executor.inner.cleanup_slots.used(), 1);
+        job();
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        drop(permit);
+        assert_eq!(executor.inner.cleanup_slots.used(), 0);
+    }
+
+    #[test]
+    fn successful_cleanup_runs_and_releases_reserved_slot() {
+        let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+        let executor = LocalIoExecutor::new(manager, LocalExecutionConfig::default()).unwrap();
+        let permit = executor.reserve_cleanup().unwrap();
+        let (done_tx, done_rx) = mpsc::channel();
+        if executor
+            .enqueue_cleanup(Box::new(move || done_tx.send(()).unwrap()), permit)
+            .is_err()
+        {
+            panic!("cleanup enqueue should succeed with a reserved permit");
+        }
+        executor.inner.queue.stop();
+        for worker in executor
+            ._owner
+            .workers
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .drain(..)
+        {
+            worker.join().unwrap();
+        }
+        done_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        assert_eq!(executor.inner.cleanup_slots.used(), 0);
+        assert!(executor.reserve_cleanup().is_some());
+    }
+
+    #[test]
+    fn dropping_executor_drains_queued_work_and_stops_queue() {
+        let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+        let executor = LocalIoExecutor::new(
+            manager,
+            LocalExecutionConfig {
+                worker_count: 1,
+                queue_capacity: 2,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let queue = std::sync::Arc::clone(&executor.inner.queue);
+        let (started_tx, started_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        executor
+            .enqueue_task(move || {
+                started_tx.send(()).unwrap();
+                release_rx.recv().unwrap();
+            })
+            .unwrap();
+        started_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+
+        let (events_tx, events_rx) = mpsc::channel();
+        executor
+            .enqueue_task({
+                let events_tx = events_tx.clone();
+                move || events_tx.send("queued work drained").unwrap()
+            })
+            .unwrap();
+        let drop_thread = std::thread::spawn(move || {
+            drop(executor);
+            events_tx.send("executor dropped").unwrap();
+        });
+        release_tx.send(()).unwrap();
+        assert_eq!(
+            events_rx.recv_timeout(Duration::from_secs(5)).unwrap(),
+            "queued work drained"
+        );
+        assert_eq!(
+            events_rx.recv_timeout(Duration::from_secs(5)).unwrap(),
+            "executor dropped"
+        );
+        drop_thread.join().unwrap();
+        assert!(queue.push(Box::new(|| {}), false, 1).is_err());
     }
 
     #[test]

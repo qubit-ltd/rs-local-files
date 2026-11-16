@@ -2,6 +2,8 @@ use std::collections::VecDeque;
 use std::sync::Condvar;
 use std::sync::Mutex;
 
+use super::permits::Permit;
+
 pub(crate) struct QueueState {
     ordinary: VecDeque<Box<dyn FnOnce() + Send + 'static>>,
     cleanup: VecDeque<Box<dyn FnOnce() + Send + 'static>>,
@@ -48,6 +50,25 @@ impl WorkerQueue {
             return Err(job);
         }
         queue.push_back(job);
+        self.wake.notify_one();
+        Ok(())
+    }
+
+    pub(crate) fn push_cleanup(
+        &self,
+        job: Box<dyn FnOnce() + Send + 'static>,
+        permit: Permit,
+        limit: usize,
+    ) -> Result<(), (Box<dyn FnOnce() + Send + 'static>, Permit)> {
+        let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        if state.stopping || state.cleanup.len() >= limit {
+            return Err((job, permit));
+        }
+        let wrapped = Box::new(move || {
+            let _permit = permit;
+            job();
+        });
+        state.cleanup.push_back(wrapped);
         self.wake.notify_one();
         Ok(())
     }

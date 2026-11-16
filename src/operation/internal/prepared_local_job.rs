@@ -44,9 +44,10 @@ pub(crate) struct PreparedLocalJob<R, T, E> {
     task: Mutex<Option<Box<dyn FnOnce(R) -> OperationOutcome<T, E> + Send + 'static>>>,
     _slot: Mutex<Option<Permit>>,
     _owned_permit: Mutex<Option<Arc<Mutex<Permit>>>>,
-    _fact_observer: LocalFactObserver,
+    _fact_observer: Mutex<Option<LocalFactObserver>>,
     _handle_permit: Mutex<Option<Permit>>,
     claimed: AtomicBool,
+    activation_started: AtomicBool,
     port: Mutex<Port<T, E>>,
 }
 
@@ -74,9 +75,10 @@ where
             task: Mutex::new(Some(Box::new(task))),
             _slot: Mutex::new(Some(slot)),
             _owned_permit: Mutex::new(Some(owned_permit)),
-            _fact_observer: fact_observer,
+            _fact_observer: Mutex::new(Some(fact_observer)),
             _handle_permit: Mutex::new(Some(handle_permit)),
             claimed: AtomicBool::new(false),
+            activation_started: AtomicBool::new(false),
             port: Mutex::new(Port {
                 id: None,
                 phase: ExecutionPhase::Queued,
@@ -90,24 +92,48 @@ where
         })
     }
 
-    fn wake_all(port: &mut Port<T, E>) {
-        let wakers = std::mem::replace(&mut port.wakers, [None, None, None, None]);
-        for (index, waker) in wakers.iter().enumerate() {
-            let Some(waker) = waker else {
+    fn take_wakers(port: &mut Port<T, E>) -> [Option<Waker>; 4] {
+        std::mem::replace(&mut port.wakers, [None, None, None, None])
+    }
+
+    fn wake_all(mut wakers: [Option<Waker>; 4]) {
+        let mut duplicate = [false; 4];
+        for index in 0..wakers.len() {
+            let Some(current) = wakers[index].as_ref() else {
                 continue;
             };
-            let duplicate = wakers[..index]
+            duplicate[index] = wakers[..index]
                 .iter()
                 .flatten()
-                .any(|prior| prior.will_wake(waker));
-            if !duplicate {
-                waker.wake_by_ref();
+                .any(|prior| prior.will_wake(current));
+        }
+        for index in 0..wakers.len() {
+            let Some(waker) = wakers[index].take() else {
+                continue;
+            };
+            if !duplicate[index] {
+                let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    waker.wake_by_ref();
+                }));
             }
+            let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| drop(waker)));
         }
     }
 
-    fn register(port: &mut Port<T, E>, slot: usize, waker: &Waker) {
-        port.wakers[slot] = Some(waker.clone());
+    fn register(port: &mut Port<T, E>, slot: usize, waker: &mut Option<Waker>) -> Option<Waker> {
+        if port.wakers[slot]
+            .as_ref()
+            .is_some_and(|previous| previous.will_wake(waker.as_ref().expect("new waker")))
+        {
+            return None;
+        }
+        std::mem::replace(&mut port.wakers[slot], waker.take())
+    }
+
+    fn discard_waker(waker: Option<Waker>) {
+        if let Some(waker) = waker {
+            let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| drop(waker)));
+        }
     }
 }
 
@@ -120,18 +146,32 @@ impl<R: Send + 'static, T: Send + 'static, E: Send + 'static> PreparedLocalJob<R
     }
 
     fn finish_released(&self, id: OperationId) {
-        let mut port = self.port.lock().unwrap_or_else(|e| e.into_inner());
-        let outcome = OperationOutcome::ExecutionFailed(ExecutionFailure {
-            operation_id: id,
-            summary: DiagnosticSummary::new("local worker activation failed"),
-            source: None,
-        });
-        port.phase = ExecutionPhase::Finished;
-        port.summary = Some(outcome_summary(id, &outcome));
-        port.outcome = Some(outcome);
-        port.released = true;
-        port.settlement = Some(empty_settlement(id));
-        Self::wake_all(&mut port);
+        self.task.lock().unwrap_or_else(|e| e.into_inner()).take();
+        self.request
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .take();
+        self._slot.lock().unwrap_or_else(|e| e.into_inner()).take();
+        self._owned_permit
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .take();
+        self._handle_permit
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .take();
+        self._fact_observer
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .take();
+        let wakers = {
+            let mut port = self.port.lock().unwrap_or_else(|e| e.into_inner());
+            port.phase = ExecutionPhase::Finished;
+            port.released = true;
+            port.settlement = Some(empty_settlement(id));
+            Self::take_wakers(&mut port)
+        };
+        Self::wake_all(wakers);
     }
 }
 
@@ -170,11 +210,14 @@ where
     E: Send + 'static,
 {
     fn request_stop(&self, reason: StopReason) {
-        let mut port = self.port.lock().unwrap_or_else(|e| e.into_inner());
-        if port.stop.is_none() {
-            port.stop = Some(reason);
-        }
-        Self::wake_all(&mut port);
+        let wakers = {
+            let mut port = self.port.lock().unwrap_or_else(|e| e.into_inner());
+            if port.stop.is_none() {
+                port.stop = Some(reason);
+            }
+            Self::take_wakers(&mut port)
+        };
+        Self::wake_all(wakers);
     }
 
     fn snapshot(&self) -> ChildSnapshot {
@@ -193,32 +236,53 @@ where
     }
 
     fn poll_outcome(&self, cx: &mut Context<'_>) -> Poll<ChildOutcomeSummary> {
+        let mut new_waker = Some(cx.waker().clone());
         let mut port = self.port.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(value) = &port.summary {
-            return Poll::Ready(value.clone());
+            let value = value.clone();
+            drop(port);
+            Self::discard_waker(new_waker.take());
+            return Poll::Ready(value);
         }
-        Self::register(&mut port, 1, cx.waker());
+        let old = Self::register(&mut port, 1, &mut new_waker);
+        drop(port);
+        Self::discard_waker(old);
+        Self::discard_waker(new_waker);
         Poll::Pending
     }
 
     fn poll_release(&self, cx: &mut Context<'_>) -> Poll<ChildRelease> {
+        let mut new_waker = Some(cx.waker().clone());
         let mut port = self.port.lock().unwrap_or_else(|e| e.into_inner());
         if port.released {
-            return Poll::Ready(ChildRelease {
+            let released = ChildRelease {
                 operation_id: port.id.expect("manager binds before observing control"),
                 confirmed_at: None,
-            });
+            };
+            drop(port);
+            Self::discard_waker(new_waker.take());
+            return Poll::Ready(released);
         }
-        Self::register(&mut port, 2, cx.waker());
+        let old = Self::register(&mut port, 2, &mut new_waker);
+        drop(port);
+        Self::discard_waker(old);
+        Self::discard_waker(new_waker);
         Poll::Pending
     }
 
     fn poll_settlement(&self, cx: &mut Context<'_>) -> Poll<Arc<SettlementReport>> {
+        let mut new_waker = Some(cx.waker().clone());
         let mut port = self.port.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(value) = &port.settlement {
-            return Poll::Ready(Arc::clone(value));
+            let value = Arc::clone(value);
+            drop(port);
+            Self::discard_waker(new_waker.take());
+            return Poll::Ready(value);
         }
-        Self::register(&mut port, 3, cx.waker());
+        let old = Self::register(&mut port, 3, &mut new_waker);
+        drop(port);
+        Self::discard_waker(old);
+        Self::discard_waker(new_waker);
         Poll::Pending
     }
 }
@@ -244,6 +308,13 @@ where
 
     fn activate(self: Arc<Self>, scope: OperationScope) -> Result<(), ExecutionFailure> {
         let id = scope.id();
+        if self.activation_started.swap(true, Ordering::AcqRel) {
+            return Err(ExecutionFailure {
+                operation_id: id,
+                summary: DiagnosticSummary::new("local job activation was already attempted"),
+                source: None,
+            });
+        }
         let claimed_id = self.port.lock().unwrap_or_else(|e| e.into_inner()).id;
         if claimed_id != Some(id) {
             self.finish_released(id);
@@ -279,32 +350,36 @@ where
         let job = Box::new(move || {
             let _scope_guard = scope_guard;
             this._slot.lock().unwrap_or_else(|e| e.into_inner()).take();
-            let stop_before_start = {
+            let (stop_before_start, wakers) = {
                 let mut port = this.port.lock().unwrap_or_else(|e| e.into_inner());
-                if let Some(reason) = port.stop {
+                let stop = if let Some(reason) = port.stop {
                     Some(reason)
                 } else {
                     port.phase = ExecutionPhase::Running;
-                    Self::wake_all(&mut port);
                     None
-                }
+                };
+                (stop, Self::take_wakers(&mut port))
             };
+            Self::wake_all(wakers);
             if let Some(reason) = stop_before_start {
                 let outcome = OperationOutcome::Stopped(qubit_operation::StopReport {
                     reason,
                     accepted_at: None,
                 });
-                let mut port = this.port.lock().unwrap_or_else(|e| e.into_inner());
-                port.phase = ExecutionPhase::Finished;
-                port.summary = Some(outcome_summary(id, &outcome));
-                port.outcome = Some(outcome);
-                port.released = true;
-                port.settlement = Some(empty_settlement(id));
                 this._handle_permit
                     .lock()
                     .unwrap_or_else(|e| e.into_inner())
                     .take();
-                Self::wake_all(&mut port);
+                let wakers = {
+                    let mut port = this.port.lock().unwrap_or_else(|e| e.into_inner());
+                    port.phase = ExecutionPhase::Finished;
+                    port.summary = Some(outcome_summary(id, &outcome));
+                    port.outcome = Some(outcome);
+                    port.released = true;
+                    port.settlement = Some(empty_settlement(id));
+                    Self::take_wakers(&mut port)
+                };
+                Self::wake_all(wakers);
                 return;
             }
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| task(request)));
@@ -322,15 +397,18 @@ where
             };
             let summary = outcome_summary(id, &outcome);
             let settlement = empty_settlement(id);
-            let mut port = this.port.lock().unwrap_or_else(|e| e.into_inner());
-            port.phase = ExecutionPhase::Finished;
-            port.summary = Some(summary);
-            port.outcome = Some(outcome);
-            port.released = true;
-            port.settlement = Some(settlement);
-            Self::wake_all(&mut port);
+            let wakers = {
+                let mut port = this.port.lock().unwrap_or_else(|e| e.into_inner());
+                port.phase = ExecutionPhase::Finished;
+                port.summary = Some(summary);
+                port.outcome = Some(outcome);
+                port.released = true;
+                port.settlement = Some(settlement);
+                Self::take_wakers(&mut port)
+            };
+            Self::wake_all(wakers);
         });
-        if let Err(_job) = self.executor.queue.push(
+        if let Err(job) = self.executor.queue.push(
             job,
             false,
             self.executor
@@ -338,6 +416,7 @@ where
                 .queue_capacity
                 .saturating_add(self.executor.config.waiter_capacity),
         ) {
+            drop(job);
             self.finish_released(id);
             return Err(ExecutionFailure {
                 operation_id: id,
@@ -359,25 +438,42 @@ where
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .take();
-        let mut port = self.port.lock().unwrap_or_else(|e| e.into_inner());
-        if let Some(id) = port.id {
-            port.phase = ExecutionPhase::Finished;
-            port.released = true;
-            port.settlement = Some(empty_settlement(id));
-        }
-        Self::wake_all(&mut port);
+        self._handle_permit
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .take();
+        self._fact_observer
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .take();
+        let wakers = {
+            let mut port = self.port.lock().unwrap_or_else(|e| e.into_inner());
+            if let Some(id) = port.id {
+                port.phase = ExecutionPhase::Finished;
+                port.released = true;
+                port.settlement = Some(empty_settlement(id));
+            }
+            Self::take_wakers(&mut port)
+        };
+        Self::wake_all(wakers);
     }
 
     fn poll_take_outcome(&self, cx: &mut Context<'_>) -> Poll<OperationOutcome<T, E>> {
+        let mut new_waker = Some(cx.waker().clone());
         let mut port = self.port.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(value) = port.outcome.take() {
+            drop(port);
             self._owned_permit
                 .lock()
                 .unwrap_or_else(|e| e.into_inner())
                 .take();
+            Self::discard_waker(new_waker.take());
             return Poll::Ready(value);
         }
-        Self::register(&mut port, 0, cx.waker());
+        let old = Self::register(&mut port, 0, &mut new_waker);
+        drop(port);
+        Self::discard_waker(old);
+        Self::discard_waker(new_waker);
         Poll::Pending
     }
 }
