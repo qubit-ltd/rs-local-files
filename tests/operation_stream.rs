@@ -508,6 +508,29 @@ fn seek_current_accounts_for_prefetched_bytes() {
 }
 
 #[test]
+fn pending_seek_future_repoll_returns_original_position_without_reissuing_seek() {
+    let worker = Arc::new(FakeWorker::with_bytes(b"abc"));
+    worker.hold_next();
+    let mut reader = reader(&worker);
+    let mut seek = Box::pin(reader.seek(SeekFrom::Current(1)));
+    assert!(poll(|cx| seek.as_mut().poll(cx)).is_pending());
+
+    worker.release();
+    assert!(matches!(
+        poll(|cx| seek.as_mut().poll(cx)),
+        Poll::Ready(Ok(1))
+    ));
+    drop(seek);
+
+    let mut output = [0; 1];
+    assert!(matches!(
+        poll(|cx| Pin::new(&mut reader).poll_read(cx, &mut output)),
+        Poll::Ready(Ok(1))
+    ));
+    assert_eq!(output, [b'b']);
+}
+
+#[test]
 fn cancelled_seek_remains_a_barrier_until_its_position_is_decided() {
     let worker = Arc::new(FakeWorker::with_bytes(b"0123456789"));
     let mut reader = reader(&worker);

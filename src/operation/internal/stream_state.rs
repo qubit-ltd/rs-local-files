@@ -538,9 +538,7 @@ impl StreamState {
             return Poll::Pending;
         }
         if let Some(result) = self.seek_result.take() {
-            if let Err(error) = result {
-                return Poll::Ready(Err(error));
-            }
+            return Poll::Ready(result);
         }
         if let Poll::Pending = self.poll_pending_read(resource, cx) {
             return Poll::Pending;
