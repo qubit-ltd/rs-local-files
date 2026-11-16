@@ -21,6 +21,11 @@ struct PendingWrite {
     offset: usize,
 }
 
+struct PendingSeek {
+    owner_id: u64,
+    request: LocalStreamRequest,
+}
+
 #[derive(Clone)]
 struct SavedError {
     kind: io::ErrorKind,
@@ -43,6 +48,7 @@ impl SavedError {
 pub(super) struct StreamState {
     direction: Direction,
     next_id: u64,
+    next_seek_owner_id: u64,
     read_request: Option<LocalStreamRequest>,
     read_buffer: VecDeque<u8>,
     eof: bool,
@@ -50,8 +56,8 @@ pub(super) struct StreamState {
     queued_write_bytes: usize,
     written_bytes: u64,
     write_error: Option<SavedError>,
-    seek_request: Option<LocalStreamRequest>,
-    seek_result: Option<io::Result<u64>>,
+    seek_request: Option<PendingSeek>,
+    seek_result: Option<(u64, io::Result<u64>)>,
     flush_request: Option<LocalStreamRequest>,
     close_request: Option<LocalStreamRequest>,
     closed: bool,
@@ -194,6 +200,7 @@ impl StreamState {
         Self {
             direction,
             next_id: 1,
+            next_seek_owner_id: 1,
             read_request: None,
             read_buffer: VecDeque::new(),
             eof: false,
@@ -214,6 +221,12 @@ impl StreamState {
         let id = self.next_id;
         self.next_id = self.next_id.wrapping_add(1).max(1);
         LocalStreamRequest { id, command }
+    }
+
+    pub(super) fn new_seek_owner_id(&mut self) -> u64 {
+        let id = self.next_seek_owner_id;
+        self.next_seek_owner_id = self.next_seek_owner_id.wrapping_add(1).max(1);
+        id
     }
 
     fn error_closed() -> io::Error {
@@ -245,7 +258,7 @@ impl StreamState {
         if let Poll::Pending = self.poll_seek_barrier(resource, cx) {
             return Poll::Pending;
         }
-        if let Some(result) = self.seek_result.take() {
+        if let Some((_, result)) = self.seek_result.take() {
             if let Err(error) = result {
                 return Poll::Ready(Err(error));
             }
@@ -345,7 +358,7 @@ impl StreamState {
         if let Poll::Pending = self.poll_seek_barrier(resource, cx) {
             return Poll::Pending;
         }
-        if let Some(Err(error)) = self.seek_result.take() {
+        if let Some((_, Err(error))) = self.seek_result.take() {
             return Poll::Ready(Err(error));
         }
         if let Poll::Pending = self.poll_writes(resource, cx) {
@@ -524,6 +537,7 @@ impl StreamState {
         resource: &LocalStreamResource,
         cx: &mut Context<'_>,
         position: SeekFrom,
+        owner_id: u64,
     ) -> Poll<io::Result<u64>> {
         if self.direction != Direction::Read {
             return Poll::Ready(Err(io::Error::new(
@@ -537,8 +551,14 @@ impl StreamState {
         if let Poll::Pending = self.poll_seek_barrier(resource, cx) {
             return Poll::Pending;
         }
-        if let Some(result) = self.seek_result.take() {
-            return Poll::Ready(result);
+        if let Some((result_owner, result)) = self.seek_result.take() {
+            match result {
+                Err(error) => return Poll::Ready(Err(error)),
+                Ok(position) if result_owner == owner_id => {
+                    return Poll::Ready(Ok(position));
+                }
+                Ok(_) => {}
+            }
         }
         if let Poll::Pending = self.poll_pending_read(resource, cx) {
             return Poll::Pending;
@@ -562,17 +582,26 @@ impl StreamState {
                 }
                 other => other,
             };
-            self.seek_request = Some(self.request(LocalStreamCommand::Seek(adjusted)));
+            self.seek_request = Some(PendingSeek {
+                owner_id,
+                request: self.request(LocalStreamCommand::Seek(adjusted)),
+            });
         }
         if let Poll::Pending = self.poll_seek_barrier(resource, cx) {
             return Poll::Pending;
         }
-        Poll::Ready(self.seek_result.take().unwrap_or_else(|| {
-            Err(io::Error::new(
+        match self.seek_result.take() {
+            Some((result_owner, result)) if result_owner == owner_id => Poll::Ready(result),
+            Some((_, Err(error))) => Poll::Ready(Err(error)),
+            Some((_, Ok(_))) => Poll::Ready(Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "another seek completed while the current seek was pending",
+            ))),
+            None => Poll::Ready(Err(io::Error::new(
                 io::ErrorKind::InvalidData,
                 "seek completed without a result",
-            ))
-        }))
+            ))),
+        }
     }
 
     fn poll_seek_barrier(
@@ -580,16 +609,18 @@ impl StreamState {
         resource: &LocalStreamResource,
         cx: &mut Context<'_>,
     ) -> Poll<()> {
-        let Some(request) = self.seek_request.as_ref() else {
+        let Some(pending) = self.seek_request.as_ref() else {
             return Poll::Ready(());
         };
-        match resource.poll_command(cx, request) {
+        let owner_id = pending.owner_id;
+        let request = pending.request.clone();
+        match resource.poll_command(cx, &request) {
             Poll::Pending => Poll::Pending,
             Poll::Ready(Ok(LocalStreamCompletion::Seeked(position))) => {
                 self.seek_request = None;
                 self.read_buffer.clear();
                 self.eof = false;
-                self.seek_result = Some(Ok(position));
+                self.seek_result = Some((owner_id, Ok(position)));
                 Poll::Ready(())
             }
             Poll::Ready(Ok(LocalStreamCompletion::Unconfirmed { operation, detail })) => {
@@ -599,7 +630,7 @@ impl StreamState {
                     error.kind(),
                     error.to_string(),
                 )));
-                self.seek_result = Some(Err(error));
+                self.seek_result = Some((owner_id, Err(error)));
                 Poll::Ready(())
             }
             Poll::Ready(Ok(_)) => {
@@ -610,7 +641,7 @@ impl StreamState {
                     error.kind(),
                     error.to_string(),
                 )));
-                self.seek_result = Some(Err(error));
+                self.seek_result = Some((owner_id, Err(error)));
                 Poll::Ready(())
             }
             Poll::Ready(Err(error)) => {
@@ -622,7 +653,7 @@ impl StreamState {
                     unknown.kind(),
                     unknown.to_string(),
                 )));
-                self.seek_result = Some(Err(unknown));
+                self.seek_result = Some((owner_id, Err(unknown)));
                 Poll::Ready(())
             }
         }
@@ -701,7 +732,7 @@ impl StreamState {
         if let Poll::Pending = self.poll_seek_barrier(resource, cx) {
             return Poll::Pending;
         }
-        if let Some(Err(error)) = self.seek_result.take() {
+        if let Some((_, Err(error))) = self.seek_result.take() {
             return Poll::Ready(Err(error));
         }
         if self.direction == Direction::Read {
@@ -735,7 +766,7 @@ impl StreamState {
         if let Poll::Pending = self.poll_seek_barrier(resource, cx) {
             return Poll::Pending;
         }
-        if let Some(Err(error)) = self.seek_result.take() {
+        if let Some((_, Err(error))) = self.seek_result.take() {
             self.write_error = Some(SavedError::capture(error));
         }
         if self.direction == Direction::Read {

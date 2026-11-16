@@ -150,11 +150,12 @@ impl AsyncLocalFileReader {
     /// Performs a cancellation-safe seek. A cancelled seek remains in the
     /// stream state and is settled before a later read is allowed to proceed.
     pub async fn seek(&mut self, position: SeekFrom) -> io::Result<u64> {
+        let owner_id = self.state.new_seek_owner_id();
         let Some(resource) = self.resource.as_deref() else {
             return Err(StreamState::closed_error());
         };
         let state = &mut self.state;
-        std::future::poll_fn(move |cx| state.poll_seek(resource, cx, position)).await
+        std::future::poll_fn(move |cx| state.poll_seek(resource, cx, position, owner_id)).await
     }
 
     /// Waits for the stream's in-flight command and reports a latched failure.
