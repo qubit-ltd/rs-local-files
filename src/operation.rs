@@ -1,10 +1,17 @@
-//! Public contracts for managed local filesystem operations.
-//!
-//! The operation dependency is part of the common contract. The optional
-//! `async` feature gates the local execution facade, not these value types.
+//! Managed local operation contracts and asynchronous execution support.
 
+#[cfg(feature = "async")]
+mod async_local_file_system;
+#[cfg(feature = "async")]
+mod executor;
+#[cfg(feature = "async")]
+mod internal;
 mod types;
 
+#[cfg(feature = "async")]
+pub use async_local_file_system::AsyncLocalFileSystem;
+#[cfg(feature = "async")]
+pub use executor::LocalIoExecutor;
 pub use types::LocalDurabilityState;
 pub use types::LocalExecutionConfig;
 pub use types::LocalExecutorConfigError;
