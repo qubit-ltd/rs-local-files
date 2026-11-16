@@ -7,7 +7,10 @@
 
 use std::collections::HashMap;
 use std::io;
-use std::sync::{Arc, Condvar, Mutex, OnceLock};
+use std::sync::Arc;
+use std::sync::Condvar;
+use std::sync::Mutex;
+use std::sync::OnceLock;
 
 #[derive(Default)]
 struct GateState {
@@ -60,9 +63,7 @@ impl TestGateGuard {
 impl Drop for TestGateGuard {
     fn drop(&mut self) {
         self.release();
-        let mut active = gates()
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut active = gates().lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         if active
             .get(&self.name)
             .is_some_and(|state| Arc::ptr_eq(state, &self.state))
@@ -79,15 +80,10 @@ impl Drop for TestGateGuard {
 #[doc(hidden)]
 pub fn install_test_gate(name: &str) -> io::Result<TestGateGuard> {
     if name.is_empty() {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "test gate name is empty",
-        ));
+        return Err(io::Error::new(io::ErrorKind::InvalidInput, "test gate name is empty"));
     }
     let state = Arc::new(GateState::default());
-    let mut active = gates()
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut active = gates().lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     if active.contains_key(name) {
         return Err(io::Error::new(
             io::ErrorKind::AlreadyExists,
@@ -109,10 +105,7 @@ pub(crate) fn hit_test_gate(name: &str) {
         .get(name)
         .cloned();
     let Some(state) = state else { return };
-    let mut phase = state
-        .phase
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut phase = state.phase.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     phase.0 = true;
     state.changed.notify_all();
     while !phase.1 {
@@ -125,7 +118,8 @@ pub(crate) fn hit_test_gate(name: &str) {
 
 #[cfg(test)]
 mod tests {
-    use super::{hit_test_gate, install_test_gate};
+    use super::hit_test_gate;
+    use super::install_test_gate;
 
     #[test]
     fn gate_releases_a_worker_after_entered_notification() {

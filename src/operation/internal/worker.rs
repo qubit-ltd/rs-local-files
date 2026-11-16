@@ -104,10 +104,7 @@ impl WorkerQueue {
     }
 
     pub(crate) fn stop(&self) {
-        self.state
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .stopping = true;
+        self.state.lock().unwrap_or_else(|e| e.into_inner()).stopping = true;
         self.wake.notify_all();
     }
 }

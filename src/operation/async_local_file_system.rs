@@ -6,7 +6,8 @@ use std::task::Waker;
 
 use super::LocalIoExecutor;
 
-/// Asynchronous facade retaining its synchronous filesystem authority and executor.
+/// Asynchronous facade retaining its synchronous filesystem authority and
+/// executor.
 #[derive(Clone)]
 pub struct AsyncLocalFileSystem {
     pub(crate) filesystem: crate::LocalFileSystem,
@@ -27,28 +28,24 @@ impl AsyncLocalFileSystem {
         }
     }
 
-    /// Creates a Host facade after reading the process cwd on a local I/O worker.
+    /// Creates a Host facade after reading the process cwd on a local I/O
+    /// worker.
     pub async fn host(executor: LocalIoExecutor) -> crate::LocalResult<Self> {
         let filesystem = crate::LocalFileSystem::host()?;
         let host_base = run_on_worker(&executor, || {
             std::env::current_dir().map_err(|source| {
-                crate::LocalFileError::from_io(
-                    crate::LocalFileOperation::CurrentDirectory,
-                    None,
-                    None,
-                    source,
-                )
-                .with_reason("failed to capture process directory for async local filesystem")
+                crate::LocalFileError::from_io(crate::LocalFileOperation::CurrentDirectory, None, None, source)
+                    .with_reason("failed to capture process directory for async local filesystem")
             })
         })
         .await?;
         Ok(Self::new(filesystem, executor, Some(host_base)))
     }
 
-    /// Opens a Rooted authority on a local I/O worker and returns its async facade.
+    /// Opens a Rooted authority on a local I/O worker and returns its async
+    /// facade.
     pub async fn rooted(executor: LocalIoExecutor, root: PathBuf) -> crate::LocalResult<Self> {
-        let filesystem =
-            run_on_worker(&executor, move || crate::LocalFileSystem::rooted(&root)).await?;
+        let filesystem = run_on_worker(&executor, move || crate::LocalFileSystem::rooted(&root)).await?;
         Ok(Self::new(filesystem, executor, None))
     }
 
@@ -59,10 +56,7 @@ impl AsyncLocalFileSystem {
         operation: qubit_operation::OperationOptions,
         path: PathBuf,
         options: crate::LocalListOptions,
-    ) -> Result<
-        super::LocalOperation<super::stream::AsyncLocalDirectoryWalker>,
-        super::LocalSubmitError<PathBuf>,
-    > {
+    ) -> Result<super::LocalOperation<super::stream::AsyncLocalDirectoryWalker>, super::LocalSubmitError<PathBuf>> {
         use qubit_operation::OperationOutcome;
         let scoped = match manager.with_group(&self.executor.inner.group) {
             Ok(value) => value,
@@ -79,10 +73,7 @@ impl AsyncLocalFileSystem {
                 ));
             }
             Err(qubit_operation::GroupBindingError::Closed) => {
-                return Err(super::LocalSubmitError::new(
-                    path,
-                    super::LocalSubmitRejection::Closed,
-                ));
+                return Err(super::LocalSubmitError::new(path, super::LocalSubmitRejection::Closed));
             }
             Err(qubit_operation::GroupBindingError::CapacityExceeded) => {
                 return Err(super::LocalSubmitError::new(
@@ -107,10 +98,7 @@ impl AsyncLocalFileSystem {
                 super::LocalSubmitRejection::CapacityExceeded,
             ));
         };
-        let Some(budget) = self
-            .executor
-            .reserve_bytes(super::stream::LOCAL_WALK_BATCH_BYTES)
-        else {
+        let Some(budget) = self.executor.reserve_bytes(super::stream::LOCAL_WALK_BATCH_BYTES) else {
             return Err(super::LocalSubmitError::new(
                 path,
                 super::LocalSubmitRejection::CapacityExceeded,
@@ -146,13 +134,8 @@ impl AsyncLocalFileSystem {
             move |_, scope| match filesystem.list_with_options(&execution_path, &options) {
                 Err(error) => OperationOutcome::Failed(error),
                 Ok(walker) => {
-                    let resource = super::stream::WorkerWalkDriver::managed(
-                        scope,
-                        executor,
-                        walker,
-                        worker_budget,
-                        worker_handle,
-                    );
+                    let resource =
+                        super::stream::WorkerWalkDriver::managed(scope, executor, walker, worker_budget, worker_handle);
                     match resource.and_then(super::stream::AsyncLocalDirectoryWalker::new) {
                         Ok(walker) => OperationOutcome::Succeeded(walker),
                         Err(error) => OperationOutcome::Failed(crate::LocalFileError::from_io(
@@ -173,14 +156,9 @@ impl AsyncLocalFileSystem {
                 Err(super::LocalSubmitError::new(
                     request,
                     match reason {
-                        qubit_operation::AdmissionError::ScopeEnded => {
-                            super::LocalSubmitRejection::ScopeEnded
-                        }
-                        qubit_operation::AdmissionError::Stopped => {
-                            super::LocalSubmitRejection::Stopped
-                        }
-                        qubit_operation::AdmissionError::CapacityExceeded
-                        | qubit_operation::AdmissionError::Busy => {
+                        qubit_operation::AdmissionError::ScopeEnded => super::LocalSubmitRejection::ScopeEnded,
+                        qubit_operation::AdmissionError::Stopped => super::LocalSubmitRejection::Stopped,
+                        qubit_operation::AdmissionError::CapacityExceeded | qubit_operation::AdmissionError::Busy => {
                             super::LocalSubmitRejection::CapacityExceeded
                         }
                         _ => super::LocalSubmitRejection::Closed,
@@ -198,10 +176,7 @@ impl AsyncLocalFileSystem {
         operation: qubit_operation::OperationOptions,
         path: PathBuf,
         options: crate::LocalReadOptions,
-    ) -> Result<
-        super::LocalOperation<super::stream::AsyncLocalFileReader>,
-        super::LocalSubmitError<PathBuf>,
-    > {
+    ) -> Result<super::LocalOperation<super::stream::AsyncLocalFileReader>, super::LocalSubmitError<PathBuf>> {
         use qubit_operation::OperationOutcome;
         let scoped = match manager.with_group(&self.executor.inner.group) {
             Ok(value) => value,
@@ -218,10 +193,7 @@ impl AsyncLocalFileSystem {
                 ));
             }
             Err(qubit_operation::GroupBindingError::Closed) => {
-                return Err(super::LocalSubmitError::new(
-                    path,
-                    super::LocalSubmitRejection::Closed,
-                ));
+                return Err(super::LocalSubmitError::new(path, super::LocalSubmitRejection::Closed));
             }
             Err(qubit_operation::GroupBindingError::CapacityExceeded) => {
                 return Err(super::LocalSubmitError::new(
@@ -246,10 +218,7 @@ impl AsyncLocalFileSystem {
                 super::LocalSubmitRejection::CapacityExceeded,
             ));
         };
-        let Some(bytes) = self
-            .executor
-            .reserve_bytes(super::stream::LOCAL_STREAM_BUFFER_SIZE)
-        else {
+        let Some(bytes) = self.executor.reserve_bytes(super::stream::LOCAL_STREAM_BUFFER_SIZE) else {
             return Err(super::LocalSubmitError::new(
                 path,
                 super::LocalSubmitRejection::CapacityExceeded,
@@ -316,14 +285,9 @@ impl AsyncLocalFileSystem {
                 Err(super::LocalSubmitError::new(
                     request,
                     match reason {
-                        qubit_operation::AdmissionError::ScopeEnded => {
-                            super::LocalSubmitRejection::ScopeEnded
-                        }
-                        qubit_operation::AdmissionError::Stopped => {
-                            super::LocalSubmitRejection::Stopped
-                        }
-                        qubit_operation::AdmissionError::CapacityExceeded
-                        | qubit_operation::AdmissionError::Busy => {
+                        qubit_operation::AdmissionError::ScopeEnded => super::LocalSubmitRejection::ScopeEnded,
+                        qubit_operation::AdmissionError::Stopped => super::LocalSubmitRejection::Stopped,
+                        qubit_operation::AdmissionError::CapacityExceeded | qubit_operation::AdmissionError::Busy => {
                             super::LocalSubmitRejection::CapacityExceeded
                         }
                         _ => super::LocalSubmitRejection::Closed,
@@ -334,7 +298,8 @@ impl AsyncLocalFileSystem {
     }
 
     /// Submits a worker-backed writer open. Accepted bytes are sent to the
-    /// native writer on the executor; the returned observer reports the final commit fact.
+    /// native writer on the executor; the returned observer reports the final
+    /// commit fact.
     pub fn submit_open_writer(
         &self,
         manager: &qubit_operation::OperationManager,
@@ -364,10 +329,7 @@ impl AsyncLocalFileSystem {
                 ));
             }
             Err(qubit_operation::GroupBindingError::Closed) => {
-                return Err(super::LocalSubmitError::new(
-                    path,
-                    super::LocalSubmitRejection::Closed,
-                ));
+                return Err(super::LocalSubmitError::new(path, super::LocalSubmitRejection::Closed));
             }
             Err(qubit_operation::GroupBindingError::CapacityExceeded) => {
                 return Err(super::LocalSubmitError::new(
@@ -392,10 +354,7 @@ impl AsyncLocalFileSystem {
                 super::LocalSubmitRejection::CapacityExceeded,
             ));
         };
-        let Some(budget) = self
-            .executor
-            .reserve_bytes(super::stream::LOCAL_STREAM_BUFFER_SIZE)
-        else {
+        let Some(budget) = self.executor.reserve_bytes(super::stream::LOCAL_STREAM_BUFFER_SIZE) else {
             return Err(super::LocalSubmitError::new(
                 path,
                 super::LocalSubmitRejection::CapacityExceeded,
@@ -460,14 +419,9 @@ impl AsyncLocalFileSystem {
                 Err(super::LocalSubmitError::new(
                     request,
                     match reason {
-                        qubit_operation::AdmissionError::ScopeEnded => {
-                            super::LocalSubmitRejection::ScopeEnded
-                        }
-                        qubit_operation::AdmissionError::Stopped => {
-                            super::LocalSubmitRejection::Stopped
-                        }
-                        qubit_operation::AdmissionError::CapacityExceeded
-                        | qubit_operation::AdmissionError::Busy => {
+                        qubit_operation::AdmissionError::ScopeEnded => super::LocalSubmitRejection::ScopeEnded,
+                        qubit_operation::AdmissionError::Stopped => super::LocalSubmitRejection::Stopped,
+                        qubit_operation::AdmissionError::CapacityExceeded | qubit_operation::AdmissionError::Busy => {
                             super::LocalSubmitRejection::CapacityExceeded
                         }
                         _ => super::LocalSubmitRejection::Closed,
@@ -477,7 +431,8 @@ impl AsyncLocalFileSystem {
         }
     }
 
-    /// Submits a complete file read and returns its independent local fact observer.
+    /// Submits a complete file read and returns its independent local fact
+    /// observer.
     pub fn submit_read_all_with_observer(
         &self,
         manager: &qubit_operation::OperationManager,
@@ -592,9 +547,7 @@ impl AsyncLocalFileSystem {
                 let read = filesystem.read_all_with_options_and_reserver(
                     &execution_path,
                     &execution_options,
-                    |output, additional| {
-                        reserve_vec_capacity(output, additional, &budget_for_task, byte_limit)
-                    },
+                    |output, additional| reserve_vec_capacity(output, additional, &budget_for_task, byte_limit),
                 );
                 match read {
                     Ok(value) => qubit_operation::OperationOutcome::Succeeded(value),
@@ -611,26 +564,17 @@ impl AsyncLocalFileSystem {
             Ok(handle) => Ok((super::LocalOperation::new(handle, byte_permit), observer)),
             Err(error) => {
                 let (reason, _prepared) = error.into_parts();
-                let request = job
-                    .take_request()
-                    .expect("rejected local job preserves its request");
+                let request = job.take_request().expect("rejected local job preserves its request");
                 Err(super::LocalSubmitError::new(
                     request,
                     match reason {
                         qubit_operation::AdmissionError::Closed
-                        | qubit_operation::AdmissionError::ExecutorUnavailable => {
-                            super::LocalSubmitRejection::Closed
-                        }
-                        qubit_operation::AdmissionError::CapacityExceeded
-                        | qubit_operation::AdmissionError::Busy => {
+                        | qubit_operation::AdmissionError::ExecutorUnavailable => super::LocalSubmitRejection::Closed,
+                        qubit_operation::AdmissionError::CapacityExceeded | qubit_operation::AdmissionError::Busy => {
                             super::LocalSubmitRejection::CapacityExceeded
                         }
-                        qubit_operation::AdmissionError::ScopeEnded => {
-                            super::LocalSubmitRejection::ScopeEnded
-                        }
-                        qubit_operation::AdmissionError::Stopped => {
-                            super::LocalSubmitRejection::Stopped
-                        }
+                        qubit_operation::AdmissionError::ScopeEnded => super::LocalSubmitRejection::ScopeEnded,
+                        qubit_operation::AdmissionError::Stopped => super::LocalSubmitRejection::Stopped,
                         _ => super::LocalSubmitRejection::Closed,
                     },
                 ))
@@ -647,7 +591,8 @@ fn bind_host_path(base: &Option<PathBuf>, path: &PathBuf) -> PathBuf {
 }
 
 impl crate::LocalFileSystem {
-    /// Moves this filesystem and its already-open authority into an async facade.
+    /// Moves this filesystem and its already-open authority into an async
+    /// facade.
     ///
     /// Relative Host paths are rejected because this conversion does not query
     /// process-global cwd. Use [`AsyncLocalFileSystem::host`] for Host paths.
@@ -706,19 +651,16 @@ where
     }));
     let completion_for_worker = Arc::clone(&completion);
     let scheduled = executor.enqueue_task(move || {
-        let value =
-            std::panic::catch_unwind(std::panic::AssertUnwindSafe(task)).unwrap_or_else(|_| {
-                Err(crate::LocalFileError::from_io(
-                    crate::LocalFileOperation::Configure,
-                    None,
-                    None,
-                    std::io::Error::other("async filesystem constructor panicked"),
-                ))
-            });
+        let value = std::panic::catch_unwind(std::panic::AssertUnwindSafe(task)).unwrap_or_else(|_| {
+            Err(crate::LocalFileError::from_io(
+                crate::LocalFileOperation::Configure,
+                None,
+                None,
+                std::io::Error::other("async filesystem constructor panicked"),
+            ))
+        });
         let waker = {
-            let mut completion = completion_for_worker
-                .lock()
-                .unwrap_or_else(|e| e.into_inner());
+            let mut completion = completion_for_worker.lock().unwrap_or_else(|e| e.into_inner());
             completion.value = Some(value);
             completion.waker.take()
         };
@@ -766,13 +708,15 @@ where
 
 #[cfg(test)]
 mod tests {
-    use std::sync::{Arc, Mutex};
+    use std::sync::Arc;
+    use std::sync::Mutex;
 
-    use crate::operation::LocalExecutionConfig;
-    use crate::operation::LocalIoExecutor;
-    use qubit_operation::{ManagerOptions, OperationManager};
+    use qubit_operation::ManagerOptions;
+    use qubit_operation::OperationManager;
 
     use super::reserve_vec_capacity;
+    use crate::operation::LocalExecutionConfig;
+    use crate::operation::LocalIoExecutor;
 
     #[test]
     fn read_buffer_growth_reserves_actual_capacity_before_allocation() {

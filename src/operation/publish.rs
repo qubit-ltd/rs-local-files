@@ -2,28 +2,47 @@
 
 use std::future::Future;
 use std::io::IoSlice;
-use std::ops::{Deref, DerefMut};
+use std::ops::Deref;
+use std::ops::DerefMut;
 use std::path::PathBuf;
 use std::pin::Pin;
-use std::sync::{Arc, Mutex};
-use std::task::{Context, Poll, Waker};
+use std::sync::Arc;
+use std::sync::Mutex;
+use std::task::Context;
+use std::task::Poll;
+use std::task::Waker;
 
 use qubit_io::Output;
-use qubit_operation::{
-    AsyncCleanup, CleanupContext, CleanupFuture, CleanupOutcome, DiagnosticSummary, EffectFact,
-    EffectRecord, OperationOptions, OperationOutcome, ResourceId, ResourceRef, StopReport,
-};
+use qubit_operation::AsyncCleanup;
+use qubit_operation::CleanupContext;
+use qubit_operation::CleanupFuture;
+use qubit_operation::CleanupOutcome;
+use qubit_operation::DiagnosticSummary;
+use qubit_operation::EffectFact;
+use qubit_operation::EffectRecord;
+use qubit_operation::OperationOptions;
+use qubit_operation::OperationOutcome;
+use qubit_operation::ResourceId;
+use qubit_operation::ResourceRef;
+use qubit_operation::StopReport;
 
+use super::AsyncLocalFileSystem;
+use super::LocalDurabilityState;
+use super::LocalFactObserver;
+use super::LocalFactSnapshot;
+use super::LocalOperation;
+use super::LocalOperationOptions;
+use super::LocalPublicationState;
+use super::LocalSubmitError;
 use super::executor::LocalIoExecutor;
 use super::handoff::LocalReadLease;
 use super::internal::permits::DiskPermit;
-use super::temp::{LocalTempCommandError, LocalTempNative};
-use super::{
-    AsyncLocalFileSystem, LocalDurabilityState, LocalFactObserver, LocalFactSnapshot,
-    LocalOperation, LocalOperationOptions, LocalPublicationState, LocalSubmitError,
-};
+use super::temp::LocalTempCommandError;
+use super::temp::LocalTempNative;
+use crate::LocalFileCommitError;
+use crate::LocalFileError;
+use crate::LocalWriteOutcome;
 use crate::options::LocalWriteOptions;
-use crate::{LocalFileCommitError, LocalFileError, LocalWriteOutcome};
 
 /// Owned data and policy for one atomic writer commit.
 #[derive(Debug)]
@@ -36,7 +55,8 @@ pub struct LocalWriterCommitRequest {
     pub bytes: Vec<u8>,
 }
 
-/// Structured errors retain the native writer's original errors and recovery owner.
+/// Structured errors retain the native writer's original errors and recovery
+/// owner.
 #[derive(Debug)]
 pub enum LocalWriterCommandError {
     /// Scope capacity for retryable writer cleanup was unavailable.
@@ -45,7 +65,8 @@ pub enum LocalWriterCommandError {
     ResourceCommit(qubit_operation::ResourceManageErrorKind),
     /// Opening the writer failed before any write was attempted.
     Open(LocalFileError),
-    /// Writing or flushing failed; a retryable writer is retained if abort cleanup failed.
+    /// Writing or flushing failed; a retryable writer is retained if abort
+    /// cleanup failed.
     Write {
         cause: LocalFileError,
         cleanup_error: Option<LocalFileError>,
@@ -64,10 +85,7 @@ struct LocalManagedAbortResource<W: Send + 'static> {
 }
 
 impl<W: Send + 'static> LocalManagedAbortResource<W> {
-    fn new(
-        cleanup_permit: super::internal::permits::Permit,
-        abort: fn(&mut W) -> Result<(), LocalFileError>,
-    ) -> Self {
+    fn new(cleanup_permit: super::internal::permits::Permit, abort: fn(&mut W) -> Result<(), LocalFileError>) -> Self {
         Self {
             native: Mutex::new(None),
             id: Mutex::new(None),
@@ -103,13 +121,7 @@ impl<W: Send + 'static> Future for LocalAbortCleanupWait<W> {
     type Output = CleanupOutcome<LocalManagedAbortResource<W>>;
 
     fn poll(self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<Self::Output> {
-        if let Some(result) = self
-            .0
-            .result
-            .lock()
-            .unwrap_or_else(|error| error.into_inner())
-            .take()
-        {
+        if let Some(result) = self.0.result.lock().unwrap_or_else(|error| error.into_inner()).take() {
             return Poll::Ready(result);
         }
         let Some(new_waker) = super::temp::safe_clone_waker(context.waker()) else {
@@ -122,13 +134,7 @@ impl<W: Send + 'static> Future for LocalAbortCleanupWait<W> {
             .unwrap_or_else(|error| error.into_inner())
             .replace(new_waker);
         super::temp::safe_drop_waker(old_waker);
-        match self
-            .0
-            .result
-            .lock()
-            .unwrap_or_else(|error| error.into_inner())
-            .take()
-        {
+        match self.0.result.lock().unwrap_or_else(|error| error.into_inner()).take() {
             Some(result) => Poll::Ready(result),
             None => Poll::Pending,
         }
@@ -149,11 +155,7 @@ impl<W: Send + 'static> AsyncCleanup<LocalManagedAbortResource<W>> for LocalMana
             .or_else(|| self.executor.reserve_cleanup());
         let Some(permit) = permit else {
             return Box::pin(async move {
-                let failure = local_abort_cleanup_failure(
-                    &resource,
-                    "local cleanup capacity exhausted",
-                    None,
-                );
+                let failure = local_abort_cleanup_failure(&resource, "local cleanup capacity exhausted", None);
                 CleanupOutcome::Failed { failure, resource }
             });
         };
@@ -173,16 +175,11 @@ impl<W: Send + 'static> AsyncCleanup<LocalManagedAbortResource<W>> for LocalMana
                 return;
             };
             let error = {
-                let mut native = resource
-                    .native
-                    .lock()
-                    .unwrap_or_else(|error| error.into_inner());
+                let mut native = resource.native.lock().unwrap_or_else(|error| error.into_inner());
                 match native.as_mut() {
                     None => None,
                     Some(owner) => {
-                        match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                            (resource.abort)(owner)
-                        })) {
+                        match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| (resource.abort)(owner))) {
                             Ok(Ok(())) => {
                                 native.take();
                                 None
@@ -207,10 +204,7 @@ impl<W: Send + 'static> AsyncCleanup<LocalManagedAbortResource<W>> for LocalMana
                     CleanupOutcome::Failed { failure, resource }
                 }
             };
-            *worker_state
-                .result
-                .lock()
-                .unwrap_or_else(|error| error.into_inner()) = Some(outcome);
+            *worker_state.result.lock().unwrap_or_else(|error| error.into_inner()) = Some(outcome);
             if let Some(waker) = worker_state
                 .waker
                 .lock()
@@ -232,11 +226,7 @@ impl<W: Send + 'static> AsyncCleanup<LocalManagedAbortResource<W>> for LocalMana
                 .take()
                 .expect("cleanup owner remains available when queue admission fails");
             return Box::pin(async move {
-                let failure = local_abort_cleanup_failure(
-                    &resource,
-                    "local cleanup queue is unavailable",
-                    None,
-                );
+                let failure = local_abort_cleanup_failure(&resource, "local cleanup queue is unavailable", None);
                 CleanupOutcome::Failed { failure, resource }
             });
         }
@@ -286,13 +276,8 @@ fn abort_managed_conditional_after_error<D: digest::Digest + Send + 'static>(
     resource: &ResourceRef<LocalManagedAbortResource<crate::LocalConditionalWriter<D>>>,
     cause: LocalFileError,
 ) -> LocalConditionalWriterCommandError<D> {
-    let mut native = resource
-        .native
-        .lock()
-        .unwrap_or_else(|error| error.into_inner());
-    let writer = native
-        .as_mut()
-        .expect("managed conditional writer is available");
+    let mut native = resource.native.lock().unwrap_or_else(|error| error.into_inner());
+    let writer = native.as_mut().expect("managed conditional writer is available");
     match (resource.abort)(writer) {
         Ok(()) => {
             native.take();
@@ -316,14 +301,8 @@ fn abort_managed_conditional_after_error<D: digest::Digest + Send + 'static>(
 fn abort_managed_conditional_after_stop<D: digest::Digest + Send + 'static>(
     resource: &ResourceRef<LocalManagedAbortResource<crate::LocalConditionalWriter<D>>>,
     stop: StopReport,
-) -> OperationOutcome<
-    crate::outcome::LocalConditionalWriteOutcome<D>,
-    LocalConditionalWriterCommandError<D>,
-> {
-    let mut native = resource
-        .native
-        .lock()
-        .unwrap_or_else(|error| error.into_inner());
+) -> OperationOutcome<crate::outcome::LocalConditionalWriteOutcome<D>, LocalConditionalWriterCommandError<D>> {
+    let mut native = resource.native.lock().unwrap_or_else(|error| error.into_inner());
     let Some(writer) = native.as_mut() else {
         return OperationOutcome::Stopped(stop);
     };
@@ -336,22 +315,20 @@ fn abort_managed_conditional_after_stop<D: digest::Digest + Send + 'static>(
 impl AsyncLocalFileSystem {
     /// Sets the default symlink policy on this facade's owned filesystem value.
     ///
-    /// This changes only the filesystem value retained by this facade; it does not
-    /// modify the manager or any other facade. Conditional publication requires
-    /// [`crate::policy::LocalSymlinkPolicy::Reject`] because it validates the
-    /// destination without following symbolic links.
-    pub fn with_symlink_policy(
-        mut self,
-        policy: crate::policy::LocalSymlinkPolicy,
-    ) -> crate::LocalResult<Self> {
+    /// This changes only the filesystem value retained by this facade; it does
+    /// not modify the manager or any other facade. Conditional publication
+    /// requires [`crate::policy::LocalSymlinkPolicy::Reject`] because it
+    /// validates the destination without following symbolic links.
+    pub fn with_symlink_policy(mut self, policy: crate::policy::LocalSymlinkPolicy) -> crate::LocalResult<Self> {
         self.filesystem.set_symlink_policy(policy)?;
         Ok(self)
     }
 
     /// Commits owned bytes through the local writer on a bounded I/O worker.
     ///
-    /// The operation checks cancellation immediately before opening and writing.
-    /// Once the native commit begins, it waits for the writer's actual result.
+    /// The operation checks cancellation immediately before opening and
+    /// writing. Once the native commit begins, it waits for the writer's
+    /// actual result.
     pub fn submit_writer_commit(
         &self,
         manager: &qubit_operation::OperationManager,
@@ -393,21 +370,16 @@ impl AsyncLocalFileSystem {
                         );
                     }
                     Err(error) => {
-                        return OperationOutcome::Failed(
-                            LocalWriterCommandError::ResourceCapacity(error),
-                        );
+                        return OperationOutcome::Failed(LocalWriterCommandError::ResourceCapacity(error));
                     }
                 };
                 let Some(cleanup_permit) = executor.reserve_cleanup() else {
-                    return OperationOutcome::Failed(LocalWriterCommandError::Open(
-                        LocalFileError::new(
-                            crate::LocalFileErrorKind::ResourceLimit,
-                            crate::LocalFileOperation::OpenWriter,
-                        ),
-                    ));
+                    return OperationOutcome::Failed(LocalWriterCommandError::Open(LocalFileError::new(
+                        crate::LocalFileErrorKind::ResourceLimit,
+                        crate::LocalFileOperation::OpenWriter,
+                    )));
                 };
-                let resource =
-                    LocalManagedAbortResource::new(cleanup_permit, abort_managed_file_writer);
+                let resource = LocalManagedAbortResource::new(cleanup_permit, abort_managed_file_writer);
                 let writer_resource = match reservation.commit_with(
                     resource,
                     LocalManagedAbortCleanup::<crate::LocalFileWriter>::new(executor.clone()),
@@ -417,32 +389,21 @@ impl AsyncLocalFileSystem {
                         let (reason, _resource, _cleanup, _reservation) = error.into_parts();
                         return match reason {
                             qubit_operation::ResourceManageErrorKind::Stopped => {
-                                OperationOutcome::Stopped(
-                                    stop_report(scope).expect("scope stopped before writer open"),
-                                )
+                                OperationOutcome::Stopped(stop_report(scope).expect("scope stopped before writer open"))
                             }
-                            reason => OperationOutcome::Failed(
-                                LocalWriterCommandError::ResourceCommit(reason),
-                            ),
+                            reason => OperationOutcome::Failed(LocalWriterCommandError::ResourceCommit(reason)),
                         };
                     }
                 };
                 let resource_id = writer_resource.id();
-                *writer_resource
-                    .id
-                    .lock()
-                    .unwrap_or_else(|error| error.into_inner()) = Some(resource_id);
-                let writer =
-                    match filesystem.open_writer_with_options(&destination, &request.options) {
-                        Ok(writer) => writer,
-                        Err(error) => {
-                            return OperationOutcome::Failed(LocalWriterCommandError::Open(error));
-                        }
-                    };
-                *writer_resource
-                    .native
-                    .lock()
-                    .unwrap_or_else(|error| error.into_inner()) = Some(writer);
+                *writer_resource.id.lock().unwrap_or_else(|error| error.into_inner()) = Some(resource_id);
+                let writer = match filesystem.open_writer_with_options(&destination, &request.options) {
+                    Ok(writer) => writer,
+                    Err(error) => {
+                        return OperationOutcome::Failed(LocalWriterCommandError::Open(error));
+                    }
+                };
+                *writer_resource.native.lock().unwrap_or_else(|error| error.into_inner()) = Some(writer);
                 let submitted_bytes = request.bytes.len() as u64;
                 let append_mode = request.options.mode() == crate::LocalWriteMode::Append;
                 let mut append_effect_recorded = false;
@@ -460,10 +421,7 @@ impl AsyncLocalFileSystem {
                     }
                     let slices = [IoSlice::new(&request.bytes[offset..])];
                     let write_result = {
-                        let mut native = writer_resource
-                            .native
-                            .lock()
-                            .unwrap_or_else(|error| error.into_inner());
+                        let mut native = writer_resource.native.lock().unwrap_or_else(|error| error.into_inner());
                         native
                             .as_mut()
                             .expect("managed writer is available")
@@ -515,10 +473,7 @@ impl AsyncLocalFileSystem {
                     }
                 }
                 let flush_result = {
-                    let mut native = writer_resource
-                        .native
-                        .lock()
-                        .unwrap_or_else(|error| error.into_inner());
+                    let mut native = writer_resource.native.lock().unwrap_or_else(|error| error.into_inner());
                     Output::flush(native.as_mut().expect("managed writer is available"))
                 };
                 if let Err(source) = flush_result {
@@ -538,9 +493,7 @@ impl AsyncLocalFileSystem {
                     ));
                 }
                 #[cfg(feature = "test-support")]
-                if append_effect_recorded
-                    && crate::local::test_support_enabled("lf7-append-panic-after-write")
-                {
+                if append_effect_recorded && crate::local::test_support_enabled("lf7-append-panic-after-write") {
                     let _ = crate::local::test_fault_error();
                     panic!("injected panic after direct append");
                 }
@@ -592,25 +545,15 @@ impl AsyncLocalFileSystem {
                     }
                     Err(error) => {
                         let publication = match error.state() {
-                            crate::LocalWriteFailureState::NotPublished => {
-                                LocalPublicationState::NotPublished
-                            }
-                            crate::LocalWriteFailureState::Published => {
-                                LocalPublicationState::Published
-                            }
-                            crate::LocalWriteFailureState::Indeterminate => {
-                                LocalPublicationState::Unknown
-                            }
+                            crate::LocalWriteFailureState::NotPublished => LocalPublicationState::NotPublished,
+                            crate::LocalWriteFailureState::Published => LocalPublicationState::Published,
+                            crate::LocalWriteFailureState::Indeterminate => LocalPublicationState::Unknown,
                         };
                         if append_effect_recorded {
                             let durability = match error.state() {
-                                crate::LocalWriteFailureState::Published => {
-                                    LocalDurabilityState::Failed
-                                }
+                                crate::LocalWriteFailureState::Published => LocalDurabilityState::Failed,
                                 crate::LocalWriteFailureState::NotPublished
-                                | crate::LocalWriteFailureState::Indeterminate => {
-                                    LocalDurabilityState::Unknown
-                                }
+                                | crate::LocalWriteFailureState::Indeterminate => LocalDurabilityState::Unknown,
                             };
                             update_writer_effect_observer(
                                 &observer,
@@ -644,17 +587,12 @@ fn abort_managed_writer_after_error(
     observer: &LocalFactObserver,
     effect_already_recorded: bool,
 ) -> LocalWriterCommandError {
-    let mut native = resource
-        .native
-        .lock()
-        .unwrap_or_else(|error| error.into_inner());
+    let mut native = resource.native.lock().unwrap_or_else(|error| error.into_inner());
     let writer = native.as_mut().expect("managed writer is available");
     match writer.abort() {
         Ok(outcome) => {
             native.take();
-            if !effect_already_recorded
-                && outcome.failure_state() == Some(crate::LocalWriteFailureState::Published)
-            {
+            if !effect_already_recorded && outcome.failure_state() == Some(crate::LocalWriteFailureState::Published) {
                 record_writer_effect(
                     scope,
                     observer,
@@ -714,19 +652,14 @@ fn abort_managed_writer_after_stop(
     observer: &LocalFactObserver,
     effect_already_recorded: bool,
 ) -> OperationOutcome<LocalWriteOutcome, LocalWriterCommandError> {
-    let mut native = resource
-        .native
-        .lock()
-        .unwrap_or_else(|error| error.into_inner());
+    let mut native = resource.native.lock().unwrap_or_else(|error| error.into_inner());
     let Some(writer) = native.as_mut() else {
         return OperationOutcome::Stopped(stop);
     };
     match writer.abort() {
         Ok(outcome) => {
             native.take();
-            if !effect_already_recorded
-                && outcome.failure_state() == Some(crate::LocalWriteFailureState::Published)
-            {
+            if !effect_already_recorded && outcome.failure_state() == Some(crate::LocalWriteFailureState::Published) {
                 record_writer_effect(
                     scope,
                     observer,
@@ -896,7 +829,8 @@ pub struct LocalStagedTreePublishRequest {
     pub stage_options: crate::options::LocalTempDirectoryOptions,
     /// Files written under the stage; paths must be direct children.
     pub files: Vec<LocalStagedTreeFile>,
-    /// Durability and access options for publication; exact verification is added automatically.
+    /// Durability and access options for publication; exact verification is
+    /// added automatically.
     pub publish_options: crate::options::LocalTreePublishOptions,
 }
 
@@ -967,10 +901,7 @@ pub struct LocalStagedTreeRecovery {
 }
 
 impl LocalStagedTreeRecovery {
-    fn new(
-        stage: crate::directory::LocalStagedDirectory,
-        reservation: LocalStagedTreeDiskReservation,
-    ) -> Self {
+    fn new(stage: crate::directory::LocalStagedDirectory, reservation: LocalStagedTreeDiskReservation) -> Self {
         Self {
             stage: Some(stage),
             reservation,
@@ -995,9 +926,7 @@ impl LocalStagedTreeRecovery {
 
     /// Explicitly cleans the stage. A failure keeps its native recovery error
     /// and the disk reservation in one value.
-    pub fn cleanup(
-        mut self,
-    ) -> Result<(), LocalStagedTreeReservedError<crate::directory::LocalTreeCleanupError>> {
+    pub fn cleanup(mut self) -> Result<(), LocalStagedTreeReservedError<crate::directory::LocalTreeCleanupError>> {
         let stage = self.stage.take().expect("staged recovery owner is present");
         stage
             .cleanup()
@@ -1009,17 +938,13 @@ impl Deref for LocalStagedTreeRecovery {
     type Target = crate::directory::LocalStagedDirectory;
 
     fn deref(&self) -> &Self::Target {
-        self.stage
-            .as_ref()
-            .expect("staged recovery owner is present")
+        self.stage.as_ref().expect("staged recovery owner is present")
     }
 }
 
 impl DerefMut for LocalStagedTreeRecovery {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        self.stage
-            .as_mut()
-            .expect("staged recovery owner is present")
+        self.stage.as_mut().expect("staged recovery owner is present")
     }
 }
 
@@ -1040,19 +965,22 @@ pub enum LocalStagedTreePublishError {
     Parent(LocalFileError),
     /// Stage creation failed with its native cleanup ownership.
     Create(LocalStagedTreeReservedError<crate::directory::LocalTreeCreateError>),
-    /// A staged file could not be created; the stage remains available for cleanup.
+    /// A staged file could not be created; the stage remains available for
+    /// cleanup.
     Write {
         cause: LocalFileError,
         stage: LocalStagedTreeRecovery,
     },
-    /// Verification or publication failed with the existing native recovery report.
+    /// Verification or publication failed with the existing native recovery
+    /// report.
     Publish(LocalStagedTreeReservedError<crate::directory::LocalTreePublishError>),
     /// A cancellation cleanup failed and retains the cleanup owner.
     Cleanup(LocalStagedTreeReservedError<crate::directory::LocalTreeCleanupError>),
 }
 
 impl AsyncLocalFileSystem {
-    /// Creates files beneath a private stage, verifies the exact tree, then publishes it.
+    /// Creates files beneath a private stage, verifies the exact tree, then
+    /// publishes it.
     pub fn submit_staged_tree_publish(
         &self,
         manager: &qubit_operation::OperationManager,
@@ -1088,10 +1016,7 @@ impl AsyncLocalFileSystem {
         let disk_limit = limits
             .max_disk_bytes
             .unwrap_or(self.executor.inner.config.max_disk_bytes);
-        if disk_limit == 0
-            || disk_limit > self.executor.inner.config.max_disk_bytes
-            || disk_bytes > disk_limit
-        {
+        if disk_limit == 0 || disk_limit > self.executor.inner.config.max_disk_bytes || disk_bytes > disk_limit {
             return Err(LocalSubmitError::new(
                 request,
                 super::LocalSubmitRejection::CapacityExceeded,
@@ -1117,15 +1042,12 @@ impl AsyncLocalFileSystem {
                 if let Some(stop) = stop_report(scope) {
                     return OperationOutcome::Stopped(stop);
                 }
-                let parent = match filesystem.open_directory_with_options(
-                    &parent_path,
-                    &crate::options::LocalDirectoryOpenOptions::new(),
-                ) {
+                let parent = match filesystem
+                    .open_directory_with_options(&parent_path, &crate::options::LocalDirectoryOpenOptions::new())
+                {
                     Ok(parent) => parent,
                     Err(error) => {
-                        return OperationOutcome::Failed(LocalStagedTreePublishError::Parent(
-                            error,
-                        ));
+                        return OperationOutcome::Failed(LocalStagedTreePublishError::Parent(error));
                     }
                 };
                 let stage_options = request
@@ -1145,60 +1067,45 @@ impl AsyncLocalFileSystem {
                     if let Some(stop) = stop_report(scope) {
                         return match stage.cleanup() {
                             Ok(()) => OperationOutcome::Stopped(stop),
-                            Err(error) => {
-                                OperationOutcome::Failed(LocalStagedTreePublishError::Cleanup(
-                                    LocalStagedTreeReservedError::new(error, reservation.clone()),
-                                ))
-                            }
+                            Err(error) => OperationOutcome::Failed(LocalStagedTreePublishError::Cleanup(
+                                LocalStagedTreeReservedError::new(error, reservation.clone()),
+                            )),
                         };
                     }
-                    let entry = match crate::directory::LocalTreeEntry::new(
-                        file.path.clone(),
-                        crate::LocalFileKind::File,
-                    ) {
-                        Ok(entry) => entry,
-                        Err(cause) => {
-                            return OperationOutcome::Failed(LocalStagedTreePublishError::Write {
-                                cause,
-                                stage: LocalStagedTreeRecovery::new(stage, reservation.clone()),
-                            });
-                        }
-                    };
+                    let entry =
+                        match crate::directory::LocalTreeEntry::new(file.path.clone(), crate::LocalFileKind::File) {
+                            Ok(entry) => entry,
+                            Err(cause) => {
+                                return OperationOutcome::Failed(LocalStagedTreePublishError::Write {
+                                    cause,
+                                    stage: LocalStagedTreeRecovery::new(stage, reservation.clone()),
+                                });
+                            }
+                        };
                     let mut input = file.bytes.as_slice();
-                    if let Err(cause) =
-                        stage.write_file_new(&file.path, &mut input, file.bytes.len() as u64)
-                    {
+                    if let Err(cause) = stage.write_file_new(&file.path, &mut input, file.bytes.len() as u64) {
                         record_stage_write(scope, &observer, 0, EffectFact::Unknown);
                         return OperationOutcome::Failed(LocalStagedTreePublishError::Write {
                             cause,
                             stage: LocalStagedTreeRecovery::new(stage, reservation.clone()),
                         });
                     }
-                    record_stage_write(
-                        scope,
-                        &observer,
-                        file.bytes.len() as u64,
-                        EffectFact::Known,
-                    );
+                    record_stage_write(scope, &observer, file.bytes.len() as u64, EffectFact::Known);
                     expected.push(entry);
                 }
-                let validation = crate::directory::LocalTreeValidationOptions::new()
-                    .with_exact_entries(expected);
+                let validation = crate::directory::LocalTreeValidationOptions::new().with_exact_entries(expected);
                 let publish_options = request.publish_options.clone().with_validation(validation);
                 if let Some(stop) = stop_report(scope) {
                     return match stage.cleanup() {
                         Ok(()) => OperationOutcome::Stopped(stop),
-                        Err(error) => {
-                            OperationOutcome::Failed(LocalStagedTreePublishError::Cleanup(
-                                LocalStagedTreeReservedError::new(error, reservation.clone()),
-                            ))
-                        }
+                        Err(error) => OperationOutcome::Failed(LocalStagedTreePublishError::Cleanup(
+                            LocalStagedTreeReservedError::new(error, reservation.clone()),
+                        )),
                     };
                 }
                 match stage.publish_new(&parent, &request.name, &publish_options) {
                     Ok(outcome) => {
-                        if outcome.publication() == crate::outcome::LocalTreePublication::Published
-                        {
+                        if outcome.publication() == crate::outcome::LocalTreePublication::Published {
                             record_local_effect(
                                 scope,
                                 &observer,
@@ -1224,16 +1131,14 @@ impl AsyncLocalFileSystem {
                                 LocalPublicationState::Published,
                                 LocalDurabilityState::Failed,
                             ),
-                            crate::outcome::LocalTreePublication::Indeterminate => {
-                                record_local_effect(
-                                    scope,
-                                    &observer,
-                                    1,
-                                    0,
-                                    LocalPublicationState::Unknown,
-                                    LocalDurabilityState::Unknown,
-                                )
-                            }
+                            crate::outcome::LocalTreePublication::Indeterminate => record_local_effect(
+                                scope,
+                                &observer,
+                                1,
+                                0,
+                                LocalPublicationState::Unknown,
+                                LocalDurabilityState::Unknown,
+                            ),
                             _ => {}
                         }
                         OperationOutcome::Failed(LocalStagedTreePublishError::Publish(
@@ -1247,7 +1152,8 @@ impl AsyncLocalFileSystem {
 }
 
 #[cfg(feature = "digest")]
-/// Structured conditional writer failure preserving open, stream, and commit errors.
+/// Structured conditional writer failure preserving open, stream, and commit
+/// errors.
 #[derive(Debug)]
 pub enum LocalConditionalWriterCommandError<D: digest::Digest + Send + 'static> {
     /// Scope capacity for retryable writer cleanup was unavailable.
@@ -1273,7 +1179,8 @@ pub enum LocalConditionalWriterCommandError<D: digest::Digest + Send + 'static> 
 pub struct LocalConditionalWriterCommitRequest<D: digest::Digest> {
     /// Destination interpreted through the facade authority.
     pub path: PathBuf,
-    /// Digest/absence condition checked by the native conditional state machine.
+    /// Digest/absence condition checked by the native conditional state
+    /// machine.
     pub precondition: crate::options::LocalWritePrecondition<digest::Output<D>>,
     /// Publication policy.
     pub options: LocalWriteOptions,
@@ -1292,10 +1199,7 @@ impl AsyncLocalFileSystem {
         limits: LocalOperationOptions,
     ) -> Result<
         (
-            LocalOperation<
-                crate::outcome::LocalConditionalWriteOutcome<D>,
-                LocalConditionalWriterCommandError<D>,
-            >,
+            LocalOperation<crate::outcome::LocalConditionalWriteOutcome<D>, LocalConditionalWriterCommandError<D>>,
             LocalFactObserver,
         ),
         LocalSubmitError<LocalConditionalWriterCommitRequest<D>>,
@@ -1328,77 +1232,53 @@ impl AsyncLocalFileSystem {
                         );
                     }
                     Err(error) => {
-                        return OperationOutcome::Failed(
-                            LocalConditionalWriterCommandError::ResourceCapacity(error),
-                        );
+                        return OperationOutcome::Failed(LocalConditionalWriterCommandError::ResourceCapacity(error));
                     }
                 };
                 let Some(cleanup_permit) = executor.reserve_cleanup() else {
-                    return OperationOutcome::Failed(LocalConditionalWriterCommandError::Open(
-                        LocalFileError::new(
-                            crate::LocalFileErrorKind::ResourceLimit,
-                            crate::LocalFileOperation::OpenWriter,
-                        ),
-                    ));
+                    return OperationOutcome::Failed(LocalConditionalWriterCommandError::Open(LocalFileError::new(
+                        crate::LocalFileErrorKind::ResourceLimit,
+                        crate::LocalFileOperation::OpenWriter,
+                    )));
                 };
-                let resource =
-                    LocalManagedAbortResource::new(cleanup_permit, abort_conditional_writer::<D>);
+                let resource = LocalManagedAbortResource::new(cleanup_permit, abort_conditional_writer::<D>);
                 let writer_resource = match reservation.commit_with(
                     resource,
-                    LocalManagedAbortCleanup::<crate::LocalConditionalWriter<D>>::new(
-                        executor.clone(),
-                    ),
+                    LocalManagedAbortCleanup::<crate::LocalConditionalWriter<D>>::new(executor.clone()),
                 ) {
                     Ok(resource) => resource,
                     Err(error) => {
                         let (reason, _resource, _cleanup, _reservation) = error.into_parts();
                         return match reason {
                             qubit_operation::ResourceManageErrorKind::Stopped => {
-                                OperationOutcome::Stopped(
-                                    stop_report(scope).expect("scope stopped before writer open"),
-                                )
+                                OperationOutcome::Stopped(stop_report(scope).expect("scope stopped before writer open"))
                             }
-                            reason => OperationOutcome::Failed(
-                                LocalConditionalWriterCommandError::ResourceCommit(reason),
-                            ),
+                            reason => {
+                                OperationOutcome::Failed(LocalConditionalWriterCommandError::ResourceCommit(reason))
+                            }
                         };
                     }
                 };
                 let resource_id = writer_resource.id();
-                *writer_resource
-                    .id
-                    .lock()
-                    .unwrap_or_else(|error| error.into_inner()) = Some(resource_id);
-                let writer = match filesystem.open_conditional_writer::<D>(
-                    &destination,
-                    request.precondition,
-                    &request.options,
-                ) {
-                    Ok(writer) => writer,
-                    Err(error) => {
-                        return OperationOutcome::Failed(LocalConditionalWriterCommandError::Open(
-                            error,
-                        ));
-                    }
-                };
-                *writer_resource
-                    .native
-                    .lock()
-                    .unwrap_or_else(|error| error.into_inner()) = Some(writer);
+                *writer_resource.id.lock().unwrap_or_else(|error| error.into_inner()) = Some(resource_id);
+                let writer =
+                    match filesystem.open_conditional_writer::<D>(&destination, request.precondition, &request.options)
+                    {
+                        Ok(writer) => writer,
+                        Err(error) => {
+                            return OperationOutcome::Failed(LocalConditionalWriterCommandError::Open(error));
+                        }
+                    };
+                *writer_resource.native.lock().unwrap_or_else(|error| error.into_inner()) = Some(writer);
                 let mut offset = 0;
                 while offset < request.bytes.len() {
                     if let Some(stop) = stop_report(scope) {
                         return abort_managed_conditional_after_stop(&writer_resource, stop);
                     }
                     let write_result = {
-                        let mut native = writer_resource
-                            .native
-                            .lock()
-                            .unwrap_or_else(|error| error.into_inner());
+                        let mut native = writer_resource.native.lock().unwrap_or_else(|error| error.into_inner());
                         Output::write(
-                            native
-                                .as_mut()
-                                .expect("managed conditional writer is available"),
+                            native.as_mut().expect("managed conditional writer is available"),
                             &request.bytes[offset..],
                         )
                     };
@@ -1409,9 +1289,10 @@ impl AsyncLocalFileSystem {
                                 crate::LocalFileOperation::Commit,
                             )
                             .with_path(destination.clone());
-                            return OperationOutcome::Failed(
-                                abort_managed_conditional_after_error(&writer_resource, error),
-                            );
+                            return OperationOutcome::Failed(abort_managed_conditional_after_error(
+                                &writer_resource,
+                                error,
+                            ));
                         }
                         Ok(written) => offset += written,
                         Err(source) => {
@@ -1421,22 +1302,16 @@ impl AsyncLocalFileSystem {
                                 None,
                                 source,
                             );
-                            return OperationOutcome::Failed(
-                                abort_managed_conditional_after_error(&writer_resource, error),
-                            );
+                            return OperationOutcome::Failed(abort_managed_conditional_after_error(
+                                &writer_resource,
+                                error,
+                            ));
                         }
                     }
                 }
                 let flush_result = {
-                    let mut native = writer_resource
-                        .native
-                        .lock()
-                        .unwrap_or_else(|error| error.into_inner());
-                    Output::flush(
-                        native
-                            .as_mut()
-                            .expect("managed conditional writer is available"),
-                    )
+                    let mut native = writer_resource.native.lock().unwrap_or_else(|error| error.into_inner());
+                    Output::flush(native.as_mut().expect("managed conditional writer is available"))
                 };
                 if let Err(source) = flush_result {
                     let error = LocalFileError::from_io(
@@ -1445,10 +1320,7 @@ impl AsyncLocalFileSystem {
                         None,
                         source,
                     );
-                    return OperationOutcome::Failed(abort_managed_conditional_after_error(
-                        &writer_resource,
-                        error,
-                    ));
+                    return OperationOutcome::Failed(abort_managed_conditional_after_error(&writer_resource, error));
                 }
                 if let Some(stop) = stop_report(scope) {
                     return abort_managed_conditional_after_stop(&writer_resource, stop);
@@ -1481,25 +1353,21 @@ impl AsyncLocalFileSystem {
                     }
                     Err(error) => {
                         match error.publication() {
-                            crate::outcome::LocalConditionalPublicationState::Published => {
-                                record_writer_effect(
-                                    scope,
-                                    &observer,
-                                    request.bytes.len() as u64,
-                                    LocalPublicationState::Published,
-                                    LocalDurabilityState::Failed,
-                                )
-                            }
-                            crate::outcome::LocalConditionalPublicationState::Indeterminate => {
-                                record_local_effect(
-                                    scope,
-                                    &observer,
-                                    1,
-                                    0,
-                                    LocalPublicationState::Unknown,
-                                    LocalDurabilityState::Unknown,
-                                )
-                            }
+                            crate::outcome::LocalConditionalPublicationState::Published => record_writer_effect(
+                                scope,
+                                &observer,
+                                request.bytes.len() as u64,
+                                LocalPublicationState::Published,
+                                LocalDurabilityState::Failed,
+                            ),
+                            crate::outcome::LocalConditionalPublicationState::Indeterminate => record_local_effect(
+                                scope,
+                                &observer,
+                                1,
+                                0,
+                                LocalPublicationState::Unknown,
+                                LocalDurabilityState::Unknown,
+                            ),
                             _ => {}
                         }
                         OperationOutcome::Failed(LocalConditionalWriterCommandError::Commit(error))
@@ -1517,7 +1385,8 @@ pub enum LocalTempLifecycleCommand {
     Keep,
     /// Atomically persist at the requested path.
     Persist {
-        /// Target interpreted using the temporary resource's captured authority.
+        /// Target interpreted using the temporary resource's captured
+        /// authority.
         target: PathBuf,
         /// Persistence guarantees for this transition.
         options: crate::options::LocalPersistOptions,
@@ -1537,7 +1406,8 @@ pub enum LocalTempLifecycleResult {
     Sealed(LocalReadLease),
 }
 
-/// Lossless persistence failure facts; the owner remains in the same managed resource.
+/// Lossless persistence failure facts; the owner remains in the same managed
+/// resource.
 #[derive(Debug)]
 pub struct LocalTempPersistFailure {
     /// Native cause.
@@ -1554,7 +1424,8 @@ pub struct LocalTempPersistFailure {
     pub source_state: crate::outcome::LocalTempSourceState,
 }
 
-/// Managed command failure, preserving native errors and worker admission state.
+/// Managed command failure, preserving native errors and worker admission
+/// state.
 #[derive(Debug)]
 pub enum LocalTempLifecycleError {
     /// Structured persistence failure.
@@ -1585,7 +1456,8 @@ pub enum LocalTempWorkerCommandFailure {
     Panicked,
 }
 
-/// Submits a temporary lifecycle transition and returns the same resource access token.
+/// Submits a temporary lifecycle transition and returns the same resource
+/// access token.
 pub type LocalTempLifecycleOperation =
     qubit_operation::AsyncOperationHandle<LocalTempLifecycleResult, LocalTempLifecycleError>;
 
@@ -1598,8 +1470,9 @@ pub struct LocalTempLifecycleRequest {
 }
 
 impl AsyncLocalFileSystem {
-    /// Serializes temporary keep/persist/seal work on the local worker and awaits it
-    /// from the operation future, keeping the resource's existing identity.
+    /// Serializes temporary keep/persist/seal work on the local worker and
+    /// awaits it from the operation future, keeping the resource's existing
+    /// identity.
     pub fn submit_temp_lifecycle(
         &self,
         manager: &qubit_operation::OperationManager,
@@ -1617,15 +1490,9 @@ impl AsyncLocalFileSystem {
             Ok(scoped) => scoped,
             Err(error) => {
                 let rejection = match error {
-                    qubit_operation::GroupBindingError::WrongManager => {
-                        super::LocalSubmitRejection::WrongManager
-                    }
-                    qubit_operation::GroupBindingError::ScopeEnded => {
-                        super::LocalSubmitRejection::ScopeEnded
-                    }
-                    qubit_operation::GroupBindingError::Closed => {
-                        super::LocalSubmitRejection::Closed
-                    }
+                    qubit_operation::GroupBindingError::WrongManager => super::LocalSubmitRejection::WrongManager,
+                    qubit_operation::GroupBindingError::ScopeEnded => super::LocalSubmitRejection::ScopeEnded,
+                    qubit_operation::GroupBindingError::Closed => super::LocalSubmitRejection::Closed,
                     qubit_operation::GroupBindingError::CapacityExceeded => {
                         super::LocalSubmitRejection::CapacityExceeded
                     }
@@ -1646,57 +1513,47 @@ impl AsyncLocalFileSystem {
         let request_owner = Arc::new(Mutex::new(Some(request)));
         let request_for_body = Arc::clone(&request_owner);
         let executor = self.executor.clone();
-        let submit = scoped
-            .as_async()
-            .try_submit(operation, move |scope| async move {
-                let request = request_for_body
-                    .lock()
-                    .unwrap_or_else(|e| e.into_inner())
-                    .take()
-                    .expect("accepted local temp command retains its request");
-                if scope.context().stop_reason().is_some() {
-                    return Err(LocalTempLifecycleError::Stopped);
+        let submit = scoped.as_async().try_submit(operation, move |scope| async move {
+            let request = request_for_body
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .take()
+                .expect("accepted local temp command retains its request");
+            if scope.context().stop_reason().is_some() {
+                return Err(LocalTempLifecycleError::Stopped);
+            }
+            let lease_access = request.access.clone_access();
+            let context = scope.context();
+            let unsupported_operation = match request.command {
+                LocalTempLifecycleCommand::Seal { .. } => crate::LocalFileOperation::Commit,
+                LocalTempLifecycleCommand::Keep | LocalTempLifecycleCommand::Persist { .. } => {
+                    crate::LocalFileOperation::PersistTemp
                 }
-                let lease_access = request.access.clone_access();
-                let context = scope.context();
-                let unsupported_operation = match request.command {
-                    LocalTempLifecycleCommand::Seal { .. } => crate::LocalFileOperation::Commit,
-                    LocalTempLifecycleCommand::Keep | LocalTempLifecycleCommand::Persist { .. } => {
-                        crate::LocalFileOperation::PersistTemp
-                    }
-                };
-                let command = request.command;
-                let receiver = request
-                    .access
-                    .enqueue_native_transition(&executor, move |native| {
-                        #[cfg(feature = "test-support")]
-                        crate::test_support::hit_test_gate("lf7-temp-before-persist-primitive");
-                        transition_temp_native(native, command, lease_access, context)
-                    });
-                let receiver = match receiver {
-                    Ok(receiver) => receiver,
-                    Err(error) => {
-                        return Err(map_temp_command_error(error, unsupported_operation));
-                    }
-                };
-                match receiver.await {
-                    Err(error) => Err(map_temp_command_error(error, unsupported_operation)),
-                    Ok(Err(error)) => {
-                        record_temp_failure(&scope, &observer_for_task, &error);
-                        Err(error)
-                    }
-                    Ok(Ok((result, publication, durability))) => {
-                        record_writer_effect(
-                            &scope,
-                            &observer_for_task,
-                            0,
-                            publication,
-                            durability,
-                        );
-                        Ok(result)
-                    }
-                }
+            };
+            let command = request.command;
+            let receiver = request.access.enqueue_native_transition(&executor, move |native| {
+                #[cfg(feature = "test-support")]
+                crate::test_support::hit_test_gate("lf7-temp-before-persist-primitive");
+                transition_temp_native(native, command, lease_access, context)
             });
+            let receiver = match receiver {
+                Ok(receiver) => receiver,
+                Err(error) => {
+                    return Err(map_temp_command_error(error, unsupported_operation));
+                }
+            };
+            match receiver.await {
+                Err(error) => Err(map_temp_command_error(error, unsupported_operation)),
+                Ok(Err(error)) => {
+                    record_temp_failure(&scope, &observer_for_task, &error);
+                    Err(error)
+                }
+                Ok(Ok((result, publication, durability))) => {
+                    record_writer_effect(&scope, &observer_for_task, 0, publication, durability);
+                    Ok(result)
+                }
+            }
+        });
         match submit {
             Ok(handle) => Ok((handle, returned_access, observer)),
             Err(error) => {
@@ -1707,20 +1564,14 @@ impl AsyncLocalFileSystem {
                     .take()
                     .expect("rejected temp command returns its original request");
                 let rejection = match reason {
-                    qubit_operation::AdmissionError::Closed
-                    | qubit_operation::AdmissionError::ExecutorUnavailable => {
+                    qubit_operation::AdmissionError::Closed | qubit_operation::AdmissionError::ExecutorUnavailable => {
                         super::LocalSubmitRejection::Closed
                     }
-                    qubit_operation::AdmissionError::CapacityExceeded
-                    | qubit_operation::AdmissionError::Busy => {
+                    qubit_operation::AdmissionError::CapacityExceeded | qubit_operation::AdmissionError::Busy => {
                         super::LocalSubmitRejection::CapacityExceeded
                     }
-                    qubit_operation::AdmissionError::ScopeEnded => {
-                        super::LocalSubmitRejection::ScopeEnded
-                    }
-                    qubit_operation::AdmissionError::Stopped => {
-                        super::LocalSubmitRejection::Stopped
-                    }
+                    qubit_operation::AdmissionError::ScopeEnded => super::LocalSubmitRejection::ScopeEnded,
+                    qubit_operation::AdmissionError::Stopped => super::LocalSubmitRejection::Stopped,
                     _ => super::LocalSubmitRejection::Closed,
                 };
                 Err(LocalSubmitError::new(request, rejection))
@@ -1732,12 +1583,8 @@ impl AsyncLocalFileSystem {
 fn map_temp_worker_error(error: LocalTempCommandError) -> LocalTempWorkerCommandFailure {
     match error {
         LocalTempCommandError::Capacity => LocalTempWorkerCommandFailure::Capacity,
-        LocalTempCommandError::ResourceUnavailable => {
-            LocalTempWorkerCommandFailure::ResourceUnavailable
-        }
-        LocalTempCommandError::UnsupportedKind => {
-            LocalTempWorkerCommandFailure::ResourceUnavailable
-        }
+        LocalTempCommandError::ResourceUnavailable => LocalTempWorkerCommandFailure::ResourceUnavailable,
+        LocalTempCommandError::UnsupportedKind => LocalTempWorkerCommandFailure::ResourceUnavailable,
         LocalTempCommandError::Panicked => LocalTempWorkerCommandFailure::Panicked,
     }
 }
@@ -1747,10 +1594,7 @@ fn map_temp_command_error(
     operation: crate::LocalFileOperation,
 ) -> LocalTempLifecycleError {
     if error == LocalTempCommandError::UnsupportedKind {
-        LocalTempLifecycleError::Unsupported(LocalFileError::new(
-            crate::LocalFileErrorKind::Unsupported,
-            operation,
-        ))
+        LocalTempLifecycleError::Unsupported(LocalFileError::new(crate::LocalFileErrorKind::Unsupported, operation))
     } else {
         LocalTempLifecycleError::Worker(map_temp_worker_error(error))
     }
@@ -1764,11 +1608,7 @@ fn transition_temp_native(
 ) -> Result<
     (
         Option<LocalTempNative>,
-        (
-            LocalTempLifecycleResult,
-            LocalPublicationState,
-            LocalDurabilityState,
-        ),
+        (LocalTempLifecycleResult, LocalPublicationState, LocalDurabilityState),
     ),
     (LocalTempNative, LocalTempLifecycleError),
 > {
@@ -1819,10 +1659,7 @@ fn transition_temp_native(
                 Ok(sealed) => Ok((
                     Some(LocalTempNative::Sealed(sealed)),
                     (
-                        LocalTempLifecycleResult::Sealed(LocalReadLease::from_temp_access(
-                            &lease_access,
-                            false,
-                        )),
+                        LocalTempLifecycleResult::Sealed(LocalReadLease::from_temp_access(&lease_access, false)),
                         LocalPublicationState::NotPublished,
                         LocalDurabilityState::Unknown,
                     ),
@@ -1839,8 +1676,26 @@ fn transition_temp_native(
                 }
             }
         }
-        (LocalTempNative::Directory(directory), LocalTempLifecycleCommand::Keep) => {
-            match directory.keep() {
+        (LocalTempNative::Directory(directory), LocalTempLifecycleCommand::Keep) => match directory.keep() {
+            Ok(outcome) => {
+                let durability = if outcome.durable() {
+                    LocalDurabilityState::Durable
+                } else {
+                    LocalDurabilityState::Unknown
+                };
+                Ok((
+                    None,
+                    (
+                        LocalTempLifecycleResult::Persisted(outcome),
+                        LocalPublicationState::Published,
+                        durability,
+                    ),
+                ))
+            }
+            Err(error) => Err(persist_failure(error, LocalTempNative::Directory)),
+        },
+        (LocalTempNative::Directory(directory), LocalTempLifecycleCommand::Persist { target, options }) => {
+            match directory.persist_with(&target, options) {
                 Ok(outcome) => {
                     let durability = if outcome.durable() {
                         LocalDurabilityState::Durable
@@ -1859,27 +1714,6 @@ fn transition_temp_native(
                 Err(error) => Err(persist_failure(error, LocalTempNative::Directory)),
             }
         }
-        (
-            LocalTempNative::Directory(directory),
-            LocalTempLifecycleCommand::Persist { target, options },
-        ) => match directory.persist_with(&target, options) {
-            Ok(outcome) => {
-                let durability = if outcome.durable() {
-                    LocalDurabilityState::Durable
-                } else {
-                    LocalDurabilityState::Unknown
-                };
-                Ok((
-                    None,
-                    (
-                        LocalTempLifecycleResult::Persisted(outcome),
-                        LocalPublicationState::Published,
-                        durability,
-                    ),
-                ))
-            }
-            Err(error) => Err(persist_failure(error, LocalTempNative::Directory)),
-        },
         (native, LocalTempLifecycleCommand::Seal { .. }) => Err((
             native,
             LocalTempLifecycleError::Unsupported(LocalFileError::new(
@@ -1937,9 +1771,7 @@ fn record_temp_failure(
             ),
             _ => {}
         },
-        LocalTempLifecycleError::Seal { .. } => {
-            record_stage_write(scope, observer, 0, EffectFact::Known)
-        }
+        LocalTempLifecycleError::Seal { .. } => record_stage_write(scope, observer, 0, EffectFact::Known),
         _ => {}
     }
 }

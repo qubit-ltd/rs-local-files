@@ -4,19 +4,25 @@ use std::fs::File;
 use std::future::poll_fn;
 use std::io::Write;
 use std::pin::Pin;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+use std::sync::Mutex;
 use std::task::Context;
 use std::task::Poll;
 
 use qubit_io::AsyncInput;
-use qubit_operation::{AsyncOperationHandle, OperationOptions, OperationOutcome, ResourceRef};
+use qubit_operation::AsyncOperationHandle;
+use qubit_operation::OperationOptions;
+use qubit_operation::OperationOutcome;
+use qubit_operation::ResourceRef;
 
 use super::executor::LocalIoExecutor;
 use super::internal::permits::Permit;
-use super::temp::{
-    LocalCreateFailure, LocalTempCommandError, LocalTempFileAccess, LocalTempNative,
-    LocalTempResource, submit_temp_file,
-};
+use super::temp::LocalCreateFailure;
+use super::temp::LocalTempCommandError;
+use super::temp::LocalTempFileAccess;
+use super::temp::LocalTempNative;
+use super::temp::LocalTempResource;
+use super::temp::submit_temp_file;
 
 /// Bounds and controls for one staged payload.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -52,7 +58,8 @@ pub struct LocalReadResource {
     export_read_handle: bool,
 }
 
-/// A clonable lease. Each clone keeps the same single registered resource alive.
+/// A clonable lease. Each clone keeps the same single registered resource
+/// alive.
 #[derive(Clone)]
 pub struct LocalReadLease {
     resource: Arc<LocalReadResource>,
@@ -75,12 +82,10 @@ impl LocalReadLease {
         self.resource.reference.id()
     }
 
-    /// Exports a clone of the already-open sealed handle and retains this lease.
-    /// Rooted exports require the explicit option supplied at staging time.
-    pub async fn export_read_handle(
-        &self,
-        executor: &LocalIoExecutor,
-    ) -> Result<LocalReadExport, LocalStageFailure> {
+    /// Exports a clone of the already-open sealed handle and retains this
+    /// lease. Rooted exports require the explicit option supplied at
+    /// staging time.
+    pub async fn export_read_handle(&self, executor: &LocalIoExecutor) -> Result<LocalReadExport, LocalStageFailure> {
         let reference = self.resource.reference.clone();
         let allow_rooted = self.resource.export_read_handle;
         let result = enqueue_resource_command(executor, reference, move |native| match native {
@@ -88,8 +93,7 @@ impl LocalReadLease {
                 if file.native_path().is_none() && !allow_rooted {
                     return Err(LocalStageFailure::RootedExportDenied);
                 }
-                file.try_clone_readonly_file()
-                    .map_err(LocalStageFailure::Local)
+                file.try_clone_readonly_file().map_err(LocalStageFailure::Local)
             }
             _ => Err(LocalStageFailure::NotSealed),
         })
@@ -239,15 +243,7 @@ async fn stage_bytes_in_scope(
     if context.stop_reason().is_some() {
         return Err(LocalStageFailure::Stopped);
     }
-    let access = create_temp_access(
-        filesystem,
-        executor.clone(),
-        &scope,
-        operation,
-        temp_options,
-        disk,
-    )
-    .await?;
+    let access = create_temp_access(filesystem, executor.clone(), &scope, operation, temp_options, disk).await?;
     if context.stop_reason().is_some() {
         return Err(LocalStageFailure::Stopped);
     }
@@ -274,14 +270,8 @@ async fn create_temp_access(
     }
     let child_manager = scope.manager();
     let async_manager = child_manager.as_async();
-    let mut create = submit_temp_file(
-        filesystem,
-        executor.clone(),
-        &async_manager,
-        operation,
-        temp_options,
-    )
-    .map_err(|_| LocalStageFailure::Capacity)?;
+    let mut create = submit_temp_file(filesystem, executor.clone(), &async_manager, operation, temp_options)
+        .map_err(|_| LocalStageFailure::Capacity)?;
     let access = match create
         .wait_outcome()
         .await
@@ -340,18 +330,15 @@ async fn seal_access(
             }
             #[cfg(test)]
             tests::SEAL_ATTEMPTS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-            let transition = match file.seal_with_options(
-                &crate::options::LocalSealOptions::new().with_file_sync(stage.file_sync),
-            ) {
+            let transition = match file
+                .seal_with_options(&crate::options::LocalSealOptions::new().with_file_sync(stage.file_sync))
+            {
                 Ok(sealed) => Ok((Some(LocalTempNative::Sealed(sealed)), ())),
                 Err(error) => {
                     let (cause, access_state, file) = error.into_parts();
                     Err((
                         LocalTempNative::File(file),
-                        LocalStageFailure::Seal {
-                            cause,
-                            access_state,
-                        },
+                        LocalStageFailure::Seal { cause, access_state },
                     ))
                 }
             };
@@ -371,10 +358,7 @@ async fn seal_access(
         // normal scope cleanup remove the sealed file.
         return Err(LocalStageFailure::Stopped);
     }
-    Ok(LocalReadLease::from_temp_access(
-        &access,
-        stage.export_read_handle,
-    ))
+    Ok(LocalReadLease::from_temp_access(&access, stage.export_read_handle))
 }
 
 /// Reads and stages an owned asynchronous input in bounded chunks.
@@ -496,9 +480,7 @@ pub enum LocalStageStreamSubmitError<I> {
 impl<I> std::fmt::Debug for LocalStageStreamSubmitError<I> {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Budget { .. } => {
-                formatter.write_str("LocalStageStreamSubmitError::Budget { input: <owned> }")
-            }
+            Self::Budget { .. } => formatter.write_str("LocalStageStreamSubmitError::Budget { input: <owned> }"),
             Self::Admission { reason, .. } => formatter
                 .debug_struct("LocalStageStreamSubmitError::Admission")
                 .field("reason", reason)
@@ -525,18 +507,20 @@ fn command_error(error: LocalTempCommandError) -> LocalStageFailure {
         LocalTempCommandError::Capacity => "local worker queue capacity exhausted",
         LocalTempCommandError::ResourceUnavailable => "managed temp resource is unavailable",
         LocalTempCommandError::UnsupportedKind => "managed temp resource kind is unsupported",
-        LocalTempCommandError::Panicked => {
-            "managed temp command panicked; completion is unconfirmed"
-        }
+        LocalTempCommandError::Panicked => "managed temp command panicked; completion is unconfirmed",
     };
     LocalStageFailure::Command(detail.to_owned())
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::sync::atomic::AtomicUsize;
-    use std::task::{Context, Poll, Wake, Waker};
+    use std::task::Context;
+    use std::task::Poll;
+    use std::task::Wake;
+    use std::task::Waker;
+
+    use super::*;
 
     pub(super) static SEAL_ATTEMPTS: AtomicUsize = AtomicUsize::new(0);
 
@@ -565,13 +549,9 @@ mod tests {
     #[test]
     fn lease_from_temp_access_reuses_the_registered_resource() {
         let manager =
-            qubit_operation::OperationManager::new(qubit_operation::ManagerOptions::default())
-                .expect("manager");
-        let executor = LocalIoExecutor::new(
-            manager.clone(),
-            crate::operation::LocalExecutionConfig::default(),
-        )
-        .expect("local executor");
+            qubit_operation::OperationManager::new(qubit_operation::ManagerOptions::default()).expect("manager");
+        let executor = LocalIoExecutor::new(manager.clone(), crate::operation::LocalExecutionConfig::default())
+            .expect("local executor");
         let filesystem = crate::LocalFileSystem::host().expect("filesystem");
         let mut create = submit_temp_file(
             filesystem,
@@ -598,16 +578,11 @@ mod tests {
     #[test]
     fn stop_after_queued_write_prevents_the_following_seal_command() {
         let manager =
-            qubit_operation::OperationManager::new(qubit_operation::ManagerOptions::default())
-                .expect("manager");
-        let executor = LocalIoExecutor::new(
-            manager.clone(),
-            crate::operation::LocalExecutionConfig::default(),
-        )
-        .expect("local executor");
+            qubit_operation::OperationManager::new(qubit_operation::ManagerOptions::default()).expect("manager");
+        let executor = LocalIoExecutor::new(manager.clone(), crate::operation::LocalExecutionConfig::default())
+            .expect("local executor");
         let filesystem = crate::LocalFileSystem::host().expect("filesystem");
-        let gate = crate::test_support::install_test_gate("lf6-stage-bytes-after-write")
-            .expect("write boundary gate");
+        let gate = crate::test_support::install_test_gate("lf6-stage-bytes-after-write").expect("write boundary gate");
         SEAL_ATTEMPTS.store(0, std::sync::atomic::Ordering::SeqCst);
         let mut operation = stage_bytes(
             filesystem,
@@ -633,16 +608,11 @@ mod tests {
     #[test]
     fn stop_after_native_seal_keeps_the_sealed_owner_for_managed_cleanup() {
         let manager =
-            qubit_operation::OperationManager::new(qubit_operation::ManagerOptions::default())
-                .expect("manager");
-        let executor = LocalIoExecutor::new(
-            manager.clone(),
-            crate::operation::LocalExecutionConfig::default(),
-        )
-        .expect("local executor");
+            qubit_operation::OperationManager::new(qubit_operation::ManagerOptions::default()).expect("manager");
+        let executor = LocalIoExecutor::new(manager.clone(), crate::operation::LocalExecutionConfig::default())
+            .expect("local executor");
         let filesystem = crate::LocalFileSystem::host().expect("filesystem");
-        let gate = crate::test_support::install_test_gate("lf6-stage-bytes-after-native-seal")
-            .expect("post-seal gate");
+        let gate = crate::test_support::install_test_gate("lf6-stage-bytes-after-native-seal").expect("post-seal gate");
         SEAL_ATTEMPTS.store(0, std::sync::atomic::Ordering::SeqCst);
         let mut operation = stage_bytes(
             filesystem,

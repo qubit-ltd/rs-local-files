@@ -1,35 +1,52 @@
 //! Complete operations submitted to the bounded local I/O executor.
 
-use std::io::{Seek, SeekFrom};
+use std::io::Seek;
+use std::io::SeekFrom;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+use std::sync::Mutex;
 
 use qubit_io::Input;
-use qubit_operation::{
-    DiagnosticSummary, EffectFact, EffectRecord, OperationManager, OperationOptions,
-    OperationOutcome, OperationScope, StopReport,
-};
+use qubit_operation::DiagnosticSummary;
+use qubit_operation::EffectFact;
+use qubit_operation::EffectRecord;
+use qubit_operation::OperationManager;
+use qubit_operation::OperationOptions;
+use qubit_operation::OperationOutcome;
+use qubit_operation::OperationScope;
+use qubit_operation::StopReport;
 
+use super::AsyncLocalFileSystem;
+use super::LocalFactObserver;
+use super::LocalOperation;
+use super::LocalOperationOptions;
+use super::LocalReadRequest;
+use super::LocalSubmitError;
+use super::LocalSubmitRejection;
 use super::internal::permits::Permit;
 use super::internal::prepared_local_job::PreparedLocalJob;
-use super::{
-    AsyncLocalFileSystem, LocalFactObserver, LocalOperation, LocalOperationOptions,
-    LocalReadRequest, LocalSubmitError, LocalSubmitRejection,
-};
+use crate::LocalDurabilityState;
+use crate::LocalFactSnapshot;
+use crate::LocalFileError;
+use crate::LocalFileErrorKind;
+use crate::LocalFileMetadata;
+use crate::LocalPublicationState;
 use crate::error::LocalFileOperation;
 use crate::error::LocalReadLimitError;
-use crate::options::{
-    LocalCopyOptions, LocalCreateDirectoryOptions, LocalDeleteOptions, LocalReadAllOptions,
-    LocalReadOptions, LocalRenameOptions,
-};
-use crate::outcome::{
-    LocalCopyFailure, LocalCopyFailureState, LocalCopyOutcome, LocalCreateDirectoryOutcome,
-    LocalDeleteOutcome, LocalRenameFailure, LocalRenameFailureState, LocalRenameOutcome,
-};
-use crate::{
-    LocalDurabilityState, LocalFactSnapshot, LocalFileError, LocalFileErrorKind, LocalFileMetadata,
-    LocalPublicationState,
-};
+use crate::options::LocalCopyOptions;
+use crate::options::LocalCreateDirectoryOptions;
+use crate::options::LocalDeleteOptions;
+use crate::options::LocalReadAllOptions;
+use crate::options::LocalReadOptions;
+use crate::options::LocalRenameOptions;
+use crate::outcome::LocalCopyFailure;
+use crate::outcome::LocalCopyFailureState;
+use crate::outcome::LocalCopyOutcome;
+use crate::outcome::LocalCreateDirectoryOutcome;
+use crate::outcome::LocalDeleteOutcome;
+use crate::outcome::LocalRenameFailure;
+use crate::outcome::LocalRenameFailureState;
+use crate::outcome::LocalRenameOutcome;
 
 /// An at-most prefix result. `complete` is true only when EOF was observed.
 #[derive(Debug, Eq, PartialEq)]
@@ -131,8 +148,7 @@ impl AsyncLocalFileSystem {
         operation: OperationOptions,
         request: LocalReadRequest,
         limits: LocalOperationOptions,
-    ) -> Result<(LocalOperation<Vec<u8>>, LocalFactObserver), LocalSubmitError<LocalReadRequest>>
-    {
+    ) -> Result<(LocalOperation<Vec<u8>>, LocalFactObserver), LocalSubmitError<LocalReadRequest>> {
         let execution_path = match (&self.host_base, request.path.is_relative()) {
             (Some(base), true) => base.join(&request.path),
             _ => request.path.clone(),
@@ -163,15 +179,15 @@ impl AsyncLocalFileSystem {
         )
     }
 
-    /// Submits a complete UTF-8 read using the same allocation accounting as read-all.
+    /// Submits a complete UTF-8 read using the same allocation accounting as
+    /// read-all.
     pub fn submit_read_text(
         &self,
         manager: &OperationManager,
         operation: OperationOptions,
         request: LocalReadRequest,
         limits: LocalOperationOptions,
-    ) -> Result<(LocalOperation<String>, LocalFactObserver), LocalSubmitError<LocalReadRequest>>
-    {
+    ) -> Result<(LocalOperation<String>, LocalFactObserver), LocalSubmitError<LocalReadRequest>> {
         let execution_path = match (&self.host_base, request.path.is_relative()) {
             (Some(base), true) => base.join(&request.path),
             _ => request.path.clone(),
@@ -214,13 +230,9 @@ impl AsyncLocalFileSystem {
                         shrink_to_zero(&budget);
                         OperationOutcome::Stopped(stop)
                     }
-                    OperationOutcome::ChildFailed(summary) => {
-                        OperationOutcome::ChildFailed(summary)
-                    }
+                    OperationOutcome::ChildFailed(summary) => OperationOutcome::ChildFailed(summary),
                     OperationOutcome::Panicked(summary) => OperationOutcome::Panicked(summary),
-                    OperationOutcome::ExecutionFailed(failure) => {
-                        OperationOutcome::ExecutionFailed(failure)
-                    }
+                    OperationOutcome::ExecutionFailed(failure) => OperationOutcome::ExecutionFailed(failure),
                 }
             },
         )
@@ -233,10 +245,7 @@ impl AsyncLocalFileSystem {
         operation: OperationOptions,
         request: LocalReadPrefixRequest,
         limits: LocalOperationOptions,
-    ) -> Result<
-        (LocalOperation<LocalReadPrefix>, LocalFactObserver),
-        LocalSubmitError<LocalReadPrefixRequest>,
-    > {
+    ) -> Result<(LocalOperation<LocalReadPrefix>, LocalFactObserver), LocalSubmitError<LocalReadPrefixRequest>> {
         let execution_path = match (&self.host_base, request.path.is_relative()) {
             (Some(base), true) => base.join(&request.path),
             _ => request.path.clone(),
@@ -306,9 +315,7 @@ impl AsyncLocalFileSystem {
                             }
                         }
                     }
-                    let count = (target - bytes.len())
-                        .min(buffer.len())
-                        .min(capacity_remaining);
+                    let count = (target - bytes.len()).min(buffer.len()).min(capacity_remaining);
                     if let Err(error) = reserve_capacity(&mut bytes, count, &budget, maximum) {
                         shrink_to_zero(&budget);
                         return OperationOutcome::Failed(LocalFileError::from_io(
@@ -353,8 +360,7 @@ impl AsyncLocalFileSystem {
         operation: OperationOptions,
         request: LocalReadAtRequest,
         limits: LocalOperationOptions,
-    ) -> Result<(LocalOperation<Vec<u8>>, LocalFactObserver), LocalSubmitError<LocalReadAtRequest>>
-    {
+    ) -> Result<(LocalOperation<Vec<u8>>, LocalFactObserver), LocalSubmitError<LocalReadAtRequest>> {
         let execution_path = match (&self.host_base, request.path.is_relative()) {
             (Some(base), true) => base.join(&request.path),
             _ => request.path.clone(),
@@ -436,8 +442,7 @@ impl AsyncLocalFileSystem {
         operation: OperationOptions,
         path: PathBuf,
         limits: LocalOperationOptions,
-    ) -> Result<(LocalOperation<LocalFileMetadata>, LocalFactObserver), LocalSubmitError<PathBuf>>
-    {
+    ) -> Result<(LocalOperation<LocalFileMetadata>, LocalFactObserver), LocalSubmitError<PathBuf>> {
         let execution_path = match (&self.host_base, path.is_relative()) {
             (Some(base), true) => base.join(&path),
             _ => path.clone(),
@@ -450,10 +455,9 @@ impl AsyncLocalFileSystem {
             execution_path.is_relative(),
             1,
             limits,
-            move |_request, _scope, _observer, _budget, _maximum| match before_native_call(
-                _scope,
-                || filesystem.metadata(&execution_path),
-            ) {
+            move |_request, _scope, _observer, _budget, _maximum| match before_native_call(_scope, || {
+                filesystem.metadata(&execution_path)
+            }) {
                 Ok(Ok(metadata)) => OperationOutcome::Succeeded(metadata),
                 Ok(Err(error)) => OperationOutcome::Failed(error),
                 Err(stop) => OperationOutcome::Stopped(stop),
@@ -477,8 +481,7 @@ impl AsyncLocalFileSystem {
     > {
         let source = bind_host_path(&self.host_base, &request.source);
         let destination = bind_host_path(&self.host_base, &request.destination);
-        let required_handles =
-            2_usize.saturating_add(request.options.max_open_directories().unwrap_or(1));
+        let required_handles = 2_usize.saturating_add(request.options.max_open_directories().unwrap_or(1));
         let filesystem = self.filesystem.clone();
         self.submit_owned(
             manager,
@@ -525,8 +528,7 @@ impl AsyncLocalFileSystem {
                             LocalCopyFailureState::Unchanged => {
                                 (LocalPublicationState::NotPublished, EffectFact::Known)
                             }
-                            LocalCopyFailureState::PartiallyPublished
-                            | LocalCopyFailureState::Published => {
+                            LocalCopyFailureState::PartiallyPublished | LocalCopyFailureState::Published => {
                                 (LocalPublicationState::Published, EffectFact::Known)
                             }
                             LocalCopyFailureState::Indeterminate => {
@@ -605,9 +607,7 @@ impl AsyncLocalFileSystem {
                             LocalRenameFailureState::Unchanged => {
                                 (LocalPublicationState::NotPublished, EffectFact::Known)
                             }
-                            LocalRenameFailureState::Renamed => {
-                                (LocalPublicationState::Published, EffectFact::Known)
-                            }
+                            LocalRenameFailureState::Renamed => (LocalPublicationState::Published, EffectFact::Known),
                             LocalRenameFailureState::Indeterminate => {
                                 (LocalPublicationState::Unknown, EffectFact::Unknown)
                             }
@@ -637,10 +637,7 @@ impl AsyncLocalFileSystem {
         request: LocalCreateDirectoryRequest,
         limits: LocalOperationOptions,
     ) -> Result<
-        (
-            LocalOperation<LocalCreateDirectoryOperationResult>,
-            LocalFactObserver,
-        ),
+        (LocalOperation<LocalCreateDirectoryOperationResult>, LocalFactObserver),
         LocalSubmitError<LocalCreateDirectoryRequest>,
     > {
         let path = bind_host_path(&self.host_base, &request.path);
@@ -703,13 +700,8 @@ impl AsyncLocalFileSystem {
         operation: OperationOptions,
         request: LocalDeleteRequest,
         limits: LocalOperationOptions,
-    ) -> Result<
-        (
-            LocalOperation<LocalDeleteOperationResult>,
-            LocalFactObserver,
-        ),
-        LocalSubmitError<LocalDeleteRequest>,
-    > {
+    ) -> Result<(LocalOperation<LocalDeleteOperationResult>, LocalFactObserver), LocalSubmitError<LocalDeleteRequest>>
+    {
         let path = bind_host_path(&self.host_base, &request.path);
         let filesystem = self.filesystem.clone();
         self.submit_owned(
@@ -733,10 +725,21 @@ impl AsyncLocalFileSystem {
                         let deleted = outcome.deleted();
                         let recursive_directory = request.directory && request.options.recursive();
                         record_local_effect(
-                            scope, &observer, u64::from(deleted), 0,
-                            if deleted { LocalPublicationState::Published } else { LocalPublicationState::NotPublished },
+                            scope,
+                            &observer,
+                            u64::from(deleted),
+                            0,
+                            if deleted {
+                                LocalPublicationState::Published
+                            } else {
+                                LocalPublicationState::NotPublished
+                            },
                             LocalDurabilityState::Unknown,
-                            if recursive_directory { EffectFact::Unknown } else { EffectFact::Known },
+                            if recursive_directory {
+                                EffectFact::Unknown
+                            } else {
+                                EffectFact::Known
+                            },
                             "local entry deletion completed",
                         );
                         OperationOutcome::Succeeded(LocalDeleteOperationResult {
@@ -754,8 +757,13 @@ impl AsyncLocalFileSystem {
                     }
                     Err(error) => {
                         record_local_effect(
-                            scope, &observer, 0, 0, LocalPublicationState::Unknown,
-                            LocalDurabilityState::Unknown, EffectFact::Unknown,
+                            scope,
+                            &observer,
+                            0,
+                            0,
+                            LocalPublicationState::Unknown,
+                            LocalDurabilityState::Unknown,
+                            EffectFact::Unknown,
                             "local deletion failed; partial recursive deletion count is unavailable",
                         );
                         OperationOutcome::Failed(error)
@@ -779,13 +787,7 @@ impl AsyncLocalFileSystem {
         R: Send + 'static,
         T: Send + 'static,
         E: Send + 'static,
-        F: FnOnce(
-                R,
-                &OperationScope,
-                LocalFactObserver,
-                Arc<Mutex<Permit>>,
-                usize,
-            ) -> OperationOutcome<T, E>
+        F: FnOnce(R, &OperationScope, LocalFactObserver, Arc<Mutex<Permit>>, usize) -> OperationOutcome<T, E>
             + Send
             + 'static,
     {
@@ -818,13 +820,7 @@ impl AsyncLocalFileSystem {
         R: Send + 'static,
         T: Send + 'static,
         E: Send + 'static,
-        F: FnOnce(
-                R,
-                &OperationScope,
-                LocalFactObserver,
-                Arc<Mutex<Permit>>,
-                usize,
-            ) -> OperationOutcome<T, E>
+        F: FnOnce(R, &OperationScope, LocalFactObserver, Arc<Mutex<Permit>>, usize) -> OperationOutcome<T, E>
             + Send
             + 'static,
     {
@@ -832,16 +828,10 @@ impl AsyncLocalFileSystem {
             Ok(scoped) => scoped,
             Err(error) => {
                 let rejection = match error {
-                    qubit_operation::GroupBindingError::WrongManager => {
-                        LocalSubmitRejection::WrongManager
-                    }
-                    qubit_operation::GroupBindingError::ScopeEnded => {
-                        LocalSubmitRejection::ScopeEnded
-                    }
+                    qubit_operation::GroupBindingError::WrongManager => LocalSubmitRejection::WrongManager,
+                    qubit_operation::GroupBindingError::ScopeEnded => LocalSubmitRejection::ScopeEnded,
                     qubit_operation::GroupBindingError::Closed => LocalSubmitRejection::Closed,
-                    qubit_operation::GroupBindingError::CapacityExceeded => {
-                        LocalSubmitRejection::CapacityExceeded
-                    }
+                    qubit_operation::GroupBindingError::CapacityExceeded => LocalSubmitRejection::CapacityExceeded,
                 };
                 return Err(LocalSubmitError::new(request, rejection));
             }
@@ -849,18 +839,10 @@ impl AsyncLocalFileSystem {
         let maximum = limits
             .max_owned_bytes
             .unwrap_or(self.executor.inner.config.max_owned_bytes);
-        if maximum == 0
-            || maximum > self.executor.inner.config.max_owned_bytes
-            || initial_owned_bytes > maximum
-        {
-            return Err(LocalSubmitError::new(
-                request,
-                LocalSubmitRejection::CapacityExceeded,
-            ));
+        if maximum == 0 || maximum > self.executor.inner.config.max_owned_bytes || initial_owned_bytes > maximum {
+            return Err(LocalSubmitError::new(request, LocalSubmitRejection::CapacityExceeded));
         }
-        if self.filesystem.scope() == crate::LocalFileSystemScope::Host
-            && self.host_base.is_none()
-            && path_is_relative
+        if self.filesystem.scope() == crate::LocalFileSystemScope::Host && self.host_base.is_none() && path_is_relative
         {
             return Err(LocalSubmitError::new(
                 request,
@@ -870,43 +852,21 @@ impl AsyncLocalFileSystem {
         let handle_limit = limits
             .max_open_handles
             .unwrap_or(self.executor.inner.config.max_open_handles);
-        if handle_limit > self.executor.inner.config.max_open_handles
-            || required_handles > handle_limit
-        {
-            return Err(LocalSubmitError::new(
-                request,
-                LocalSubmitRejection::CapacityExceeded,
-            ));
+        if handle_limit > self.executor.inner.config.max_open_handles || required_handles > handle_limit {
+            return Err(LocalSubmitError::new(request, LocalSubmitRejection::CapacityExceeded));
         }
         let Some(slot) = self.executor.reserve_slot() else {
-            return Err(LocalSubmitError::new(
-                request,
-                LocalSubmitRejection::CapacityExceeded,
-            ));
+            return Err(LocalSubmitError::new(request, LocalSubmitRejection::CapacityExceeded));
         };
         let Some(byte_permit) = self.executor.reserve_bytes(initial_owned_bytes) else {
-            return Err(LocalSubmitError::new(
-                request,
-                LocalSubmitRejection::CapacityExceeded,
-            ));
+            return Err(LocalSubmitError::new(request, LocalSubmitRejection::CapacityExceeded));
         };
         let byte_permit = Arc::new(Mutex::new(byte_permit));
-        let Some(handle_permit) = self
-            .executor
-            .inner
-            .handle_slots
-            .try_acquire(required_handles)
-        else {
-            return Err(LocalSubmitError::new(
-                request,
-                LocalSubmitRejection::CapacityExceeded,
-            ));
+        let Some(handle_permit) = self.executor.inner.handle_slots.try_acquire(required_handles) else {
+            return Err(LocalSubmitError::new(request, LocalSubmitRejection::CapacityExceeded));
         };
         let Some(fact_permit) = self.executor.reserve_fact() else {
-            return Err(LocalSubmitError::new(
-                request,
-                LocalSubmitRejection::CapacityExceeded,
-            ));
+            return Err(LocalSubmitError::new(request, LocalSubmitRejection::CapacityExceeded));
         };
         let fact_permit: Arc<dyn Send + Sync> = Arc::new(fact_permit);
         let observer = LocalFactObserver::with_permit(Arc::clone(&fact_permit));
@@ -920,30 +880,18 @@ impl AsyncLocalFileSystem {
             Arc::clone(&byte_permit),
             handle_permit,
             observer_for_job,
-            move |request, scope| {
-                task(
-                    request,
-                    scope,
-                    observer_for_task,
-                    byte_permit_for_job,
-                    maximum,
-                )
-            },
+            move |request, scope| task(request, scope, observer_for_task, byte_permit_for_job, maximum),
         );
         match scoped.try_submit_external(operation, Arc::clone(&job)) {
             Ok(handle) => Ok((LocalOperation::new(handle, byte_permit), observer)),
             Err(error) => {
                 let (reason, _prepared) = error.into_parts();
-                let request = job
-                    .take_request()
-                    .expect("rejected job preserves its request");
+                let request = job.take_request().expect("rejected job preserves its request");
                 let rejection = match reason {
-                    qubit_operation::AdmissionError::Closed
-                    | qubit_operation::AdmissionError::ExecutorUnavailable => {
+                    qubit_operation::AdmissionError::Closed | qubit_operation::AdmissionError::ExecutorUnavailable => {
                         LocalSubmitRejection::Closed
                     }
-                    qubit_operation::AdmissionError::CapacityExceeded
-                    | qubit_operation::AdmissionError::Busy => {
+                    qubit_operation::AdmissionError::CapacityExceeded | qubit_operation::AdmissionError::Busy => {
                         LocalSubmitRejection::CapacityExceeded
                     }
                     qubit_operation::AdmissionError::ScopeEnded => LocalSubmitRejection::ScopeEnded,
@@ -978,16 +926,14 @@ fn read_complete_cancellable(
     if let Some(stopped) = stop_outcome(scope) {
         return stopped;
     }
-    let reader_result = match before_native_call(scope, || {
-        match (options.read_options(), options.symlink_policy()) {
-            (None, None) => filesystem.open_reader(path),
-            (read_options, policy) => {
-                let mut read_options = read_options.copied().unwrap_or_default();
-                if let Some(policy) = policy {
-                    read_options = read_options.with_symlink_policy(policy);
-                }
-                filesystem.open_reader_with_options(path, &read_options)
+    let reader_result = match before_native_call(scope, || match (options.read_options(), options.symlink_policy()) {
+        (None, None) => filesystem.open_reader(path),
+        (read_options, policy) => {
+            let mut read_options = read_options.copied().unwrap_or_default();
+            if let Some(policy) = policy {
+                read_options = read_options.with_symlink_policy(policy);
             }
+            filesystem.open_reader_with_options(path, &read_options)
         }
     }) {
         Ok(result) => result,
@@ -997,11 +943,10 @@ fn read_complete_cancellable(
         Ok(reader) => reader,
         Err(error) => return OperationOutcome::Failed(error),
     };
-    let mut observed =
-        match LocalObservedReader::from_reader(reader, LocalObservationRequirement::Required) {
-            Ok(reader) => reader.bind_error_context(path.clone(), None),
-            Err(error) => return OperationOutcome::Failed(error),
-        };
+    let mut observed = match LocalObservedReader::from_reader(reader, LocalObservationRequirement::Required) {
+        Ok(reader) => reader.bind_error_context(path.clone(), None),
+        Err(error) => return OperationOutcome::Failed(error),
+    };
     let before = observed.observation().clone();
     let observed_len = before.metadata().len();
     if observed_len > maximum {
@@ -1074,11 +1019,8 @@ fn read_complete_cancellable(
     };
     if !crate::observation::snapshot::observations_match(&before, &after, bytes.len() as u64) {
         return OperationOutcome::Failed(
-            LocalFileError::new(
-                LocalFileErrorKind::ChangedDuringRead,
-                LocalFileOperation::Read,
-            )
-            .with_path(path.clone()),
+            LocalFileError::new(LocalFileErrorKind::ChangedDuringRead, LocalFileOperation::Read)
+                .with_path(path.clone()),
         );
     }
     if let Some(stopped) = stop_outcome(scope) {
@@ -1096,10 +1038,7 @@ fn stop_outcome<T, E>(scope: &OperationScope) -> Option<OperationOutcome<T, E>> 
     })
 }
 
-fn before_native_call<T>(
-    scope: &OperationScope,
-    native_call: impl FnOnce() -> T,
-) -> Result<T, StopReport> {
+fn before_native_call<T>(scope: &OperationScope, native_call: impl FnOnce() -> T) -> Result<T, StopReport> {
     match scope.context().stop_reason() {
         Some(reason) => Err(StopReport {
             reason,
@@ -1147,10 +1086,17 @@ fn shrink_to_zero(permit: &Arc<Mutex<Permit>>) {
 
 #[cfg(test)]
 mod stop_gate_tests {
+    use std::sync::Arc;
+    use std::sync::atomic::AtomicUsize;
+    use std::sync::atomic::Ordering;
+    use std::sync::mpsc;
+
+    use qubit_operation::ManagerOptions;
+    use qubit_operation::OperationManager;
+    use qubit_operation::OperationOutcome;
+    use qubit_operation::StopReason;
+
     use super::before_native_call;
-    use qubit_operation::{ManagerOptions, OperationManager, OperationOutcome, StopReason};
-    use std::sync::atomic::{AtomicUsize, Ordering};
-    use std::sync::{Arc, mpsc};
 
     #[test]
     fn stopped_scope_skips_the_first_native_call() {
@@ -1163,9 +1109,7 @@ mod stop_gate_tests {
             .try_submit(Default::default(), move |scope| {
                 entered_tx.send(()).unwrap();
                 release_rx.recv().unwrap();
-                let result = before_native_call(&scope, || {
-                    native_calls_for_task.fetch_add(1, Ordering::SeqCst)
-                });
+                let result = before_native_call(&scope, || native_calls_for_task.fetch_add(1, Ordering::SeqCst));
                 Ok::<_, ()>(result.map_err(|stop| stop.reason))
             })
             .unwrap();

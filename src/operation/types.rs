@@ -17,10 +17,7 @@ pub struct LocalOperation<T: Send + 'static, E: Send + 'static = LocalFileError>
 
 impl<T: Send + 'static, E: Send + 'static> LocalOperation<T, E> {
     #[cfg(feature = "async")]
-    pub(crate) fn new(
-        inner: qubit_operation::OperationHandle<T, E>,
-        budget: Arc<dyn Send + Sync>,
-    ) -> Self {
+    pub(crate) fn new(inner: qubit_operation::OperationHandle<T, E>, budget: Arc<dyn Send + Sync>) -> Self {
         Self {
             inner: Some(inner),
             budget: Some(budget),
@@ -30,18 +27,13 @@ impl<T: Send + 'static, E: Send + 'static> LocalOperation<T, E> {
     pub fn id(&self) -> qubit_operation::OperationId {
         self.inner().id()
     }
-    pub fn request_stop(
-        &self,
-        reason: qubit_operation::StopReason,
-    ) -> qubit_operation::StopRequestStatus {
+    pub fn request_stop(&self, reason: qubit_operation::StopReason) -> qubit_operation::StopRequestStatus {
         self.inner().request_stop(reason)
     }
     pub fn snapshot(&self) -> qubit_operation::OperationSnapshot {
         self.inner().snapshot()
     }
-    pub fn wait_outcome(
-        &mut self,
-    ) -> Result<qubit_operation::OperationOutcome<T, E>, qubit_operation::OutcomeError> {
+    pub fn wait_outcome(&mut self) -> Result<qubit_operation::OperationOutcome<T, E>, qubit_operation::OutcomeError> {
         let result = self.inner_mut().wait_outcome();
         if result.is_ok() {
             self.budget.take();
@@ -50,17 +42,14 @@ impl<T: Send + 'static, E: Send + 'static> LocalOperation<T, E> {
     }
     pub fn try_take_outcome(
         &mut self,
-    ) -> Result<Option<qubit_operation::OperationOutcome<T, E>>, qubit_operation::OutcomeError>
-    {
+    ) -> Result<Option<qubit_operation::OperationOutcome<T, E>>, qubit_operation::OutcomeError> {
         let result = self.inner_mut().try_take_outcome();
         if matches!(result, Ok(Some(_))) {
             self.budget.take();
         }
         result
     }
-    pub fn wait_settlement(
-        &self,
-    ) -> Result<Arc<qubit_operation::SettlementReport>, qubit_operation::ObservationError> {
+    pub fn wait_settlement(&self) -> Result<Arc<qubit_operation::SettlementReport>, qubit_operation::ObservationError> {
         self.inner().wait_settlement()
     }
     pub fn wait_settlement_for(
@@ -70,21 +59,13 @@ impl<T: Send + 'static, E: Send + 'static> LocalOperation<T, E> {
         self.inner().wait_settlement_for(timeout)
     }
     pub fn into_observer(mut self) -> qubit_operation::OperationObserver {
-        let observer = self
-            .inner
-            .take()
-            .expect("local handle is present")
-            .into_observer();
+        let observer = self.inner.take().expect("local handle is present").into_observer();
         self.budget.take();
         observer
     }
     #[cfg(feature = "async")]
     pub fn into_async(mut self) -> AsyncLocalOperation<T, E> {
-        let inner = self
-            .inner
-            .take()
-            .expect("local handle is present")
-            .into_async();
+        let inner = self.inner.take().expect("local handle is present").into_async();
         AsyncLocalOperation {
             inner: Some(inner),
             budget: self.budget.take(),
@@ -116,10 +97,7 @@ impl<T: Send + 'static, E: Send + 'static> AsyncLocalOperation<T, E> {
     pub fn id(&self) -> qubit_operation::OperationId {
         self.inner().id()
     }
-    pub fn request_stop(
-        &self,
-        reason: qubit_operation::StopReason,
-    ) -> qubit_operation::StopRequestStatus {
+    pub fn request_stop(&self, reason: qubit_operation::StopReason) -> qubit_operation::StopRequestStatus {
         self.inner().request_stop(reason)
     }
     pub fn snapshot(&self) -> qubit_operation::OperationSnapshot {
@@ -136,8 +114,7 @@ impl<T: Send + 'static, E: Send + 'static> AsyncLocalOperation<T, E> {
     }
     pub fn try_take_outcome(
         &mut self,
-    ) -> Result<Option<qubit_operation::OperationOutcome<T, E>>, qubit_operation::OutcomeError>
-    {
+    ) -> Result<Option<qubit_operation::OperationOutcome<T, E>>, qubit_operation::OutcomeError> {
         let result = self.inner_mut().try_take_outcome();
         if matches!(result, Ok(Some(_))) {
             self.budget.take();
@@ -148,11 +125,7 @@ impl<T: Send + 'static, E: Send + 'static> AsyncLocalOperation<T, E> {
         self.inner().wait_settlement().await
     }
     pub fn into_sync(mut self) -> LocalOperation<T, E> {
-        let inner = self
-            .inner
-            .take()
-            .expect("async local handle is present")
-            .into_sync();
+        let inner = self.inner.take().expect("async local handle is present").into_sync();
         LocalOperation {
             inner: Some(inner),
             budget: self.budget.take(),
@@ -319,7 +292,8 @@ pub enum LocalDurabilityState {
     Failed,
 }
 
-/// Bounded summary of local filesystem effects, independent of operation outcome.
+/// Bounded summary of local filesystem effects, independent of operation
+/// outcome.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct LocalFactSnapshot {
     /// Number of known mutation events.
@@ -357,12 +331,10 @@ impl std::fmt::Debug for LocalFactObserver {
 }
 
 impl LocalFactObserver {
-    /// Returns the latest fixed-size snapshot without retaining a resource reference.
+    /// Returns the latest fixed-size snapshot without retaining a resource
+    /// reference.
     pub fn snapshot(&self) -> LocalFactSnapshot {
-        *self
-            .snapshot
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+        *self.snapshot.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
     #[allow(dead_code)]
@@ -383,10 +355,7 @@ impl LocalFactObserver {
 
     #[allow(dead_code)]
     pub(crate) fn update(&self, snapshot: LocalFactSnapshot) {
-        *self
-            .snapshot
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner()) = snapshot;
+        *self.snapshot.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = snapshot;
     }
 }
 
@@ -405,7 +374,8 @@ pub enum LocalSubmitRejection {
     Stopped,
     /// The prepared local job was already claimed.
     AlreadyBound,
-    /// A relative Host path requires the explicit asynchronous Host constructor.
+    /// A relative Host path requires the explicit asynchronous Host
+    /// constructor.
     AuthorityNotCaptured,
 }
 
@@ -421,7 +391,8 @@ impl<R> LocalSubmitError<R> {
         Self { request, rejection }
     }
 
-    /// Returns the original request without requiring it to implement Clone or Debug.
+    /// Returns the original request without requiring it to implement Clone or
+    /// Debug.
     pub fn into_request(self) -> R {
         self.request
     }
@@ -460,9 +431,7 @@ mod tests {
 
     #[test]
     fn rejected_request_round_trips_the_same_non_clone_non_debug_value() {
-        let request = OpaqueRequest {
-            identity: Box::new(()),
-        };
+        let request = OpaqueRequest { identity: Box::new(()) };
         let identity = &*request.identity as *const ();
         let rejected = LocalSubmitError::new(request, LocalSubmitRejection::CapacityExceeded);
         assert_eq!(rejected.rejection(), LocalSubmitRejection::CapacityExceeded);

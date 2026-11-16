@@ -37,18 +37,13 @@ struct Port<T, E> {
     wakers: [Option<Waker>; 4],
 }
 
-/// Owned job prepared before manager admission. Binding and activation are one-shot.
+/// Owned job prepared before manager admission. Binding and activation are
+/// one-shot.
 pub(crate) struct PreparedLocalJob<R, T, E> {
     executor: Arc<ExecutorInner>,
     request: Mutex<Option<R>>,
     task: Mutex<
-        Option<
-            Box<
-                dyn for<'scope> FnOnce(R, &'scope OperationScope) -> OperationOutcome<T, E>
-                    + Send
-                    + 'static,
-            >,
-        >,
+        Option<Box<dyn for<'scope> FnOnce(R, &'scope OperationScope) -> OperationOutcome<T, E> + Send + 'static>>,
     >,
     _slot: Mutex<Option<Permit>>,
     _owned_permit: Mutex<Option<Arc<Mutex<Permit>>>>,
@@ -88,7 +83,8 @@ where
         )
     }
 
-    /// Creates a prepared job whose synchronous worker can inspect its operation scope.
+    /// Creates a prepared job whose synchronous worker can inspect its
+    /// operation scope.
     pub(crate) fn new_scoped<F>(
         executor: Arc<ExecutorInner>,
         request: R,
@@ -159,10 +155,7 @@ where
             let Some(current) = wakers[index].as_ref() else {
                 continue;
             };
-            duplicate[index] = wakers[..index]
-                .iter()
-                .flatten()
-                .any(|prior| prior.will_wake(current));
+            duplicate[index] = wakers[..index].iter().flatten().any(|prior| prior.will_wake(current));
         }
         for index in 0..wakers.len() {
             let Some(waker) = wakers[index].take() else {
@@ -196,31 +189,16 @@ where
 
 impl<R: Send + 'static, T: Send + 'static, E: Send + 'static> PreparedLocalJob<R, T, E> {
     pub(crate) fn take_request(&self) -> Option<R> {
-        self.request
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .take()
+        self.request.lock().unwrap_or_else(|e| e.into_inner()).take()
     }
 
     fn finish_released(&self, id: OperationId) {
         self.task.lock().unwrap_or_else(|e| e.into_inner()).take();
-        self.request
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .take();
+        self.request.lock().unwrap_or_else(|e| e.into_inner()).take();
         self._slot.lock().unwrap_or_else(|e| e.into_inner()).take();
-        self._owned_permit
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .take();
-        self._handle_permit
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .take();
-        self._fact_observer
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .take();
+        self._owned_permit.lock().unwrap_or_else(|e| e.into_inner()).take();
+        self._handle_permit.lock().unwrap_or_else(|e| e.into_inner()).take();
+        self._fact_observer.lock().unwrap_or_else(|e| e.into_inner()).take();
         let wakers = {
             let mut port = self.port.lock().unwrap_or_else(|e| e.into_inner());
             port.phase = ExecutionPhase::Finished;
@@ -390,11 +368,7 @@ where
             });
         };
         let this = Arc::clone(&self);
-        let request = self
-            .request
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .take();
+        let request = self.request.lock().unwrap_or_else(|e| e.into_inner()).take();
         let Some(request) = request else {
             self.finish_released(id);
             return Err(ExecutionFailure {
@@ -422,10 +396,7 @@ where
                     reason,
                     accepted_at: None,
                 });
-                this._handle_permit
-                    .lock()
-                    .unwrap_or_else(|e| e.into_inner())
-                    .take();
+                this._handle_permit.lock().unwrap_or_else(|e| e.into_inner()).take();
                 let wakers = {
                     let mut port = this.port.lock().unwrap_or_else(|e| e.into_inner());
                     port.phase = ExecutionPhase::Finished;
@@ -438,13 +409,8 @@ where
                 Self::wake_all(wakers);
                 return;
             }
-            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                task(request, &scope_guard)
-            }));
-            this._handle_permit
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .take();
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| task(request, &scope_guard)));
+            this._handle_permit.lock().unwrap_or_else(|e| e.into_inner()).take();
             let outcome = match result {
                 Ok(outcome) => outcome,
                 Err(_) => OperationOutcome::ExecutionFailed(ExecutionFailure {
@@ -487,23 +453,11 @@ where
 
     fn abandon(self: Arc<Self>) {
         self.task.lock().unwrap_or_else(|e| e.into_inner()).take();
-        self.request
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .take();
+        self.request.lock().unwrap_or_else(|e| e.into_inner()).take();
         self._slot.lock().unwrap_or_else(|e| e.into_inner()).take();
-        self._owned_permit
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .take();
-        self._handle_permit
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .take();
-        self._fact_observer
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .take();
+        self._owned_permit.lock().unwrap_or_else(|e| e.into_inner()).take();
+        self._handle_permit.lock().unwrap_or_else(|e| e.into_inner()).take();
+        self._fact_observer.lock().unwrap_or_else(|e| e.into_inner()).take();
         let wakers = {
             let mut port = self.port.lock().unwrap_or_else(|e| e.into_inner());
             if let Some(id) = port.id {
@@ -521,10 +475,7 @@ where
         let mut port = self.port.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(value) = port.outcome.take() {
             drop(port);
-            self._owned_permit
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .take();
+            self._owned_permit.lock().unwrap_or_else(|e| e.into_inner()).take();
             Self::discard_waker(new_waker.take());
             return Poll::Ready(value);
         }
@@ -539,14 +490,10 @@ where
 fn outcome_summary<T, E>(id: OperationId, outcome: &OperationOutcome<T, E>) -> ChildOutcomeSummary {
     let (kind, text) = match outcome {
         OperationOutcome::Succeeded(_) => (ChildOutcomeKind::Succeeded, "child succeeded"),
-        OperationOutcome::Failed(_) | OperationOutcome::ChildFailed(_) => {
-            (ChildOutcomeKind::Failed, "child failed")
-        }
+        OperationOutcome::Failed(_) | OperationOutcome::ChildFailed(_) => (ChildOutcomeKind::Failed, "child failed"),
         OperationOutcome::Stopped(_) => (ChildOutcomeKind::Stopped, "child stopped"),
         OperationOutcome::Panicked(panic) => (ChildOutcomeKind::Panicked, panic.summary.as_str()),
-        OperationOutcome::ExecutionFailed(error) => {
-            (ChildOutcomeKind::ExecutionFailed, error.summary.as_str())
-        }
+        OperationOutcome::ExecutionFailed(error) => (ChildOutcomeKind::ExecutionFailed, error.summary.as_str()),
     };
     ChildOutcomeSummary {
         operation_id: id,

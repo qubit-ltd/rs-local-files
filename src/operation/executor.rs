@@ -46,10 +46,7 @@ struct WorkerOwner {
 
 impl LocalIoExecutor {
     /// Starts a bounded worker group attached to `manager`.
-    pub fn new(
-        manager: OperationManager,
-        config: LocalExecutionConfig,
-    ) -> Result<Self, LocalExecutorCreateError> {
+    pub fn new(manager: OperationManager, config: LocalExecutionConfig) -> Result<Self, LocalExecutorCreateError> {
         validate(&config).map_err(LocalExecutorCreateError::InvalidConfig)?;
         let group_capacity = config
             .queue_capacity
@@ -159,11 +156,7 @@ impl LocalIoExecutor {
     }
 }
 
-fn spawn_workers<F>(
-    queue: &Arc<WorkerQueue>,
-    count: usize,
-    mut spawn: F,
-) -> io::Result<Vec<JoinHandle<()>>>
+fn spawn_workers<F>(queue: &Arc<WorkerQueue>, count: usize, mut spawn: F) -> io::Result<Vec<JoinHandle<()>>>
 where
     F: FnMut(usize, Arc<WorkerQueue>) -> io::Result<JoinHandle<()>>,
 {
@@ -224,6 +217,10 @@ mod tests {
     use std::sync::mpsc;
     use std::time::Duration;
 
+    use qubit_operation::ManagerOptions;
+    use qubit_operation::OperationManager;
+    use qubit_operation::OperationOutcome;
+
     use super::LocalExecutionConfig;
     use super::LocalIoExecutor;
     use super::spawn_workers;
@@ -231,14 +228,8 @@ mod tests {
     use crate::operation::LocalFactObserver;
     use crate::operation::internal::prepared_local_job::PreparedLocalJob;
     use crate::operation::internal::worker::WorkerQueue;
-    use qubit_operation::ManagerOptions;
-    use qubit_operation::OperationManager;
-    use qubit_operation::OperationOutcome;
 
-    fn make_job<F>(
-        executor: &LocalIoExecutor,
-        task: F,
-    ) -> std::sync::Arc<PreparedLocalJob<(), (), ()>>
+    fn make_job<F>(executor: &LocalIoExecutor, task: F) -> std::sync::Arc<PreparedLocalJob<(), (), ()>>
     where
         F: FnOnce(()) -> OperationOutcome<(), ()> + Send + 'static,
     {
@@ -292,7 +283,9 @@ mod tests {
 
     #[test]
     fn activate_queue_failure_leaves_typed_outcome_to_manager_and_releases_permits() {
-        use std::task::{Context, Wake, Waker};
+        use std::task::Context;
+        use std::task::Wake;
+        use std::task::Waker;
 
         struct Noop;
         impl Wake for Noop {
@@ -300,8 +293,7 @@ mod tests {
         }
 
         let manager = OperationManager::new(ManagerOptions::default()).unwrap();
-        let executor =
-            LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).unwrap();
+        let executor = LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).unwrap();
         let owned = std::sync::Arc::new(std::sync::Mutex::new(executor.reserve_bytes(7).unwrap()));
         let owned_for_task = std::sync::Arc::clone(&owned);
         let fact = std::sync::Arc::new(executor.reserve_fact().unwrap());
@@ -330,20 +322,13 @@ mod tests {
         let mut context = Context::from_waker(&waker);
         assert!(
             matches!(
-                qubit_operation::PreparedExternalOperation::poll_take_outcome(
-                    &*prepared,
-                    &mut context,
-                ),
+                qubit_operation::PreparedExternalOperation::poll_take_outcome(&*prepared, &mut context,),
                 std::task::Poll::Pending
             ),
             "manager owns the sole typed ExecutionFailed outcome"
         );
-        assert!(
-            qubit_operation::OperationControl::poll_release(&*prepared, &mut context).is_ready()
-        );
-        assert!(
-            qubit_operation::OperationControl::poll_settlement(&*prepared, &mut context).is_ready()
-        );
+        assert!(qubit_operation::OperationControl::poll_release(&*prepared, &mut context).is_ready());
+        assert!(qubit_operation::OperationControl::poll_settlement(&*prepared, &mut context).is_ready());
         assert_eq!(executor.inner.queue_slots.used(), 0);
         assert_eq!(executor.inner.byte_slots.used(), 0);
         assert_eq!(executor.inner.handle_slots.used(), 0);
@@ -353,7 +338,9 @@ mod tests {
 
     #[test]
     fn reentrant_waker_can_observe_control_without_deadlocking() {
-        use std::task::{Context, Wake, Waker};
+        use std::task::Context;
+        use std::task::Wake;
+        use std::task::Waker;
 
         struct Reentrant {
             prepared: std::sync::Arc<PreparedLocalJob<(), (), ()>>,
@@ -370,8 +357,7 @@ mod tests {
         }
 
         let manager = OperationManager::new(ManagerOptions::default()).unwrap();
-        let executor =
-            LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).unwrap();
+        let executor = LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).unwrap();
         let prepared = make_job(&executor, |_| OperationOutcome::Succeeded(()));
         let prepared_for_parent = std::sync::Arc::clone(&prepared);
         let manager_for_thread = manager.clone();
@@ -379,11 +365,7 @@ mod tests {
         let thread = std::thread::spawn(move || {
             let mut parent = manager_for_thread
                 .try_submit(Default::default(), move |scope| {
-                    qubit_operation::PreparedExternalOperation::bind(
-                        &*prepared_for_parent,
-                        scope.id(),
-                    )
-                    .unwrap();
+                    qubit_operation::PreparedExternalOperation::bind(&*prepared_for_parent, scope.id()).unwrap();
                     let (wake_tx, wake_rx) = mpsc::channel();
                     let waker = Waker::from(std::sync::Arc::new(Reentrant {
                         prepared: std::sync::Arc::clone(&prepared_for_parent),
@@ -391,11 +373,8 @@ mod tests {
                     }));
                     let mut context = Context::from_waker(&waker);
                     assert!(
-                        qubit_operation::OperationControl::poll_outcome(
-                            &*prepared_for_parent,
-                            &mut context,
-                        )
-                        .is_pending()
+                        qubit_operation::OperationControl::poll_outcome(&*prepared_for_parent, &mut context,)
+                            .is_pending()
                     );
                     qubit_operation::OperationControl::request_stop(
                         &*prepared_for_parent,
@@ -419,7 +398,9 @@ mod tests {
 
     #[test]
     fn panicking_waker_does_not_unwind_or_corrupt_control_state() {
-        use std::task::{Context, Wake, Waker};
+        use std::task::Context;
+        use std::task::Wake;
+        use std::task::Waker;
 
         struct Panics;
         impl Wake for Panics {
@@ -432,22 +413,16 @@ mod tests {
         }
 
         let manager = OperationManager::new(ManagerOptions::default()).unwrap();
-        let executor =
-            LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).unwrap();
+        let executor = LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).unwrap();
         let prepared = make_job(&executor, |_| OperationOutcome::Succeeded(()));
         let prepared_for_parent = std::sync::Arc::clone(&prepared);
         let mut parent = manager
             .try_submit(Default::default(), move |scope| {
-                qubit_operation::PreparedExternalOperation::bind(&*prepared_for_parent, scope.id())
-                    .unwrap();
+                qubit_operation::PreparedExternalOperation::bind(&*prepared_for_parent, scope.id()).unwrap();
                 let waker = Waker::from(std::sync::Arc::new(Panics));
                 let mut context = Context::from_waker(&waker);
                 assert!(
-                    qubit_operation::OperationControl::poll_outcome(
-                        &*prepared_for_parent,
-                        &mut context,
-                    )
-                    .is_pending()
+                    qubit_operation::OperationControl::poll_outcome(&*prepared_for_parent, &mut context,).is_pending()
                 );
                 qubit_operation::OperationControl::request_stop(
                     &*prepared_for_parent,
@@ -471,8 +446,7 @@ mod tests {
     #[test]
     fn abandon_releases_all_unstarted_permits_even_with_retained_arc() {
         let manager = OperationManager::new(ManagerOptions::default()).unwrap();
-        let executor =
-            LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).unwrap();
+        let executor = LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).unwrap();
         let owned = std::sync::Arc::new(std::sync::Mutex::new(executor.reserve_bytes(9).unwrap()));
         let owned_for_task = std::sync::Arc::clone(&owned);
         let observer_permit = std::sync::Arc::new(executor.reserve_fact().unwrap());
@@ -492,11 +466,8 @@ mod tests {
         let executor_for_parent = executor.clone();
         let mut parent = manager
             .try_submit(Default::default(), move |scope| {
-                qubit_operation::PreparedExternalOperation::bind(&*prepared_for_parent, scope.id())
-                    .unwrap();
-                qubit_operation::PreparedExternalOperation::abandon(std::sync::Arc::clone(
-                    &prepared_for_parent,
-                ));
+                qubit_operation::PreparedExternalOperation::bind(&*prepared_for_parent, scope.id()).unwrap();
+                qubit_operation::PreparedExternalOperation::abandon(std::sync::Arc::clone(&prepared_for_parent));
                 assert_eq!(executor_for_parent.inner.queue_slots.used(), 0);
                 assert_eq!(executor_for_parent.inner.byte_slots.used(), 0);
                 assert_eq!(executor_for_parent.inner.handle_slots.used(), 0);
@@ -514,8 +485,7 @@ mod tests {
     #[test]
     fn local_operation_keeps_result_budget_until_user_takes_outcome() {
         let manager = OperationManager::new(ManagerOptions::default()).unwrap();
-        let executor =
-            LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).unwrap();
+        let executor = LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).unwrap();
         let permit = std::sync::Arc::new(std::sync::Mutex::new(executor.reserve_bytes(8).unwrap()));
         let handle = manager
             .try_submit(Default::default(), |_| Ok::<_, ()>(vec![1_u8; 4]))
@@ -602,7 +572,10 @@ mod tests {
     #[test]
     fn async_constructor_poll_never_waits_for_blocked_worker_io() {
         use std::future::Future;
-        use std::task::{Context, Poll, Wake, Waker};
+        use std::task::Context;
+        use std::task::Poll;
+        use std::task::Wake;
+        use std::task::Waker;
         struct Noop;
         impl Wake for Noop {
             fn wake(self: std::sync::Arc<Self>) {}
@@ -639,9 +612,7 @@ mod tests {
         drop(host);
 
         let (complete_tx, complete_rx) = mpsc::channel();
-        executor
-            .enqueue_task(move || complete_tx.send(()).unwrap())
-            .unwrap();
+        executor.enqueue_task(move || complete_tx.send(()).unwrap()).unwrap();
         release_tx.send(()).unwrap();
         complete_rx.recv_timeout(Duration::from_secs(5)).unwrap();
     }
@@ -670,31 +641,17 @@ mod tests {
         let cleanup_order = order_tx.clone();
         assert!(
             queue
-                .push(
-                    Box::new(move || cleanup_order.send("cleanup").unwrap()),
-                    true,
-                    4,
-                )
+                .push(Box::new(move || cleanup_order.send("cleanup").unwrap()), true, 4,)
                 .is_ok()
         );
         assert!(
             queue
-                .push(
-                    Box::new(move || order_tx.send("ordinary").unwrap()),
-                    false,
-                    4,
-                )
+                .push(Box::new(move || order_tx.send("ordinary").unwrap()), false, 4,)
                 .is_ok()
         );
         release_tx.send(()).unwrap();
-        assert_eq!(
-            order_rx.recv_timeout(Duration::from_secs(5)).unwrap(),
-            "ordinary"
-        );
-        assert_eq!(
-            order_rx.recv_timeout(Duration::from_secs(5)).unwrap(),
-            "cleanup"
-        );
+        assert_eq!(order_rx.recv_timeout(Duration::from_secs(5)).unwrap(), "ordinary");
+        assert_eq!(order_rx.recv_timeout(Duration::from_secs(5)).unwrap(), "cleanup");
         queue.stop();
         worker.join().unwrap();
     }
@@ -727,23 +684,15 @@ mod tests {
         let queued_slot = executor
             .reserve_slot()
             .expect("queue capacity available while first job runs");
-        let waiter_slot = executor
-            .reserve_slot()
-            .expect("bounded waiter capacity is available");
+        let waiter_slot = executor.reserve_slot().expect("bounded waiter capacity is available");
         assert!(
             executor.reserve_slot().is_none(),
             "all queue and waiter reservations are held"
         );
-        let queued =
-            make_job_with_slot(&executor, queued_slot, |_| OperationOutcome::Succeeded(()));
-        let waiting =
-            make_job_with_slot(&executor, waiter_slot, |_| OperationOutcome::Succeeded(()));
-        let mut queued_handle = manager
-            .try_submit_external(Default::default(), queued)
-            .unwrap();
-        let mut waiting_handle = manager
-            .try_submit_external(Default::default(), waiting)
-            .unwrap();
+        let queued = make_job_with_slot(&executor, queued_slot, |_| OperationOutcome::Succeeded(()));
+        let waiting = make_job_with_slot(&executor, waiter_slot, |_| OperationOutcome::Succeeded(()));
+        let mut queued_handle = manager.try_submit_external(Default::default(), queued).unwrap();
+        let mut waiting_handle = manager.try_submit_external(Default::default(), waiting).unwrap();
 
         release_tx.send(()).unwrap();
         assert!(matches!(
@@ -767,8 +716,11 @@ mod tests {
 
     #[test]
     fn stop_after_bind_before_activate_prevents_task_from_running() {
-        use std::sync::atomic::{AtomicUsize, Ordering};
-        use std::task::{Context, Wake, Waker};
+        use std::sync::atomic::AtomicUsize;
+        use std::sync::atomic::Ordering;
+        use std::task::Context;
+        use std::task::Wake;
+        use std::task::Waker;
 
         struct Notify(std::sync::mpsc::Sender<()>);
         impl Wake for Notify {
@@ -781,8 +733,7 @@ mod tests {
         }
 
         let manager = OperationManager::new(ManagerOptions::default()).unwrap();
-        let executor =
-            LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).unwrap();
+        let executor = LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).unwrap();
         let executions = std::sync::Arc::new(AtomicUsize::new(0));
         let executions_for_parent = std::sync::Arc::clone(&executions);
         let mut parent = manager
@@ -794,33 +745,21 @@ mod tests {
                 });
                 let id = scope.id();
                 qubit_operation::PreparedExternalOperation::bind(&*prepared, id).unwrap();
-                qubit_operation::OperationControl::request_stop(
-                    &*prepared,
-                    qubit_operation::StopReason::UserCancelled,
-                );
-                qubit_operation::PreparedExternalOperation::activate(
-                    std::sync::Arc::clone(&prepared),
-                    scope,
-                )
-                .unwrap();
+                qubit_operation::OperationControl::request_stop(&*prepared, qubit_operation::StopReason::UserCancelled);
+                qubit_operation::PreparedExternalOperation::activate(std::sync::Arc::clone(&prepared), scope).unwrap();
 
                 let (wake_tx, wake_rx) = std::sync::mpsc::channel();
                 let waker = Waker::from(std::sync::Arc::new(Notify(wake_tx)));
                 let mut context = Context::from_waker(&waker);
                 loop {
-                    match qubit_operation::PreparedExternalOperation::poll_take_outcome(
-                        &*prepared,
-                        &mut context,
-                    ) {
+                    match qubit_operation::PreparedExternalOperation::poll_take_outcome(&*prepared, &mut context) {
                         std::task::Poll::Ready(qubit_operation::OperationOutcome::Stopped(_)) => {
                             break;
                         }
                         std::task::Poll::Ready(_) => {
                             panic!("stopped prepared task produced a non-stopped outcome")
                         }
-                        std::task::Poll::Pending => {
-                            wake_rx.recv_timeout(Duration::from_secs(5)).unwrap()
-                        }
+                        std::task::Poll::Pending => wake_rx.recv_timeout(Duration::from_secs(5)).unwrap(),
                     }
                 }
                 Ok::<_, ()>(())
@@ -849,7 +788,8 @@ mod tests {
 
     #[test]
     fn cleanup_permit_quota_and_rejected_enqueue_preserve_job_and_permit() {
-        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::atomic::AtomicUsize;
+        use std::sync::atomic::Ordering;
 
         let manager = OperationManager::new(ManagerOptions::default()).unwrap();
         let executor = LocalIoExecutor::new(
@@ -957,8 +897,7 @@ mod tests {
     #[test]
     fn duplicate_arc_submission_is_rejected_without_abandoning_claimed_job() {
         let manager = OperationManager::new(ManagerOptions::default()).unwrap();
-        let executor =
-            LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).unwrap();
+        let executor = LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).unwrap();
         let (started_tx, started_rx) = mpsc::channel();
         let (release_tx, release_rx) = mpsc::channel();
         let prepared = make_job(&executor, move |_| {
@@ -970,16 +909,12 @@ mod tests {
             .try_submit_external(Default::default(), std::sync::Arc::clone(&prepared))
             .unwrap();
         started_rx.recv_timeout(Duration::from_secs(5)).unwrap();
-        let rejected =
-            manager.try_submit_external(Default::default(), std::sync::Arc::clone(&prepared));
+        let rejected = manager.try_submit_external(Default::default(), std::sync::Arc::clone(&prepared));
         let error = match rejected {
             Ok(_) => panic!("duplicate prepared Arc was accepted"),
             Err(error) => error,
         };
-        assert_eq!(
-            error.reason(),
-            qubit_operation::AdmissionError::AlreadyBound
-        );
+        assert_eq!(error.reason(), qubit_operation::AdmissionError::AlreadyBound);
         release_tx.send(()).unwrap();
         assert!(matches!(
             accepted.wait_outcome().unwrap(),

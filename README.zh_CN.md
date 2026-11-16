@@ -17,8 +17,15 @@
 
 ```toml
 [dependencies]
-qubit-local-files = "0.5"
+qubit-local-files = "0.6"
 qubit-io = "0.19"
+```
+
+启用可选 `async` feature 后，可使用有界本地 I/O worker 和应用持有的 operation manager：
+
+```toml
+qubit-local-files = { version = "0.6", features = ["async"] }
+qubit-operation = "^0.3"
 ```
 
 Reader 使用 `qubit_io::ByteInput`，writer 和临时文件使用
@@ -61,6 +68,14 @@ work.cleanup()?;
 # Ok::<(), Box<dyn std::error::Error>>(())
 ```
 
+## 与运行时无关的异步访问
+
+异步 facade 不依赖 Tokio 或其他运行时。先取得 operation outcome，使用并关闭返回资源，
+再等待 settlement；持有 reader、writer 或 walker 等待 settlement 可能导致自等待。Rooted
+stage 导出需要显式能力；helper 使用克隆的 `File` 时，必须在整个使用期间保留对应 read
+lease。清理失败会保留在 settlement/恢复状态中。完整的 outcome、关闭和 settlement 示例见
+[用户手册中的异步工作流](doc/user_guide.zh_CN.md#与运行时无关的异步操作)。
+
 ## 条件写入：校验 A 的内容后保存 B
 
 编辑器读取文档 A 后，保存时可先检查当前文件的摘要是否仍与 A 一致，再请求发布新内容 B。
@@ -71,7 +86,7 @@ B 已短暂可见后才被发现，回滚或恢复也可能失败。
 并添加算法依赖：
 
 ```toml
-qubit-local-files = { version = "0.5", features = ["digest"] }
+qubit-local-files = { version = "0.6", features = ["digest"] }
 sha2 = "0.11"
 ```
 

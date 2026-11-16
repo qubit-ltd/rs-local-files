@@ -6,12 +6,12 @@
 
 ## Purpose and Audience
 
-This guide covers `qubit-local-files` 0.5.4 on Rust 1.94 or newer. It is for
+This guide covers `qubit-local-files` 0.6.0 on Rust 1.94 or newer. It is for
 applications that operate on the host filesystem or need operations restricted
 to one opened directory. It is not a provider registry, a remote filesystem
-API, or a replacement for provider-level logical paths. The crate is
-synchronous; async applications should call it from an appropriate blocking
-execution context.
+API, or a replacement for provider-level logical paths. The synchronous API
+remains available; the optional `async` feature adds a runtime-independent
+facade that runs blocking filesystem calls on bounded local workers.
 
 ## Installation and Minimal Configuration
 
@@ -20,13 +20,71 @@ Add the crate to the application manifest:
 ```toml
 # BEGIN guide introductory dependencies
 [dependencies]
-qubit-local-files = "0.5.4"
+qubit-local-files = "0.6.0"
 qubit-io = "0.19"
 tempfile = "3.27"
 # END guide introductory dependencies
 ```
 
 `tempfile` is used only by the guide's exercise fixtures to create temporary directories.
+
+Applications using the asynchronous facade enable its feature and provide an
+operation manager:
+
+```toml
+qubit-local-files = { version = "0.6.0", features = ["async"] }
+qubit-operation = "^0.3"
+```
+
+## Runtime-independent asynchronous operations
+
+`LocalIoExecutor` starts a bounded local worker group; it does not require
+Tokio, futures, or another runtime. An operation outcome can contain a live
+reader, writer, or walker. Retrieve that outcome first, use and explicitly
+close the returned resource, then wait for settlement. Waiting for settlement
+while retaining a resource returned by that same operation can wait forever,
+because the scope still owns the resource until its last user releases it.
+
+```rust,no_run
+# async fn example() -> Result<(), Box<dyn std::error::Error>> {
+use std::path::PathBuf;
+use qubit_local_files::{
+    AsyncLocalFileSystem, LocalExecutionConfig, LocalIoExecutor, LocalReadOptions,
+};
+use qubit_operation::{ManagerOptions, OperationManager, OperationOptions, OperationOutcome};
+
+let manager = OperationManager::new(ManagerOptions::default())?;
+let executor = LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default())?;
+let filesystem = AsyncLocalFileSystem::host(executor).await?;
+let mut opening = filesystem.submit_open_reader(
+    &manager,
+    OperationOptions::default(),
+    PathBuf::from("input.txt"),
+    LocalReadOptions::default(),
+)?;
+let mut opening = opening.into_async();
+let mut reader = match opening.wait_outcome().await? {
+    OperationOutcome::Succeeded(reader) => reader,
+    _ => return Err(std::io::Error::other("reader open did not succeed").into()),
+};
+reader.close().await?;
+drop(reader);
+let settlement = opening.wait_settlement().await;
+assert_eq!(settlement.recovery_count, 0);
+# Ok(())
+# }
+```
+
+An outcome reports the operation's typed result; settlement reports whether
+the executor released its inputs and completed resource cleanup or retained a
+recoverable owner. Dropping an operation handle does not cancel accepted work.
+Rooted temporary resources are not exportable as read-only OS handles unless
+the stage request explicitly grants that capability. Any `File::try_clone`
+used by a helper must remain paired with a cloned read lease until that helper
+finishes. Close streams and release helper leases before waiting for settlement;
+keep recovery handles when cleanup reports a retained resource. A stream
+writer must call `commit()` to publish or `abort()` to discard before closing;
+dropping an uncommitted writer aborts its staged data.
 
 Choose the authority before configuring operation policy. Host mode uses the
 process-visible namespace. Rooted mode opens one existing directory and treats
@@ -682,7 +740,7 @@ optional feature and an algorithm implementation to the application manifest:
 ```toml
 # BEGIN executable application dependencies
 [dependencies]
-qubit-local-files = { version = "0.5.4", features = ["digest"] }
+qubit-local-files = { version = "0.6.0", features = ["digest"] }
 qubit-io = "0.19"
 sha2 = "0.11"
 tempfile = "^3.27"

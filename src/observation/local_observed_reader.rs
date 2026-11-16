@@ -48,10 +48,7 @@ const BLOCK_SIZE: usize = 8 * 1024;
 /// # Errors
 /// Returns a read error or `ResourceLimit` when the input exceeds the limit or
 /// memory reservation fails.
-pub(crate) fn collect_limited<S: ByteInput + ?Sized>(
-    input: &mut S,
-    maximum: Option<u64>,
-) -> LocalResult<Vec<u8>> {
+pub(crate) fn collect_limited<S: ByteInput + ?Sized>(input: &mut S, maximum: Option<u64>) -> LocalResult<Vec<u8>> {
     collect_limited_with_reserver(input, maximum, |output, additional| {
         output.try_reserve(additional).map_err(io::Error::other)
     })
@@ -104,10 +101,7 @@ where
                 Ok(0) => return Ok(output),
                 Ok(_) => {
                     let observed = count.checked_add(1).ok_or_else(length_overflow)?;
-                    return Err(read_limit(
-                        maximum.expect("sentinel requires a limit"),
-                        observed,
-                    ));
+                    return Err(read_limit(maximum.expect("sentinel requires a limit"), observed));
                 }
                 Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
                 Err(error) => return Err(read_error(error)),
@@ -242,9 +236,6 @@ mod tests {
 
         assert_eq!(error.kind(), LocalFileErrorKind::ResourceLimit);
         assert!(error.read_limit_error().is_none());
-        assert_eq!(
-            error.reason(),
-            Some("read length exceeds addressable capacity")
-        );
+        assert_eq!(error.reason(), Some("read length exceeds addressable capacity"));
     }
 }

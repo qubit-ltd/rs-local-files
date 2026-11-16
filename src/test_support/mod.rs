@@ -62,12 +62,14 @@ pub(crate) use internal::temp_cleanup_replace_observed_entry;
 #[doc(hidden)]
 pub use test_fault_plan::TestFaultPlan;
 pub use test_fault_point::TestFaultPoint;
-
+#[cfg(feature = "test-support")]
+#[doc(hidden)]
+pub use test_gate::TestGateGuard;
 #[cfg(feature = "test-support")]
 pub(crate) use test_gate::hit_test_gate;
 #[cfg(feature = "test-support")]
 #[doc(hidden)]
-pub use test_gate::{TestGateGuard, install_test_gate};
+pub use test_gate::install_test_gate;
 
 #[cfg(feature = "test-support")]
 #[doc(hidden)]

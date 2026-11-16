@@ -33,10 +33,7 @@ pub(crate) trait ReaderPathBinding: std::fmt::Debug + Send + Sync {
     ///
     /// # Errors
     /// Returns structured errors when verification cannot be completed.
-    fn verify_until(
-        &self,
-        deadline: Option<std::time::Instant>,
-    ) -> LocalResult<LocalSourceVerification>;
+    fn verify_until(&self, deadline: Option<std::time::Instant>) -> LocalResult<LocalSourceVerification>;
 
     /// Computes the deadline from the current instant, then verifies the
     /// binding.

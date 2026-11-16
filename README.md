@@ -18,8 +18,16 @@ in [`qubit-fs-local`](https://crates.io/crates/qubit-fs-local).
 
 ```toml
 [dependencies]
-qubit-local-files = "0.5"
+qubit-local-files = "0.6"
 qubit-io = "0.19"
+```
+
+Enable the optional `async` feature to use bounded local I/O workers with an
+application-owned operation manager:
+
+```toml
+qubit-local-files = { version = "0.6", features = ["async"] }
+qubit-operation = "^0.3"
 ```
 
 Readers use `qubit_io::ByteInput`; writers and temporary files use
@@ -66,6 +74,17 @@ work.cleanup()?;
 # Ok::<(), Box<dyn std::error::Error>>(())
 ```
 
+## Runtime-independent async access
+
+The async facade does not depend on Tokio or another runtime. Retrieve the
+operation outcome, use and close any returned resource, then await settlement;
+waiting for settlement while retaining a returned reader, writer, or walker can
+self-wait. Rooted stage exports require explicit capability, and each helper
+using a cloned `File` must retain its corresponding read lease until it finishes.
+Cleanup failures remain represented in settlement/recovery state. See the
+[async workflow in the user guide](doc/user_guide.md#runtime-independent-asynchronous-operations)
+for a complete outcome/close/settlement example.
+
 ## Conditional write: check A's content before saving B
 
 An editor can read a document as A and later request publication of B after
@@ -79,7 +98,7 @@ and attempts publication against the requested condition. Add the feature and
 algorithm dependency to the application manifest:
 
 ```toml
-qubit-local-files = { version = "0.5", features = ["digest"] }
+qubit-local-files = { version = "0.6", features = ["digest"] }
 sha2 = "0.11"
 ```
 

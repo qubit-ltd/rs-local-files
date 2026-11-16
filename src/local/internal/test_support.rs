@@ -112,16 +112,9 @@ pub(crate) fn install_test_fault_repeated(name: &str, count: usize) -> io::Resul
 ///
 /// Returns a guard that releases the selector and wakes a waiting installer.
 #[cfg(feature = "test-support")]
-fn install_test_fault_for(
-    name: &str,
-    repeat_count: usize,
-    shared: bool,
-) -> io::Result<TestFaultGuard> {
+fn install_test_fault_for(name: &str, repeat_count: usize, shared: bool) -> io::Result<TestFaultGuard> {
     let owner = std::thread::current().id();
-    let mut active = ACTIVE_FAULT
-        .0
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut active = ACTIVE_FAULT.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     loop {
         match active.as_ref() {
             Some(current) if current.owner == owner => {
@@ -153,10 +146,7 @@ fn install_test_fault_for(
 /// Releases the process-wide selector and occurrence counters for its guard.
 #[cfg(feature = "test-support")]
 pub(super) fn release_test_fault() {
-    let mut active = ACTIVE_FAULT
-        .0
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut active = ACTIVE_FAULT.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     active.take();
     ONE_SHOT_FAULT_TAKEN.store(false, Ordering::Relaxed);
     NTH_FAULT_OCCURRENCES.store(0, Ordering::Relaxed);
@@ -248,8 +238,7 @@ pub(crate) fn take(name: &str) -> bool {
 #[inline]
 pub(crate) fn take_repeated(name: &str) -> bool {
     is_enabled(name)
-        && NTH_FAULT_OCCURRENCES.fetch_add(1, Ordering::Relaxed)
-            < REPEATED_FAULT_COUNT.load(Ordering::Relaxed)
+        && NTH_FAULT_OCCURRENCES.fetch_add(1, Ordering::Relaxed) < REPEATED_FAULT_COUNT.load(Ordering::Relaxed)
 }
 
 /// Returns how many matching fault boundaries have been reached in the active
@@ -346,12 +335,13 @@ fn take_on_nth_impl(name: &str, occurrence: usize) -> bool {
 
 #[cfg(all(test, feature = "test-support"))]
 mod shared_fault_tests {
-    use super::{install_test_fault_shared, take};
+    use super::install_test_fault_shared;
+    use super::take;
 
     #[test]
     fn shared_fault_can_be_consumed_by_another_thread() {
-        let _fault = install_test_fault_shared("test-support-shared-thread-regression")
-            .expect("shared selector should install");
+        let _fault =
+            install_test_fault_shared("test-support-shared-thread-regression").expect("shared selector should install");
         let worker = std::thread::spawn(|| take("test-support-shared-thread-regression"));
         assert!(worker.join().expect("worker should finish"));
         assert!(!take("test-support-shared-thread-regression"));

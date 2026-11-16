@@ -62,12 +62,11 @@ impl Permit {
             if next_used > self.state.limit {
                 return false;
             }
-            match self.state.used.compare_exchange_weak(
-                current,
-                next_used,
-                Ordering::AcqRel,
-                Ordering::Acquire,
-            ) {
+            match self
+                .state
+                .used
+                .compare_exchange_weak(current, next_used, Ordering::AcqRel, Ordering::Acquire)
+            {
                 Ok(_) => {
                     self.amount = next_amount;
                     return true;
@@ -149,12 +148,11 @@ impl DiskPermit {
             if next_used > self.state.limit {
                 return false;
             }
-            match self.state.used.compare_exchange_weak(
-                current,
-                next_used,
-                Ordering::AcqRel,
-                Ordering::Acquire,
-            ) {
+            match self
+                .state
+                .used
+                .compare_exchange_weak(current, next_used, Ordering::AcqRel, Ordering::Acquire)
+            {
                 Ok(_) => {
                     self.amount = next_amount;
                     return true;

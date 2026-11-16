@@ -116,15 +116,12 @@ impl LocalSealedTempFile {
     ///
     /// `Some(path)` for Host authority, or `None` for Rooted authority.
     pub fn native_path(&self) -> Option<&Path> {
-        matches!(
-            self.resource.core.backend,
-            LocalTempResourceBackend::Host(_)
-        )
-        .then(|| self.path())
+        matches!(self.resource.core.backend, LocalTempResourceBackend::Host(_)).then(|| self.path())
     }
 
     /// Clones the already-open read-only handle without resolving or reopening
-    /// a path. The caller must retain the managed resource lease while using it.
+    /// a path. The caller must retain the managed resource lease while using
+    /// it.
     pub(crate) fn try_clone_readonly_file(&self) -> LocalResult<File> {
         let file = self.resource.file.as_ref().ok_or_else(|| {
             LocalFileError::from_io(
@@ -160,15 +157,14 @@ impl LocalSealedTempFile {
                 super::closed_file_error(),
             )
         })?;
-        crate::observation::query::query_observation(file, LocalObservationRequirement::Required)
-            .map_err(|error| {
-                let error = if error.path().is_none() {
-                    error.with_path(self.path().to_path_buf())
-                } else {
-                    error
-                };
-                self.resource.core.contextualize_error(error)
-            })
+        crate::observation::query::query_observation(file, LocalObservationRequirement::Required).map_err(|error| {
+            let error = if error.path().is_none() {
+                error.with_path(self.path().to_path_buf())
+            } else {
+                error
+            };
+            self.resource.core.contextualize_error(error)
+        })
     }
 
     /// Removes the sealed file and its sandbox.

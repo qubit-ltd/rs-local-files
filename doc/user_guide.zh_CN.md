@@ -6,10 +6,10 @@
 
 ## 手册目标与读者
 
-本手册面向 Rust 1.94 及以上版本的 `qubit-local-files` 0.5.4 使用者，适用于直接操作主机
+本手册面向 Rust 1.94 及以上版本的 `qubit-local-files` 0.6.0 使用者，适用于直接操作主机
 文件系统，或需要把操作限制在一个已打开目录之下的应用。它不是 provider 注册表、远程
-文件系统 API，也不替代 provider 层的逻辑路径模型。本 crate 提供同步 API；异步应用应在
-合适的 blocking 执行环境中调用。
+文件系统 API，也不替代 provider 层的逻辑路径模型。同步 API 保持可用；可选 `async`
+feature 提供与运行时无关的 facade，并通过有界本地 worker 执行阻塞文件系统调用。
 
 ## 安装与最小配置
 
@@ -18,13 +18,64 @@
 ```toml
 # BEGIN guide introductory dependencies
 [dependencies]
-qubit-local-files = "0.5.4"
+qubit-local-files = "0.6.0"
 qubit-io = "0.19"
 tempfile = "3.27"
 # END guide introductory dependencies
 ```
 
 `tempfile` 仅用于本手册练习 fixture 创建临时目录。
+
+使用异步 facade 的应用需启用该 feature 并提供 operation manager：
+
+```toml
+qubit-local-files = { version = "0.6.0", features = ["async"] }
+qubit-operation = "^0.3"
+```
+
+## 与运行时无关的异步操作
+
+`LocalIoExecutor` 会启动有界本地 worker 组，不要求 Tokio、futures 或其他运行时。操作
+结果可能包含仍在使用的 reader、writer 或 walker。先取出 outcome，使用并显式关闭资源，
+最后再等待 settlement。如果仍持有同一操作返回的资源就等待 settlement，等待可能永不结束，
+因为 scope 会一直管理该资源，直到最后一个使用者归还引用。
+
+```rust,no_run
+# async fn example() -> Result<(), Box<dyn std::error::Error>> {
+use std::path::PathBuf;
+use qubit_local_files::{
+    AsyncLocalFileSystem, LocalExecutionConfig, LocalIoExecutor, LocalReadOptions,
+};
+use qubit_operation::{ManagerOptions, OperationManager, OperationOptions, OperationOutcome};
+
+let manager = OperationManager::new(ManagerOptions::default())?;
+let executor = LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default())?;
+let filesystem = AsyncLocalFileSystem::host(executor).await?;
+let mut opening = filesystem.submit_open_reader(
+    &manager,
+    OperationOptions::default(),
+    PathBuf::from("input.txt"),
+    LocalReadOptions::default(),
+)?;
+let mut opening = opening.into_async();
+let mut reader = match opening.wait_outcome().await? {
+    OperationOutcome::Succeeded(reader) => reader,
+    _ => return Err(std::io::Error::other("reader open did not succeed").into()),
+};
+reader.close().await?;
+drop(reader);
+let settlement = opening.wait_settlement().await;
+assert_eq!(settlement.recovery_count, 0);
+# Ok(())
+# }
+```
+
+Outcome 报告操作的类型化结果；settlement 报告 executor 是否已释放输入、完成资源清理，
+或保留了可恢复 owner。丢弃操作 handle 不会取消已接纳任务。Rooted 临时资源默认不能导出
+只读 OS 句柄，除非 stage 请求显式授予该能力。helper 使用 `File::try_clone` 时，整个使用期
+都必须同时保留一个克隆的 read lease。等待 settlement 前应先关闭流并归还 helper lease；
+清理报告保留资源时，应继续保留恢复 handle。发布流式 writer 前先调用 `commit()`；
+决定放弃时调用 `abort()`，然后再关闭。丢弃尚未提交的 writer 会终止暂存数据。
 
 配置操作策略前，先选择权限范围。Host 模式使用进程可见的命名空间；Rooted 模式打开一个
 已存在目录并将其映射为虚拟 `/`。权限句柄打开后，构造时传入的 Host 路径只用于诊断。
@@ -555,7 +606,7 @@ FreeBSD 暂不支持。其 CI 只检查编译和少量兼容性合同，不再�
 ```toml
 # BEGIN executable application dependencies
 [dependencies]
-qubit-local-files = { version = "0.5.4", features = ["digest"] }
+qubit-local-files = { version = "0.6.0", features = ["digest"] }
 qubit-io = "0.19"
 sha2 = "0.11"
 tempfile = "^3.27"

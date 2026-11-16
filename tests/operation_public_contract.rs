@@ -40,6 +40,55 @@ fn rejected_request_type_accepts_an_opaque_non_clone_non_debug_payload() {
     let _recover = recover;
 }
 
+#[cfg(feature = "async")]
+#[test]
+fn lf8_async_surface_is_available_from_the_crate_root() {
+    use qubit_local_files::AsyncLocalDirectoryWalker;
+    use qubit_local_files::AsyncLocalFileReader;
+    use qubit_local_files::AsyncLocalFileSystem;
+    use qubit_local_files::AsyncLocalFileWriter;
+    use qubit_local_files::LocalReadExport;
+    use qubit_local_files::LocalReadLease;
+    use qubit_local_files::LocalReadResource;
+    use qubit_local_files::LocalStageOptions;
+    use qubit_local_files::LocalStreamCommand;
+    use qubit_local_files::LocalStreamResource;
+    use qubit_local_files::LocalTempFileAccess;
+    use qubit_local_files::LocalTempLifecycleCommand;
+    use qubit_local_files::LocalWalkResource;
+    use qubit_local_files::LocalWriterCommitRequest;
+    use qubit_local_files::stage_bytes;
+    use qubit_local_files::stage_stream;
+    use qubit_local_files::submit_temp_directory;
+    use qubit_local_files::submit_temp_file;
+
+    let _: Option<AsyncLocalDirectoryWalker> = None;
+    let _: Option<AsyncLocalFileReader> = None;
+    let _: Option<AsyncLocalFileSystem> = None;
+    let _: Option<AsyncLocalFileWriter> = None;
+    let _: Option<LocalReadExport> = None;
+    let _: Option<LocalReadLease> = None;
+    let _: Option<LocalReadResource> = None;
+    let _: Option<LocalStageOptions> = None;
+    let _: Option<LocalStreamCommand> = None;
+    let _: Option<LocalStreamResource> = None;
+    let _: Option<LocalTempFileAccess> = None;
+    let _: Option<LocalTempLifecycleCommand> = None;
+    let _: Option<LocalWriterCommitRequest> = None;
+    let _: Option<LocalWalkResource> = None;
+    let _ = (stage_bytes, submit_temp_directory, submit_temp_file);
+    let _ = stage_stream::<AsyncLocalFileReader>;
+}
+
+#[cfg(all(feature = "async", feature = "digest"))]
+#[test]
+fn lf8_digest_surface_is_available_from_the_crate_root() {
+    use qubit_local_files::LocalConditionalWriterCommandError;
+    use qubit_local_files::LocalConditionalWriterCommitRequest;
+    let _: Option<LocalConditionalWriterCommandError<sha2::Sha256>> = None;
+    let _: Option<LocalConditionalWriterCommitRequest<sha2::Sha256>> = None;
+}
+
 // This generic external test compiles against only the dependency's public
 // crate root. It deliberately does not import downstream-private adapters.
 #[allow(dead_code)]

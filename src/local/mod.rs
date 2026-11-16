@@ -21,10 +21,10 @@ pub use internal::test_fault_guard::TestFaultGuard;
 pub(crate) use internal::test_support::fault_error as test_fault_error;
 #[cfg(feature = "test-support")]
 pub use internal::test_support::install_test_fault;
-#[cfg(feature = "test-support")]
-pub use internal::test_support::install_test_fault_shared;
 #[cfg(all(feature = "test-support", test))]
 pub(crate) use internal::test_support::install_test_fault_repeated;
+#[cfg(feature = "test-support")]
+pub use internal::test_support::install_test_fault_shared;
 pub(crate) use internal::test_support::io_error as test_io_error;
 pub(crate) use internal::test_support::is_enabled as test_support_enabled;
 #[cfg(feature = "test-support")]
