@@ -12,6 +12,8 @@
 pub(super) struct ActiveFault {
     /// Test thread that owns the currently installed selector.
     pub(super) owner: std::thread::ThreadId,
+    /// Whether native worker threads may consume this selector too.
+    pub(super) shared: bool,
     /// Native fault boundary selected by the owning test.
     pub(super) name: String,
 }

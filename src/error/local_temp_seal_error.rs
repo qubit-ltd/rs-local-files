@@ -59,7 +59,10 @@ impl LocalTempSealError {
     /// * `cause` — the sealing failure that retains the temporary file.
     /// * `access_state` — the access state observed when sealing failed.
     pub(crate) const fn new(cause: LocalFileError, access_state: LocalTempAccessState) -> Self {
-        Self { cause, access_state }
+        Self {
+            cause,
+            access_state,
+        }
     }
 
     /// Returns the sealing failure.
@@ -81,7 +84,10 @@ impl LocalTempSealError {
     /// file owner so an adapter can preserve both the diagnostic and recovery
     /// responsibility.
     pub fn into_parts(self) -> (LocalFileError, LocalTempAccessState, LocalTempFile) {
-        let Self { cause, access_state } = self;
+        let Self {
+            cause,
+            access_state,
+        } = self;
         let (cause, recovery) = cause.into_temp_recovery_parts();
         let resource = recovery
             .and_then(crate::temp::types::LocalTempRecovery::into_file)

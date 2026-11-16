@@ -10,9 +10,11 @@
 //! This module is available only with the `test-support` feature. It is not a
 //! production API and does not carry the crate's normal semver compatibility
 //! promise. Instance-local plans validate isolated facade behavior; the
-//! process-local guard serializes installation and affects only its owning
-//! thread. It supports native boundary and recovery-state tests that cannot be
-//! triggered through ordinary inputs.
+//! process-local fault guard serializes installation; ordinary selectors are
+//! thread-affine, while explicitly shared selectors and named gates support
+//! async adapters whose native work runs on worker threads. These helpers are
+//! for native boundary and recovery-state tests that ordinary inputs cannot
+//! trigger.
 
 #[cfg(all(feature = "digest", feature = "test-support"))]
 mod conditional_hooks;
@@ -27,6 +29,8 @@ mod test_conditional_hooks;
 mod test_conditional_point;
 mod test_fault_plan;
 mod test_fault_point;
+#[cfg(feature = "test-support")]
+mod test_gate;
 
 #[cfg(all(feature = "digest", feature = "test-support"))]
 #[doc(hidden)]
@@ -60,8 +64,17 @@ pub use test_fault_plan::TestFaultPlan;
 pub use test_fault_point::TestFaultPoint;
 
 #[cfg(feature = "test-support")]
+pub(crate) use test_gate::hit_test_gate;
+#[cfg(feature = "test-support")]
+#[doc(hidden)]
+pub use test_gate::{TestGateGuard, install_test_gate};
+
+#[cfg(feature = "test-support")]
 #[doc(hidden)]
 pub use crate::local::TestFaultGuard;
 #[cfg(feature = "test-support")]
 #[doc(hidden)]
 pub use crate::local::install_test_fault;
+#[cfg(feature = "test-support")]
+#[doc(hidden)]
+pub use crate::local::install_test_fault_shared;
