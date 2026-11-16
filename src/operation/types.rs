@@ -16,6 +16,7 @@ pub struct LocalOperation<T: Send + 'static, E: Send + 'static = LocalFileError>
 }
 
 impl<T: Send + 'static, E: Send + 'static> LocalOperation<T, E> {
+    #[cfg(feature = "async")]
     pub(crate) fn new(
         inner: qubit_operation::OperationHandle<T, E>,
         budget: Arc<dyn Send + Sync>,
@@ -372,6 +373,7 @@ impl LocalFactObserver {
         }
     }
 
+    #[cfg(feature = "async")]
     pub(crate) fn with_permit(permit: Arc<dyn Send + Sync>) -> Self {
         Self {
             snapshot: Arc::new(Mutex::new(LocalFactSnapshot::default())),

@@ -41,7 +41,15 @@ struct Port<T, E> {
 pub(crate) struct PreparedLocalJob<R, T, E> {
     executor: Arc<ExecutorInner>,
     request: Mutex<Option<R>>,
-    task: Mutex<Option<Box<dyn FnOnce(R) -> OperationOutcome<T, E> + Send + 'static>>>,
+    task: Mutex<
+        Option<
+            Box<
+                dyn for<'scope> FnOnce(R, &'scope OperationScope) -> OperationOutcome<T, E>
+                    + Send
+                    + 'static,
+            >,
+        >,
+    >,
     _slot: Mutex<Option<Permit>>,
     _owned_permit: Mutex<Option<Arc<Mutex<Permit>>>>,
     _fact_observer: Mutex<Option<LocalFactObserver>>,
@@ -68,6 +76,30 @@ where
     ) -> Arc<Self>
     where
         F: FnOnce(R) -> OperationOutcome<T, E> + Send + 'static,
+    {
+        Self::new_scoped(
+            executor,
+            request,
+            slot,
+            owned_permit,
+            handle_permit,
+            fact_observer,
+            move |request, _scope| task(request),
+        )
+    }
+
+    /// Creates a prepared job whose synchronous worker can inspect its operation scope.
+    pub(crate) fn new_scoped<F>(
+        executor: Arc<ExecutorInner>,
+        request: R,
+        slot: Permit,
+        owned_permit: Arc<Mutex<Permit>>,
+        handle_permit: Permit,
+        fact_observer: LocalFactObserver,
+        task: F,
+    ) -> Arc<Self>
+    where
+        F: for<'scope> FnOnce(R, &'scope OperationScope) -> OperationOutcome<T, E> + Send + 'static,
     {
         Arc::new(Self {
             executor,
@@ -348,7 +380,6 @@ where
         };
         let scope_guard = scope;
         let job = Box::new(move || {
-            let _scope_guard = scope_guard;
             this._slot.lock().unwrap_or_else(|e| e.into_inner()).take();
             let (stop_before_start, wakers) = {
                 let mut port = this.port.lock().unwrap_or_else(|e| e.into_inner());
@@ -382,7 +413,9 @@ where
                 Self::wake_all(wakers);
                 return;
             }
-            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| task(request)));
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                task(request, &scope_guard)
+            }));
             this._handle_permit
                 .lock()
                 .unwrap_or_else(|e| e.into_inner())

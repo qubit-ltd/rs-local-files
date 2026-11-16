@@ -324,6 +324,7 @@ impl LocalFileSystem {
     /// - `options`: Reader overrides and optional maximum byte count.
     /// - `finish`: Conversion applied to the complete bytes and resolved
     ///   context.
+    #[cfg(feature = "async")]
     pub(crate) fn read_all_with_options_and_reserver<F>(
         &self,
         path: &Path,

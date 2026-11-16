@@ -11,7 +11,7 @@ use super::LocalIoExecutor;
 pub struct AsyncLocalFileSystem {
     pub(crate) filesystem: crate::LocalFileSystem,
     pub(crate) executor: LocalIoExecutor,
-    host_base: Option<PathBuf>,
+    pub(crate) host_base: Option<PathBuf>,
 }
 
 impl AsyncLocalFileSystem {
