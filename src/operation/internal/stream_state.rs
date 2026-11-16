@@ -1,3 +1,11 @@
+// =============================================================================
+//    Copyright (c) 2025 - 2026 Haixing Hu.
+//
+//    SPDX-License-Identifier: Apache-2.0
+//
+//    Licensed under the Apache License, Version 2.0.
+// =============================================================================
+
 use std::collections::VecDeque;
 use std::io;
 use std::io::SeekFrom;
@@ -117,19 +125,25 @@ impl WalkState {
                     let bytes = entry.as_os_str().as_encoded_bytes().len();
                     if bytes > LOCAL_WALK_BATCH_BYTES {
                         self.request_stop(resource);
-                        return Poll::Ready(Err(resource_limit("single walker path exceeds 256 KiB batch limit")));
+                        return Poll::Ready(Err(resource_limit(
+                            "single walker path exceeds 256 KiB batch limit",
+                        )));
                     }
                     total = match total.checked_add(bytes) {
                         Some(total) if total <= LOCAL_WALK_BATCH_BYTES => total,
                         _ => {
                             self.request_stop(resource);
-                            return Poll::Ready(Err(resource_limit("walker batch exceeds 256 KiB path budget")));
+                            return Poll::Ready(Err(resource_limit(
+                                "walker batch exceeds 256 KiB path budget",
+                            )));
                         }
                     };
                 }
                 if entries.len() > LOCAL_WALK_BATCH_ENTRIES {
                     self.request_stop(resource);
-                    return Poll::Ready(Err(resource_limit("walker batch exceeds 128 entry limit")));
+                    return Poll::Ready(Err(resource_limit(
+                        "walker batch exceeds 128 entry limit",
+                    )));
                 }
                 Poll::Ready(Ok(Some(entries)))
             }
@@ -143,7 +157,11 @@ impl WalkState {
         }
     }
 
-    pub(super) fn poll_close(&mut self, resource: &LocalWalkResource, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+    pub(super) fn poll_close(
+        &mut self,
+        resource: &LocalWalkResource,
+        cx: &mut Context<'_>,
+    ) -> Poll<io::Result<()>> {
         if self.closed {
             return self.poll_closed_without_resource();
         }
@@ -239,7 +257,10 @@ impl StreamState {
         output: &mut [u8],
     ) -> Poll<io::Result<usize>> {
         if self.direction != Direction::Read {
-            return Poll::Ready(Err(io::Error::new(io::ErrorKind::InvalidInput, "not a reader")));
+            return Poll::Ready(Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "not a reader",
+            )));
         }
         if self.closed || self.close_request.is_some() {
             return Poll::Ready(Err(Self::error_closed()));
@@ -258,7 +279,10 @@ impl StreamState {
         if !self.read_buffer.is_empty() {
             let count = output.len().min(self.read_buffer.len());
             for slot in &mut output[..count] {
-                *slot = self.read_buffer.pop_front().expect("count bounded by buffer length");
+                *slot = self
+                    .read_buffer
+                    .pop_front()
+                    .expect("count bounded by buffer length");
             }
             return Poll::Ready(Ok(count));
         }
@@ -278,10 +302,14 @@ impl StreamState {
                 match result {
                     Ok(LocalStreamCompletion::Read(bytes)) => {
                         if bytes.len() > LOCAL_STREAM_BUFFER_SIZE {
-                            let error =
-                                io::Error::new(io::ErrorKind::InvalidData, "stream worker exceeded read buffer limit");
-                            self.write_error =
-                                Some(SavedError::capture(io::Error::new(error.kind(), error.to_string())));
+                            let error = io::Error::new(
+                                io::ErrorKind::InvalidData,
+                                "stream worker exceeded read buffer limit",
+                            );
+                            self.write_error = Some(SavedError::capture(io::Error::new(
+                                error.kind(),
+                                error.to_string(),
+                            )));
                             return Poll::Ready(Err(error));
                         }
                         self.eof = bytes.is_empty();
@@ -294,7 +322,10 @@ impl StreamState {
                     }
                     Ok(LocalStreamCompletion::Unconfirmed { operation, detail }) => {
                         let error = io::Error::other(format!("Unconfirmed {operation}: {detail}"));
-                        self.write_error = Some(SavedError::capture(io::Error::new(error.kind(), error.to_string())));
+                        self.write_error = Some(SavedError::capture(io::Error::new(
+                            error.kind(),
+                            error.to_string(),
+                        )));
                         Poll::Ready(Err(error))
                     }
                     Ok(_) => Poll::Ready(Err(io::Error::new(
@@ -302,7 +333,10 @@ impl StreamState {
                         "stream worker returned an unexpected read completion",
                     ))),
                     Err(error) => {
-                        self.write_error = Some(SavedError::capture(io::Error::new(error.kind(), error.to_string())));
+                        self.write_error = Some(SavedError::capture(io::Error::new(
+                            error.kind(),
+                            error.to_string(),
+                        )));
                         Poll::Ready(Err(error))
                     }
                 }
@@ -317,7 +351,10 @@ impl StreamState {
         input: &[u8],
     ) -> Poll<io::Result<usize>> {
         if self.direction != Direction::Write {
-            return Poll::Ready(Err(io::Error::new(io::ErrorKind::InvalidInput, "not a writer")));
+            return Poll::Ready(Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "not a writer",
+            )));
         }
         if self.closed || self.close_request.is_some() {
             return Poll::Ready(Err(Self::error_closed()));
@@ -387,7 +424,10 @@ impl StreamState {
                     if count == 0 || count > remaining {
                         self.write_error = Some(SavedError::capture(io::Error::new(
                             io::ErrorKind::WriteZero,
-                            format!("invalid partial write result after {} bytes", self.written_bytes),
+                            format!(
+                                "invalid partial write result after {} bytes",
+                                self.written_bytes
+                            ),
                         )));
                         self.writes.clear();
                         self.queued_write_bytes = 0;
@@ -399,11 +439,16 @@ impl StreamState {
                         self.writes.pop_front();
                     } else {
                         let rest = match &request.command {
-                            LocalStreamCommand::Write { bytes } => Arc::from(&bytes[offset + count..]),
+                            LocalStreamCommand::Write { bytes } => {
+                                Arc::from(&bytes[offset + count..])
+                            }
                             _ => unreachable!(),
                         };
                         let next = self.request(LocalStreamCommand::Write { bytes: rest });
-                        let pending = self.writes.front_mut().expect("partial write remains queued");
+                        let pending = self
+                            .writes
+                            .front_mut()
+                            .expect("partial write remains queued");
                         pending.offset = 0;
                         pending.request = next;
                     }
@@ -430,7 +475,11 @@ impl StreamState {
         }
     }
 
-    pub(super) fn poll_flush(&mut self, resource: &LocalStreamResource, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+    pub(super) fn poll_flush(
+        &mut self,
+        resource: &LocalStreamResource,
+        cx: &mut Context<'_>,
+    ) -> Poll<io::Result<()>> {
         if self.closed || self.close_request.is_some() {
             return Poll::Ready(Err(Self::error_closed()));
         }
@@ -449,7 +498,11 @@ impl StreamState {
         self.poll_pending_flush(resource, cx)
     }
 
-    fn poll_pending_flush(&mut self, resource: &LocalStreamResource, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+    fn poll_pending_flush(
+        &mut self,
+        resource: &LocalStreamResource,
+        cx: &mut Context<'_>,
+    ) -> Poll<io::Result<()>> {
         let Some(request) = self.flush_request.as_ref() else {
             return Poll::Ready(Ok(()));
         };
@@ -465,7 +518,10 @@ impl StreamState {
                     "Unconfirmed {operation} after {} bytes written: {detail}",
                     self.written_bytes
                 ));
-                self.write_error = Some(SavedError::capture(io::Error::new(error.kind(), error.to_string())));
+                self.write_error = Some(SavedError::capture(io::Error::new(
+                    error.kind(),
+                    error.to_string(),
+                )));
                 Poll::Ready(Err(error))
             }
             Poll::Ready(Ok(_)) => {
@@ -479,7 +535,10 @@ impl StreamState {
                 self.flush_request = None;
                 self.write_error = Some(SavedError::capture(io::Error::new(
                     error.kind(),
-                    format!("{} ({} bytes written before failure)", error, self.written_bytes),
+                    format!(
+                        "{} ({} bytes written before failure)",
+                        error, self.written_bytes
+                    ),
                 )));
                 Poll::Ready(Err(self.write_error.as_ref().expect("error stored").make()))
             }
@@ -558,7 +617,11 @@ impl StreamState {
         }
     }
 
-    fn poll_seek_barrier(&mut self, resource: &LocalStreamResource, cx: &mut Context<'_>) -> Poll<()> {
+    fn poll_seek_barrier(
+        &mut self,
+        resource: &LocalStreamResource,
+        cx: &mut Context<'_>,
+    ) -> Poll<()> {
         let Some(pending) = self.seek_request.as_ref() else {
             return Poll::Ready(());
         };
@@ -576,28 +639,44 @@ impl StreamState {
             Poll::Ready(Ok(LocalStreamCompletion::Unconfirmed { operation, detail })) => {
                 self.seek_request = None;
                 let error = io::Error::other(format!("Unconfirmed {operation}: {detail}"));
-                self.write_error = Some(SavedError::capture(io::Error::new(error.kind(), error.to_string())));
+                self.write_error = Some(SavedError::capture(io::Error::new(
+                    error.kind(),
+                    error.to_string(),
+                )));
                 self.seek_result = Some((owner_id, Err(error)));
                 Poll::Ready(())
             }
             Poll::Ready(Ok(_)) => {
                 self.seek_request = None;
-                let error = io::Error::other("stream position unknown after unexpected seek completion");
-                self.write_error = Some(SavedError::capture(io::Error::new(error.kind(), error.to_string())));
+                let error =
+                    io::Error::other("stream position unknown after unexpected seek completion");
+                self.write_error = Some(SavedError::capture(io::Error::new(
+                    error.kind(),
+                    error.to_string(),
+                )));
                 self.seek_result = Some((owner_id, Err(error)));
                 Poll::Ready(())
             }
             Poll::Ready(Err(error)) => {
                 self.seek_request = None;
-                let unknown = io::Error::other(format!("stream position unknown after failed seek: {error}"));
-                self.write_error = Some(SavedError::capture(io::Error::new(unknown.kind(), unknown.to_string())));
+                let unknown = io::Error::other(format!(
+                    "stream position unknown after failed seek: {error}"
+                ));
+                self.write_error = Some(SavedError::capture(io::Error::new(
+                    unknown.kind(),
+                    unknown.to_string(),
+                )));
                 self.seek_result = Some((owner_id, Err(unknown)));
                 Poll::Ready(())
             }
         }
     }
 
-    fn poll_pending_read(&mut self, resource: &LocalStreamResource, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+    fn poll_pending_read(
+        &mut self,
+        resource: &LocalStreamResource,
+        cx: &mut Context<'_>,
+    ) -> Poll<io::Result<()>> {
         let Some(request) = self.read_request.as_ref().cloned() else {
             return Poll::Ready(Ok(()));
         };
@@ -606,8 +685,14 @@ impl StreamState {
             Poll::Ready(Ok(LocalStreamCompletion::Read(bytes))) => {
                 self.read_request = None;
                 if bytes.len() > LOCAL_STREAM_BUFFER_SIZE {
-                    let error = io::Error::new(io::ErrorKind::InvalidData, "stream worker exceeded read buffer limit");
-                    self.write_error = Some(SavedError::capture(io::Error::new(error.kind(), error.to_string())));
+                    let error = io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "stream worker exceeded read buffer limit",
+                    );
+                    self.write_error = Some(SavedError::capture(io::Error::new(
+                        error.kind(),
+                        error.to_string(),
+                    )));
                     return Poll::Ready(Err(error));
                 }
                 self.eof = bytes.is_empty();
@@ -617,7 +702,10 @@ impl StreamState {
             Poll::Ready(Ok(LocalStreamCompletion::Unconfirmed { operation, detail })) => {
                 self.read_request = None;
                 let error = io::Error::other(format!("Unconfirmed {operation}: {detail}"));
-                self.write_error = Some(SavedError::capture(io::Error::new(error.kind(), error.to_string())));
+                self.write_error = Some(SavedError::capture(io::Error::new(
+                    error.kind(),
+                    error.to_string(),
+                )));
                 Poll::Ready(Err(error))
             }
             Poll::Ready(Ok(_)) => {
@@ -626,18 +714,28 @@ impl StreamState {
                     io::ErrorKind::InvalidData,
                     "stream worker returned an unexpected read completion",
                 );
-                self.write_error = Some(SavedError::capture(io::Error::new(error.kind(), error.to_string())));
+                self.write_error = Some(SavedError::capture(io::Error::new(
+                    error.kind(),
+                    error.to_string(),
+                )));
                 Poll::Ready(Err(error))
             }
             Poll::Ready(Err(error)) => {
                 self.read_request = None;
-                self.write_error = Some(SavedError::capture(io::Error::new(error.kind(), error.to_string())));
+                self.write_error = Some(SavedError::capture(io::Error::new(
+                    error.kind(),
+                    error.to_string(),
+                )));
                 Poll::Ready(Err(error))
             }
         }
     }
 
-    pub(super) fn poll_settle(&mut self, resource: &LocalStreamResource, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+    pub(super) fn poll_settle(
+        &mut self,
+        resource: &LocalStreamResource,
+        cx: &mut Context<'_>,
+    ) -> Poll<io::Result<()>> {
         if self.close_request.is_some() {
             return self.poll_close(resource, cx);
         }
@@ -670,7 +768,11 @@ impl StreamState {
         Poll::Ready(Ok(()))
     }
 
-    pub(super) fn poll_close(&mut self, resource: &LocalStreamResource, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+    pub(super) fn poll_close(
+        &mut self,
+        resource: &LocalStreamResource,
+        cx: &mut Context<'_>,
+    ) -> Poll<io::Result<()>> {
         if self.closed {
             return self.completed_close();
         }

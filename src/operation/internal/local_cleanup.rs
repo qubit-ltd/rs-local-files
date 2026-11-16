@@ -1,3 +1,11 @@
+// =============================================================================
+//    Copyright (c) 2025 - 2026 Haixing Hu.
+//
+//    SPDX-License-Identifier: Apache-2.0
+//
+//    Licensed under the Apache License, Version 2.0.
+// =============================================================================
+
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -29,9 +37,14 @@ impl AsyncCleanup<LocalTempResource> for LocalCleanup {
         resource: LocalTempResource,
         _context: CleanupContext,
     ) -> CleanupFuture<LocalTempResource> {
-        let reserved = resource.cleanup_permit.lock().unwrap_or_else(|e| e.into_inner()).take();
+        let reserved = resource
+            .cleanup_permit
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .take();
         let Some(permit) = reserved.or_else(|| self.executor.reserve_cleanup()) else {
-            let failure = cleanup_failure(&resource, "local cleanup queue capacity exhausted", None);
+            let failure =
+                cleanup_failure(&resource, "local cleanup queue capacity exhausted", None);
             return Box::pin(async move { CleanupOutcome::Failed { failure, resource } });
         };
         let state = Arc::new(CleanupState {
@@ -41,12 +54,24 @@ impl AsyncCleanup<LocalTempResource> for LocalCleanup {
         });
         let worker_state = Arc::clone(&state);
         let job = Box::new(move || {
-            let Some(resource) = worker_state.owner.lock().unwrap_or_else(|e| e.into_inner()).take() else {
+            let Some(resource) = worker_state
+                .owner
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .take()
+            else {
                 return;
             };
             let result = cleanup_resource(resource);
-            *worker_state.result.lock().unwrap_or_else(|e| e.into_inner()) = Some(result);
-            let waker = worker_state.waker.lock().unwrap_or_else(|e| e.into_inner()).take();
+            *worker_state
+                .result
+                .lock()
+                .unwrap_or_else(|e| e.into_inner()) = Some(result);
+            let waker = worker_state
+                .waker
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .take();
             if let Some(waker) = waker {
                 safe_wake(waker);
             }
@@ -81,13 +106,23 @@ struct CleanupWait {
 impl Future for CleanupWait {
     type Output = CleanupOutcome<LocalTempResource>;
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let result = self.state.result.lock().unwrap_or_else(|e| e.into_inner()).take();
+        let result = self
+            .state
+            .result
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .take();
         if let Some(result) = result {
             clear_waker(&self.state);
             return Poll::Ready(cleanup_outcome(result));
         }
         let Some(new_waker) = safe_clone_waker(cx.waker()) else {
-            let result = self.state.result.lock().unwrap_or_else(|e| e.into_inner()).take();
+            let result = self
+                .state
+                .result
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .take();
             return match result {
                 Some(result) => {
                     clear_waker(&self.state);
@@ -101,7 +136,12 @@ impl Future for CleanupWait {
             waker.replace(new_waker)
         };
         safe_drop_waker(old_waker);
-        let result = self.state.result.lock().unwrap_or_else(|e| e.into_inner()).take();
+        let result = self
+            .state
+            .result
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .take();
         if let Some(result) = result {
             clear_waker(&self.state);
             Poll::Ready(cleanup_outcome(result))
@@ -124,17 +164,25 @@ fn safe_wake(waker: Waker) {
     }
 }
 
-fn cleanup_outcome(result: Option<(crate::LocalFileError, LocalTempResource)>) -> CleanupOutcome<LocalTempResource> {
+fn cleanup_outcome(
+    result: Option<(crate::LocalFileError, LocalTempResource)>,
+) -> CleanupOutcome<LocalTempResource> {
     match result {
         None => CleanupOutcome::Released,
         Some((error, resource)) => {
-            let failure = cleanup_failure(&resource, "native temporary cleanup failed", Some(Arc::new(error)));
+            let failure = cleanup_failure(
+                &resource,
+                "native temporary cleanup failed",
+                Some(Arc::new(error)),
+            );
             CleanupOutcome::Failed { failure, resource }
         }
     }
 }
 
-fn cleanup_resource(resource: LocalTempResource) -> Option<(crate::LocalFileError, LocalTempResource)> {
+fn cleanup_resource(
+    resource: LocalTempResource,
+) -> Option<(crate::LocalFileError, LocalTempResource)> {
     let result = {
         let mut native = resource.native.lock().unwrap_or_else(|e| e.into_inner());
         match native.as_mut() {
@@ -154,10 +202,12 @@ fn cleanup_resource(resource: LocalTempResource) -> Option<(crate::LocalFileErro
                 native.take();
                 ()
             }),
-            Some(LocalTempNative::Unconfirmed(LocalTempCleanupAnchor::File(anchor))) => anchor.cleanup().map(|()| {
-                native.take();
-                ()
-            }),
+            Some(LocalTempNative::Unconfirmed(LocalTempCleanupAnchor::File(anchor))) => {
+                anchor.cleanup().map(|()| {
+                    native.take();
+                    ()
+                })
+            }
             Some(LocalTempNative::Unconfirmed(LocalTempCleanupAnchor::Directory(anchor))) => {
                 anchor.cleanup().map(|()| {
                     native.take();
@@ -236,8 +286,10 @@ mod tests {
     unsafe fn wake_panics(_: *const ()) {
         panic!("custom waker wake panic");
     }
-    static CLONE_PANIC_VTABLE: RawWakerVTable = RawWakerVTable::new(clone_panics, raw_noop, raw_noop, raw_noop);
-    static WAKE_PANIC_VTABLE: RawWakerVTable = RawWakerVTable::new(raw_clone, wake_panics, wake_panics, raw_noop);
+    static CLONE_PANIC_VTABLE: RawWakerVTable =
+        RawWakerVTable::new(clone_panics, raw_noop, raw_noop, raw_noop);
+    static WAKE_PANIC_VTABLE: RawWakerVTable =
+        RawWakerVTable::new(raw_clone, wake_panics, wake_panics, raw_noop);
 
     unsafe fn raw_clone(data: *const ()) -> RawWaker {
         RawWaker::new(data, &WAKE_PANIC_VTABLE)
@@ -299,7 +351,11 @@ mod tests {
     }
 
     #[cfg(feature = "test-support")]
-    fn assert_cleanup_dispatch_retries(resource: LocalTempResource, parent: &std::path::Path, fault: &str) {
+    fn assert_cleanup_dispatch_retries(
+        resource: LocalTempResource,
+        parent: &std::path::Path,
+        fault: &str,
+    ) {
         let _fault = crate::test_support::install_test_fault(fault).expect("cleanup fault");
         let Some((_error, resource)) = cleanup_resource(resource) else {
             panic!("first cleanup should retain the owner after injected failure");
@@ -311,10 +367,11 @@ mod tests {
 
     #[cfg(feature = "test-support")]
     #[test]
-    fn local_cleanup_dispatch_retries_file_and_directory_anchors() {
+    fn test_local_cleanup_dispatch_retries_file_and_directory_anchors() {
         let parent = tempfile::tempdir().expect("temp parent");
         let manager = OperationManager::new(ManagerOptions::default()).expect("manager");
-        let executor = LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).expect("executor");
+        let executor = LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default())
+            .expect("executor");
 
         let file_resource = test_owner(&manager, &executor, parent.path());
         {
@@ -325,7 +382,9 @@ mod tests {
             let anchor = file.cleanup_anchor();
             file.disarm_cleanup_on_drop();
             drop(file);
-            *native = Some(LocalTempNative::Unconfirmed(LocalTempCleanupAnchor::File(anchor)));
+            *native = Some(LocalTempNative::Unconfirmed(LocalTempCleanupAnchor::File(
+                anchor,
+            )));
         }
         assert_cleanup_dispatch_retries(file_resource, parent.path(), "temp-file-sandbox-remove");
 
@@ -338,14 +397,22 @@ mod tests {
             drop(file);
             let mut directory = LocalFileSystem::host()
                 .expect("filesystem")
-                .create_temp_directory_with_options(&LocalTempDirectoryOptions::new().with_parent(parent.path()))
+                .create_temp_directory_with_options(
+                    &LocalTempDirectoryOptions::new().with_parent(parent.path()),
+                )
                 .expect("temporary directory");
             let anchor = directory.cleanup_anchor();
             directory.disarm_cleanup_on_drop();
             drop(directory);
-            *native = Some(LocalTempNative::Unconfirmed(LocalTempCleanupAnchor::Directory(anchor)));
+            *native = Some(LocalTempNative::Unconfirmed(
+                LocalTempCleanupAnchor::Directory(anchor),
+            ));
         }
-        assert_cleanup_dispatch_retries(directory_resource, parent.path(), "temp-directory-sandbox-remove");
+        assert_cleanup_dispatch_retries(
+            directory_resource,
+            parent.path(),
+            "temp-directory-sandbox-remove",
+        );
     }
 
     fn cleanup_error() -> crate::LocalFileError {
@@ -358,10 +425,11 @@ mod tests {
     }
 
     #[test]
-    fn panicking_waker_clone_and_drop_do_not_lose_failed_cleanup_owner() {
+    fn test_panicking_waker_clone_and_drop_do_not_lose_failed_cleanup_owner() {
         let parent = tempfile::tempdir().expect("temp parent");
         let manager = OperationManager::new(ManagerOptions::default()).expect("manager");
-        let executor = LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).expect("executor");
+        let executor = LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default())
+            .expect("executor");
         let owner = test_owner(&manager, &executor, parent.path());
         let state = Arc::new(CleanupState {
             result: Mutex::new(None),
@@ -375,12 +443,22 @@ mod tests {
 
         let clone_panicking = clone_panic_waker();
         let mut clone_context = Context::from_waker(&clone_panicking);
-        assert!(matches!(wait.as_mut().poll(&mut clone_context), Poll::Pending));
+        assert!(matches!(
+            wait.as_mut().poll(&mut clone_context),
+            Poll::Pending
+        ));
         assert!(state.owner.lock().expect("owner lock").is_some());
 
         *state.waker.lock().expect("waker lock") =
             Some(unsafe { Waker::from_raw(RawWaker::new(std::ptr::null(), &WAKE_PANIC_VTABLE)) });
-        safe_wake(state.waker.lock().expect("waker lock").take().expect("wake waker"));
+        safe_wake(
+            state
+                .waker
+                .lock()
+                .expect("waker lock")
+                .take()
+                .expect("wake waker"),
+        );
 
         let owner = state
             .owner
@@ -401,11 +479,17 @@ mod tests {
         };
 
         let cleanup = Arc::new(LocalCleanup { executor });
-        let context = CleanupContext::new(qubit_operation::ContextOptions::default()).expect("cleanup context");
+        let context = CleanupContext::new(qubit_operation::ContextOptions::default())
+            .expect("cleanup context");
         assert!(matches!(
             block_on(cleanup.cleanup(resource, context)),
             CleanupOutcome::Released
         ));
-        assert_eq!(std::fs::read_dir(parent.path()).expect("read temp parent").count(), 0);
+        assert_eq!(
+            std::fs::read_dir(parent.path())
+                .expect("read temp parent")
+                .count(),
+            0
+        );
     }
 }

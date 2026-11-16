@@ -1,3 +1,11 @@
+// =============================================================================
+//    Copyright (c) 2025 - 2026 Haixing Hu.
+//
+//    SPDX-License-Identifier: Apache-2.0
+//
+//    Licensed under the Apache License, Version 2.0.
+// =============================================================================
+
 #![cfg(feature = "async")]
 
 use std::future::Future;
@@ -78,13 +86,13 @@ fn find_file(root: &std::path::Path) -> std::path::PathBuf {
 }
 
 #[test]
-fn local_temp_resource_is_a_send_sync_control_port() {
+fn test_local_temp_resource_is_a_send_sync_control_port() {
     assert_send_sync::<qubit_local_files::operation::LocalTempResource>();
     assert_send_sync::<qubit_operation::ResourceRef<qubit_local_files::operation::LocalTempResource>>();
 }
 
 #[test]
-fn created_temp_file_is_cleaned_after_scope_ends_and_access_returns() {
+fn test_created_temp_file_is_cleaned_after_scope_ends_and_access_returns() {
     let parent = tempfile::tempdir().expect("temporary parent");
     let manager = OperationManager::new(ManagerOptions::default()).expect("manager");
     let executor = LocalIoExecutor::new(
@@ -130,7 +138,7 @@ fn created_temp_file_is_cleaned_after_scope_ends_and_access_returns() {
 }
 
 #[test]
-fn created_temp_directory_is_cleaned_after_scope_ends_and_access_returns() {
+fn test_created_temp_directory_is_cleaned_after_scope_ends_and_access_returns() {
     let parent = tempfile::tempdir().expect("temporary parent");
     let manager = OperationManager::new(ManagerOptions::default()).expect("manager");
     let executor = LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).expect("executor");
@@ -155,7 +163,7 @@ fn created_temp_directory_is_cleaned_after_scope_ends_and_access_returns() {
 }
 
 #[test]
-fn failed_cleanup_keeps_resource_permit_and_public_recovery_can_retry() {
+fn test_failed_cleanup_keeps_resource_permit_and_public_recovery_can_retry() {
     let parent = tempfile::tempdir().expect("temporary parent");
     let manager = OperationManager::new(ManagerOptions::default()).expect("manager");
     let executor = LocalIoExecutor::new(
@@ -279,7 +287,7 @@ impl AsyncCleanup<RetryOwner> for RetryOnceCleanup {
 }
 
 #[test]
-fn public_recovery_retry_and_store_transfer_preserve_the_same_owner() {
+fn test_public_recovery_retry_and_store_transfer_preserve_the_same_owner() {
     let manager = OperationManager::new(ManagerOptions::default()).expect("manager");
     let live = Arc::new(AtomicUsize::new(1));
     let id_slot = Arc::new(std::sync::Mutex::new(None));
@@ -379,7 +387,7 @@ fn gate() -> (Gate, GateOpen) {
 }
 
 #[test]
-fn stop_after_creation_before_commit_retains_the_original_owner() {
+fn test_stop_after_creation_before_commit_retains_the_original_owner() {
     let manager = OperationManager::new(ManagerOptions::default()).expect("manager");
     let (gate, open) = gate();
     let (started_tx, started_rx) = std::sync::mpsc::channel();
@@ -444,7 +452,7 @@ fn stop_after_creation_before_commit_retains_the_original_owner() {
 }
 
 #[test]
-fn exhausted_resource_capacity_skips_creation() {
+fn test_exhausted_resource_capacity_skips_creation() {
     let manager = OperationManager::new(ManagerOptions::default()).expect("manager");
     let creates = Arc::new(AtomicUsize::new(0));
     let mut options = OperationOptions::default();
@@ -470,7 +478,7 @@ fn exhausted_resource_capacity_skips_creation() {
 }
 
 #[test]
-fn open_zero_reference_resource_can_be_reacquired_but_ended_scope_cannot() {
+fn test_open_zero_reference_resource_can_be_reacquired_but_ended_scope_cannot() {
     let manager = OperationManager::new(ManagerOptions::default()).expect("manager");
     let result = manager
         .run(OperationOptions::default(), |scope| {
