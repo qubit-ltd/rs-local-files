@@ -37,7 +37,7 @@ fn safe_wake(waker: Waker) {
 /// A thread-safe control port owning a native temporary file and its permits.
 pub struct LocalTempResource {
     pub(crate) native: Mutex<Option<LocalTempNative>>,
-    _disk: Mutex<Option<super::internal::permits::DiskPermit>>,
+    _disk: Mutex<Vec<super::internal::permits::DiskPermit>>,
     _handle: Mutex<Option<super::internal::permits::Permit>>,
     pub(crate) cleanup_permit: Mutex<Option<super::internal::permits::Permit>>,
     pub(crate) id: Arc<Mutex<Option<ResourceId>>>,
@@ -45,6 +45,7 @@ pub struct LocalTempResource {
 
 pub(crate) enum LocalTempNative {
     File(crate::LocalTempFile),
+    Sealed(crate::LocalSealedTempFile),
     Directory(crate::LocalTempDirectory),
     Recovery(crate::LocalTempRecovery),
 }
@@ -58,7 +59,7 @@ impl LocalTempResource {
     ) -> Self {
         Self {
             native: Mutex::new(Some(native)),
-            _disk: Mutex::new(Some(disk)),
+            _disk: Mutex::new(vec![disk]),
             _handle: Mutex::new(Some(handle)),
             cleanup_permit: Mutex::new(Some(cleanup_permit)),
             id: Arc::new(Mutex::new(None)),
@@ -78,6 +79,139 @@ impl LocalTempFileAccess {
     /// Returns the stable public resource identity.
     pub fn resource_id(&self) -> ResourceId {
         self.resource.id()
+    }
+
+    /// Retains the same registered owner for a related operation/helper.
+    pub(crate) fn clone_resource_ref(&self) -> ResourceRef<LocalTempResource> {
+        self.resource.clone()
+    }
+
+    /// Retains an additional disk reservation on the registered native owner.
+    pub(crate) fn retain_disk_permit(&self, permit: super::internal::permits::DiskPermit) {
+        self.resource
+            ._disk
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .push(permit);
+    }
+
+    /// Queues one serialized native-resource command on the local I/O worker.
+    /// The cloned resource reference remains alive until the command returns.
+    pub(crate) fn enqueue_native_command<T, F>(
+        &self,
+        executor: &LocalIoExecutor,
+        command: F,
+    ) -> Result<LocalTempCommandReceiver<T>, LocalTempCommandError>
+    where
+        T: Send + 'static,
+        F: FnOnce(&mut LocalTempNative) -> T + Send + 'static,
+    {
+        let resource = self.clone_resource_ref();
+        let (sender, receiver) = async_result();
+        executor
+            .enqueue_task(move || {
+                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    let mut native = resource.native.lock().unwrap_or_else(|e| e.into_inner());
+                    let Some(native) = native.as_mut() else {
+                        return Err(LocalTempCommandError::ResourceUnavailable);
+                    };
+                    Ok(command(native))
+                }))
+                .unwrap_or(Err(LocalTempCommandError::Panicked));
+                let _ = sender.send(result);
+                drop(resource);
+            })
+            .map_err(|()| LocalTempCommandError::Capacity)?;
+        Ok(LocalTempCommandReceiver(receiver))
+    }
+
+    /// Queues an internal consuming command. Callbacks are crate-controlled,
+    /// never caller-supplied; ordinary error paths must return the owner. A
+    /// callback must not panic after taking ownership of the native value.
+    pub(crate) fn enqueue_native_transition<T, E, F>(
+        &self,
+        executor: &LocalIoExecutor,
+        command: F,
+    ) -> Result<LocalTempCommandReceiver<Result<T, E>>, LocalTempCommandError>
+    where
+        T: Send + 'static,
+        E: Send + 'static,
+        F: FnOnce(LocalTempNative) -> Result<(Option<LocalTempNative>, T), (LocalTempNative, E)>
+            + Send
+            + 'static,
+    {
+        let resource = self.clone_resource_ref();
+        let (sender, receiver) = async_result();
+        executor
+            .enqueue_task(move || {
+                let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    let mut native = resource.native.lock().unwrap_or_else(|e| e.into_inner());
+                    let Some(owner) = native.take() else {
+                        return Err(LocalTempCommandError::ResourceUnavailable);
+                    };
+                    match command(owner) {
+                        Ok((owner, value)) => {
+                            *native = owner;
+                            Ok(Ok(value))
+                        }
+                        Err((owner, error)) => {
+                            *native = Some(owner);
+                            Ok(Err(error))
+                        }
+                    }
+                }))
+                .unwrap_or(Err(LocalTempCommandError::Panicked));
+                let _ = sender.send(outcome);
+                drop(resource);
+            })
+            .map_err(|()| LocalTempCommandError::Capacity)?;
+        Ok(LocalTempCommandReceiver(receiver))
+    }
+}
+
+pub(super) fn enqueue_resource_command<T, F>(
+    executor: &LocalIoExecutor,
+    resource: ResourceRef<LocalTempResource>,
+    command: F,
+) -> Result<LocalTempCommandReceiver<T>, LocalTempCommandError>
+where
+    T: Send + 'static,
+    F: FnOnce(&mut LocalTempNative) -> T + Send + 'static,
+{
+    let (sender, receiver) = async_result();
+    executor
+        .enqueue_task(move || {
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let mut native = resource.native.lock().unwrap_or_else(|e| e.into_inner());
+                let Some(native) = native.as_mut() else {
+                    return Err(LocalTempCommandError::ResourceUnavailable);
+                };
+                Ok(command(native))
+            }))
+            .unwrap_or(Err(LocalTempCommandError::Panicked));
+            let _ = sender.send(result);
+            drop(resource);
+        })
+        .map_err(|()| LocalTempCommandError::Capacity)?;
+    Ok(LocalTempCommandReceiver(receiver))
+}
+
+/// Failure to schedule or execute a managed native-resource command.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum LocalTempCommandError {
+    Capacity,
+    ResourceUnavailable,
+    Panicked,
+}
+
+/// Future receiving a local worker command result without doing native I/O in poll.
+pub(crate) struct LocalTempCommandReceiver<T>(AsyncReceiver<Result<T, LocalTempCommandError>>);
+
+impl<T> Future for LocalTempCommandReceiver<T> {
+    type Output = Result<T, LocalTempCommandError>;
+
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        Pin::new(&mut self.0).poll(cx)
     }
 }
 

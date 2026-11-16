@@ -175,6 +175,10 @@ fn cleanup_resource(
                 native.take();
                 ()
             }),
+            Some(LocalTempNative::Sealed(value)) => value.cleanup().map(|()| {
+                native.take();
+                ()
+            }),
             Some(LocalTempNative::Directory(value)) => value.cleanup().map(|()| {
                 native.take();
                 ()
