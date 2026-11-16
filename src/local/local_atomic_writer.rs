@@ -618,6 +618,8 @@ impl LocalAtomicWriter {
                 },
             );
         }
+        #[cfg(feature = "test-support")]
+        crate::test_support::hit_test_gate("atomic-writer-after-install-before-parent-sync");
         if self.durability == LocalDurabilityRequirement::NotRequired {
             self.staged_file.disarm();
             return Ok(false);
