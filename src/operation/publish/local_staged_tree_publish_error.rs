@@ -6,10 +6,10 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 
+use crate::LocalFileError;
+
 use super::LocalStagedTreeRecovery;
 use super::LocalStagedTreeReservedError;
-
-use crate::LocalFileError;
 
 /// Errors keep the stage or native recovery owners attached for retry/cleanup.
 #[derive(Debug)]
@@ -21,7 +21,9 @@ pub enum LocalStagedTreePublishError {
     /// A staged file could not be created; the stage remains available for
     /// cleanup.
     Write {
+        /// Failure while creating or writing a staged file.
         cause: LocalFileError,
+        /// Unpublished stage retained for caller-directed cleanup.
         stage: LocalStagedTreeRecovery,
     },
     /// Verification or publication failed with the existing native recovery

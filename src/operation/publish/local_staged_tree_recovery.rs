@@ -14,13 +14,17 @@ use super::LocalStagedTreeReservedError;
 
 /// A failed staged write that still owns the unpublished stage and disk quota.
 pub struct LocalStagedTreeRecovery {
+    /// Unpublished stage retained for inspection or explicit cleanup.
     stage: Option<crate::directory::LocalStagedDirectory>,
+    /// Quota held until the stage owner is released.
     reservation: LocalStagedTreeDiskReservation,
 }
 
 impl LocalStagedTreeRecovery {
     pub(super) fn new(
+        /// Stage retained for inspection and cleanup after publication failure.
         stage: crate::directory::LocalStagedDirectory,
+        /// Quota retained alongside the stage.
         reservation: LocalStagedTreeDiskReservation,
     ) -> Self {
         Self {
@@ -30,6 +34,9 @@ impl LocalStagedTreeRecovery {
     }
 
     /// Sets cleanup limits on the retained stage.
+    ///
+    /// # Parameters
+    /// * `limits` — bounds for the later cleanup attempt.
     pub fn set_cleanup_limits(&mut self, limits: crate::options::LocalTempCleanupLimits) {
         self.stage
             .as_mut()
@@ -47,6 +54,10 @@ impl LocalStagedTreeRecovery {
 
     /// Explicitly cleans the stage. A failure keeps its native recovery error
     /// and the disk reservation in one value.
+    /// Consumes the recovery owner and attempts explicit cleanup.
+    ///
+    /// # Errors
+    /// Returns the native cleanup error together with its retained reservation.
     pub fn cleanup(
         mut self,
     ) -> Result<(), LocalStagedTreeReservedError<crate::directory::LocalTreeCleanupError>> {
@@ -58,8 +69,10 @@ impl LocalStagedTreeRecovery {
 }
 
 impl Deref for LocalStagedTreeRecovery {
+    /// Native staged-directory type exposed by this recovery owner.
     type Target = crate::directory::LocalStagedDirectory;
 
+    /// Borrows the native stage for its full recovery-owner lifetime.
     fn deref(&self) -> &Self::Target {
         self.stage
             .as_ref()
@@ -68,6 +81,7 @@ impl Deref for LocalStagedTreeRecovery {
 }
 
 impl DerefMut for LocalStagedTreeRecovery {
+    /// Mutably borrows the native stage to configure recovery behavior.
     fn deref_mut(&mut self) -> &mut Self::Target {
         self.stage
             .as_mut()
@@ -76,6 +90,7 @@ impl DerefMut for LocalStagedTreeRecovery {
 }
 
 impl std::fmt::Debug for LocalStagedTreeRecovery {
+    /// Formats the stage owner and its retained quota for diagnostics.
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter
             .debug_struct("LocalStagedTreeRecovery")

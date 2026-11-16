@@ -12,7 +12,9 @@ use std::path::PathBuf;
 #[derive(Debug)]
 pub struct LocalStagedTreeFile {
     /// Normalized relative path beneath the staging directory.
+    /// Normalized relative destination within the staged directory.
     pub path: PathBuf,
     /// Owned bytes written to this path.
+    /// Complete contents written to the relative destination.
     pub bytes: Vec<u8>,
 }

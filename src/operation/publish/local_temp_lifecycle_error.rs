@@ -15,8 +15,10 @@ pub enum LocalTempLifecycleError {
     /// Structured sealing failure.
     Seal {
         /// Native cause.
+        /// Native sealing failure.
         error: LocalFileError,
         /// Access state after the attempted seal.
+        /// Access capabilities that remain after the failed transition.
         access_state: crate::LocalTempAccessState,
     },
     /// The resource kind does not support this command.

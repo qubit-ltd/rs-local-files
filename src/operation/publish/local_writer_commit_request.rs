@@ -14,9 +14,12 @@ use crate::options::LocalWriteOptions;
 #[derive(Debug)]
 pub struct LocalWriterCommitRequest {
     /// Destination interpreted through the facade's captured authority.
+    /// Destination resolved through the facade authority.
     pub path: PathBuf,
     /// Writer policy fixed for this command.
+    /// Durability and access policy for the committed file.
     pub options: LocalWriteOptions,
     /// Bytes owned by the operation before submission.
+    /// Candidate contents owned by this request.
     pub bytes: Vec<u8>,
 }

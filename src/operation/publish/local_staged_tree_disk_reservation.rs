@@ -18,6 +18,7 @@ pub struct LocalStagedTreeDiskReservation(
 );
 
 impl std::fmt::Debug for LocalStagedTreeDiskReservation {
+    /// Formats the reservation using its byte count without exposing permit internals.
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter
             .debug_tuple("LocalStagedTreeDiskReservation")
@@ -28,6 +29,9 @@ impl std::fmt::Debug for LocalStagedTreeDiskReservation {
 
 impl LocalStagedTreeDiskReservation {
     /// Returns the number of disk bytes held by this reservation.
+    ///
+    /// # Returns
+    /// The number of bytes represented by the retained native permit.
     pub fn bytes(&self) -> u64 {
         self.0.amount()
     }
