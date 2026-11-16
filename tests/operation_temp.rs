@@ -1,21 +1,37 @@
 #![cfg(feature = "async")]
 
 use std::future::Future;
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
-use std::task::{Context, Poll, Wake, Waker};
+use std::sync::Arc;
+use std::sync::Mutex;
+use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::Ordering;
+use std::task::Context;
+use std::task::Poll;
+use std::task::Wake;
+use std::task::Waker;
 
 use qubit_local_files::LocalExecutionConfig;
 use qubit_local_files::LocalFileSystem;
-use qubit_local_files::operation::{
-    LocalCreateFailure, LocalIoExecutor, submit_temp_directory, submit_temp_file,
-};
-use qubit_local_files::options::{LocalTempDirectoryOptions, LocalTempFileOptions};
-use qubit_operation::{
-    AsyncCleanup, CleanupContext, CleanupFailure, CleanupFuture, CleanupOutcome, CleanupStage,
-    DiagnosticSummary, ManagerOptions, OperationManager, OperationOptions, OperationOutcome,
-    RecoveryPhase, RecoveryStore, RecoveryStoreOptions,
-};
+use qubit_local_files::operation::LocalCreateFailure;
+use qubit_local_files::operation::LocalIoExecutor;
+use qubit_local_files::operation::submit_temp_directory;
+use qubit_local_files::operation::submit_temp_file;
+use qubit_local_files::options::LocalTempDirectoryOptions;
+use qubit_local_files::options::LocalTempFileOptions;
+use qubit_operation::AsyncCleanup;
+use qubit_operation::CleanupContext;
+use qubit_operation::CleanupFailure;
+use qubit_operation::CleanupFuture;
+use qubit_operation::CleanupOutcome;
+use qubit_operation::CleanupStage;
+use qubit_operation::DiagnosticSummary;
+use qubit_operation::ManagerOptions;
+use qubit_operation::OperationManager;
+use qubit_operation::OperationOptions;
+use qubit_operation::OperationOutcome;
+use qubit_operation::RecoveryPhase;
+use qubit_operation::RecoveryStore;
+use qubit_operation::RecoveryStoreOptions;
 
 fn assert_send_sync<T: Send + Sync + 'static>() {}
 
@@ -64,8 +80,7 @@ fn find_file(root: &std::path::Path) -> std::path::PathBuf {
 #[test]
 fn local_temp_resource_is_a_send_sync_control_port() {
     assert_send_sync::<qubit_local_files::operation::LocalTempResource>();
-    assert_send_sync::<qubit_operation::ResourceRef<qubit_local_files::operation::LocalTempResource>>(
-    );
+    assert_send_sync::<qubit_operation::ResourceRef<qubit_local_files::operation::LocalTempResource>>();
 }
 
 #[test]
@@ -94,21 +109,11 @@ fn created_temp_file_is_cleaned_after_scope_ends_and_access_returns() {
     let OperationOutcome::Succeeded(access) = outcome else {
         panic!("temp creation should succeed");
     };
-    assert_eq!(
-        std::fs::read_dir(parent.path())
-            .expect("read parent")
-            .count(),
-        1
-    );
+    assert_eq!(std::fs::read_dir(parent.path()).expect("read parent").count(), 1);
     drop(access);
     let settlement = block_on(operation.wait_settlement());
     assert_eq!(settlement.recovery_count, 0);
-    assert_eq!(
-        std::fs::read_dir(parent.path())
-            .expect("read parent")
-            .count(),
-        0
-    );
+    assert_eq!(std::fs::read_dir(parent.path()).expect("read parent").count(), 0);
     let mut next = submit_temp_file(
         filesystem,
         executor,
@@ -117,8 +122,7 @@ fn created_temp_file_is_cleaned_after_scope_ends_and_access_returns() {
         LocalTempFileOptions::new().with_parent(parent.path()),
     )
     .expect("one-byte disk reservation returned after confirmed cleanup");
-    let OperationOutcome::Succeeded(access) = block_on(next.wait_outcome()).expect("outcome")
-    else {
+    let OperationOutcome::Succeeded(access) = block_on(next.wait_outcome()).expect("outcome") else {
         panic!("disk permit should be reusable");
     };
     drop(access);
@@ -129,8 +133,7 @@ fn created_temp_file_is_cleaned_after_scope_ends_and_access_returns() {
 fn created_temp_directory_is_cleaned_after_scope_ends_and_access_returns() {
     let parent = tempfile::tempdir().expect("temporary parent");
     let manager = OperationManager::new(ManagerOptions::default()).expect("manager");
-    let executor =
-        LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).expect("executor");
+    let executor = LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).expect("executor");
     let filesystem = LocalFileSystem::host().expect("host filesystem");
     let mut operation = submit_temp_directory(
         filesystem,
@@ -144,21 +147,11 @@ fn created_temp_directory_is_cleaned_after_scope_ends_and_access_returns() {
     let OperationOutcome::Succeeded(access) = outcome else {
         panic!("temp creation should succeed");
     };
-    assert_eq!(
-        std::fs::read_dir(parent.path())
-            .expect("read parent")
-            .count(),
-        1
-    );
+    assert_eq!(std::fs::read_dir(parent.path()).expect("read parent").count(), 1);
     drop(access);
     let settlement = block_on(operation.wait_settlement());
     assert_eq!(settlement.recovery_count, 0);
-    assert_eq!(
-        std::fs::read_dir(parent.path())
-            .expect("read parent")
-            .count(),
-        0
-    );
+    assert_eq!(std::fs::read_dir(parent.path()).expect("read parent").count(), 0);
 }
 
 #[test]
@@ -257,11 +250,7 @@ struct RetryOnceCleanup {
     attempts: AtomicUsize,
 }
 impl AsyncCleanup<RetryOwner> for RetryOnceCleanup {
-    fn cleanup(
-        self: Arc<Self>,
-        owner: RetryOwner,
-        _context: CleanupContext,
-    ) -> CleanupFuture<RetryOwner> {
+    fn cleanup(self: Arc<Self>, owner: RetryOwner, _context: CleanupContext) -> CleanupFuture<RetryOwner> {
         let attempt = self.attempts.fetch_add(1, Ordering::SeqCst);
         if attempt == 0 {
             let failure = CleanupFailure {
@@ -406,9 +395,7 @@ fn stop_after_creation_before_commit_retains_the_original_owner() {
             let id_slot = Arc::clone(&id_slot);
             let cleanup = Arc::clone(&cleanup);
             move |scope| async move {
-                let reservation = scope
-                    .reserve_resource()
-                    .map_err(LocalCreateFailure::Reservation)?;
+                let reservation = scope.reserve_resource().map_err(LocalCreateFailure::Reservation)?;
                 started_tx.send(()).expect("test receiver");
                 gate.await;
                 live.fetch_add(1, Ordering::SeqCst);
@@ -428,10 +415,7 @@ fn stop_after_creation_before_commit_retains_the_original_owner() {
                         let mut id = id_slot.lock().expect("id lock");
                         let resource_id = reservation.retain_with_for_cleanup(owner, cleanup);
                         *id = Some(resource_id);
-                        Err(LocalCreateFailure::Retained {
-                            reason,
-                            resource_id,
-                        })
+                        Err(LocalCreateFailure::Retained { reason, resource_id })
                     }
                 }
             }
@@ -448,10 +432,7 @@ fn stop_after_creation_before_commit_retains_the_original_owner() {
     assert_eq!(settlement.recoveries.len(), 1);
     assert_eq!(
         settlement.recoveries[0].snapshot().resources.as_ref(),
-        &[id_slot
-            .lock()
-            .expect("id lock")
-            .expect("retained resource id")]
+        &[id_slot.lock().expect("id lock").expect("retained resource id")]
     );
     let retry = settlement.recoveries[0]
         .try_retry()
@@ -474,9 +455,7 @@ fn exhausted_resource_capacity_skips_creation() {
             move |scope| {
                 let _first = scope.reserve_resource().expect("first reservation");
                 match scope.reserve_resource() {
-                    Err(qubit_operation::ResourceCapacityError::CapacityExceeded) => {
-                        Ok::<(), ()>(())
-                    }
+                    Err(qubit_operation::ResourceCapacityError::CapacityExceeded) => Ok::<(), ()>(()),
                     Err(error) => panic!("unexpected reservation error: {error}"),
                     Ok(_reservation) => {
                         creates.fetch_add(1, Ordering::SeqCst);
@@ -504,9 +483,7 @@ fn open_zero_reference_resource_can_be_reacquired_but_ended_scope_cannot() {
             let key = reference.key();
             let id = reference.id();
             drop(reference);
-            let reacquired = resource_scope
-                .get_resource(key)
-                .expect("Open+0 remains reachable");
+            let reacquired = resource_scope.get_resource(key).expect("Open+0 remains reachable");
             assert_eq!(reacquired.id(), id);
             drop(reacquired);
             resource_scope.end();

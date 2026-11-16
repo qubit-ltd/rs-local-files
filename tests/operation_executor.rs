@@ -10,8 +10,12 @@ use qubit_operation::ManagerOptions;
 use qubit_operation::OperationManager;
 
 fn block_on<F: std::future::Future>(future: F) -> F::Output {
-    use std::sync::{Arc, Condvar, Mutex};
-    use std::task::{Context, Wake, Waker};
+    use std::sync::Arc;
+    use std::sync::Condvar;
+    use std::sync::Mutex;
+    use std::task::Context;
+    use std::task::Wake;
+    use std::task::Waker;
     struct Signal {
         ready: Mutex<bool>,
         changed: Condvar,
@@ -68,9 +72,7 @@ fn host_facade_retains_a_fact_observer_for_submitted_reads() {
         .unwrap();
     let mut operation = operation;
     let outcome = operation.wait_outcome().unwrap();
-    assert!(
-        matches!(outcome, qubit_operation::OperationOutcome::Succeeded(bytes) if !bytes.is_empty())
-    );
+    assert!(matches!(outcome, qubit_operation::OperationOutcome::Succeeded(bytes) if !bytes.is_empty()));
     operation.wait_settlement().unwrap();
     assert_eq!(observer.snapshot().modified_count, 0);
 }
@@ -97,15 +99,11 @@ fn wrong_manager_rejection_returns_the_unmodified_request() {
         read: original_read,
     };
 
-    let rejected = match filesystem.submit_read_all_with_observer(
-        &other,
-        Default::default(),
-        request,
-        Default::default(),
-    ) {
-        Ok(_) => panic!("cross-manager submission unexpectedly succeeded"),
-        Err(error) => error,
-    };
+    let rejected =
+        match filesystem.submit_read_all_with_observer(&other, Default::default(), request, Default::default()) {
+            Ok(_) => panic!("cross-manager submission unexpectedly succeeded"),
+            Err(error) => error,
+        };
     assert_eq!(
         rejected.rejection(),
         qubit_local_files::operation::LocalSubmitRejection::WrongManager
@@ -295,10 +293,7 @@ fn rooted_facade_keeps_open_authority_after_root_path_replacement() {
 fn into_async_does_not_capture_host_cwd_and_rejects_relative_paths() {
     let manager = OperationManager::new(ManagerOptions::default()).unwrap();
     let executor = LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).unwrap();
-    let filesystem = LocalFileSystem::host()
-        .unwrap()
-        .into_async(executor)
-        .unwrap();
+    let filesystem = LocalFileSystem::host().unwrap().into_async(executor).unwrap();
     let rejected = filesystem
         .submit_read_all_with_observer(
             &manager,

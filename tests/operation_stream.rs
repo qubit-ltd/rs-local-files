@@ -1,22 +1,36 @@
 #![cfg(feature = "async")]
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::HashMap;
+use std::collections::VecDeque;
 use std::future::Future;
-use std::io::{self, SeekFrom};
+use std::io::SeekFrom;
+use std::io::{self};
 use std::path::PathBuf;
 use std::pin::Pin;
+use std::sync::Arc;
+use std::sync::Mutex;
 use std::sync::mpsc::sync_channel;
-use std::sync::{Arc, Mutex};
-use std::task::{Context, Poll, Waker};
+use std::task::Context;
+use std::task::Poll;
+use std::task::Waker;
 
-use qubit_io::{AsyncInput, AsyncOutput};
-use qubit_local_files::operation::stream::{
-    AsyncLocalDirectoryWalker, AsyncLocalFileReader, AsyncLocalFileWriter,
-    LOCAL_STREAM_BUFFER_SIZE, LocalStreamCommand, LocalStreamCompletion, LocalStreamDriver,
-    LocalStreamRequest, LocalStreamResource, LocalWalkDriver, LocalWalkResource,
-};
+use qubit_io::AsyncInput;
+use qubit_io::AsyncOutput;
+use qubit_local_files::operation::stream::AsyncLocalDirectoryWalker;
+use qubit_local_files::operation::stream::AsyncLocalFileReader;
+use qubit_local_files::operation::stream::AsyncLocalFileWriter;
+use qubit_local_files::operation::stream::LOCAL_STREAM_BUFFER_SIZE;
+use qubit_local_files::operation::stream::LocalStreamCommand;
+use qubit_local_files::operation::stream::LocalStreamCompletion;
+use qubit_local_files::operation::stream::LocalStreamDriver;
+use qubit_local_files::operation::stream::LocalStreamRequest;
+use qubit_local_files::operation::stream::LocalStreamResource;
+use qubit_local_files::operation::stream::LocalWalkDriver;
+use qubit_local_files::operation::stream::LocalWalkResource;
+use qubit_operation::ManagerOptions;
+use qubit_operation::OperationManager;
 use qubit_operation::ResourceRef;
-use qubit_operation::{ManagerOptions, OperationManager, ResourceScopeOptions};
+use qubit_operation::ResourceScopeOptions;
 
 #[derive(Default)]
 struct FakeState {
@@ -134,10 +148,7 @@ impl LocalStreamDriver for FakeWorker {
                 if let Some(bytes) = state.oversized_read.take() {
                     return Poll::Ready(Ok(LocalStreamCompletion::Read(bytes)));
                 }
-                let end = state
-                    .bytes
-                    .len()
-                    .min(state.position.saturating_add(*max_bytes));
+                let end = state.bytes.len().min(state.position.saturating_add(*max_bytes));
                 let bytes = state.bytes[state.position..end].to_vec();
                 state.position = end;
                 if state.hold_read_after_execute {
@@ -193,12 +204,8 @@ fn resource(worker: Arc<FakeWorker>) -> ResourceRef<LocalStreamResource> {
     let manager = OperationManager::new(ManagerOptions::default()).unwrap();
     let mut operation = manager
         .try_submit(Default::default(), move |scope| {
-            let resources = scope
-                .resource_scope(ResourceScopeOptions { capacity: 1 })
-                .unwrap();
-            let resource = resources
-                .manage(LocalStreamResource::new(FakeProxy(worker)))
-                .unwrap();
+            let resources = scope.resource_scope(ResourceScopeOptions { capacity: 1 }).unwrap();
+            let resource = resources.manage(LocalStreamResource::new(FakeProxy(worker))).unwrap();
             Ok::<_, ()>(resource)
         })
         .unwrap();
@@ -287,12 +294,8 @@ fn walk_resource(worker: Arc<FakeWalkWorker>) -> ResourceRef<LocalWalkResource> 
     let manager = OperationManager::new(ManagerOptions::default()).unwrap();
     let mut operation = manager
         .try_submit(Default::default(), move |scope| {
-            let resources = scope
-                .resource_scope(ResourceScopeOptions { capacity: 1 })
-                .unwrap();
-            let resource = resources
-                .manage(LocalWalkResource::new(FakeWalkProxy(worker)))
-                .unwrap();
+            let resources = scope.resource_scope(ResourceScopeOptions { capacity: 1 }).unwrap();
+            let resource = resources.manage(LocalWalkResource::new(FakeWalkProxy(worker))).unwrap();
             Ok::<_, ()>(resource)
         })
         .unwrap();
@@ -334,7 +337,8 @@ fn apply_offset(base: usize, offset: i64) -> usize {
 }
 
 // ResourceRef requires an owned Send + Sync resource; this proxy gives each
-// handle a distinct registration while the fake worker remains under test control.
+// handle a distinct registration while the fake worker remains under test
+// control.
 #[derive(Clone)]
 struct FakeProxy(Arc<FakeWorker>);
 
@@ -373,11 +377,15 @@ fn poll_worker<T>(mut future: impl FnMut(&mut Context<'_>) -> Poll<T>) -> T {
 #[test]
 fn async_filesystem_opens_real_reader_writer_and_bounded_walker() {
     use qubit_local_files::LocalFileSystem;
-    use qubit_local_files::operation::{LocalExecutionConfig, LocalIoExecutor};
-    use qubit_local_files::options::{
-        LocalListOptions, LocalReadOptions, LocalWriteMode, LocalWriteOptions,
-    };
-    use qubit_operation::{ManagerOptions, OperationManager, OperationOutcome};
+    use qubit_local_files::operation::LocalExecutionConfig;
+    use qubit_local_files::operation::LocalIoExecutor;
+    use qubit_local_files::options::LocalListOptions;
+    use qubit_local_files::options::LocalReadOptions;
+    use qubit_local_files::options::LocalWriteMode;
+    use qubit_local_files::options::LocalWriteOptions;
+    use qubit_operation::ManagerOptions;
+    use qubit_operation::OperationManager;
+    use qubit_operation::OperationOutcome;
 
     let directory = tempfile::tempdir().unwrap();
     let input = directory.path().join("input.txt");
@@ -385,18 +393,10 @@ fn async_filesystem_opens_real_reader_writer_and_bounded_walker() {
     std::fs::write(&input, b"real local reader").unwrap();
     let manager = OperationManager::new(ManagerOptions::default()).unwrap();
     let executor = LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).unwrap();
-    let filesystem = LocalFileSystem::host()
-        .unwrap()
-        .into_async(executor)
-        .unwrap();
+    let filesystem = LocalFileSystem::host().unwrap().into_async(executor).unwrap();
 
     let mut opening = filesystem
-        .submit_open_reader(
-            &manager,
-            Default::default(),
-            input.clone(),
-            LocalReadOptions::default(),
-        )
+        .submit_open_reader(&manager, Default::default(), input.clone(), LocalReadOptions::default())
         .unwrap();
     let mut reader = match opening.wait_outcome().unwrap() {
         OperationOutcome::Succeeded(reader) => reader,
@@ -426,10 +426,7 @@ fn async_filesystem_opens_real_reader_writer_and_bounded_walker() {
         17
     );
     let outcome = poll_worker(|cx| Box::pin(writer.commit()).as_mut().poll(cx)).unwrap();
-    assert_eq!(
-        outcome.state(),
-        qubit_local_files::outcome::LocalWriterState::Committed
-    );
+    assert_eq!(outcome.state(), qubit_local_files::outcome::LocalWriterState::Committed);
     assert_eq!(
         observer.snapshot().publication,
         qubit_local_files::LocalPublicationState::Published
@@ -457,10 +454,7 @@ fn async_filesystem_opens_real_reader_writer_and_bounded_walker() {
     );
     drop(writer);
     opening.wait_settlement().unwrap();
-    assert!(
-        !aborted.exists(),
-        "dropping an uncommitted writer must abort"
-    );
+    assert!(!aborted.exists(), "dropping an uncommitted writer must abort");
 
     let mut opening = filesystem
         .submit_open_walker(
@@ -498,18 +492,19 @@ fn async_filesystem_opens_real_reader_writer_and_bounded_walker() {
 #[test]
 fn real_writer_commit_preserves_typed_error_and_observer() {
     use qubit_local_files::LocalFileSystem;
-    use qubit_local_files::operation::{LocalExecutionConfig, LocalIoExecutor};
-    use qubit_local_files::options::{LocalWriteMode, LocalWriteOptions};
-    use qubit_operation::{ManagerOptions, OperationManager, OperationOutcome};
+    use qubit_local_files::operation::LocalExecutionConfig;
+    use qubit_local_files::operation::LocalIoExecutor;
+    use qubit_local_files::options::LocalWriteMode;
+    use qubit_local_files::options::LocalWriteOptions;
+    use qubit_operation::ManagerOptions;
+    use qubit_operation::OperationManager;
+    use qubit_operation::OperationOutcome;
 
     let directory = tempfile::tempdir().unwrap();
     let destination = directory.path().join("race.txt");
     let manager = OperationManager::new(ManagerOptions::default()).unwrap();
     let executor = LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).unwrap();
-    let filesystem = LocalFileSystem::host()
-        .unwrap()
-        .into_async(executor)
-        .unwrap();
+    let filesystem = LocalFileSystem::host().unwrap().into_async(executor).unwrap();
     let (mut opening, observer) = filesystem
         .submit_open_writer(
             &manager,
@@ -543,9 +538,12 @@ fn real_writer_commit_preserves_typed_error_and_observer() {
 #[test]
 fn walker_cumulative_path_budget_returns_every_entry() {
     use qubit_local_files::LocalFileSystem;
-    use qubit_local_files::operation::{LocalExecutionConfig, LocalIoExecutor};
+    use qubit_local_files::operation::LocalExecutionConfig;
+    use qubit_local_files::operation::LocalIoExecutor;
     use qubit_local_files::options::LocalListOptions;
-    use qubit_operation::{ManagerOptions, OperationManager, OperationOutcome};
+    use qubit_operation::ManagerOptions;
+    use qubit_operation::OperationManager;
+    use qubit_operation::OperationOutcome;
 
     let directory = tempfile::tempdir().unwrap();
     let mut root = directory.path().to_path_buf();
@@ -558,10 +556,7 @@ fn walker_cumulative_path_budget_returns_every_entry() {
     }
     let manager = OperationManager::new(ManagerOptions::default()).unwrap();
     let executor = LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).unwrap();
-    let filesystem = LocalFileSystem::host()
-        .unwrap()
-        .into_async(executor)
-        .unwrap();
+    let filesystem = LocalFileSystem::host().unwrap().into_async(executor).unwrap();
     let mut opening = filesystem
         .submit_open_walker(
             &manager,
@@ -575,9 +570,7 @@ fn walker_cumulative_path_budget_returns_every_entry() {
         _ => panic!("walker open failed"),
     };
     let mut found = Vec::new();
-    while let Some(batch) =
-        poll_worker(|cx| Box::pin(walker.next_batch()).as_mut().poll(cx)).unwrap()
-    {
+    while let Some(batch) = poll_worker(|cx| Box::pin(walker.next_batch()).as_mut().poll(cx)).unwrap() {
         found.extend(batch);
     }
     assert_eq!(
@@ -596,9 +589,12 @@ fn walker_cumulative_path_budget_returns_every_entry() {
 #[test]
 fn stream_handle_permit_lives_until_worker_cleanup_settles() {
     use qubit_local_files::LocalFileSystem;
-    use qubit_local_files::operation::{LocalExecutionConfig, LocalIoExecutor};
+    use qubit_local_files::operation::LocalExecutionConfig;
+    use qubit_local_files::operation::LocalIoExecutor;
     use qubit_local_files::options::LocalReadOptions;
-    use qubit_operation::{ManagerOptions, OperationManager, OperationOutcome};
+    use qubit_operation::ManagerOptions;
+    use qubit_operation::OperationManager;
+    use qubit_operation::OperationOutcome;
 
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("input.txt");
@@ -612,31 +608,19 @@ fn stream_handle_permit_lives_until_worker_cleanup_settles() {
         },
     )
     .unwrap();
-    let filesystem = LocalFileSystem::host()
-        .unwrap()
-        .into_async(executor)
-        .unwrap();
+    let filesystem = LocalFileSystem::host().unwrap().into_async(executor).unwrap();
     let mut opening = filesystem
-        .submit_open_reader(
-            &manager,
-            Default::default(),
-            path.clone(),
-            LocalReadOptions::default(),
-        )
+        .submit_open_reader(&manager, Default::default(), path.clone(), LocalReadOptions::default())
         .unwrap();
     let mut reader = match opening.wait_outcome().unwrap() {
         OperationOutcome::Succeeded(reader) => reader,
         _ => panic!("reader open failed"),
     };
-    let rejected = match filesystem.submit_open_reader(
-        &manager,
-        Default::default(),
-        path.clone(),
-        LocalReadOptions::default(),
-    ) {
-        Ok(_) => panic!("second stream should exceed handle capacity"),
-        Err(error) => error,
-    };
+    let rejected =
+        match filesystem.submit_open_reader(&manager, Default::default(), path.clone(), LocalReadOptions::default()) {
+            Ok(_) => panic!("second stream should exceed handle capacity"),
+            Err(error) => error,
+        };
     assert_eq!(
         rejected.rejection(),
         qubit_local_files::operation::LocalSubmitRejection::CapacityExceeded
@@ -645,12 +629,7 @@ fn stream_handle_permit_lives_until_worker_cleanup_settles() {
     drop(reader);
     opening.wait_settlement().unwrap();
     let mut second = filesystem
-        .submit_open_reader(
-            &manager,
-            Default::default(),
-            path,
-            LocalReadOptions::default(),
-        )
+        .submit_open_reader(&manager, Default::default(), path, LocalReadOptions::default())
         .unwrap();
     let mut reader = match second.wait_outcome().unwrap() {
         OperationOutcome::Succeeded(reader) => reader,
@@ -730,10 +709,7 @@ fn writes_are_accepted_only_when_owned_capacity_is_available() {
     );
     let abandoned_input = b"old buffer".to_vec();
     assert!(poll(|cx| Pin::new(&mut writer).poll_write(cx, &abandoned_input)).is_pending());
-    assert!(
-        worker.writes().is_empty(),
-        "pending write must not reach worker"
-    );
+    assert!(worker.writes().is_empty(), "pending write must not reach worker");
 
     worker.release();
     drop(abandoned_input);
@@ -798,10 +774,7 @@ fn seek_current_accounts_for_prefetched_bytes() {
     ));
     assert_eq!(&first, b"01");
     let mut seek = Box::pin(reader.seek(SeekFrom::Current(1)));
-    assert!(matches!(
-        poll(|cx| seek.as_mut().poll(cx)),
-        Poll::Ready(Ok(3))
-    ));
+    assert!(matches!(poll(|cx| seek.as_mut().poll(cx)), Poll::Ready(Ok(3))));
     drop(seek);
     let mut next = [0; 1];
     assert!(matches!(
@@ -820,10 +793,7 @@ fn pending_seek_future_repoll_returns_original_position_without_reissuing_seek()
     assert!(poll(|cx| seek.as_mut().poll(cx)).is_pending());
 
     worker.release();
-    assert!(matches!(
-        poll(|cx| seek.as_mut().poll(cx)),
-        Poll::Ready(Ok(1))
-    ));
+    assert!(matches!(poll(|cx| seek.as_mut().poll(cx)), Poll::Ready(Ok(1))));
     drop(seek);
 
     let mut output = [0; 1];
@@ -847,10 +817,7 @@ fn new_seek_future_waits_for_cancelled_seek_then_runs_its_own_request() {
     let mut next_seek = Box::pin(reader.seek(SeekFrom::Current(1)));
     assert!(poll(|cx| next_seek.as_mut().poll(cx)).is_pending());
     worker.release();
-    assert!(matches!(
-        poll(|cx| next_seek.as_mut().poll(cx)),
-        Poll::Ready(Ok(1))
-    ));
+    assert!(matches!(poll(|cx| next_seek.as_mut().poll(cx)), Poll::Ready(Ok(1))));
     drop(next_seek);
 
     let mut output = [0; 1];
@@ -898,10 +865,7 @@ fn current_seek_settles_completed_but_unconsumed_read_before_adjusting_offset() 
     let mut seek = Box::pin(reader.seek(SeekFrom::Current(1)));
     assert!(poll(|cx| seek.as_mut().poll(cx)).is_pending());
     worker.release();
-    assert!(matches!(
-        poll(|cx| seek.as_mut().poll(cx)),
-        Poll::Ready(Ok(1))
-    ));
+    assert!(matches!(poll(|cx| seek.as_mut().poll(cx)), Poll::Ready(Ok(1))));
     drop(seek);
 
     assert!(matches!(
@@ -958,9 +922,7 @@ fn close_completes_while_operation_scope_is_still_open() {
     let (continue_tx, continue_rx) = sync_channel(0);
     let mut operation = manager
         .try_submit(Default::default(), move |scope| {
-            let resources = scope
-                .resource_scope(ResourceScopeOptions { capacity: 1 })
-                .unwrap();
+            let resources = scope.resource_scope(ResourceScopeOptions { capacity: 1 }).unwrap();
             let resource = resources
                 .manage(LocalStreamResource::new(FakeProxy(worker_for_operation)))
                 .unwrap();
@@ -990,11 +952,7 @@ fn stream_drop_requests_worker_close_without_blocking() {
     let writer = writer(&worker);
     drop(writer);
     assert!(worker.0.lock().unwrap().close_requested);
-    assert_eq!(
-        worker.0.lock().unwrap().close_count,
-        0,
-        "drop only enqueues close"
-    );
+    assert_eq!(worker.0.lock().unwrap().close_count, 0, "drop only enqueues close");
 }
 
 #[test]
@@ -1089,11 +1047,7 @@ fn separate_streams_keep_independent_offsets() {
 
 #[test]
 fn walker_enforces_batch_limits_and_drop_confirms_worker_close() {
-    let oversized = Some(
-        (0..129)
-            .map(|index| PathBuf::from(format!("entry-{index}")))
-            .collect(),
-    );
+    let oversized = Some((0..129).map(|index| PathBuf::from(format!("entry-{index}"))).collect());
     let worker = Arc::new(FakeWalkWorker::with_batches([oversized]));
     let mut walker = AsyncLocalDirectoryWalker::new(walk_resource(Arc::clone(&worker))).unwrap();
     let error = match poll(|cx| Box::pin(walker.next_batch()).as_mut().poll(cx)) {
@@ -1108,10 +1062,7 @@ fn walker_enforces_batch_limits_and_drop_confirms_worker_close() {
     drop(walker);
     assert!(worker.0.lock().unwrap().stopped);
 
-    let worker = Arc::new(FakeWalkWorker::with_batches([
-        Some(vec![PathBuf::from("entry")]),
-        None,
-    ]));
+    let worker = Arc::new(FakeWalkWorker::with_batches([Some(vec![PathBuf::from("entry")]), None]));
     worker.0.lock().unwrap().allow_close = false;
     let mut walker = AsyncLocalDirectoryWalker::new(walk_resource(Arc::clone(&worker))).unwrap();
     let observer = walker.close_observer();

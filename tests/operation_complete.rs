@@ -18,8 +18,12 @@ use qubit_operation::ManagerOptions;
 use qubit_operation::OperationManager;
 
 fn block_on<F: std::future::Future>(future: F) -> F::Output {
-    use std::sync::{Arc, Condvar, Mutex};
-    use std::task::{Context, Wake, Waker};
+    use std::sync::Arc;
+    use std::sync::Condvar;
+    use std::sync::Mutex;
+    use std::task::Context;
+    use std::task::Wake;
+    use std::task::Waker;
     struct Signal(Mutex<bool>, Condvar);
     impl Wake for Signal {
         fn wake(self: Arc<Self>) {
@@ -86,10 +90,8 @@ fn complete_read_reports_limit_error_without_returning_truncated_success() {
         .unwrap()
         .0;
     let outcome = operation.wait_outcome().unwrap();
-    assert!(
-        matches!(outcome, qubit_operation::OperationOutcome::Failed(error)
-        if error.read_limit_error().is_some())
-    );
+    assert!(matches!(outcome, qubit_operation::OperationOutcome::Failed(error)
+        if error.read_limit_error().is_some()));
 }
 
 #[test]
@@ -210,12 +212,7 @@ fn metadata_and_prefix_expose_complete_file_observations() {
     let filesystem = facade(&manager);
 
     let mut metadata = filesystem
-        .submit_metadata(
-            &manager,
-            Default::default(),
-            PathBuf::from(&path),
-            Default::default(),
-        )
+        .submit_metadata(&manager, Default::default(), PathBuf::from(&path), Default::default())
         .unwrap()
         .0;
     assert!(matches!(metadata.wait_outcome().unwrap(),
