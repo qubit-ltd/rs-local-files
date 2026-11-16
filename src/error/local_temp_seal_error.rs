@@ -74,10 +74,19 @@ impl LocalTempSealError {
     ///
     /// This consumes the error and transfers its retained file owner.
     pub fn into_resource(self) -> LocalTempFile {
-        let (_, recovery) = self.cause.into_temp_recovery_parts();
-        recovery
+        self.into_parts().2
+    }
+
+    /// Splits the primary sealing error, observed access state, and retained
+    /// file owner so an adapter can preserve both the diagnostic and recovery
+    /// responsibility.
+    pub fn into_parts(self) -> (LocalFileError, LocalTempAccessState, LocalTempFile) {
+        let Self { cause, access_state } = self;
+        let (cause, recovery) = cause.into_temp_recovery_parts();
+        let resource = recovery
             .and_then(crate::temp::types::LocalTempRecovery::into_file)
-            .expect("seal failure retains its temporary file")
+            .expect("seal failure retains its temporary file");
+        (cause, access_state, resource)
     }
 
     /// Returns the access state established when sealing failed.
