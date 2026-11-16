@@ -536,6 +536,73 @@ fn real_writer_commit_preserves_typed_error_and_observer() {
 }
 
 #[test]
+fn append_facts_survive_close_and_drop() {
+    use qubit_local_files::LocalFileSystem;
+    use qubit_local_files::operation::{LocalExecutionConfig, LocalIoExecutor};
+    use qubit_local_files::options::{LocalWriteMode, LocalWriteOptions};
+    use qubit_operation::{ManagerOptions, OperationManager, OperationOutcome};
+
+    let directory = tempfile::tempdir().unwrap();
+    let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+    let executor = LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).unwrap();
+    let filesystem = LocalFileSystem::host()
+        .unwrap()
+        .into_async(executor)
+        .unwrap();
+
+    let closed_path = directory.path().join("closed.txt");
+    std::fs::write(&closed_path, b"before").unwrap();
+    let (mut opening, observer) = filesystem
+        .submit_open_writer(
+            &manager,
+            Default::default(),
+            closed_path.clone(),
+            LocalWriteOptions::new(LocalWriteMode::Append),
+        )
+        .unwrap();
+    let mut writer = match opening.wait_outcome().unwrap() {
+        OperationOutcome::Succeeded(writer) => writer,
+        _ => panic!("append writer open failed"),
+    };
+    poll_worker(|cx| Pin::new(&mut writer).poll_write(cx, b" plus close")).unwrap();
+    poll_worker(|cx| Box::pin(writer.settle()).as_mut().poll(cx)).unwrap();
+    poll_worker(|cx| Box::pin(writer.close()).as_mut().poll(cx)).unwrap();
+    assert_eq!(
+        observer.snapshot().publication,
+        qubit_local_files::LocalPublicationState::Published
+    );
+    assert_eq!(observer.snapshot().modified_bytes, 11);
+    drop(writer);
+    opening.wait_settlement().unwrap();
+    assert_eq!(std::fs::read(&closed_path).unwrap(), b"before plus close");
+
+    let dropped_path = directory.path().join("dropped.txt");
+    std::fs::write(&dropped_path, b"before").unwrap();
+    let (mut opening, observer) = filesystem
+        .submit_open_writer(
+            &manager,
+            Default::default(),
+            dropped_path.clone(),
+            LocalWriteOptions::new(LocalWriteMode::Append),
+        )
+        .unwrap();
+    let mut writer = match opening.wait_outcome().unwrap() {
+        OperationOutcome::Succeeded(writer) => writer,
+        _ => panic!("append writer open failed"),
+    };
+    poll_worker(|cx| Pin::new(&mut writer).poll_write(cx, b" plus drop")).unwrap();
+    poll_worker(|cx| Box::pin(writer.settle()).as_mut().poll(cx)).unwrap();
+    drop(writer);
+    opening.wait_settlement().unwrap();
+    assert_eq!(
+        observer.snapshot().publication,
+        qubit_local_files::LocalPublicationState::Published
+    );
+    assert_eq!(observer.snapshot().modified_bytes, 10);
+    assert_eq!(std::fs::read(&dropped_path).unwrap(), b"before plus drop");
+}
+
+#[test]
 fn walker_cumulative_path_budget_returns_every_entry() {
     use qubit_local_files::LocalFileSystem;
     use qubit_local_files::operation::LocalExecutionConfig;

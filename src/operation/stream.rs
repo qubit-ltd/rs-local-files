@@ -554,6 +554,7 @@ struct WorkerStreamInner {
     _handle_budget: Arc<super::internal::permits::Permit>,
     observer: Option<super::LocalFactObserver>,
     written_bytes: std::sync::atomic::AtomicU64,
+    append_mode: bool,
 }
 
 pub(crate) struct WorkerStreamDriver(Arc<WorkerStreamInner>);
@@ -566,6 +567,7 @@ impl WorkerStreamDriver {
         buffer_budget: Arc<Mutex<super::internal::permits::Permit>>,
         handle_budget: Arc<super::internal::permits::Permit>,
         observer: Option<super::LocalFactObserver>,
+        append_mode: bool,
     ) -> io::Result<ResourceRef<LocalStreamResource>> {
         let cleanup_permit = executor
             .reserve_cleanup()
@@ -584,6 +586,7 @@ impl WorkerStreamDriver {
             _handle_budget: handle_budget,
             observer,
             written_bytes: std::sync::atomic::AtomicU64::new(0),
+            append_mode,
         })));
         let resources = scope
             .resource_scope(qubit_operation::ResourceScopeOptions { capacity: 1 })
@@ -698,21 +701,36 @@ fn drain_stream_commands(inner: Arc<WorkerStreamInner>) {
         if let Ok(completion) = &result {
             match completion {
                 LocalStreamCompletion::Written(bytes) => {
-                    inner.written_bytes.fetch_add(*bytes as u64, Ordering::AcqRel);
+                    let previous = inner
+                        .written_bytes
+                        .fetch_update(Ordering::AcqRel, Ordering::Acquire, |current| {
+                            Some(current.saturating_add(*bytes as u64))
+                        })
+                        .unwrap_or_else(|current| current);
+                    let total = previous.saturating_add(*bytes as u64);
+                    if inner.append_mode && *bytes > 0 {
+                        if let Some(observer) = &inner.observer {
+                            record_stream_fact(
+                                observer,
+                                super::LocalPublicationState::Published,
+                                super::LocalDurabilityState::Unknown,
+                                total,
+                            );
+                        }
+                    }
                 }
                 LocalStreamCompletion::Committed(outcome) => {
                     if let Some(observer) = &inner.observer {
-                        observer.update(super::LocalFactSnapshot {
-                            modified_count: 1,
-                            modified_bytes: inner.written_bytes.load(Ordering::Acquire),
-                            publication: super::LocalPublicationState::Published,
-                            durability: if outcome.durable() {
+                        record_stream_fact(
+                            observer,
+                            super::LocalPublicationState::Published,
+                            if outcome.durable() {
                                 super::LocalDurabilityState::Durable
                             } else {
                                 super::LocalDurabilityState::Unknown
                             },
-                            ..Default::default()
-                        });
+                            inner.written_bytes.load(Ordering::Acquire),
+                        );
                     }
                 }
                 LocalStreamCompletion::CommitFailed { error, .. } => {
@@ -722,17 +740,16 @@ fn drain_stream_commands(inner: Arc<WorkerStreamInner>) {
                             crate::LocalWriteFailureState::Published => super::LocalPublicationState::Published,
                             crate::LocalWriteFailureState::Indeterminate => super::LocalPublicationState::Unknown,
                         };
-                        observer.update(super::LocalFactSnapshot {
-                            modified_count: u64::from(publication == super::LocalPublicationState::Published),
-                            modified_bytes: inner.written_bytes.load(Ordering::Acquire),
+                        record_stream_fact(
+                            observer,
                             publication,
-                            durability: if publication == super::LocalPublicationState::Published {
+                            if publication == super::LocalPublicationState::Published {
                                 super::LocalDurabilityState::Failed
                             } else {
                                 super::LocalDurabilityState::Unknown
                             },
-                            ..Default::default()
-                        });
+                            inner.written_bytes.load(Ordering::Acquire),
+                        );
                     }
                 }
                 _ => {}
@@ -750,6 +767,26 @@ fn drain_stream_commands(inner: Arc<WorkerStreamInner>) {
             let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| waker.wake()));
         }
     }
+}
+
+fn record_stream_fact(
+    observer: &super::LocalFactObserver,
+    publication: super::LocalPublicationState,
+    durability: super::LocalDurabilityState,
+    modified_bytes: u64,
+) {
+    let mut snapshot = observer.snapshot();
+    if snapshot.publication != super::LocalPublicationState::Published {
+        snapshot.publication = publication;
+    }
+    if snapshot.publication == super::LocalPublicationState::Published {
+        snapshot.modified_count = 1;
+        snapshot.modified_bytes = snapshot.modified_bytes.max(modified_bytes);
+        if durability != super::LocalDurabilityState::Unknown {
+            snapshot.durability = durability;
+        }
+    }
+    observer.update(snapshot);
 }
 
 impl LocalStreamDriver for WorkerStreamDriver {

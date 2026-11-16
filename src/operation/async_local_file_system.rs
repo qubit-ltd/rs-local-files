@@ -263,6 +263,7 @@ impl AsyncLocalFileSystem {
                             worker_budget,
                             worker_handle,
                             None,
+                            false,
                         );
                         match resource.and_then(super::stream::AsyncLocalFileReader::new) {
                             Ok(reader) => OperationOutcome::Succeeded(reader),
@@ -398,6 +399,7 @@ impl AsyncLocalFileSystem {
                         worker_budget,
                         worker_handle,
                         Some(worker_observer),
+                        options.mode() == crate::LocalWriteMode::Append,
                     );
                     match resource.and_then(super::stream::AsyncLocalFileWriter::new) {
                         Ok(writer) => OperationOutcome::Succeeded(writer),
