@@ -595,11 +595,20 @@ dependencies = [
  "proptest",
  "qubit-budget",
  "qubit-io",
+ "qubit-operation",
  "qubit-redact",
  "rustix",
  "sha2",
  "tempfile",
  "windows-sys",
+]
+
+[[package]]
+name = "qubit-operation"
+version = "0.3.0"
+source = "git+https://github.com/qubit-ltd/rs-operation.git?rev=64dddb746afbe3395934dd0f07168b13fbaafd6a#64dddb746afbe3395934dd0f07168b13fbaafd6a"
+dependencies = [
+ "qubit-budget",
 ]
 
 [[package]]

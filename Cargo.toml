@@ -29,6 +29,7 @@ doctest = true
 
 [features]
 default = []
+async = []
 test-support = []
 digest = ["dep:digest", "qubit-io/digest"]
 
@@ -38,6 +39,7 @@ qubit-io = "^0.19"
 qubit-budget = "^0.10"
 qubit-redact = { version = "^0.10", default-features = false }
 getrandom = "^0.4"
+qubit-operation = { version = "^0.3", git = "https://github.com/qubit-ltd/rs-operation.git", rev = "64dddb746afbe3395934dd0f07168b13fbaafd6a" }
 
 [target.'cfg(unix)'.dependencies]
 libc = "^0.2"
