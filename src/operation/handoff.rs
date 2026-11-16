@@ -59,6 +59,17 @@ pub struct LocalReadLease {
 }
 
 impl LocalReadLease {
+    /// Builds a lease around the same registered temp resource, without
+    /// creating a new resource entry.
+    pub(crate) fn from_temp_access(access: &LocalTempFileAccess, export_rooted: bool) -> Self {
+        Self {
+            resource: Arc::new(LocalReadResource {
+                reference: access.clone_access().clone_resource_ref(),
+                export_read_handle: export_rooted,
+            }),
+        }
+    }
+
     /// Returns the original registered resource identity.
     pub fn resource_id(&self) -> qubit_operation::ResourceId {
         self.resource.reference.id()
@@ -114,7 +125,10 @@ pub enum LocalStageFailure {
     Command(String),
     Local(crate::LocalFileError),
     Io(std::io::Error),
-    Seal(String),
+    Seal {
+        cause: crate::LocalFileError,
+        access_state: crate::outcome::LocalTempAccessState,
+    },
     ContentTooLarge,
     Stopped,
     RootedExportDenied,
@@ -221,6 +235,10 @@ async fn stage_bytes_in_scope(
     disk: super::internal::permits::DiskPermit,
     temp_options: crate::options::LocalTempFileOptions,
 ) -> Result<LocalReadLease, LocalStageFailure> {
+    let context = scope.context();
+    if context.stop_reason().is_some() {
+        return Err(LocalStageFailure::Stopped);
+    }
     let access = create_temp_access(
         filesystem,
         executor.clone(),
@@ -230,9 +248,17 @@ async fn stage_bytes_in_scope(
         disk,
     )
     .await?;
-    write_access_chunk(&access, &executor, bytes).await?;
+    if context.stop_reason().is_some() {
+        return Err(LocalStageFailure::Stopped);
+    }
+    write_access_chunk(&access, &executor, bytes, context.clone()).await?;
+    #[cfg(feature = "test-support")]
+    crate::test_support::hit_test_gate("lf6-stage-bytes-after-write");
+    if context.stop_reason().is_some() {
+        return Err(LocalStageFailure::Stopped);
+    }
     drop(owned);
-    seal_access(access, executor, stage).await
+    seal_access(access, executor, stage, context).await
 }
 
 async fn create_temp_access(
@@ -243,6 +269,9 @@ async fn create_temp_access(
     temp_options: crate::options::LocalTempFileOptions,
     disk: super::internal::permits::DiskPermit,
 ) -> Result<LocalTempFileAccess, LocalStageFailure> {
+    if scope.context().stop_reason().is_some() {
+        return Err(LocalStageFailure::Stopped);
+    }
     let child_manager = scope.manager();
     let async_manager = child_manager.as_async();
     let mut create = submit_temp_file(
@@ -262,6 +291,10 @@ async fn create_temp_access(
         OperationOutcome::Failed(error) => return Err(LocalStageFailure::Child(error)),
         _ => return Err(LocalStageFailure::ChildOutcome),
     };
+    if scope.context().stop_reason().is_some() {
+        drop(access);
+        return Err(LocalStageFailure::Stopped);
+    }
     access.retain_disk_permit(disk);
     Ok(access)
 }
@@ -270,14 +303,20 @@ async fn write_access_chunk(
     access: &LocalTempFileAccess,
     executor: &LocalIoExecutor,
     bytes: Vec<u8>,
+    context: qubit_operation::OperationContext,
 ) -> Result<(), LocalStageFailure> {
     let receiver = access
-        .enqueue_native_command(executor, move |native| match native {
-            LocalTempNative::File(file) => file
-                .as_file_mut()
-                .and_then(|handle| handle.write_all(&bytes))
-                .map_err(LocalStageFailure::Io),
-            _ => Err(LocalStageFailure::NotSealed),
+        .enqueue_native_command(executor, move |native| {
+            if context.stop_reason().is_some() {
+                return Err(LocalStageFailure::Stopped);
+            }
+            match native {
+                LocalTempNative::File(file) => file
+                    .as_file_mut()
+                    .and_then(|handle| handle.write_all(&bytes))
+                    .map_err(LocalStageFailure::Io),
+                _ => Err(LocalStageFailure::NotSealed),
+            }
         })
         .map_err(command_error)?;
     receiver.await.map_err(command_error)??;
@@ -288,35 +327,40 @@ async fn seal_access(
     access: LocalTempFileAccess,
     executor: LocalIoExecutor,
     stage: LocalStageOptions,
+    context: qubit_operation::OperationContext,
 ) -> Result<LocalReadLease, LocalStageFailure> {
-    let reference = access.clone_resource_ref();
     let receiver = access
         .enqueue_native_transition(&executor, move |native| {
             let LocalTempNative::File(file) = native else {
                 return Err((native, LocalStageFailure::NotSealed));
             };
+            if context.stop_reason().is_some() {
+                return Err((LocalTempNative::File(file), LocalStageFailure::Stopped));
+            }
+            #[cfg(test)]
+            tests::SEAL_ATTEMPTS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             match file.seal_with_options(
                 &crate::options::LocalSealOptions::new().with_file_sync(stage.file_sync),
             ) {
                 Ok(sealed) => Ok((Some(LocalTempNative::Sealed(sealed)), ())),
                 Err(error) => {
-                    let summary = error.cause().to_string();
-                    let file = error.into_resource();
+                    let (cause, access_state, file) = error.into_parts();
                     Err((
                         LocalTempNative::File(file),
-                        LocalStageFailure::Seal(summary),
+                        LocalStageFailure::Seal {
+                            cause,
+                            access_state,
+                        },
                     ))
                 }
             }
         })
         .map_err(command_error)?;
     receiver.await.map_err(command_error)??;
-    Ok(LocalReadLease {
-        resource: Arc::new(LocalReadResource {
-            reference,
-            export_read_handle: stage.export_read_handle,
-        }),
-    })
+    Ok(LocalReadLease::from_temp_access(
+        &access,
+        stage.export_read_handle,
+    ))
 }
 
 /// Reads and stages an owned asynchronous input in bounded chunks.
@@ -398,14 +442,14 @@ where
                 return Err(LocalStageFailure::ContentTooLarge);
             }
             chunk.truncate(read);
-            write_access_chunk(&access, &task_executor, chunk).await?;
+            write_access_chunk(&access, &task_executor, chunk, context.clone()).await?;
             drop(chunk_permit);
             total = total.saturating_add(read);
         }
         if context.stop_reason().is_some() {
             return Err(LocalStageFailure::Stopped);
         }
-        seal_access(access, task_executor, stage).await
+        seal_access(access, task_executor, stage, context).await
     });
     match submit {
         Ok(handle) => Ok(handle),
@@ -471,4 +515,102 @@ fn command_error(error: LocalTempCommandError) -> LocalStageFailure {
         }
     };
     LocalStageFailure::Command(detail.to_owned())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::AtomicUsize;
+    use std::task::{Context, Poll, Wake, Waker};
+
+    pub(super) static SEAL_ATTEMPTS: AtomicUsize = AtomicUsize::new(0);
+
+    struct ThreadWake(std::thread::Thread);
+    impl Wake for ThreadWake {
+        fn wake(self: Arc<Self>) {
+            self.0.unpark();
+        }
+        fn wake_by_ref(self: &Arc<Self>) {
+            self.0.unpark();
+        }
+    }
+
+    fn block_on<F: std::future::Future>(future: F) -> F::Output {
+        let waker = Waker::from(Arc::new(ThreadWake(std::thread::current())));
+        let mut context = Context::from_waker(&waker);
+        let mut future = std::pin::pin!(future);
+        loop {
+            if let Poll::Ready(output) = future.as_mut().poll(&mut context) {
+                return output;
+            }
+            std::thread::park();
+        }
+    }
+
+    #[test]
+    fn lease_from_temp_access_reuses_the_registered_resource() {
+        let manager =
+            qubit_operation::OperationManager::new(qubit_operation::ManagerOptions::default())
+                .expect("manager");
+        let executor = LocalIoExecutor::new(
+            manager.clone(),
+            crate::operation::LocalExecutionConfig::default(),
+        )
+        .expect("local executor");
+        let filesystem = crate::LocalFileSystem::host().expect("filesystem");
+        let mut create = submit_temp_file(
+            filesystem,
+            executor,
+            &manager.as_async(),
+            OperationOptions::default(),
+            crate::options::LocalTempFileOptions::new(),
+        )
+        .expect("temp operation");
+        let OperationOutcome::Succeeded(access) = block_on(create.wait_outcome()).unwrap() else {
+            panic!("temp file should be created");
+        };
+        let lease = LocalReadLease::from_temp_access(&access, true);
+        assert_eq!(lease.resource_id(), access.resource_id());
+        let clone = access.clone_access();
+        assert_eq!(clone.resource_id(), lease.resource_id());
+        drop(access);
+        drop(clone);
+        drop(lease);
+        assert_eq!(block_on(create.wait_settlement()).recovery_count, 0);
+    }
+
+    #[cfg(feature = "test-support")]
+    #[test]
+    fn stop_after_queued_write_prevents_the_following_seal_command() {
+        let manager =
+            qubit_operation::OperationManager::new(qubit_operation::ManagerOptions::default())
+                .expect("manager");
+        let executor = LocalIoExecutor::new(
+            manager.clone(),
+            crate::operation::LocalExecutionConfig::default(),
+        )
+        .expect("local executor");
+        let filesystem = crate::LocalFileSystem::host().expect("filesystem");
+        let gate = crate::test_support::install_test_gate("lf6-stage-bytes-after-write")
+            .expect("write boundary gate");
+        SEAL_ATTEMPTS.store(0, std::sync::atomic::Ordering::SeqCst);
+        let mut operation = stage_bytes(
+            filesystem,
+            executor,
+            &manager.as_async(),
+            OperationOptions::default(),
+            b"payload".to_vec(),
+            LocalStageOptions::default(),
+        )
+        .expect("stage admitted");
+        gate.wait_until_entered();
+        let _ = operation.request_stop(qubit_operation::StopReason::UserCancelled);
+        gate.release();
+        assert!(matches!(
+            block_on(operation.wait_outcome()).expect("operation outcome"),
+            OperationOutcome::Stopped(_) | OperationOutcome::Failed(LocalStageFailure::Stopped)
+        ));
+        assert_eq!(SEAL_ATTEMPTS.load(std::sync::atomic::Ordering::SeqCst), 0);
+        assert_eq!(block_on(operation.wait_settlement()).recovery_count, 0);
+    }
 }

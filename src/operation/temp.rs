@@ -48,6 +48,9 @@ pub(crate) enum LocalTempNative {
     Sealed(crate::LocalSealedTempFile),
     Directory(crate::LocalTempDirectory),
     Recovery(crate::LocalTempRecovery),
+    /// A consuming command panicked after taking its owner; cleanup cannot
+    /// claim that the native resource was released.
+    Unconfirmed,
 }
 
 impl LocalTempResource {
@@ -151,23 +154,35 @@ impl LocalTempFileAccess {
         let (sender, receiver) = async_result();
         executor
             .enqueue_task(move || {
-                let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    let mut native = resource.native.lock().unwrap_or_else(|e| e.into_inner());
-                    let Some(owner) = native.take() else {
-                        return Err(LocalTempCommandError::ResourceUnavailable);
+                let mut native = resource.native.lock().unwrap_or_else(|e| e.into_inner());
+                let outcome =
+                    match native.take() {
+                        None => Err(LocalTempCommandError::ResourceUnavailable),
+                        Some(owner) => {
+                            match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                                command(owner)
+                            })) {
+                                Ok(Ok((owner, value))) => {
+                                    *native = owner;
+                                    Ok(Ok(value))
+                                }
+                                Ok(Err((owner, error))) => {
+                                    *native = Some(owner);
+                                    Ok(Err(error))
+                                }
+                                Err(payload) => {
+                                    if let Err(payload) = std::panic::catch_unwind(
+                                        std::panic::AssertUnwindSafe(|| drop(payload)),
+                                    ) {
+                                        std::mem::forget(payload);
+                                    }
+                                    *native = Some(LocalTempNative::Unconfirmed);
+                                    Err(LocalTempCommandError::Panicked)
+                                }
+                            }
+                        }
                     };
-                    match command(owner) {
-                        Ok((owner, value)) => {
-                            *native = owner;
-                            Ok(Ok(value))
-                        }
-                        Err((owner, error)) => {
-                            *native = Some(owner);
-                            Ok(Err(error))
-                        }
-                    }
-                }))
-                .unwrap_or(Err(LocalTempCommandError::Panicked));
+                drop(native);
                 let _ = sender.send(outcome);
                 drop(resource);
             })
@@ -539,6 +554,76 @@ mod tests {
             .expect("operation completed");
         assert_eq!(completion.settlement.recovery_count, 0);
         assert_eq!(std::fs::read_dir(parent.path()).unwrap().count(), 0);
+    }
+
+    #[test]
+    fn panicked_consuming_transition_cannot_settle_as_released() {
+        let parent = tempfile::tempdir().expect("temp parent");
+        let manager = OperationManager::new(ManagerOptions::default()).expect("manager");
+        let executor = LocalIoExecutor::new(
+            manager.clone(),
+            super::super::LocalExecutionConfig::default(),
+        )
+        .expect("local executor");
+        let filesystem = LocalFileSystem::host().expect("filesystem");
+        let parent_path = parent.path().to_path_buf();
+        let completion = manager
+            .run_and_settle(qubit_operation::OperationOptions::default(), move |scope| {
+                let reservation = scope.reserve_resource().expect("resource reservation");
+                let file = filesystem
+                    .create_temp_file_with_options(
+                        &LocalTempFileOptions::new().with_parent(&parent_path),
+                    )
+                    .expect("temporary file");
+                let owner = LocalTempResource::new(
+                    LocalTempNative::File(file),
+                    executor.reserve_disk(1).expect("disk permit"),
+                    executor.reserve_handle().expect("handle permit"),
+                    executor.reserve_cleanup().expect("cleanup permit"),
+                );
+                let id_slot = Arc::clone(&owner.id);
+                let reference = reservation
+                    .commit_with(
+                        owner,
+                        LocalCleanup {
+                            executor: executor.clone(),
+                        },
+                    )
+                    .expect("managed temp resource");
+                *id_slot.lock().unwrap_or_else(|e| e.into_inner()) = Some(reference.id());
+                let access = LocalTempFileAccess {
+                    resource: reference,
+                };
+                let receiver = access
+                    .enqueue_native_transition(
+                        &executor,
+                        |_owner| -> Result<(Option<LocalTempNative>, ()), (LocalTempNative, ())> {
+                            panic!("injected transition panic")
+                        },
+                    )
+                    .expect("command queued");
+                assert!(matches!(
+                    block_on(receiver),
+                    Err(LocalTempCommandError::Panicked)
+                ));
+                drop(access);
+                Ok::<(), ()>(())
+            })
+            .expect("operation completed");
+        assert!(completion.settlement.recovery_count > 0);
+        assert!(!completion.settlement.cleanup_failures.is_empty());
+    }
+
+    fn block_on<F: std::future::Future>(future: F) -> F::Output {
+        let waker = Waker::from(Arc::new(ThreadWake(std::thread::current())));
+        let mut context = Context::from_waker(&waker);
+        let mut future = Box::pin(future);
+        loop {
+            if let Poll::Ready(output) = future.as_mut().poll(&mut context) {
+                return output;
+            }
+            std::thread::park();
+        }
     }
 
     #[test]

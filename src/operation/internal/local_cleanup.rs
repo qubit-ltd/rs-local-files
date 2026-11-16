@@ -187,6 +187,14 @@ fn cleanup_resource(
                 native.take();
                 ()
             }),
+            Some(LocalTempNative::Unconfirmed) => Err(crate::LocalFileError::from_io(
+                crate::LocalFileOperation::Cleanup,
+                None,
+                None,
+                std::io::Error::other(
+                    "native temp owner was lost during a panicked transition; release is unconfirmed",
+                ),
+            )),
             None => Ok(()),
         }
     };
