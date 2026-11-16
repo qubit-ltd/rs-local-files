@@ -11,6 +11,7 @@ use std::sync::Condvar;
 use std::sync::Mutex;
 
 use super::permits::Permit;
+// Stores bounded queue contents and the worker's fair scheduling state.
 mod queue_state;
 
 use queue_state::QueueState;

@@ -12,6 +12,7 @@ use std::sync::Condvar;
 use std::sync::Mutex;
 use std::sync::OnceLock;
 
+// Keeps gate phase state and synchronization primitives with their owner type.
 mod gate_state;
 
 use gate_state::GateState;
