@@ -32,7 +32,7 @@ use crate::path::LocalNamespacePath;
 use crate::path::LocalPathResolver;
 
 /// Authority and lifecycle shared by file and directory wrappers.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub(crate) struct LocalTempResourceCore {
     /// Namespace-absolute diagnostic source path; Host also uses native syntax.
     pub(crate) path: PathBuf,

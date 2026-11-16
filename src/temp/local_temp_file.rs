@@ -140,6 +140,9 @@ pub struct LocalTempFile {
     access_state: LocalTempAccessState,
     /// Identity observed on the original open handle, when available.
     file_identity: Option<crate::observation::LocalFileIdentity>,
+    /// Whether dropping this wrapper should attempt cleanup. Cleanup anchors
+    /// disable this while remaining explicitly cleanable.
+    cleanup_on_drop: bool,
 }
 
 impl std::fmt::Debug for LocalTempFile {
@@ -203,6 +206,7 @@ impl LocalTempFile {
             file: Some(file),
             access_state: LocalTempAccessState::Writable,
             file_identity,
+            cleanup_on_drop: true,
         })
     }
 
@@ -256,7 +260,33 @@ impl LocalTempFile {
             file: Some(file),
             access_state: LocalTempAccessState::Writable,
             file_identity,
+            cleanup_on_drop: true,
         })
+    }
+
+    /// Clones only the bound authority and identity needed to retry cleanup.
+    /// The clone owns no file handle and its Drop is inert until cleanup is
+    /// explicitly requested.
+    pub(crate) fn cleanup_anchor(&self) -> Self {
+        Self {
+            core: self.core.clone(),
+            file: None,
+            access_state: self.access_state,
+            file_identity: self.file_identity.clone(),
+            cleanup_on_drop: false,
+        }
+    }
+
+    /// Prevents this owner from making a best-effort cleanup during unwind.
+    /// A separately retained cleanup anchor must be installed before calling.
+    pub(crate) fn disarm_cleanup_on_drop(&mut self) {
+        self.cleanup_on_drop = false;
+    }
+
+    /// Restores ordinary best-effort drop cleanup after a transition returns
+    /// ownership to the managed resource.
+    pub(crate) fn arm_cleanup_on_drop(&mut self) {
+        self.cleanup_on_drop = true;
     }
 
     /// Returns the namespace-absolute generated path.
@@ -1574,7 +1604,9 @@ impl Seek for LocalTempFile {
 impl Drop for LocalTempFile {
     /// Attempts remaining file or sandbox cleanup and discards cleanup errors.
     fn drop(&mut self) {
-        let _ = self.cleanup();
+        if self.cleanup_on_drop {
+            let _ = self.cleanup();
+        }
     }
 }
 

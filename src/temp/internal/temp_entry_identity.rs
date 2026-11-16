@@ -27,7 +27,7 @@ use windows_sys::Win32::Storage::FileSystem::FILE_FLAG_OPEN_REPARSE_POINT;
 use windows_sys::Win32::Storage::FileSystem::GetFileInformationByHandle;
 
 /// Native identity captured when a host temporary entry is created.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub(crate) struct TempEntryIdentity {
     /// Unix device identifier.
     #[cfg(unix)]

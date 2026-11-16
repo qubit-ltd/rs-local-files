@@ -92,6 +92,14 @@ pub struct LocalTempRecovery {
 }
 
 impl LocalTempRecovery {
+    /// Restores Drop cleanup on a live file returned from a managed consuming
+    /// transition. Native-entry recovery owners have no file wrapper to arm.
+    pub(crate) fn arm_cleanup_on_drop(&mut self) {
+        if let Some(RecoveryResource::LiveFile(file)) = self.resource.as_mut() {
+            file.arm_cleanup_on_drop();
+        }
+    }
+
     /// Transfers a live temporary file's cleanup owner into recovery.
     ///
     /// The path remains diagnostic; cleanup uses the file owner's retained

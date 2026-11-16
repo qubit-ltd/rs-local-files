@@ -80,6 +80,12 @@ impl LocalSealedTempFile {
         Self { resource }
     }
 
+    /// Restores drop cleanup after a managed consuming transition returns this
+    /// sealed owner to its registered resource.
+    pub(crate) fn arm_cleanup_on_drop(&mut self) {
+        self.resource.arm_cleanup_on_drop();
+    }
+
     /// Returns the namespace path of the sealed file.
     ///
     /// # Returns

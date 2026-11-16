@@ -12,7 +12,7 @@ use super::HostTempResourceBackend;
 use super::RootedTempResourceBackend;
 
 /// Identifies whether a temporary resource is host- or descriptor-relative.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub(crate) enum LocalTempResourceBackend {
     /// A host path already bound at creation time.
     Host(

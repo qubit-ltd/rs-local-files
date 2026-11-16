@@ -21,7 +21,7 @@ use crate::rooted::Root;
 /// descendant before removal. The open root handle remains the authority for
 /// both the descendant and its private cleanup sandbox; stored paths only
 /// identify entries relative to that handle.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub(crate) struct RootedTempResourceBackend {
     /// Unique identity captured through the retained root authority.
     pub(crate) identity: Metadata,
