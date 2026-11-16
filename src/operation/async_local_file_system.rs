@@ -654,20 +654,6 @@ fn bind_host_path(base: &Option<PathBuf>, path: &PathBuf) -> PathBuf {
     }
 }
 
-impl crate::LocalFileSystem {
-    /// Moves this filesystem and its already-open authority into an async
-    /// facade.
-    ///
-    /// Relative Host paths are rejected because this conversion does not query
-    /// process-global cwd. Use [`AsyncLocalFileSystem::host`] for Host paths.
-    ///
-    /// # Parameters
-    /// - `executor` — bounded worker executor used to run blocking work.
-    pub fn into_async(self, executor: LocalIoExecutor) -> crate::LocalResult<AsyncLocalFileSystem> {
-        Ok(AsyncLocalFileSystem::new(self, executor, None))
-    }
-}
-
 /// Runs the reserve vec capacity behavior while preserving the operation
 /// lifecycle invariants.
 

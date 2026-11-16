@@ -143,6 +143,34 @@ impl fmt::Debug for LocalFileSystem {
 }
 
 impl LocalFileSystem {
+    /// Moves this filesystem and its opened authority into an async facade.
+    ///
+    /// Relative Host paths are rejected because this conversion does not read
+    /// or snapshot the process working directory. Use
+    /// [`crate::operation::AsyncLocalFileSystem::host`] for Host paths.
+    ///
+    /// # Parameters
+    ///
+    /// - `executor`: Bounded worker executor used to run blocking filesystem
+    ///   work.
+    ///
+    /// # Returns
+    ///
+    /// An asynchronous facade retaining this filesystem's authority and the
+    /// supplied worker executor.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if this filesystem's authority cannot be transferred
+    /// into the asynchronous facade.
+    #[cfg(feature = "async")]
+    pub fn into_async(
+        self,
+        executor: crate::operation::LocalIoExecutor,
+    ) -> LocalResult<crate::operation::AsyncLocalFileSystem> {
+        Ok(crate::operation::AsyncLocalFileSystem::new(self, executor, None))
+    }
+
     /// Creates a filesystem bound to the host namespace.
     ///
     /// Construction does not read or snapshot the process working directory.
