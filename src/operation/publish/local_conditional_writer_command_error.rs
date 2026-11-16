@@ -19,11 +19,20 @@ use crate::LocalFileError;
 #[derive(Debug)]
 pub enum LocalConditionalWriterCommandError<D: digest::Digest + Send + 'static> {
     /// The operation could not reserve capacity for retaining a failed candidate writer.
-    ResourceCapacity(qubit_operation::ResourceCapacityError),
+    ResourceCapacity(
+        /// Scope capacity admission failure for retaining candidate cleanup ownership.
+        qubit_operation::ResourceCapacityError,
+    ),
     /// Recovery ownership could not be registered, so the operation cannot promise scoped retry cleanup.
-    ResourceCommit(qubit_operation::ResourceManageErrorKind),
+    ResourceCommit(
+        /// Failure kind returned while registering retry cleanup in the operation scope.
+        qubit_operation::ResourceManageErrorKind,
+    ),
     /// The native filesystem rejected opening the candidate before any candidate bytes were written.
-    Open(LocalFileError),
+    Open(
+        /// Native failure returned while opening the conditional candidate.
+        LocalFileError,
+    ),
     /// Writing/flushing the candidate failed.
     Write {
         /// Native write or flush failure.
@@ -36,5 +45,8 @@ pub enum LocalConditionalWriterCommandError<D: digest::Digest + Send + 'static> 
         retryable_writer: Option<crate::LocalConditionalWriter<D>>,
     },
     /// The native conditional commit rejected the precondition or failed during atomic replacement.
-    Commit(crate::error::LocalConditionalCommitError),
+    Commit(
+        /// Native conditional commit result and its publication recovery state.
+        crate::error::LocalConditionalCommitError,
+    ),
 }

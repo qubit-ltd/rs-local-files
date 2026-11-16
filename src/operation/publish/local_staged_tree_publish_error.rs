@@ -14,9 +14,15 @@ use crate::LocalFileError;
 #[derive(Debug)]
 pub enum LocalStagedTreePublishError {
     /// Opening the requested parent under captured authority failed before a stage was created.
-    Parent(LocalFileError),
+    Parent(
+        /// Native error produced while opening the requested parent authority.
+        LocalFileError,
+    ),
     /// Native stage creation failed and returns its cleanup owner with the disk reservation.
-    Create(LocalStagedTreeReservedError<crate::directory::LocalTreeCreateError>),
+    Create(
+        /// Native create failure together with the quota reservation retained for cleanup.
+        LocalStagedTreeReservedError<crate::directory::LocalTreeCreateError>,
+    ),
     /// A staged file could not be created; the stage remains available for
     /// cleanup.
     Write {
@@ -26,7 +32,13 @@ pub enum LocalStagedTreePublishError {
         stage: LocalStagedTreeRecovery,
     },
     /// Native verification or atomic installation failed; its report retains the exact recovery state.
-    Publish(LocalStagedTreeReservedError<crate::directory::LocalTreePublishError>),
+    Publish(
+        /// Native verification or publication error with recovery ownership and quota.
+        LocalStagedTreeReservedError<crate::directory::LocalTreePublishError>,
+    ),
     /// Cleanup after cancellation failed, leaving a native cleanup owner for retry.
-    Cleanup(LocalStagedTreeReservedError<crate::directory::LocalTreeCleanupError>),
+    Cleanup(
+        /// Native cleanup error with the stage owner and quota retained for retry.
+        LocalStagedTreeReservedError<crate::directory::LocalTreeCleanupError>,
+    ),
 }

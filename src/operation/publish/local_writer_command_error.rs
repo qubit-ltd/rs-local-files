@@ -16,11 +16,20 @@ use crate::LocalFileError;
 #[derive(Debug)]
 pub enum LocalWriterCommandError {
     /// The operation could not reserve capacity for retaining a failed candidate writer.
-    ResourceCapacity(qubit_operation::ResourceCapacityError),
+    ResourceCapacity(
+        /// Scope capacity admission failure for retaining candidate cleanup ownership.
+        qubit_operation::ResourceCapacityError,
+    ),
     /// Recovery ownership could not be registered, so the operation cannot promise scoped retry cleanup.
-    ResourceCommit(qubit_operation::ResourceManageErrorKind),
+    ResourceCommit(
+        /// Failure kind returned while registering retry cleanup in the operation scope.
+        qubit_operation::ResourceManageErrorKind,
+    ),
     /// The native filesystem rejected opening the destination candidate before any bytes were written.
-    Open(LocalFileError),
+    Open(
+        /// Native failure returned while opening the destination candidate.
+        LocalFileError,
+    ),
     /// Writing or flushing failed; a retryable writer is retained if abort
     /// cleanup failed.
     Write {
@@ -34,5 +43,8 @@ pub enum LocalWriterCommandError {
         recovery_resource: Option<ResourceId>,
     },
     /// Atomic publication failed; the wrapped commit error preserves destination state and retry ownership.
-    Commit(LocalFileCommitError),
+    Commit(
+        /// Native commit failure and its publication/retry recovery facts.
+        LocalFileCommitError,
+    ),
 }

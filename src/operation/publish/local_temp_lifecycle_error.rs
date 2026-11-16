@@ -11,7 +11,10 @@
 #[derive(Debug)]
 pub enum LocalTempLifecycleError {
     /// Persistence failed; requested and resolved target facts remain available in the payload.
-    Persist(LocalTempPersistFailure),
+    Persist(
+        /// Persistence failure details while the managed resource remains owned.
+        LocalTempPersistFailure,
+    ),
     /// Structured sealing failure.
     Seal {
         /// Native cause.
@@ -22,9 +25,15 @@ pub enum LocalTempLifecycleError {
         access_state: crate::LocalTempAccessState,
     },
     /// This command cannot be applied to the managed resource kind, with the native rejection attached.
-    Unsupported(LocalFileError),
+    Unsupported(
+        /// Native rejection explaining why this resource cannot perform the command.
+        LocalFileError,
+    ),
     /// Worker admission or execution failed before the lifecycle result could be returned.
-    Worker(LocalTempWorkerCommandFailure),
+    Worker(
+        /// Stable worker-level capacity, ownership, or panic classification.
+        LocalTempWorkerCommandFailure,
+    ),
     /// The operation was stopped before the native transition began.
     Stopped,
 }
