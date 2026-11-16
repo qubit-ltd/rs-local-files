@@ -789,6 +789,45 @@ impl AsyncLocalFileSystem {
             + Send
             + 'static,
     {
+        self.submit_owned_with_bytes(
+            manager,
+            operation,
+            request,
+            path_is_relative,
+            required_handles,
+            limits,
+            0,
+            task,
+        )
+    }
+
+    /// Submits an operation while reserving its already-owned input allocation
+    /// before manager admission. Rejection returns the original request.
+    pub(super) fn submit_owned_with_bytes<R, T, E, F>(
+        &self,
+        manager: &OperationManager,
+        operation: OperationOptions,
+        request: R,
+        path_is_relative: bool,
+        required_handles: usize,
+        limits: LocalOperationOptions,
+        initial_owned_bytes: usize,
+        task: F,
+    ) -> Result<(LocalOperation<T, E>, LocalFactObserver), LocalSubmitError<R>>
+    where
+        R: Send + 'static,
+        T: Send + 'static,
+        E: Send + 'static,
+        F: FnOnce(
+                R,
+                &OperationScope,
+                LocalFactObserver,
+                Arc<Mutex<Permit>>,
+                usize,
+            ) -> OperationOutcome<T, E>
+            + Send
+            + 'static,
+    {
         let scoped = match manager.with_group(&self.executor.inner.group) {
             Ok(scoped) => scoped,
             Err(error) => {
@@ -810,7 +849,10 @@ impl AsyncLocalFileSystem {
         let maximum = limits
             .max_owned_bytes
             .unwrap_or(self.executor.inner.config.max_owned_bytes);
-        if maximum == 0 || maximum > self.executor.inner.config.max_owned_bytes {
+        if maximum == 0
+            || maximum > self.executor.inner.config.max_owned_bytes
+            || initial_owned_bytes > maximum
+        {
             return Err(LocalSubmitError::new(
                 request,
                 LocalSubmitRejection::CapacityExceeded,
@@ -842,7 +884,7 @@ impl AsyncLocalFileSystem {
                 LocalSubmitRejection::CapacityExceeded,
             ));
         };
-        let Some(byte_permit) = self.executor.reserve_bytes(0) else {
+        let Some(byte_permit) = self.executor.reserve_bytes(initial_owned_bytes) else {
             return Err(LocalSubmitError::new(
                 request,
                 LocalSubmitRejection::CapacityExceeded,
