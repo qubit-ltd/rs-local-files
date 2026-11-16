@@ -115,10 +115,7 @@ fn test_create_new_conflict_preserves_the_existing_destination_and_not_published
             LocalOperationOptions::default(),
         )
         .unwrap();
-    assert!(matches!(
-        operation.wait_outcome().unwrap(),
-        OperationOutcome::Failed(_)
-    ));
+    assert!(matches!(operation.wait_outcome().unwrap(), OperationOutcome::Failed(_)));
     assert_eq!(std::fs::read(destination).unwrap(), b"original");
     assert_eq!(
         observer.snapshot().publication,
@@ -269,9 +266,7 @@ fn test_digest_conditional_conflict_keeps_existing_data_and_published_state_corr
         .unwrap();
     assert!(matches!(
         operation.wait_outcome().unwrap(),
-        OperationOutcome::Failed(
-            qubit_local_files::operation::publish::LocalConditionalWriterCommandError::Commit(_)
-        )
+        OperationOutcome::Failed(qubit_local_files::operation::publish::LocalConditionalWriterCommandError::Commit(_))
     ));
     assert_eq!(std::fs::read(destination).unwrap(), b"original");
     assert_eq!(
@@ -330,9 +325,7 @@ fn test_conditional_abort_failure_after_stop_retains_recovery_owner() {
         let outcome = operation.wait_outcome();
         panic!("conditional operation did not reach publish gate; outcome: {outcome:?}");
     }
-    gate_waiter
-        .join()
-        .expect("gate waiter should exit after entry");
+    gate_waiter.join().expect("gate waiter should exit after entry");
     let fault = install_test_fault_shared("lf7-conditional-abort").unwrap();
     let _ = operation.request_stop(StopReason::UserCancelled);
     gate.release();
@@ -353,10 +346,7 @@ fn test_conditional_abort_failure_after_stop_retains_recovery_owner() {
         .clone();
     drop(fault);
     let report = recovery.try_retry().unwrap().wait().unwrap();
-    assert_eq!(
-        report.recovery.phase,
-        qubit_operation::RecoveryPhase::Resolved
-    );
+    assert_eq!(report.recovery.phase, qubit_operation::RecoveryPhase::Resolved);
     assert!(!destination.exists());
 }
 
@@ -383,11 +373,7 @@ fn test_expired_deadline_rejects_owned_request_before_native_work() {
         fn now(&self) -> MonotonicTime {
             MonotonicTime::new(self.domain, self.ticks)
         }
-        fn register_deadline(
-            &self,
-            _at: MonotonicTime,
-            _wake: Waker,
-        ) -> Box<dyn TimerRegistration> {
+        fn register_deadline(&self, _at: MonotonicTime, _wake: Waker) -> Box<dyn TimerRegistration> {
             Box::new(NoTimer)
         }
     }
@@ -408,12 +394,7 @@ fn test_expired_deadline_rejects_owned_request_before_native_work() {
         options: LocalWriteOptions::new(LocalWriteMode::CreateOrReplace),
         bytes: b"never written".to_vec(),
     };
-    let rejected = match filesystem.submit_writer_commit(
-        &manager,
-        options,
-        request,
-        LocalOperationOptions::default(),
-    ) {
+    let rejected = match filesystem.submit_writer_commit(&manager, options, request, LocalOperationOptions::default()) {
         Err(error) => error,
         Ok(_) => panic!("expired deadline should reject admission"),
     };
@@ -493,8 +474,7 @@ fn test_staged_tree_forces_private_file_creation_even_when_defaults_were_request
             LocalStagedTreePublishRequest {
                 parent: directory.path().into(),
                 name: "private-stage".into(),
-                stage_options: LocalTempDirectoryOptions::new()
-                    .with_privacy(LocalPrivacyRequirement::PlatformDefault),
+                stage_options: LocalTempDirectoryOptions::new().with_privacy(LocalPrivacyRequirement::PlatformDefault),
                 files: vec![
                     LocalStagedTreeFile {
                         path: PathBuf::from("partial"),
@@ -549,10 +529,7 @@ fn test_exhausted_fact_record_slots_reject_new_mutation_before_native_work() {
             LocalOperationOptions::default(),
         )
         .unwrap();
-    assert!(matches!(
-        first.wait_outcome().unwrap(),
-        OperationOutcome::Succeeded(_)
-    ));
+    assert!(matches!(first.wait_outcome().unwrap(), OperationOutcome::Succeeded(_)));
     let request = LocalWriterCommitRequest {
         path: second_path.clone(),
         options: LocalWriteOptions::new(LocalWriteMode::CreateOrReplace),
@@ -952,10 +929,7 @@ fn test_queued_temp_persist_observes_stop_before_publishing() {
     gate.release();
     let _ = block_on(operation.wait_outcome()).unwrap();
     block_on(operation.wait_settlement());
-    assert!(
-        !target.exists(),
-        "queued stop must prevent temp publication"
-    );
+    assert!(!target.exists(), "queued stop must prevent temp publication");
 
     let (mut kept, _, _) = async_filesystem
         .submit_temp_lifecycle(
@@ -1060,10 +1034,7 @@ fn test_failed_abort_after_stop_returns_retryable_writer_and_cleanup_error() {
         .clone();
     drop(fault);
     let report = recovery.try_retry().unwrap().wait().unwrap();
-    assert_eq!(
-        report.recovery.phase,
-        qubit_operation::RecoveryPhase::Resolved
-    );
+    assert_eq!(report.recovery.phase, qubit_operation::RecoveryPhase::Resolved);
     assert!(!destination.exists());
 }
 
@@ -1205,8 +1176,7 @@ fn test_stop_during_native_publish_preserves_published_fact_when_parent_sync_fai
     );
     operation.wait_settlement().unwrap();
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
-    while observer.snapshot().publication
-        != qubit_local_files::operation::LocalPublicationState::Published
+    while observer.snapshot().publication != qubit_local_files::operation::LocalPublicationState::Published
         && std::time::Instant::now() < deadline
     {
         std::thread::yield_now();

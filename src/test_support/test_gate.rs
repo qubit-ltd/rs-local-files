@@ -1,7 +1,9 @@
 // =============================================================================
-//    Copyright (c) 2026 Haixing Hu.
+//    Copyright (c) 2025 - 2026 Haixing Hu.
 //
 //    SPDX-License-Identifier: Apache-2.0
+//
+//    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 //! Worker-aware gates for deterministic asynchronous adapter tests.
 
@@ -12,10 +14,13 @@ use std::sync::Condvar;
 use std::sync::Mutex;
 use std::sync::OnceLock;
 
-// Keeps gate phase state and synchronization primitives with their owner type.
+// Stores the shared phase and condition variable for each named gate.
 mod gate_state;
+// Owns the guard lifecycle and worker synchronization methods.
+mod test_gate_guard;
 
 use gate_state::GateState;
+pub use test_gate_guard::TestGateGuard;
 
 /// Registry of currently installed test gates keyed by their selector names.
 static GATES: OnceLock<Mutex<HashMap<String, Arc<GateState>>>> = OnceLock::new();
@@ -23,69 +28,6 @@ static GATES: OnceLock<Mutex<HashMap<String, Arc<GateState>>>> = OnceLock::new()
 /// Returns the process-wide registry used to coordinate test gates.
 fn gates() -> &'static Mutex<HashMap<String, Arc<GateState>>> {
     GATES.get_or_init(|| Mutex::new(HashMap::new()))
-}
-
-/// Test-owned handle for synchronizing with one native worker boundary.
-#[doc(hidden)]
-pub struct TestGateGuard {
-    /// Selector removed from the registry when the guard is dropped.
-    name: String,
-    /// Shared signal state used by the blocked worker and test thread.
-    state: Arc<GateState>,
-}
-
-impl TestGateGuard {
-    /// Waits until a worker reaches the named gate.
-    ///
-    /// # Synchronization
-    ///
-    /// Blocks the calling test thread until the worker enters the gate or the
-    /// gate is released.
-    pub fn wait_until_entered(&self) {
-        let mut phase = self
-            .state
-            .phase
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        while !phase.0 && !phase.1 {
-            phase = self
-                .state
-                .changed
-                .wait(phase)
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
-        }
-    }
-
-    /// Releases any worker waiting at this gate.
-    ///
-    /// # Effects
-    ///
-    /// Wakes all workers waiting on this gate. The guard remains installed
-    /// until it is dropped.
-    pub fn release(&self) {
-        let mut phase = self
-            .state
-            .phase
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        phase.1 = true;
-        self.state.changed.notify_all();
-    }
-}
-
-impl Drop for TestGateGuard {
-    fn drop(&mut self) {
-        self.release();
-        let mut active = gates()
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        if active
-            .get(&self.name)
-            .is_some_and(|state| Arc::ptr_eq(state, &self.state))
-        {
-            active.remove(&self.name);
-        }
-    }
 }
 
 /// Installs a named gate that a native worker can hit from another thread.
