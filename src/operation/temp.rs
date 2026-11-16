@@ -81,6 +81,13 @@ impl LocalTempFileAccess {
         self.resource.id()
     }
 
+    /// Clones this access token without registering another resource.
+    pub(crate) fn clone_access(&self) -> Self {
+        Self {
+            resource: self.resource.clone(),
+        }
+    }
+
     /// Retains the same registered owner for a related operation/helper.
     pub(crate) fn clone_resource_ref(&self) -> ResourceRef<LocalTempResource> {
         self.resource.clone()
@@ -487,6 +494,52 @@ mod tests {
     use crate::LocalFileSystem;
     use crate::options::LocalTempFileOptions;
     use qubit_operation::{ManagerOptions, OperationManager, StopReason};
+
+    #[test]
+    fn cloning_access_keeps_the_same_registered_resource_until_last_clone_drops() {
+        let parent = tempfile::tempdir().expect("temp parent");
+        let manager = OperationManager::new(ManagerOptions::default()).expect("manager");
+        let executor = LocalIoExecutor::new(
+            manager.clone(),
+            super::super::LocalExecutionConfig::default(),
+        )
+        .expect("local executor");
+        let filesystem = LocalFileSystem::host().expect("filesystem");
+        let parent_path = parent.path().to_path_buf();
+        let completion = manager
+            .run_and_settle(qubit_operation::OperationOptions::default(), move |scope| {
+                let reservation = scope.reserve_resource().expect("resource reservation");
+                let file = filesystem
+                    .create_temp_file_with_options(
+                        &LocalTempFileOptions::new().with_parent(&parent_path),
+                    )
+                    .expect("temporary file");
+                let owner = LocalTempResource::new(
+                    LocalTempNative::File(file),
+                    executor.reserve_disk(1).expect("disk permit"),
+                    executor.reserve_handle().expect("handle permit"),
+                    executor.reserve_cleanup().expect("cleanup permit"),
+                );
+                let id_slot = Arc::clone(&owner.id);
+                let reference = reservation
+                    .commit_with(owner, LocalCleanup { executor })
+                    .expect("managed temp resource");
+                *id_slot.lock().unwrap_or_else(|e| e.into_inner()) = Some(reference.id());
+                let original = LocalTempFileAccess {
+                    resource: reference,
+                };
+                let clone = original.clone_access();
+                assert_eq!(original.resource_id(), clone.resource_id());
+
+                drop(original);
+                assert_eq!(std::fs::read_dir(&parent_path).unwrap().count(), 1);
+                drop(clone);
+                Ok::<(), ()>(())
+            })
+            .expect("operation completed");
+        assert_eq!(completion.settlement.recovery_count, 0);
+        assert_eq!(std::fs::read_dir(parent.path()).unwrap().count(), 0);
+    }
 
     #[test]
     fn partial_creation_recovery_is_retained_when_stopped_commit_is_rejected() {
