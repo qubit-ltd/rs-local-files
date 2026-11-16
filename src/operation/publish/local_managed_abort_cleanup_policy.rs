@@ -14,15 +14,27 @@ use qubit_operation::CleanupContext;
 use qubit_operation::CleanupFuture;
 use qubit_operation::CleanupOutcome;
 
-use crate::LocalFileError;
-
 use super::LocalAbortCleanupState;
 use super::LocalAbortCleanupWait;
 use super::LocalManagedAbortCleanup;
 use super::LocalManagedAbortResource;
 use super::local_abort_cleanup_failure;
+use crate::LocalFileError;
 
 impl<W: Send + 'static> AsyncCleanup<LocalManagedAbortResource<W>> for LocalManagedAbortCleanup<W> {
+    /// Runs the native abort callback on a reserved cleanup worker.
+    ///
+    /// If no cleanup permit is available, the resource is returned with a
+    /// capacity failure so a later cleanup attempt can retry. A worker panic
+    /// becomes an indeterminate abort failure; successful abort releases the
+    /// managed native writer, while callback errors preserve it for recovery.
+    ///
+    /// # Parameters
+    ///
+    /// * `self` - Shared cleanup policy and worker executor.
+    /// * `resource` - Native writer owner whose pending abort is serviced.
+    /// * `_context` - Cleanup context; this implementation relies on the
+    ///   resource's reserved permit and does not inspect additional context.
     fn cleanup(
         self: Arc<Self>,
         resource: LocalManagedAbortResource<W>,

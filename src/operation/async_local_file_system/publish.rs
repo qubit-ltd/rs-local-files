@@ -6,6 +6,15 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 
+use std::io::IoSlice;
+use std::sync::Arc;
+use std::sync::Mutex;
+
+use qubit_io::Output;
+use qubit_operation::EffectFact;
+use qubit_operation::OperationOptions;
+use qubit_operation::OperationOutcome;
+
 use super::super::LocalDurabilityState;
 use super::super::LocalFactObserver;
 use super::super::LocalOperation;
@@ -47,13 +56,6 @@ use crate::operation::publish::record_writer_effect;
 use crate::operation::publish::stop_report;
 use crate::operation::publish::transition_temp_native;
 use crate::operation::publish::update_writer_effect_observer;
-use qubit_io::Output;
-use qubit_operation::EffectFact;
-use qubit_operation::OperationOptions;
-use qubit_operation::OperationOutcome;
-use std::io::IoSlice;
-use std::sync::Arc;
-use std::sync::Mutex;
 
 impl AsyncLocalFileSystem {
     /// Sets the default symlink policy on this facade's owned filesystem value.
@@ -62,6 +64,10 @@ impl AsyncLocalFileSystem {
     /// not modify the manager or any other facade. Conditional publication
     /// requires [`crate::policy::LocalSymlinkPolicy::Reject`] because it
     /// validates the destination without following symbolic links.
+    ///
+    /// # Parameters
+    ///
+    /// * `policy` - Symlink traversal policy stored on the returned facade.
     pub fn with_symlink_policy(
         mut self,
         policy: crate::policy::LocalSymlinkPolicy,
@@ -75,6 +81,13 @@ impl AsyncLocalFileSystem {
     /// The operation checks cancellation immediately before opening and
     /// writing. Once the native commit begins, it waits for the writer's
     /// actual result.
+    ///
+    /// # Parameters
+    ///
+    /// * `manager` - Operation manager that owns the submission.
+    /// * `operation` - Cancellation and deadline policy for this commit.
+    /// * `request` - Owned destination, write options, and bytes to publish.
+    /// * `limits` - Per-operation memory, I/O, and resource limits.
     pub fn submit_writer_commit(
         &self,
         manager: &qubit_operation::OperationManager,
@@ -362,6 +375,13 @@ impl AsyncLocalFileSystem {
 impl AsyncLocalFileSystem {
     /// Creates files beneath a private stage, verifies the exact tree, then
     /// publishes it.
+    ///
+    /// # Parameters
+    ///
+    /// * `manager` - Operation manager that owns the staged publication.
+    /// * `operation` - Cancellation and deadline policy for this publication.
+    /// * `request` - Parent, stage policy, file contents, and publish policy.
+    /// * `limits` - Per-operation memory, disk, I/O, and resource limits.
     pub fn submit_staged_tree_publish(
         &self,
         manager: &qubit_operation::OperationManager,
@@ -557,6 +577,17 @@ impl AsyncLocalFileSystem {
 
 impl AsyncLocalFileSystem {
     /// Commits bytes only when the digest precondition still holds.
+    ///
+    /// # Type Parameters
+    ///
+    /// * `D` - Digest algorithm used to validate the destination contents.
+    ///
+    /// # Parameters
+    ///
+    /// * `manager` - Operation manager that owns the conditional commit.
+    /// * `operation` - Cancellation and deadline policy for the commit.
+    /// * `request` - Destination precondition, options, and owned candidate bytes.
+    /// * `limits` - Per-operation memory, I/O, and resource limits.
     pub fn submit_conditional_writer_commit<D: digest::Digest + Send + 'static>(
         &self,
         manager: &qubit_operation::OperationManager,
@@ -787,6 +818,12 @@ impl AsyncLocalFileSystem {
     /// Serializes temporary keep/persist/seal work on the local worker and
     /// awaits it from the operation future, keeping the resource's existing
     /// identity.
+    ///
+    /// # Parameters
+    ///
+    /// * `manager` - Operation manager that owns the transition.
+    /// * `operation` - Cancellation and deadline policy for the transition.
+    /// * `request` - Existing access token and serialized lifecycle command.
     pub fn submit_temp_lifecycle(
         &self,
         manager: &qubit_operation::OperationManager,

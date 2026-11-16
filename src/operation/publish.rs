@@ -99,6 +99,17 @@ pub use local_temp_lifecycle_operation::LocalTempLifecycleOperation;
 mod local_temp_lifecycle_request;
 pub use local_temp_lifecycle_request::LocalTempLifecycleRequest;
 
+/// Builds the cleanup failure returned when a native writer cannot abort.
+///
+/// # Type Parameters
+///
+/// * `W` - Native writer retained by the managed cleanup owner.
+///
+/// # Parameters
+///
+/// * `resource` - Managed owner retained for a later cleanup attempt.
+/// * `summary` - Stable description of the cleanup failure.
+/// * `source` - Optional native error retained as the failure source.
 pub(super) fn local_abort_cleanup_failure<W: Send + 'static>(
     resource: &LocalManagedAbortResource<W>,
     summary: &str,
@@ -116,12 +127,26 @@ pub(super) fn local_abort_cleanup_failure<W: Send + 'static>(
     }
 }
 
+/// Aborts a native writer and discards its completion outcome.
+///
+/// # Parameters
+///
+/// * `writer` - Native writer whose unpublished staging must be aborted.
 pub(super) fn abort_managed_file_writer(
     writer: &mut crate::LocalFileWriter,
 ) -> Result<(), LocalFileError> {
     writer.abort().map(|_| ())
 }
 
+/// Aborts a conditional writer using its native cleanup path.
+///
+/// # Type Parameters
+///
+/// * `D` - Digest algorithm used by the writer's precondition.
+///
+/// # Parameters
+///
+/// * `writer` - Conditional writer whose candidate publication is abandoned.
 #[cfg(feature = "digest")]
 fn abort_conditional_writer<D: digest::Digest + Send + 'static>(
     writer: &mut crate::LocalConditionalWriter<D>,
@@ -138,6 +163,16 @@ fn abort_conditional_writer<D: digest::Digest + Send + 'static>(
     writer.abort().map(|_| ())
 }
 
+/// Converts a failed conditional write into a structured error after aborting.
+///
+/// # Type Parameters
+///
+/// * `D` - Digest algorithm used by the conditional writer.
+///
+/// # Parameters
+///
+/// * `resource` - Managed writer owner retained by the operation scope.
+/// * `cause` - Original write or flush failure.
 #[cfg(feature = "digest")]
 fn abort_managed_conditional_after_error<D: digest::Digest + Send + 'static>(
     resource: &ResourceRef<LocalManagedAbortResource<crate::LocalConditionalWriter<D>>>,
@@ -169,6 +204,16 @@ fn abort_managed_conditional_after_error<D: digest::Digest + Send + 'static>(
     }
 }
 
+/// Aborts a conditional writer when cancellation stops publication.
+///
+/// # Type Parameters
+///
+/// * `D` - Digest algorithm used by the conditional writer.
+///
+/// # Parameters
+///
+/// * `resource` - Managed writer owner retained by the operation scope.
+/// * `stop` - Cancellation or deadline report returned to the caller.
 #[cfg(feature = "digest")]
 fn abort_managed_conditional_after_stop<D: digest::Digest + Send + 'static>(
     resource: &ResourceRef<LocalManagedAbortResource<crate::LocalConditionalWriter<D>>>,
@@ -190,6 +235,16 @@ fn abort_managed_conditional_after_stop<D: digest::Digest + Send + 'static>(
     OperationOutcome::Stopped(stop)
 }
 
+/// Aborts a managed writer after I/O failure and preserves recovery facts.
+///
+/// # Parameters
+///
+/// * `resource` - Operation-managed native writer owner.
+/// * `cause` - Original write or flush failure.
+/// * `accepted_bytes` - Bytes accepted before the failure boundary.
+/// * `scope` - Operation scope used to record confirmed side effects.
+/// * `observer` - Shared publication facts for this operation.
+/// * `effect_already_recorded` - Whether append facts were recorded earlier.
 pub(super) fn abort_managed_writer_after_error(
     resource: &ResourceRef<LocalManagedAbortResource<crate::LocalFileWriter>>,
     cause: LocalFileError,
@@ -260,6 +315,16 @@ pub(super) fn abort_managed_writer_after_error(
     }
 }
 
+/// Aborts a managed writer when cancellation wins before publication.
+///
+/// # Parameters
+///
+/// * `resource` - Operation-managed native writer owner.
+/// * `stop` - Cancellation or deadline report returned to the caller.
+/// * `accepted_bytes` - Bytes accepted before the stop boundary.
+/// * `scope` - Operation scope used to record confirmed side effects.
+/// * `observer` - Shared publication facts for this operation.
+/// * `effect_already_recorded` - Whether append facts were recorded earlier.
 pub(super) fn abort_managed_writer_after_stop(
     resource: &ResourceRef<LocalManagedAbortResource<crate::LocalFileWriter>>,
     stop: StopReport,
@@ -317,6 +382,15 @@ pub(super) fn abort_managed_writer_after_stop(
     }
 }
 
+/// Records publication and durability facts for a completed writer action.
+///
+/// # Parameters
+///
+/// * `scope` - Operation scope receiving the effect record.
+/// * `observer` - Snapshot updated with the same confirmed facts.
+/// * `bytes` - Number of modified bytes observed by the worker.
+/// * `publication` - Publication state confirmed by the operation.
+/// * `durability` - Durability state confirmed by the operation.
 pub(super) fn record_writer_effect(
     scope: &qubit_operation::OperationScope,
     observer: &LocalFactObserver,
@@ -327,6 +401,14 @@ pub(super) fn record_writer_effect(
     record_local_effect(scope, observer, 1, bytes, publication, durability);
 }
 
+/// Records append bytes without duplicating a previously registered effect.
+///
+/// # Parameters
+///
+/// * `scope` - Operation scope receiving the initial effect record.
+/// * `observer` - Snapshot updated with confirmed append facts.
+/// * `bytes` - Newly written byte count.
+/// * `effect_recorded` - Tracks whether this operation already registered an effect.
 pub(super) fn record_append_writer_bytes(
     scope: &qubit_operation::OperationScope,
     observer: &LocalFactObserver,
@@ -353,6 +435,15 @@ pub(super) fn record_append_writer_bytes(
     }
 }
 
+/// Updates the observer after an effect record has already been written.
+///
+/// # Parameters
+///
+/// * `observer` - Snapshot receiving publication facts.
+/// * `modified_count` - Number of confirmed modifications to add.
+/// * `bytes` - Confirmed bytes to add.
+/// * `publication` - Publication state after the worker action.
+/// * `durability` - Durability state after the worker action.
 pub(super) fn update_writer_effect_observer(
     observer: &LocalFactObserver,
     modified_count: u64,
@@ -370,6 +461,16 @@ pub(super) fn update_writer_effect_observer(
     observer.update(snapshot);
 }
 
+/// Records an effect and synchronizes the observer's publication facts.
+///
+/// # Parameters
+///
+/// * `scope` - Operation scope receiving the effect record.
+/// * `observer` - Snapshot updated with operation facts.
+/// * `modified_count` - Number of filesystem entries modified.
+/// * `bytes` - Number of bytes modified.
+/// * `publication` - Publication state established by the operation.
+/// * `durability` - Durability state established by the operation.
 pub(super) fn record_local_effect(
     scope: &qubit_operation::OperationScope,
     observer: &LocalFactObserver,
@@ -398,6 +499,14 @@ pub(super) fn record_local_effect(
     }
 }
 
+/// Records a write to a staged tree that has not yet been published.
+///
+/// # Parameters
+///
+/// * `scope` - Operation scope receiving the stage-write effect.
+/// * `observer` - Snapshot updated with unpublished write facts.
+/// * `bytes` - Bytes written to the staged file.
+/// * `fact` - Certainty of the worker's write result.
 pub(super) fn record_stage_write(
     scope: &qubit_operation::OperationScope,
     observer: &LocalFactObserver,
@@ -423,6 +532,11 @@ pub(super) fn record_stage_write(
     observer.update(snapshot);
 }
 
+/// Captures the scope's stop reason for a stopped operation result.
+///
+/// # Parameters
+///
+/// * `scope` - Operation scope whose cancellation state is inspected.
 pub(super) fn stop_report(scope: &qubit_operation::OperationScope) -> Option<StopReport> {
     scope.context().stop_reason().map(|reason| StopReport {
         reason,
@@ -430,8 +544,12 @@ pub(super) fn stop_report(scope: &qubit_operation::OperationScope) -> Option<Sto
     })
 }
 
+/// Maps internal worker admission errors to a stable lifecycle error value.
+///
+/// # Parameters
+///
+/// * `error` - Internal worker result for a temporary-resource command.
 #[cfg(feature = "digest")]
-
 pub(super) fn map_temp_worker_error(error: LocalTempCommandError) -> LocalTempWorkerCommandFailure {
     match error {
         LocalTempCommandError::Capacity => LocalTempWorkerCommandFailure::Capacity,
@@ -445,6 +563,12 @@ pub(super) fn map_temp_worker_error(error: LocalTempCommandError) -> LocalTempWo
     }
 }
 
+/// Maps temporary worker results into lifecycle errors for the caller.
+///
+/// # Parameters
+///
+/// * `error` - Internal worker result for the lifecycle command.
+/// * `operation` - Filesystem operation used to classify unsupported kinds.
 pub(super) fn map_temp_command_error(
     error: LocalTempCommandError,
     operation: crate::LocalFileOperation,
@@ -459,6 +583,13 @@ pub(super) fn map_temp_command_error(
     }
 }
 
+/// Applies one lifecycle command and returns the retained owner on failure.
+///
+/// # Parameters
+///
+/// * `native` - Managed temporary file or directory being transitioned.
+/// * `command` - Keep, persist, or seal action requested by the caller.
+/// * `lease_access` - Access token retained if sealing creates a read lease.
 pub(super) fn transition_temp_native(
     native: LocalTempNative,
     command: LocalTempLifecycleCommand,
@@ -600,6 +731,16 @@ pub(super) fn transition_temp_native(
     }
 }
 
+/// Converts a failed persistence attempt while retaining its native resource.
+///
+/// # Type Parameters
+///
+/// * `T` - Native temporary resource type returned by the failed operation.
+///
+/// # Parameters
+///
+/// * `error` - Lossless native persistence error and recovery state.
+/// * `wrap` - Converts the retained native owner into the lifecycle enum.
 fn persist_failure<T>(
     error: crate::local::LocalPersistError<T>,
     wrap: impl FnOnce(T) -> LocalTempNative,
@@ -617,6 +758,13 @@ fn persist_failure<T>(
     (native, LocalTempLifecycleError::Persist(failure))
 }
 
+/// Records publication facts established by a failed temporary transition.
+///
+/// # Parameters
+///
+/// * `scope` - Operation scope receiving the effect record.
+/// * `observer` - Snapshot updated with transition facts.
+/// * `error` - Structured failure carrying the observed publication state.
 pub(super) fn record_temp_failure(
     scope: &qubit_operation::OperationScope,
     observer: &LocalFactObserver,
