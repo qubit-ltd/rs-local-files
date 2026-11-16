@@ -50,7 +50,14 @@ pub(crate) enum LocalTempNative {
     Recovery(crate::LocalTempRecovery),
     /// A consuming command panicked after taking its owner. The cleanup-only
     /// clone retains the same Host/Rooted authority and identity checks.
-    Unconfirmed(crate::LocalTempFile),
+    Unconfirmed(LocalTempCleanupAnchor),
+}
+
+/// Cleanup-only owner retained when a consuming File or Directory transition
+/// unwinds. Each variant preserves its native Host/Rooted identity authority.
+pub(crate) enum LocalTempCleanupAnchor {
+    File(crate::LocalTempFile),
+    Directory(crate::LocalTempDirectory),
 }
 
 impl LocalTempResource {
@@ -137,7 +144,10 @@ impl LocalTempFileAccess {
 
     /// Queues an internal consuming command. Callbacks are crate-controlled,
     /// never caller-supplied; ordinary error paths must return the owner. A
-    /// callback must not panic after taking ownership of the native value.
+    /// File or Directory owner is disarmed while the callback runs, and its
+    /// cleanup-only anchor is retained if the callback panics. A terminal
+    /// publication callback must still avoid panicking after publication has
+    /// moved the source away from its cleanup coordinate.
     pub(crate) fn enqueue_native_transition<T, E, F>(
         &self,
         executor: &LocalIoExecutor,
@@ -162,7 +172,12 @@ impl LocalTempFileAccess {
                     Some(LocalTempNative::File(file)) => {
                         let anchor = file.cleanup_anchor();
                         file.disarm_cleanup_on_drop();
-                        anchor
+                        LocalTempCleanupAnchor::File(anchor)
+                    }
+                    Some(LocalTempNative::Directory(directory)) => {
+                        let anchor = directory.cleanup_anchor();
+                        directory.disarm_cleanup_on_drop();
+                        LocalTempCleanupAnchor::Directory(anchor)
                     }
                     _ => {
                         drop(native);
@@ -216,6 +231,7 @@ fn arm_native_cleanup_on_drop(native: &mut LocalTempNative) {
     match native {
         LocalTempNative::File(file) => file.arm_cleanup_on_drop(),
         LocalTempNative::Sealed(file) => file.arm_cleanup_on_drop(),
+        LocalTempNative::Directory(directory) => directory.arm_cleanup_on_drop(),
         LocalTempNative::Recovery(recovery) => recovery.arm_cleanup_on_drop(),
         _ => {}
     }
@@ -537,6 +553,7 @@ mod tests {
     use super::*;
     use crate::LocalFileOperation;
     use crate::LocalFileSystem;
+    use crate::options::LocalTempDirectoryOptions;
     use crate::options::LocalTempFileOptions;
     #[cfg(feature = "test-support")]
     use crate::outcome::LocalTempSourceState;
@@ -706,7 +723,9 @@ mod tests {
                         crate::test_support::install_test_fault("temp-file-sandbox-remove")
                             .expect("first sandbox cleanup should fail");
                     let mut native = access.resource.native.lock().expect("native lock");
-                    let Some(LocalTempNative::Unconfirmed(anchor)) = native.as_mut() else {
+                    let Some(LocalTempNative::Unconfirmed(LocalTempCleanupAnchor::File(anchor))) =
+                        native.as_mut()
+                    else {
                         panic!("a panicked transition should retain its cleanup anchor");
                     };
                     assert!(anchor.cleanup().is_err());
@@ -741,6 +760,333 @@ mod tests {
             std::path::PathBuf::from("/"),
         );
         assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 0);
+    }
+
+    fn assert_panicked_directory_transition_cleans_anchor(
+        filesystem: LocalFileSystem,
+        parent_path: std::path::PathBuf,
+    ) {
+        let manager = OperationManager::new(ManagerOptions::default()).expect("manager");
+        let executor = LocalIoExecutor::new(
+            manager.clone(),
+            super::super::LocalExecutionConfig::default(),
+        )
+        .expect("local executor");
+        let completion = manager
+            .run_and_settle(qubit_operation::OperationOptions::default(), move |scope| {
+                let reservation = scope.reserve_resource().expect("resource reservation");
+                let directory = filesystem
+                    .create_temp_directory_with_options(
+                        &LocalTempDirectoryOptions::new().with_parent(&parent_path),
+                    )
+                    .expect("temporary directory");
+                let owner = LocalTempResource::new(
+                    LocalTempNative::Directory(directory),
+                    executor.reserve_disk(1).expect("disk permit"),
+                    executor.reserve_handle().expect("handle permit"),
+                    executor.reserve_cleanup().expect("cleanup permit"),
+                );
+                let id_slot = Arc::clone(&owner.id);
+                let reference = reservation
+                    .commit_with(
+                        owner,
+                        LocalCleanup {
+                            executor: executor.clone(),
+                        },
+                    )
+                    .expect("managed temp resource");
+                *id_slot.lock().unwrap_or_else(|e| e.into_inner()) = Some(reference.id());
+                let access = LocalTempFileAccess {
+                    resource: reference,
+                };
+                let receiver = access
+                    .enqueue_native_transition(
+                        &executor,
+                        |_owner| -> Result<(Option<LocalTempNative>, ()), (LocalTempNative, ())> {
+                            panic!("injected directory transition panic")
+                        },
+                    )
+                    .expect("directory transition queued");
+                assert!(matches!(
+                    block_on(receiver),
+                    Err(LocalTempCommandError::Panicked)
+                ));
+                #[cfg(feature = "test-support")]
+                {
+                    let _fault =
+                        crate::test_support::install_test_fault("temp-directory-sandbox-remove")
+                            .expect("first directory sandbox cleanup should fail");
+                    let mut native = access.resource.native.lock().expect("native lock");
+                    let Some(LocalTempNative::Unconfirmed(LocalTempCleanupAnchor::Directory(
+                        anchor,
+                    ))) = native.as_mut()
+                    else {
+                        panic!("a panicked directory transition should retain its anchor");
+                    };
+                    assert!(anchor.cleanup().is_err());
+                    anchor
+                        .cleanup()
+                        .expect("directory anchor should retry cleanup");
+                    assert_eq!(anchor.source_state(), LocalTempSourceState::Released);
+                }
+                drop(access);
+                Ok::<(), ()>(())
+            })
+            .expect("operation completed");
+        assert_eq!(completion.settlement.recovery_count, 0);
+        assert!(completion.settlement.cleanup_failures.is_empty());
+    }
+
+    #[test]
+    fn panicked_host_and_rooted_directory_transitions_retain_cleanup_authority() {
+        let host_parent = tempfile::tempdir().expect("Host parent");
+        assert_panicked_directory_transition_cleans_anchor(
+            LocalFileSystem::host().expect("Host filesystem"),
+            host_parent.path().to_path_buf(),
+        );
+        assert_eq!(std::fs::read_dir(host_parent.path()).unwrap().count(), 0);
+
+        let rooted_parent = tempfile::tempdir().expect("Rooted parent");
+        assert_panicked_directory_transition_cleans_anchor(
+            LocalFileSystem::rooted(rooted_parent.path()).expect("Rooted filesystem"),
+            std::path::PathBuf::from("/"),
+        );
+        assert_eq!(std::fs::read_dir(rooted_parent.path()).unwrap().count(), 0);
+    }
+
+    fn run_directory_publication_transition(
+        filesystem: LocalFileSystem,
+        parent_path: std::path::PathBuf,
+        target: Option<std::path::PathBuf>,
+    ) -> std::path::PathBuf {
+        let manager = OperationManager::new(ManagerOptions::default()).expect("manager");
+        let executor = LocalIoExecutor::new(
+            manager.clone(),
+            super::super::LocalExecutionConfig::default(),
+        )
+        .expect("local executor");
+        let completion = manager
+            .run_and_settle(qubit_operation::OperationOptions::default(), move |scope| {
+                let reservation = scope.reserve_resource().expect("resource reservation");
+                let directory = filesystem
+                    .create_temp_directory_with_options(
+                        &LocalTempDirectoryOptions::new().with_parent(&parent_path),
+                    )
+                    .expect("temporary directory");
+                let owner = LocalTempResource::new(
+                    LocalTempNative::Directory(directory),
+                    executor.reserve_disk(1).expect("disk permit"),
+                    executor.reserve_handle().expect("handle permit"),
+                    executor.reserve_cleanup().expect("cleanup permit"),
+                );
+                let id_slot = Arc::clone(&owner.id);
+                let reference = reservation
+                    .commit_with(
+                        owner,
+                        LocalCleanup {
+                            executor: executor.clone(),
+                        },
+                    )
+                    .expect("managed temp resource");
+                *id_slot.lock().unwrap_or_else(|e| e.into_inner()) = Some(reference.id());
+                let access = LocalTempFileAccess {
+                    resource: reference,
+                };
+                let receiver = access
+                    .enqueue_native_transition(&executor, move |native| {
+                        let LocalTempNative::Directory(directory) = native else {
+                            return Err((
+                                native,
+                                crate::LocalFileError::from_io(
+                                    LocalFileOperation::PersistTemp,
+                                    None,
+                                    None,
+                                    std::io::Error::other("expected a temporary directory owner"),
+                                ),
+                            ));
+                        };
+                        let result = match target {
+                            Some(target) => directory.persist(target),
+                            None => directory.keep(),
+                        };
+                        match result {
+                            Ok(outcome) => Ok((None, outcome)),
+                            Err(error) => {
+                                let parts = error.into_parts();
+                                Err((LocalTempNative::Directory(parts.resource), parts.error))
+                            }
+                        }
+                    })
+                    .expect("directory publication queued");
+                let outcome = block_on(receiver)
+                    .expect("directory publication command")
+                    .expect("directory publication outcome");
+                let published = outcome.path().to_path_buf();
+                assert!(outcome.cleanup_error().is_none());
+                drop(access);
+                Ok::<_, ()>(published)
+            })
+            .expect("operation completed");
+        assert_eq!(completion.settlement.recovery_count, 0);
+        assert!(completion.settlement.cleanup_failures.is_empty());
+        match completion.outcome {
+            qubit_operation::OperationOutcome::Succeeded(path) => path,
+            _ => panic!("directory publication should succeed"),
+        }
+    }
+
+    #[test]
+    fn directory_keep_and_persist_succeed_through_native_transition() {
+        let keep_parent = tempfile::tempdir().expect("Keep parent");
+        let kept_path = run_directory_publication_transition(
+            LocalFileSystem::host().expect("Host filesystem"),
+            keep_parent.path().to_path_buf(),
+            None,
+        );
+        assert!(kept_path.exists());
+        assert_eq!(std::fs::read_dir(keep_parent.path()).unwrap().count(), 1);
+
+        let persist_parent = tempfile::tempdir().expect("Persist parent");
+        let target = persist_parent.path().join("published");
+        let persisted_path = run_directory_publication_transition(
+            LocalFileSystem::host().expect("Host filesystem"),
+            persist_parent.path().to_path_buf(),
+            Some(target.clone()),
+        );
+        assert_eq!(persisted_path, target);
+        assert!(target.is_dir());
+        assert_eq!(std::fs::read_dir(persist_parent.path()).unwrap().count(), 1);
+
+        let rooted_keep_parent = tempfile::tempdir().expect("Rooted Keep parent");
+        let rooted_keep_path = run_directory_publication_transition(
+            LocalFileSystem::rooted(rooted_keep_parent.path()).expect("Rooted filesystem"),
+            std::path::PathBuf::from("/"),
+            None,
+        );
+        let rooted_keep_relative = rooted_keep_path
+            .strip_prefix(std::path::Path::new("/"))
+            .expect("Rooted Keep result should be virtual absolute");
+        assert!(
+            rooted_keep_parent
+                .path()
+                .join(rooted_keep_relative)
+                .is_dir()
+        );
+        assert_eq!(
+            std::fs::read_dir(rooted_keep_parent.path())
+                .unwrap()
+                .count(),
+            1
+        );
+
+        let rooted_persist_parent = tempfile::tempdir().expect("Rooted Persist parent");
+        let rooted_target = std::path::PathBuf::from("/published");
+        let rooted_persist_path = run_directory_publication_transition(
+            LocalFileSystem::rooted(rooted_persist_parent.path()).expect("Rooted filesystem"),
+            std::path::PathBuf::from("/"),
+            Some(rooted_target),
+        );
+        assert_eq!(rooted_persist_path, std::path::PathBuf::from("/published"));
+        assert!(rooted_persist_parent.path().join("published").is_dir());
+        assert_eq!(
+            std::fs::read_dir(rooted_persist_parent.path())
+                .unwrap()
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn normal_directory_transition_rearms_the_returned_owner() {
+        let parent = tempfile::tempdir().expect("temp parent");
+        let manager = OperationManager::new(ManagerOptions::default()).expect("manager");
+        let executor = LocalIoExecutor::new(
+            manager.clone(),
+            super::super::LocalExecutionConfig::default(),
+        )
+        .expect("local executor");
+        let filesystem = LocalFileSystem::host().expect("filesystem");
+        let parent_path = parent.path().to_path_buf();
+        let completion = manager
+            .run_and_settle(qubit_operation::OperationOptions::default(), move |scope| {
+                let reservation = scope.reserve_resource().expect("resource reservation");
+                let directory = filesystem
+                    .create_temp_directory_with_options(
+                        &LocalTempDirectoryOptions::new().with_parent(&parent_path),
+                    )
+                    .expect("temporary directory");
+                let owner = LocalTempResource::new(
+                    LocalTempNative::Directory(directory),
+                    executor.reserve_disk(1).expect("disk permit"),
+                    executor.reserve_handle().expect("handle permit"),
+                    executor.reserve_cleanup().expect("cleanup permit"),
+                );
+                let id_slot = Arc::clone(&owner.id);
+                let reference = reservation
+                    .commit_with(
+                        owner,
+                        LocalCleanup {
+                            executor: executor.clone(),
+                        },
+                    )
+                    .expect("managed temp resource");
+                *id_slot.lock().unwrap_or_else(|e| e.into_inner()) = Some(reference.id());
+                let access = LocalTempFileAccess {
+                    resource: reference,
+                };
+                let receiver = access
+                    .enqueue_native_transition(&executor, |owner| {
+                        Ok::<_, (LocalTempNative, ())>((Some(owner), ()))
+                    })
+                    .expect("directory transition queued");
+                block_on(receiver)
+                    .expect("command result")
+                    .expect("transition result");
+                let owner = access
+                    .resource
+                    .native
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .take()
+                    .expect("transition should return the directory owner");
+                drop(owner);
+                assert_eq!(std::fs::read_dir(&parent_path).unwrap().count(), 0);
+                drop(access);
+                Ok::<(), ()>(())
+            })
+            .expect("operation completed");
+        assert_eq!(completion.settlement.recovery_count, 0);
+        assert!(completion.settlement.cleanup_failures.is_empty());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn directory_cleanup_anchor_refuses_symlink_replacement() {
+        let parent = tempfile::tempdir().expect("temp parent");
+        let target = tempfile::tempdir().expect("symlink target");
+        let mut directory = LocalFileSystem::host()
+            .expect("filesystem")
+            .create_temp_directory_with_options(
+                &LocalTempDirectoryOptions::new().with_parent(parent.path()),
+            )
+            .expect("temporary directory");
+        let path = directory.path().to_path_buf();
+        let mut anchor = directory.cleanup_anchor();
+        directory.disarm_cleanup_on_drop();
+        drop(directory);
+
+        let moved = parent.path().join("moved-original");
+        std::fs::rename(&path, &moved).expect("move original directory");
+        std::os::unix::fs::symlink(target.path(), &path).expect("install symlink replacement");
+        assert!(anchor.cleanup().is_err());
+        assert!(
+            std::fs::symlink_metadata(&path)
+                .unwrap()
+                .file_type()
+                .is_symlink()
+        );
+        assert!(target.path().is_dir());
+        assert!(moved.is_dir());
     }
 
     #[cfg(feature = "test-support")]

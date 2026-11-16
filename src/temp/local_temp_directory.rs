@@ -108,6 +108,9 @@ pub struct LocalTempDirectory {
     /// Limits reused by explicit cleanup and Drop, with a fresh budget per
     /// call.
     cleanup_limits: LocalTempCleanupLimits,
+    /// Whether dropping this wrapper should attempt cleanup. Cleanup anchors
+    /// disable this while remaining explicitly cleanable.
+    cleanup_on_drop: bool,
 }
 
 impl std::fmt::Debug for LocalTempDirectory {
@@ -156,6 +159,7 @@ impl LocalTempDirectory {
         let creation_parent = sandbox_path.parent().unwrap_or_else(|| Path::new("")).to_path_buf();
         Ok(Self {
             cleanup_limits,
+            cleanup_on_drop: true,
             core: LocalTempResourceCore::new(
                 path,
                 creation_parent,
@@ -196,6 +200,7 @@ impl LocalTempDirectory {
         let creation_parent = sandbox_path.parent().unwrap_or_else(|| Path::new("")).to_path_buf();
         Ok(Self {
             cleanup_limits,
+            cleanup_on_drop: true,
             core: LocalTempResourceCore::new(
                 path.clone(),
                 creation_parent,
@@ -243,6 +248,7 @@ impl LocalTempDirectory {
         let creation_parent = sandbox_path.parent().unwrap_or_else(|| Path::new("")).to_path_buf();
         Ok(Self {
             cleanup_limits,
+            cleanup_on_drop: true,
             core: LocalTempResourceCore::new(
                 path.clone(),
                 creation_parent,
@@ -255,6 +261,29 @@ impl LocalTempDirectory {
                 symlink_policy,
             ),
         })
+    }
+
+    /// Clones only the bound authority and identity needed to retry cleanup.
+    /// The clone owns no directory handle and its Drop is inert until cleanup
+    /// is explicitly requested.
+    pub(crate) fn cleanup_anchor(&self) -> Self {
+        Self {
+            core: self.core.clone(),
+            cleanup_limits: self.cleanup_limits,
+            cleanup_on_drop: false,
+        }
+    }
+
+    /// Prevents this owner from making best-effort cleanup during unwind. A
+    /// separately retained cleanup anchor must be installed before calling.
+    pub(crate) fn disarm_cleanup_on_drop(&mut self) {
+        self.cleanup_on_drop = false;
+    }
+
+    /// Restores ordinary best-effort Drop cleanup after a transition returns
+    /// ownership to the managed resource.
+    pub(crate) fn arm_cleanup_on_drop(&mut self) {
+        self.cleanup_on_drop = true;
     }
 
     /// Returns the namespace-absolute generated path.
@@ -933,6 +962,8 @@ impl LocalTempDirectory {
 impl Drop for LocalTempDirectory {
     /// Attempts remaining tree or sandbox cleanup and discards cleanup errors.
     fn drop(&mut self) {
-        let _ = self.cleanup();
+        if self.cleanup_on_drop {
+            let _ = self.cleanup();
+        }
     }
 }

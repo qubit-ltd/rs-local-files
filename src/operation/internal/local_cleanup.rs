@@ -5,10 +5,10 @@ use std::task::{Context, Poll, Waker};
 
 use qubit_operation::{AsyncCleanup, CleanupContext, CleanupFuture, CleanupOutcome};
 
-use super::LocalTempNative;
 use super::LocalTempResource;
 use super::safe_clone_waker;
 use super::safe_drop_waker;
+use super::{LocalTempCleanupAnchor, LocalTempNative};
 use crate::operation::executor::LocalIoExecutor;
 
 /// Asynchronous cleanup policy using the executor's dedicated cleanup queue.
@@ -187,10 +187,18 @@ fn cleanup_resource(
                 native.take();
                 ()
             }),
-            Some(LocalTempNative::Unconfirmed(anchor)) => anchor.cleanup().map(|()| {
-                native.take();
-                ()
-            }),
+            Some(LocalTempNative::Unconfirmed(LocalTempCleanupAnchor::File(anchor))) => {
+                anchor.cleanup().map(|()| {
+                    native.take();
+                    ()
+                })
+            }
+            Some(LocalTempNative::Unconfirmed(LocalTempCleanupAnchor::Directory(anchor))) => {
+                anchor.cleanup().map(|()| {
+                    native.take();
+                    ()
+                })
+            }
             None => Ok(()),
         }
     };
