@@ -52,6 +52,416 @@ impl AsyncLocalFileSystem {
         Ok(Self::new(filesystem, executor, None))
     }
 
+    /// Submits a bounded, worker-backed directory traversal.
+    pub fn submit_open_walker(
+        &self,
+        manager: &qubit_operation::OperationManager,
+        operation: qubit_operation::OperationOptions,
+        path: PathBuf,
+        options: crate::LocalListOptions,
+    ) -> Result<
+        super::LocalOperation<super::stream::AsyncLocalDirectoryWalker>,
+        super::LocalSubmitError<PathBuf>,
+    > {
+        use qubit_operation::OperationOutcome;
+        let scoped = match manager.with_group(&self.executor.inner.group) {
+            Ok(value) => value,
+            Err(qubit_operation::GroupBindingError::WrongManager) => {
+                return Err(super::LocalSubmitError::new(
+                    path,
+                    super::LocalSubmitRejection::WrongManager,
+                ));
+            }
+            Err(qubit_operation::GroupBindingError::ScopeEnded) => {
+                return Err(super::LocalSubmitError::new(
+                    path,
+                    super::LocalSubmitRejection::ScopeEnded,
+                ));
+            }
+            Err(qubit_operation::GroupBindingError::Closed) => {
+                return Err(super::LocalSubmitError::new(
+                    path,
+                    super::LocalSubmitRejection::Closed,
+                ));
+            }
+            Err(qubit_operation::GroupBindingError::CapacityExceeded) => {
+                return Err(super::LocalSubmitError::new(
+                    path,
+                    super::LocalSubmitRejection::CapacityExceeded,
+                ));
+            }
+        };
+        if self.filesystem.scope() == crate::path::LocalFileSystemScope::Host
+            && self.host_base.is_none()
+            && path.is_relative()
+        {
+            return Err(super::LocalSubmitError::new(
+                path,
+                super::LocalSubmitRejection::AuthorityNotCaptured,
+            ));
+        }
+        let execution_path = bind_host_path(&self.host_base, &path);
+        let Some(slot) = self.executor.reserve_slot() else {
+            return Err(super::LocalSubmitError::new(
+                path,
+                super::LocalSubmitRejection::CapacityExceeded,
+            ));
+        };
+        let Some(budget) = self
+            .executor
+            .reserve_bytes(super::stream::LOCAL_WALK_BATCH_BYTES)
+        else {
+            return Err(super::LocalSubmitError::new(
+                path,
+                super::LocalSubmitRejection::CapacityExceeded,
+            ));
+        };
+        let Some(handle) = self.executor.reserve_handle() else {
+            return Err(super::LocalSubmitError::new(
+                path,
+                super::LocalSubmitRejection::CapacityExceeded,
+            ));
+        };
+        let Some(fact) = self.executor.reserve_fact() else {
+            return Err(super::LocalSubmitError::new(
+                path,
+                super::LocalSubmitRejection::CapacityExceeded,
+            ));
+        };
+        let budget = Arc::new(Mutex::new(budget));
+        let fact: Arc<dyn Send + Sync> = Arc::new(fact);
+        let observer = super::LocalFactObserver::with_permit(Arc::clone(&fact));
+        let filesystem = self.filesystem.clone();
+        let executor = self.executor.clone();
+        let worker_budget = Arc::clone(&budget);
+        let job = super::internal::prepared_local_job::PreparedLocalJob::new_scoped(
+            Arc::clone(&self.executor.inner),
+            path.clone(),
+            slot,
+            Arc::clone(&budget),
+            handle,
+            observer.clone(),
+            move |_, scope| match filesystem.list_with_options(&execution_path, &options) {
+                Err(error) => OperationOutcome::Failed(error),
+                Ok(walker) => {
+                    let resource = super::stream::WorkerWalkDriver::managed(
+                        scope,
+                        executor,
+                        walker,
+                        worker_budget,
+                    );
+                    match resource.and_then(super::stream::AsyncLocalDirectoryWalker::new) {
+                        Ok(walker) => OperationOutcome::Succeeded(walker),
+                        Err(error) => OperationOutcome::Failed(crate::LocalFileError::from_io(
+                            crate::LocalFileOperation::List,
+                            Some(execution_path),
+                            None,
+                            error,
+                        )),
+                    }
+                }
+            },
+        );
+        match scoped.try_submit_external(operation, Arc::clone(&job)) {
+            Ok(handle) => Ok(super::LocalOperation::new(handle, budget)),
+            Err(error) => {
+                let (reason, _) = error.into_parts();
+                let request = job.take_request().unwrap_or(path);
+                Err(super::LocalSubmitError::new(
+                    request,
+                    match reason {
+                        qubit_operation::AdmissionError::ScopeEnded => {
+                            super::LocalSubmitRejection::ScopeEnded
+                        }
+                        qubit_operation::AdmissionError::Stopped => {
+                            super::LocalSubmitRejection::Stopped
+                        }
+                        qubit_operation::AdmissionError::CapacityExceeded
+                        | qubit_operation::AdmissionError::Busy => {
+                            super::LocalSubmitRejection::CapacityExceeded
+                        }
+                        _ => super::LocalSubmitRejection::Closed,
+                    },
+                ))
+            }
+        }
+    }
+
+    /// Submits a worker-backed reader open. The returned stream owns a managed
+    /// worker resource and performs every native read and seek on the executor.
+    pub fn submit_open_reader(
+        &self,
+        manager: &qubit_operation::OperationManager,
+        operation: qubit_operation::OperationOptions,
+        path: PathBuf,
+        options: crate::LocalReadOptions,
+    ) -> Result<
+        super::LocalOperation<super::stream::AsyncLocalFileReader>,
+        super::LocalSubmitError<PathBuf>,
+    > {
+        use qubit_operation::OperationOutcome;
+        let scoped = match manager.with_group(&self.executor.inner.group) {
+            Ok(value) => value,
+            Err(qubit_operation::GroupBindingError::WrongManager) => {
+                return Err(super::LocalSubmitError::new(
+                    path,
+                    super::LocalSubmitRejection::WrongManager,
+                ));
+            }
+            Err(qubit_operation::GroupBindingError::ScopeEnded) => {
+                return Err(super::LocalSubmitError::new(
+                    path,
+                    super::LocalSubmitRejection::ScopeEnded,
+                ));
+            }
+            Err(qubit_operation::GroupBindingError::Closed) => {
+                return Err(super::LocalSubmitError::new(
+                    path,
+                    super::LocalSubmitRejection::Closed,
+                ));
+            }
+            Err(qubit_operation::GroupBindingError::CapacityExceeded) => {
+                return Err(super::LocalSubmitError::new(
+                    path,
+                    super::LocalSubmitRejection::CapacityExceeded,
+                ));
+            }
+        };
+        if self.filesystem.scope() == crate::path::LocalFileSystemScope::Host
+            && self.host_base.is_none()
+            && path.is_relative()
+        {
+            return Err(super::LocalSubmitError::new(
+                path,
+                super::LocalSubmitRejection::AuthorityNotCaptured,
+            ));
+        }
+        let execution_path = bind_host_path(&self.host_base, &path);
+        let Some(slot) = self.executor.reserve_slot() else {
+            return Err(super::LocalSubmitError::new(
+                path,
+                super::LocalSubmitRejection::CapacityExceeded,
+            ));
+        };
+        let Some(bytes) = self
+            .executor
+            .reserve_bytes(super::stream::LOCAL_STREAM_BUFFER_SIZE)
+        else {
+            return Err(super::LocalSubmitError::new(
+                path,
+                super::LocalSubmitRejection::CapacityExceeded,
+            ));
+        };
+        let Some(handle) = self.executor.reserve_handle() else {
+            return Err(super::LocalSubmitError::new(
+                path,
+                super::LocalSubmitRejection::CapacityExceeded,
+            ));
+        };
+        let Some(fact) = self.executor.reserve_fact() else {
+            return Err(super::LocalSubmitError::new(
+                path,
+                super::LocalSubmitRejection::CapacityExceeded,
+            ));
+        };
+        let bytes = Arc::new(Mutex::new(bytes));
+        let fact: Arc<dyn Send + Sync> = Arc::new(fact);
+        let observer = super::LocalFactObserver::with_permit(Arc::clone(&fact));
+        let filesystem = self.filesystem.clone();
+        let executor = self.executor.clone();
+        let worker_budget = Arc::clone(&bytes);
+        let job = super::internal::prepared_local_job::PreparedLocalJob::new_scoped(
+            Arc::clone(&self.executor.inner),
+            path.clone(),
+            slot,
+            Arc::clone(&bytes),
+            handle,
+            observer.clone(),
+            move |_, scope| {
+                let opened = filesystem.open_reader_with_options(&execution_path, &options);
+                match opened {
+                    Err(error) => OperationOutcome::Failed(error),
+                    Ok(reader) => {
+                        let resource = super::stream::WorkerStreamDriver::managed(
+                            scope,
+                            executor,
+                            super::stream::LocalNativeStream::Reader(reader),
+                            worker_budget,
+                        );
+                        match resource.and_then(super::stream::AsyncLocalFileReader::new) {
+                            Ok(reader) => OperationOutcome::Succeeded(reader),
+                            Err(error) => OperationOutcome::Failed(crate::LocalFileError::from_io(
+                                crate::LocalFileOperation::OpenReader,
+                                Some(execution_path),
+                                None,
+                                error,
+                            )),
+                        }
+                    }
+                }
+            },
+        );
+        match scoped.try_submit_external(operation, Arc::clone(&job)) {
+            Ok(handle) => Ok(super::LocalOperation::new(handle, bytes)),
+            Err(error) => {
+                let (reason, _) = error.into_parts();
+                let request = job.take_request().unwrap_or(path);
+                Err(super::LocalSubmitError::new(
+                    request,
+                    match reason {
+                        qubit_operation::AdmissionError::ScopeEnded => {
+                            super::LocalSubmitRejection::ScopeEnded
+                        }
+                        qubit_operation::AdmissionError::Stopped => {
+                            super::LocalSubmitRejection::Stopped
+                        }
+                        qubit_operation::AdmissionError::CapacityExceeded
+                        | qubit_operation::AdmissionError::Busy => {
+                            super::LocalSubmitRejection::CapacityExceeded
+                        }
+                        _ => super::LocalSubmitRejection::Closed,
+                    },
+                ))
+            }
+        }
+    }
+
+    /// Submits a worker-backed writer open. Accepted bytes are sent to the
+    /// native writer on the executor; `close` commits and reports publication.
+    pub fn submit_open_writer(
+        &self,
+        manager: &qubit_operation::OperationManager,
+        operation: qubit_operation::OperationOptions,
+        path: PathBuf,
+        options: crate::LocalWriteOptions,
+    ) -> Result<
+        super::LocalOperation<super::stream::AsyncLocalFileWriter>,
+        super::LocalSubmitError<PathBuf>,
+    > {
+        use qubit_operation::OperationOutcome;
+        let scoped = match manager.with_group(&self.executor.inner.group) {
+            Ok(value) => value,
+            Err(qubit_operation::GroupBindingError::WrongManager) => {
+                return Err(super::LocalSubmitError::new(
+                    path,
+                    super::LocalSubmitRejection::WrongManager,
+                ));
+            }
+            Err(qubit_operation::GroupBindingError::ScopeEnded) => {
+                return Err(super::LocalSubmitError::new(
+                    path,
+                    super::LocalSubmitRejection::ScopeEnded,
+                ));
+            }
+            Err(qubit_operation::GroupBindingError::Closed) => {
+                return Err(super::LocalSubmitError::new(
+                    path,
+                    super::LocalSubmitRejection::Closed,
+                ));
+            }
+            Err(qubit_operation::GroupBindingError::CapacityExceeded) => {
+                return Err(super::LocalSubmitError::new(
+                    path,
+                    super::LocalSubmitRejection::CapacityExceeded,
+                ));
+            }
+        };
+        if self.filesystem.scope() == crate::path::LocalFileSystemScope::Host
+            && self.host_base.is_none()
+            && path.is_relative()
+        {
+            return Err(super::LocalSubmitError::new(
+                path,
+                super::LocalSubmitRejection::AuthorityNotCaptured,
+            ));
+        }
+        let execution_path = bind_host_path(&self.host_base, &path);
+        let Some(slot) = self.executor.reserve_slot() else {
+            return Err(super::LocalSubmitError::new(
+                path,
+                super::LocalSubmitRejection::CapacityExceeded,
+            ));
+        };
+        let Some(budget) = self
+            .executor
+            .reserve_bytes(super::stream::LOCAL_STREAM_BUFFER_SIZE)
+        else {
+            return Err(super::LocalSubmitError::new(
+                path,
+                super::LocalSubmitRejection::CapacityExceeded,
+            ));
+        };
+        let Some(handle) = self.executor.reserve_handle() else {
+            return Err(super::LocalSubmitError::new(
+                path,
+                super::LocalSubmitRejection::CapacityExceeded,
+            ));
+        };
+        let Some(fact) = self.executor.reserve_fact() else {
+            return Err(super::LocalSubmitError::new(
+                path,
+                super::LocalSubmitRejection::CapacityExceeded,
+            ));
+        };
+        let budget = Arc::new(Mutex::new(budget));
+        let fact: Arc<dyn Send + Sync> = Arc::new(fact);
+        let observer = super::LocalFactObserver::with_permit(Arc::clone(&fact));
+        let filesystem = self.filesystem.clone();
+        let executor = self.executor.clone();
+        let worker_budget = Arc::clone(&budget);
+        let job = super::internal::prepared_local_job::PreparedLocalJob::new_scoped(
+            Arc::clone(&self.executor.inner),
+            path.clone(),
+            slot,
+            Arc::clone(&budget),
+            handle,
+            observer.clone(),
+            move |_, scope| match filesystem.open_writer_with_options(&execution_path, &options) {
+                Err(error) => OperationOutcome::Failed(error),
+                Ok(writer) => {
+                    let resource = super::stream::WorkerStreamDriver::managed(
+                        scope,
+                        executor,
+                        super::stream::LocalNativeStream::Writer(writer),
+                        worker_budget,
+                    );
+                    match resource.and_then(super::stream::AsyncLocalFileWriter::new) {
+                        Ok(writer) => OperationOutcome::Succeeded(writer),
+                        Err(error) => OperationOutcome::Failed(crate::LocalFileError::from_io(
+                            crate::LocalFileOperation::OpenWriter,
+                            Some(execution_path),
+                            None,
+                            error,
+                        )),
+                    }
+                }
+            },
+        );
+        match scoped.try_submit_external(operation, Arc::clone(&job)) {
+            Ok(handle) => Ok(super::LocalOperation::new(handle, budget)),
+            Err(error) => {
+                let (reason, _) = error.into_parts();
+                let request = job.take_request().unwrap_or(path);
+                Err(super::LocalSubmitError::new(
+                    request,
+                    match reason {
+                        qubit_operation::AdmissionError::ScopeEnded => {
+                            super::LocalSubmitRejection::ScopeEnded
+                        }
+                        qubit_operation::AdmissionError::Stopped => {
+                            super::LocalSubmitRejection::Stopped
+                        }
+                        qubit_operation::AdmissionError::CapacityExceeded
+                        | qubit_operation::AdmissionError::Busy => {
+                            super::LocalSubmitRejection::CapacityExceeded
+                        }
+                        _ => super::LocalSubmitRejection::Closed,
+                    },
+                ))
+            }
+        }
+    }
+
     /// Submits a complete file read and returns its independent local fact observer.
     pub fn submit_read_all_with_observer(
         &self,
@@ -211,6 +621,13 @@ impl AsyncLocalFileSystem {
                 ))
             }
         }
+    }
+}
+
+fn bind_host_path(base: &Option<PathBuf>, path: &PathBuf) -> PathBuf {
+    match (base, path.is_relative()) {
+        (Some(base), true) => base.join(path),
+        _ => path.clone(),
     }
 }
 

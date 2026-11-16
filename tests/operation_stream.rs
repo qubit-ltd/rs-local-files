@@ -175,7 +175,7 @@ impl LocalStreamDriver for FakeWorker {
                 state.position = next;
                 Ok(LocalStreamCompletion::Seeked(next as u64))
             }
-            LocalStreamCommand::Close => {
+            LocalStreamCommand::Close | LocalStreamCommand::Abort => {
                 state.close_count += 1;
                 Ok(LocalStreamCompletion::Closed)
             }
@@ -355,6 +355,135 @@ fn poll<T>(future: impl FnOnce(&mut Context<'_>) -> Poll<T>) -> Poll<T> {
     let waker = Waker::noop();
     let mut cx = Context::from_waker(waker);
     future(&mut cx)
+}
+
+fn poll_worker<T>(mut future: impl FnMut(&mut Context<'_>) -> Poll<T>) -> T {
+    let waker = Waker::noop();
+    let mut cx = Context::from_waker(waker);
+    for _ in 0..100_000 {
+        if let Poll::Ready(value) = future(&mut cx) {
+            return value;
+        }
+        std::thread::yield_now();
+    }
+    panic!("worker-backed operation did not complete");
+}
+
+#[test]
+fn async_filesystem_opens_real_reader_writer_and_bounded_walker() {
+    use qubit_local_files::LocalFileSystem;
+    use qubit_local_files::operation::{LocalExecutionConfig, LocalIoExecutor};
+    use qubit_local_files::options::{
+        LocalListOptions, LocalReadOptions, LocalWriteMode, LocalWriteOptions,
+    };
+    use qubit_operation::{ManagerOptions, OperationManager, OperationOutcome};
+
+    let directory = tempfile::tempdir().unwrap();
+    let input = directory.path().join("input.txt");
+    let output = directory.path().join("output.txt");
+    std::fs::write(&input, b"real local reader").unwrap();
+    let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+    let executor = LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).unwrap();
+    let filesystem = LocalFileSystem::host()
+        .unwrap()
+        .into_async(executor)
+        .unwrap();
+
+    let mut opening = filesystem
+        .submit_open_reader(
+            &manager,
+            Default::default(),
+            input.clone(),
+            LocalReadOptions::default(),
+        )
+        .unwrap();
+    let mut reader = match opening.wait_outcome().unwrap() {
+        OperationOutcome::Succeeded(reader) => reader,
+        _ => panic!("reader open failed"),
+    };
+    let mut bytes = [0; 64];
+    let count = poll_worker(|cx| Pin::new(&mut reader).poll_read(cx, &mut bytes)).unwrap();
+    assert_eq!(&bytes[..count], b"real local reader");
+    poll_worker(|cx| Box::pin(reader.close()).as_mut().poll(cx)).unwrap();
+    drop(reader);
+    opening.wait_settlement().unwrap();
+
+    let mut opening = filesystem
+        .submit_open_writer(
+            &manager,
+            Default::default(),
+            output.clone(),
+            LocalWriteOptions::new(LocalWriteMode::CreateOrReplace),
+        )
+        .unwrap();
+    let mut writer = match opening.wait_outcome().unwrap() {
+        OperationOutcome::Succeeded(writer) => writer,
+        _ => panic!("writer open failed"),
+    };
+    assert_eq!(
+        poll_worker(|cx| Pin::new(&mut writer).poll_write(cx, b"written on worker")).unwrap(),
+        17
+    );
+    poll_worker(|cx| Box::pin(writer.close()).as_mut().poll(cx)).unwrap();
+    drop(writer);
+    opening.wait_settlement().unwrap();
+    assert_eq!(std::fs::read(&output).unwrap(), b"written on worker");
+
+    let aborted = directory.path().join("aborted.txt");
+    let mut opening = filesystem
+        .submit_open_writer(
+            &manager,
+            Default::default(),
+            aborted.clone(),
+            LocalWriteOptions::new(LocalWriteMode::CreateOrReplace),
+        )
+        .unwrap();
+    let mut writer = match opening.wait_outcome().unwrap() {
+        OperationOutcome::Succeeded(writer) => writer,
+        _ => panic!("writer open failed"),
+    };
+    assert_eq!(
+        poll_worker(|cx| Pin::new(&mut writer).poll_write(cx, b"must abort")).unwrap(),
+        10
+    );
+    drop(writer);
+    opening.wait_settlement().unwrap();
+    assert!(
+        !aborted.exists(),
+        "dropping an uncommitted writer must abort"
+    );
+
+    let mut opening = filesystem
+        .submit_open_walker(
+            &manager,
+            Default::default(),
+            directory.path().to_path_buf(),
+            LocalListOptions::default(),
+        )
+        .unwrap();
+    let mut walker = match opening.wait_outcome().unwrap() {
+        OperationOutcome::Succeeded(walker) => walker,
+        _ => panic!("walker open failed"),
+    };
+    let mut found = Vec::new();
+    loop {
+        match poll_worker(|cx| Box::pin(walker.next_batch()).as_mut().poll(cx)).unwrap() {
+            Some(batch) => found.extend(batch),
+            None => break,
+        }
+    }
+    assert!(
+        found
+            .iter()
+            .any(|path| path.file_name().is_some_and(|name| name == "input.txt"))
+    );
+    assert!(
+        found
+            .iter()
+            .any(|path| path.file_name().is_some_and(|name| name == "output.txt"))
+    );
+    drop(walker);
+    opening.wait_settlement().unwrap();
 }
 
 #[test]
