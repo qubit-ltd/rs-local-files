@@ -1,3 +1,11 @@
+// =============================================================================
+//    Copyright (c) 2025 - 2026 Haixing Hu.
+//
+//    SPDX-License-Identifier: Apache-2.0
+//
+//    Licensed under the Apache License, Version 2.0.
+// =============================================================================
+
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::Condvar;
@@ -57,7 +65,7 @@ fn facade(manager: &OperationManager) -> AsyncLocalFileSystem {
 }
 
 #[test]
-fn successful_commit_publishes_and_records_effect_independently_of_outcome() {
+fn test_successful_commit_publishes_and_records_effect_independently_of_outcome() {
     let directory = tempfile::tempdir().unwrap();
     let destination = directory.path().join("published");
     let manager = OperationManager::new(ManagerOptions::default()).unwrap();
@@ -89,7 +97,7 @@ fn successful_commit_publishes_and_records_effect_independently_of_outcome() {
 }
 
 #[test]
-fn create_new_conflict_preserves_the_existing_destination_and_not_published_fact() {
+fn test_create_new_conflict_preserves_the_existing_destination_and_not_published_fact() {
     let directory = tempfile::tempdir().unwrap();
     let destination = directory.path().join("occupied");
     std::fs::write(&destination, b"original").unwrap();
@@ -107,7 +115,10 @@ fn create_new_conflict_preserves_the_existing_destination_and_not_published_fact
             LocalOperationOptions::default(),
         )
         .unwrap();
-    assert!(matches!(operation.wait_outcome().unwrap(), OperationOutcome::Failed(_)));
+    assert!(matches!(
+        operation.wait_outcome().unwrap(),
+        OperationOutcome::Failed(_)
+    ));
     assert_eq!(std::fs::read(destination).unwrap(), b"original");
     assert_eq!(
         observer.snapshot().publication,
@@ -116,7 +127,7 @@ fn create_new_conflict_preserves_the_existing_destination_and_not_published_fact
 }
 
 #[test]
-fn writer_rejects_owned_allocation_over_budget_before_opening_destination() {
+fn test_writer_rejects_owned_allocation_over_budget_before_opening_destination() {
     let directory = tempfile::tempdir().unwrap();
     let destination = directory.path().join("must-not-exist");
     let manager = OperationManager::new(ManagerOptions::default()).unwrap();
@@ -145,7 +156,7 @@ fn writer_rejects_owned_allocation_over_budget_before_opening_destination() {
 }
 
 #[test]
-fn staged_tree_disk_quota_rejection_returns_the_original_request() {
+fn test_staged_tree_disk_quota_rejection_returns_the_original_request() {
     use qubit_local_files::operation::LocalSubmitRejection;
     use qubit_local_files::operation::publish::LocalStagedTreeFile;
     use qubit_local_files::operation::publish::LocalStagedTreePublishRequest;
@@ -189,7 +200,7 @@ fn staged_tree_disk_quota_rejection_returns_the_original_request() {
 }
 
 #[test]
-fn staged_tree_uses_one_parent_authority_and_publishes_only_after_exact_validation() {
+fn test_staged_tree_uses_one_parent_authority_and_publishes_only_after_exact_validation() {
     use qubit_local_files::operation::publish::LocalStagedTreeFile;
     use qubit_local_files::operation::publish::LocalStagedTreePublishRequest;
     use qubit_local_files::options::LocalTempDirectoryOptions;
@@ -230,7 +241,7 @@ fn staged_tree_uses_one_parent_authority_and_publishes_only_after_exact_validati
 
 #[cfg(feature = "digest")]
 #[test]
-fn digest_conditional_conflict_keeps_existing_data_and_published_state_correct() {
+fn test_digest_conditional_conflict_keeps_existing_data_and_published_state_correct() {
     use qubit_local_files::operation::publish::LocalConditionalWriterCommitRequest;
     use qubit_local_files::options::LocalWriteMode;
     use qubit_local_files::options::LocalWritePrecondition;
@@ -258,7 +269,9 @@ fn digest_conditional_conflict_keeps_existing_data_and_published_state_correct()
         .unwrap();
     assert!(matches!(
         operation.wait_outcome().unwrap(),
-        OperationOutcome::Failed(qubit_local_files::operation::publish::LocalConditionalWriterCommandError::Commit(_))
+        OperationOutcome::Failed(
+            qubit_local_files::operation::publish::LocalConditionalWriterCommandError::Commit(_)
+        )
     ));
     assert_eq!(std::fs::read(destination).unwrap(), b"original");
     assert_eq!(
@@ -269,7 +282,7 @@ fn digest_conditional_conflict_keeps_existing_data_and_published_state_correct()
 
 #[cfg(all(feature = "digest", feature = "test-support"))]
 #[test]
-fn conditional_abort_failure_after_stop_retains_recovery_owner() {
+fn test_conditional_abort_failure_after_stop_retains_recovery_owner() {
     use qubit_local_files::operation::publish::LocalConditionalWriterCommitRequest;
     use qubit_local_files::options::LocalWriteMode;
     use qubit_local_files::options::LocalWritePrecondition;
@@ -317,7 +330,9 @@ fn conditional_abort_failure_after_stop_retains_recovery_owner() {
         let outcome = operation.wait_outcome();
         panic!("conditional operation did not reach publish gate; outcome: {outcome:?}");
     }
-    gate_waiter.join().expect("gate waiter should exit after entry");
+    gate_waiter
+        .join()
+        .expect("gate waiter should exit after entry");
     let fault = install_test_fault_shared("lf7-conditional-abort").unwrap();
     let _ = operation.request_stop(StopReason::UserCancelled);
     gate.release();
@@ -338,12 +353,15 @@ fn conditional_abort_failure_after_stop_retains_recovery_owner() {
         .clone();
     drop(fault);
     let report = recovery.try_retry().unwrap().wait().unwrap();
-    assert_eq!(report.recovery.phase, qubit_operation::RecoveryPhase::Resolved);
+    assert_eq!(
+        report.recovery.phase,
+        qubit_operation::RecoveryPhase::Resolved
+    );
     assert!(!destination.exists());
 }
 
 #[test]
-fn expired_deadline_rejects_owned_request_before_native_work() {
+fn test_expired_deadline_rejects_owned_request_before_native_work() {
     use std::task::Waker;
 
     use qubit_operation::ClockDomainId;
@@ -365,7 +383,11 @@ fn expired_deadline_rejects_owned_request_before_native_work() {
         fn now(&self) -> MonotonicTime {
             MonotonicTime::new(self.domain, self.ticks)
         }
-        fn register_deadline(&self, _at: MonotonicTime, _wake: Waker) -> Box<dyn TimerRegistration> {
+        fn register_deadline(
+            &self,
+            _at: MonotonicTime,
+            _wake: Waker,
+        ) -> Box<dyn TimerRegistration> {
             Box::new(NoTimer)
         }
     }
@@ -386,7 +408,12 @@ fn expired_deadline_rejects_owned_request_before_native_work() {
         options: LocalWriteOptions::new(LocalWriteMode::CreateOrReplace),
         bytes: b"never written".to_vec(),
     };
-    let rejected = match filesystem.submit_writer_commit(&manager, options, request, LocalOperationOptions::default()) {
+    let rejected = match filesystem.submit_writer_commit(
+        &manager,
+        options,
+        request,
+        LocalOperationOptions::default(),
+    ) {
         Err(error) => error,
         Ok(_) => panic!("expired deadline should reject admission"),
     };
@@ -395,7 +422,7 @@ fn expired_deadline_rejects_owned_request_before_native_work() {
 }
 
 #[test]
-fn partial_stage_write_failure_keeps_the_unpublished_stage_for_cleanup() {
+fn test_partial_stage_write_failure_keeps_the_unpublished_stage_for_cleanup() {
     use qubit_local_files::operation::publish::LocalStagedTreeFile;
     use qubit_local_files::operation::publish::LocalStagedTreePublishError;
     use qubit_local_files::operation::publish::LocalStagedTreePublishRequest;
@@ -446,7 +473,7 @@ fn partial_stage_write_failure_keeps_the_unpublished_stage_for_cleanup() {
 
 #[cfg(unix)]
 #[test]
-fn staged_tree_forces_private_file_creation_even_when_defaults_were_requested() {
+fn test_staged_tree_forces_private_file_creation_even_when_defaults_were_requested() {
     use std::os::unix::fs::PermissionsExt;
 
     use qubit_local_files::operation::publish::LocalStagedTreeFile;
@@ -466,7 +493,8 @@ fn staged_tree_forces_private_file_creation_even_when_defaults_were_requested() 
             LocalStagedTreePublishRequest {
                 parent: directory.path().into(),
                 name: "private-stage".into(),
-                stage_options: LocalTempDirectoryOptions::new().with_privacy(LocalPrivacyRequirement::PlatformDefault),
+                stage_options: LocalTempDirectoryOptions::new()
+                    .with_privacy(LocalPrivacyRequirement::PlatformDefault),
                 files: vec![
                     LocalStagedTreeFile {
                         path: PathBuf::from("partial"),
@@ -495,7 +523,7 @@ fn staged_tree_forces_private_file_creation_even_when_defaults_were_requested() 
 }
 
 #[test]
-fn exhausted_fact_record_slots_reject_new_mutation_before_native_work() {
+fn test_exhausted_fact_record_slots_reject_new_mutation_before_native_work() {
     let directory = tempfile::tempdir().unwrap();
     let first_path = directory.path().join("first");
     let second_path = directory.path().join("second");
@@ -521,7 +549,10 @@ fn exhausted_fact_record_slots_reject_new_mutation_before_native_work() {
             LocalOperationOptions::default(),
         )
         .unwrap();
-    assert!(matches!(first.wait_outcome().unwrap(), OperationOutcome::Succeeded(_)));
+    assert!(matches!(
+        first.wait_outcome().unwrap(),
+        OperationOutcome::Succeeded(_)
+    ));
     let request = LocalWriterCommitRequest {
         path: second_path.clone(),
         options: LocalWriteOptions::new(LocalWriteMode::CreateOrReplace),
@@ -545,7 +576,7 @@ fn exhausted_fact_record_slots_reject_new_mutation_before_native_work() {
 }
 
 #[test]
-fn failed_publish_effect_registration_keeps_observer_facts() {
+fn test_failed_publish_effect_registration_keeps_observer_facts() {
     use qubit_local_files::operation::publish::LocalStagedTreeFile;
     use qubit_local_files::operation::publish::LocalStagedTreePublishRequest;
     use qubit_local_files::options::LocalTempDirectoryOptions;
@@ -591,7 +622,7 @@ fn failed_publish_effect_registration_keeps_observer_facts() {
 }
 
 #[test]
-fn temp_persist_conflict_retains_same_resource_for_a_later_keep() {
+fn test_temp_persist_conflict_retains_same_resource_for_a_later_keep() {
     use qubit_local_files::LocalFileSystem;
     use qubit_local_files::operation::publish::LocalTempLifecycleCommand;
     use qubit_local_files::operation::publish::LocalTempLifecycleError;
@@ -669,7 +700,7 @@ fn temp_persist_conflict_retains_same_resource_for_a_later_keep() {
 }
 
 #[test]
-fn temp_seal_returns_a_read_lease_for_the_same_registered_resource() {
+fn test_temp_seal_returns_a_read_lease_for_the_same_registered_resource() {
     use qubit_local_files::LocalFileSystem;
     use qubit_local_files::operation::publish::LocalTempLifecycleCommand;
     use qubit_local_files::operation::publish::LocalTempLifecycleRequest;
@@ -717,7 +748,7 @@ fn temp_seal_returns_a_read_lease_for_the_same_registered_resource() {
 }
 
 #[test]
-fn sealed_temp_rejects_repeat_lifecycle_commands_without_consuming_the_owner() {
+fn test_sealed_temp_rejects_repeat_lifecycle_commands_without_consuming_the_owner() {
     use qubit_local_files::LocalFileSystem;
     use qubit_local_files::operation::publish::LocalTempLifecycleCommand;
     use qubit_local_files::operation::publish::LocalTempLifecycleError;
@@ -794,7 +825,7 @@ fn sealed_temp_rejects_repeat_lifecycle_commands_without_consuming_the_owner() {
 }
 
 #[test]
-fn temp_directory_keep_and_persist_are_supported() {
+fn test_temp_directory_keep_and_persist_are_supported() {
     use qubit_local_files::LocalFileSystem;
     use qubit_local_files::operation::publish::LocalTempLifecycleCommand;
     use qubit_local_files::operation::publish::LocalTempLifecycleRequest;
@@ -874,7 +905,7 @@ fn temp_directory_keep_and_persist_are_supported() {
 
 #[cfg(feature = "test-support")]
 #[test]
-fn queued_temp_persist_observes_stop_before_publishing() {
+fn test_queued_temp_persist_observes_stop_before_publishing() {
     use qubit_local_files::LocalFileSystem;
     use qubit_local_files::operation::publish::LocalTempLifecycleCommand;
     use qubit_local_files::operation::publish::LocalTempLifecycleRequest;
@@ -921,7 +952,10 @@ fn queued_temp_persist_observes_stop_before_publishing() {
     gate.release();
     let _ = block_on(operation.wait_outcome()).unwrap();
     block_on(operation.wait_settlement());
-    assert!(!target.exists(), "queued stop must prevent temp publication");
+    assert!(
+        !target.exists(),
+        "queued stop must prevent temp publication"
+    );
 
     let (mut kept, _, _) = async_filesystem
         .submit_temp_lifecycle(
@@ -941,7 +975,7 @@ fn queued_temp_persist_observes_stop_before_publishing() {
 
 #[cfg(feature = "test-support")]
 #[test]
-fn cancellation_at_last_precommit_gate_aborts_without_publishing() {
+fn test_cancellation_at_last_precommit_gate_aborts_without_publishing() {
     use qubit_local_files::test_support::install_test_gate;
     use qubit_operation::StopReason;
 
@@ -981,7 +1015,7 @@ fn cancellation_at_last_precommit_gate_aborts_without_publishing() {
 
 #[cfg(feature = "test-support")]
 #[test]
-fn failed_abort_after_stop_returns_retryable_writer_and_cleanup_error() {
+fn test_failed_abort_after_stop_returns_retryable_writer_and_cleanup_error() {
     use qubit_local_files::test_support::install_test_fault_shared;
     use qubit_local_files::test_support::install_test_gate;
     use qubit_operation::StopReason;
@@ -1026,13 +1060,16 @@ fn failed_abort_after_stop_returns_retryable_writer_and_cleanup_error() {
         .clone();
     drop(fault);
     let report = recovery.try_retry().unwrap().wait().unwrap();
-    assert_eq!(report.recovery.phase, qubit_operation::RecoveryPhase::Resolved);
+    assert_eq!(
+        report.recovery.phase,
+        qubit_operation::RecoveryPhase::Resolved
+    );
     assert!(!destination.exists());
 }
 
 #[cfg(feature = "test-support")]
 #[test]
-fn append_effect_is_published_before_worker_panic_and_cleanup_releases_writer() {
+fn test_append_effect_is_published_before_worker_panic_and_cleanup_releases_writer() {
     use qubit_local_files::test_support::install_test_fault_shared;
 
     let _support_lock = PUBLISH_TEST_SUPPORT_LOCK
@@ -1076,7 +1113,7 @@ fn append_effect_is_published_before_worker_panic_and_cleanup_releases_writer() 
 
 #[cfg(all(feature = "test-support", unix))]
 #[test]
-fn append_sync_failure_preserves_published_bytes_and_failed_durability() {
+fn test_append_sync_failure_preserves_published_bytes_and_failed_durability() {
     use qubit_local_files::operation::publish::LocalWriterCommandError;
     use qubit_local_files::policy::LocalDurabilityRequirement;
     use qubit_local_files::test_support::install_test_fault_shared;
@@ -1124,7 +1161,7 @@ fn append_sync_failure_preserves_published_bytes_and_failed_durability() {
 
 #[cfg(feature = "test-support")]
 #[test]
-fn stop_during_native_publish_preserves_published_fact_when_parent_sync_fails() {
+fn test_stop_during_native_publish_preserves_published_fact_when_parent_sync_fails() {
     use qubit_local_files::operation::publish::LocalWriterCommandError;
     use qubit_local_files::outcome::LocalWriteFailureState;
     use qubit_local_files::policy::LocalDurabilityRequirement;
@@ -1168,7 +1205,8 @@ fn stop_during_native_publish_preserves_published_fact_when_parent_sync_fails() 
     );
     operation.wait_settlement().unwrap();
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
-    while observer.snapshot().publication != qubit_local_files::operation::LocalPublicationState::Published
+    while observer.snapshot().publication
+        != qubit_local_files::operation::LocalPublicationState::Published
         && std::time::Instant::now() < deadline
     {
         std::thread::yield_now();
@@ -1187,7 +1225,7 @@ fn stop_during_native_publish_preserves_published_fact_when_parent_sync_fails() 
 }
 
 #[test]
-fn partial_tree_cleanup_failure_keeps_a_retryable_recovery_owner() {
+fn test_partial_tree_cleanup_failure_keeps_a_retryable_recovery_owner() {
     use qubit_local_files::directory::LocalTreeRetainedResource;
     use qubit_local_files::operation::publish::LocalStagedTreeFile;
     use qubit_local_files::operation::publish::LocalStagedTreePublishError;

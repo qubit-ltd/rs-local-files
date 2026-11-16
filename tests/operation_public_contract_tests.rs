@@ -1,3 +1,11 @@
+// =============================================================================
+//    Copyright (c) 2025 - 2026 Haixing Hu.
+//
+//    SPDX-License-Identifier: Apache-2.0
+//
+//    Licensed under the Apache License, Version 2.0.
+// =============================================================================
+
 use std::sync::Arc;
 
 use qubit_local_files::LocalExecutionConfig;
@@ -19,7 +27,7 @@ fn assert_send_sync_static<T: Send + Sync + 'static>() {}
 fn assert_copy<T: Copy>() {}
 
 #[test]
-fn lf1_types_are_available_from_the_crate_root() {
+fn test_lf1_types_are_available_from_the_crate_root() {
     assert_send_sync_static::<LocalFactObserver>();
     assert_send_sync_static::<LocalFactSnapshot>();
     assert_send_sync_static::<LocalExecutionConfig>();
@@ -32,7 +40,7 @@ fn lf1_types_are_available_from_the_crate_root() {
 }
 
 #[test]
-fn rejected_request_type_accepts_an_opaque_non_clone_non_debug_payload() {
+fn test_rejected_request_type_accepts_an_opaque_non_clone_non_debug_payload() {
     fn recover(error: LocalSubmitError<OpaqueRequest>) -> OpaqueRequest {
         error.into_request()
     }
@@ -42,7 +50,7 @@ fn rejected_request_type_accepts_an_opaque_non_clone_non_debug_payload() {
 
 #[cfg(feature = "async")]
 #[test]
-fn lf8_async_surface_is_available_from_the_crate_root() {
+fn test_lf8_async_surface_is_available_from_the_crate_root() {
     use qubit_local_files::AsyncLocalDirectoryWalker;
     use qubit_local_files::AsyncLocalFileReader;
     use qubit_local_files::AsyncLocalFileSystem;
@@ -82,7 +90,7 @@ fn lf8_async_surface_is_available_from_the_crate_root() {
 
 #[cfg(all(feature = "async", feature = "digest"))]
 #[test]
-fn lf8_digest_surface_is_available_from_the_crate_root() {
+fn test_lf8_digest_surface_is_available_from_the_crate_root() {
     use qubit_local_files::LocalConditionalWriterCommandError;
     use qubit_local_files::LocalConditionalWriterCommitRequest;
     let _: Option<LocalConditionalWriterCommandError<sha2::Sha256>> = None;

@@ -1,10 +1,18 @@
+// =============================================================================
+//    Copyright (c) 2025 - 2026 Haixing Hu.
+//
+//    SPDX-License-Identifier: Apache-2.0
+//
+//    Licensed under the Apache License, Version 2.0.
+// =============================================================================
+
 #![cfg(feature = "async")]
 
 use std::collections::HashMap;
 use std::collections::VecDeque;
 use std::future::Future;
+use std::io;
 use std::io::SeekFrom;
-use std::io::{self};
 use std::path::PathBuf;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -148,7 +156,10 @@ impl LocalStreamDriver for FakeWorker {
                 if let Some(bytes) = state.oversized_read.take() {
                     return Poll::Ready(Ok(LocalStreamCompletion::Read(bytes)));
                 }
-                let end = state.bytes.len().min(state.position.saturating_add(*max_bytes));
+                let end = state
+                    .bytes
+                    .len()
+                    .min(state.position.saturating_add(*max_bytes));
                 let bytes = state.bytes[state.position..end].to_vec();
                 state.position = end;
                 if state.hold_read_after_execute {
@@ -204,8 +215,12 @@ fn resource(worker: Arc<FakeWorker>) -> ResourceRef<LocalStreamResource> {
     let manager = OperationManager::new(ManagerOptions::default()).unwrap();
     let mut operation = manager
         .try_submit(Default::default(), move |scope| {
-            let resources = scope.resource_scope(ResourceScopeOptions { capacity: 1 }).unwrap();
-            let resource = resources.manage(LocalStreamResource::new(FakeProxy(worker))).unwrap();
+            let resources = scope
+                .resource_scope(ResourceScopeOptions { capacity: 1 })
+                .unwrap();
+            let resource = resources
+                .manage(LocalStreamResource::new(FakeProxy(worker)))
+                .unwrap();
             Ok::<_, ()>(resource)
         })
         .unwrap();
@@ -294,8 +309,12 @@ fn walk_resource(worker: Arc<FakeWalkWorker>) -> ResourceRef<LocalWalkResource> 
     let manager = OperationManager::new(ManagerOptions::default()).unwrap();
     let mut operation = manager
         .try_submit(Default::default(), move |scope| {
-            let resources = scope.resource_scope(ResourceScopeOptions { capacity: 1 }).unwrap();
-            let resource = resources.manage(LocalWalkResource::new(FakeWalkProxy(worker))).unwrap();
+            let resources = scope
+                .resource_scope(ResourceScopeOptions { capacity: 1 })
+                .unwrap();
+            let resource = resources
+                .manage(LocalWalkResource::new(FakeWalkProxy(worker)))
+                .unwrap();
             Ok::<_, ()>(resource)
         })
         .unwrap();
@@ -375,7 +394,7 @@ fn poll_worker<T>(mut future: impl FnMut(&mut Context<'_>) -> Poll<T>) -> T {
 }
 
 #[test]
-fn async_filesystem_opens_real_reader_writer_and_bounded_walker() {
+fn test_async_filesystem_opens_real_reader_writer_and_bounded_walker() {
     use qubit_local_files::LocalFileSystem;
     use qubit_local_files::operation::LocalExecutionConfig;
     use qubit_local_files::operation::LocalIoExecutor;
@@ -393,10 +412,18 @@ fn async_filesystem_opens_real_reader_writer_and_bounded_walker() {
     std::fs::write(&input, b"real local reader").unwrap();
     let manager = OperationManager::new(ManagerOptions::default()).unwrap();
     let executor = LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).unwrap();
-    let filesystem = LocalFileSystem::host().unwrap().into_async(executor).unwrap();
+    let filesystem = LocalFileSystem::host()
+        .unwrap()
+        .into_async(executor)
+        .unwrap();
 
     let mut opening = filesystem
-        .submit_open_reader(&manager, Default::default(), input.clone(), LocalReadOptions::default())
+        .submit_open_reader(
+            &manager,
+            Default::default(),
+            input.clone(),
+            LocalReadOptions::default(),
+        )
         .unwrap();
     let mut reader = match opening.wait_outcome().unwrap() {
         OperationOutcome::Succeeded(reader) => reader,
@@ -426,7 +453,10 @@ fn async_filesystem_opens_real_reader_writer_and_bounded_walker() {
         17
     );
     let outcome = poll_worker(|cx| Box::pin(writer.commit()).as_mut().poll(cx)).unwrap();
-    assert_eq!(outcome.state(), qubit_local_files::outcome::LocalWriterState::Committed);
+    assert_eq!(
+        outcome.state(),
+        qubit_local_files::outcome::LocalWriterState::Committed
+    );
     assert_eq!(
         observer.snapshot().publication,
         qubit_local_files::LocalPublicationState::Published
@@ -454,7 +484,10 @@ fn async_filesystem_opens_real_reader_writer_and_bounded_walker() {
     );
     drop(writer);
     opening.wait_settlement().unwrap();
-    assert!(!aborted.exists(), "dropping an uncommitted writer must abort");
+    assert!(
+        !aborted.exists(),
+        "dropping an uncommitted writer must abort"
+    );
 
     let mut opening = filesystem
         .submit_open_walker(
@@ -490,7 +523,7 @@ fn async_filesystem_opens_real_reader_writer_and_bounded_walker() {
 }
 
 #[test]
-fn real_writer_commit_preserves_typed_error_and_observer() {
+fn test_real_writer_commit_preserves_typed_error_and_observer() {
     use qubit_local_files::LocalFileSystem;
     use qubit_local_files::operation::LocalExecutionConfig;
     use qubit_local_files::operation::LocalIoExecutor;
@@ -504,7 +537,10 @@ fn real_writer_commit_preserves_typed_error_and_observer() {
     let destination = directory.path().join("race.txt");
     let manager = OperationManager::new(ManagerOptions::default()).unwrap();
     let executor = LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).unwrap();
-    let filesystem = LocalFileSystem::host().unwrap().into_async(executor).unwrap();
+    let filesystem = LocalFileSystem::host()
+        .unwrap()
+        .into_async(executor)
+        .unwrap();
     let (mut opening, observer) = filesystem
         .submit_open_writer(
             &manager,
@@ -536,11 +572,15 @@ fn real_writer_commit_preserves_typed_error_and_observer() {
 }
 
 #[test]
-fn append_facts_survive_close_and_drop() {
+fn test_append_facts_survive_close_and_drop() {
     use qubit_local_files::LocalFileSystem;
-    use qubit_local_files::operation::{LocalExecutionConfig, LocalIoExecutor};
-    use qubit_local_files::options::{LocalWriteMode, LocalWriteOptions};
-    use qubit_operation::{ManagerOptions, OperationManager, OperationOutcome};
+    use qubit_local_files::operation::LocalExecutionConfig;
+    use qubit_local_files::operation::LocalIoExecutor;
+    use qubit_local_files::options::LocalWriteMode;
+    use qubit_local_files::options::LocalWriteOptions;
+    use qubit_operation::ManagerOptions;
+    use qubit_operation::OperationManager;
+    use qubit_operation::OperationOutcome;
 
     let directory = tempfile::tempdir().unwrap();
     let manager = OperationManager::new(ManagerOptions::default()).unwrap();
@@ -603,7 +643,7 @@ fn append_facts_survive_close_and_drop() {
 }
 
 #[test]
-fn walker_cumulative_path_budget_returns_every_entry() {
+fn test_walker_cumulative_path_budget_returns_every_entry() {
     use qubit_local_files::LocalFileSystem;
     use qubit_local_files::operation::LocalExecutionConfig;
     use qubit_local_files::operation::LocalIoExecutor;
@@ -623,7 +663,10 @@ fn walker_cumulative_path_budget_returns_every_entry() {
     }
     let manager = OperationManager::new(ManagerOptions::default()).unwrap();
     let executor = LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).unwrap();
-    let filesystem = LocalFileSystem::host().unwrap().into_async(executor).unwrap();
+    let filesystem = LocalFileSystem::host()
+        .unwrap()
+        .into_async(executor)
+        .unwrap();
     let mut opening = filesystem
         .submit_open_walker(
             &manager,
@@ -637,7 +680,9 @@ fn walker_cumulative_path_budget_returns_every_entry() {
         _ => panic!("walker open failed"),
     };
     let mut found = Vec::new();
-    while let Some(batch) = poll_worker(|cx| Box::pin(walker.next_batch()).as_mut().poll(cx)).unwrap() {
+    while let Some(batch) =
+        poll_worker(|cx| Box::pin(walker.next_batch()).as_mut().poll(cx)).unwrap()
+    {
         found.extend(batch);
     }
     assert_eq!(
@@ -654,7 +699,7 @@ fn walker_cumulative_path_budget_returns_every_entry() {
 }
 
 #[test]
-fn stream_handle_permit_lives_until_worker_cleanup_settles() {
+fn test_stream_handle_permit_lives_until_worker_cleanup_settles() {
     use qubit_local_files::LocalFileSystem;
     use qubit_local_files::operation::LocalExecutionConfig;
     use qubit_local_files::operation::LocalIoExecutor;
@@ -675,19 +720,31 @@ fn stream_handle_permit_lives_until_worker_cleanup_settles() {
         },
     )
     .unwrap();
-    let filesystem = LocalFileSystem::host().unwrap().into_async(executor).unwrap();
+    let filesystem = LocalFileSystem::host()
+        .unwrap()
+        .into_async(executor)
+        .unwrap();
     let mut opening = filesystem
-        .submit_open_reader(&manager, Default::default(), path.clone(), LocalReadOptions::default())
+        .submit_open_reader(
+            &manager,
+            Default::default(),
+            path.clone(),
+            LocalReadOptions::default(),
+        )
         .unwrap();
     let mut reader = match opening.wait_outcome().unwrap() {
         OperationOutcome::Succeeded(reader) => reader,
         _ => panic!("reader open failed"),
     };
-    let rejected =
-        match filesystem.submit_open_reader(&manager, Default::default(), path.clone(), LocalReadOptions::default()) {
-            Ok(_) => panic!("second stream should exceed handle capacity"),
-            Err(error) => error,
-        };
+    let rejected = match filesystem.submit_open_reader(
+        &manager,
+        Default::default(),
+        path.clone(),
+        LocalReadOptions::default(),
+    ) {
+        Ok(_) => panic!("second stream should exceed handle capacity"),
+        Err(error) => error,
+    };
     assert_eq!(
         rejected.rejection(),
         qubit_local_files::operation::LocalSubmitRejection::CapacityExceeded
@@ -696,7 +753,12 @@ fn stream_handle_permit_lives_until_worker_cleanup_settles() {
     drop(reader);
     opening.wait_settlement().unwrap();
     let mut second = filesystem
-        .submit_open_reader(&manager, Default::default(), path, LocalReadOptions::default())
+        .submit_open_reader(
+            &manager,
+            Default::default(),
+            path,
+            LocalReadOptions::default(),
+        )
         .unwrap();
     let mut reader = match second.wait_outcome().unwrap() {
         OperationOutcome::Succeeded(reader) => reader,
@@ -708,7 +770,7 @@ fn stream_handle_permit_lives_until_worker_cleanup_settles() {
 }
 
 #[test]
-fn pending_read_future_drop_keeps_the_first_chunk_for_the_next_read() {
+fn test_pending_read_future_drop_keeps_the_first_chunk_for_the_next_read() {
     let worker = Arc::new(FakeWorker::with_bytes(b"first chunk"));
     worker.hold_next();
     let mut reader = reader(&worker);
@@ -725,7 +787,7 @@ fn pending_read_future_drop_keeps_the_first_chunk_for_the_next_read() {
 }
 
 #[test]
-fn settle_rejects_and_latches_over_limit_read_completion() {
+fn test_settle_rejects_and_latches_over_limit_read_completion() {
     let worker = Arc::new(FakeWorker::default());
     worker.hold_next();
     worker.overread_next(vec![b'x'; LOCAL_STREAM_BUFFER_SIZE + 1]);
@@ -746,7 +808,7 @@ fn settle_rejects_and_latches_over_limit_read_completion() {
 }
 
 #[test]
-fn close_rejects_over_limit_read_completion_before_release() {
+fn test_close_rejects_over_limit_read_completion_before_release() {
     let worker = Arc::new(FakeWorker::default());
     worker.hold_next();
     worker.overread_next(vec![b'x'; LOCAL_STREAM_BUFFER_SIZE + 1]);
@@ -766,7 +828,7 @@ fn close_rejects_over_limit_read_completion_before_release() {
 }
 
 #[test]
-fn writes_are_accepted_only_when_owned_capacity_is_available() {
+fn test_writes_are_accepted_only_when_owned_capacity_is_available() {
     let worker = Arc::new(FakeWorker::default());
     worker.hold_next();
     let mut writer = writer(&worker);
@@ -776,7 +838,10 @@ fn writes_are_accepted_only_when_owned_capacity_is_available() {
     );
     let abandoned_input = b"old buffer".to_vec();
     assert!(poll(|cx| Pin::new(&mut writer).poll_write(cx, &abandoned_input)).is_pending());
-    assert!(worker.writes().is_empty(), "pending write must not reach worker");
+    assert!(
+        worker.writes().is_empty(),
+        "pending write must not reach worker"
+    );
 
     worker.release();
     drop(abandoned_input);
@@ -793,7 +858,7 @@ fn writes_are_accepted_only_when_owned_capacity_is_available() {
 }
 
 #[test]
-fn flush_waits_until_already_accepted_write_finishes() {
+fn test_flush_waits_until_already_accepted_write_finishes() {
     let worker = Arc::new(FakeWorker::default());
     worker.hold_next();
     let mut writer = writer(&worker);
@@ -812,7 +877,7 @@ fn flush_waits_until_already_accepted_write_finishes() {
 }
 
 #[test]
-fn ready_write_accepts_bytes_in_the_same_poll_and_zero_count_is_immediate() {
+fn test_ready_write_accepts_bytes_in_the_same_poll_and_zero_count_is_immediate() {
     let worker = Arc::new(FakeWorker::default());
     let mut writer = writer(&worker);
     assert!(matches!(
@@ -831,7 +896,7 @@ fn ready_write_accepts_bytes_in_the_same_poll_and_zero_count_is_immediate() {
 }
 
 #[test]
-fn seek_current_accounts_for_prefetched_bytes() {
+fn test_seek_current_accounts_for_prefetched_bytes() {
     let worker = Arc::new(FakeWorker::with_bytes(b"0123456789"));
     let mut reader = reader(&worker);
     let mut first = [0; 2];
@@ -841,7 +906,10 @@ fn seek_current_accounts_for_prefetched_bytes() {
     ));
     assert_eq!(&first, b"01");
     let mut seek = Box::pin(reader.seek(SeekFrom::Current(1)));
-    assert!(matches!(poll(|cx| seek.as_mut().poll(cx)), Poll::Ready(Ok(3))));
+    assert!(matches!(
+        poll(|cx| seek.as_mut().poll(cx)),
+        Poll::Ready(Ok(3))
+    ));
     drop(seek);
     let mut next = [0; 1];
     assert!(matches!(
@@ -852,7 +920,7 @@ fn seek_current_accounts_for_prefetched_bytes() {
 }
 
 #[test]
-fn pending_seek_future_repoll_returns_original_position_without_reissuing_seek() {
+fn test_pending_seek_future_repoll_returns_original_position_without_reissuing_seek() {
     let worker = Arc::new(FakeWorker::with_bytes(b"abc"));
     worker.hold_next();
     let mut reader = reader(&worker);
@@ -860,7 +928,10 @@ fn pending_seek_future_repoll_returns_original_position_without_reissuing_seek()
     assert!(poll(|cx| seek.as_mut().poll(cx)).is_pending());
 
     worker.release();
-    assert!(matches!(poll(|cx| seek.as_mut().poll(cx)), Poll::Ready(Ok(1))));
+    assert!(matches!(
+        poll(|cx| seek.as_mut().poll(cx)),
+        Poll::Ready(Ok(1))
+    ));
     drop(seek);
 
     let mut output = [0; 1];
@@ -872,7 +943,7 @@ fn pending_seek_future_repoll_returns_original_position_without_reissuing_seek()
 }
 
 #[test]
-fn new_seek_future_waits_for_cancelled_seek_then_runs_its_own_request() {
+fn test_new_seek_future_waits_for_cancelled_seek_then_runs_its_own_request() {
     let worker = Arc::new(FakeWorker::with_bytes(b"abc"));
     worker.hold_next();
     let mut reader = reader(&worker);
@@ -884,7 +955,10 @@ fn new_seek_future_waits_for_cancelled_seek_then_runs_its_own_request() {
     let mut next_seek = Box::pin(reader.seek(SeekFrom::Current(1)));
     assert!(poll(|cx| next_seek.as_mut().poll(cx)).is_pending());
     worker.release();
-    assert!(matches!(poll(|cx| next_seek.as_mut().poll(cx)), Poll::Ready(Ok(1))));
+    assert!(matches!(
+        poll(|cx| next_seek.as_mut().poll(cx)),
+        Poll::Ready(Ok(1))
+    ));
     drop(next_seek);
 
     let mut output = [0; 1];
@@ -896,7 +970,7 @@ fn new_seek_future_waits_for_cancelled_seek_then_runs_its_own_request() {
 }
 
 #[test]
-fn cancelled_seek_remains_a_barrier_until_its_position_is_decided() {
+fn test_cancelled_seek_remains_a_barrier_until_its_position_is_decided() {
     let worker = Arc::new(FakeWorker::with_bytes(b"0123456789"));
     let mut reader = reader(&worker);
     let mut first = [0; 1];
@@ -920,7 +994,7 @@ fn cancelled_seek_remains_a_barrier_until_its_position_is_decided() {
 }
 
 #[test]
-fn current_seek_settles_completed_but_unconsumed_read_before_adjusting_offset() {
+fn test_current_seek_settles_completed_but_unconsumed_read_before_adjusting_offset() {
     let mut bytes = vec![b'a'; 128 * 1024];
     bytes[1] = b'b';
     let worker = Arc::new(FakeWorker::with_bytes(&bytes));
@@ -932,7 +1006,10 @@ fn current_seek_settles_completed_but_unconsumed_read_before_adjusting_offset() 
     let mut seek = Box::pin(reader.seek(SeekFrom::Current(1)));
     assert!(poll(|cx| seek.as_mut().poll(cx)).is_pending());
     worker.release();
-    assert!(matches!(poll(|cx| seek.as_mut().poll(cx)), Poll::Ready(Ok(1))));
+    assert!(matches!(
+        poll(|cx| seek.as_mut().poll(cx)),
+        Poll::Ready(Ok(1))
+    ));
     drop(seek);
 
     assert!(matches!(
@@ -943,7 +1020,7 @@ fn current_seek_settles_completed_but_unconsumed_read_before_adjusting_offset() 
 }
 
 #[test]
-fn failed_seek_marks_position_unknown_and_never_delivers_old_prefetch() {
+fn test_failed_seek_marks_position_unknown_and_never_delivers_old_prefetch() {
     let worker = Arc::new(FakeWorker::with_bytes(b"0123456789"));
     let mut reader = reader(&worker);
     let mut first = [0; 1];
@@ -965,7 +1042,7 @@ fn failed_seek_marks_position_unknown_and_never_delivers_old_prefetch() {
 }
 
 #[test]
-fn close_is_independent_of_scope_settlement_and_is_repeatable() {
+fn test_close_is_independent_of_scope_settlement_and_is_repeatable() {
     let worker = Arc::new(FakeWorker::default());
     let mut writer = writer(&worker);
     assert!(matches!(
@@ -981,7 +1058,7 @@ fn close_is_independent_of_scope_settlement_and_is_repeatable() {
 }
 
 #[test]
-fn close_completes_while_operation_scope_is_still_open() {
+fn test_close_completes_while_operation_scope_is_still_open() {
     let manager = OperationManager::new(ManagerOptions::default()).unwrap();
     let worker = Arc::new(FakeWorker::default());
     let worker_for_operation = Arc::clone(&worker);
@@ -989,7 +1066,9 @@ fn close_completes_while_operation_scope_is_still_open() {
     let (continue_tx, continue_rx) = sync_channel(0);
     let mut operation = manager
         .try_submit(Default::default(), move |scope| {
-            let resources = scope.resource_scope(ResourceScopeOptions { capacity: 1 }).unwrap();
+            let resources = scope
+                .resource_scope(ResourceScopeOptions { capacity: 1 })
+                .unwrap();
             let resource = resources
                 .manage(LocalStreamResource::new(FakeProxy(worker_for_operation)))
                 .unwrap();
@@ -1014,16 +1093,20 @@ fn close_completes_while_operation_scope_is_still_open() {
 }
 
 #[test]
-fn stream_drop_requests_worker_close_without_blocking() {
+fn test_stream_drop_requests_worker_close_without_blocking() {
     let worker = Arc::new(FakeWorker::default());
     let writer = writer(&worker);
     drop(writer);
     assert!(worker.0.lock().unwrap().close_requested);
-    assert_eq!(worker.0.lock().unwrap().close_count, 0, "drop only enqueues close");
+    assert_eq!(
+        worker.0.lock().unwrap().close_count,
+        0,
+        "drop only enqueues close"
+    );
 }
 
 #[test]
-fn cancelled_close_can_be_observed_by_a_later_close_call() {
+fn test_cancelled_close_can_be_observed_by_a_later_close_call() {
     let worker = Arc::new(FakeWorker::default());
     worker.hold_next();
     let mut writer = writer(&worker);
@@ -1039,7 +1122,7 @@ fn cancelled_close_can_be_observed_by_a_later_close_call() {
 }
 
 #[test]
-fn cloned_resource_reference_cannot_create_a_second_mutable_stream() {
+fn test_cloned_resource_reference_cannot_create_a_second_mutable_stream() {
     let worker = Arc::new(FakeWorker::default());
     let resource = resource(Arc::clone(&worker));
     let second_reference = resource.clone();
@@ -1049,7 +1132,7 @@ fn cloned_resource_reference_cannot_create_a_second_mutable_stream() {
 }
 
 #[test]
-fn partial_write_failure_latches_actual_count_and_driver_panic_is_unconfirmed() {
+fn test_partial_write_failure_latches_actual_count_and_driver_panic_is_unconfirmed() {
     let worker = Arc::new(FakeWorker::default());
     worker.partial_then_fail(2);
     let mut writer = writer(&worker);
@@ -1089,7 +1172,7 @@ fn partial_write_failure_latches_actual_count_and_driver_panic_is_unconfirmed() 
 }
 
 #[test]
-fn separate_streams_keep_independent_offsets() {
+fn test_separate_streams_keep_independent_offsets() {
     let first_worker = Arc::new(FakeWorker::with_bytes(b"abc"));
     let second_worker = Arc::new(FakeWorker::with_bytes(b"XYZ"));
     let mut first = reader(&first_worker);
@@ -1113,8 +1196,12 @@ fn separate_streams_keep_independent_offsets() {
 }
 
 #[test]
-fn walker_enforces_batch_limits_and_drop_confirms_worker_close() {
-    let oversized = Some((0..129).map(|index| PathBuf::from(format!("entry-{index}"))).collect());
+fn test_walker_enforces_batch_limits_and_drop_confirms_worker_close() {
+    let oversized = Some(
+        (0..129)
+            .map(|index| PathBuf::from(format!("entry-{index}")))
+            .collect(),
+    );
     let worker = Arc::new(FakeWalkWorker::with_batches([oversized]));
     let mut walker = AsyncLocalDirectoryWalker::new(walk_resource(Arc::clone(&worker))).unwrap();
     let error = match poll(|cx| Box::pin(walker.next_batch()).as_mut().poll(cx)) {
@@ -1129,7 +1216,10 @@ fn walker_enforces_batch_limits_and_drop_confirms_worker_close() {
     drop(walker);
     assert!(worker.0.lock().unwrap().stopped);
 
-    let worker = Arc::new(FakeWalkWorker::with_batches([Some(vec![PathBuf::from("entry")]), None]));
+    let worker = Arc::new(FakeWalkWorker::with_batches([
+        Some(vec![PathBuf::from("entry")]),
+        None,
+    ]));
     worker.0.lock().unwrap().allow_close = false;
     let mut walker = AsyncLocalDirectoryWalker::new(walk_resource(Arc::clone(&worker))).unwrap();
     let observer = walker.close_observer();
