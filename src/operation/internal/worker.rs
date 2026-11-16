@@ -1,18 +1,25 @@
-use std::collections::VecDeque;
+// =============================================================================
+//    Copyright (c) 2025 - 2026 Haixing Hu.
+//
+//    SPDX-License-Identifier: Apache-2.0
+//
+//    Licensed under the Apache License, Version 2.0.
+// =============================================================================
+//! Bounded ordinary and cleanup queues used by local I/O workers.
+
 use std::sync::Condvar;
 use std::sync::Mutex;
 
 use super::permits::Permit;
+mod queue_state;
 
-pub(crate) struct QueueState {
-    ordinary: VecDeque<Box<dyn FnOnce() + Send + 'static>>,
-    cleanup: VecDeque<Box<dyn FnOnce() + Send + 'static>>,
-    stopping: bool,
-    last_was_cleanup: bool,
-}
+use queue_state::QueueState;
 
+/// Runs queued local I/O jobs while preserving a cleanup execution lane.
 pub(crate) struct WorkerQueue {
+    /// Queue state shared with producers and the worker thread.
     state: Mutex<QueueState>,
+    /// Wakes the worker when work is enqueued or shutdown is requested.
     wake: Condvar,
 }
 
@@ -31,6 +38,18 @@ impl Default for WorkerQueue {
 }
 
 impl WorkerQueue {
+    /// Enqueues ordinary or cleanup work up to the selected queue limit.
+    ///
+    /// # Parameters
+    ///
+    /// - `job`: Owned task to run on the worker thread.
+    /// - `cleanup`: Selects the cleanup queue when true.
+    /// - `limit`: Maximum number of tasks allowed in the selected queue.
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(())` after enqueueing or the original task when the queue is
+    /// stopped or full.
     pub(crate) fn push(
         &self,
         job: Box<dyn FnOnce() + Send + 'static>,
@@ -54,6 +73,18 @@ impl WorkerQueue {
         Ok(())
     }
 
+    /// Enqueues cleanup work using its pre-reserved cleanup permit.
+    ///
+    /// # Parameters
+    ///
+    /// - `job`: Owned cleanup task to run on the worker thread.
+    /// - `permit`: Capacity reserved for this cleanup operation.
+    /// - `limit`: Maximum number of cleanup tasks allowed in the queue.
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(())` after enqueueing or both the task and permit when the
+    /// queue is stopped or full.
     pub(crate) fn push_cleanup(
         &self,
         job: Box<dyn FnOnce() + Send + 'static>,
@@ -73,6 +104,7 @@ impl WorkerQueue {
         Ok(())
     }
 
+    /// Runs queued tasks until shutdown has been requested and both queues drain.
     pub(crate) fn run(&self) {
         loop {
             let job = {
@@ -103,8 +135,12 @@ impl WorkerQueue {
         }
     }
 
+    /// Requests worker shutdown after queued work has been processed.
     pub(crate) fn stop(&self) {
-        self.state.lock().unwrap_or_else(|e| e.into_inner()).stopping = true;
+        self.state
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .stopping = true;
         self.wake.notify_all();
     }
 }

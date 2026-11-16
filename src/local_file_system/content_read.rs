@@ -65,7 +65,11 @@ impl LocalFileSystem {
     /// # Errors
     ///
     /// Returns path-resolution, opening, reading, or byte-limit errors.
-    pub fn read_all_with_options(&self, path: &Path, options: &LocalReadAllOptions) -> LocalResult<Vec<u8>> {
+    pub fn read_all_with_options(
+        &self,
+        path: &Path,
+        options: &LocalReadAllOptions,
+    ) -> LocalResult<Vec<u8>> {
         self.read_all_with_context(path, options, |bytes, _, _| Ok(bytes))
     }
     /// Reads a complete UTF-8 text file using the filesystem's reader defaults.
@@ -102,11 +106,19 @@ impl LocalFileSystem {
     ///
     /// Returns path-resolution, opening, reading, byte-limit, or UTF-8 decoding
     /// errors.
-    pub fn read_text_with_options(&self, path: &Path, options: &LocalReadAllOptions) -> LocalResult<String> {
+    pub fn read_text_with_options(
+        &self,
+        path: &Path,
+        options: &LocalReadAllOptions,
+    ) -> LocalResult<String> {
         self.read_all_with_context(path, options, |bytes, absolute, pwd| {
             String::from_utf8(bytes).map_err(|source| {
                 with_current_directory(
-                    LocalFileError::from_utf8(LocalFileOperation::Read, Some(absolute.to_path_buf()), source),
+                    LocalFileError::from_utf8(
+                        LocalFileOperation::Read,
+                        Some(absolute.to_path_buf()),
+                        source,
+                    ),
                     pwd,
                 )
             })
@@ -136,8 +148,14 @@ impl LocalFileSystem {
         path: &Path,
         options: &LocalSnapshotOptions,
     ) -> LocalResult<crate::LocalFileSnapshot> {
-        let symlink_policy = self.read_symlink_policy(options.read_options(), options.symlink_policy());
-        validate_scope_symlink_policy(self.scope(), symlink_policy, LocalFileOperation::Read, Some(path))?;
+        let symlink_policy =
+            self.read_symlink_policy(options.read_options(), options.symlink_policy());
+        validate_scope_symlink_policy(
+            self.scope(),
+            symlink_policy,
+            LocalFileOperation::Read,
+            Some(path),
+        )?;
         let resolver = self.resolver_for(path, LocalFileOperation::Read)?;
         let resolved = resolve_operation_path(&resolver, path, LocalFileOperation::Read)?;
         let reader = self.open_resolved_reader_with_policy(
@@ -147,20 +165,21 @@ impl LocalFileSystem {
             resolver.current_directory(),
             symlink_policy,
         )?;
-        let mut observed = LocalObservedReader::from_reader(reader, LocalObservationRequirement::Required)
-            .map_err(|error| {
-                operation_error(
-                    error,
-                    LocalFileOperation::Read,
-                    resolved.namespace_absolute(),
-                    None,
-                    resolver.current_directory(),
-                )
-            })?
-            .bind_error_context(
-                resolved.namespace_absolute().to_path_buf(),
-                resolver.current_directory().map(Path::to_path_buf),
-            );
+        let mut observed =
+            LocalObservedReader::from_reader(reader, LocalObservationRequirement::Required)
+                .map_err(|error| {
+                    operation_error(
+                        error,
+                        LocalFileOperation::Read,
+                        resolved.namespace_absolute(),
+                        None,
+                        resolver.current_directory(),
+                    )
+                })?
+                .bind_error_context(
+                    resolved.namespace_absolute().to_path_buf(),
+                    resolver.current_directory().map(Path::to_path_buf),
+                );
         let before = observed.observation().clone();
         if before.metadata().len() > options.max_bytes() {
             return Err(operation_error(
@@ -175,15 +194,17 @@ impl LocalFileSystem {
                 resolver.current_directory(),
             ));
         }
-        let bytes = observed.read_to_end_limited(options.max_bytes()).map_err(|error| {
-            operation_error(
-                error,
-                LocalFileOperation::Read,
-                resolved.namespace_absolute(),
-                None,
-                resolver.current_directory(),
-            )
-        })?;
+        let bytes = observed
+            .read_to_end_limited(options.max_bytes())
+            .map_err(|error| {
+                operation_error(
+                    error,
+                    LocalFileOperation::Read,
+                    resolved.namespace_absolute(),
+                    None,
+                    resolver.current_directory(),
+                )
+            })?;
         #[cfg(test)]
         crate::observation::snapshot::run_read_hook();
         let after = observed.observe_now().map_err(|error| {
@@ -197,7 +218,10 @@ impl LocalFileSystem {
         })?;
         if !crate::observation::snapshot::observations_match(&before, &after, bytes.len() as u64) {
             return Err(operation_error(
-                LocalFileError::new(LocalFileErrorKind::ChangedDuringRead, LocalFileOperation::Read),
+                LocalFileError::new(
+                    LocalFileErrorKind::ChangedDuringRead,
+                    LocalFileOperation::Read,
+                ),
                 LocalFileOperation::Read,
                 resolved.namespace_absolute(),
                 None,
@@ -253,7 +277,12 @@ impl LocalFileSystem {
         options: &LocalReadOptions,
     ) -> LocalResult<Vec<u8>> {
         let symlink_policy = self.read_symlink_policy(options, None);
-        validate_scope_symlink_policy(self.scope(), symlink_policy, LocalFileOperation::Read, Some(path))?;
+        validate_scope_symlink_policy(
+            self.scope(),
+            symlink_policy,
+            LocalFileOperation::Read,
+            Some(path),
+        )?;
         let resolver = self.resolver_for(path, LocalFileOperation::Read)?;
         let resolved = resolve_operation_path(&resolver, path, LocalFileOperation::Read)?;
         let error_path = resolved.namespace_absolute().to_path_buf();
@@ -279,22 +308,20 @@ impl LocalFileSystem {
             )
         })
     }
-    /// Reads the file and passes its bytes and resolved path context to
-    /// `finish`.
+    /// Reads a complete file into a byte vector using a caller-provided reserve
+    /// policy for each additional allocation.
     ///
-    /// The callback runs only after the complete bounded read succeeds and can
-    /// preserve namespace and PWD context when converting the result.
-    ///
-    /// # Type Parameters
-    ///
-    /// - `T`: Result type produced by the conversion callback.
+    /// The read preserves the configured namespace and path resolution policy.
     ///
     /// # Parameters
     ///
     /// - `path`: Namespace path of the regular file to read.
     /// - `options`: Reader overrides and optional maximum byte count.
-    /// - `finish`: Conversion applied to the complete bytes and resolved
-    ///   context.
+    /// - `reserve`: Callback that reserves memory before the output vector grows.
+    ///
+    /// # Returns
+    ///
+    /// Returns the complete file contents after the bounded read succeeds.
     #[cfg(feature = "async")]
     pub(crate) fn read_all_with_options_and_reserver<F>(
         &self,
@@ -308,6 +335,21 @@ impl LocalFileSystem {
         self.read_all_with_context_and_reserver(path, options, reserve, |bytes, _, _| Ok(bytes))
     }
 
+    /// Reads a complete file and converts its bytes with resolved path context.
+    ///
+    /// # Type Parameters
+    ///
+    /// - `T`: Value produced by the conversion callback.
+    ///
+    /// # Parameters
+    ///
+    /// - `path`: Namespace path of the regular file to read.
+    /// - `options`: Reader overrides and optional maximum byte count.
+    /// - `finish`: Conversion applied after the complete bounded read.
+    ///
+    /// # Returns
+    ///
+    /// Returns the converted value after reading succeeds.
     fn read_all_with_context<T>(
         &self,
         path: &Path,
@@ -317,11 +359,32 @@ impl LocalFileSystem {
         self.read_all_with_context_and_reserver(
             path,
             options,
-            |output, additional| output.try_reserve(additional).map_err(std::io::Error::other),
+            |output, additional| {
+                output
+                    .try_reserve(additional)
+                    .map_err(std::io::Error::other)
+            },
             finish,
         )
     }
 
+    /// Reads a complete file with explicit allocation and result conversion.
+    ///
+    /// # Type Parameters
+    ///
+    /// - `T`: Value produced by the conversion callback.
+    /// - `F`: Allocation reservation callback type.
+    ///
+    /// # Parameters
+    ///
+    /// - `path`: Namespace path of the regular file to read.
+    /// - `options`: Reader overrides and optional maximum byte count.
+    /// - `reserve`: Callback that reserves memory before the output vector grows.
+    /// - `finish`: Conversion applied after the complete bounded read.
+    ///
+    /// # Returns
+    ///
+    /// Returns the converted value after reading succeeds.
     fn read_all_with_context_and_reserver<T, F>(
         &self,
         path: &Path,
@@ -334,7 +397,12 @@ impl LocalFileSystem {
     {
         let read_options = options.read_options().unwrap_or(&self.defaults.read);
         let symlink_policy = self.read_symlink_policy(read_options, options.symlink_policy());
-        validate_scope_symlink_policy(self.scope(), symlink_policy, LocalFileOperation::Read, Some(path))?;
+        validate_scope_symlink_policy(
+            self.scope(),
+            symlink_policy,
+            LocalFileOperation::Read,
+            Some(path),
+        )?;
         let resolver = self.resolver_for(path, LocalFileOperation::Read)?;
         let resolved = resolve_operation_path(&resolver, path, LocalFileOperation::Read)?;
         let mut reader = self.open_resolved_reader_with_policy(
@@ -362,18 +430,25 @@ impl LocalFileSystem {
         }
         #[cfg(test)]
         crate::observation::snapshot::run_read_hook();
-        let bytes = crate::observation::reader::collect_limited_with_reserver(&mut reader, maximum, reserve).map_err(
-            |error| {
-                operation_error(
-                    error,
-                    LocalFileOperation::Read,
-                    resolved.namespace_absolute(),
-                    None,
-                    resolver.current_directory(),
-                )
-            },
-        )?;
-        finish(bytes, resolved.namespace_absolute(), resolver.current_directory())
+        let bytes = crate::observation::reader::collect_limited_with_reserver(
+            &mut reader,
+            maximum,
+            reserve,
+        )
+        .map_err(|error| {
+            operation_error(
+                error,
+                LocalFileOperation::Read,
+                resolved.namespace_absolute(),
+                None,
+                resolver.current_directory(),
+            )
+        })?;
+        finish(
+            bytes,
+            resolved.namespace_absolute(),
+            resolver.current_directory(),
+        )
     }
 }
 
@@ -393,7 +468,9 @@ fn try_reserve_prefix(output: &mut Vec<u8>, additional: usize) -> std::io::Resul
     if tests::should_fail_prefix_reserve() {
         return Err(std::io::Error::other("injected prefix reserve failure"));
     }
-    output.try_reserve(additional).map_err(std::io::Error::other)
+    output
+        .try_reserve(additional)
+        .map_err(std::io::Error::other)
 }
 /// Collects at most `maximum` bytes, retrying interrupted reads and discarding
 /// partial output on error.
@@ -417,7 +494,11 @@ fn try_reserve_prefix(output: &mut Vec<u8>, additional: usize) -> std::io::Resul
 ///
 /// Returns `ResourceLimit` when reservation fails, or an I/O error when reading
 /// fails.
-fn collect_prefix_with_reserver<S, F>(input: &mut S, maximum: usize, mut reserve: F) -> LocalResult<Vec<u8>>
+fn collect_prefix_with_reserver<S, F>(
+    input: &mut S,
+    maximum: usize,
+    mut reserve: F,
+) -> LocalResult<Vec<u8>>
 where
     S: ByteInput + ?Sized,
     F: FnMut(&mut Vec<u8>, usize) -> std::io::Result<()>,
@@ -446,8 +527,9 @@ where
         if matches!(&read_result, Err(error) if error.kind() == std::io::ErrorKind::Interrupted) {
             continue;
         }
-        let count =
-            read_result.map_err(|source| LocalFileError::from_io(LocalFileOperation::Read, None, None, source))?;
+        let count = read_result.map_err(|source| {
+            LocalFileError::from_io(LocalFileOperation::Read, None, None, source)
+        })?;
         if count == 0 {
             break;
         }
@@ -493,7 +575,8 @@ mod tests {
     }
 
     fn fail_prefix_reserve_after(successful_reserves: usize) {
-        PREFIX_RESERVE_FAILURE_AFTER.with(|failure_after| failure_after.set(Some(successful_reserves)));
+        PREFIX_RESERVE_FAILURE_AFTER
+            .with(|failure_after| failure_after.set(Some(successful_reserves)));
     }
 
     fn assert_prefix_allocation_context(
@@ -551,7 +634,8 @@ mod tests {
         assert!(
             output.status.success()
                 && stdout.contains("running 1 test")
-                && stdout.contains("test_prefix_allocation_failure_keeps_host_relative_context ... ok"),
+                && stdout
+                    .contains("test_prefix_allocation_failure_keeps_host_relative_context ... ok"),
             "isolated relative-path test must execute and pass; status: {}; stdout: {}; stderr: {}",
             output.status,
             stdout,
@@ -575,8 +659,10 @@ mod tests {
     #[test]
     fn test_prefix_allocation_failure_before_first_chunk_is_resource_limit() {
         let mut input = Cursor::new(b"payload");
-        let error = collect_prefix_with_reserver(&mut input, 8, |_, _| Err(std::io::Error::other("reserve failure")))
-            .expect_err("first reserve should fail");
+        let error = collect_prefix_with_reserver(&mut input, 8, |_, _| {
+            Err(std::io::Error::other("reserve failure"))
+        })
+        .expect_err("first reserve should fail");
         assert_eq!(error.kind(), LocalFileErrorKind::ResourceLimit);
         assert_eq!(error.operation(), LocalFileOperation::Read);
         let error = operation_error(
@@ -597,7 +683,9 @@ mod tests {
         let error = collect_prefix_with_reserver(&mut input, 8193, |output, additional| {
             reserves += 1;
             if reserves == 1 {
-                output.try_reserve(additional).map_err(std::io::Error::other)
+                output
+                    .try_reserve(additional)
+                    .map_err(std::io::Error::other)
             } else {
                 Err(std::io::Error::other("reserve failure"))
             }
@@ -629,7 +717,9 @@ mod tests {
             interrupt_next: true,
         };
         let result = collect_prefix_with_reserver(&mut input, 7, |output, additional| {
-            output.try_reserve(additional).map_err(std::io::Error::other)
+            output
+                .try_reserve(additional)
+                .map_err(std::io::Error::other)
         })
         .expect("prefix should collect");
         assert_eq!(result, b"payload");
@@ -678,6 +768,10 @@ mod tests {
         assert_eq!(LocalFileOperation::Read, error.operation());
         assert_eq!(Some(path.as_path()), error.path());
         assert_eq!(std::io::ErrorKind::Other, error.io_error_kind());
-        assert!(error.to_string().contains("injected native I/O contract failure"));
+        assert!(
+            error
+                .to_string()
+                .contains("injected native I/O contract failure")
+        );
     }
 }
