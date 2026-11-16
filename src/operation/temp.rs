@@ -12,6 +12,28 @@ use super::executor::LocalIoExecutor;
 mod local_cleanup;
 use local_cleanup::LocalCleanup;
 
+pub(super) fn safe_clone_waker(waker: &Waker) -> Option<Waker> {
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| waker.clone())) {
+        Ok(clone) => Some(clone),
+        Err(payload) => {
+            std::mem::forget(payload);
+            None
+        }
+    }
+}
+
+pub(super) fn safe_drop_waker(waker: Option<Waker>) {
+    if let Err(payload) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| drop(waker))) {
+        std::mem::forget(payload);
+    }
+}
+
+fn safe_wake(waker: Waker) {
+    if let Err(payload) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| waker.wake())) {
+        std::mem::forget(payload);
+    }
+}
+
 /// A thread-safe control port owning a native temporary file and its permits.
 pub struct LocalTempResource {
     pub(crate) native: Mutex<Option<LocalTempNative>>,
@@ -395,19 +417,48 @@ mod tests {
             0
         );
     }
+
+    struct WakePanics;
+    struct ThreadWake(std::thread::Thread);
+    impl std::task::Wake for ThreadWake {
+        fn wake(self: Arc<Self>) {
+            self.0.unpark();
+        }
+        fn wake_by_ref(self: &Arc<Self>) {
+            self.0.unpark();
+        }
+    }
+    impl std::task::Wake for WakePanics {
+        fn wake(self: Arc<Self>) {
+            panic!("custom wake panic");
+        }
+    }
+
+    #[test]
+    fn async_sender_wake_panic_does_not_hide_the_sent_result() {
+        let (sender, mut receiver) = async_result();
+        *receiver.0.waker.lock().expect("waker lock") = Some(Waker::from(Arc::new(WakePanics)));
+        assert!(sender.send(42_u8).is_ok());
+        let waker = Waker::from(Arc::new(ThreadWake(std::thread::current())));
+        let mut context = Context::from_waker(&waker);
+        assert!(matches!(
+            Pin::new(&mut receiver).poll(&mut context),
+            Poll::Ready(42)
+        ));
+    }
 }
 struct AsyncSender<T>(Arc<AsyncResult<T>>);
 impl<T> AsyncSender<T> {
     fn send(self, value: T) -> Result<(), T> {
         *self.0.value.lock().unwrap_or_else(|e| e.into_inner()) = Some(value);
-        if let Some(waker) = self
+        let waker = self
             .0
             .waker
             .lock()
             .unwrap_or_else(|e| e.into_inner())
-            .take()
-        {
-            waker.wake();
+            .take();
+        if let Some(waker) = waker {
+            safe_wake(waker);
         }
         Ok(())
     }
@@ -425,7 +476,22 @@ impl<T> Future for AsyncReceiver<T> {
         {
             return Poll::Ready(value);
         }
-        *self.0.waker.lock().unwrap_or_else(|e| e.into_inner()) = Some(cx.waker().clone());
+        let Some(new_waker) = safe_clone_waker(cx.waker()) else {
+            return self
+                .0
+                .value
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .take()
+                .map_or(Poll::Pending, Poll::Ready);
+        };
+        let old_waker = self
+            .0
+            .waker
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .replace(new_waker);
+        safe_drop_waker(old_waker);
         if let Some(value) = self
             .0
             .value
