@@ -602,9 +602,24 @@ impl AsyncLocalFileSystem {
                                 LocalPublicationState::Unknown
                             }
                         };
-                        if publication != LocalPublicationState::NotPublished
-                            && !append_effect_recorded
-                        {
+                        if append_effect_recorded {
+                            let durability = match error.state() {
+                                crate::LocalWriteFailureState::Published => {
+                                    LocalDurabilityState::Failed
+                                }
+                                crate::LocalWriteFailureState::NotPublished
+                                | crate::LocalWriteFailureState::Indeterminate => {
+                                    LocalDurabilityState::Unknown
+                                }
+                            };
+                            update_writer_effect_observer(
+                                &observer,
+                                0,
+                                0,
+                                LocalPublicationState::Published,
+                                durability,
+                            );
+                        } else if publication != LocalPublicationState::NotPublished {
                             record_writer_effect(
                                 scope,
                                 &observer,

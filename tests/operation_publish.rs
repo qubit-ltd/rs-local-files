@@ -1082,6 +1082,54 @@ fn append_effect_is_published_before_worker_panic_and_cleanup_releases_writer() 
     assert_eq!(settlement.recovery_count, 0);
 }
 
+#[cfg(all(feature = "test-support", unix))]
+#[test]
+fn append_sync_failure_preserves_published_bytes_and_failed_durability() {
+    use qubit_local_files::operation::publish::LocalWriterCommandError;
+    use qubit_local_files::policy::LocalDurabilityRequirement;
+    use qubit_local_files::test_support::install_test_fault_shared;
+
+    let _support_lock = PUBLISH_TEST_SUPPORT_LOCK
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
+    let directory = tempfile::tempdir().unwrap();
+    let destination = directory.path().join("append-sync-failure");
+    std::fs::write(&destination, b"prefix:").unwrap();
+    let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+    let filesystem = facade(&manager);
+    let fault = install_test_fault_shared("writer-append-required-sync").unwrap();
+    let (mut operation, observer) = filesystem
+        .submit_writer_commit(
+            &manager,
+            Default::default(),
+            LocalWriterCommitRequest {
+                path: destination.clone(),
+                options: LocalWriteOptions::new(LocalWriteMode::Append)
+                    .with_durability(LocalDurabilityRequirement::Required),
+                bytes: b"suffix".to_vec(),
+            },
+            LocalOperationOptions::default(),
+        )
+        .unwrap();
+    assert!(matches!(
+        operation.wait_outcome().unwrap(),
+        OperationOutcome::Failed(LocalWriterCommandError::Commit(_))
+    ));
+    drop(fault);
+    assert_eq!(std::fs::read(destination).unwrap(), b"prefix:suffix");
+    let facts = observer.snapshot();
+    assert_eq!(
+        facts.publication,
+        qubit_local_files::operation::LocalPublicationState::Published
+    );
+    assert_eq!(
+        facts.durability,
+        qubit_local_files::operation::LocalDurabilityState::Failed
+    );
+    assert_eq!(facts.modified_bytes, 6);
+    assert_eq!(facts.modified_count, 1);
+}
+
 #[cfg(feature = "test-support")]
 #[test]
 fn stop_during_native_publish_preserves_published_fact_when_parent_sync_fails() {
