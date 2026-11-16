@@ -1,3 +1,11 @@
+// =============================================================================
+//    Copyright (c) 2025 - 2026 Haixing Hu.
+//
+//    SPDX-License-Identifier: Apache-2.0
+//
+//    Licensed under the Apache License, Version 2.0.
+// =============================================================================
+
 use std::io;
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -20,33 +28,52 @@ use super::internal::worker::WorkerQueue;
 /// Bounded local I/O worker group associated with an application manager.
 #[derive(Clone)]
 pub struct LocalIoExecutor {
+    /// Stores the inner associated with this value.
     pub(crate) inner: Arc<ExecutorInner>,
+    /// Stores the  owner associated with this value.
     _owner: Arc<WorkerOwner>,
 }
 
+/// Represents executor inner within the local operation subsystem.
 pub(crate) struct ExecutorInner {
+    /// Stores the group associated with this value.
     pub(crate) group: OperationGroup,
+    /// Stores the config associated with this value.
     pub(crate) config: LocalExecutionConfig,
+    /// Stores the queue associated with this value.
     pub(crate) queue: Arc<WorkerQueue>,
+    /// Stores the queue slots associated with this value.
     pub(crate) queue_slots: PermitPool,
+    /// Stores the waiter slots associated with this value.
     pub(crate) waiter_slots: PermitPool,
+    /// Stores the byte slots associated with this value.
     pub(crate) byte_slots: PermitPool,
+    /// Stores the handle slots associated with this value.
     pub(crate) handle_slots: PermitPool,
     #[allow(dead_code)]
+    /// Stores the disk slots associated with this value.
     pub(crate) disk_slots: DiskPermitPool,
+    /// Stores the fact slots associated with this value.
     pub(crate) fact_slots: PermitPool,
     #[allow(dead_code)]
+    /// Stores the cleanup slots associated with this value.
     pub(crate) cleanup_slots: PermitPool,
 }
 
+/// Represents worker owner within the local operation subsystem.
 struct WorkerOwner {
+    /// Stores the queue associated with this value.
     queue: Arc<WorkerQueue>,
+    /// Stores the workers associated with this value.
     workers: Mutex<Vec<JoinHandle<()>>>,
 }
 
 impl LocalIoExecutor {
     /// Starts a bounded worker group attached to `manager`.
-    pub fn new(manager: OperationManager, config: LocalExecutionConfig) -> Result<Self, LocalExecutorCreateError> {
+    pub fn new(
+        manager: OperationManager,
+        config: LocalExecutionConfig,
+    ) -> Result<Self, LocalExecutorCreateError> {
         validate(&config).map_err(LocalExecutorCreateError::InvalidConfig)?;
         let group_capacity = config
             .queue_capacity
@@ -91,6 +118,7 @@ impl LocalIoExecutor {
         &self.inner.config
     }
 
+    /// Runs the reserve slot behavior while preserving the operation lifecycle invariants.
     pub(crate) fn reserve_slot(&self) -> Option<Permit> {
         self.inner
             .queue_slots
@@ -98,23 +126,40 @@ impl LocalIoExecutor {
             .or_else(|| self.inner.waiter_slots.try_acquire(1))
     }
 
+    /// Runs the reserve bytes behavior while preserving the operation lifecycle invariants.
+
+    /// # Parameters
+    /// - `amount` — supplies data or policy for this operation.
     pub(crate) fn reserve_bytes(&self, amount: usize) -> Option<Permit> {
         self.inner.byte_slots.try_acquire(amount)
     }
 
+    /// Runs the reserve handle behavior while preserving the operation lifecycle invariants.
     pub(crate) fn reserve_handle(&self) -> Option<Permit> {
         self.inner.handle_slots.try_acquire(1)
     }
 
     #[allow(dead_code)]
+    /// Runs the reserve disk behavior while preserving the operation lifecycle invariants.
+
+    /// # Parameters
+    /// - `amount` — supplies data or policy for this operation.
     pub(crate) fn reserve_disk(&self, amount: u64) -> Option<DiskPermit> {
         self.inner.disk_slots.try_acquire(amount)
     }
 
+    /// Runs the reserve fact behavior while preserving the operation lifecycle invariants.
     pub(crate) fn reserve_fact(&self) -> Option<Permit> {
         self.inner.fact_slots.try_acquire(1)
     }
 
+    /// Runs the enqueue task behavior while preserving the operation lifecycle invariants.
+
+    /// # Type Parameters
+    /// - `F` — type used by this operation.
+
+    /// # Parameters
+    /// - `task` — supplies data or policy for this operation.
     pub(crate) fn enqueue_task<F>(&self, task: F) -> Result<(), ()>
     where
         F: FnOnce() + Send + 'static,
@@ -140,11 +185,17 @@ impl LocalIoExecutor {
     }
 
     #[allow(dead_code)]
+    /// Runs the reserve cleanup behavior while preserving the operation lifecycle invariants.
     pub(crate) fn reserve_cleanup(&self) -> Option<Permit> {
         self.inner.cleanup_slots.try_acquire(1)
     }
 
     #[allow(dead_code)]
+    /// Runs the enqueue cleanup behavior while preserving the operation lifecycle invariants.
+
+    /// # Parameters
+    /// - `job` — supplies data or policy for this operation.
+    /// - `permit` — supplies data or policy for this operation.
     pub(crate) fn enqueue_cleanup(
         &self,
         job: Box<dyn FnOnce() + Send + 'static>,
@@ -156,7 +207,20 @@ impl LocalIoExecutor {
     }
 }
 
-fn spawn_workers<F>(queue: &Arc<WorkerQueue>, count: usize, mut spawn: F) -> io::Result<Vec<JoinHandle<()>>>
+/// Runs the spawn workers behavior while preserving the operation lifecycle invariants.
+
+/// # Type Parameters
+/// - `F` — type used by this operation.
+
+/// # Parameters
+/// - `queue` — supplies data or policy for this operation.
+/// - `count` — supplies data or policy for this operation.
+/// - `spawn` — supplies data or policy for this operation.
+fn spawn_workers<F>(
+    queue: &Arc<WorkerQueue>,
+    count: usize,
+    mut spawn: F,
+) -> io::Result<Vec<JoinHandle<()>>>
 where
     F: FnMut(usize, Arc<WorkerQueue>) -> io::Result<JoinHandle<()>>,
 {
@@ -177,6 +241,7 @@ where
 }
 
 impl Drop for WorkerOwner {
+    /// Runs the drop behavior while preserving the operation lifecycle invariants.
     fn drop(&mut self) {
         self.queue.stop();
         let workers = self.workers.get_mut().unwrap_or_else(|e| e.into_inner());
@@ -186,6 +251,10 @@ impl Drop for WorkerOwner {
     }
 }
 
+/// Runs the validate behavior while preserving the operation lifecycle invariants.
+
+/// # Parameters
+/// - `config` — supplies data or policy for this operation.
 fn validate(config: &LocalExecutionConfig) -> Result<(), LocalExecutorConfigError> {
     if config.worker_count == 0 {
         return Err(LocalExecutorConfigError::ZeroWorkers);
@@ -229,7 +298,18 @@ mod tests {
     use crate::operation::internal::prepared_local_job::PreparedLocalJob;
     use crate::operation::internal::worker::WorkerQueue;
 
-    fn make_job<F>(executor: &LocalIoExecutor, task: F) -> std::sync::Arc<PreparedLocalJob<(), (), ()>>
+    /// Runs the make job behavior while preserving the operation lifecycle invariants.
+
+    /// # Type Parameters
+    /// - `F` — type used by this operation.
+
+    /// # Parameters
+    /// - `executor` — supplies data or policy for this operation.
+    /// - `task` — supplies data or policy for this operation.
+    fn make_job<F>(
+        executor: &LocalIoExecutor,
+        task: F,
+    ) -> std::sync::Arc<PreparedLocalJob<(), (), ()>>
     where
         F: FnOnce(()) -> OperationOutcome<(), ()> + Send + 'static,
     {
@@ -237,6 +317,15 @@ mod tests {
         make_job_with_slot(executor, slot, task)
     }
 
+    /// Runs the make job with slot behavior while preserving the operation lifecycle invariants.
+
+    /// # Type Parameters
+    /// - `F` — type used by this operation.
+
+    /// # Parameters
+    /// - `executor` — supplies data or policy for this operation.
+    /// - `slot` — supplies data or policy for this operation.
+    /// - `task` — supplies data or policy for this operation.
     fn make_job_with_slot<F>(
         executor: &LocalIoExecutor,
         slot: super::Permit,
@@ -257,7 +346,8 @@ mod tests {
     }
 
     #[test]
-    fn partial_worker_start_failure_stops_and_joins_started_workers() {
+    /// Runs the test partial worker start failure stops and joins started workers behavior while preserving the operation lifecycle invariants.
+    fn test_partial_worker_start_failure_stops_and_joins_started_workers() {
         let queue = std::sync::Arc::new(WorkerQueue::default());
         let (joined_tx, joined_rx) = mpsc::channel();
         let mut calls = 0;
@@ -282,18 +372,22 @@ mod tests {
     }
 
     #[test]
-    fn activate_queue_failure_leaves_typed_outcome_to_manager_and_releases_permits() {
+    /// Runs the test activate queue failure leaves typed outcome to manager and releases permits behavior while preserving the operation lifecycle invariants.
+    fn test_activate_queue_failure_leaves_typed_outcome_to_manager_and_releases_permits() {
         use std::task::Context;
         use std::task::Wake;
         use std::task::Waker;
 
+        /// Represents noop within the local operation subsystem.
         struct Noop;
         impl Wake for Noop {
+            /// Runs the wake behavior while preserving the operation lifecycle invariants.
             fn wake(self: std::sync::Arc<Self>) {}
         }
 
         let manager = OperationManager::new(ManagerOptions::default()).unwrap();
-        let executor = LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).unwrap();
+        let executor =
+            LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).unwrap();
         let owned = std::sync::Arc::new(std::sync::Mutex::new(executor.reserve_bytes(7).unwrap()));
         let owned_for_task = std::sync::Arc::clone(&owned);
         let fact = std::sync::Arc::new(executor.reserve_fact().unwrap());
@@ -322,13 +416,20 @@ mod tests {
         let mut context = Context::from_waker(&waker);
         assert!(
             matches!(
-                qubit_operation::PreparedExternalOperation::poll_take_outcome(&*prepared, &mut context,),
+                qubit_operation::PreparedExternalOperation::poll_take_outcome(
+                    &*prepared,
+                    &mut context,
+                ),
                 std::task::Poll::Pending
             ),
             "manager owns the sole typed ExecutionFailed outcome"
         );
-        assert!(qubit_operation::OperationControl::poll_release(&*prepared, &mut context).is_ready());
-        assert!(qubit_operation::OperationControl::poll_settlement(&*prepared, &mut context).is_ready());
+        assert!(
+            qubit_operation::OperationControl::poll_release(&*prepared, &mut context).is_ready()
+        );
+        assert!(
+            qubit_operation::OperationControl::poll_settlement(&*prepared, &mut context).is_ready()
+        );
         assert_eq!(executor.inner.queue_slots.used(), 0);
         assert_eq!(executor.inner.byte_slots.used(), 0);
         assert_eq!(executor.inner.handle_slots.used(), 0);
@@ -337,19 +438,25 @@ mod tests {
     }
 
     #[test]
-    fn reentrant_waker_can_observe_control_without_deadlocking() {
+    /// Runs the test reentrant waker can observe control without deadlocking behavior while preserving the operation lifecycle invariants.
+    fn test_reentrant_waker_can_observe_control_without_deadlocking() {
         use std::task::Context;
         use std::task::Wake;
         use std::task::Waker;
 
+        /// Represents reentrant within the local operation subsystem.
         struct Reentrant {
+            /// Stores the prepared associated with this value.
             prepared: std::sync::Arc<PreparedLocalJob<(), (), ()>>,
+            /// Stores the notified associated with this value.
             notified: mpsc::Sender<()>,
         }
         impl Wake for Reentrant {
+            /// Runs the wake behavior while preserving the operation lifecycle invariants.
             fn wake(self: std::sync::Arc<Self>) {
                 self.wake_by_ref();
             }
+            /// Runs the wake by ref behavior while preserving the operation lifecycle invariants.
             fn wake_by_ref(self: &std::sync::Arc<Self>) {
                 let _ = qubit_operation::OperationControl::snapshot(&*self.prepared);
                 let _ = self.notified.send(());
@@ -357,7 +464,8 @@ mod tests {
         }
 
         let manager = OperationManager::new(ManagerOptions::default()).unwrap();
-        let executor = LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).unwrap();
+        let executor =
+            LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).unwrap();
         let prepared = make_job(&executor, |_| OperationOutcome::Succeeded(()));
         let prepared_for_parent = std::sync::Arc::clone(&prepared);
         let manager_for_thread = manager.clone();
@@ -365,7 +473,11 @@ mod tests {
         let thread = std::thread::spawn(move || {
             let mut parent = manager_for_thread
                 .try_submit(Default::default(), move |scope| {
-                    qubit_operation::PreparedExternalOperation::bind(&*prepared_for_parent, scope.id()).unwrap();
+                    qubit_operation::PreparedExternalOperation::bind(
+                        &*prepared_for_parent,
+                        scope.id(),
+                    )
+                    .unwrap();
                     let (wake_tx, wake_rx) = mpsc::channel();
                     let waker = Waker::from(std::sync::Arc::new(Reentrant {
                         prepared: std::sync::Arc::clone(&prepared_for_parent),
@@ -373,8 +485,11 @@ mod tests {
                     }));
                     let mut context = Context::from_waker(&waker);
                     assert!(
-                        qubit_operation::OperationControl::poll_outcome(&*prepared_for_parent, &mut context,)
-                            .is_pending()
+                        qubit_operation::OperationControl::poll_outcome(
+                            &*prepared_for_parent,
+                            &mut context,
+                        )
+                        .is_pending()
                     );
                     qubit_operation::OperationControl::request_stop(
                         &*prepared_for_parent,
@@ -397,32 +512,42 @@ mod tests {
     }
 
     #[test]
-    fn panicking_waker_does_not_unwind_or_corrupt_control_state() {
+    /// Runs the test panicking waker does not unwind or corrupt control state behavior while preserving the operation lifecycle invariants.
+    fn test_panicking_waker_does_not_unwind_or_corrupt_control_state() {
         use std::task::Context;
         use std::task::Wake;
         use std::task::Waker;
 
+        /// Represents panics within the local operation subsystem.
         struct Panics;
         impl Wake for Panics {
+            /// Runs the wake behavior while preserving the operation lifecycle invariants.
             fn wake(self: std::sync::Arc<Self>) {
                 panic!("injected Waker panic");
             }
+            /// Runs the wake by ref behavior while preserving the operation lifecycle invariants.
             fn wake_by_ref(self: &std::sync::Arc<Self>) {
                 panic!("injected Waker panic");
             }
         }
 
         let manager = OperationManager::new(ManagerOptions::default()).unwrap();
-        let executor = LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).unwrap();
+        let executor =
+            LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).unwrap();
         let prepared = make_job(&executor, |_| OperationOutcome::Succeeded(()));
         let prepared_for_parent = std::sync::Arc::clone(&prepared);
         let mut parent = manager
             .try_submit(Default::default(), move |scope| {
-                qubit_operation::PreparedExternalOperation::bind(&*prepared_for_parent, scope.id()).unwrap();
+                qubit_operation::PreparedExternalOperation::bind(&*prepared_for_parent, scope.id())
+                    .unwrap();
                 let waker = Waker::from(std::sync::Arc::new(Panics));
                 let mut context = Context::from_waker(&waker);
                 assert!(
-                    qubit_operation::OperationControl::poll_outcome(&*prepared_for_parent, &mut context,).is_pending()
+                    qubit_operation::OperationControl::poll_outcome(
+                        &*prepared_for_parent,
+                        &mut context,
+                    )
+                    .is_pending()
                 );
                 qubit_operation::OperationControl::request_stop(
                     &*prepared_for_parent,
@@ -444,9 +569,11 @@ mod tests {
     }
 
     #[test]
-    fn abandon_releases_all_unstarted_permits_even_with_retained_arc() {
+    /// Runs the test abandon releases all unstarted permits even with retained arc behavior while preserving the operation lifecycle invariants.
+    fn test_abandon_releases_all_unstarted_permits_even_with_retained_arc() {
         let manager = OperationManager::new(ManagerOptions::default()).unwrap();
-        let executor = LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).unwrap();
+        let executor =
+            LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).unwrap();
         let owned = std::sync::Arc::new(std::sync::Mutex::new(executor.reserve_bytes(9).unwrap()));
         let owned_for_task = std::sync::Arc::clone(&owned);
         let observer_permit = std::sync::Arc::new(executor.reserve_fact().unwrap());
@@ -466,8 +593,11 @@ mod tests {
         let executor_for_parent = executor.clone();
         let mut parent = manager
             .try_submit(Default::default(), move |scope| {
-                qubit_operation::PreparedExternalOperation::bind(&*prepared_for_parent, scope.id()).unwrap();
-                qubit_operation::PreparedExternalOperation::abandon(std::sync::Arc::clone(&prepared_for_parent));
+                qubit_operation::PreparedExternalOperation::bind(&*prepared_for_parent, scope.id())
+                    .unwrap();
+                qubit_operation::PreparedExternalOperation::abandon(std::sync::Arc::clone(
+                    &prepared_for_parent,
+                ));
                 assert_eq!(executor_for_parent.inner.queue_slots.used(), 0);
                 assert_eq!(executor_for_parent.inner.byte_slots.used(), 0);
                 assert_eq!(executor_for_parent.inner.handle_slots.used(), 0);
@@ -483,9 +613,11 @@ mod tests {
     }
 
     #[test]
-    fn local_operation_keeps_result_budget_until_user_takes_outcome() {
+    /// Runs the test local operation keeps result budget until user takes outcome behavior while preserving the operation lifecycle invariants.
+    fn test_local_operation_keeps_result_budget_until_user_takes_outcome() {
         let manager = OperationManager::new(ManagerOptions::default()).unwrap();
-        let executor = LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).unwrap();
+        let executor =
+            LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).unwrap();
         let permit = std::sync::Arc::new(std::sync::Mutex::new(executor.reserve_bytes(8).unwrap()));
         let handle = manager
             .try_submit(Default::default(), |_| Ok::<_, ()>(vec![1_u8; 4]))
@@ -500,7 +632,8 @@ mod tests {
     }
 
     #[test]
-    fn small_read_budgets_actual_capacity_until_take_or_drop() {
+    /// Runs the test small read budgets actual capacity until take or drop behavior while preserving the operation lifecycle invariants.
+    fn test_small_read_budgets_actual_capacity_until_take_or_drop() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("small");
         std::fs::write(&path, b"tiny").unwrap();
@@ -570,14 +703,17 @@ mod tests {
     }
 
     #[test]
-    fn async_constructor_poll_never_waits_for_blocked_worker_io() {
+    /// Runs the test async constructor poll never waits for blocked worker io behavior while preserving the operation lifecycle invariants.
+    fn test_async_constructor_poll_never_waits_for_blocked_worker_io() {
         use std::future::Future;
         use std::task::Context;
         use std::task::Poll;
         use std::task::Wake;
         use std::task::Waker;
+        /// Represents noop within the local operation subsystem.
         struct Noop;
         impl Wake for Noop {
+            /// Runs the wake behavior while preserving the operation lifecycle invariants.
             fn wake(self: std::sync::Arc<Self>) {}
         }
 
@@ -612,13 +748,16 @@ mod tests {
         drop(host);
 
         let (complete_tx, complete_rx) = mpsc::channel();
-        executor.enqueue_task(move || complete_tx.send(()).unwrap()).unwrap();
+        executor
+            .enqueue_task(move || complete_tx.send(()).unwrap())
+            .unwrap();
         release_tx.send(()).unwrap();
         complete_rx.recv_timeout(Duration::from_secs(5)).unwrap();
     }
 
     #[test]
-    fn cleanup_and_ordinary_queues_make_round_robin_progress() {
+    /// Runs the test cleanup and ordinary queues make round robin progress behavior while preserving the operation lifecycle invariants.
+    fn test_cleanup_and_ordinary_queues_make_round_robin_progress() {
         let queue = std::sync::Arc::new(WorkerQueue::default());
         let worker_queue = std::sync::Arc::clone(&queue);
         let worker = std::thread::spawn(move || worker_queue.run());
@@ -641,23 +780,38 @@ mod tests {
         let cleanup_order = order_tx.clone();
         assert!(
             queue
-                .push(Box::new(move || cleanup_order.send("cleanup").unwrap()), true, 4,)
+                .push(
+                    Box::new(move || cleanup_order.send("cleanup").unwrap()),
+                    true,
+                    4,
+                )
                 .is_ok()
         );
         assert!(
             queue
-                .push(Box::new(move || order_tx.send("ordinary").unwrap()), false, 4,)
+                .push(
+                    Box::new(move || order_tx.send("ordinary").unwrap()),
+                    false,
+                    4,
+                )
                 .is_ok()
         );
         release_tx.send(()).unwrap();
-        assert_eq!(order_rx.recv_timeout(Duration::from_secs(5)).unwrap(), "ordinary");
-        assert_eq!(order_rx.recv_timeout(Duration::from_secs(5)).unwrap(), "cleanup");
+        assert_eq!(
+            order_rx.recv_timeout(Duration::from_secs(5)).unwrap(),
+            "ordinary"
+        );
+        assert_eq!(
+            order_rx.recv_timeout(Duration::from_secs(5)).unwrap(),
+            "cleanup"
+        );
         queue.stop();
         worker.join().unwrap();
     }
 
     #[test]
-    fn queue_and_waiter_permits_bound_blocked_jobs_and_return_on_release() {
+    /// Runs the test queue and waiter permits bound blocked jobs and return on release behavior while preserving the operation lifecycle invariants.
+    fn test_queue_and_waiter_permits_bound_blocked_jobs_and_return_on_release() {
         let manager = OperationManager::new(ManagerOptions::default()).unwrap();
         let executor = LocalIoExecutor::new(
             manager.clone(),
@@ -684,15 +838,23 @@ mod tests {
         let queued_slot = executor
             .reserve_slot()
             .expect("queue capacity available while first job runs");
-        let waiter_slot = executor.reserve_slot().expect("bounded waiter capacity is available");
+        let waiter_slot = executor
+            .reserve_slot()
+            .expect("bounded waiter capacity is available");
         assert!(
             executor.reserve_slot().is_none(),
             "all queue and waiter reservations are held"
         );
-        let queued = make_job_with_slot(&executor, queued_slot, |_| OperationOutcome::Succeeded(()));
-        let waiting = make_job_with_slot(&executor, waiter_slot, |_| OperationOutcome::Succeeded(()));
-        let mut queued_handle = manager.try_submit_external(Default::default(), queued).unwrap();
-        let mut waiting_handle = manager.try_submit_external(Default::default(), waiting).unwrap();
+        let queued =
+            make_job_with_slot(&executor, queued_slot, |_| OperationOutcome::Succeeded(()));
+        let waiting =
+            make_job_with_slot(&executor, waiter_slot, |_| OperationOutcome::Succeeded(()));
+        let mut queued_handle = manager
+            .try_submit_external(Default::default(), queued)
+            .unwrap();
+        let mut waiting_handle = manager
+            .try_submit_external(Default::default(), waiting)
+            .unwrap();
 
         release_tx.send(()).unwrap();
         assert!(matches!(
@@ -715,25 +877,30 @@ mod tests {
     }
 
     #[test]
-    fn stop_after_bind_before_activate_prevents_task_from_running() {
+    /// Runs the test stop after bind before activate prevents task from running behavior while preserving the operation lifecycle invariants.
+    fn test_stop_after_bind_before_activate_prevents_task_from_running() {
         use std::sync::atomic::AtomicUsize;
         use std::sync::atomic::Ordering;
         use std::task::Context;
         use std::task::Wake;
         use std::task::Waker;
 
+        /// Represents notify within the local operation subsystem.
         struct Notify(std::sync::mpsc::Sender<()>);
         impl Wake for Notify {
+            /// Runs the wake behavior while preserving the operation lifecycle invariants.
             fn wake(self: std::sync::Arc<Self>) {
                 let _ = self.0.send(());
             }
+            /// Runs the wake by ref behavior while preserving the operation lifecycle invariants.
             fn wake_by_ref(self: &std::sync::Arc<Self>) {
                 let _ = self.0.send(());
             }
         }
 
         let manager = OperationManager::new(ManagerOptions::default()).unwrap();
-        let executor = LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).unwrap();
+        let executor =
+            LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).unwrap();
         let executions = std::sync::Arc::new(AtomicUsize::new(0));
         let executions_for_parent = std::sync::Arc::clone(&executions);
         let mut parent = manager
@@ -745,21 +912,33 @@ mod tests {
                 });
                 let id = scope.id();
                 qubit_operation::PreparedExternalOperation::bind(&*prepared, id).unwrap();
-                qubit_operation::OperationControl::request_stop(&*prepared, qubit_operation::StopReason::UserCancelled);
-                qubit_operation::PreparedExternalOperation::activate(std::sync::Arc::clone(&prepared), scope).unwrap();
+                qubit_operation::OperationControl::request_stop(
+                    &*prepared,
+                    qubit_operation::StopReason::UserCancelled,
+                );
+                qubit_operation::PreparedExternalOperation::activate(
+                    std::sync::Arc::clone(&prepared),
+                    scope,
+                )
+                .unwrap();
 
                 let (wake_tx, wake_rx) = std::sync::mpsc::channel();
                 let waker = Waker::from(std::sync::Arc::new(Notify(wake_tx)));
                 let mut context = Context::from_waker(&waker);
                 loop {
-                    match qubit_operation::PreparedExternalOperation::poll_take_outcome(&*prepared, &mut context) {
+                    match qubit_operation::PreparedExternalOperation::poll_take_outcome(
+                        &*prepared,
+                        &mut context,
+                    ) {
                         std::task::Poll::Ready(qubit_operation::OperationOutcome::Stopped(_)) => {
                             break;
                         }
                         std::task::Poll::Ready(_) => {
                             panic!("stopped prepared task produced a non-stopped outcome")
                         }
-                        std::task::Poll::Pending => wake_rx.recv_timeout(Duration::from_secs(5)).unwrap(),
+                        std::task::Poll::Pending => {
+                            wake_rx.recv_timeout(Duration::from_secs(5)).unwrap()
+                        }
                     }
                 }
                 Ok::<_, ()>(())
@@ -770,7 +949,8 @@ mod tests {
     }
 
     #[test]
-    fn disk_permits_are_finite_and_return_when_released() {
+    /// Runs the test disk permits are finite and return when released behavior while preserving the operation lifecycle invariants.
+    fn test_disk_permits_are_finite_and_return_when_released() {
         let manager = OperationManager::new(ManagerOptions::default()).unwrap();
         let executor = LocalIoExecutor::new(
             manager,
@@ -787,7 +967,8 @@ mod tests {
     }
 
     #[test]
-    fn cleanup_permit_quota_and_rejected_enqueue_preserve_job_and_permit() {
+    /// Runs the test cleanup permit quota and rejected enqueue preserve job and permit behavior while preserving the operation lifecycle invariants.
+    fn test_cleanup_permit_quota_and_rejected_enqueue_preserve_job_and_permit() {
         use std::sync::atomic::AtomicUsize;
         use std::sync::atomic::Ordering;
 
@@ -821,7 +1002,8 @@ mod tests {
     }
 
     #[test]
-    fn successful_cleanup_runs_and_releases_reserved_slot() {
+    /// Runs the test successful cleanup runs and releases reserved slot behavior while preserving the operation lifecycle invariants.
+    fn test_successful_cleanup_runs_and_releases_reserved_slot() {
         let manager = OperationManager::new(ManagerOptions::default()).unwrap();
         let executor = LocalIoExecutor::new(manager, LocalExecutionConfig::default()).unwrap();
         let permit = executor.reserve_cleanup().unwrap();
@@ -848,7 +1030,8 @@ mod tests {
     }
 
     #[test]
-    fn dropping_executor_drains_queued_work_and_stops_queue() {
+    /// Runs the test dropping executor drains queued work and stops queue behavior while preserving the operation lifecycle invariants.
+    fn test_dropping_executor_drains_queued_work_and_stops_queue() {
         let manager = OperationManager::new(ManagerOptions::default()).unwrap();
         let executor = LocalIoExecutor::new(
             manager,
@@ -895,9 +1078,11 @@ mod tests {
     }
 
     #[test]
-    fn duplicate_arc_submission_is_rejected_without_abandoning_claimed_job() {
+    /// Runs the test duplicate arc submission is rejected without abandoning claimed job behavior while preserving the operation lifecycle invariants.
+    fn test_duplicate_arc_submission_is_rejected_without_abandoning_claimed_job() {
         let manager = OperationManager::new(ManagerOptions::default()).unwrap();
-        let executor = LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).unwrap();
+        let executor =
+            LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).unwrap();
         let (started_tx, started_rx) = mpsc::channel();
         let (release_tx, release_rx) = mpsc::channel();
         let prepared = make_job(&executor, move |_| {
@@ -909,12 +1094,16 @@ mod tests {
             .try_submit_external(Default::default(), std::sync::Arc::clone(&prepared))
             .unwrap();
         started_rx.recv_timeout(Duration::from_secs(5)).unwrap();
-        let rejected = manager.try_submit_external(Default::default(), std::sync::Arc::clone(&prepared));
+        let rejected =
+            manager.try_submit_external(Default::default(), std::sync::Arc::clone(&prepared));
         let error = match rejected {
             Ok(_) => panic!("duplicate prepared Arc was accepted"),
             Err(error) => error,
         };
-        assert_eq!(error.reason(), qubit_operation::AdmissionError::AlreadyBound);
+        assert_eq!(
+            error.reason(),
+            qubit_operation::AdmissionError::AlreadyBound
+        );
         release_tx.send(()).unwrap();
         assert!(matches!(
             accepted.wait_outcome().unwrap(),

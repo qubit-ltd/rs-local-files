@@ -1,3 +1,11 @@
+// =============================================================================
+//    Copyright (c) 2025 - 2026 Haixing Hu.
+//
+//    SPDX-License-Identifier: Apache-2.0
+//
+//    Licensed under the Apache License, Version 2.0.
+// =============================================================================
+
 use std::io::SeekFrom;
 use std::path::PathBuf;
 
@@ -57,7 +65,7 @@ fn facade(manager: &OperationManager) -> AsyncLocalFileSystem {
 }
 
 #[test]
-fn complete_read_reports_limit_error_without_returning_truncated_success() {
+fn test_complete_read_reports_limit_error_without_returning_truncated_success() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("payload");
     std::fs::write(&path, b"four").unwrap();
@@ -95,7 +103,7 @@ fn complete_read_reports_limit_error_without_returning_truncated_success() {
 }
 
 #[test]
-fn read_text_preserves_utf8_conversion_error() {
+fn test_read_text_preserves_utf8_conversion_error() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("invalid-utf8");
     std::fs::write(&path, [0xff, 0xfe]).unwrap();
@@ -118,7 +126,7 @@ fn read_text_preserves_utf8_conversion_error() {
 }
 
 #[test]
-fn invalid_text_keeps_its_owned_byte_permit_until_the_outcome_is_taken() {
+fn test_invalid_text_keeps_its_owned_byte_permit_until_the_outcome_is_taken() {
     let directory = tempfile::tempdir().unwrap();
     let invalid = directory.path().join("invalid-utf8");
     let valid = directory.path().join("valid");
@@ -183,7 +191,7 @@ fn invalid_text_keeps_its_owned_byte_permit_until_the_outcome_is_taken() {
 }
 
 #[test]
-fn read_at_seeks_and_reads_the_same_opened_object() {
+fn test_read_at_seeks_and_reads_the_same_opened_object() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("payload");
     std::fs::write(&path, b"012345").unwrap();
@@ -204,7 +212,7 @@ fn read_at_seeks_and_reads_the_same_opened_object() {
 }
 
 #[test]
-fn metadata_and_prefix_expose_complete_file_observations() {
+fn test_metadata_and_prefix_expose_complete_file_observations() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("payload");
     std::fs::write(&path, b"abcdef").unwrap();
@@ -254,7 +262,7 @@ fn metadata_and_prefix_expose_complete_file_observations() {
 }
 
 #[test]
-fn prefix_bound_larger_than_executor_budget_only_charges_retained_capacity() {
+fn test_prefix_bound_larger_than_executor_budget_only_charges_retained_capacity() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("short");
     std::fs::write(&path, b"short").unwrap();
@@ -284,7 +292,7 @@ fn prefix_bound_larger_than_executor_budget_only_charges_retained_capacity() {
 }
 
 #[test]
-fn operation_handle_limits_reserve_the_required_native_handle_count() {
+fn test_operation_handle_limits_reserve_the_required_native_handle_count() {
     let directory = tempfile::tempdir().unwrap();
     let source = directory.path().join("source");
     let destination = directory.path().join("destination");
@@ -353,7 +361,7 @@ fn operation_handle_limits_reserve_the_required_native_handle_count() {
 }
 
 #[test]
-fn copy_rename_create_and_delete_retain_structured_results_and_facts() {
+fn test_copy_rename_create_and_delete_retain_structured_results_and_facts() {
     let directory = tempfile::tempdir().unwrap();
     let source = directory.path().join("source");
     let copied = directory.path().join("copied");

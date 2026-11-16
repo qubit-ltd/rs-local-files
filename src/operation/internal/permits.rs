@@ -1,3 +1,11 @@
+// =============================================================================
+//    Copyright (c) 2025 - 2026 Haixing Hu.
+//
+//    SPDX-License-Identifier: Apache-2.0
+//
+//    Licensed under the Apache License, Version 2.0.
+// =============================================================================
+
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::AtomicUsize;
@@ -62,11 +70,12 @@ impl Permit {
             if next_used > self.state.limit {
                 return false;
             }
-            match self
-                .state
-                .used
-                .compare_exchange_weak(current, next_used, Ordering::AcqRel, Ordering::Acquire)
-            {
+            match self.state.used.compare_exchange_weak(
+                current,
+                next_used,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            ) {
                 Ok(_) => {
                     self.amount = next_amount;
                     return true;
@@ -148,11 +157,12 @@ impl DiskPermit {
             if next_used > self.state.limit {
                 return false;
             }
-            match self
-                .state
-                .used
-                .compare_exchange_weak(current, next_used, Ordering::AcqRel, Ordering::Acquire)
-            {
+            match self.state.used.compare_exchange_weak(
+                current,
+                next_used,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            ) {
                 Ok(_) => {
                     self.amount = next_amount;
                     return true;

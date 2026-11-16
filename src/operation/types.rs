@@ -1,3 +1,11 @@
+// =============================================================================
+//    Copyright (c) 2025 - 2026 Haixing Hu.
+//
+//    SPDX-License-Identifier: Apache-2.0
+//
+//    Licensed under the Apache License, Version 2.0.
+// =============================================================================
+
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -11,75 +19,118 @@ use crate::options::LocalReadAllOptions;
 /// Owned memory permits stay attached to this handle until its outcome is
 /// delivered or the handle is dropped and the upstream result slot discarded.
 pub struct LocalOperation<T: Send + 'static, E: Send + 'static = LocalFileError> {
+    /// Stores the inner associated with this value.
     inner: Option<qubit_operation::OperationHandle<T, E>>,
+    /// Stores the budget associated with this value.
     budget: Option<Arc<dyn Send + Sync>>,
 }
 
 impl<T: Send + 'static, E: Send + 'static> LocalOperation<T, E> {
     #[cfg(feature = "async")]
-    pub(crate) fn new(inner: qubit_operation::OperationHandle<T, E>, budget: Arc<dyn Send + Sync>) -> Self {
+    /// Runs the new behavior while preserving the operation lifecycle invariants.
+
+    /// # Parameters
+    /// - `budget` — supplies data or policy for this operation.
+    pub(crate) fn new(
+        inner: qubit_operation::OperationHandle<T, E>,
+        budget: Arc<dyn Send + Sync>,
+    ) -> Self {
         Self {
             inner: Some(inner),
             budget: Some(budget),
         }
     }
 
+    /// Runs the id behavior while preserving the operation lifecycle invariants.
     pub fn id(&self) -> qubit_operation::OperationId {
         self.inner().id()
     }
-    pub fn request_stop(&self, reason: qubit_operation::StopReason) -> qubit_operation::StopRequestStatus {
+    /// Runs the request stop behavior while preserving the operation lifecycle invariants.
+
+    /// # Parameters
+    /// - `reason` — supplies data or policy for this operation.
+    pub fn request_stop(
+        &self,
+        reason: qubit_operation::StopReason,
+    ) -> qubit_operation::StopRequestStatus {
         self.inner().request_stop(reason)
     }
+    /// Runs the snapshot behavior while preserving the operation lifecycle invariants.
     pub fn snapshot(&self) -> qubit_operation::OperationSnapshot {
         self.inner().snapshot()
     }
-    pub fn wait_outcome(&mut self) -> Result<qubit_operation::OperationOutcome<T, E>, qubit_operation::OutcomeError> {
+    /// Runs the wait outcome behavior while preserving the operation lifecycle invariants.
+    pub fn wait_outcome(
+        &mut self,
+    ) -> Result<qubit_operation::OperationOutcome<T, E>, qubit_operation::OutcomeError> {
         let result = self.inner_mut().wait_outcome();
         if result.is_ok() {
             self.budget.take();
         }
         result
     }
+    /// Runs the try take outcome behavior while preserving the operation lifecycle invariants.
     pub fn try_take_outcome(
         &mut self,
-    ) -> Result<Option<qubit_operation::OperationOutcome<T, E>>, qubit_operation::OutcomeError> {
+    ) -> Result<Option<qubit_operation::OperationOutcome<T, E>>, qubit_operation::OutcomeError>
+    {
         let result = self.inner_mut().try_take_outcome();
         if matches!(result, Ok(Some(_))) {
             self.budget.take();
         }
         result
     }
-    pub fn wait_settlement(&self) -> Result<Arc<qubit_operation::SettlementReport>, qubit_operation::ObservationError> {
+    /// Runs the wait settlement behavior while preserving the operation lifecycle invariants.
+    pub fn wait_settlement(
+        &self,
+    ) -> Result<Arc<qubit_operation::SettlementReport>, qubit_operation::ObservationError> {
         self.inner().wait_settlement()
     }
+    /// Runs the wait settlement for behavior while preserving the operation lifecycle invariants.
+
+    /// # Parameters
+    /// - `timeout` — supplies data or policy for this operation.
     pub fn wait_settlement_for(
         &self,
         timeout: Duration,
     ) -> Result<qubit_operation::SettlementWait, qubit_operation::ObservationError> {
         self.inner().wait_settlement_for(timeout)
     }
+    /// Runs the into observer behavior while preserving the operation lifecycle invariants.
     pub fn into_observer(mut self) -> qubit_operation::OperationObserver {
-        let observer = self.inner.take().expect("local handle is present").into_observer();
+        let observer = self
+            .inner
+            .take()
+            .expect("local handle is present")
+            .into_observer();
         self.budget.take();
         observer
     }
     #[cfg(feature = "async")]
+    /// Runs the into async behavior while preserving the operation lifecycle invariants.
     pub fn into_async(mut self) -> AsyncLocalOperation<T, E> {
-        let inner = self.inner.take().expect("local handle is present").into_async();
+        let inner = self
+            .inner
+            .take()
+            .expect("local handle is present")
+            .into_async();
         AsyncLocalOperation {
             inner: Some(inner),
             budget: self.budget.take(),
         }
     }
+    /// Runs the inner behavior while preserving the operation lifecycle invariants.
     fn inner(&self) -> &qubit_operation::OperationHandle<T, E> {
         self.inner.as_ref().expect("local handle is present")
     }
+    /// Runs the inner mut behavior while preserving the operation lifecycle invariants.
     fn inner_mut(&mut self) -> &mut qubit_operation::OperationHandle<T, E> {
         self.inner.as_mut().expect("local handle is present")
     }
 }
 
 impl<T: Send + 'static, E: Send + 'static> Drop for LocalOperation<T, E> {
+    /// Runs the drop behavior while preserving the operation lifecycle invariants.
     fn drop(&mut self) {
         drop(self.inner.take());
         self.budget.take();
@@ -87,22 +138,35 @@ impl<T: Send + 'static, E: Send + 'static> Drop for LocalOperation<T, E> {
 }
 
 #[cfg(feature = "async")]
+/// Represents async local operation within the local operation subsystem.
 pub struct AsyncLocalOperation<T: Send + 'static, E: Send + 'static = LocalFileError> {
+    /// Stores the inner associated with this value.
     inner: Option<qubit_operation::AsyncOperationHandle<T, E>>,
+    /// Stores the budget associated with this value.
     budget: Option<Arc<dyn Send + Sync>>,
 }
 
 #[cfg(feature = "async")]
 impl<T: Send + 'static, E: Send + 'static> AsyncLocalOperation<T, E> {
+    /// Runs the id behavior while preserving the operation lifecycle invariants.
     pub fn id(&self) -> qubit_operation::OperationId {
         self.inner().id()
     }
-    pub fn request_stop(&self, reason: qubit_operation::StopReason) -> qubit_operation::StopRequestStatus {
+    /// Runs the request stop behavior while preserving the operation lifecycle invariants.
+
+    /// # Parameters
+    /// - `reason` — supplies data or policy for this operation.
+    pub fn request_stop(
+        &self,
+        reason: qubit_operation::StopReason,
+    ) -> qubit_operation::StopRequestStatus {
         self.inner().request_stop(reason)
     }
+    /// Runs the snapshot behavior while preserving the operation lifecycle invariants.
     pub fn snapshot(&self) -> qubit_operation::OperationSnapshot {
         self.inner().snapshot()
     }
+    /// Runs the wait outcome behavior while preserving the operation lifecycle invariants.
     pub async fn wait_outcome(
         &mut self,
     ) -> Result<qubit_operation::OperationOutcome<T, E>, qubit_operation::OutcomeError> {
@@ -112,25 +176,34 @@ impl<T: Send + 'static, E: Send + 'static> AsyncLocalOperation<T, E> {
         }
         result
     }
+    /// Runs the try take outcome behavior while preserving the operation lifecycle invariants.
     pub fn try_take_outcome(
         &mut self,
-    ) -> Result<Option<qubit_operation::OperationOutcome<T, E>>, qubit_operation::OutcomeError> {
+    ) -> Result<Option<qubit_operation::OperationOutcome<T, E>>, qubit_operation::OutcomeError>
+    {
         let result = self.inner_mut().try_take_outcome();
         if matches!(result, Ok(Some(_))) {
             self.budget.take();
         }
         result
     }
+    /// Runs the wait settlement behavior while preserving the operation lifecycle invariants.
     pub async fn wait_settlement(&self) -> Arc<qubit_operation::SettlementReport> {
         self.inner().wait_settlement().await
     }
+    /// Runs the into sync behavior while preserving the operation lifecycle invariants.
     pub fn into_sync(mut self) -> LocalOperation<T, E> {
-        let inner = self.inner.take().expect("async local handle is present").into_sync();
+        let inner = self
+            .inner
+            .take()
+            .expect("async local handle is present")
+            .into_sync();
         LocalOperation {
             inner: Some(inner),
             budget: self.budget.take(),
         }
     }
+    /// Runs the into observer behavior while preserving the operation lifecycle invariants.
     pub fn into_observer(mut self) -> qubit_operation::AsyncOperationObserver {
         let observer = self
             .inner
@@ -140,9 +213,11 @@ impl<T: Send + 'static, E: Send + 'static> AsyncLocalOperation<T, E> {
         self.budget.take();
         observer
     }
+    /// Runs the inner behavior while preserving the operation lifecycle invariants.
     fn inner(&self) -> &qubit_operation::AsyncOperationHandle<T, E> {
         self.inner.as_ref().expect("async local handle is present")
     }
+    /// Runs the inner mut behavior while preserving the operation lifecycle invariants.
     fn inner_mut(&mut self) -> &mut qubit_operation::AsyncOperationHandle<T, E> {
         self.inner.as_mut().expect("async local handle is present")
     }
@@ -150,6 +225,7 @@ impl<T: Send + 'static, E: Send + 'static> AsyncLocalOperation<T, E> {
 
 #[cfg(feature = "async")]
 impl<T: Send + 'static, E: Send + 'static> Drop for AsyncLocalOperation<T, E> {
+    /// Runs the drop behavior while preserving the operation lifecycle invariants.
     fn drop(&mut self) {
         drop(self.inner.take());
         self.budget.take();
@@ -196,6 +272,7 @@ pub struct LocalExecutionConfig {
 }
 
 impl Default for LocalExecutionConfig {
+    /// Runs the default behavior while preserving the operation lifecycle invariants.
     fn default() -> Self {
         Self {
             worker_count: 4,
@@ -238,6 +315,10 @@ pub enum LocalExecutorCreateError {
 }
 
 impl std::fmt::Display for LocalExecutorCreateError {
+    /// Runs the fmt behavior while preserving the operation lifecycle invariants.
+
+    /// # Parameters
+    /// - `formatter` — supplies data or policy for this operation.
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::InvalidConfig(error) => {
@@ -251,6 +332,7 @@ impl std::fmt::Display for LocalExecutorCreateError {
 }
 
 impl std::error::Error for LocalExecutorCreateError {
+    /// Runs the source behavior while preserving the operation lifecycle invariants.
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::InvalidConfig(_) => None,
@@ -317,11 +399,17 @@ pub struct LocalFactSnapshot {
 /// Read-only observer for the bounded local fact snapshot.
 #[derive(Clone)]
 pub struct LocalFactObserver {
+    /// Stores the snapshot associated with this value.
     snapshot: Arc<Mutex<LocalFactSnapshot>>,
+    /// Stores the  record permit associated with this value.
     _record_permit: Option<Arc<dyn Send + Sync>>,
 }
 
 impl std::fmt::Debug for LocalFactObserver {
+    /// Runs the fmt behavior while preserving the operation lifecycle invariants.
+
+    /// # Parameters
+    /// - `formatter` — supplies data or policy for this operation.
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter
             .debug_struct("LocalFactObserver")
@@ -334,10 +422,14 @@ impl LocalFactObserver {
     /// Returns the latest fixed-size snapshot without retaining a resource
     /// reference.
     pub fn snapshot(&self) -> LocalFactSnapshot {
-        *self.snapshot.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+        *self
+            .snapshot
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
     #[allow(dead_code)]
+    /// Runs the new behavior while preserving the operation lifecycle invariants.
     pub(crate) fn new() -> Self {
         Self {
             snapshot: Arc::new(Mutex::new(LocalFactSnapshot::default())),
@@ -346,6 +438,7 @@ impl LocalFactObserver {
     }
 
     #[cfg(feature = "async")]
+    /// Runs the with permit behavior while preserving the operation lifecycle invariants.
     pub(crate) fn with_permit(permit: Arc<dyn Send + Sync>) -> Self {
         Self {
             snapshot: Arc::new(Mutex::new(LocalFactSnapshot::default())),
@@ -354,8 +447,15 @@ impl LocalFactObserver {
     }
 
     #[allow(dead_code)]
+    /// Runs the update behavior while preserving the operation lifecycle invariants.
+
+    /// # Parameters
+    /// - `snapshot` — supplies data or policy for this operation.
     pub(crate) fn update(&self, snapshot: LocalFactSnapshot) {
-        *self.snapshot.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = snapshot;
+        *self
+            .snapshot
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = snapshot;
     }
 }
 
@@ -381,12 +481,18 @@ pub enum LocalSubmitRejection {
 
 /// Submission rejection that returns the exact owned request to its caller.
 pub struct LocalSubmitError<R> {
+    /// Stores the request associated with this value.
     request: R,
+    /// Stores the rejection associated with this value.
     rejection: LocalSubmitRejection,
 }
 
 impl<R> LocalSubmitError<R> {
     #[allow(dead_code)]
+    /// Runs the new behavior while preserving the operation lifecycle invariants.
+
+    /// # Parameters
+    /// - `rejection` — supplies data or policy for this operation.
     pub(crate) fn new(request: R, rejection: LocalSubmitRejection) -> Self {
         Self { request, rejection }
     }
@@ -404,6 +510,10 @@ impl<R> LocalSubmitError<R> {
 }
 
 impl<R> std::fmt::Debug for LocalSubmitError<R> {
+    /// Runs the fmt behavior while preserving the operation lifecycle invariants.
+
+    /// # Parameters
+    /// - `formatter` — supplies data or policy for this operation.
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter
             .debug_struct("LocalSubmitError")
@@ -413,6 +523,10 @@ impl<R> std::fmt::Debug for LocalSubmitError<R> {
 }
 
 impl<R> std::fmt::Display for LocalSubmitError<R> {
+    /// Runs the fmt behavior while preserving the operation lifecycle invariants.
+
+    /// # Parameters
+    /// - `formatter` — supplies data or policy for this operation.
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(formatter, "local operation rejected: {:?}", self.rejection)
     }
@@ -425,13 +539,18 @@ mod tests {
     use super::LocalSubmitError;
     use super::LocalSubmitRejection;
 
+    /// Represents opaque request within the local operation subsystem.
     struct OpaqueRequest {
+        /// Stores the identity associated with this value.
         identity: Box<()>,
     }
 
     #[test]
-    fn rejected_request_round_trips_the_same_non_clone_non_debug_value() {
-        let request = OpaqueRequest { identity: Box::new(()) };
+    /// Runs the test rejected request round trips the same non clone non debug value behavior while preserving the operation lifecycle invariants.
+    fn test_rejected_request_round_trips_the_same_non_clone_non_debug_value() {
+        let request = OpaqueRequest {
+            identity: Box::new(()),
+        };
         let identity = &*request.identity as *const ();
         let rejected = LocalSubmitError::new(request, LocalSubmitRejection::CapacityExceeded);
         assert_eq!(rejected.rejection(), LocalSubmitRejection::CapacityExceeded);

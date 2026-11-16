@@ -1,3 +1,11 @@
+// =============================================================================
+//    Copyright (c) 2025 - 2026 Haixing Hu.
+//
+//    SPDX-License-Identifier: Apache-2.0
+//
+//    Licensed under the Apache License, Version 2.0.
+// =============================================================================
+
 use std::path::PathBuf;
 
 use qubit_local_files::LocalExecutionConfig;
@@ -55,7 +63,7 @@ fn host_async(manager: OperationManager) -> AsyncLocalFileSystem {
 }
 
 #[test]
-fn host_facade_retains_a_fact_observer_for_submitted_reads() {
+fn test_host_facade_retains_a_fact_observer_for_submitted_reads() {
     let manager = OperationManager::new(ManagerOptions::default()).unwrap();
     let filesystem = host_async(manager.clone());
 
@@ -78,7 +86,7 @@ fn host_facade_retains_a_fact_observer_for_submitted_reads() {
 }
 
 #[test]
-fn invalid_executor_configuration_is_rejected_before_starting_workers() {
+fn test_invalid_executor_configuration_is_rejected_before_starting_workers() {
     let manager = OperationManager::new(ManagerOptions::default()).unwrap();
     let config = LocalExecutionConfig {
         worker_count: 0,
@@ -89,7 +97,7 @@ fn invalid_executor_configuration_is_rejected_before_starting_workers() {
 }
 
 #[test]
-fn wrong_manager_rejection_returns_the_unmodified_request() {
+fn test_wrong_manager_rejection_returns_the_unmodified_request() {
     let owner = OperationManager::new(ManagerOptions::default()).unwrap();
     let other = OperationManager::new(ManagerOptions::default()).unwrap();
     let filesystem = host_async(owner);
@@ -114,7 +122,7 @@ fn wrong_manager_rejection_returns_the_unmodified_request() {
 }
 
 #[test]
-fn oversized_owned_read_limit_is_rejected_with_original_request() {
+fn test_oversized_owned_read_limit_is_rejected_with_original_request() {
     let manager = OperationManager::new(ManagerOptions::default()).unwrap();
     let config = LocalExecutionConfig {
         max_owned_bytes: 8,
@@ -146,7 +154,7 @@ fn oversized_owned_read_limit_is_rejected_with_original_request() {
 }
 
 #[test]
-fn stopped_parent_rejects_child_read_before_worker_io() {
+fn test_stopped_parent_rejects_child_read_before_worker_io() {
     use std::sync::mpsc;
     use std::time::Duration;
 
@@ -187,7 +195,7 @@ fn stopped_parent_rejects_child_read_before_worker_io() {
 }
 
 #[test]
-fn parent_manager_view_can_submit_through_executor_runtime_group() {
+fn test_parent_manager_view_can_submit_through_executor_runtime_group() {
     let manager = OperationManager::new(ManagerOptions::default()).unwrap();
     let filesystem = host_async(manager.clone());
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml");
@@ -221,7 +229,7 @@ fn parent_manager_view_can_submit_through_executor_runtime_group() {
 }
 
 #[test]
-fn host_relative_reads_use_cwd_captured_by_async_conversion() {
+fn test_host_relative_reads_use_cwd_captured_by_async_conversion() {
     struct RestoreCwd(PathBuf);
     impl Drop for RestoreCwd {
         fn drop(&mut self) {
@@ -259,7 +267,7 @@ fn host_relative_reads_use_cwd_captured_by_async_conversion() {
 }
 
 #[test]
-fn rooted_facade_keeps_open_authority_after_root_path_replacement() {
+fn test_rooted_facade_keeps_open_authority_after_root_path_replacement() {
     let scratch = tempfile::tempdir().unwrap();
     let root = scratch.path().join("root");
     std::fs::create_dir(&root).unwrap();
@@ -290,7 +298,7 @@ fn rooted_facade_keeps_open_authority_after_root_path_replacement() {
 }
 
 #[test]
-fn into_async_does_not_capture_host_cwd_and_rejects_relative_paths() {
+fn test_into_async_does_not_capture_host_cwd_and_rejects_relative_paths() {
     let manager = OperationManager::new(ManagerOptions::default()).unwrap();
     let executor = LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).unwrap();
     let filesystem = LocalFileSystem::host().unwrap().into_async(executor).unwrap();
