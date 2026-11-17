@@ -11,7 +11,7 @@ cargo-fuzz = true
 [dependencies]
 libfuzzer-sys = "^0.4"
 qubit-io = "^0.19"
-qubit-local-files = { path = "../", version = "^0.5" }
+qubit-local-files = { path = "../", version = "^0.6" }
 sha2 = { version = "^0.11", optional = true }
 
 [features]
@@ -69,3 +69,5 @@ path = "fuzz_targets/copy_lifecycle.rs"
 test = false
 doc = false
 bench = false
+
+[workspace]

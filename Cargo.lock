@@ -586,7 +586,7 @@ dependencies = [
 
 [[package]]
 name = "qubit-local-files"
-version = "0.5.4"
+version = "0.6.0"
 dependencies = [
  "criterion",
  "digest",
@@ -605,8 +605,7 @@ dependencies = [
 
 [[package]]
 name = "qubit-operation"
-version = "0.3.0"
-source = "git+https://github.com/qubit-ltd/rs-operation.git?rev=64dddb746afbe3395934dd0f07168b13fbaafd6a#64dddb746afbe3395934dd0f07168b13fbaafd6a"
+version = "0.3.1"
 dependencies = [
  "qubit-budget",
 ]
