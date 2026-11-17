@@ -273,7 +273,7 @@ pub(super) fn abort_managed_writer_after_error(
             if effect_already_recorded {
                 return LocalWriterCommandError::Write {
                     cause,
-                    cleanup_error: Some(cleanup_error),
+                    cleanup_error: Some(Box::new(cleanup_error)),
                     retryable_writer: None,
                     recovery_resource: Some(resource.id()),
                 };
@@ -297,7 +297,7 @@ pub(super) fn abort_managed_writer_after_error(
             }
             LocalWriterCommandError::Write {
                 cause,
-                cleanup_error: Some(cleanup_error),
+                cleanup_error: Some(Box::new(cleanup_error)),
                 retryable_writer: None,
                 recovery_resource: Some(resource.id()),
             }
@@ -589,7 +589,7 @@ pub(super) fn transition_temp_native(
                 Ok((
                     None,
                     (
-                        LocalTempLifecycleResult::Persisted(outcome),
+                        LocalTempLifecycleResult::Persisted(Box::new(outcome)),
                         LocalPublicationState::Published,
                         durability,
                     ),
@@ -608,7 +608,7 @@ pub(super) fn transition_temp_native(
                     Ok((
                         None,
                         (
-                            LocalTempLifecycleResult::Persisted(outcome),
+                            LocalTempLifecycleResult::Persisted(Box::new(outcome)),
                             LocalPublicationState::Published,
                             durability,
                         ),
@@ -649,7 +649,7 @@ pub(super) fn transition_temp_native(
                 Ok((
                     None,
                     (
-                        LocalTempLifecycleResult::Persisted(outcome),
+                        LocalTempLifecycleResult::Persisted(Box::new(outcome)),
                         LocalPublicationState::Published,
                         durability,
                     ),
@@ -668,7 +668,7 @@ pub(super) fn transition_temp_native(
                     Ok((
                         None,
                         (
-                            LocalTempLifecycleResult::Persisted(outcome),
+                            LocalTempLifecycleResult::Persisted(Box::new(outcome)),
                             LocalPublicationState::Published,
                             durability,
                         ),

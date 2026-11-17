@@ -41,7 +41,7 @@ pub enum LocalWriterCommandError {
         /// Native write or flush failure.
         cause: LocalFileError,
         /// Failure encountered while aborting the candidate, if any.
-        cleanup_error: Option<LocalFileError>,
+        cleanup_error: Option<Box<LocalFileError>>,
         /// Candidate writer retained when cleanup can be retried.
         retryable_writer: Option<Box<crate::LocalFileWriter>>,
         /// Operation-scope identifier for the registered recovery owner.

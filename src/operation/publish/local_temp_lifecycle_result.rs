@@ -15,7 +15,7 @@ pub enum LocalTempLifecycleResult {
     Persisted(
         /// Publication outcome describing the persisted destination and
         /// guarantees.
-        crate::outcome::LocalPersistOutcome,
+        Box<crate::outcome::LocalPersistOutcome>,
     ),
     /// Sealing succeeded and returns a read lease for the resource now
     /// protected against writes.
