@@ -22,12 +22,11 @@ use super::Direction;
 use super::PendingSeek;
 use super::PendingWrite;
 use super::SavedError;
-use super::resource_limit;
 
 /// Coordinates queued reads, writes, seeks, flushes, and close completion.
 /// Request ids bind worker responses to the active operation; buffered bytes
 /// and sticky errors preserve stream ordering across asynchronous polls.
-pub(super) struct StreamState {
+pub(crate) struct StreamState {
     /// Selects whether this instance enforces read-side or write-side
     /// operations.
     direction: Direction,
@@ -71,7 +70,7 @@ impl StreamState {
     /// # Parameters
     ///
     /// * `direction` — read or write mode whose request invariants apply.
-    pub(super) fn new(direction: Direction) -> Self {
+    pub(in crate::operation::stream) fn new(direction: Direction) -> Self {
         Self {
             direction,
             next_id: 1,
@@ -108,7 +107,7 @@ impl StreamState {
     /// # Parameters
     ///
     /// * `self` — state machine that owns the pending request and buffers .
-    pub(super) fn new_seek_owner_id(&mut self) -> u64 {
+    pub(in crate::operation::stream) fn new_seek_owner_id(&mut self) -> u64 {
         let id = self.next_seek_owner_id;
         self.next_seek_owner_id = self.next_seek_owner_id.wrapping_add(1).max(1);
         id
@@ -121,7 +120,7 @@ impl StreamState {
     }
 
     /// Returns the canonical error for an operation attempted after close.
-    pub(super) fn closed_error() -> io::Error {
+    pub(in crate::operation::stream) fn closed_error() -> io::Error {
         Self::error_closed()
     }
 
@@ -135,7 +134,7 @@ impl StreamState {
     /// * `resource` — worker resource used to request more native bytes.
     /// * `cx` — task context used while waiting for the worker.
     /// * `output` — destination for the next available stream bytes.
-    pub(super) fn poll_read(
+    pub(in crate::operation::stream) fn poll_read(
         &mut self,
         resource: &LocalStreamResource,
         cx: &mut Context<'_>,
@@ -150,13 +149,11 @@ impl StreamState {
         if let Some(error) = &self.write_error {
             return Poll::Ready(Err(error.make()));
         }
-        if let Poll::Pending = self.poll_seek_barrier(resource, cx) {
+        if self.poll_seek_barrier(resource, cx).is_pending() {
             return Poll::Pending;
         }
-        if let Some((_, result)) = self.seek_result.take() {
-            if let Err(error) = result {
-                return Poll::Ready(Err(error));
-            }
+        if let Some((_, Err(error))) = self.seek_result.take() {
+            return Poll::Ready(Err(error));
         }
         if !self.read_buffer.is_empty() {
             let count = output.len().min(self.read_buffer.len());
@@ -222,7 +219,7 @@ impl StreamState {
     /// * `resource` — worker resource receiving the queued write.
     /// * `cx` — task context used while waiting for native progress.
     /// * `input` — bytes to append after any earlier queued write.
-    pub(super) fn poll_write(
+    pub(in crate::operation::stream) fn poll_write(
         &mut self,
         resource: &LocalStreamResource,
         cx: &mut Context<'_>,
@@ -237,22 +234,21 @@ impl StreamState {
         if let Some(error) = &self.write_error {
             return Poll::Ready(Err(error.make()));
         }
-        if let Poll::Pending = self.poll_pending_flush(resource, cx) {
+        if self.poll_pending_flush(resource, cx).is_pending() {
             return Poll::Pending;
         }
         if let Some(error) = &self.write_error {
             return Poll::Ready(Err(error.make()));
         }
-        if let Poll::Pending = self.poll_seek_barrier(resource, cx) {
+        if self.poll_seek_barrier(resource, cx).is_pending() {
             return Poll::Pending;
         }
         if let Some((_, Err(error))) = self.seek_result.take() {
             return Poll::Ready(Err(error));
         }
-        if let Poll::Pending = self.poll_writes(resource, cx) {
-            // A queued command may still be running; newly accepted input is
-            // independent because it is atomically moved into owned storage.
-        }
+        // A queued command may still be running; newly accepted input is
+        // independent because it is atomically moved into owned storage.
+        let _ = self.poll_writes(resource, cx);
         if let Some(error) = &self.write_error {
             return Poll::Ready(Err(error.make()));
         }
@@ -356,14 +352,18 @@ impl StreamState {
     /// * `self` — state machine whose writes must settle before flush.
     /// * `resource` — worker resource receiving the flush command.
     /// * `cx` — task context used while waiting for writes and flush.
-    pub(super) fn poll_flush(&mut self, resource: &LocalStreamResource, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+    pub(in crate::operation::stream) fn poll_flush(
+        &mut self,
+        resource: &LocalStreamResource,
+        cx: &mut Context<'_>,
+    ) -> Poll<io::Result<()>> {
         if self.closed || self.close_request.is_some() {
             return Poll::Ready(Err(Self::error_closed()));
         }
         if let Some(error) = &self.write_error {
             return Poll::Ready(Err(error.make()));
         }
-        if let Poll::Pending = self.poll_writes(resource, cx) {
+        if self.poll_writes(resource, cx).is_pending() {
             return Poll::Pending;
         }
         if let Some(error) = &self.write_error {
@@ -429,7 +429,7 @@ impl StreamState {
     /// * `cx` — task context used while waiting for the seek barrier.
     /// * `position` — requested position and origin.
     /// * `owner_id` — writer identity used to validate the seek result.
-    pub(super) fn poll_seek(
+    pub(in crate::operation::stream) fn poll_seek(
         &mut self,
         resource: &LocalStreamResource,
         cx: &mut Context<'_>,
@@ -445,7 +445,7 @@ impl StreamState {
         if let Some(error) = &self.write_error {
             return Poll::Ready(Err(error.make()));
         }
-        if let Poll::Pending = self.poll_seek_barrier(resource, cx) {
+        if self.poll_seek_barrier(resource, cx).is_pending() {
             return Poll::Pending;
         }
         if let Some((result_owner, result)) = self.seek_result.take() {
@@ -457,7 +457,7 @@ impl StreamState {
                 Ok(_) => {}
             }
         }
-        if let Poll::Pending = self.poll_pending_read(resource, cx) {
+        if self.poll_pending_read(resource, cx).is_pending() {
             return Poll::Pending;
         }
         if let Some(error) = &self.write_error {
@@ -484,7 +484,7 @@ impl StreamState {
                 request: self.request(LocalStreamCommand::Seek(adjusted)),
             });
         }
-        if let Poll::Pending = self.poll_seek_barrier(resource, cx) {
+        if self.poll_seek_barrier(resource, cx).is_pending() {
             return Poll::Pending;
         }
         match self.seek_result.take() {
@@ -601,14 +601,18 @@ impl StreamState {
     /// * `self` — state machine containing all pending stream operations.
     /// * `resource` — worker resource needed to settle pending commands.
     /// * `cx` — task context used while waiting for pending work.
-    pub(super) fn poll_settle(&mut self, resource: &LocalStreamResource, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+    pub(in crate::operation::stream) fn poll_settle(
+        &mut self,
+        resource: &LocalStreamResource,
+        cx: &mut Context<'_>,
+    ) -> Poll<io::Result<()>> {
         if self.close_request.is_some() {
             return self.poll_close(resource, cx);
         }
         if let Some(error) = &self.write_error {
             return Poll::Ready(Err(error.make()));
         }
-        if let Poll::Pending = self.poll_seek_barrier(resource, cx) {
+        if self.poll_seek_barrier(resource, cx).is_pending() {
             return Poll::Pending;
         }
         if let Some((_, Err(error))) = self.seek_result.take() {
@@ -621,10 +625,10 @@ impl StreamState {
                 Poll::Ready(Ok(())) => {}
             }
         } else {
-            if let Poll::Pending = self.poll_writes(resource, cx) {
+            if self.poll_writes(resource, cx).is_pending() {
                 return Poll::Pending;
             }
-            if let Poll::Pending = self.poll_pending_flush(resource, cx) {
+            if self.poll_pending_flush(resource, cx).is_pending() {
                 return Poll::Pending;
             }
             if let Some(error) = &self.write_error {
@@ -642,11 +646,15 @@ impl StreamState {
     /// * `self` — state machine retaining the close request and result.
     /// * `resource` — worker resource that owns native close.
     /// * `cx` — task context used while waiting for close completion.
-    pub(super) fn poll_close(&mut self, resource: &LocalStreamResource, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+    pub(in crate::operation::stream) fn poll_close(
+        &mut self,
+        resource: &LocalStreamResource,
+        cx: &mut Context<'_>,
+    ) -> Poll<io::Result<()>> {
         if self.closed {
             return self.completed_close();
         }
-        if let Poll::Pending = self.poll_seek_barrier(resource, cx) {
+        if self.poll_seek_barrier(resource, cx).is_pending() {
             return Poll::Pending;
         }
         if let Some((_, Err(error))) = self.seek_result.take() {
@@ -658,10 +666,10 @@ impl StreamState {
                 Poll::Ready(Err(_)) | Poll::Ready(Ok(())) => {}
             }
         } else {
-            if let Poll::Pending = self.poll_writes(resource, cx) {
+            if self.poll_writes(resource, cx).is_pending() {
                 return Poll::Pending;
             }
-            if let Poll::Pending = self.poll_pending_flush(resource, cx) {
+            if self.poll_pending_flush(resource, cx).is_pending() {
                 return Poll::Pending;
             }
         }
@@ -711,7 +719,7 @@ impl StreamState {
     /// # Parameters
     ///
     /// * `self` — state machine that owns the pending request and buffers .
-    pub(super) fn completed_close(&self) -> Poll<io::Result<()>> {
+    pub(in crate::operation::stream) fn completed_close(&self) -> Poll<io::Result<()>> {
         self.close_error
             .as_ref()
             .map_or(Poll::Ready(Ok(())), |error| Poll::Ready(Err(error.make())))
@@ -722,7 +730,7 @@ impl StreamState {
     /// # Parameters
     ///
     /// * `self` — state machine that owns the pending request and buffers .
-    pub(super) fn request_close_on_drop(&mut self, resource: &LocalStreamResource) {
+    pub(in crate::operation::stream) fn request_close_on_drop(&mut self, resource: &LocalStreamResource) {
         if self.closed {
             return;
         }
@@ -742,7 +750,7 @@ impl StreamState {
     /// # Parameters
     ///
     /// * `self` — state machine that owns the pending request and buffers .
-    pub(super) fn is_closed(&self) -> bool {
+    pub(in crate::operation::stream) fn is_closed(&self) -> bool {
         self.closed
     }
 }

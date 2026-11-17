@@ -63,9 +63,7 @@ impl Drop for TestGateGuard {
     /// Releases waiters and removes this guard's selector from the registry.
     fn drop(&mut self) {
         self.release();
-        let mut active = super::gates()
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut active = super::gates().lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         if active
             .get(&self.name)
             .is_some_and(|state| Arc::ptr_eq(state, &self.state))

@@ -12,9 +12,6 @@ use std::sync::Mutex;
 use qubit_operation::ResourceId;
 
 use super::LocalTempNative;
-use crate::operation::internal::permits::DiskPermit;
-use crate::operation::internal::permits::Permit;
-
 /// A thread-safe control port owning a native temporary file and its permits.
 ///
 /// The resource manager stores this owner under one stable id. Its native

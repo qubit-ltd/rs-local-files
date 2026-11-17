@@ -7,7 +7,7 @@
 // =============================================================================
 
 use std::io::Seek;
-use std::io::SeekFrom;
+use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -28,9 +28,21 @@ use super::super::LocalOperationOptions;
 use super::super::LocalReadRequest;
 use super::super::LocalSubmitError;
 use super::super::LocalSubmitRejection;
+use super::super::complete::LocalCopyOperationResult;
+use super::super::complete::LocalCopyRequest;
+use super::super::complete::LocalCreateDirectoryOperationResult;
+use super::super::complete::LocalCreateDirectoryRequest;
+use super::super::complete::LocalDeleteOperationResult;
+use super::super::complete::LocalDeleteRequest;
+use super::super::complete::LocalReadAtRequest;
+use super::super::complete::LocalReadPrefix;
+use super::super::complete::LocalReadPrefixRequest;
+use super::super::complete::LocalRenameOperationResult;
+use super::super::complete::LocalRenameRequest;
 use super::super::internal::permits::Permit;
 use super::super::internal::prepared_local_job::PreparedLocalJob;
 use super::AsyncLocalFileSystem;
+use super::OwnedSubmission;
 use crate::LocalDurabilityState;
 use crate::LocalFactSnapshot;
 use crate::LocalFileError;
@@ -39,20 +51,11 @@ use crate::LocalFileMetadata;
 use crate::LocalPublicationState;
 use crate::error::LocalFileOperation;
 use crate::error::LocalReadLimitError;
-use crate::options::LocalCopyOptions;
-use crate::options::LocalCreateDirectoryOptions;
-use crate::options::LocalDeleteOptions;
 use crate::options::LocalReadAllOptions;
-use crate::options::LocalReadOptions;
-use crate::options::LocalRenameOptions;
 use crate::outcome::LocalCopyFailure;
 use crate::outcome::LocalCopyFailureState;
-use crate::outcome::LocalCopyOutcome;
-use crate::outcome::LocalCreateDirectoryOutcome;
-use crate::outcome::LocalDeleteOutcome;
 use crate::outcome::LocalRenameFailure;
 use crate::outcome::LocalRenameFailureState;
-use crate::outcome::LocalRenameOutcome;
 
 impl AsyncLocalFileSystem {
     /// Submits a finite complete read with per-block cooperative cancellation.
@@ -78,9 +81,15 @@ impl AsyncLocalFileSystem {
             manager,
             operation,
             request,
-            execution_path.is_relative(),
-            1,
-            limits,
+            OwnedSubmission {
+                path_is_relative: execution_path.is_relative(),
+
+                required_handles: 1,
+
+                limits,
+
+                initial_owned_bytes: 0,
+            },
             move |request, scope, _observer, budget, maximum| {
                 let read_limit = request
                     .read
@@ -122,9 +131,15 @@ impl AsyncLocalFileSystem {
             manager,
             operation,
             request,
-            execution_path.is_relative(),
-            1,
-            limits,
+            OwnedSubmission {
+                path_is_relative: execution_path.is_relative(),
+
+                required_handles: 1,
+
+                limits,
+
+                initial_owned_bytes: 0,
+            },
             move |request, scope, _observer, budget, maximum| {
                 let read_limit = request
                     .read
@@ -135,7 +150,7 @@ impl AsyncLocalFileSystem {
                     &execution_path,
                     &request.read,
                     read_limit,
-                    &scope,
+                    scope,
                     &budget,
                     maximum,
                 ) {
@@ -185,9 +200,15 @@ impl AsyncLocalFileSystem {
             manager,
             operation,
             request,
-            execution_path.is_relative(),
-            1,
-            limits,
+            OwnedSubmission {
+                path_is_relative: execution_path.is_relative(),
+
+                required_handles: 1,
+
+                limits,
+
+                initial_owned_bytes: 0,
+            },
             move |request, _scope, _observer, budget, maximum| {
                 let requested = request.max_bytes.saturating_add(1);
                 let reader_result = match before_native_call(_scope, || {
@@ -305,9 +326,15 @@ impl AsyncLocalFileSystem {
             manager,
             operation,
             request,
-            execution_path.is_relative(),
-            1,
-            limits,
+            OwnedSubmission {
+                path_is_relative: execution_path.is_relative(),
+
+                required_handles: 1,
+
+                limits,
+
+                initial_owned_bytes: 0,
+            },
             move |request, _scope, _observer, budget, maximum| {
                 let reader_result = match before_native_call(_scope, || {
                     filesystem.open_reader_with_options(&execution_path, &request.read)
@@ -392,9 +419,12 @@ impl AsyncLocalFileSystem {
             manager,
             operation,
             path,
-            execution_path.is_relative(),
-            1,
-            limits,
+            OwnedSubmission {
+                path_is_relative: execution_path.is_relative(),
+                required_handles: 1,
+                limits,
+                initial_owned_bytes: 0,
+            },
             move |_request, _scope, _observer, _budget, _maximum| match before_native_call(_scope, || {
                 filesystem.metadata(&execution_path)
             }) {
@@ -432,9 +462,15 @@ impl AsyncLocalFileSystem {
             manager,
             operation,
             request,
-            source.is_relative() || destination.is_relative(),
-            required_handles,
-            limits,
+            OwnedSubmission {
+                path_is_relative: source.is_relative() || destination.is_relative(),
+
+                required_handles,
+
+                limits,
+
+                initial_owned_bytes: 0,
+            },
             move |request, scope, observer, _budget, _maximum| {
                 if let Some(stopped) = stop_outcome(scope) {
                     return stopped;
@@ -523,9 +559,15 @@ impl AsyncLocalFileSystem {
             manager,
             operation,
             request,
-            source.is_relative() || destination.is_relative(),
-            2,
-            limits,
+            OwnedSubmission {
+                path_is_relative: source.is_relative() || destination.is_relative(),
+
+                required_handles: 2,
+
+                limits,
+
+                initial_owned_bytes: 0,
+            },
             move |request, scope, observer, _budget, _maximum| {
                 if let Some(stopped) = stop_outcome(scope) {
                     return stopped;
@@ -601,9 +643,15 @@ impl AsyncLocalFileSystem {
             manager,
             operation,
             request,
-            path.is_relative(),
-            1,
-            limits,
+            OwnedSubmission {
+                path_is_relative: path.is_relative(),
+
+                required_handles: 1,
+
+                limits,
+
+                initial_owned_bytes: 0,
+            },
             move |request, scope, observer, _budget, _maximum| {
                 if let Some(stopped) = stop_outcome(scope) {
                     return stopped;
@@ -668,9 +716,15 @@ impl AsyncLocalFileSystem {
             manager,
             operation,
             request,
-            path.is_relative(),
-            1,
-            limits,
+            OwnedSubmission {
+                path_is_relative: path.is_relative(),
+
+                required_handles: 1,
+
+                limits,
+
+                initial_owned_bytes: 0,
+            },
             move |request, scope, observer, _budget, _maximum| {
                 if let Some(stopped) = stop_outcome(scope) {
                     return stopped;
@@ -732,16 +786,13 @@ impl AsyncLocalFileSystem {
             },
         )
     }
-
     /// Runs the submit owned behavior while preserving the operation lifecycle
     /// invariants.
-
     /// # Type Parameters
     /// - `R` — type used by this operation.
     /// - `T` — type used by this operation.
     /// - `E` — type used by this operation.
     /// - `F` — type used by this operation.
-
     /// # Parameters
     /// - `manager` — supplies data or policy for this operation.
     /// - `operation` — supplies data or policy for this operation.
@@ -755,9 +806,7 @@ impl AsyncLocalFileSystem {
         manager: &OperationManager,
         operation: OperationOptions,
         request: R,
-        path_is_relative: bool,
-        required_handles: usize,
-        limits: LocalOperationOptions,
+        requirements: OwnedSubmission,
         task: F,
     ) -> Result<(LocalOperation<T, E>, LocalFactObserver), LocalSubmitError<R>>
     where
@@ -772,10 +821,10 @@ impl AsyncLocalFileSystem {
             manager,
             operation,
             request,
-            path_is_relative,
-            required_handles,
-            limits,
-            0,
+            OwnedSubmission {
+                initial_owned_bytes: 0,
+                ..requirements
+            },
             task,
         )
     }
@@ -802,10 +851,7 @@ impl AsyncLocalFileSystem {
         manager: &OperationManager,
         operation: OperationOptions,
         request: R,
-        path_is_relative: bool,
-        required_handles: usize,
-        limits: LocalOperationOptions,
-        initial_owned_bytes: usize,
+        requirements: OwnedSubmission,
         task: F,
     ) -> Result<(LocalOperation<T, E>, LocalFactObserver), LocalSubmitError<R>>
     where
@@ -816,6 +862,12 @@ impl AsyncLocalFileSystem {
             + Send
             + 'static,
     {
+        let OwnedSubmission {
+            path_is_relative,
+            required_handles,
+            limits,
+            initial_owned_bytes,
+        } = requirements;
         let scoped = match manager.with_group(&self.executor.inner.group) {
             Ok(scoped) => scoped,
             Err(error) => {
@@ -895,10 +947,8 @@ impl AsyncLocalFileSystem {
         }
     }
 }
-
 /// Runs the bind host path behavior while preserving the operation lifecycle
 /// invariants.
-
 /// # Parameters
 /// - `base` — supplies data or policy for this operation.
 /// - `path` — supplies data or policy for this operation.
@@ -908,10 +958,8 @@ fn bind_host_path(base: &Option<PathBuf>, path: &PathBuf) -> PathBuf {
         _ => path.clone(),
     }
 }
-
 /// Runs the read complete cancellable behavior while preserving the operation
 /// lifecycle invariants.
-
 /// # Parameters
 /// - `filesystem` — supplies data or policy for this operation.
 /// - `path` — supplies data or policy for this operation.
@@ -922,7 +970,7 @@ fn bind_host_path(base: &Option<PathBuf>, path: &PathBuf) -> PathBuf {
 /// - `allocation_limit` — supplies data or policy for this operation.
 fn read_complete_cancellable(
     filesystem: &crate::LocalFileSystem,
-    path: &PathBuf,
+    path: &Path,
     options: &LocalReadAllOptions,
     maximum: u64,
     scope: &OperationScope,
@@ -953,7 +1001,7 @@ fn read_complete_cancellable(
         Err(error) => return OperationOutcome::Failed(error),
     };
     let mut observed = match LocalObservedReader::from_reader(reader, LocalObservationRequirement::Required) {
-        Ok(reader) => reader.bind_error_context(path.clone(), None),
+        Ok(reader) => reader.bind_error_context(path.to_path_buf(), None),
         Err(error) => return OperationOutcome::Failed(error),
     };
     let before = observed.observation().clone();
@@ -961,7 +1009,7 @@ fn read_complete_cancellable(
     if observed_len > maximum {
         return OperationOutcome::Failed(LocalFileError::from_read_limit(
             LocalFileOperation::Read,
-            Some(path.clone()),
+            Some(path.to_path_buf()),
             LocalReadLimitError::new(maximum, observed_len),
         ));
     }
@@ -979,7 +1027,7 @@ fn read_complete_cancellable(
                 Ok(_) => {
                     return OperationOutcome::Failed(LocalFileError::from_read_limit(
                         LocalFileOperation::Read,
-                        Some(path.clone()),
+                        Some(path.to_path_buf()),
                         LocalReadLimitError::new(maximum, maximum.saturating_add(1)),
                     ));
                 }
@@ -987,7 +1035,7 @@ fn read_complete_cancellable(
                 Err(error) => {
                     return OperationOutcome::Failed(LocalFileError::from_io(
                         LocalFileOperation::Read,
-                        Some(path.clone()),
+                        Some(path.to_path_buf()),
                         None,
                         error,
                     ));
@@ -998,7 +1046,7 @@ fn read_complete_cancellable(
         if let Err(error) = reserve_capacity(&mut bytes, remaining, budget, allocation_limit) {
             return OperationOutcome::Failed(LocalFileError::from_io(
                 LocalFileOperation::Read,
-                Some(path.clone()),
+                Some(path.to_path_buf()),
                 None,
                 error,
             ));
@@ -1015,7 +1063,7 @@ fn read_complete_cancellable(
             Err(error) => {
                 return OperationOutcome::Failed(LocalFileError::from_io(
                     LocalFileOperation::Read,
-                    Some(path.clone()),
+                    Some(path.to_path_buf()),
                     None,
                     error,
                 ));
@@ -1029,7 +1077,7 @@ fn read_complete_cancellable(
     if !crate::observation::snapshot::observations_match(&before, &after, bytes.len() as u64) {
         return OperationOutcome::Failed(
             LocalFileError::new(LocalFileErrorKind::ChangedDuringRead, LocalFileOperation::Read)
-                .with_path(path.clone()),
+                .with_path(path.to_path_buf()),
         );
     }
     if let Some(stopped) = stop_outcome(scope) {
@@ -1037,14 +1085,11 @@ fn read_complete_cancellable(
     }
     OperationOutcome::Succeeded(bytes)
 }
-
 /// Runs the stop outcome behavior while preserving the operation lifecycle
 /// invariants.
-
 /// # Type Parameters
 /// - `T` — type used by this operation.
 /// - `E` — type used by this operation.
-
 /// # Parameters
 /// - `scope` — supplies data or policy for this operation.
 fn stop_outcome<T, E>(scope: &OperationScope) -> Option<OperationOutcome<T, E>> {
@@ -1055,13 +1100,10 @@ fn stop_outcome<T, E>(scope: &OperationScope) -> Option<OperationOutcome<T, E>> 
         })
     })
 }
-
 /// Runs the before native call behavior while preserving the operation
 /// lifecycle invariants.
-
 /// # Type Parameters
 /// - `T` — type used by this operation.
-
 /// # Parameters
 /// - `scope` — supplies data or policy for this operation.
 /// - `native_call` — supplies data or policy for this operation.
@@ -1074,10 +1116,8 @@ fn before_native_call<T>(scope: &OperationScope, native_call: impl FnOnce() -> T
         None => Ok(native_call()),
     }
 }
-
 /// Runs the record local effect behavior while preserving the operation
 /// lifecycle invariants.
-
 /// # Parameters
 /// - `scope` — supplies data or policy for this operation.
 /// - `observer` — supplies data or policy for this operation.
@@ -1116,10 +1156,8 @@ fn record_local_effect(
     snapshot.effect_record_error = effect_record_error;
     observer.update(snapshot);
 }
-
 /// Runs the shrink to zero behavior while preserving the operation lifecycle
 /// invariants.
-
 /// # Parameters
 /// - `permit` — supplies data or policy for this operation.
 fn shrink_to_zero(permit: &Arc<Mutex<Permit>>) {
@@ -1128,53 +1166,8 @@ fn shrink_to_zero(permit: &Arc<Mutex<Permit>>) {
     permit.shrink(amount);
 }
 
-#[cfg(test)]
-mod stop_gate_tests {
-    use std::sync::Arc;
-    use std::sync::atomic::AtomicUsize;
-    use std::sync::atomic::Ordering;
-    use std::sync::mpsc;
-
-    use qubit_operation::ManagerOptions;
-    use qubit_operation::OperationManager;
-    use qubit_operation::OperationOutcome;
-    use qubit_operation::StopReason;
-
-    use super::before_native_call;
-
-    /// Runs the test stopped scope skips the first native call behavior while
-    /// preserving the operation lifecycle invariants.
-    #[test]
-    fn test_stopped_scope_skips_the_first_native_call() {
-        let manager = OperationManager::new(ManagerOptions::default()).unwrap();
-        let native_calls = Arc::new(AtomicUsize::new(0));
-        let native_calls_for_task = Arc::clone(&native_calls);
-        let (entered_tx, entered_rx) = mpsc::channel();
-        let (release_tx, release_rx) = mpsc::channel();
-        let mut operation = manager
-            .try_submit(Default::default(), move |scope| {
-                entered_tx.send(()).unwrap();
-                release_rx.recv().unwrap();
-                let result = before_native_call(&scope, || native_calls_for_task.fetch_add(1, Ordering::SeqCst));
-                Ok::<_, ()>(result.map_err(|stop| stop.reason))
-            })
-            .unwrap();
-
-        entered_rx.recv().unwrap();
-        let _ = operation.request_stop(StopReason::UserCancelled);
-        release_tx.send(()).unwrap();
-
-        assert!(matches!(
-            operation.wait_outcome().unwrap(),
-            OperationOutcome::Stopped(report) if report.reason == StopReason::UserCancelled
-        ));
-        assert_eq!(native_calls.load(Ordering::SeqCst), 0);
-    }
-}
-
 /// Runs the reserve capacity behavior while preserving the operation lifecycle
 /// invariants.
-
 /// # Parameters
 /// - `output` — supplies data or policy for this operation.
 /// - `additional` — supplies data or policy for this operation.
@@ -1212,4 +1205,47 @@ fn reserve_capacity(
         ));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod stop_gate_tests {
+    use std::sync::Arc;
+    use std::sync::atomic::AtomicUsize;
+    use std::sync::atomic::Ordering;
+    use std::sync::mpsc;
+
+    use qubit_operation::ManagerOptions;
+    use qubit_operation::OperationManager;
+    use qubit_operation::OperationOutcome;
+    use qubit_operation::StopReason;
+
+    use super::before_native_call;
+    /// Runs the test stopped scope skips the first native call behavior while
+    /// preserving the operation lifecycle invariants.
+    #[test]
+    fn test_stopped_scope_skips_the_first_native_call() {
+        let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+        let native_calls = Arc::new(AtomicUsize::new(0));
+        let native_calls_for_task = Arc::clone(&native_calls);
+        let (entered_tx, entered_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        let mut operation = manager
+            .try_submit(Default::default(), move |scope| {
+                entered_tx.send(()).unwrap();
+                release_rx.recv().unwrap();
+                let result = before_native_call(&scope, || native_calls_for_task.fetch_add(1, Ordering::SeqCst));
+                Ok::<_, ()>(result.map_err(|stop| stop.reason))
+            })
+            .unwrap();
+
+        entered_rx.recv().unwrap();
+        let _ = operation.request_stop(StopReason::UserCancelled);
+        release_tx.send(()).unwrap();
+
+        assert!(matches!(
+            operation.wait_outcome().unwrap(),
+            OperationOutcome::Stopped(report) if report.reason == StopReason::UserCancelled
+        ));
+        assert_eq!(native_calls.load(Ordering::SeqCst), 0);
+    }
 }

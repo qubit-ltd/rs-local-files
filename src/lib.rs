@@ -321,5 +321,5 @@ pub use writer::LocalConditionalWriter;
 pub(crate) use writer::LocalFileCommitError;
 pub use writer::LocalFileWriter;
 pub(crate) use writer::LocalWriteFailureState;
-pub(crate) use writer::LocalWriteOutcome;
+pub use writer::LocalWriteOutcome;
 pub(crate) use writer::LocalWriterState;

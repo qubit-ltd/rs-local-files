@@ -38,5 +38,5 @@ pub(crate) struct ExecutorInner {
     pub(crate) fact_slots: PermitPool,
     /// Stores the cleanup slots associated with this value.
     #[allow(dead_code)]
-    pub(crate) cleanup_slots: PermitPool,
+    pub(crate) cleanup_slots: Arc<PermitPool>,
 }

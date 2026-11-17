@@ -8,17 +8,18 @@
 
 use std::sync::Arc;
 
-use super::DiskPermit;
+use crate::operation::internal::permits::DiskPermit;
 
 /// A retained disk reservation associated with a staged-tree owner.
 #[derive(Clone)]
 pub struct LocalStagedTreeDiskReservation(
     /// Disk quota retained while the staged-tree owner is alive.
-    pub(super) Arc<DiskPermit>,
+    pub(in crate::operation) Arc<DiskPermit>,
 );
 
 impl std::fmt::Debug for LocalStagedTreeDiskReservation {
-    /// Formats the reservation using its byte count without exposing permit internals.
+    /// Formats the reservation using its byte count without exposing permit
+    /// internals.
     ///
     /// # Parameters
     /// * `formatter` — destination for this diagnostic representation.

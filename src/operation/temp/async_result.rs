@@ -20,7 +20,7 @@ use super::AsyncSender;
 /// # Type Parameters
 ///
 /// * `T` — result value shared by the worker and receiver.
-pub(super) struct AsyncResult<T> {
+pub(crate) struct AsyncResult<T> {
     /// Result value published by the worker and consumed by the receiver.
     pub(super) value: Mutex<Option<T>>,
     /// Current receiver task waker, if the future is pending.

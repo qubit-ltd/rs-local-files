@@ -6,6 +6,7 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 
+#[cfg(feature = "async")]
 use std::fs::File;
 use std::path::Path;
 
@@ -82,18 +83,21 @@ impl LocalSealedTempFile {
 
     /// Restores drop cleanup after a managed consuming transition returns this
     /// sealed owner to its registered resource.
+    #[cfg(feature = "async")]
     pub(crate) fn arm_cleanup_on_drop(&mut self) {
         self.resource.arm_cleanup_on_drop();
     }
 
     /// Clones the bound cleanup authority without cloning or exposing the
     /// sealed file handle.
+    #[cfg(feature = "async")]
     pub(crate) fn cleanup_anchor(&self) -> LocalTempFile {
         self.resource.cleanup_anchor()
     }
 
     /// Prevents this sealed wrapper from cleaning during unwind while a
     /// separate cleanup anchor is retained by the managed transition.
+    #[cfg(feature = "async")]
     pub(crate) fn disarm_cleanup_on_drop(&mut self) {
         self.resource.disarm_cleanup_on_drop();
     }
@@ -122,6 +126,7 @@ impl LocalSealedTempFile {
     /// Clones the already-open read-only handle without resolving or reopening
     /// a path. The caller must retain the managed resource lease while using
     /// it.
+    #[cfg(feature = "async")]
     pub(crate) fn try_clone_readonly_file(&self) -> LocalResult<File> {
         let file = self.resource.file.as_ref().ok_or_else(|| {
             LocalFileError::from_io(

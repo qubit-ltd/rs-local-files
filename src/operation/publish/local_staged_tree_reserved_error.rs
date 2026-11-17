@@ -27,7 +27,7 @@ impl<E> LocalStagedTreeReservedError<E> {
     /// # Parameters
     /// * `error` — native failure that owns recovery state.
     /// * `reservation` — quota retained for that state.
-    pub(super) fn new(error: E, reservation: LocalStagedTreeDiskReservation) -> Self {
+    pub(in crate::operation) fn new(error: E, reservation: LocalStagedTreeDiskReservation) -> Self {
         Self { error, reservation }
     }
 

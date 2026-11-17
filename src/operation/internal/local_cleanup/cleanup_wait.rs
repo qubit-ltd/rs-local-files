@@ -22,7 +22,7 @@ use super::safe_drop_waker;
 use crate::operation::temp::LocalTempResource;
 
 /// Future that collects the result from one queued native cleanup job.
-pub(super) struct CleanupWait {
+pub(crate) struct CleanupWait {
     /// State shared with the worker closure for this cleanup request.
     pub(super) state: Arc<CleanupState>,
     /// Associates the wait future with the resource type being cleaned.
@@ -31,18 +31,10 @@ pub(super) struct CleanupWait {
 
 impl Future for CleanupWait {
     /// Cleanup status with the resource returned on failure.
-    /// Cleanup status with the resource returned on failure.
     type Output = CleanupOutcome<LocalTempResource>;
 
     /// Returns the worker result or stores the current task waker until it
     /// arrives.
-    ///
-    /// # Parameters
-    ///
-    /// * `self` — pinned future whose state is shared with the cleanup worker.
-    /// * `cx` — task context used to arrange a wake after the worker completes.
-    /// Collects the completed cleanup result or registers the current task
-    /// waker.
     ///
     /// # Parameters
     ///

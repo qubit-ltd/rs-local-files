@@ -6,6 +6,8 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 
+use super::LocalTempCleanupAnchor;
+
 /// Native owner currently attached to a registered temporary-file resource.
 ///
 /// Variants encode lifecycle state so serialized commands can reject

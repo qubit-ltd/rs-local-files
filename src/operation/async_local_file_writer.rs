@@ -83,12 +83,7 @@ impl AsyncLocalFileWriter {
         self.settle().await.map_err(|error| {
             LocalStreamCommitError::new(
                 crate::LocalFileCommitError::new(
-                    crate::LocalFileError::from_io(
-                        crate::LocalFileOperation::Commit,
-                        None,
-                        None,
-                        error,
-                    ),
+                    crate::LocalFileError::from_io(crate::LocalFileOperation::Commit, None, None, error),
                     crate::LocalWriteFailureState::NotPublished,
                     None,
                 ),
@@ -112,15 +107,12 @@ impl AsyncLocalFileWriter {
         };
         let id = self
             .commit_request
-            .get_or_insert_with(|| LocalStreamRequest {
+            .get_or_insert(LocalStreamRequest {
                 id: 0x8000_0000_0000_0001,
                 command: LocalStreamCommand::Commit,
             })
             .id;
-        let request = self
-            .commit_request
-            .as_ref()
-            .expect("commit request inserted");
+        let request = self.commit_request.as_ref().expect("commit request inserted");
         let result = std::future::poll_fn(|cx| match resource.poll_command(cx, request) {
             Poll::Pending => Poll::Pending,
             Poll::Ready(Ok(LocalStreamCompletion::Committed(outcome))) => Poll::Ready(Ok(outcome)),
@@ -142,12 +134,7 @@ impl AsyncLocalFileWriter {
             ))),
             Poll::Ready(Err(error)) => Poll::Ready(Err(LocalStreamCommitError::new(
                 crate::LocalFileCommitError::new(
-                    crate::LocalFileError::from_io(
-                        crate::LocalFileOperation::Commit,
-                        None,
-                        None,
-                        error,
-                    ),
+                    crate::LocalFileError::from_io(crate::LocalFileOperation::Commit, None, None, error),
                     crate::LocalWriteFailureState::Indeterminate,
                     None,
                 ),
@@ -230,10 +217,7 @@ impl AsyncOutput for AsyncLocalFileWriter {
         if this.resource.is_none() {
             return Poll::Ready(Err(StreamState::closed_error()));
         }
-        let resource = this
-            .resource
-            .as_deref()
-            .expect("resource retained until close");
+        let resource = this.resource.as_deref().expect("resource retained until close");
         this.state.poll_write(resource, cx, &input[index..end])
     }
 
@@ -248,10 +232,7 @@ impl AsyncOutput for AsyncLocalFileWriter {
         if this.resource.is_none() {
             return Poll::Ready(Err(StreamState::closed_error()));
         }
-        let resource = this
-            .resource
-            .as_deref()
-            .expect("resource retained until close");
+        let resource = this.resource.as_deref().expect("resource retained until close");
         this.state.poll_flush(resource, cx)
     }
 }

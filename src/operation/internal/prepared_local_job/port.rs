@@ -21,7 +21,8 @@ use qubit_operation::StopReason;
 /// # Type Parameters
 /// - `T` — operation result type.
 /// - `E` — operation error type.
-/// Represents port within the local operation subsystem.
+///
+/// The port synchronizes worker completion with external-operation polls.
 pub(super) struct Port<T, E> {
     /// Stores the id associated with this value.
     pub(super) id: Option<OperationId>,

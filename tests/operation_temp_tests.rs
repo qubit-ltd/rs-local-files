@@ -71,13 +71,13 @@ fn find_file(root: &std::path::Path) -> std::path::PathBuf {
         if path.is_file() {
             return path;
         }
-        if path.is_dir() {
-            if let Ok(found) = std::fs::read_dir(&path) {
-                for child in found {
-                    let child = child.expect("child").path();
-                    if child.is_file() {
-                        return child;
-                    }
+        if path.is_dir()
+            && let Ok(found) = std::fs::read_dir(&path)
+        {
+            for child in found {
+                let child = child.expect("child").path();
+                if child.is_file() {
+                    return child;
                 }
             }
         }

@@ -7,12 +7,13 @@
 // =============================================================================
 
 use super::super::temp::LocalTempFileAccess;
+use super::LocalTempLifecycleCommand;
 
 /// Owned temporary-resource lifecycle request.
 pub struct LocalTempLifecycleRequest {
     /// Existing access token for the registered temporary resource.
     /// Access token that identifies and retains the managed resource.
-    pub access: super::LocalTempFileAccess,
+    pub access: LocalTempFileAccess,
     /// Native lifecycle action to serialize on the local worker.
     /// Transition serialized by the local worker.
     pub command: LocalTempLifecycleCommand,

@@ -29,9 +29,7 @@ pub enum LocalStreamCompletion {
     /// New absolute position after a seek.
     Seeked(#[doc = "Absolute position reached after the seek."] u64),
     /// Writer publication completed.
-    Committed(
-        #[doc = "Publication and durability facts confirmed by commit."] crate::LocalWriteOutcome,
-    ),
+    Committed(#[doc = "Publication and durability facts confirmed by commit."] crate::LocalWriteOutcome),
     /// Publication failed, with the writer retained when retry is possible.
     CommitFailed {
         /// Structured reason publication failed.

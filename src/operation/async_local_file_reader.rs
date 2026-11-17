@@ -152,10 +152,7 @@ impl AsyncInput for AsyncLocalFileReader {
         if this.resource.is_none() {
             return Poll::Ready(Err(StreamState::closed_error()));
         }
-        let resource = this
-            .resource
-            .as_deref()
-            .expect("resource retained until close");
+        let resource = this.resource.as_deref().expect("resource retained until close");
         this.state.poll_read(resource, cx, &mut output[index..end])
     }
 }

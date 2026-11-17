@@ -59,6 +59,7 @@ fn test_tree_publish_outcome_must_use_in_external_consumer() {
     let target = temporary.path().join("target");
 
     let accepted = Command::new("cargo")
+        .current_dir(temporary.path())
         .arg("check")
         .arg("--frozen")
         .arg("--manifest-path")
@@ -83,6 +84,7 @@ fn test_tree_publish_outcome_must_use_in_external_consumer() {
     );
 
     let rejected = Command::new("cargo")
+        .current_dir(temporary.path())
         .arg("check")
         .arg("--frozen")
         .arg("--manifest-path")
@@ -110,6 +112,7 @@ fn test_tree_publish_outcome_must_use_in_external_consumer() {
     );
 
     let discarded_options = Command::new("cargo")
+        .current_dir(temporary.path())
         .arg("check")
         .arg("--frozen")
         .arg("--manifest-path")

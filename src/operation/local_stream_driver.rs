@@ -15,7 +15,8 @@ use super::LocalStreamRequest;
 /// Non-blocking driver implemented by a local serial worker or a deterministic
 /// fake.
 ///
-/// Implementations should arrange for command progress to wake the supplied task.
+/// Implementations should arrange for command progress to wake the supplied
+/// task.
 ///
 /// For a given request id, a driver must schedule at most one command and keep
 /// its completion observable until it returns `Ready` from this method. Calls

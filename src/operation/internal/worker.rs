@@ -8,6 +8,8 @@
 //! Worker queue implementation used by the local I/O executor.
 
 // Keeps queue ownership, scheduling, and cleanup capacity in one type module.
+mod cleanup_enqueue_error;
 mod worker_queue;
 
+pub(crate) use cleanup_enqueue_error::CleanupEnqueueError;
 pub(crate) use worker_queue::WorkerQueue;

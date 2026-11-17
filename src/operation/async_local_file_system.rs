@@ -13,16 +13,16 @@ mod completion;
 
 // Implements complete-operation submission methods for this filesystem facade.
 mod complete_operations;
-
+mod owned_submission;
 use std::sync::Mutex;
 
 use completion::Completion;
+use owned_submission::OwnedSubmission;
 
 use super::LocalIoExecutor;
 
 #[path = "async_local_file_system/publish.rs"]
 mod publish;
-
 /// Asynchronous facade retaining its synchronous filesystem authority and
 /// executor.
 #[derive(Clone)]
@@ -38,7 +38,6 @@ pub struct AsyncLocalFileSystem {
 impl AsyncLocalFileSystem {
     /// Runs the new behavior while preserving the operation lifecycle
     /// invariants.
-
     /// # Parameters
     /// - `executor` — supplies data or policy for this operation.
     /// - `host_base` — supplies data or policy for this operation.
@@ -447,7 +446,7 @@ impl AsyncLocalFileSystem {
                     let resource = super::stream::WorkerStreamDriver::managed(
                         scope,
                         executor,
-                        super::stream::LocalNativeStream::Writer(writer),
+                        super::stream::LocalNativeStream::Writer(Box::new(writer)),
                         worker_budget,
                         worker_handle,
                         Some(worker_observer),
@@ -643,10 +642,8 @@ impl AsyncLocalFileSystem {
         }
     }
 }
-
 /// Runs the bind host path behavior while preserving the operation lifecycle
 /// invariants.
-
 /// # Parameters
 /// - `base` — supplies data or policy for this operation.
 /// - `path` — supplies data or policy for this operation.
@@ -656,10 +653,8 @@ fn bind_host_path(base: &Option<PathBuf>, path: &PathBuf) -> PathBuf {
         _ => path.clone(),
     }
 }
-
 /// Runs the reserve vec capacity behavior while preserving the operation
 /// lifecycle invariants.
-
 /// # Parameters
 /// - `output` — supplies data or policy for this operation.
 /// - `additional` — supplies data or policy for this operation.
@@ -698,14 +693,11 @@ fn reserve_vec_capacity(
     }
     Ok(())
 }
-
 /// Runs the run on worker behavior while preserving the operation lifecycle
 /// invariants.
-
 /// # Type Parameters
 /// - `T` — type used by this operation.
 /// - `F` — type used by this operation.
-
 /// # Parameters
 /// - `executor` — supplies data or policy for this operation.
 /// - `task` — supplies data or policy for this operation.
@@ -777,16 +769,43 @@ where
 
 #[cfg(test)]
 mod tests {
+    use std::path::PathBuf;
     use std::sync::Arc;
     use std::sync::Mutex;
+    use std::task::Context;
+    use std::task::Poll;
+    use std::task::Wake;
+    use std::task::Waker;
 
     use qubit_operation::ManagerOptions;
     use qubit_operation::OperationManager;
 
+    use super::AsyncLocalFileSystem;
     use super::reserve_vec_capacity;
     use crate::operation::LocalExecutionConfig;
     use crate::operation::LocalIoExecutor;
 
+    fn block_on<F: std::future::Future>(future: F) -> F::Output {
+        struct ThreadWake(std::thread::Thread);
+        impl Wake for ThreadWake {
+            fn wake(self: Arc<Self>) {
+                self.0.unpark();
+            }
+            fn wake_by_ref(self: &Arc<Self>) {
+                self.0.unpark();
+            }
+        }
+
+        let waker = Waker::from(Arc::new(ThreadWake(std::thread::current())));
+        let mut context = Context::from_waker(&waker);
+        let mut future = std::pin::pin!(future);
+        loop {
+            match future.as_mut().poll(&mut context) {
+                Poll::Ready(value) => return value,
+                Poll::Pending => std::thread::park(),
+            }
+        }
+    }
     /// Runs the test read buffer growth reserves actual capacity before
     /// allocation behavior while preserving the operation lifecycle invariants.
     #[test]
@@ -820,5 +839,99 @@ mod tests {
         assert_eq!(executor.inner.byte_slots.used(), reserved);
         drop(permit);
         assert_eq!(executor.inner.byte_slots.used(), 0);
+    }
+
+    #[test]
+    fn test_async_openers_create_and_release_worker_managed_resources() {
+        use qubit_operation::OperationOutcome;
+
+        use crate::operation::LocalReadRequest;
+        use crate::options::LocalListOptions;
+        use crate::options::LocalReadOptions;
+        use crate::options::LocalWriteMode;
+        use crate::options::LocalWriteOptions;
+
+        let directory = tempfile::tempdir().unwrap();
+        let input = directory.path().join("input");
+        std::fs::write(&input, b"reader input").unwrap();
+        let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+        let executor = LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).unwrap();
+        let filesystem = block_on(AsyncLocalFileSystem::rooted(executor, directory.path().to_path_buf())).unwrap();
+
+        let mut reader_open = filesystem
+            .submit_open_reader(
+                &manager,
+                Default::default(),
+                PathBuf::from("input"),
+                LocalReadOptions::default(),
+            )
+            .unwrap();
+        let reader = match reader_open.wait_outcome().unwrap() {
+            OperationOutcome::Succeeded(reader) => reader,
+            _ => panic!("expected reader to open"),
+        };
+        drop(reader);
+        reader_open.wait_settlement().unwrap();
+
+        let mut missing_open = filesystem
+            .submit_open_reader(
+                &manager,
+                Default::default(),
+                PathBuf::from("missing"),
+                LocalReadOptions::default(),
+            )
+            .unwrap();
+        assert!(matches!(
+            missing_open.wait_outcome().unwrap(),
+            OperationOutcome::Failed(_)
+        ));
+
+        let mut writer_open = filesystem
+            .submit_open_writer(
+                &manager,
+                Default::default(),
+                PathBuf::from("output"),
+                LocalWriteOptions::new(LocalWriteMode::CreateOrReplace),
+            )
+            .unwrap()
+            .0;
+        let writer = match writer_open.wait_outcome().unwrap() {
+            OperationOutcome::Succeeded(writer) => writer,
+            _ => panic!("expected writer to open"),
+        };
+        drop(writer);
+        writer_open.wait_settlement().unwrap();
+
+        let mut walker_open = filesystem
+            .submit_open_walker(
+                &manager,
+                Default::default(),
+                PathBuf::from("."),
+                LocalListOptions::default(),
+            )
+            .unwrap();
+        let walker = match walker_open.wait_outcome().unwrap() {
+            OperationOutcome::Succeeded(walker) => walker,
+            _ => panic!("expected walker to open"),
+        };
+        drop(walker);
+        walker_open.wait_settlement().unwrap();
+
+        let mut read = filesystem
+            .submit_read_all(
+                &manager,
+                Default::default(),
+                LocalReadRequest {
+                    path: PathBuf::from("input"),
+                    read: Default::default(),
+                },
+                Default::default(),
+            )
+            .unwrap()
+            .0;
+        assert!(matches!(
+            read.wait_outcome().unwrap(),
+            OperationOutcome::Succeeded(bytes) if bytes == b"reader input"
+        ));
     }
 }

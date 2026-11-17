@@ -29,7 +29,8 @@ pub(in crate::operation) struct LocalManagedAbortResource<W: Send + 'static> {
 }
 
 impl<W: Send + 'static> LocalManagedAbortResource<W> {
-    /// Creates an empty cleanup owner retaining its worker permit and abort action.
+    /// Creates an empty cleanup owner retaining its worker permit and abort
+    /// action.
     ///
     /// # Parameters
     ///

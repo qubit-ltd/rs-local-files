@@ -6,6 +6,8 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 
+#![cfg(feature = "async")]
+
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::Condvar;
@@ -292,7 +294,9 @@ fn test_conditional_abort_failure_after_stop_retains_recovery_owner() {
     let directory = tempfile::tempdir().unwrap();
     let destination = directory.path().join("conditional-abort-recovery");
     let manager = OperationManager::new(ManagerOptions::default()).unwrap();
-    let filesystem = facade(&manager)
+    let executor = LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).unwrap();
+    let filesystem = block_on(AsyncLocalFileSystem::host(executor.clone()))
+        .unwrap()
         .with_symlink_policy(qubit_local_files::policy::LocalSymlinkPolicy::Reject)
         .unwrap();
     let gate = Arc::new(install_test_gate("lf7-conditional-before-publish").unwrap());
@@ -344,10 +348,28 @@ fn test_conditional_abort_failure_after_stop_retains_recovery_owner() {
         .first()
         .expect("conditional writer cleanup failure must retain its owner")
         .clone();
+    drop(settlement);
     drop(fault);
     let report = recovery.try_retry().unwrap().wait().unwrap();
     assert_eq!(report.recovery.phase, qubit_operation::RecoveryPhase::Resolved);
     assert!(!destination.exists());
+    drop(report);
+    drop(observer);
+    let shutdown_report = executor
+        .request_shutdown(qubit_operation::ShutdownMode::Drain)
+        .wait()
+        .expect("executor group shutdown should complete after recovery");
+    assert_eq!(shutdown_report.snapshot.active_operations, 0);
+    drop(recovery);
+    drop(operation);
+    drop(filesystem);
+    drop(executor);
+    let shutdown_report = manager
+        .request_shutdown(qubit_operation::ShutdownMode::Drain)
+        .wait()
+        .expect("manager shutdown should release recovery tracking");
+    assert_eq!(shutdown_report.snapshot.active_operations, 0);
+    assert_eq!(shutdown_report.snapshot.recovery_groups, 0);
 }
 
 #[test]
@@ -383,11 +405,13 @@ fn test_expired_deadline_rejects_owned_request_before_native_work() {
     let manager = OperationManager::new(ManagerOptions::default()).unwrap();
     let filesystem = facade(&manager);
     let domain = ClockDomainId::new_unique();
-    let mut options = qubit_operation::OperationOptions::default();
-    options.context = ContextOptions {
-        clock: Some(Arc::new(FakeClock { domain, ticks: 10 })),
-        deadline: Some(Deadline::at(MonotonicTime::new(domain, 1))),
-        budget: None,
+    let options = qubit_operation::OperationOptions {
+        context: ContextOptions {
+            clock: Some(Arc::new(FakeClock { domain, ticks: 10 })),
+            deadline: Some(Deadline::at(MonotonicTime::new(domain, 1))),
+            budget: None,
+        },
+        ..Default::default()
     };
     let request = LocalWriterCommitRequest {
         path: PathBuf::from(&destination),
@@ -1003,7 +1027,8 @@ fn test_failed_abort_after_stop_returns_retryable_writer_and_cleanup_error() {
     let directory = tempfile::tempdir().unwrap();
     let destination = directory.path().join("abort-recovery");
     let manager = OperationManager::new(ManagerOptions::default()).unwrap();
-    let filesystem = facade(&manager);
+    let executor = LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).unwrap();
+    let filesystem = block_on(AsyncLocalFileSystem::host(executor.clone())).unwrap();
     let gate = install_test_gate("lf7-writer-before-publish").unwrap();
     let (mut operation, _) = filesystem
         .submit_writer_commit(
@@ -1032,10 +1057,27 @@ fn test_failed_abort_after_stop_returns_retryable_writer_and_cleanup_error() {
         .first()
         .expect("failed cleanup should expose a recovery handle")
         .clone();
+    drop(settlement);
     drop(fault);
     let report = recovery.try_retry().unwrap().wait().unwrap();
     assert_eq!(report.recovery.phase, qubit_operation::RecoveryPhase::Resolved);
     assert!(!destination.exists());
+    drop(report);
+    let shutdown_report = executor
+        .request_shutdown(qubit_operation::ShutdownMode::Drain)
+        .wait()
+        .expect("executor group shutdown should complete after recovery");
+    assert_eq!(shutdown_report.snapshot.active_operations, 0);
+    drop(recovery);
+    drop(operation);
+    drop(filesystem);
+    drop(executor);
+    let shutdown_report = manager
+        .request_shutdown(qubit_operation::ShutdownMode::Drain)
+        .wait()
+        .expect("manager shutdown should release recovery tracking");
+    assert_eq!(shutdown_report.snapshot.active_operations, 0);
+    assert_eq!(shutdown_report.snapshot.recovery_groups, 0);
 }
 
 #[cfg(feature = "test-support")]

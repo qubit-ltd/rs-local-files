@@ -10,12 +10,15 @@ use super::super::handoff::LocalReadLease;
 
 /// Successful result of one temporary lifecycle transition.
 pub enum LocalTempLifecycleResult {
-    /// The temporary resource was moved to a caller-visible destination and the outcome describes the publication guarantees.
+    /// The temporary resource was moved to a caller-visible destination and the
+    /// outcome describes the publication guarantees.
     Persisted(
-        /// Publication outcome describing the persisted destination and guarantees.
+        /// Publication outcome describing the persisted destination and
+        /// guarantees.
         crate::outcome::LocalPersistOutcome,
     ),
-    /// Sealing succeeded and returns a read lease for the resource now protected against writes.
+    /// Sealing succeeded and returns a read lease for the resource now
+    /// protected against writes.
     Sealed(
         /// Read capability for the resource after it has been sealed.
         LocalReadLease,

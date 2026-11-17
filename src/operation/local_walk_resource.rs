@@ -85,12 +85,7 @@ impl LocalWalkResource {
         self.claimed
             .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
             .map(|_| ())
-            .map_err(|_| {
-                io::Error::new(
-                    io::ErrorKind::AlreadyExists,
-                    "walker already has an exclusive handle",
-                )
-            })
+            .map_err(|_| io::Error::new(io::ErrorKind::AlreadyExists, "walker already has an exclusive handle"))
     }
 
     /// Polls a bounded batch while converting driver panics to an I/O error.
@@ -99,30 +94,19 @@ impl LocalWalkResource {
     ///
     /// * `cx` - Caller task context used by the worker driver for wakeups.
     /// * `request_id` - Stable identifier reused when polling the same batch.
-    pub(super) fn poll_batch(
-        &self,
-        cx: &mut Context<'_>,
-        request_id: u64,
-    ) -> Poll<io::Result<Option<Vec<PathBuf>>>> {
+    pub(super) fn poll_batch(&self, cx: &mut Context<'_>, request_id: u64) -> Poll<io::Result<Option<Vec<PathBuf>>>> {
         match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            self.driver.poll_batch(
-                cx,
-                request_id,
-                LOCAL_WALK_BATCH_ENTRIES,
-                LOCAL_WALK_BATCH_BYTES,
-            )
+            self.driver
+                .poll_batch(cx, request_id, LOCAL_WALK_BATCH_ENTRIES, LOCAL_WALK_BATCH_BYTES)
         })) {
             Ok(result) => result,
-            Err(_) => Poll::Ready(Err(io::Error::other(
-                "Unconfirmed: local walker driver panicked",
-            ))),
+            Err(_) => Poll::Ready(Err(io::Error::other("Unconfirmed: local walker driver panicked"))),
         }
     }
 
     /// Enqueues worker-side stop and contains driver panics.
     pub(super) fn request_stop(&self) {
-        let _ =
-            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| self.driver.request_stop()));
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| self.driver.request_stop()));
     }
 
     /// Polls for native iterator closure while converting driver panics.
@@ -131,12 +115,9 @@ impl LocalWalkResource {
     ///
     /// * `cx` - Caller task context used by the worker driver for wakeups.
     pub(super) fn poll_closed(&self, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
-        match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| self.driver.poll_closed(cx)))
-        {
+        match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| self.driver.poll_closed(cx))) {
             Ok(result) => result,
-            Err(_) => Poll::Ready(Err(io::Error::other(
-                "Unconfirmed: local walker close driver panicked",
-            ))),
+            Err(_) => Poll::Ready(Err(io::Error::other("Unconfirmed: local walker close driver panicked"))),
         }
     }
 }

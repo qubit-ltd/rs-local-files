@@ -6,6 +6,7 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 
+use super::LocalExecutorConfigError;
 /// Failure to create the local worker group.
 #[derive(Debug)]
 pub enum LocalExecutorCreateError {
@@ -24,7 +25,6 @@ pub enum LocalExecutorCreateError {
 impl std::fmt::Display for LocalExecutorCreateError {
     /// Runs the fmt behavior while preserving the operation lifecycle
     /// invariants.
-
     /// # Parameters
     /// - `formatter` — supplies data or policy for this operation.
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

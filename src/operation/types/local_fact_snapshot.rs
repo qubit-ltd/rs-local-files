@@ -6,6 +6,10 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 
+use super::LocalDurabilityState;
+use super::LocalModifiedRange;
+use super::LocalPublicationState;
+
 /// Bounded summary of local filesystem effects, independent of operation
 /// outcome.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]

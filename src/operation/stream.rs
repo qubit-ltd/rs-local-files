@@ -108,16 +108,12 @@ fn start_stream_drain(inner: Arc<WorkerStreamInner>, terminal: bool) -> io::Resu
 
     if !terminal {
         inner.active.store(false, Ordering::Release);
-        return Err(io::Error::new(
-            io::ErrorKind::WouldBlock,
-            "local worker queue is full",
-        ));
+        return Err(io::Error::new(io::ErrorKind::WouldBlock, "local worker queue is full"));
     }
 
     // Only terminal commands may use the cleanup lane reserved for this stream.
     let task_inner = Arc::clone(&inner);
-    let mut fallback: Box<dyn FnOnce() + Send> =
-        Box::new(move || drain_stream_commands(task_inner));
+    let mut fallback: Box<dyn FnOnce() + Send> = Box::new(move || drain_stream_commands(task_inner));
     for _ in 0..8 {
         let permit = inner
             .cleanup_permit
@@ -129,10 +125,7 @@ fn start_stream_drain(inner: Arc<WorkerStreamInner>, terminal: bool) -> io::Resu
         match inner.executor.enqueue_cleanup(fallback, permit) {
             Ok(()) => return Ok(()),
             Err((job, permit)) => {
-                *inner
-                    .cleanup_permit
-                    .lock()
-                    .unwrap_or_else(|e| e.into_inner()) = Some(permit);
+                *inner.cleanup_permit.lock().unwrap_or_else(|e| e.into_inner()) = Some(permit);
                 fallback = job;
             }
         }
@@ -155,10 +148,7 @@ fn fail_stream_queue(inner: &WorkerStreamInner, error: io::Error) {
     let requests = {
         let mut queue = inner.queue.lock().unwrap_or_else(|e| e.into_inner());
         inner.active.store(false, Ordering::Release);
-        queue
-            .drain(..)
-            .map(|request| request.id)
-            .collect::<Vec<_>>()
+        queue.drain(..).map(|request| request.id).collect::<Vec<_>>()
     };
     for id in requests {
         let waker = {
@@ -179,7 +169,8 @@ fn fail_stream_queue(inner: &WorkerStreamInner, error: io::Error) {
 ///
 /// # Parameters
 ///
-/// * `inner` - Shared worker state retaining the native stream and request queue.
+/// * `inner` - Shared worker state retaining the native stream and request
+///   queue.
 fn drain_stream_commands(inner: Arc<WorkerStreamInner>) {
     loop {
         let request = {
@@ -196,11 +187,7 @@ fn drain_stream_commands(inner: Arc<WorkerStreamInner>) {
             let mut native = inner.native.lock().unwrap_or_else(|e| e.into_inner());
             execute_stream_command(&mut native, &request.command)
         }))
-        .unwrap_or_else(|_| {
-            Err(io::Error::other(
-                "Unconfirmed: local stream worker panicked",
-            ))
-        });
+        .unwrap_or_else(|_| Err(io::Error::other("Unconfirmed: local stream worker panicked")));
         if let Ok(completion) = &result {
             match completion {
                 LocalStreamCompletion::Written(bytes) => {
@@ -211,15 +198,16 @@ fn drain_stream_commands(inner: Arc<WorkerStreamInner>) {
                         })
                         .unwrap_or_else(|current| current);
                     let total = previous.saturating_add(*bytes as u64);
-                    if inner.append_mode && *bytes > 0 {
-                        if let Some(observer) = &inner.observer {
-                            record_stream_fact(
-                                observer,
-                                super::LocalPublicationState::Published,
-                                super::LocalDurabilityState::Unknown,
-                                total,
-                            );
-                        }
+                    if inner.append_mode
+                        && *bytes > 0
+                        && let Some(observer) = &inner.observer
+                    {
+                        record_stream_fact(
+                            observer,
+                            super::LocalPublicationState::Published,
+                            super::LocalDurabilityState::Unknown,
+                            total,
+                        );
                     }
                 }
                 LocalStreamCompletion::Committed(outcome) => {
@@ -239,15 +227,9 @@ fn drain_stream_commands(inner: Arc<WorkerStreamInner>) {
                 LocalStreamCompletion::CommitFailed { error, .. } => {
                     if let Some(observer) = &inner.observer {
                         let publication = match error.state() {
-                            crate::LocalWriteFailureState::NotPublished => {
-                                super::LocalPublicationState::NotPublished
-                            }
-                            crate::LocalWriteFailureState::Published => {
-                                super::LocalPublicationState::Published
-                            }
-                            crate::LocalWriteFailureState::Indeterminate => {
-                                super::LocalPublicationState::Unknown
-                            }
+                            crate::LocalWriteFailureState::NotPublished => super::LocalPublicationState::NotPublished,
+                            crate::LocalWriteFailureState::Published => super::LocalPublicationState::Published,
+                            crate::LocalWriteFailureState::Indeterminate => super::LocalPublicationState::Unknown,
                         };
                         record_stream_fact(
                             observer,
@@ -318,10 +300,7 @@ fn execute_stream_command(
 ) -> io::Result<LocalStreamCompletion> {
     if matches!(command, LocalStreamCommand::Commit) {
         let Some(LocalNativeStream::Writer(writer)) = native.take() else {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "commit requires a writer",
-            ));
+            return Err(io::Error::new(io::ErrorKind::InvalidInput, "commit requires a writer"));
         };
         return match writer.commit() {
             Ok(outcome) => Ok(LocalStreamCompletion::Committed(outcome)),
@@ -329,7 +308,7 @@ fn execute_stream_command(
                 let (file_error, state, retry_writer) = error.into_parts();
                 let retryable = retry_writer.is_some();
                 if let Some(writer) = retry_writer {
-                    *native = Some(LocalNativeStream::Writer(writer));
+                    *native = Some(LocalNativeStream::Writer(Box::new(writer)));
                 }
                 Ok(LocalStreamCompletion::CommitFailed {
                     error: crate::LocalFileCommitError::new(file_error, state, None),
@@ -338,10 +317,7 @@ fn execute_stream_command(
             }
         };
     }
-    if matches!(
-        command,
-        LocalStreamCommand::Close | LocalStreamCommand::Abort
-    ) {
+    if matches!(command, LocalStreamCommand::Close | LocalStreamCommand::Abort) {
         let Some(previous) = native.take() else {
             return Ok(LocalStreamCompletion::Closed);
         };
@@ -349,10 +325,7 @@ fn execute_stream_command(
         return Ok(LocalStreamCompletion::Closed);
     }
     let Some(native) = native.as_mut() else {
-        return Err(io::Error::new(
-            io::ErrorKind::BrokenPipe,
-            "local stream is closed",
-        ));
+        return Err(io::Error::new(io::ErrorKind::BrokenPipe, "local stream is closed"));
     };
     match (native, command) {
         (LocalNativeStream::Reader(reader), LocalStreamCommand::Read { max_bytes }) => {
@@ -362,16 +335,16 @@ fn execute_stream_command(
             Ok(LocalStreamCompletion::Read(bytes))
         }
         (LocalNativeStream::Writer(writer), LocalStreamCommand::Write { bytes }) => {
-            let count = qubit_io::Output::write(writer, bytes)?;
+            let count = qubit_io::Output::write(writer.as_mut(), bytes)?;
             Ok(LocalStreamCompletion::Written(count))
         }
         (LocalNativeStream::Writer(writer), LocalStreamCommand::Flush) => {
-            qubit_io::Output::flush(writer)?;
+            qubit_io::Output::flush(writer.as_mut())?;
             Ok(LocalStreamCompletion::Flushed)
         }
-        (LocalNativeStream::Reader(reader), LocalStreamCommand::Seek(position)) => Ok(
-            LocalStreamCompletion::Seeked(std::io::Seek::seek(reader, *position)?),
-        ),
+        (LocalNativeStream::Reader(reader), LocalStreamCommand::Seek(position)) => {
+            Ok(LocalStreamCompletion::Seeked(std::io::Seek::seek(reader, *position)?))
+        }
         (LocalNativeStream::Writer(_), LocalStreamCommand::Seek(_)) => Err(io::Error::new(
             io::ErrorKind::Unsupported,
             "seeking a local file writer is unsupported",
@@ -407,11 +380,6 @@ pub(super) fn map_walk_error(error: io::Error) -> crate::LocalFileError {
         .with_reason("asynchronous walker batch resource limit exceeded")
         .with_detail(limit.to_string())
     } else {
-        crate::error::LocalFileError::from_io(
-            crate::error::LocalFileOperation::List,
-            None,
-            None,
-            error,
-        )
+        crate::error::LocalFileError::from_io(crate::error::LocalFileOperation::List, None, None, error)
     }
 }

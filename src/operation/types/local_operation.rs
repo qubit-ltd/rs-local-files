@@ -9,6 +9,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+#[cfg(feature = "async")]
 use super::AsyncLocalOperation;
 use crate::LocalFileError;
 /// Handle for a typed local operation managed by qubit-operation.
@@ -21,15 +22,14 @@ use crate::LocalFileError;
 /// - `E` — type carried through the operation contract.
 pub struct LocalOperation<T: Send + 'static, E: Send + 'static = LocalFileError> {
     /// Stores the inner associated with this value.
-    inner: Option<qubit_operation::OperationHandle<T, E>>,
+    pub(in crate::operation::types) inner: Option<qubit_operation::OperationHandle<T, E>>,
     /// Stores the budget associated with this value.
-    budget: Option<Arc<dyn Send + Sync>>,
+    pub(in crate::operation::types) budget: Option<Arc<dyn Send + Sync>>,
 }
 
 impl<T: Send + 'static, E: Send + 'static> LocalOperation<T, E> {
     /// Runs the new behavior while preserving the operation lifecycle
     /// invariants.
-
     /// # Parameters
     /// - `budget` — supplies data or policy for this operation.
     #[cfg(feature = "async")]
@@ -39,7 +39,6 @@ impl<T: Send + 'static, E: Send + 'static> LocalOperation<T, E> {
             budget: Some(budget),
         }
     }
-
     /// Runs the id behavior while preserving the operation lifecycle
     /// invariants.
     pub fn id(&self) -> qubit_operation::OperationId {
@@ -47,7 +46,6 @@ impl<T: Send + 'static, E: Send + 'static> LocalOperation<T, E> {
     }
     /// Runs the request stop behavior while preserving the operation lifecycle
     /// invariants.
-
     /// # Parameters
     /// - `reason` — supplies data or policy for this operation.
     pub fn request_stop(&self, reason: qubit_operation::StopReason) -> qubit_operation::StopRequestStatus {
@@ -85,7 +83,6 @@ impl<T: Send + 'static, E: Send + 'static> LocalOperation<T, E> {
     }
     /// Runs the wait settlement for behavior while preserving the operation
     /// lifecycle invariants.
-
     /// # Parameters
     /// - `timeout` — supplies data or policy for this operation.
     pub fn wait_settlement_for(

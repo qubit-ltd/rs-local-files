@@ -98,6 +98,14 @@ pub use local_temp_lifecycle_operation::LocalTempLifecycleOperation;
 #[path = "publish/local_temp_lifecycle_request.rs"]
 mod local_temp_lifecycle_request;
 pub use local_temp_lifecycle_request::LocalTempLifecycleRequest;
+#[path = "publish/local_temp_native_transition.rs"]
+mod local_temp_native_transition;
+use local_temp_native_transition::LocalTempNativeTransition;
+#[cfg(feature = "digest")]
+#[path = "publish/local_conditional_writer_operation.rs"]
+mod local_conditional_writer_operation;
+#[cfg(feature = "digest")]
+pub use local_conditional_writer_operation::LocalConditionalWriterOperation;
 
 /// Builds the cleanup failure returned when a native writer cannot abort.
 ///
@@ -132,9 +140,7 @@ pub(super) fn local_abort_cleanup_failure<W: Send + 'static>(
 /// # Parameters
 ///
 /// * `writer` - Native writer whose unpublished staging must be aborted.
-pub(super) fn abort_managed_file_writer(
-    writer: &mut crate::LocalFileWriter,
-) -> Result<(), LocalFileError> {
+pub(super) fn abort_managed_file_writer(writer: &mut crate::LocalFileWriter) -> Result<(), LocalFileError> {
     writer.abort().map(|_| ())
 }
 
@@ -148,7 +154,7 @@ pub(super) fn abort_managed_file_writer(
 ///
 /// * `writer` - Conditional writer whose candidate publication is abandoned.
 #[cfg(feature = "digest")]
-fn abort_conditional_writer<D: digest::Digest + Send + 'static>(
+pub(super) fn abort_conditional_writer<D: digest::Digest + Send + 'static>(
     writer: &mut crate::LocalConditionalWriter<D>,
 ) -> Result<(), LocalFileError> {
     #[cfg(feature = "test-support")]
@@ -174,17 +180,12 @@ fn abort_conditional_writer<D: digest::Digest + Send + 'static>(
 /// * `resource` - Managed writer owner retained by the operation scope.
 /// * `cause` - Original write or flush failure.
 #[cfg(feature = "digest")]
-fn abort_managed_conditional_after_error<D: digest::Digest + Send + 'static>(
+pub(super) fn abort_managed_conditional_after_error<D: digest::Digest + Send + 'static>(
     resource: &ResourceRef<LocalManagedAbortResource<crate::LocalConditionalWriter<D>>>,
     cause: LocalFileError,
 ) -> LocalConditionalWriterCommandError<D> {
-    let mut native = resource
-        .native
-        .lock()
-        .unwrap_or_else(|error| error.into_inner());
-    let writer = native
-        .as_mut()
-        .expect("managed conditional writer is available");
+    let mut native = resource.native.lock().unwrap_or_else(|error| error.into_inner());
+    let writer = native.as_mut().expect("managed conditional writer is available");
     match (resource.abort)(writer) {
         Ok(()) => {
             native.take();
@@ -215,17 +216,11 @@ fn abort_managed_conditional_after_error<D: digest::Digest + Send + 'static>(
 /// * `resource` - Managed writer owner retained by the operation scope.
 /// * `stop` - Cancellation or deadline report returned to the caller.
 #[cfg(feature = "digest")]
-fn abort_managed_conditional_after_stop<D: digest::Digest + Send + 'static>(
+pub(super) fn abort_managed_conditional_after_stop<D: digest::Digest + Send + 'static>(
     resource: &ResourceRef<LocalManagedAbortResource<crate::LocalConditionalWriter<D>>>,
     stop: StopReport,
-) -> OperationOutcome<
-    crate::outcome::LocalConditionalWriteOutcome<D>,
-    LocalConditionalWriterCommandError<D>,
-> {
-    let mut native = resource
-        .native
-        .lock()
-        .unwrap_or_else(|error| error.into_inner());
+) -> OperationOutcome<crate::outcome::LocalConditionalWriteOutcome<D>, LocalConditionalWriterCommandError<D>> {
+    let mut native = resource.native.lock().unwrap_or_else(|error| error.into_inner());
     let Some(writer) = native.as_mut() else {
         return OperationOutcome::Stopped(stop);
     };
@@ -253,17 +248,12 @@ pub(super) fn abort_managed_writer_after_error(
     observer: &LocalFactObserver,
     effect_already_recorded: bool,
 ) -> LocalWriterCommandError {
-    let mut native = resource
-        .native
-        .lock()
-        .unwrap_or_else(|error| error.into_inner());
+    let mut native = resource.native.lock().unwrap_or_else(|error| error.into_inner());
     let writer = native.as_mut().expect("managed writer is available");
     match writer.abort() {
         Ok(outcome) => {
             native.take();
-            if !effect_already_recorded
-                && outcome.failure_state() == Some(crate::LocalWriteFailureState::Published)
-            {
+            if !effect_already_recorded && outcome.failure_state() == Some(crate::LocalWriteFailureState::Published) {
                 record_writer_effect(
                     scope,
                     observer,
@@ -333,19 +323,14 @@ pub(super) fn abort_managed_writer_after_stop(
     observer: &LocalFactObserver,
     effect_already_recorded: bool,
 ) -> OperationOutcome<LocalWriteOutcome, LocalWriterCommandError> {
-    let mut native = resource
-        .native
-        .lock()
-        .unwrap_or_else(|error| error.into_inner());
+    let mut native = resource.native.lock().unwrap_or_else(|error| error.into_inner());
     let Some(writer) = native.as_mut() else {
         return OperationOutcome::Stopped(stop);
     };
     match writer.abort() {
         Ok(outcome) => {
             native.take();
-            if !effect_already_recorded
-                && outcome.failure_state() == Some(crate::LocalWriteFailureState::Published)
-            {
+            if !effect_already_recorded && outcome.failure_state() == Some(crate::LocalWriteFailureState::Published) {
                 record_writer_effect(
                     scope,
                     observer,
@@ -408,7 +393,8 @@ pub(super) fn record_writer_effect(
 /// * `scope` - Operation scope receiving the initial effect record.
 /// * `observer` - Snapshot updated with confirmed append facts.
 /// * `bytes` - Newly written byte count.
-/// * `effect_recorded` - Tracks whether this operation already registered an effect.
+/// * `effect_recorded` - Tracks whether this operation already registered an
+///   effect.
 pub(super) fn record_append_writer_bytes(
     scope: &qubit_operation::OperationScope,
     observer: &LocalFactObserver,
@@ -553,12 +539,8 @@ pub(super) fn stop_report(scope: &qubit_operation::OperationScope) -> Option<Sto
 pub(super) fn map_temp_worker_error(error: LocalTempCommandError) -> LocalTempWorkerCommandFailure {
     match error {
         LocalTempCommandError::Capacity => LocalTempWorkerCommandFailure::Capacity,
-        LocalTempCommandError::ResourceUnavailable => {
-            LocalTempWorkerCommandFailure::ResourceUnavailable
-        }
-        LocalTempCommandError::UnsupportedKind => {
-            LocalTempWorkerCommandFailure::ResourceUnavailable
-        }
+        LocalTempCommandError::ResourceUnavailable => LocalTempWorkerCommandFailure::ResourceUnavailable,
+        LocalTempCommandError::UnsupportedKind => LocalTempWorkerCommandFailure::ResourceUnavailable,
         LocalTempCommandError::Panicked => LocalTempWorkerCommandFailure::Panicked,
     }
 }
@@ -574,10 +556,7 @@ pub(super) fn map_temp_command_error(
     operation: crate::LocalFileOperation,
 ) -> LocalTempLifecycleError {
     if error == LocalTempCommandError::UnsupportedKind {
-        LocalTempLifecycleError::Unsupported(LocalFileError::new(
-            crate::LocalFileErrorKind::Unsupported,
-            operation,
-        ))
+        LocalTempLifecycleError::Unsupported(LocalFileError::new(crate::LocalFileErrorKind::Unsupported, operation))
     } else {
         LocalTempLifecycleError::Worker(map_temp_worker_error(error))
     }
@@ -595,17 +574,7 @@ pub(super) fn transition_temp_native(
     command: LocalTempLifecycleCommand,
     lease_access: super::LocalTempFileAccess,
     context: qubit_operation::OperationContext,
-) -> Result<
-    (
-        Option<LocalTempNative>,
-        (
-            LocalTempLifecycleResult,
-            LocalPublicationState,
-            LocalDurabilityState,
-        ),
-    ),
-    (LocalTempNative, LocalTempLifecycleError),
-> {
+) -> LocalTempNativeTransition {
     if context.stop_reason().is_some() {
         return Err((native, LocalTempLifecycleError::Stopped));
     }
@@ -653,10 +622,7 @@ pub(super) fn transition_temp_native(
                 Ok(sealed) => Ok((
                     Some(LocalTempNative::Sealed(sealed)),
                     (
-                        LocalTempLifecycleResult::Sealed(LocalReadLease::from_temp_access(
-                            &lease_access,
-                            false,
-                        )),
+                        LocalTempLifecycleResult::Sealed(LocalReadLease::from_temp_access(&lease_access, false)),
                         LocalPublicationState::NotPublished,
                         LocalDurabilityState::Unknown,
                     ),
@@ -673,8 +639,26 @@ pub(super) fn transition_temp_native(
                 }
             }
         }
-        (LocalTempNative::Directory(directory), LocalTempLifecycleCommand::Keep) => {
-            match directory.keep() {
+        (LocalTempNative::Directory(directory), LocalTempLifecycleCommand::Keep) => match directory.keep() {
+            Ok(outcome) => {
+                let durability = if outcome.durable() {
+                    LocalDurabilityState::Durable
+                } else {
+                    LocalDurabilityState::Unknown
+                };
+                Ok((
+                    None,
+                    (
+                        LocalTempLifecycleResult::Persisted(outcome),
+                        LocalPublicationState::Published,
+                        durability,
+                    ),
+                ))
+            }
+            Err(error) => Err(persist_failure(error, LocalTempNative::Directory)),
+        },
+        (LocalTempNative::Directory(directory), LocalTempLifecycleCommand::Persist { target, options }) => {
+            match directory.persist_with(&target, options) {
                 Ok(outcome) => {
                     let durability = if outcome.durable() {
                         LocalDurabilityState::Durable
@@ -693,27 +677,6 @@ pub(super) fn transition_temp_native(
                 Err(error) => Err(persist_failure(error, LocalTempNative::Directory)),
             }
         }
-        (
-            LocalTempNative::Directory(directory),
-            LocalTempLifecycleCommand::Persist { target, options },
-        ) => match directory.persist_with(&target, options) {
-            Ok(outcome) => {
-                let durability = if outcome.durable() {
-                    LocalDurabilityState::Durable
-                } else {
-                    LocalDurabilityState::Unknown
-                };
-                Ok((
-                    None,
-                    (
-                        LocalTempLifecycleResult::Persisted(outcome),
-                        LocalPublicationState::Published,
-                        durability,
-                    ),
-                ))
-            }
-            Err(error) => Err(persist_failure(error, LocalTempNative::Directory)),
-        },
         (native, LocalTempLifecycleCommand::Seal { .. }) => Err((
             native,
             LocalTempLifecycleError::Unsupported(LocalFileError::new(
@@ -788,9 +751,7 @@ pub(super) fn record_temp_failure(
             ),
             _ => {}
         },
-        LocalTempLifecycleError::Seal { .. } => {
-            record_stage_write(scope, observer, 0, EffectFact::Known)
-        }
+        LocalTempLifecycleError::Seal { .. } => record_stage_write(scope, observer, 0, EffectFact::Known),
         _ => {}
     }
 }

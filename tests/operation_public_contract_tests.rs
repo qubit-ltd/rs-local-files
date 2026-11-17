@@ -6,6 +6,8 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 
+#![cfg(feature = "async")]
+
 use std::sync::Arc;
 
 use qubit_local_files::LocalExecutionConfig;

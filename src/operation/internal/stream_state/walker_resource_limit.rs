@@ -6,13 +6,12 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 
-use std::fmt;
 use std::io;
 
 /// Describes a directory-walk batch that exceeds the bounded memory budget.
 /// The error is exposed through `io::Error` so callers can inspect its cause.
 #[derive(Debug)]
-pub(super) struct WalkerResourceLimit {
+pub(crate) struct WalkerResourceLimit {
     /// Explanation of the directory-walk budget that was exceeded.
     message: &'static str,
 }
@@ -22,7 +21,7 @@ pub(super) struct WalkerResourceLimit {
 /// # Parameters
 ///
 /// * `message` — detail describing which batch limit was exceeded.
-pub(super) fn resource_limit(message: &'static str) -> io::Error {
+pub(crate) fn resource_limit(message: &'static str) -> io::Error {
     io::Error::new(io::ErrorKind::OutOfMemory, WalkerResourceLimit { message })
 }
 

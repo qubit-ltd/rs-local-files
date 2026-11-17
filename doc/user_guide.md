@@ -46,11 +46,13 @@ while retaining a resource returned by that same operation can wait forever,
 because the scope still owns the resource until its last user releases it.
 
 ```rust,no_run
+# #[cfg(feature = "async")]
 # async fn example() -> Result<(), Box<dyn std::error::Error>> {
 use std::path::PathBuf;
 use qubit_local_files::{
-    AsyncLocalFileSystem, LocalExecutionConfig, LocalIoExecutor, LocalReadOptions,
+    AsyncLocalFileSystem, LocalExecutionConfig, LocalIoExecutor,
 };
+use qubit_local_files::options::LocalReadOptions;
 use qubit_operation::{ManagerOptions, OperationManager, OperationOptions, OperationOutcome};
 
 let manager = OperationManager::new(ManagerOptions::default())?;

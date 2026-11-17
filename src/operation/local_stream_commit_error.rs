@@ -37,7 +37,7 @@ impl LocalStreamCommitError {
     ///
     /// * `error` - Structured publication error produced by the worker.
     /// * `retryable` - Whether the writer remains available for another commit.
-    pub(super) fn new(error: crate::LocalFileCommitError, retryable: bool) -> Self {
+    pub(in crate::operation) fn new(error: crate::LocalFileCommitError, retryable: bool) -> Self {
         Self { error, retryable }
     }
 

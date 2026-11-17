@@ -20,7 +20,7 @@ mod pending_write;
 mod saved_error;
 // Coordinates read, write, seek, flush, and close state.
 #[path = "stream_state/stream_state.rs"]
-mod stream_state;
+mod state;
 // Retains a directory walk's pending batch and overflow entry.
 #[path = "stream_state/walk_state.rs"]
 mod walk_state;
@@ -32,7 +32,7 @@ pub(super) use direction::Direction;
 use pending_seek::PendingSeek;
 use pending_write::PendingWrite;
 use saved_error::SavedError;
-pub(super) use stream_state::StreamState;
+pub(super) use state::StreamState;
 pub(super) use walk_state::WalkState;
 pub(super) use walker_resource_limit::WalkerResourceLimit;
-use walker_resource_limit::resource_limit;
+pub(super) use walker_resource_limit::resource_limit;

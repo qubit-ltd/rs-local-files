@@ -8,7 +8,7 @@
 
 use std::marker::PhantomData;
 
-use super::LocalIoExecutor;
+use crate::operation::executor::LocalCleanupExecutor;
 
 /// Cleanup adapter that runs native writer aborts on the serial executor.
 ///
@@ -17,7 +17,7 @@ use super::LocalIoExecutor;
 /// * `W` - Native writer type retained by the cleanup resource.
 pub(in crate::operation) struct LocalManagedAbortCleanup<W: Send + 'static> {
     /// Executor that serializes native abort work.
-    pub(in crate::operation) executor: LocalIoExecutor,
+    pub(in crate::operation) executor: LocalCleanupExecutor,
     /// Associates this policy with its writer type without storing a writer.
     pub(in crate::operation) marker: PhantomData<fn(W)>,
 }
@@ -28,7 +28,7 @@ impl<W: Send + 'static> LocalManagedAbortCleanup<W> {
     /// # Parameters
     ///
     /// * `executor` - Executor used to queue native abort work.
-    pub(in crate::operation) fn new(executor: LocalIoExecutor) -> Self {
+    pub(in crate::operation) fn new(executor: LocalCleanupExecutor) -> Self {
         Self {
             executor,
             marker: PhantomData,

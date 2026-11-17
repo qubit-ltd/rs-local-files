@@ -94,6 +94,7 @@ pub struct LocalTempRecovery {
 impl LocalTempRecovery {
     /// Restores Drop cleanup on a live file returned from a managed consuming
     /// transition. Native-entry recovery owners have no file wrapper to arm.
+    #[cfg(feature = "async")]
     pub(crate) fn arm_cleanup_on_drop(&mut self) {
         if let Some(RecoveryResource::LiveFile(file)) = self.resource.as_mut() {
             file.arm_cleanup_on_drop();

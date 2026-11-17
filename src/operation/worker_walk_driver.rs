@@ -48,9 +48,9 @@ impl WorkerWalkDriver {
         buffer_budget: Arc<Mutex<super::super::internal::permits::Permit>>,
         handle_budget: Arc<super::super::internal::permits::Permit>,
     ) -> io::Result<ResourceRef<LocalWalkResource>> {
-        let cleanup_permit = executor.reserve_cleanup().ok_or_else(|| {
-            io::Error::new(io::ErrorKind::WouldBlock, "local cleanup capacity is full")
-        })?;
+        let cleanup_permit = executor
+            .reserve_cleanup()
+            .ok_or_else(|| io::Error::new(io::ErrorKind::WouldBlock, "local cleanup capacity is full"))?;
         let cleanup = WorkerCleanup::<LocalWalkResource>::policy();
         let resource = LocalWalkResource::new(Self(Arc::new(WorkerWalkInner {
             executor,
@@ -72,18 +72,13 @@ impl WorkerWalkDriver {
             .map_err(io::Error::other)?;
         match resources.manage_with(resource, Arc::clone(&cleanup)) {
             Ok(reference) => {
-                *reference
-                    .resource_id
-                    .lock()
-                    .unwrap_or_else(|e| e.into_inner()) = Some(reference.id());
+                *reference.resource_id.lock().unwrap_or_else(|e| e.into_inner()) = Some(reference.id());
                 Ok(reference)
             }
             Err(error) => {
                 let (reason, resource, _) = error.into_parts();
                 WorkerCleanup::<LocalWalkResource>::dispose(resource);
-                Err(io::Error::other(format!(
-                    "failed to register local walker: {reason:?}"
-                )))
+                Err(io::Error::other(format!("failed to register local walker: {reason:?}")))
             }
         }
     }
@@ -185,11 +180,7 @@ impl LocalWalkDriver for WorkerWalkDriver {
                         Ok(Some(entries))
                     }
                 }))
-                .unwrap_or_else(|_| {
-                    Err(io::Error::other(
-                        "Unconfirmed: local walker worker panicked",
-                    ))
-                });
+                .unwrap_or_else(|_| Err(io::Error::other("Unconfirmed: local walker worker panicked")));
                 let wake = {
                     let mut commands = inner.commands.lock().unwrap_or_else(|e| e.into_inner());
                     let Some(command) = commands.get_mut(&request_id) else {
@@ -224,29 +215,13 @@ impl LocalWalkDriver for WorkerWalkDriver {
         }
         let inner = Arc::clone(&self.0);
         let job: Box<dyn FnOnce() + Send> = Box::new(move || {
-            inner
-                .walker
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .walker
-                .take();
+            inner.walker.lock().unwrap_or_else(|e| e.into_inner()).walker.take();
             inner.closed.store(true, Ordering::Release);
-            if let Some(waker) = inner
-                .close_waker
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .take()
-            {
+            if let Some(waker) = inner.close_waker.lock().unwrap_or_else(|e| e.into_inner()).take() {
                 let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| waker.wake()));
             }
         });
-        if let Some(permit) = self
-            .0
-            .cleanup_permit
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .take()
-        {
+        if let Some(permit) = self.0.cleanup_permit.lock().unwrap_or_else(|e| e.into_inner()).take() {
             let mut permit = Some(permit);
             let mut job = Some(job);
             let mut queued = false;
@@ -270,11 +245,7 @@ impl LocalWalkDriver for WorkerWalkDriver {
                     io::ErrorKind::WouldBlock,
                     "reserved local walker cleanup queue is unavailable".to_owned(),
                 ));
-                *self
-                    .0
-                    .cleanup_permit
-                    .lock()
-                    .unwrap_or_else(|e| e.into_inner()) = permit;
+                *self.0.cleanup_permit.lock().unwrap_or_else(|e| e.into_inner()) = permit;
             }
         }
     }
@@ -285,13 +256,7 @@ impl LocalWalkDriver for WorkerWalkDriver {
     ///
     /// * `cx` - Task context to wake when native closure completes.
     fn poll_closed(&self, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
-        if let Some((kind, message)) = self
-            .0
-            .close_error
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .clone()
-        {
+        if let Some((kind, message)) = self.0.close_error.lock().unwrap_or_else(|e| e.into_inner()).clone() {
             return Poll::Ready(Err(io::Error::new(kind, message)));
         }
         if self.0.closed.load(Ordering::Acquire) {

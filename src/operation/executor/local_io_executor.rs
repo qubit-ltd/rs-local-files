@@ -12,8 +12,9 @@ use std::thread;
 use std::thread::JoinHandle;
 
 use qubit_operation::GroupOptions;
-use qubit_operation::OperationGroup;
 use qubit_operation::OperationManager;
+use qubit_operation::ShutdownHandle;
+use qubit_operation::ShutdownMode;
 
 use super::super::LocalExecutionConfig;
 use super::super::LocalExecutorConfigError;
@@ -22,17 +23,18 @@ use super::super::internal::permits::DiskPermit;
 use super::super::internal::permits::DiskPermitPool;
 use super::super::internal::permits::Permit;
 use super::super::internal::permits::PermitPool;
+use super::super::internal::worker::CleanupEnqueueError;
 use super::super::internal::worker::WorkerQueue;
 use super::executor_inner::ExecutorInner;
+use super::local_cleanup_executor::LocalCleanupExecutor;
 use super::worker_owner::WorkerOwner;
-
 /// Bounded local I/O worker group associated with an application manager.
 #[derive(Clone)]
 pub struct LocalIoExecutor {
     /// Stores the inner associated with this value.
     pub(crate) inner: Arc<ExecutorInner>,
     /// Stores the  owner associated with this value.
-    _owner: Arc<WorkerOwner>,
+    pub(super) _owner: Arc<WorkerOwner>,
 }
 
 impl LocalIoExecutor {
@@ -71,17 +73,47 @@ impl LocalIoExecutor {
                 handle_slots: PermitPool::new(config.max_open_handles),
                 disk_slots: DiskPermitPool::new(config.max_disk_bytes),
                 fact_slots: PermitPool::new(config.max_fact_records),
-                cleanup_slots: PermitPool::new(config.max_open_handles),
+                cleanup_slots: Arc::new(PermitPool::new(config.max_open_handles)),
             }),
             _owner: owner,
         })
+    }
+    /// Requests shutdown of this executor's operation group.
+    ///
+    /// The request closes this group's admission and drains or cancels its
+    /// accepted operations according to `mode`. It does not shut down the
+    /// application manager; callers may continue submitting through other
+    /// manager views. Drop the executor after observing shutdown completion to
+    /// stop and join its local workers.
+    ///
+    /// # Parameters
+    ///
+    /// - `mode` — whether accepted group operations drain or receive
+    ///   cancellation requests.
+    ///
+    /// # Returns
+    ///
+    /// A handle for observing completion of the group's shutdown.
+    pub fn request_shutdown(&self, mode: ShutdownMode) -> ShutdownHandle {
+        self.inner.group.request_shutdown(mode)
+    }
+
+    /// Returns a cleanup-only worker handle suitable for retained recovery
+    /// policies. It keeps workers alive without retaining the operation group
+    /// or its manager.
+    pub(crate) fn cleanup_executor(&self) -> LocalCleanupExecutor {
+        LocalCleanupExecutor {
+            queue: Arc::clone(&self.inner.queue),
+            cleanup_slots: Arc::clone(&self.inner.cleanup_slots),
+            _owner: Arc::clone(&self._owner),
+            cleanup_capacity: self.inner.config.max_open_handles,
+        }
     }
 
     /// Returns the immutable resource and queue limits used by this executor.
     pub fn config(&self) -> &LocalExecutionConfig {
         &self.inner.config
     }
-
     /// Runs the reserve slot behavior while preserving the operation lifecycle
     /// invariants.
     pub(crate) fn reserve_slot(&self) -> Option<Permit> {
@@ -90,44 +122,35 @@ impl LocalIoExecutor {
             .try_acquire(1)
             .or_else(|| self.inner.waiter_slots.try_acquire(1))
     }
-
     /// Runs the reserve bytes behavior while preserving the operation lifecycle
     /// invariants.
-
     /// # Parameters
     /// - `amount` — supplies data or policy for this operation.
     pub(crate) fn reserve_bytes(&self, amount: usize) -> Option<Permit> {
         self.inner.byte_slots.try_acquire(amount)
     }
-
     /// Runs the reserve handle behavior while preserving the operation
     /// lifecycle invariants.
     pub(crate) fn reserve_handle(&self) -> Option<Permit> {
         self.inner.handle_slots.try_acquire(1)
     }
-
     /// Runs the reserve disk behavior while preserving the operation lifecycle
     /// invariants.
-
     /// # Parameters
     /// - `amount` — supplies data or policy for this operation.
     #[allow(dead_code)]
     pub(crate) fn reserve_disk(&self, amount: u64) -> Option<DiskPermit> {
         self.inner.disk_slots.try_acquire(amount)
     }
-
     /// Runs the reserve fact behavior while preserving the operation lifecycle
     /// invariants.
     pub(crate) fn reserve_fact(&self) -> Option<Permit> {
         self.inner.fact_slots.try_acquire(1)
     }
-
     /// Runs the enqueue task behavior while preserving the operation lifecycle
     /// invariants.
-
     /// # Type Parameters
     /// - `F` — type used by this operation.
-
     /// # Parameters
     /// - `task` — supplies data or policy for this operation.
     pub(crate) fn enqueue_task<F>(&self, task: F) -> Result<(), ()>
@@ -153,17 +176,14 @@ impl LocalIoExecutor {
             Err(_) => Err(()),
         }
     }
-
     /// Runs the reserve cleanup behavior while preserving the operation
     /// lifecycle invariants.
     #[allow(dead_code)]
     pub(crate) fn reserve_cleanup(&self) -> Option<Permit> {
         self.inner.cleanup_slots.try_acquire(1)
     }
-
     /// Runs the enqueue cleanup behavior while preserving the operation
     /// lifecycle invariants.
-
     /// # Parameters
     /// - `job` — supplies data or policy for this operation.
     /// - `permit` — supplies data or policy for this operation.
@@ -172,19 +192,16 @@ impl LocalIoExecutor {
         &self,
         job: Box<dyn FnOnce() + Send + 'static>,
         permit: Permit,
-    ) -> Result<(), (Box<dyn FnOnce() + Send + 'static>, Permit)> {
+    ) -> Result<(), CleanupEnqueueError> {
         self.inner
             .queue
             .push_cleanup(job, permit, self.inner.config.max_open_handles)
     }
 }
-
 /// Runs the spawn workers behavior while preserving the operation lifecycle
 /// invariants.
-
 /// # Type Parameters
 /// - `F` — type used by this operation.
-
 /// # Parameters
 /// - `queue` — supplies data or policy for this operation.
 /// - `count` — supplies data or policy for this operation.
@@ -208,10 +225,8 @@ where
     }
     Ok(workers)
 }
-
 /// Runs the validate behavior while preserving the operation lifecycle
 /// invariants.
-
 /// # Parameters
 /// - `config` — supplies data or policy for this operation.
 fn validate(config: &LocalExecutionConfig) -> Result<(), LocalExecutorConfigError> {

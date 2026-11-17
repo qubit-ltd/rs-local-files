@@ -8,7 +8,6 @@
 
 //! Owned staging and read-only handoff for managed local temporary files.
 
-use std::fs::File;
 use std::future::poll_fn;
 use std::io::Write;
 use std::pin::Pin;
@@ -23,14 +22,12 @@ use qubit_operation::OperationOptions;
 use qubit_operation::OperationOutcome;
 use qubit_operation::ResourceRef;
 
-use super::executor::LocalIoExecutor;
-use super::internal::permits::Permit;
-use super::temp::LocalCreateFailure;
-use super::temp::LocalTempCommandError;
 use super::temp::LocalTempFileAccess;
-use super::temp::LocalTempNative;
-use super::temp::LocalTempResource;
-use super::temp::submit_temp_file;
+use crate::operation::executor::LocalIoExecutor;
+use crate::operation::temp::LocalTempCommandError;
+use crate::operation::temp::LocalTempNative;
+use crate::operation::temp::LocalTempResource;
+use crate::operation::temp::submit_temp_file;
 
 mod local_read_export;
 mod local_read_lease;
@@ -39,14 +36,16 @@ mod local_stage_failure;
 mod local_stage_options;
 mod local_stage_stream_submit_error;
 mod local_stage_submit_error;
+mod stage_bytes_submission;
 
 pub use local_read_export::LocalReadExport;
 pub use local_read_lease::LocalReadLease;
-use local_read_resource::LocalReadResource;
+pub use local_read_resource::LocalReadResource;
 pub use local_stage_failure::LocalStageFailure;
 pub use local_stage_options::LocalStageOptions;
 pub use local_stage_stream_submit_error::LocalStageStreamSubmitError;
 pub use local_stage_submit_error::LocalStageSubmitError;
+use stage_bytes_submission::StageBytesSubmission;
 
 /// Typed operation returned by [`stage_bytes`].
 pub type LocalStageOperation = AsyncOperationHandle<LocalReadLease, LocalStageFailure>;
@@ -101,12 +100,14 @@ pub fn stage_bytes(
             filesystem,
             executor,
             scope,
-            child_operation,
-            bytes,
-            stage,
-            owned,
-            disk,
-            temp_options,
+            StageBytesSubmission {
+                operation: child_operation,
+                bytes,
+                stage,
+                owned,
+                disk,
+                temp_options,
+            },
         )
         .await
     });
@@ -143,13 +144,16 @@ async fn stage_bytes_in_scope(
     filesystem: crate::LocalFileSystem,
     executor: LocalIoExecutor,
     scope: qubit_operation::OperationScope,
-    operation: OperationOptions,
-    bytes: Vec<u8>,
-    stage: LocalStageOptions,
-    owned: Permit,
-    disk: super::internal::permits::DiskPermit,
-    temp_options: crate::options::LocalTempFileOptions,
+    submission: StageBytesSubmission,
 ) -> Result<LocalReadLease, LocalStageFailure> {
+    let StageBytesSubmission {
+        operation,
+        bytes,
+        stage,
+        owned,
+        disk,
+        temp_options,
+    } = submission;
     let context = scope.context();
     if context.stop_reason().is_some() {
         return Err(LocalStageFailure::Stopped);
@@ -459,27 +463,26 @@ fn command_error(error: LocalTempCommandError) -> LocalStageFailure {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+    use std::sync::Mutex;
     use std::sync::atomic::AtomicUsize;
     use std::task::Context;
     use std::task::Poll;
     use std::task::Wake;
     use std::task::Waker;
 
-    use super::LOCAL_STAGE_STREAM_CHUNK_SIZE;
+    use qubit_operation::OperationOptions;
+    use qubit_operation::OperationOutcome;
+
     use super::LocalReadLease;
     use super::LocalStageFailure;
     use super::LocalStageOptions;
-    use super::LocalStageStreamSubmitError;
-    use super::LocalTempCommandError;
-    use super::LocalTempCommandReceiver;
-    use super::LocalTempNative;
-    use super::LocalTempResource;
-    use super::command_error;
-    use super::enqueue_resource_command;
-    use super::seal_access;
     use super::stage_bytes;
+    use crate::operation::executor::LocalIoExecutor;
+    use crate::operation::temp::submit_temp_file;
 
     pub(super) static SEAL_ATTEMPTS: AtomicUsize = AtomicUsize::new(0);
+    static SEAL_TEST_LOCK: Mutex<()> = Mutex::new(());
 
     struct ThreadWake(std::thread::Thread);
     impl Wake for ThreadWake {
@@ -534,6 +537,7 @@ mod tests {
     #[cfg(feature = "test-support")]
     #[test]
     fn test_stop_after_queued_write_prevents_the_following_seal_command() {
+        let _guard = SEAL_TEST_LOCK.lock().unwrap_or_else(|error| error.into_inner());
         let manager =
             qubit_operation::OperationManager::new(qubit_operation::ManagerOptions::default()).expect("manager");
         let executor = LocalIoExecutor::new(manager.clone(), crate::operation::LocalExecutionConfig::default())
@@ -564,6 +568,7 @@ mod tests {
     #[cfg(feature = "test-support")]
     #[test]
     fn test_stop_after_native_seal_keeps_the_sealed_owner_for_managed_cleanup() {
+        let _guard = SEAL_TEST_LOCK.lock().unwrap_or_else(|error| error.into_inner());
         let manager =
             qubit_operation::OperationManager::new(qubit_operation::ManagerOptions::default()).expect("manager");
         let executor = LocalIoExecutor::new(manager.clone(), crate::operation::LocalExecutionConfig::default())

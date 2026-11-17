@@ -10,7 +10,6 @@ use std::sync::Arc;
 use std::sync::Mutex;
 
 use super::LocalFactSnapshot;
-
 /// Read-only observer for the bounded local fact snapshot.
 #[derive(Clone)]
 pub struct LocalFactObserver {
@@ -23,7 +22,6 @@ pub struct LocalFactObserver {
 impl std::fmt::Debug for LocalFactObserver {
     /// Runs the fmt behavior while preserving the operation lifecycle
     /// invariants.
-
     /// # Parameters
     /// - `formatter` — supplies data or policy for this operation.
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -40,7 +38,6 @@ impl LocalFactObserver {
     pub fn snapshot(&self) -> LocalFactSnapshot {
         *self.snapshot.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
     }
-
     /// Runs the new behavior while preserving the operation lifecycle
     /// invariants.
     #[allow(dead_code)]
@@ -61,10 +58,8 @@ impl LocalFactObserver {
             _record_permit: Some(permit),
         }
     }
-
     /// Runs the update behavior while preserving the operation lifecycle
     /// invariants.
-
     /// # Parameters
     /// - `snapshot` — supplies data or policy for this operation.
     #[allow(dead_code)]

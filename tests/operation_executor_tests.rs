@@ -6,6 +6,8 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 
+#![cfg(feature = "async")]
+
 use std::path::PathBuf;
 
 use qubit_local_files::LocalExecutionConfig;
@@ -16,6 +18,8 @@ use qubit_local_files::operation::LocalIoExecutor;
 use qubit_local_files::options::LocalReadAllOptions;
 use qubit_operation::ManagerOptions;
 use qubit_operation::OperationManager;
+
+static PROCESS_CWD_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 fn block_on<F: std::future::Future>(future: F) -> F::Output {
     use std::sync::Arc;
@@ -64,6 +68,7 @@ fn host_async(manager: OperationManager) -> AsyncLocalFileSystem {
 
 #[test]
 fn test_host_facade_retains_a_fact_observer_for_submitted_reads() {
+    let _cwd_guard = PROCESS_CWD_TEST_LOCK.lock().unwrap();
     let manager = OperationManager::new(ManagerOptions::default()).unwrap();
     let filesystem = host_async(manager.clone());
 
@@ -97,7 +102,30 @@ fn test_invalid_executor_configuration_is_rejected_before_starting_workers() {
 }
 
 #[test]
+fn test_group_shutdown_does_not_close_application_manager() {
+    use qubit_operation::GroupOptions;
+    use qubit_operation::ShutdownMode;
+
+    let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+    let group = manager.group(GroupOptions { capacity: 1 }).unwrap();
+    let report = group.request_shutdown(ShutdownMode::Drain).wait().unwrap();
+    assert_eq!(report.snapshot.active_operations, 0);
+
+    let mut operation = manager
+        .try_submit(Default::default(), |_| Ok::<_, std::convert::Infallible>(()))
+        .expect("closing a runtime group must leave its application manager open");
+    assert!(matches!(
+        operation.wait_outcome().unwrap(),
+        qubit_operation::OperationOutcome::Succeeded(())
+    ));
+    operation.wait_settlement().unwrap();
+    let report = manager.request_shutdown(ShutdownMode::Drain).wait().unwrap();
+    assert_eq!(report.snapshot.active_operations, 0);
+}
+
+#[test]
 fn test_wrong_manager_rejection_returns_the_unmodified_request() {
+    let _cwd_guard = PROCESS_CWD_TEST_LOCK.lock().unwrap();
     let owner = OperationManager::new(ManagerOptions::default()).unwrap();
     let other = OperationManager::new(ManagerOptions::default()).unwrap();
     let filesystem = host_async(owner);
@@ -155,6 +183,7 @@ fn test_oversized_owned_read_limit_is_rejected_with_original_request() {
 
 #[test]
 fn test_stopped_parent_rejects_child_read_before_worker_io() {
+    let _cwd_guard = PROCESS_CWD_TEST_LOCK.lock().unwrap();
     use std::sync::mpsc;
     use std::time::Duration;
 
@@ -196,6 +225,7 @@ fn test_stopped_parent_rejects_child_read_before_worker_io() {
 
 #[test]
 fn test_parent_manager_view_can_submit_through_executor_runtime_group() {
+    let _cwd_guard = PROCESS_CWD_TEST_LOCK.lock().unwrap();
     let manager = OperationManager::new(ManagerOptions::default()).unwrap();
     let filesystem = host_async(manager.clone());
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml");
@@ -230,6 +260,7 @@ fn test_parent_manager_view_can_submit_through_executor_runtime_group() {
 
 #[test]
 fn test_host_relative_reads_use_cwd_captured_by_async_conversion() {
+    let _cwd_guard = PROCESS_CWD_TEST_LOCK.lock().unwrap();
     struct RestoreCwd(PathBuf);
     impl Drop for RestoreCwd {
         fn drop(&mut self) {

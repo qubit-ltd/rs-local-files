@@ -6,23 +6,17 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 
-use std::future::Future;
-use std::pin::Pin;
-use std::task::Context;
-
 use qubit_operation::ResourceId;
 use qubit_operation::ResourceRef;
 
 use super::LocalTempCleanupAnchor;
 use super::LocalTempCommandError;
 use super::LocalTempCommandReceiver;
-use super::LocalTempFileAccess;
 use super::LocalTempNative;
 use super::LocalTempResource;
 use super::arm_native_cleanup_on_drop;
 use super::async_result;
 use crate::operation::executor::LocalIoExecutor;
-use crate::operation::internal::permits::DiskPermit;
 
 /// Public read-only access token for a managed temporary file.
 ///

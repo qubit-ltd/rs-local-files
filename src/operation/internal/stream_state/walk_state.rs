@@ -21,7 +21,7 @@ use super::resource_limit;
 /// At most one request is pending, and the state retains close errors for later
 /// polls after the underlying walker has stopped.
 #[derive(Default)]
-pub(super) struct WalkState {
+pub(crate) struct WalkState {
     /// Next nonzero id used to correlate a batch request with its reply.
     next_request_id: u64,
     /// Id of the sole batch request currently awaiting the worker.
@@ -43,7 +43,7 @@ impl WalkState {
     /// * `self` — walk state retaining the pending request and stop status.
     /// * `resource` — worker resource producing path batches.
     /// * `cx` — task context used to wait for the next batch.
-    pub(super) fn poll_batch(
+    pub(in crate::operation::stream) fn poll_batch(
         &mut self,
         resource: &LocalWalkResource,
         cx: &mut Context<'_>,
@@ -106,7 +106,7 @@ impl WalkState {
     /// # Parameters
     ///
     /// * `self` — state machine that owns the pending request and buffers .
-    pub(super) fn request_stop(&mut self, resource: &LocalWalkResource) {
+    pub(in crate::operation::stream) fn request_stop(&mut self, resource: &LocalWalkResource) {
         if !self.stop_requested {
             self.stop_requested = true;
             resource.request_stop();
@@ -121,7 +121,11 @@ impl WalkState {
     /// * `self` — state retaining stop and close completion status.
     /// * `resource` — worker resource that owns the directory walk.
     /// * `cx` — task context used while waiting for close completion.
-    pub(super) fn poll_close(&mut self, resource: &LocalWalkResource, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+    pub(in crate::operation::stream) fn poll_close(
+        &mut self,
+        resource: &LocalWalkResource,
+        cx: &mut Context<'_>,
+    ) -> Poll<io::Result<()>> {
         if self.closed {
             return self.poll_closed_without_resource();
         }
@@ -143,7 +147,7 @@ impl WalkState {
     /// # Parameters
     ///
     /// * `self` — state machine that owns the pending request and buffers .
-    pub(super) fn poll_closed_without_resource(&self) -> Poll<io::Result<()>> {
+    pub(in crate::operation::stream) fn poll_closed_without_resource(&self) -> Poll<io::Result<()>> {
         if let Some(error) = &self.close_error {
             Poll::Ready(Err(error.make()))
         } else if self.closed {
@@ -158,7 +162,7 @@ impl WalkState {
     /// # Parameters
     ///
     /// * `self` — state machine that owns the pending request and buffers .
-    pub(super) fn is_closed(&self) -> bool {
+    pub(in crate::operation::stream) fn is_closed(&self) -> bool {
         self.closed
     }
 }

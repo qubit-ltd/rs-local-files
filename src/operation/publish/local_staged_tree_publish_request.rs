@@ -8,6 +8,8 @@
 
 use std::path::PathBuf;
 
+use super::LocalStagedTreeFile;
+
 /// Owned request that creates, verifies, and publishes a staged tree.
 #[derive(Debug)]
 pub struct LocalStagedTreePublishRequest {

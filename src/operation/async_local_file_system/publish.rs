@@ -21,9 +21,9 @@ use super::super::LocalOperation;
 use super::super::LocalOperationOptions;
 use super::super::LocalPublicationState;
 use super::super::LocalSubmitError;
-use super::super::LocalSubmitRejection;
 use super::super::publish::LocalConditionalWriterCommandError;
 use super::super::publish::LocalConditionalWriterCommitRequest;
+use super::super::publish::LocalConditionalWriterOperation;
 use super::super::publish::LocalManagedAbortCleanup;
 use super::super::publish::LocalManagedAbortResource;
 use super::super::publish::LocalStagedTreeDiskReservation;
@@ -38,7 +38,8 @@ use super::super::publish::LocalTempLifecycleOperation;
 use super::super::publish::LocalTempLifecycleRequest;
 use super::super::publish::LocalWriterCommandError;
 use super::super::publish::LocalWriterCommitRequest;
-use super::super::temp::LocalTempFileAccess;
+use super::AsyncLocalFileSystem;
+use super::OwnedSubmission;
 use crate::LocalFileError;
 use crate::LocalWriteOutcome;
 use crate::operation::publish::abort_conditional_writer;
@@ -68,10 +69,7 @@ impl AsyncLocalFileSystem {
     /// # Parameters
     ///
     /// * `policy` - Symlink traversal policy stored on the returned facade.
-    pub fn with_symlink_policy(
-        mut self,
-        policy: crate::policy::LocalSymlinkPolicy,
-    ) -> crate::LocalResult<Self> {
+    pub fn with_symlink_policy(mut self, policy: crate::policy::LocalSymlinkPolicy) -> crate::LocalResult<Self> {
         self.filesystem.set_symlink_policy(policy)?;
         Ok(self)
     }
@@ -113,10 +111,15 @@ impl AsyncLocalFileSystem {
             manager,
             operation,
             request,
-            relative,
-            1,
-            limits,
-            owned_capacity,
+            OwnedSubmission {
+                path_is_relative: relative,
+
+                required_handles: 1,
+
+                limits,
+
+                initial_owned_bytes: owned_capacity,
+            },
             move |request, scope, observer, _budget, _maximum| {
                 if let Some(stop) = stop_report(scope) {
                     return OperationOutcome::Stopped(stop);
@@ -129,56 +132,40 @@ impl AsyncLocalFileSystem {
                         );
                     }
                     Err(error) => {
-                        return OperationOutcome::Failed(
-                            LocalWriterCommandError::ResourceCapacity(error),
-                        );
+                        return OperationOutcome::Failed(LocalWriterCommandError::ResourceCapacity(error));
                     }
                 };
                 let Some(cleanup_permit) = executor.reserve_cleanup() else {
-                    return OperationOutcome::Failed(LocalWriterCommandError::Open(
-                        LocalFileError::new(
-                            crate::LocalFileErrorKind::ResourceLimit,
-                            crate::LocalFileOperation::OpenWriter,
-                        ),
-                    ));
+                    return OperationOutcome::Failed(LocalWriterCommandError::Open(LocalFileError::new(
+                        crate::LocalFileErrorKind::ResourceLimit,
+                        crate::LocalFileOperation::OpenWriter,
+                    )));
                 };
-                let resource =
-                    LocalManagedAbortResource::new(cleanup_permit, abort_managed_file_writer);
+                let resource = LocalManagedAbortResource::new(cleanup_permit, abort_managed_file_writer);
                 let writer_resource = match reservation.commit_with(
                     resource,
-                    LocalManagedAbortCleanup::<crate::LocalFileWriter>::new(executor.clone()),
+                    LocalManagedAbortCleanup::<crate::LocalFileWriter>::new(executor.cleanup_executor()),
                 ) {
                     Ok(resource) => resource,
                     Err(error) => {
                         let (reason, _resource, _cleanup, _reservation) = error.into_parts();
                         return match reason {
                             qubit_operation::ResourceManageErrorKind::Stopped => {
-                                OperationOutcome::Stopped(
-                                    stop_report(scope).expect("scope stopped before writer open"),
-                                )
+                                OperationOutcome::Stopped(stop_report(scope).expect("scope stopped before writer open"))
                             }
-                            reason => OperationOutcome::Failed(
-                                LocalWriterCommandError::ResourceCommit(reason),
-                            ),
+                            reason => OperationOutcome::Failed(LocalWriterCommandError::ResourceCommit(reason)),
                         };
                     }
                 };
                 let resource_id = writer_resource.id();
-                *writer_resource
-                    .id
-                    .lock()
-                    .unwrap_or_else(|error| error.into_inner()) = Some(resource_id);
-                let writer =
-                    match filesystem.open_writer_with_options(&destination, &request.options) {
-                        Ok(writer) => writer,
-                        Err(error) => {
-                            return OperationOutcome::Failed(LocalWriterCommandError::Open(error));
-                        }
-                    };
-                *writer_resource
-                    .native
-                    .lock()
-                    .unwrap_or_else(|error| error.into_inner()) = Some(writer);
+                *writer_resource.id.lock().unwrap_or_else(|error| error.into_inner()) = Some(resource_id);
+                let writer = match filesystem.open_writer_with_options(&destination, &request.options) {
+                    Ok(writer) => writer,
+                    Err(error) => {
+                        return OperationOutcome::Failed(LocalWriterCommandError::Open(error));
+                    }
+                };
+                *writer_resource.native.lock().unwrap_or_else(|error| error.into_inner()) = Some(writer);
                 let submitted_bytes = request.bytes.len() as u64;
                 let append_mode = request.options.mode() == crate::LocalWriteMode::Append;
                 let mut append_effect_recorded = false;
@@ -196,10 +183,7 @@ impl AsyncLocalFileSystem {
                     }
                     let slices = [IoSlice::new(&request.bytes[offset..])];
                     let write_result = {
-                        let mut native = writer_resource
-                            .native
-                            .lock()
-                            .unwrap_or_else(|error| error.into_inner());
+                        let mut native = writer_resource.native.lock().unwrap_or_else(|error| error.into_inner());
                         native
                             .as_mut()
                             .expect("managed writer is available")
@@ -251,10 +235,7 @@ impl AsyncLocalFileSystem {
                     }
                 }
                 let flush_result = {
-                    let mut native = writer_resource
-                        .native
-                        .lock()
-                        .unwrap_or_else(|error| error.into_inner());
+                    let mut native = writer_resource.native.lock().unwrap_or_else(|error| error.into_inner());
                     Output::flush(native.as_mut().expect("managed writer is available"))
                 };
                 if let Err(source) = flush_result {
@@ -274,9 +255,7 @@ impl AsyncLocalFileSystem {
                     ));
                 }
                 #[cfg(feature = "test-support")]
-                if append_effect_recorded
-                    && crate::local::test_support_enabled("lf7-append-panic-after-write")
-                {
+                if append_effect_recorded && crate::local::test_support_enabled("lf7-append-panic-after-write") {
                     let _ = crate::local::test_fault_error();
                     panic!("injected panic after direct append");
                 }
@@ -328,25 +307,15 @@ impl AsyncLocalFileSystem {
                     }
                     Err(error) => {
                         let publication = match error.state() {
-                            crate::LocalWriteFailureState::NotPublished => {
-                                LocalPublicationState::NotPublished
-                            }
-                            crate::LocalWriteFailureState::Published => {
-                                LocalPublicationState::Published
-                            }
-                            crate::LocalWriteFailureState::Indeterminate => {
-                                LocalPublicationState::Unknown
-                            }
+                            crate::LocalWriteFailureState::NotPublished => LocalPublicationState::NotPublished,
+                            crate::LocalWriteFailureState::Published => LocalPublicationState::Published,
+                            crate::LocalWriteFailureState::Indeterminate => LocalPublicationState::Unknown,
                         };
                         if append_effect_recorded {
                             let durability = match error.state() {
-                                crate::LocalWriteFailureState::Published => {
-                                    LocalDurabilityState::Failed
-                                }
+                                crate::LocalWriteFailureState::Published => LocalDurabilityState::Failed,
                                 crate::LocalWriteFailureState::NotPublished
-                                | crate::LocalWriteFailureState::Indeterminate => {
-                                    LocalDurabilityState::Unknown
-                                }
+                                | crate::LocalWriteFailureState::Indeterminate => LocalDurabilityState::Unknown,
                             };
                             update_writer_effect_observer(
                                 &observer,
@@ -417,10 +386,7 @@ impl AsyncLocalFileSystem {
         let disk_limit = limits
             .max_disk_bytes
             .unwrap_or(self.executor.inner.config.max_disk_bytes);
-        if disk_limit == 0
-            || disk_limit > self.executor.inner.config.max_disk_bytes
-            || disk_bytes > disk_limit
-        {
+        if disk_limit == 0 || disk_limit > self.executor.inner.config.max_disk_bytes || disk_bytes > disk_limit {
             return Err(LocalSubmitError::new(
                 request,
                 super::super::LocalSubmitRejection::CapacityExceeded,
@@ -438,23 +404,25 @@ impl AsyncLocalFileSystem {
             manager,
             operation,
             request,
-            relative,
-            2,
-            limits,
-            owned_bytes,
+            OwnedSubmission {
+                path_is_relative: relative,
+
+                required_handles: 2,
+
+                limits,
+
+                initial_owned_bytes: owned_bytes,
+            },
             move |request, scope, observer, _budget, _maximum| {
                 if let Some(stop) = stop_report(scope) {
                     return OperationOutcome::Stopped(stop);
                 }
-                let parent = match filesystem.open_directory_with_options(
-                    &parent_path,
-                    &crate::options::LocalDirectoryOpenOptions::new(),
-                ) {
+                let parent = match filesystem
+                    .open_directory_with_options(&parent_path, &crate::options::LocalDirectoryOpenOptions::new())
+                {
                     Ok(parent) => parent,
                     Err(error) => {
-                        return OperationOutcome::Failed(LocalStagedTreePublishError::Parent(
-                            error,
-                        ));
+                        return OperationOutcome::Failed(LocalStagedTreePublishError::Parent(error));
                     }
                 };
                 let stage_options = request
@@ -474,60 +442,45 @@ impl AsyncLocalFileSystem {
                     if let Some(stop) = stop_report(scope) {
                         return match stage.cleanup() {
                             Ok(()) => OperationOutcome::Stopped(stop),
-                            Err(error) => {
-                                OperationOutcome::Failed(LocalStagedTreePublishError::Cleanup(
-                                    LocalStagedTreeReservedError::new(error, reservation.clone()),
-                                ))
-                            }
+                            Err(error) => OperationOutcome::Failed(LocalStagedTreePublishError::Cleanup(
+                                LocalStagedTreeReservedError::new(error, reservation.clone()),
+                            )),
                         };
                     }
-                    let entry = match crate::directory::LocalTreeEntry::new(
-                        file.path.clone(),
-                        crate::LocalFileKind::File,
-                    ) {
-                        Ok(entry) => entry,
-                        Err(cause) => {
-                            return OperationOutcome::Failed(LocalStagedTreePublishError::Write {
-                                cause,
-                                stage: LocalStagedTreeRecovery::new(stage, reservation.clone()),
-                            });
-                        }
-                    };
+                    let entry =
+                        match crate::directory::LocalTreeEntry::new(file.path.clone(), crate::LocalFileKind::File) {
+                            Ok(entry) => entry,
+                            Err(cause) => {
+                                return OperationOutcome::Failed(LocalStagedTreePublishError::Write {
+                                    cause,
+                                    stage: LocalStagedTreeRecovery::new(stage, reservation.clone()),
+                                });
+                            }
+                        };
                     let mut input = file.bytes.as_slice();
-                    if let Err(cause) =
-                        stage.write_file_new(&file.path, &mut input, file.bytes.len() as u64)
-                    {
+                    if let Err(cause) = stage.write_file_new(&file.path, &mut input, file.bytes.len() as u64) {
                         record_stage_write(scope, &observer, 0, EffectFact::Unknown);
                         return OperationOutcome::Failed(LocalStagedTreePublishError::Write {
                             cause,
                             stage: LocalStagedTreeRecovery::new(stage, reservation.clone()),
                         });
                     }
-                    record_stage_write(
-                        scope,
-                        &observer,
-                        file.bytes.len() as u64,
-                        EffectFact::Known,
-                    );
+                    record_stage_write(scope, &observer, file.bytes.len() as u64, EffectFact::Known);
                     expected.push(entry);
                 }
-                let validation = crate::directory::LocalTreeValidationOptions::new()
-                    .with_exact_entries(expected);
+                let validation = crate::directory::LocalTreeValidationOptions::new().with_exact_entries(expected);
                 let publish_options = request.publish_options.clone().with_validation(validation);
                 if let Some(stop) = stop_report(scope) {
                     return match stage.cleanup() {
                         Ok(()) => OperationOutcome::Stopped(stop),
-                        Err(error) => {
-                            OperationOutcome::Failed(LocalStagedTreePublishError::Cleanup(
-                                LocalStagedTreeReservedError::new(error, reservation.clone()),
-                            ))
-                        }
+                        Err(error) => OperationOutcome::Failed(LocalStagedTreePublishError::Cleanup(
+                            LocalStagedTreeReservedError::new(error, reservation.clone()),
+                        )),
                     };
                 }
                 match stage.publish_new(&parent, &request.name, &publish_options) {
                     Ok(outcome) => {
-                        if outcome.publication() == crate::outcome::LocalTreePublication::Published
-                        {
+                        if outcome.publication() == crate::outcome::LocalTreePublication::Published {
                             record_local_effect(
                                 scope,
                                 &observer,
@@ -553,16 +506,14 @@ impl AsyncLocalFileSystem {
                                 LocalPublicationState::Published,
                                 LocalDurabilityState::Failed,
                             ),
-                            crate::outcome::LocalTreePublication::Indeterminate => {
-                                record_local_effect(
-                                    scope,
-                                    &observer,
-                                    1,
-                                    0,
-                                    LocalPublicationState::Unknown,
-                                    LocalDurabilityState::Unknown,
-                                )
-                            }
+                            crate::outcome::LocalTreePublication::Indeterminate => record_local_effect(
+                                scope,
+                                &observer,
+                                1,
+                                0,
+                                LocalPublicationState::Unknown,
+                                LocalDurabilityState::Unknown,
+                            ),
                             _ => {}
                         }
                         OperationOutcome::Failed(LocalStagedTreePublishError::Publish(
@@ -586,7 +537,8 @@ impl AsyncLocalFileSystem {
     ///
     /// * `manager` - Operation manager that owns the conditional commit.
     /// * `operation` - Cancellation and deadline policy for the commit.
-    /// * `request` - Destination precondition, options, and owned candidate bytes.
+    /// * `request` - Destination precondition, options, and owned candidate
+    ///   bytes.
     /// * `limits` - Per-operation memory, I/O, and resource limits.
     pub fn submit_conditional_writer_commit<D: digest::Digest + Send + 'static>(
         &self,
@@ -594,16 +546,7 @@ impl AsyncLocalFileSystem {
         operation: OperationOptions,
         request: LocalConditionalWriterCommitRequest<D>,
         limits: LocalOperationOptions,
-    ) -> Result<
-        (
-            LocalOperation<
-                crate::outcome::LocalConditionalWriteOutcome<D>,
-                LocalConditionalWriterCommandError<D>,
-            >,
-            LocalFactObserver,
-        ),
-        LocalSubmitError<LocalConditionalWriterCommitRequest<D>>,
-    > {
+    ) -> LocalConditionalWriterOperation<D> {
         let relative = request.path.is_relative();
         let destination = match (&self.host_base, relative) {
             (Some(base), true) => base.join(&request.path),
@@ -616,10 +559,15 @@ impl AsyncLocalFileSystem {
             manager,
             operation,
             request,
-            relative,
-            1,
-            limits,
-            owned_capacity,
+            OwnedSubmission {
+                path_is_relative: relative,
+
+                required_handles: 1,
+
+                limits,
+
+                initial_owned_bytes: owned_capacity,
+            },
             move |request, scope, observer, _budget, _maximum| {
                 if let Some(stop) = stop_report(scope) {
                     return OperationOutcome::Stopped(stop);
@@ -632,77 +580,53 @@ impl AsyncLocalFileSystem {
                         );
                     }
                     Err(error) => {
-                        return OperationOutcome::Failed(
-                            LocalConditionalWriterCommandError::ResourceCapacity(error),
-                        );
+                        return OperationOutcome::Failed(LocalConditionalWriterCommandError::ResourceCapacity(error));
                     }
                 };
                 let Some(cleanup_permit) = executor.reserve_cleanup() else {
-                    return OperationOutcome::Failed(LocalConditionalWriterCommandError::Open(
-                        LocalFileError::new(
-                            crate::LocalFileErrorKind::ResourceLimit,
-                            crate::LocalFileOperation::OpenWriter,
-                        ),
-                    ));
+                    return OperationOutcome::Failed(LocalConditionalWriterCommandError::Open(LocalFileError::new(
+                        crate::LocalFileErrorKind::ResourceLimit,
+                        crate::LocalFileOperation::OpenWriter,
+                    )));
                 };
-                let resource =
-                    LocalManagedAbortResource::new(cleanup_permit, abort_conditional_writer::<D>);
+                let resource = LocalManagedAbortResource::new(cleanup_permit, abort_conditional_writer::<D>);
                 let writer_resource = match reservation.commit_with(
                     resource,
-                    LocalManagedAbortCleanup::<crate::LocalConditionalWriter<D>>::new(
-                        executor.clone(),
-                    ),
+                    LocalManagedAbortCleanup::<crate::LocalConditionalWriter<D>>::new(executor.cleanup_executor()),
                 ) {
                     Ok(resource) => resource,
                     Err(error) => {
                         let (reason, _resource, _cleanup, _reservation) = error.into_parts();
                         return match reason {
                             qubit_operation::ResourceManageErrorKind::Stopped => {
-                                OperationOutcome::Stopped(
-                                    stop_report(scope).expect("scope stopped before writer open"),
-                                )
+                                OperationOutcome::Stopped(stop_report(scope).expect("scope stopped before writer open"))
                             }
-                            reason => OperationOutcome::Failed(
-                                LocalConditionalWriterCommandError::ResourceCommit(reason),
-                            ),
+                            reason => {
+                                OperationOutcome::Failed(LocalConditionalWriterCommandError::ResourceCommit(reason))
+                            }
                         };
                     }
                 };
                 let resource_id = writer_resource.id();
-                *writer_resource
-                    .id
-                    .lock()
-                    .unwrap_or_else(|error| error.into_inner()) = Some(resource_id);
-                let writer = match filesystem.open_conditional_writer::<D>(
-                    &destination,
-                    request.precondition,
-                    &request.options,
-                ) {
-                    Ok(writer) => writer,
-                    Err(error) => {
-                        return OperationOutcome::Failed(LocalConditionalWriterCommandError::Open(
-                            error,
-                        ));
-                    }
-                };
-                *writer_resource
-                    .native
-                    .lock()
-                    .unwrap_or_else(|error| error.into_inner()) = Some(writer);
+                *writer_resource.id.lock().unwrap_or_else(|error| error.into_inner()) = Some(resource_id);
+                let writer =
+                    match filesystem.open_conditional_writer::<D>(&destination, request.precondition, &request.options)
+                    {
+                        Ok(writer) => writer,
+                        Err(error) => {
+                            return OperationOutcome::Failed(LocalConditionalWriterCommandError::Open(error));
+                        }
+                    };
+                *writer_resource.native.lock().unwrap_or_else(|error| error.into_inner()) = Some(writer);
                 let mut offset = 0;
                 while offset < request.bytes.len() {
                     if let Some(stop) = stop_report(scope) {
                         return abort_managed_conditional_after_stop(&writer_resource, stop);
                     }
                     let write_result = {
-                        let mut native = writer_resource
-                            .native
-                            .lock()
-                            .unwrap_or_else(|error| error.into_inner());
+                        let mut native = writer_resource.native.lock().unwrap_or_else(|error| error.into_inner());
                         Output::write(
-                            native
-                                .as_mut()
-                                .expect("managed conditional writer is available"),
+                            native.as_mut().expect("managed conditional writer is available"),
                             &request.bytes[offset..],
                         )
                     };
@@ -713,9 +637,10 @@ impl AsyncLocalFileSystem {
                                 crate::LocalFileOperation::Commit,
                             )
                             .with_path(destination.clone());
-                            return OperationOutcome::Failed(
-                                abort_managed_conditional_after_error(&writer_resource, error),
-                            );
+                            return OperationOutcome::Failed(abort_managed_conditional_after_error(
+                                &writer_resource,
+                                error,
+                            ));
                         }
                         Ok(written) => offset += written,
                         Err(source) => {
@@ -725,22 +650,16 @@ impl AsyncLocalFileSystem {
                                 None,
                                 source,
                             );
-                            return OperationOutcome::Failed(
-                                abort_managed_conditional_after_error(&writer_resource, error),
-                            );
+                            return OperationOutcome::Failed(abort_managed_conditional_after_error(
+                                &writer_resource,
+                                error,
+                            ));
                         }
                     }
                 }
                 let flush_result = {
-                    let mut native = writer_resource
-                        .native
-                        .lock()
-                        .unwrap_or_else(|error| error.into_inner());
-                    Output::flush(
-                        native
-                            .as_mut()
-                            .expect("managed conditional writer is available"),
-                    )
+                    let mut native = writer_resource.native.lock().unwrap_or_else(|error| error.into_inner());
+                    Output::flush(native.as_mut().expect("managed conditional writer is available"))
                 };
                 if let Err(source) = flush_result {
                     let error = LocalFileError::from_io(
@@ -749,10 +668,7 @@ impl AsyncLocalFileSystem {
                         None,
                         source,
                     );
-                    return OperationOutcome::Failed(abort_managed_conditional_after_error(
-                        &writer_resource,
-                        error,
-                    ));
+                    return OperationOutcome::Failed(abort_managed_conditional_after_error(&writer_resource, error));
                 }
                 if let Some(stop) = stop_report(scope) {
                     return abort_managed_conditional_after_stop(&writer_resource, stop);
@@ -785,25 +701,21 @@ impl AsyncLocalFileSystem {
                     }
                     Err(error) => {
                         match error.publication() {
-                            crate::outcome::LocalConditionalPublicationState::Published => {
-                                record_writer_effect(
-                                    scope,
-                                    &observer,
-                                    request.bytes.len() as u64,
-                                    LocalPublicationState::Published,
-                                    LocalDurabilityState::Failed,
-                                )
-                            }
-                            crate::outcome::LocalConditionalPublicationState::Indeterminate => {
-                                record_local_effect(
-                                    scope,
-                                    &observer,
-                                    1,
-                                    0,
-                                    LocalPublicationState::Unknown,
-                                    LocalDurabilityState::Unknown,
-                                )
-                            }
+                            crate::outcome::LocalConditionalPublicationState::Published => record_writer_effect(
+                                scope,
+                                &observer,
+                                request.bytes.len() as u64,
+                                LocalPublicationState::Published,
+                                LocalDurabilityState::Failed,
+                            ),
+                            crate::outcome::LocalConditionalPublicationState::Indeterminate => record_local_effect(
+                                scope,
+                                &observer,
+                                1,
+                                0,
+                                LocalPublicationState::Unknown,
+                                LocalDurabilityState::Unknown,
+                            ),
                             _ => {}
                         }
                         OperationOutcome::Failed(LocalConditionalWriterCommandError::Commit(error))
@@ -844,12 +756,8 @@ impl AsyncLocalFileSystem {
                     qubit_operation::GroupBindingError::WrongManager => {
                         super::super::LocalSubmitRejection::WrongManager
                     }
-                    qubit_operation::GroupBindingError::ScopeEnded => {
-                        super::super::LocalSubmitRejection::ScopeEnded
-                    }
-                    qubit_operation::GroupBindingError::Closed => {
-                        super::super::LocalSubmitRejection::Closed
-                    }
+                    qubit_operation::GroupBindingError::ScopeEnded => super::super::LocalSubmitRejection::ScopeEnded,
+                    qubit_operation::GroupBindingError::Closed => super::super::LocalSubmitRejection::Closed,
                     qubit_operation::GroupBindingError::CapacityExceeded => {
                         super::super::LocalSubmitRejection::CapacityExceeded
                     }
@@ -870,57 +778,47 @@ impl AsyncLocalFileSystem {
         let request_owner = Arc::new(Mutex::new(Some(request)));
         let request_for_body = Arc::clone(&request_owner);
         let executor = self.executor.clone();
-        let submit = scoped
-            .as_async()
-            .try_submit(operation, move |scope| async move {
-                let request = request_for_body
-                    .lock()
-                    .unwrap_or_else(|e| e.into_inner())
-                    .take()
-                    .expect("accepted local temp command retains its request");
-                if scope.context().stop_reason().is_some() {
-                    return Err(LocalTempLifecycleError::Stopped);
+        let submit = scoped.as_async().try_submit(operation, move |scope| async move {
+            let request = request_for_body
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .take()
+                .expect("accepted local temp command retains its request");
+            if scope.context().stop_reason().is_some() {
+                return Err(LocalTempLifecycleError::Stopped);
+            }
+            let lease_access = request.access.clone_access();
+            let context = scope.context();
+            let unsupported_operation = match request.command {
+                LocalTempLifecycleCommand::Seal { .. } => crate::LocalFileOperation::Commit,
+                LocalTempLifecycleCommand::Keep | LocalTempLifecycleCommand::Persist { .. } => {
+                    crate::LocalFileOperation::PersistTemp
                 }
-                let lease_access = request.access.clone_access();
-                let context = scope.context();
-                let unsupported_operation = match request.command {
-                    LocalTempLifecycleCommand::Seal { .. } => crate::LocalFileOperation::Commit,
-                    LocalTempLifecycleCommand::Keep | LocalTempLifecycleCommand::Persist { .. } => {
-                        crate::LocalFileOperation::PersistTemp
-                    }
-                };
-                let command = request.command;
-                let receiver = request
-                    .access
-                    .enqueue_native_transition(&executor, move |native| {
-                        #[cfg(feature = "test-support")]
-                        crate::test_support::hit_test_gate("lf7-temp-before-persist-primitive");
-                        transition_temp_native(native, command, lease_access, context)
-                    });
-                let receiver = match receiver {
-                    Ok(receiver) => receiver,
-                    Err(error) => {
-                        return Err(map_temp_command_error(error, unsupported_operation));
-                    }
-                };
-                match receiver.await {
-                    Err(error) => Err(map_temp_command_error(error, unsupported_operation)),
-                    Ok(Err(error)) => {
-                        record_temp_failure(&scope, &observer_for_task, &error);
-                        Err(error)
-                    }
-                    Ok(Ok((result, publication, durability))) => {
-                        record_writer_effect(
-                            &scope,
-                            &observer_for_task,
-                            0,
-                            publication,
-                            durability,
-                        );
-                        Ok(result)
-                    }
-                }
+            };
+            let command = request.command;
+            let receiver = request.access.enqueue_native_transition(&executor, move |native| {
+                #[cfg(feature = "test-support")]
+                crate::test_support::hit_test_gate("lf7-temp-before-persist-primitive");
+                transition_temp_native(native, command, lease_access, context)
             });
+            let receiver = match receiver {
+                Ok(receiver) => receiver,
+                Err(error) => {
+                    return Err(map_temp_command_error(error, unsupported_operation));
+                }
+            };
+            match receiver.await {
+                Err(error) => Err(map_temp_command_error(error, unsupported_operation)),
+                Ok(Err(error)) => {
+                    record_temp_failure(&scope, &observer_for_task, &error);
+                    Err(error)
+                }
+                Ok(Ok((result, publication, durability))) => {
+                    record_writer_effect(&scope, &observer_for_task, 0, publication, durability);
+                    Ok(result)
+                }
+            }
+        });
         match submit {
             Ok(handle) => Ok((handle, returned_access, observer)),
             Err(error) => {
@@ -931,20 +829,14 @@ impl AsyncLocalFileSystem {
                     .take()
                     .expect("rejected temp command returns its original request");
                 let rejection = match reason {
-                    qubit_operation::AdmissionError::Closed
-                    | qubit_operation::AdmissionError::ExecutorUnavailable => {
+                    qubit_operation::AdmissionError::Closed | qubit_operation::AdmissionError::ExecutorUnavailable => {
                         super::super::LocalSubmitRejection::Closed
                     }
-                    qubit_operation::AdmissionError::CapacityExceeded
-                    | qubit_operation::AdmissionError::Busy => {
+                    qubit_operation::AdmissionError::CapacityExceeded | qubit_operation::AdmissionError::Busy => {
                         super::super::LocalSubmitRejection::CapacityExceeded
                     }
-                    qubit_operation::AdmissionError::ScopeEnded => {
-                        super::super::LocalSubmitRejection::ScopeEnded
-                    }
-                    qubit_operation::AdmissionError::Stopped => {
-                        super::super::LocalSubmitRejection::Stopped
-                    }
+                    qubit_operation::AdmissionError::ScopeEnded => super::super::LocalSubmitRejection::ScopeEnded,
+                    qubit_operation::AdmissionError::Stopped => super::super::LocalSubmitRejection::Stopped,
                     _ => super::super::LocalSubmitRejection::Closed,
                 };
                 Err(LocalSubmitError::new(request, rejection))

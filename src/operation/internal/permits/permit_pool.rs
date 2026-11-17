@@ -7,6 +7,7 @@
 // =============================================================================
 
 use std::sync::Arc;
+#[cfg(test)]
 use std::sync::atomic::Ordering;
 
 use super::permit::Permit;

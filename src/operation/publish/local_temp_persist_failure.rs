@@ -21,7 +21,8 @@ pub struct LocalTempPersistFailure {
     /// Destination supplied by the caller before authority resolution.
     pub requested_target: PathBuf,
     /// Resolved target if resolution completed.
-    /// Destination resolved under captured authority, when resolution succeeded.
+    /// Destination resolved under captured authority, when resolution
+    /// succeeded.
     pub resolved_target: Option<PathBuf>,
     /// Stage where persistence stopped.
     /// Persistence phase active when the failure occurred.

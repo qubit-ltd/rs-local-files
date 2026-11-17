@@ -17,7 +17,7 @@ pub(super) struct WorkerOwner {
     /// Stores the queue associated with this value.
     queue: Arc<WorkerQueue>,
     /// Stores the workers associated with this value.
-    workers: Mutex<Vec<JoinHandle<()>>>,
+    pub(super) workers: Mutex<Vec<JoinHandle<()>>>,
 }
 
 impl WorkerOwner {

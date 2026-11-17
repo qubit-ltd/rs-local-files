@@ -266,6 +266,7 @@ impl LocalTempDirectory {
     /// Clones only the bound authority and identity needed to retry cleanup.
     /// The clone owns no directory handle and its Drop is inert until cleanup
     /// is explicitly requested.
+    #[cfg(feature = "async")]
     pub(crate) fn cleanup_anchor(&self) -> Self {
         Self {
             core: self.core.clone(),
@@ -276,12 +277,14 @@ impl LocalTempDirectory {
 
     /// Prevents this owner from making best-effort cleanup during unwind. A
     /// separately retained cleanup anchor must be installed before calling.
+    #[cfg(feature = "async")]
     pub(crate) fn disarm_cleanup_on_drop(&mut self) {
         self.cleanup_on_drop = false;
     }
 
     /// Restores ordinary best-effort Drop cleanup after a transition returns
     /// ownership to the managed resource.
+    #[cfg(feature = "async")]
     pub(crate) fn arm_cleanup_on_drop(&mut self) {
         self.cleanup_on_drop = true;
     }

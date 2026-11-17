@@ -48,11 +48,7 @@ impl<W: Send + 'static> AsyncCleanup<LocalManagedAbortResource<W>> for LocalMana
             .or_else(|| self.executor.reserve_cleanup());
         let Some(permit) = permit else {
             return Box::pin(async move {
-                let failure = local_abort_cleanup_failure(
-                    &resource,
-                    "local cleanup capacity exhausted",
-                    None,
-                );
+                let failure = local_abort_cleanup_failure(&resource, "local cleanup capacity exhausted", None);
                 CleanupOutcome::Failed { failure, resource }
             });
         };
@@ -72,16 +68,11 @@ impl<W: Send + 'static> AsyncCleanup<LocalManagedAbortResource<W>> for LocalMana
                 return;
             };
             let error = {
-                let mut native = resource
-                    .native
-                    .lock()
-                    .unwrap_or_else(|error| error.into_inner());
+                let mut native = resource.native.lock().unwrap_or_else(|error| error.into_inner());
                 match native.as_mut() {
                     None => None,
                     Some(owner) => {
-                        match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                            (resource.abort)(owner)
-                        })) {
+                        match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| (resource.abort)(owner))) {
                             Ok(Ok(())) => {
                                 native.take();
                                 None
@@ -106,21 +97,15 @@ impl<W: Send + 'static> AsyncCleanup<LocalManagedAbortResource<W>> for LocalMana
                     CleanupOutcome::Failed { failure, resource }
                 }
             };
-            *worker_state
-                .result
-                .lock()
-                .unwrap_or_else(|error| error.into_inner()) = Some(outcome);
+            *worker_state.result.lock().unwrap_or_else(|error| error.into_inner()) = Some(outcome);
             if let Some(waker) = worker_state
                 .waker
                 .lock()
                 .unwrap_or_else(|error| error.into_inner())
                 .take()
+                && let Err(payload) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| waker.wake()))
             {
-                if let Err(payload) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    waker.wake();
-                })) {
-                    std::mem::forget(payload);
-                }
+                std::mem::forget(payload);
             }
         });
         if self.executor.enqueue_cleanup(job, permit).is_err() {
@@ -131,11 +116,7 @@ impl<W: Send + 'static> AsyncCleanup<LocalManagedAbortResource<W>> for LocalMana
                 .take()
                 .expect("cleanup owner remains available when queue admission fails");
             return Box::pin(async move {
-                let failure = local_abort_cleanup_failure(
-                    &resource,
-                    "local cleanup queue is unavailable",
-                    None,
-                );
+                let failure = local_abort_cleanup_failure(&resource, "local cleanup queue is unavailable", None);
                 CleanupOutcome::Failed { failure, resource }
             });
         }

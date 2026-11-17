@@ -15,22 +15,29 @@ use std::task::Poll;
 use std::task::Waker;
 
 mod port;
+mod task;
 
 use port::Port;
 use qubit_operation::ChildOutcomeKind;
+use qubit_operation::ChildOutcomeSummary;
 use qubit_operation::ChildRelease;
 use qubit_operation::ChildSnapshot;
 use qubit_operation::DiagnosticSummary;
 use qubit_operation::ExecutionFailure;
+use qubit_operation::ExecutionPhase;
 use qubit_operation::OperationControl;
+use qubit_operation::OperationId;
+use qubit_operation::OperationOutcome;
 use qubit_operation::OperationScope;
 use qubit_operation::PreparedExternalOperation;
+use qubit_operation::SettlementReport;
 use qubit_operation::SettlementStatus;
+use qubit_operation::StopReason;
+use task::OperationTask;
 
 use super::super::LocalFactObserver;
 use super::super::executor::ExecutorInner;
 use super::permits::Permit;
-
 /// Owned job prepared before manager admission. Binding and activation are
 /// one-shot.
 ///
@@ -44,9 +51,7 @@ pub(crate) struct PreparedLocalJob<R, T, E> {
     /// Stores the request associated with this value.
     request: Mutex<Option<R>>,
     /// Stores the task associated with this value.
-    task: Mutex<
-        Option<Box<dyn for<'scope> FnOnce(R, &'scope OperationScope) -> OperationOutcome<T, E> + Send + 'static>>,
-    >,
+    task: Mutex<Option<OperationTask<R, T, E>>>,
     /// Stores the  slot associated with this value.
     _slot: Mutex<Option<Permit>>,
     /// Stores the  owned permit associated with this value.
@@ -71,10 +76,8 @@ where
 {
     /// Runs the new behavior while preserving the operation lifecycle
     /// invariants.
-
     /// # Type Parameters
     /// - `F` — type used by this operation.
-
     /// # Parameters
     /// - `request` — supplies data or policy for this operation.
     /// - `slot` — supplies data or policy for this operation.
@@ -104,7 +107,6 @@ where
             move |request, _scope| task(request),
         )
     }
-
     /// Creates a prepared job whose synchronous worker can inspect its
     /// operation scope.
     /// # Type Parameters
@@ -142,7 +144,6 @@ where
             task,
         )
     }
-
     /// Creates a job whose native-handle permit can also be retained by a
     /// resource returned from the operation outcome.
     /// # Type Parameters
@@ -192,19 +193,15 @@ where
             }),
         })
     }
-
     /// Runs the take wakers behavior while preserving the operation lifecycle
     /// invariants.
-
     /// # Parameters
     /// - `port` — supplies data or policy for this operation.
     fn take_wakers(port: &mut Port<T, E>) -> [Option<Waker>; 4] {
-        std::mem::replace(&mut port.wakers, [None, None, None, None])
+        std::mem::take(&mut port.wakers)
     }
-
     /// Runs the wake all behavior while preserving the operation lifecycle
     /// invariants.
-
     /// # Parameters
     /// - `wakers` — supplies data or policy for this operation.
     fn wake_all(mut wakers: [Option<Waker>; 4]) {
@@ -227,10 +224,8 @@ where
             let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| drop(waker)));
         }
     }
-
     /// Runs the register behavior while preserving the operation lifecycle
     /// invariants.
-
     /// # Parameters
     /// - `port` — supplies data or policy for this operation.
     /// - `slot` — supplies data or policy for this operation.
@@ -244,10 +239,8 @@ where
         }
         std::mem::replace(&mut port.wakers[slot], waker.take())
     }
-
     /// Runs the discard waker behavior while preserving the operation lifecycle
     /// invariants.
-
     /// # Parameters
     /// - `waker` — supplies data or policy for this operation.
     fn discard_waker(waker: Option<Waker>) {
@@ -263,10 +256,8 @@ impl<R: Send + 'static, T: Send + 'static, E: Send + 'static> PreparedLocalJob<R
     pub(crate) fn take_request(&self) -> Option<R> {
         self.request.lock().unwrap_or_else(|e| e.into_inner()).take()
     }
-
     /// Runs the finish released behavior while preserving the operation
     /// lifecycle invariants.
-
     /// # Parameters
     /// - `id` — supplies data or policy for this operation.
     fn finish_released(&self, id: OperationId) {
@@ -286,10 +277,8 @@ impl<R: Send + 'static, T: Send + 'static, E: Send + 'static> PreparedLocalJob<R
         Self::wake_all(wakers);
     }
 }
-
 /// Runs the empty settlement behavior while preserving the operation lifecycle
 /// invariants.
-
 /// # Parameters
 /// - `id` — supplies data or policy for this operation.
 fn empty_settlement(id: OperationId) -> Arc<SettlementReport> {
@@ -311,6 +300,7 @@ fn empty_settlement(id: OperationId) -> Arc<SettlementReport> {
         transfers: Arc::from([]),
         transfers_total: 0,
         transfers_truncated: false,
+        external_settlement: None,
         recoveries: Arc::from([]),
         recoveries_total: 0,
         recoveries_truncated: false,
@@ -328,7 +318,6 @@ where
 {
     /// Runs the request stop behavior while preserving the operation lifecycle
     /// invariants.
-
     /// # Parameters
     /// - `reason` — supplies data or policy for this operation.
     fn request_stop(&self, reason: StopReason) {
@@ -341,7 +330,6 @@ where
         };
         Self::wake_all(wakers);
     }
-
     /// Runs the snapshot behavior while preserving the operation lifecycle
     /// invariants.
     fn snapshot(&self) -> ChildSnapshot {
@@ -358,10 +346,8 @@ where
             settlement: port.settlement.clone(),
         }
     }
-
     /// Runs the poll outcome behavior while preserving the operation lifecycle
     /// invariants.
-
     /// # Parameters
     /// - `cx` — supplies data or policy for this operation.
     fn poll_outcome(&self, cx: &mut Context<'_>) -> Poll<ChildOutcomeSummary> {
@@ -379,10 +365,8 @@ where
         Self::discard_waker(new_waker);
         Poll::Pending
     }
-
     /// Runs the poll release behavior while preserving the operation lifecycle
     /// invariants.
-
     /// # Parameters
     /// - `cx` — supplies data or policy for this operation.
     fn poll_release(&self, cx: &mut Context<'_>) -> Poll<ChildRelease> {
@@ -403,10 +387,8 @@ where
         Self::discard_waker(new_waker);
         Poll::Pending
     }
-
     /// Runs the poll settlement behavior while preserving the operation
     /// lifecycle invariants.
-
     /// # Parameters
     /// - `cx` — supplies data or policy for this operation.
     fn poll_settlement(&self, cx: &mut Context<'_>) -> Poll<Arc<SettlementReport>> {
@@ -434,7 +416,6 @@ where
 {
     /// Runs the bind behavior while preserving the operation lifecycle
     /// invariants.
-
     /// # Parameters
     /// - `id` — supplies data or policy for this operation.
     fn bind(&self, id: OperationId) -> Result<(), qubit_operation::ExternalBindError> {
@@ -449,10 +430,8 @@ where
         port.id = Some(id);
         Ok(())
     }
-
     /// Runs the activate behavior while preserving the operation lifecycle
     /// invariants.
-
     /// # Parameters
     /// - `scope` — supplies data or policy for this operation.
     fn activate(self: Arc<Self>, scope: OperationScope) -> Result<(), ExecutionFailure> {
@@ -512,6 +491,7 @@ where
                 });
                 this._handle_permit.lock().unwrap_or_else(|e| e.into_inner()).take();
                 let wakers = {
+                    this._fact_observer.lock().unwrap_or_else(|e| e.into_inner()).take();
                     let mut port = this.port.lock().unwrap_or_else(|e| e.into_inner());
                     port.phase = ExecutionPhase::Finished;
                     port.summary = Some(outcome_summary(id, &outcome));
@@ -536,6 +516,7 @@ where
             let summary = outcome_summary(id, &outcome);
             let settlement = empty_settlement(id);
             let wakers = {
+                this._fact_observer.lock().unwrap_or_else(|e| e.into_inner()).take();
                 let mut port = this.port.lock().unwrap_or_else(|e| e.into_inner());
                 port.phase = ExecutionPhase::Finished;
                 port.summary = Some(summary);
@@ -564,7 +545,6 @@ where
         }
         Ok(())
     }
-
     /// Runs the abandon behavior while preserving the operation lifecycle
     /// invariants.
     fn abandon(self: Arc<Self>) {
@@ -585,10 +565,8 @@ where
         };
         Self::wake_all(wakers);
     }
-
     /// Runs the poll take outcome behavior while preserving the operation
     /// lifecycle invariants.
-
     /// # Parameters
     /// - `cx` — supplies data or policy for this operation.
     fn poll_take_outcome(&self, cx: &mut Context<'_>) -> Poll<OperationOutcome<T, E>> {
@@ -607,14 +585,11 @@ where
         Poll::Pending
     }
 }
-
 /// Runs the outcome summary behavior while preserving the operation lifecycle
 /// invariants.
-
 /// # Type Parameters
 /// - `T` — type used by this operation.
 /// - `E` — type used by this operation.
-
 /// # Parameters
 /// - `id` — supplies data or policy for this operation.
 /// - `outcome` — supplies data or policy for this operation.

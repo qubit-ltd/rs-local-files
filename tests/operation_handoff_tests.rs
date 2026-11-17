@@ -6,6 +6,8 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 
+#![cfg(feature = "async")]
+
 use std::io::Read;
 use std::io::Write;
 use std::pin::Pin;

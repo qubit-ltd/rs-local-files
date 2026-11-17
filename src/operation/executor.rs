@@ -7,13 +7,13 @@
 // =============================================================================
 
 mod executor_inner;
+mod local_cleanup_executor;
 mod local_io_executor;
 mod worker_owner;
 
+pub(crate) use executor_inner::ExecutorInner;
+pub(crate) use local_cleanup_executor::LocalCleanupExecutor;
 pub use local_io_executor::LocalIoExecutor;
-pub(super) use local_io_executor::spawn_workers;
-
-use super::LocalExecutionConfig;
 
 #[cfg(test)]
 mod tests {
@@ -25,20 +25,17 @@ mod tests {
     use qubit_operation::OperationManager;
     use qubit_operation::OperationOutcome;
 
-    use super::LocalExecutionConfig;
     use super::LocalIoExecutor;
-    use super::spawn_workers;
+    use super::local_io_executor::spawn_workers;
     use crate::operation::AsyncLocalFileSystem;
+    use crate::operation::LocalExecutionConfig;
     use crate::operation::LocalFactObserver;
     use crate::operation::internal::prepared_local_job::PreparedLocalJob;
     use crate::operation::internal::worker::WorkerQueue;
-
     /// Runs the make job behavior while preserving the operation lifecycle
     /// invariants.
-
     /// # Type Parameters
     /// - `F` — type used by this operation.
-
     /// # Parameters
     /// - `executor` — supplies data or policy for this operation.
     /// - `task` — supplies data or policy for this operation.
@@ -49,13 +46,10 @@ mod tests {
         let slot = executor.reserve_slot().unwrap();
         make_job_with_slot(executor, slot, task)
     }
-
     /// Runs the make job with slot behavior while preserving the operation
     /// lifecycle invariants.
-
     /// # Type Parameters
     /// - `F` — type used by this operation.
-
     /// # Parameters
     /// - `executor` — supplies data or policy for this operation.
     /// - `slot` — supplies data or policy for this operation.
@@ -78,7 +72,6 @@ mod tests {
             task,
         )
     }
-
     /// Runs the test partial worker start failure stops and joins started
     /// workers behavior while preserving the operation lifecycle invariants.
     #[test]
@@ -105,23 +98,13 @@ mod tests {
             .recv_timeout(Duration::from_secs(5))
             .expect("started worker must exit before start failure is returned");
     }
-
     /// Runs the test activate queue failure leaves typed outcome to manager and
     /// releases permits behavior while preserving the operation lifecycle
     /// invariants.
     #[test]
     fn test_activate_queue_failure_leaves_typed_outcome_to_manager_and_releases_permits() {
         use std::task::Context;
-        use std::task::Wake;
         use std::task::Waker;
-
-        /// Represents noop within the local operation subsystem.
-        struct Noop;
-        impl Wake for Noop {
-            /// Runs the wake behavior while preserving the operation lifecycle
-            /// invariants.
-            fn wake(self: std::sync::Arc<Self>) {}
-        }
 
         let manager = OperationManager::new(ManagerOptions::default()).unwrap();
         let executor = LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).unwrap();
@@ -149,8 +132,7 @@ mod tests {
             OperationOutcome::ExecutionFailed(_)
         ));
         handle.wait_settlement().unwrap();
-        let waker = Waker::from(std::sync::Arc::new(Noop));
-        let mut context = Context::from_waker(&waker);
+        let mut context = Context::from_waker(Waker::noop());
         assert!(
             matches!(
                 qubit_operation::PreparedExternalOperation::poll_take_outcome(&*prepared, &mut context,),
@@ -166,7 +148,6 @@ mod tests {
         assert_eq!(executor.inner.fact_slots.used(), 0);
         assert!(qubit_operation::OperationControl::snapshot(&*prepared).input_released);
     }
-
     /// Runs the test reentrant waker can observe control without deadlocking
     /// behavior while preserving the operation lifecycle invariants.
     #[test]
@@ -174,7 +155,6 @@ mod tests {
         use std::task::Context;
         use std::task::Wake;
         use std::task::Waker;
-
         /// Represents reentrant within the local operation subsystem.
         struct Reentrant {
             /// Stores the prepared associated with this value.
@@ -235,7 +215,6 @@ mod tests {
             .expect("reentrant Waker callback should complete outside the control lock");
         thread.join().unwrap();
     }
-
     /// Runs the test panicking waker does not unwind or corrupt control state
     /// behavior while preserving the operation lifecycle invariants.
     #[test]
@@ -243,7 +222,6 @@ mod tests {
         use std::task::Context;
         use std::task::Wake;
         use std::task::Waker;
-
         /// Represents panics within the local operation subsystem.
         struct Panics;
         impl Wake for Panics {
@@ -289,7 +267,6 @@ mod tests {
             OperationOutcome::Succeeded(())
         ));
     }
-
     /// Runs the test abandon releases all unstarted permits even with retained
     /// arc behavior while preserving the operation lifecycle invariants.
     #[test]
@@ -330,7 +307,6 @@ mod tests {
         ));
         assert!(qubit_operation::OperationControl::snapshot(&*prepared).input_released);
     }
-
     /// Runs the test local operation keeps result budget until user takes
     /// outcome behavior while preserving the operation lifecycle invariants.
     #[test]
@@ -349,7 +325,6 @@ mod tests {
         assert!(matches!(outcome, OperationOutcome::Succeeded(bytes) if bytes == [1, 1, 1, 1]));
         assert_eq!(executor.inner.byte_slots.used(), 0);
     }
-
     /// Runs the test small read budgets actual capacity until take or drop
     /// behavior while preserving the operation lifecycle invariants.
     #[test]
@@ -421,7 +396,6 @@ mod tests {
         drop(observer);
         assert_eq!(executor.inner.fact_slots.used(), 0);
     }
-
     /// Runs the test async constructor poll never waits for blocked worker io
     /// behavior while preserving the operation lifecycle invariants.
     #[test]
@@ -429,15 +403,7 @@ mod tests {
         use std::future::Future;
         use std::task::Context;
         use std::task::Poll;
-        use std::task::Wake;
         use std::task::Waker;
-        /// Represents noop within the local operation subsystem.
-        struct Noop;
-        impl Wake for Noop {
-            /// Runs the wake behavior while preserving the operation lifecycle
-            /// invariants.
-            fn wake(self: std::sync::Arc<Self>) {}
-        }
 
         let manager = OperationManager::new(ManagerOptions::default()).unwrap();
         let executor = LocalIoExecutor::new(
@@ -461,8 +427,7 @@ mod tests {
         let scratch = tempfile::tempdir().unwrap();
         let root = scratch.path().to_path_buf();
         let mut rooted = Box::pin(AsyncLocalFileSystem::rooted(executor.clone(), root));
-        let waker = Waker::from(std::sync::Arc::new(Noop));
-        let mut context = Context::from_waker(&waker);
+        let mut context = Context::from_waker(Waker::noop());
         assert!(matches!(rooted.as_mut().poll(&mut context), Poll::Pending));
         drop(rooted);
         let mut host = Box::pin(AsyncLocalFileSystem::host(executor.clone()));
@@ -474,7 +439,6 @@ mod tests {
         release_tx.send(()).unwrap();
         complete_rx.recv_timeout(Duration::from_secs(5)).unwrap();
     }
-
     /// Runs the test cleanup and ordinary queues make round robin progress
     /// behavior while preserving the operation lifecycle invariants.
     #[test]
@@ -515,7 +479,6 @@ mod tests {
         queue.stop();
         worker.join().unwrap();
     }
-
     /// Runs the test queue and waiter permits bound blocked jobs and return on
     /// release behavior while preserving the operation lifecycle invariants.
     #[test]
@@ -575,7 +538,6 @@ mod tests {
         assert!(executor.reserve_slot().is_some());
         assert!(executor.reserve_slot().is_some());
     }
-
     /// Runs the test stop after bind before activate prevents task from running
     /// behavior while preserving the operation lifecycle invariants.
     #[test]
@@ -585,7 +547,6 @@ mod tests {
         use std::task::Context;
         use std::task::Wake;
         use std::task::Waker;
-
         /// Represents notify within the local operation subsystem.
         struct Notify(std::sync::mpsc::Sender<()>);
         impl Wake for Notify {
@@ -637,7 +598,6 @@ mod tests {
         let _ = parent.wait_outcome().unwrap();
         assert_eq!(executions.load(Ordering::SeqCst), 0);
     }
-
     /// Runs the test disk permits are finite and return when released behavior
     /// while preserving the operation lifecycle invariants.
     #[test]
@@ -656,7 +616,6 @@ mod tests {
         drop(permit);
         assert_eq!(executor.reserve_disk(8).unwrap().amount(), 8);
     }
-
     /// Runs the test cleanup permit quota and rejected enqueue preserve job and
     /// permit behavior while preserving the operation lifecycle invariants.
     #[test]
@@ -692,7 +651,6 @@ mod tests {
         drop(permit);
         assert_eq!(executor.inner.cleanup_slots.used(), 0);
     }
-
     /// Runs the test successful cleanup runs and releases reserved slot
     /// behavior while preserving the operation lifecycle invariants.
     #[test]
@@ -721,7 +679,6 @@ mod tests {
         assert_eq!(executor.inner.cleanup_slots.used(), 0);
         assert!(executor.reserve_cleanup().is_some());
     }
-
     /// Runs the test dropping executor drains queued work and stops queue
     /// behavior while preserving the operation lifecycle invariants.
     #[test]
@@ -770,7 +727,6 @@ mod tests {
         drop_thread.join().unwrap();
         assert!(queue.push(Box::new(|| {}), false, 1).is_err());
     }
-
     /// Runs the test duplicate arc submission is rejected without abandoning
     /// claimed job behavior while preserving the operation lifecycle
     /// invariants.

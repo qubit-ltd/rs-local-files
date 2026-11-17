@@ -41,11 +41,13 @@ qubit-operation = "^0.3"
 因为 scope 会一直管理该资源，直到最后一个使用者归还引用。
 
 ```rust,no_run
+# #[cfg(feature = "async")]
 # async fn example() -> Result<(), Box<dyn std::error::Error>> {
 use std::path::PathBuf;
 use qubit_local_files::{
-    AsyncLocalFileSystem, LocalExecutionConfig, LocalIoExecutor, LocalReadOptions,
+    AsyncLocalFileSystem, LocalExecutionConfig, LocalIoExecutor,
 };
+use qubit_local_files::options::LocalReadOptions;
 use qubit_operation::{ManagerOptions, OperationManager, OperationOptions, OperationOutcome};
 
 let manager = OperationManager::new(ManagerOptions::default())?;

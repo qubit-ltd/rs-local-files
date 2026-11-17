@@ -32,11 +32,6 @@ impl SavedError {
         }
     }
 
-    /// Operates on the stream state while preserving pending request ownership.
-    ///
-    /// # Parameters
-    ///
-    /// * `self` — state machine that owns the pending request and buffers .
     /// Recreates an equivalent I/O error for the current poll result.
     ///
     /// # Parameters

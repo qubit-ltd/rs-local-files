@@ -10,7 +10,6 @@
 use std::collections::HashMap;
 use std::io;
 use std::sync::Arc;
-use std::sync::Condvar;
 use std::sync::Mutex;
 use std::sync::OnceLock;
 
@@ -51,15 +50,10 @@ fn gates() -> &'static Mutex<HashMap<String, Arc<GateState>>> {
 #[doc(hidden)]
 pub fn install_test_gate(name: &str) -> io::Result<TestGateGuard> {
     if name.is_empty() {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "test gate name is empty",
-        ));
+        return Err(io::Error::new(io::ErrorKind::InvalidInput, "test gate name is empty"));
     }
     let state = Arc::new(GateState::default());
-    let mut active = gates()
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut active = gates().lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     if active.contains_key(name) {
         return Err(io::Error::new(
             io::ErrorKind::AlreadyExists,
@@ -85,10 +79,7 @@ pub(crate) fn hit_test_gate(name: &str) {
         .get(name)
         .cloned();
     let Some(state) = state else { return };
-    let mut phase = state
-        .phase
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut phase = state.phase.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     phase.0 = true;
     state.changed.notify_all();
     while !phase.1 {

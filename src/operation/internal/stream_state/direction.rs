@@ -12,7 +12,7 @@ use std::fmt::Debug;
 /// Read and write states carry distinct queue invariants and reject operations
 /// belonging to the other direction.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(super) enum Direction {
+pub(crate) enum Direction {
     /// Polls the native reader and retains unread bytes for the next caller.
     Read,
     /// Queues native writes and preserves their ordering through flush/close.

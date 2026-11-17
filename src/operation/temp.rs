@@ -8,23 +8,16 @@
 
 //! Resource-managed temporary files for asynchronous local operations.
 
-use std::future::Future;
-use std::pin::Pin;
 use std::sync::Arc;
-use std::sync::Mutex;
-use std::task::Context;
-use std::task::Poll;
 use std::task::Waker;
 
 use qubit_operation::OperationOptions;
-use qubit_operation::ResourceCapacityError;
-use qubit_operation::ResourceId;
 use qubit_operation::ResourceRef;
 
 use super::executor::LocalIoExecutor;
 #[path = "internal/local_cleanup.rs"]
 mod local_cleanup;
-use local_cleanup::LocalCleanup;
+pub(crate) use local_cleanup::LocalCleanup;
 
 mod async_receiver;
 mod async_result;
@@ -39,12 +32,13 @@ mod local_temp_resource;
 mod local_temp_submit_error;
 
 use async_receiver::AsyncReceiver;
+pub(super) use async_result::AsyncResult;
 use async_result::async_result;
 use async_sender::AsyncSender;
 pub use local_create_failure::LocalCreateFailure;
 pub(crate) use local_temp_cleanup_anchor::LocalTempCleanupAnchor;
 pub(crate) use local_temp_command_error::LocalTempCommandError;
-pub use local_temp_command_receiver::LocalTempCommandReceiver;
+pub(crate) use local_temp_command_receiver::LocalTempCommandReceiver;
 pub use local_temp_file_access::LocalTempFileAccess;
 pub(crate) use local_temp_native::LocalTempNative;
 pub use local_temp_resource::LocalTempResource;
@@ -384,20 +378,14 @@ mod tests {
     use qubit_operation::OperationManager;
     use qubit_operation::StopReason;
 
-    use super::AsyncReceiver;
-    use super::AsyncSender;
+    use super::LocalCleanup;
     use super::LocalCreateFailure;
     use super::LocalTempCleanupAnchor;
     use super::LocalTempCommandError;
-    use super::LocalTempCommandReceiver;
     use super::LocalTempFileAccess;
     use super::LocalTempNative;
     use super::LocalTempResource;
     use super::async_result;
-    use super::enqueue_resource_command;
-    use super::safe_clone_waker;
-    use super::safe_drop_waker;
-    use super::safe_wake;
     use crate::LocalFileOperation;
     use crate::LocalFileSystem;
     use crate::operation::LocalIoExecutor;
@@ -1047,7 +1035,7 @@ mod tests {
     }
     impl std::task::Wake for WakePanics {
         fn wake(self: Arc<Self>) {
-            panic!("custom wake panic");
+            std::panic::panic_any(());
         }
     }
 

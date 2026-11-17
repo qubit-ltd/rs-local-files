@@ -6,6 +6,8 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 
+#![cfg(feature = "async")]
+
 use std::io::SeekFrom;
 use std::path::PathBuf;
 
@@ -123,6 +125,90 @@ fn test_read_text_preserves_utf8_conversion_error() {
         .0;
     assert!(matches!(operation.wait_outcome().unwrap(),
         qubit_operation::OperationOutcome::Failed(error) if error.kind() == qubit_local_files::error::LocalFileErrorKind::InvalidEncoding));
+}
+
+#[test]
+fn test_complete_reads_cover_success_and_native_open_failures() {
+    let directory = tempfile::tempdir().unwrap();
+    let text_path = directory.path().join("text");
+    std::fs::write(&text_path, b"complete text").unwrap();
+    let missing = directory.path().join("missing");
+    let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+    let filesystem = facade(&manager);
+
+    let mut text = filesystem
+        .submit_read_text(
+            &manager,
+            Default::default(),
+            LocalReadRequest {
+                path: text_path,
+                read: Default::default(),
+            },
+            Default::default(),
+        )
+        .unwrap()
+        .0;
+    assert!(matches!(
+        text.wait_outcome().unwrap(),
+        qubit_operation::OperationOutcome::Succeeded(value) if value == "complete text"
+    ));
+
+    let mut read_all = filesystem
+        .submit_read_all(
+            &manager,
+            Default::default(),
+            LocalReadRequest {
+                path: missing.clone(),
+                read: Default::default(),
+            },
+            Default::default(),
+        )
+        .unwrap()
+        .0;
+    assert!(matches!(
+        read_all.wait_outcome().unwrap(),
+        qubit_operation::OperationOutcome::Failed(error)
+            if error.kind() == qubit_local_files::error::LocalFileErrorKind::NotFound
+    ));
+
+    let mut prefix = filesystem
+        .submit_read_prefix(
+            &manager,
+            Default::default(),
+            LocalReadPrefixRequest {
+                path: missing.clone(),
+                read: Default::default(),
+                max_bytes: 4,
+            },
+            Default::default(),
+        )
+        .unwrap()
+        .0;
+    assert!(matches!(
+        prefix.wait_outcome().unwrap(),
+        qubit_operation::OperationOutcome::Failed(error)
+            if error.kind() == qubit_local_files::error::LocalFileErrorKind::NotFound
+    ));
+
+    let mut read_at = filesystem
+        .submit_read_at(
+            &manager,
+            Default::default(),
+            LocalReadAtRequest {
+                path: missing,
+                read: Default::default(),
+                offset: SeekFrom::Start(0),
+                max_bytes: 4,
+            },
+            Default::default(),
+        )
+        .unwrap()
+        .0;
+    assert!(matches!(
+        read_at.wait_outcome().unwrap(),
+        qubit_operation::OperationOutcome::Failed(error)
+            if error.kind() == qubit_local_files::error::LocalFileErrorKind::NotFound
+    ));
 }
 
 #[test]

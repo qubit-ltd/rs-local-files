@@ -217,11 +217,10 @@ fn resource(worker: Arc<FakeWorker>) -> ResourceRef<LocalStreamResource> {
             Ok::<_, ()>(resource)
         })
         .unwrap();
-    let resource = match operation.wait_outcome().unwrap() {
+    match operation.wait_outcome().unwrap() {
         qubit_operation::OperationOutcome::Succeeded(resource) => resource,
         _ => panic!("resource registration operation failed"),
-    };
-    resource
+    }
 }
 
 fn reader(worker: &Arc<FakeWorker>) -> AsyncLocalFileReader {
@@ -477,11 +476,8 @@ fn test_async_filesystem_opens_real_reader_writer_and_bounded_walker() {
         _ => panic!("walker open failed"),
     };
     let mut found = Vec::new();
-    loop {
-        match poll_worker(|cx| Box::pin(walker.next_batch()).as_mut().poll(cx)).unwrap() {
-            Some(batch) => found.extend(batch),
-            None => break,
-        }
+    while let Some(batch) = poll_worker(|cx| Box::pin(walker.next_batch()).as_mut().poll(cx)).unwrap() {
+        found.extend(batch);
     }
     assert!(
         found

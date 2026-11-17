@@ -58,10 +58,7 @@ impl AsyncLocalDirectoryWalker {
 
     /// Returns the next bounded batch, or `None` after EOF and confirmed close.
     pub async fn next_batch(&mut self) -> crate::LocalResult<Option<Vec<PathBuf>>> {
-        let resource = self
-            .resource
-            .as_deref()
-            .expect("walker resource retained until close");
+        let resource = self.resource.as_deref().expect("walker resource retained until close");
         let result = {
             let state = &mut self.state;
             std::future::poll_fn(move |cx| state.poll_batch(resource, cx)).await
@@ -94,11 +91,7 @@ impl AsyncLocalDirectoryWalker {
     /// Returns a close observer that survives dropping this walker handle.
     pub fn close_observer(&self) -> LocalWalkCloseObserver {
         LocalWalkCloseObserver {
-            resource: self
-                .resource
-                .as_ref()
-                .expect("walker resource retained")
-                .clone(),
+            resource: self.resource.as_ref().expect("walker resource retained").clone(),
         }
     }
 }
@@ -106,10 +99,10 @@ impl AsyncLocalDirectoryWalker {
 impl Drop for AsyncLocalDirectoryWalker {
     /// Requests native iterator closure when traversal is abandoned.
     fn drop(&mut self) {
-        if !self.state.is_closed() {
-            if let Some(resource) = &self.resource {
-                self.state.request_stop(resource);
-            }
+        if !self.state.is_closed()
+            && let Some(resource) = &self.resource
+        {
+            self.state.request_stop(resource);
         }
     }
 }

@@ -20,7 +20,7 @@ pub struct LocalTempSubmitError<R> {
     /// Upstream operation admission rejection.
     pub reason: qubit_operation::AdmissionError,
     /// Original request configuration returned for a possible retry.
-    request: R,
+    pub(super) request: R,
 }
 
 impl<R> LocalTempSubmitError<R> {

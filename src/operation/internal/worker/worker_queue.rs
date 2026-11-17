@@ -12,6 +12,7 @@ use std::sync::Condvar;
 use std::sync::Mutex;
 
 use super::super::permits::Permit;
+use super::CleanupEnqueueError;
 // Stores bounded queue contents and the worker's fair scheduling state.
 mod queue_state;
 
@@ -25,7 +26,9 @@ pub(crate) struct WorkerQueue {
     wake: Condvar,
 }
 
+/// Creates an empty queue with its ordinary and cleanup lanes ready.
 impl Default for WorkerQueue {
+    /// Returns an empty queue with both scheduling lanes initialized.
     fn default() -> Self {
         Self {
             state: Mutex::new(QueueState {
@@ -92,7 +95,7 @@ impl WorkerQueue {
         job: Box<dyn FnOnce() + Send + 'static>,
         permit: Permit,
         limit: usize,
-    ) -> Result<(), (Box<dyn FnOnce() + Send + 'static>, Permit)> {
+    ) -> Result<(), CleanupEnqueueError> {
         let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         if state.stopping || state.cleanup.len() >= limit {
             return Err((job, permit));
@@ -106,7 +109,8 @@ impl WorkerQueue {
         Ok(())
     }
 
-    /// Runs queued tasks until shutdown has been requested and both queues drain.
+    /// Runs queued tasks until shutdown has been requested and both queues
+    /// drain.
     pub(crate) fn run(&self) {
         loop {
             let job = {
@@ -139,10 +143,7 @@ impl WorkerQueue {
 
     /// Requests worker shutdown after queued work has been processed.
     pub(crate) fn stop(&self) {
-        self.state
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .stopping = true;
+        self.state.lock().unwrap_or_else(|e| e.into_inner()).stopping = true;
         self.wake.notify_all();
     }
 }

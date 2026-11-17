@@ -6,13 +6,19 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 
+use super::LocalTempPersistFailure;
+use super::LocalTempWorkerCommandFailure;
+use crate::LocalFileError;
+
 /// Managed command failure, preserving native errors and worker admission
 /// state.
 #[derive(Debug)]
 pub enum LocalTempLifecycleError {
-    /// Persistence failed; requested and resolved target facts remain available in the payload.
+    /// Persistence failed; requested and resolved target facts remain available
+    /// in the payload.
     Persist(
-        /// Persistence failure details while the managed resource remains owned.
+        /// Persistence failure details while the managed resource remains
+        /// owned.
         LocalTempPersistFailure,
     ),
     /// Structured sealing failure.
@@ -24,12 +30,15 @@ pub enum LocalTempLifecycleError {
         /// Access capabilities that remain after the failed transition.
         access_state: crate::LocalTempAccessState,
     },
-    /// This command cannot be applied to the managed resource kind, with the native rejection attached.
+    /// This command cannot be applied to the managed resource kind, with the
+    /// native rejection attached.
     Unsupported(
-        /// Native rejection explaining why this resource cannot perform the command.
+        /// Native rejection explaining why this resource cannot perform the
+        /// command.
         LocalFileError,
     ),
-    /// Worker admission or execution failed before the lifecycle result could be returned.
+    /// Worker admission or execution failed before the lifecycle result could
+    /// be returned.
     Worker(
         /// Stable worker-level capacity, ownership, or panic classification.
         LocalTempWorkerCommandFailure,

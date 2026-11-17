@@ -26,10 +26,8 @@ impl LocalStagedTreeRecovery {
     /// # Parameters
     /// * `stage` — unpublished native stage retained after a failed operation.
     /// * `reservation` — quota held while recovery remains possible.
-    pub(super) fn new(
-        /// Stage retained for inspection and cleanup after publication failure.
+    pub(in crate::operation) fn new(
         stage: crate::directory::LocalStagedDirectory,
-        /// Quota retained alongside the stage.
         reservation: LocalStagedTreeDiskReservation,
     ) -> Self {
         Self {
@@ -63,9 +61,7 @@ impl LocalStagedTreeRecovery {
     ///
     /// # Errors
     /// Returns the native cleanup error together with its retained reservation.
-    pub fn cleanup(
-        mut self,
-    ) -> Result<(), LocalStagedTreeReservedError<crate::directory::LocalTreeCleanupError>> {
+    pub fn cleanup(mut self) -> Result<(), LocalStagedTreeReservedError<crate::directory::LocalTreeCleanupError>> {
         let stage = self.stage.take().expect("staged recovery owner is present");
         stage
             .cleanup()
@@ -82,9 +78,7 @@ impl Deref for LocalStagedTreeRecovery {
     /// # Returns
     /// The retained native stage.
     fn deref(&self) -> &Self::Target {
-        self.stage
-            .as_ref()
-            .expect("staged recovery owner is present")
+        self.stage.as_ref().expect("staged recovery owner is present")
     }
 }
 
@@ -94,9 +88,7 @@ impl DerefMut for LocalStagedTreeRecovery {
     /// # Returns
     /// Mutable access to the retained native stage.
     fn deref_mut(&mut self) -> &mut Self::Target {
-        self.stage
-            .as_mut()
-            .expect("staged recovery owner is present")
+        self.stage.as_mut().expect("staged recovery owner is present")
     }
 }
 

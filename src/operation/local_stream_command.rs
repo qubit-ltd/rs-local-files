@@ -10,7 +10,8 @@ use std::io::SeekFrom;
 use std::sync::Arc;
 /// An owned command sent to a stream's serial worker.
 ///
-/// Each command carries only owned data so a worker can execute it after the caller yields.
+/// Each command carries only owned data so a worker can execute it after the
+/// caller yields.
 ///
 /// # Examples
 ///

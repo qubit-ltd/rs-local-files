@@ -66,7 +66,8 @@ impl LocalStreamResource {
     ///
     /// # Parameters
     ///
-    /// * `driver` - Worker adapter that owns and executes native stream requests.
+    /// * `driver` - Worker adapter that owns and executes native stream
+    ///   requests.
     pub fn new(driver: impl LocalStreamDriver) -> Self {
         Self {
             driver: Arc::new(driver),
@@ -99,13 +100,9 @@ impl LocalStreamResource {
         cx: &mut Context<'_>,
         request: &LocalStreamRequest,
     ) -> Poll<io::Result<LocalStreamCompletion>> {
-        match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            self.driver.poll_command(cx, request)
-        })) {
+        match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| self.driver.poll_command(cx, request))) {
             Ok(result) => result,
-            Err(_) => Poll::Ready(Err(io::Error::other(
-                "Unconfirmed: local stream driver panicked",
-            ))),
+            Err(_) => Poll::Ready(Err(io::Error::other("Unconfirmed: local stream driver panicked"))),
         }
     }
 
@@ -115,8 +112,6 @@ impl LocalStreamResource {
     ///
     /// * `request_id` - Stable identifier assigned to the close request.
     pub(super) fn request_close(&self, request_id: u64) {
-        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            self.driver.request_close(request_id)
-        }));
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| self.driver.request_close(request_id)));
     }
 }

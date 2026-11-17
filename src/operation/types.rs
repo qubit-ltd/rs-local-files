@@ -8,7 +8,9 @@
 
 mod local_operation;
 pub use local_operation::LocalOperation;
+#[cfg(feature = "async")]
 mod async_local_operation;
+#[cfg(feature = "async")]
 pub use async_local_operation::AsyncLocalOperation;
 mod local_read_request;
 pub use local_read_request::LocalReadRequest;

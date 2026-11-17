@@ -6,17 +6,9 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 
-use std::future::Future;
-use std::pin::Pin;
 use std::sync::Arc;
-use std::sync::Mutex;
-use std::task::Context;
-use std::task::Poll;
 use std::task::Waker;
 
-use qubit_operation::AsyncCleanup;
-use qubit_operation::CleanupContext;
-use qubit_operation::CleanupFuture;
 use qubit_operation::CleanupOutcome;
 
 use super::LocalTempCleanupAnchor;
@@ -24,18 +16,17 @@ use super::LocalTempNative;
 use super::LocalTempResource;
 use super::safe_clone_waker;
 use super::safe_drop_waker;
-use crate::operation::executor::LocalIoExecutor;
 
+#[path = "local_cleanup/local_cleanup.rs"]
+mod cleanup_runner;
 #[path = "local_cleanup/cleanup_state.rs"]
 mod cleanup_state;
 #[path = "local_cleanup/cleanup_wait.rs"]
 mod cleanup_wait;
-#[path = "local_cleanup/local_cleanup.rs"]
-mod local_cleanup;
 
+pub(crate) use cleanup_runner::LocalCleanup;
 use cleanup_state::CleanupState;
-use cleanup_wait::CleanupWait;
-pub(crate) use local_cleanup::LocalCleanup;
+pub(super) use cleanup_wait::CleanupWait;
 
 /// Removes and safely drops the task waker after the future becomes ready.
 ///
@@ -90,28 +81,22 @@ fn cleanup_resource(resource: LocalTempResource) -> Option<(crate::LocalFileErro
         match native.as_mut() {
             Some(LocalTempNative::File(value)) => value.cleanup().map(|()| {
                 native.take();
-                ()
             }),
             Some(LocalTempNative::Sealed(value)) => value.cleanup().map(|()| {
                 native.take();
-                ()
             }),
             Some(LocalTempNative::Directory(value)) => value.cleanup().map(|()| {
                 native.take();
-                ()
             }),
             Some(LocalTempNative::Recovery(value)) => value.cleanup().map(|()| {
                 native.take();
-                ()
             }),
             Some(LocalTempNative::Unconfirmed(LocalTempCleanupAnchor::File(anchor))) => anchor.cleanup().map(|()| {
                 native.take();
-                ()
             }),
             Some(LocalTempNative::Unconfirmed(LocalTempCleanupAnchor::Directory(anchor))) => {
                 anchor.cleanup().map(|()| {
                     native.take();
-                    ()
                 })
             }
             None => Ok(()),
@@ -146,10 +131,17 @@ fn cleanup_failure(
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+    use std::sync::Mutex;
+    use std::task::Context;
+    use std::task::Poll;
     use std::task::RawWaker;
     use std::task::RawWakerVTable;
+    use std::task::Waker;
 
+    use qubit_operation::AsyncCleanup;
     use qubit_operation::CleanupContext;
+    use qubit_operation::CleanupOutcome;
     use qubit_operation::ManagerOptions;
     use qubit_operation::OperationManager;
     use qubit_operation::OperationOptions;
@@ -163,6 +155,7 @@ mod tests {
     use crate::LocalFileOperation;
     use crate::LocalFileSystem;
     use crate::operation::LocalExecutionConfig;
+    use crate::operation::LocalIoExecutor;
     use crate::operation::LocalTempResource;
     #[cfg(feature = "test-support")]
     use crate::operation::temp::LocalTempCleanupAnchor;
@@ -182,20 +175,22 @@ mod tests {
         }
     }
     impl std::task::Wake for DropPanics {
-        fn wake(self: Arc<Self>) {}
+        fn wake(self: Arc<Self>) {
+            std::thread::current().unpark();
+        }
     }
     impl Drop for DropPanics {
         fn drop(&mut self) {
-            panic!("custom waker drop panic");
+            std::panic::panic_any(());
         }
     }
 
     unsafe fn clone_panics(_: *const ()) -> RawWaker {
-        panic!("custom waker clone panic");
+        std::panic::panic_any(())
     }
     unsafe fn raw_noop(_: *const ()) {}
     unsafe fn wake_panics(_: *const ()) {
-        panic!("custom waker wake panic");
+        std::panic::panic_any(())
     }
     static CLONE_PANIC_VTABLE: RawWakerVTable = RawWakerVTable::new(clone_panics, raw_noop, raw_noop, raw_noop);
     static WAKE_PANIC_VTABLE: RawWakerVTable = RawWakerVTable::new(raw_clone, wake_panics, wake_panics, raw_noop);

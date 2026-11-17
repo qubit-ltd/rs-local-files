@@ -22,7 +22,7 @@ use super::LocalTempCommandError;
 /// * `T` — command result returned when the worker finishes.
 pub(crate) struct LocalTempCommandReceiver<T>(
     /// Completion future for the serialized native command.
-    AsyncReceiver<Result<T, LocalTempCommandError>>,
+    pub(super) AsyncReceiver<Result<T, LocalTempCommandError>>,
 );
 
 impl<T> Future for LocalTempCommandReceiver<T> {

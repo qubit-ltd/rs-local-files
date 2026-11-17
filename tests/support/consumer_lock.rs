@@ -31,16 +31,16 @@ pub(crate) fn lock_with_parent_sources(consumer: &str, parent: &str) -> String {
         }) else {
             continue;
         };
+        let source = parent_entry
+            .lines()
+            .filter(|line| line.starts_with("source = ") || line.starts_with("checksum = "))
+            .collect::<Vec<_>>();
         if let (Some(consumer_dependencies), Some(parent_dependencies)) = (
             lock_array(entry, "dependencies"),
             lock_array(parent_entry, "dependencies"),
         ) {
             *entry = entry.replacen(consumer_dependencies, parent_dependencies, 1);
         }
-        let source = parent_entry
-            .lines()
-            .filter(|line| line.starts_with("source = ") || line.starts_with("checksum = "))
-            .collect::<Vec<_>>();
         if !source.is_empty() && !entry.lines().any(|line| line.starts_with("source = ")) {
             *entry = entry.replacen(&header, &format!("{header}{}\n", source.join("\n")), 1);
         }

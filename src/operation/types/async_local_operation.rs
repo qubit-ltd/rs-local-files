@@ -6,11 +6,13 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 
+#[cfg(feature = "async")]
 use std::sync::Arc;
 
+#[cfg(feature = "async")]
 use super::LocalOperation;
+#[cfg(feature = "async")]
 use crate::LocalFileError;
-
 /// Owns an asynchronous local operation result and its memory reservation.
 ///
 /// # Type Parameters
@@ -19,9 +21,9 @@ use crate::LocalFileError;
 #[cfg(feature = "async")]
 pub struct AsyncLocalOperation<T: Send + 'static, E: Send + 'static = LocalFileError> {
     /// Stores the inner associated with this value.
-    inner: Option<qubit_operation::AsyncOperationHandle<T, E>>,
+    pub(in crate::operation::types) inner: Option<qubit_operation::AsyncOperationHandle<T, E>>,
     /// Stores the budget associated with this value.
-    budget: Option<Arc<dyn Send + Sync>>,
+    pub(in crate::operation::types) budget: Option<Arc<dyn Send + Sync>>,
 }
 
 #[cfg(feature = "async")]
@@ -33,7 +35,6 @@ impl<T: Send + 'static, E: Send + 'static> AsyncLocalOperation<T, E> {
     }
     /// Runs the request stop behavior while preserving the operation lifecycle
     /// invariants.
-
     /// # Parameters
     /// - `reason` — supplies data or policy for this operation.
     pub fn request_stop(&self, reason: qubit_operation::StopReason) -> qubit_operation::StopRequestStatus {

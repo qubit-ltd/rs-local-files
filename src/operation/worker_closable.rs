@@ -52,9 +52,7 @@ impl WorkerClosable for LocalStreamResource {
         match self.poll_command(cx, &request) {
             Poll::Ready(Ok(LocalStreamCompletion::Closed)) => Poll::Ready(Ok(())),
             Poll::Ready(Ok(LocalStreamCompletion::Unconfirmed { operation, detail })) => {
-                Poll::Ready(Err(io::Error::other(format!(
-                    "Unconfirmed {operation}: {detail}"
-                ))))
+                Poll::Ready(Err(io::Error::other(format!("Unconfirmed {operation}: {detail}"))))
             }
             Poll::Ready(Ok(_)) => Poll::Ready(Err(io::Error::new(
                 io::ErrorKind::InvalidData,

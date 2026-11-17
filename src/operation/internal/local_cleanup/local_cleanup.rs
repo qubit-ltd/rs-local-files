@@ -7,6 +7,7 @@
 // =============================================================================
 
 use std::sync::Arc;
+use std::sync::Mutex;
 
 use qubit_operation::AsyncCleanup;
 use qubit_operation::CleanupContext;
@@ -14,6 +15,7 @@ use qubit_operation::CleanupFuture;
 use qubit_operation::CleanupOutcome;
 
 use super::CleanupState;
+use super::CleanupWait;
 use super::cleanup_failure;
 use super::cleanup_resource;
 use super::safe_wake;
@@ -28,7 +30,7 @@ use crate::operation::temp::LocalTempResource;
 /// filesystem I/O on the caller's thread.
 pub struct LocalCleanup {
     /// Executor that owns the dedicated cleanup worker and queue.
-    pub(super) executor: LocalIoExecutor,
+    pub(in crate::operation) executor: LocalIoExecutor,
 }
 
 impl AsyncCleanup<LocalTempResource> for LocalCleanup {

@@ -56,11 +56,7 @@ impl<T: WorkerClosable> qubit_operation::AsyncCleanup<T> for WorkerCleanup<T> {
         resource.request_cleanup();
         let mut resource = Some(resource);
         Box::pin(std::future::poll_fn(move |cx| {
-            match resource
-                .as_ref()
-                .expect("cleanup resource retained")
-                .poll_cleanup(cx)
-            {
+            match resource.as_ref().expect("cleanup resource retained").poll_cleanup(cx) {
                 Poll::Pending => Poll::Pending,
                 Poll::Ready(Ok(())) => {
                     drop(resource.take());

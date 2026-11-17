@@ -46,7 +46,8 @@ impl WorkerStreamDriver {
     /// * `executor` - Serial I/O executor used by this stream.
     /// * `native` - Exclusive native reader or writer handle.
     /// * `buffer_budget` - Reservation retained for stream buffers.
-    /// * `handle_budget` - Reservation retained while the native handle is open.
+    /// * `handle_budget` - Reservation retained while the native handle is
+    ///   open.
     /// * `observer` - Optional operation fact observer for append writes.
     /// * `append_mode` - Whether writes should update append-specific facts.
     pub(crate) fn managed(
@@ -58,12 +59,9 @@ impl WorkerStreamDriver {
         observer: Option<super::super::LocalFactObserver>,
         append_mode: bool,
     ) -> io::Result<ResourceRef<LocalStreamResource>> {
-        let cleanup_permit = executor.reserve_cleanup().ok_or_else(|| {
-            io::Error::new(
-                io::ErrorKind::WouldBlock,
-                "local stream cleanup capacity is full",
-            )
-        })?;
+        let cleanup_permit = executor
+            .reserve_cleanup()
+            .ok_or_else(|| io::Error::new(io::ErrorKind::WouldBlock, "local stream cleanup capacity is full"))?;
         let cleanup = WorkerCleanup::<LocalStreamResource>::policy();
         let resource = LocalStreamResource::new(Self(Arc::new(WorkerStreamInner {
             executor,
@@ -85,18 +83,13 @@ impl WorkerStreamDriver {
             .map_err(io::Error::other)?;
         match resources.manage_with(resource, Arc::clone(&cleanup)) {
             Ok(reference) => {
-                *reference
-                    .resource_id
-                    .lock()
-                    .unwrap_or_else(|e| e.into_inner()) = Some(reference.id());
+                *reference.resource_id.lock().unwrap_or_else(|e| e.into_inner()) = Some(reference.id());
                 Ok(reference)
             }
             Err(error) => {
                 let (reason, resource, _) = error.into_parts();
                 WorkerCleanup::<LocalStreamResource>::dispose(resource);
-                Err(io::Error::other(format!(
-                    "failed to register local stream: {reason:?}"
-                )))
+                Err(io::Error::other(format!("failed to register local stream: {reason:?}")))
             }
         }
     }
@@ -113,10 +106,7 @@ impl WorkerStreamDriver {
             !self.0.active.swap(true, Ordering::AcqRel)
         };
         if should_start {
-            let terminal = matches!(
-                request.command,
-                LocalStreamCommand::Close | LocalStreamCommand::Abort
-            );
+            let terminal = matches!(request.command, LocalStreamCommand::Close | LocalStreamCommand::Abort);
             if let Err(error) = start_stream_drain(Arc::clone(&self.0), terminal) {
                 fail_stream_queue(&self.0, io::Error::new(error.kind(), error.to_string()));
                 return Err(error);
@@ -161,16 +151,14 @@ impl LocalStreamDriver for WorkerStreamDriver {
                 }
             }
         };
-        if schedule {
-            if let Err(error) = self.schedule(request) {
-                self.0
-                    .state
-                    .lock()
-                    .unwrap_or_else(|e| e.into_inner())
-                    .commands
-                    .remove(&request.id);
-                return Poll::Ready(Err(error));
-            }
+        if schedule && let Err(error) = self.schedule(request) {
+            self.0
+                .state
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .commands
+                .remove(&request.id);
+            return Poll::Ready(Err(error));
         }
         Poll::Pending
     }
@@ -216,10 +204,7 @@ impl LocalStreamDriver for WorkerStreamDriver {
                     return;
                 };
                 slot.result = Some(Err(last_error.unwrap_or_else(|| {
-                    io::Error::new(
-                        io::ErrorKind::WouldBlock,
-                        "local stream cleanup scheduling failed",
-                    )
+                    io::Error::new(io::ErrorKind::WouldBlock, "local stream cleanup scheduling failed")
                 })));
                 slot.waker.take()
             };
