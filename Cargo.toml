@@ -39,7 +39,7 @@ qubit-io = "^0.19"
 qubit-budget = "^0.10"
 qubit-redact = { version = "^0.10", default-features = false }
 getrandom = "^0.4"
-qubit-operation = { version = "^0.3.1", path = "../rs-operation" }
+qubit-operation = "^0.3"
 
 [target.'cfg(unix)'.dependencies]
 libc = "^0.2"
