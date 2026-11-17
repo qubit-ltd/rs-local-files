@@ -247,7 +247,10 @@ fn test_digest_conditional_conflict_keeps_existing_data_and_published_state_corr
     use sha2::Sha256;
 
     let directory = tempfile::tempdir().unwrap();
-    let destination = directory.path().join("occupied");
+    // macOS exposes the temporary directory through /var, which is a symlink
+    // to /private/var. Resolve it before using the Reject symlink policy.
+    let root = std::fs::canonicalize(directory.path()).unwrap();
+    let destination = root.join("occupied");
     std::fs::write(&destination, b"original").unwrap();
     let manager = OperationManager::new(ManagerOptions::default()).unwrap();
     let filesystem = facade(&manager)
@@ -292,7 +295,10 @@ fn test_conditional_abort_failure_after_stop_retains_recovery_owner() {
         .lock()
         .unwrap_or_else(|error| error.into_inner());
     let directory = tempfile::tempdir().unwrap();
-    let destination = directory.path().join("conditional-abort-recovery");
+    // macOS exposes the temporary directory through /var, which is a symlink
+    // to /private/var. Resolve it before using the Reject symlink policy.
+    let root = std::fs::canonicalize(directory.path()).unwrap();
+    let destination = root.join("conditional-abort-recovery");
     let manager = OperationManager::new(ManagerOptions::default()).unwrap();
     let executor = LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).unwrap();
     let filesystem = block_on(AsyncLocalFileSystem::host(executor.clone()))
@@ -1214,7 +1220,8 @@ fn test_stop_during_native_publish_preserves_published_fact_when_parent_sync_fai
             outcome,
             OperationOutcome::Failed(LocalWriterCommandError::Commit(ref error))
                 if error.state() == LocalWriteFailureState::Published
-        ) || matches!(outcome, OperationOutcome::Stopped(_))
+        ) || matches!(outcome, OperationOutcome::Stopped(_)),
+        "unexpected outcome after stop during installed publication: {outcome:?}"
     );
     operation.wait_settlement().unwrap();
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
