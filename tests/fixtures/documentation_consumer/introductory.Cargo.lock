@@ -97,15 +97,23 @@ dependencies = [
 
 [[package]]
 name = "qubit-local-files"
-version = "0.5.4"
+version = "0.6.0"
 dependencies = [
  "getrandom",
  "libc",
  "qubit-budget",
  "qubit-io",
+ "qubit-operation",
  "qubit-redact",
  "rustix",
  "windows-sys",
+]
+
+[[package]]
+name = "qubit-operation"
+version = "0.3.1"
+dependencies = [
+ "qubit-budget",
 ]
 
 [[package]]
