@@ -608,7 +608,7 @@ fn test_append_facts_survive_close_and_drop() {
 }
 
 #[test]
-fn test_walker_cumulative_path_budget_returns_every_entry() {
+fn test_walker_batches_return_every_entry_on_portable_paths() {
     use qubit_local_files::LocalFileSystem;
     use qubit_local_files::operation::LocalExecutionConfig;
     use qubit_local_files::operation::LocalIoExecutor;
@@ -620,7 +620,9 @@ fn test_walker_cumulative_path_budget_returns_every_entry() {
     let directory = tempfile::tempdir().unwrap();
     let mut root = directory.path().to_path_buf();
     for index in 0..13 {
-        root.push(format!("d{index}_{}", "x".repeat(170)));
+        // Keep the full path below macOS's PATH_MAX while retaining a deeply
+        // nested fixture on every platform.
+        root.push(format!("d{index}_{}", "x".repeat(60)));
         std::fs::create_dir(&root).unwrap();
     }
     for index in 0..128 {
@@ -1169,4 +1171,20 @@ fn test_walker_enforces_batch_limits_and_drop_confirms_worker_close() {
         qubit_local_files::error::LocalFileErrorKind::ResourceLimit
     );
     assert!(error.to_string().contains("single walker path"));
+
+    let oversized_batch = (0..128)
+        .map(|index| PathBuf::from(format!("entry-{index}-{}", "x".repeat(2048))))
+        .collect();
+    let worker = Arc::new(FakeWalkWorker::with_batches([Some(oversized_batch)]));
+    let mut walker = AsyncLocalDirectoryWalker::new(walk_resource(Arc::clone(&worker))).unwrap();
+    let error = match poll(|cx| Box::pin(walker.next_batch()).as_mut().poll(cx)) {
+        Poll::Ready(Err(error)) => error,
+        other => panic!("expected oversized path batch to fail, got {other:?}"),
+    };
+    assert_eq!(
+        error.kind(),
+        qubit_local_files::error::LocalFileErrorKind::ResourceLimit
+    );
+    assert!(error.to_string().contains("256 KiB path budget"));
+    assert!(worker.0.lock().unwrap().stopped);
 }

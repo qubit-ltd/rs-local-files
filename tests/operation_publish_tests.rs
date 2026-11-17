@@ -1178,7 +1178,10 @@ fn test_append_sync_failure_preserves_published_bytes_and_failed_durability() {
     assert_eq!(facts.modified_count, 1);
 }
 
-#[cfg(feature = "test-support")]
+// This scenario requires native directory synchronization. Windows rejects a
+// Required durability request before publication because that guarantee is
+// unavailable there; its capability preflight is covered separately.
+#[cfg(all(feature = "test-support", not(windows)))]
 #[test]
 fn test_stop_during_native_publish_preserves_published_fact_when_parent_sync_fails() {
     use qubit_local_files::operation::publish::LocalWriterCommandError;
