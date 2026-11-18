@@ -936,6 +936,253 @@ mod tests {
     }
 
     #[test]
+    fn test_async_facade_constructors_and_worker_task_outcomes() {
+        use crate::LocalFileErrorKind;
+
+        let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+        let executor = LocalIoExecutor::new(manager, LocalExecutionConfig::default()).unwrap();
+        let host = block_on(AsyncLocalFileSystem::host(executor.clone())).unwrap();
+        assert_eq!(
+            host.host_base.as_deref(),
+            Some(std::env::current_dir().unwrap().as_path())
+        );
+
+        let missing_root = tempfile::tempdir().unwrap().path().join("missing-root");
+        let error = match block_on(AsyncLocalFileSystem::rooted(executor.clone(), missing_root)) {
+            Err(error) => error,
+            Ok(_) => panic!("missing rooted filesystem must fail to construct"),
+        };
+        assert_ne!(error.kind(), LocalFileErrorKind::ResourceLimit);
+
+        let value = block_on(super::run_on_worker(&executor, || Ok::<_, crate::LocalFileError>(17))).unwrap();
+        assert_eq!(value, 17);
+
+        let error = block_on(super::run_on_worker(&executor, || -> crate::LocalResult<()> {
+            panic!("constructor task panic")
+        }))
+        .unwrap_err();
+        assert_eq!(error.kind(), LocalFileErrorKind::Io);
+        assert_eq!(error.operation(), crate::LocalFileOperation::Configure);
+
+        assert_eq!(
+            super::bind_host_path(&Some(PathBuf::from("captured")), &PathBuf::from("relative")),
+            PathBuf::from("captured/relative")
+        );
+        assert_eq!(
+            super::bind_host_path(&Some(PathBuf::from("captured")), &PathBuf::from("/absolute")),
+            PathBuf::from("/absolute")
+        );
+        assert_eq!(
+            super::bind_host_path(&None, &PathBuf::from("relative")),
+            PathBuf::from("relative")
+        );
+    }
+
+    #[test]
+    fn test_async_constructor_rejects_when_worker_permits_are_exhausted() {
+        use std::sync::mpsc;
+        use std::time::Duration;
+
+        let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+        let executor = LocalIoExecutor::new(
+            manager,
+            LocalExecutionConfig {
+                worker_count: 1,
+                queue_capacity: 1,
+                waiter_capacity: 1,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let (started_tx, started_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        executor
+            .enqueue_task(move || {
+                started_tx.send(()).unwrap();
+                release_rx.recv().unwrap();
+            })
+            .unwrap();
+        started_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        let queued = executor.reserve_slot().unwrap();
+        let waiting = executor.reserve_slot().unwrap();
+
+        let error = block_on(super::run_on_worker(&executor, || Ok::<_, crate::LocalFileError>(()))).unwrap_err();
+        assert_eq!(error.kind(), crate::LocalFileErrorKind::ResourceLimit);
+        drop((queued, waiting));
+        release_tx.send(()).unwrap();
+    }
+
+    #[test]
+    fn test_read_all_with_observer_reports_success_failure_and_authority_rejection() {
+        use qubit_operation::OperationOutcome;
+
+        use crate::operation::LocalReadRequest;
+        use crate::operation::LocalSubmitRejection;
+        use crate::options::LocalReadAllOptions;
+
+        let directory = tempfile::tempdir().unwrap();
+        std::fs::write(directory.path().join("input"), b"bounded payload").unwrap();
+        let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+        let executor = LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).unwrap();
+        let filesystem = block_on(AsyncLocalFileSystem::rooted(executor, directory.path().to_path_buf())).unwrap();
+
+        let (mut operation, observer) = filesystem
+            .submit_read_all_with_observer(
+                &manager,
+                Default::default(),
+                LocalReadRequest {
+                    path: PathBuf::from("input"),
+                    read: LocalReadAllOptions::new().with_max_bytes(64),
+                },
+                Default::default(),
+            )
+            .unwrap();
+        assert!(matches!(
+            operation.wait_outcome().unwrap(),
+            OperationOutcome::Succeeded(bytes) if bytes == b"bounded payload"
+        ));
+        operation.wait_settlement().unwrap();
+        drop(observer);
+
+        let mut missing = filesystem
+            .submit_read_all_with_observer(
+                &manager,
+                Default::default(),
+                LocalReadRequest {
+                    path: PathBuf::from("missing"),
+                    read: Default::default(),
+                },
+                Default::default(),
+            )
+            .unwrap()
+            .0;
+        assert!(matches!(missing.wait_outcome().unwrap(), OperationOutcome::Failed(_)));
+        missing.wait_settlement().unwrap();
+
+        let host_without_capture = AsyncLocalFileSystem::new(
+            crate::LocalFileSystem::host().unwrap(),
+            LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).unwrap(),
+            None,
+        );
+        let request = LocalReadRequest {
+            path: PathBuf::from("relative"),
+            read: Default::default(),
+        };
+        let error = match host_without_capture.submit_read_all_with_observer(
+            &manager,
+            Default::default(),
+            request,
+            Default::default(),
+        ) {
+            Err(error) => error,
+            Ok(_) => panic!("uncaptured relative Host path must be rejected"),
+        };
+        assert_eq!(error.rejection(), LocalSubmitRejection::AuthorityNotCaptured);
+        assert_eq!(error.into_request().path, PathBuf::from("relative"));
+    }
+
+    #[test]
+    fn test_async_facade_submissions_reject_wrong_manager_and_closed_group() {
+        use crate::operation::LocalReadRequest;
+        use crate::operation::LocalSubmitRejection;
+        use crate::options::LocalListOptions;
+        use crate::options::LocalReadOptions;
+        use crate::options::LocalWriteMode;
+        use crate::options::LocalWriteOptions;
+
+        let directory = tempfile::tempdir().unwrap();
+        let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+        let other_manager = OperationManager::new(ManagerOptions::default()).unwrap();
+        let executor = LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).unwrap();
+        let filesystem = block_on(AsyncLocalFileSystem::rooted(
+            executor.clone(),
+            directory.path().to_path_buf(),
+        ))
+        .unwrap();
+
+        macro_rules! rejection {
+            ($result:expr) => {
+                match $result {
+                    Err(error) => error.rejection(),
+                    Ok(_) => panic!("submission with another manager must be rejected"),
+                }
+            };
+        }
+
+        for rejection in [
+            rejection!(filesystem.submit_open_walker(
+                &other_manager,
+                Default::default(),
+                PathBuf::from("walker"),
+                LocalListOptions::default()
+            )),
+            rejection!(filesystem.submit_open_reader(
+                &other_manager,
+                Default::default(),
+                PathBuf::from("reader"),
+                LocalReadOptions::default()
+            )),
+            rejection!(filesystem.submit_open_writer(
+                &other_manager,
+                Default::default(),
+                PathBuf::from("writer"),
+                LocalWriteOptions::new(LocalWriteMode::CreateOrReplace),
+            )),
+            rejection!(filesystem.submit_read_all_with_observer(
+                &other_manager,
+                Default::default(),
+                LocalReadRequest {
+                    path: PathBuf::from("read-all"),
+                    read: Default::default()
+                },
+                Default::default(),
+            )),
+        ] {
+            assert_eq!(rejection, LocalSubmitRejection::WrongManager);
+        }
+
+        let shutdown = executor
+            .request_shutdown(qubit_operation::ShutdownMode::Drain)
+            .wait()
+            .unwrap();
+        assert_eq!(shutdown.snapshot.active_operations, 0);
+        let submissions = [
+            rejection!(filesystem.submit_open_walker(
+                &manager,
+                Default::default(),
+                PathBuf::from("walker"),
+                LocalListOptions::default()
+            )),
+            rejection!(filesystem.submit_open_reader(
+                &manager,
+                Default::default(),
+                PathBuf::from("reader"),
+                LocalReadOptions::default()
+            )),
+            rejection!(filesystem.submit_open_writer(
+                &manager,
+                Default::default(),
+                PathBuf::from("writer"),
+                LocalWriteOptions::new(LocalWriteMode::CreateOrReplace),
+            )),
+            rejection!(filesystem.submit_read_all_with_observer(
+                &manager,
+                Default::default(),
+                LocalReadRequest {
+                    path: PathBuf::from("read-all"),
+                    read: Default::default()
+                },
+                Default::default(),
+            )),
+        ];
+        assert!(
+            submissions
+                .into_iter()
+                .all(|rejection| rejection == LocalSubmitRejection::Closed)
+        );
+    }
+
+    #[test]
     fn test_open_submissions_reject_invalid_scope_authority_and_exhausted_handles() {
         use crate::operation::LocalSubmitRejection;
         use crate::options::LocalListOptions;
