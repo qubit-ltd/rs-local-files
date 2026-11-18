@@ -1035,6 +1035,38 @@ mod relative_host_publish_tests {
         assert_eq!(observer.snapshot().publication, LocalPublicationState::Published);
     }
 
+    #[test]
+    fn test_staged_tree_publish_preserves_existing_destination() {
+        let directory = tempfile::tempdir().unwrap();
+        let destination = directory.path().join("existing-tree");
+        std::fs::create_dir(&destination).unwrap();
+        std::fs::write(destination.join("original"), b"keep me").unwrap();
+        let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+        let filesystem = filesystem(&manager, directory.path());
+        let (mut operation, observer) = filesystem
+            .submit_staged_tree_publish(
+                &manager,
+                Default::default(),
+                LocalStagedTreePublishRequest {
+                    parent: PathBuf::from("."),
+                    name: "existing-tree".into(),
+                    stage_options: LocalTempDirectoryOptions::new(),
+                    files: vec![LocalStagedTreeFile {
+                        path: PathBuf::from("replacement"),
+                        bytes: b"must not publish".to_vec(),
+                    }],
+                    publish_options: LocalTreePublishOptions::new(),
+                },
+                LocalOperationOptions::default(),
+            )
+            .unwrap();
+
+        assert!(matches!(operation.wait_outcome().unwrap(), OperationOutcome::Failed(_)));
+        assert_eq!(std::fs::read(destination.join("original")).unwrap(), b"keep me");
+        assert!(!destination.join("replacement").exists());
+        assert_eq!(observer.snapshot().publication, LocalPublicationState::NotPublished);
+    }
+
     #[cfg(feature = "digest")]
     #[test]
     fn test_relative_conditional_writer_commit_publishes_under_captured_host_base() {
@@ -1068,5 +1100,36 @@ mod relative_host_publish_tests {
             b"relative conditional"
         );
         assert_eq!(observer.snapshot().publication, LocalPublicationState::Published);
+    }
+
+    #[cfg(feature = "digest")]
+    #[test]
+    fn test_conditional_writer_rejects_absent_precondition_when_destination_exists() {
+        use sha2::Sha512;
+
+        let directory = tempfile::tempdir().unwrap();
+        let destination = directory.path().join("already-present");
+        std::fs::write(&destination, b"original").unwrap();
+        let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+        let filesystem = filesystem(&manager, directory.path())
+            .with_symlink_policy(crate::policy::LocalSymlinkPolicy::Reject)
+            .unwrap();
+        let (mut operation, observer) = filesystem
+            .submit_conditional_writer_commit::<Sha512>(
+                &manager,
+                Default::default(),
+                LocalConditionalWriterCommitRequest {
+                    path: PathBuf::from("already-present"),
+                    precondition: LocalWritePrecondition::Absent,
+                    options: LocalWriteOptions::new(LocalWriteMode::CreateOrReplace),
+                    bytes: b"replacement".to_vec(),
+                },
+                LocalOperationOptions::default(),
+            )
+            .unwrap();
+
+        assert!(matches!(operation.wait_outcome().unwrap(), OperationOutcome::Failed(_)));
+        assert_eq!(std::fs::read(destination).unwrap(), b"original");
+        assert_eq!(observer.snapshot().publication, LocalPublicationState::NotPublished);
     }
 }
