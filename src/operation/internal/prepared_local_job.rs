@@ -1603,3 +1603,63 @@ mod prepared_job_ownership_tests {
         assert!(snapshot.outcome.is_none());
     }
 }
+
+#[cfg(test)]
+mod scoped_job_tests {
+    use std::sync::Arc;
+    use std::sync::Mutex;
+    use std::task::Context;
+    use std::task::Poll;
+    use std::task::Waker;
+
+    use qubit_operation::ManagerOptions;
+    use qubit_operation::OperationControl;
+    use qubit_operation::OperationManager;
+    use qubit_operation::OperationOutcome;
+    use qubit_operation::PreparedExternalOperation;
+
+    use super::PreparedLocalJob;
+    use crate::operation::LocalExecutionConfig;
+    use crate::operation::LocalFactObserver;
+    use crate::operation::LocalIoExecutor;
+
+    #[test]
+    fn test_scoped_worker_receives_bound_identity_and_result_can_be_taken_directly() {
+        let manager = OperationManager::new(ManagerOptions::default()).expect("manager");
+        let executor = LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).expect("executor");
+        let observed_id = Arc::new(Mutex::new(None));
+        let worker_id = Arc::clone(&observed_id);
+        let job = PreparedLocalJob::new_scoped(
+            Arc::clone(&executor.inner),
+            String::from("scoped request"),
+            executor.reserve_slot().expect("queue slot"),
+            Arc::new(Mutex::new(executor.reserve_bytes(0).expect("owned permit"))),
+            executor.reserve_handle().expect("handle permit"),
+            LocalFactObserver::new(),
+            move |request, scope| {
+                assert_eq!("scoped request", request);
+                *worker_id.lock().unwrap_or_else(|error| error.into_inner()) = Some(scope.id());
+                OperationOutcome::<usize, &'static str>::Succeeded(37)
+            },
+        );
+        let handle = manager
+            .try_submit_external(Default::default(), Arc::clone(&job))
+            .expect("external operation admitted");
+        let id = OperationControl::snapshot(&*job).operation_id;
+
+        let mut context = Context::from_waker(Waker::noop());
+        let outcome = loop {
+            match PreparedExternalOperation::poll_take_outcome(&*job, &mut context) {
+                Poll::Ready(outcome) => break outcome,
+                Poll::Pending => std::thread::yield_now(),
+            }
+        };
+        assert_eq!(Some(id), *observed_id.lock().unwrap_or_else(|error| error.into_inner()));
+        assert!(matches!(outcome, OperationOutcome::Succeeded(37)));
+        assert!(matches!(
+            PreparedExternalOperation::poll_take_outcome(&*job, &mut context),
+            Poll::Pending
+        ));
+        drop(handle);
+    }
+}
