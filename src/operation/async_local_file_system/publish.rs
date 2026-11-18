@@ -916,6 +916,60 @@ mod relative_host_publish_tests {
     }
 
     #[test]
+    fn test_writer_commit_with_empty_payload_still_publishes_empty_file() {
+        let directory = tempfile::tempdir().unwrap();
+        let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+        let filesystem = filesystem(&manager, directory.path());
+        let (mut operation, observer) = filesystem
+            .submit_writer_commit(
+                &manager,
+                Default::default(),
+                LocalWriterCommitRequest {
+                    path: PathBuf::from("empty"),
+                    options: LocalWriteOptions::new(LocalWriteMode::CreateOrReplace),
+                    bytes: Vec::new(),
+                },
+                LocalOperationOptions::default(),
+            )
+            .unwrap();
+
+        assert!(matches!(
+            operation.wait_outcome().unwrap(),
+            OperationOutcome::Succeeded(_)
+        ));
+        assert_eq!(std::fs::read(directory.path().join("empty")).unwrap(), b"");
+        assert_eq!(observer.snapshot().publication, LocalPublicationState::Published);
+    }
+
+    #[test]
+    fn test_writer_commit_appends_to_existing_file() {
+        let directory = tempfile::tempdir().unwrap();
+        let destination = directory.path().join("append");
+        std::fs::write(&destination, b"before:").unwrap();
+        let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+        let filesystem = filesystem(&manager, directory.path());
+        let (mut operation, observer) = filesystem
+            .submit_writer_commit(
+                &manager,
+                Default::default(),
+                LocalWriterCommitRequest {
+                    path: PathBuf::from("append"),
+                    options: LocalWriteOptions::new(LocalWriteMode::Append),
+                    bytes: b"after".to_vec(),
+                },
+                LocalOperationOptions::default(),
+            )
+            .unwrap();
+
+        assert!(matches!(
+            operation.wait_outcome().unwrap(),
+            OperationOutcome::Succeeded(_)
+        ));
+        assert_eq!(std::fs::read(destination).unwrap(), b"before:after");
+        assert_eq!(observer.snapshot().publication, LocalPublicationState::Published);
+    }
+
+    #[test]
     fn test_relative_staged_tree_publish_uses_captured_host_base_as_parent() {
         let directory = tempfile::tempdir().unwrap();
         let manager = OperationManager::new(ManagerOptions::default()).unwrap();
