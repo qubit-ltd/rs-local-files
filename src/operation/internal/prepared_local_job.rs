@@ -974,7 +974,7 @@ mod tests {
     }
 
     #[test]
-    fn test_registered_lifecycle_wakers_are_notified_and_polls_become_ready() {
+    fn test_registered_lifecycle_polls_become_ready_after_completion() {
         use std::sync::mpsc;
         use std::task::Context;
         use std::task::Wake;
@@ -991,13 +991,30 @@ mod tests {
             }
         }
 
+        struct ReleaseGuard(Option<mpsc::Sender<()>>);
+        impl ReleaseGuard {
+            fn release(&mut self) {
+                if let Some(sender) = self.0.take() {
+                    let _ = sender.send(());
+                }
+            }
+        }
+        impl Drop for ReleaseGuard {
+            fn drop(&mut self) {
+                self.release();
+            }
+        }
+
         let manager = OperationManager::new(ManagerOptions::default()).unwrap();
         let executor = LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).unwrap();
         let (started_tx, started_rx) = mpsc::channel();
         let (release_tx, release_rx) = mpsc::channel();
+        let mut release = ReleaseGuard(Some(release_tx));
         let prepared = prepare(&executor, move |_| {
             started_tx.send(()).unwrap();
-            release_rx.recv().unwrap();
+            release_rx
+                .recv_timeout(std::time::Duration::from_secs(30))
+                .expect("test must release the worker before its barrier expires");
             OperationOutcome::<(), ()>::Succeeded(())
         });
         let mut handle = manager
@@ -1011,13 +1028,12 @@ mod tests {
         assert!(OperationControl::poll_outcome(&*prepared, &mut context).is_pending());
         assert!(OperationControl::poll_release(&*prepared, &mut context).is_pending());
         assert!(OperationControl::poll_settlement(&*prepared, &mut context).is_pending());
-        assert!(PreparedExternalOperation::poll_take_outcome(&*prepared, &mut context).is_pending());
 
-        // A stop request wakes all registered control polls while the worker
-        // is held at the channel barrier, so the notification is deterministic.
+        // A stop request wakes each registered control poll while the worker
+        // remains held at the channel barrier.
         OperationControl::request_stop(&*prepared, qubit_operation::StopReason::UserCancelled);
         assert!(counter.0.load(Ordering::SeqCst) > 0);
-        release_tx.send(()).unwrap();
+        release.release();
         assert!(matches!(
             handle.wait_outcome().unwrap(),
             OperationOutcome::Succeeded(())

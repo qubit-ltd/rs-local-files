@@ -759,3 +759,48 @@ fn test_complete_operation_edge_results_and_failures() {
             if result.outcome.deleted() && result.deleted_entries.is_none()));
     assert!(!tree.exists());
 }
+
+#[test]
+fn test_delete_reports_missing_file_and_directory_errors() {
+    let directory = tempfile::tempdir().unwrap();
+    let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+    let filesystem = facade(&manager);
+
+    let mut missing_file = filesystem
+        .submit_delete(
+            &manager,
+            Default::default(),
+            LocalDeleteRequest {
+                path: directory.path().join("missing-file"),
+                options: LocalDeleteOptions::new(),
+                directory: false,
+            },
+            Default::default(),
+        )
+        .unwrap()
+        .0;
+    assert!(matches!(
+        missing_file.wait_outcome().unwrap(),
+        qubit_operation::OperationOutcome::Failed(error)
+            if error.kind() == qubit_local_files::error::LocalFileErrorKind::NotFound
+    ));
+
+    let mut missing_directory = filesystem
+        .submit_delete(
+            &manager,
+            Default::default(),
+            LocalDeleteRequest {
+                path: directory.path().join("missing-directory"),
+                options: LocalDeleteOptions::new(),
+                directory: true,
+            },
+            Default::default(),
+        )
+        .unwrap()
+        .0;
+    assert!(matches!(
+        missing_directory.wait_outcome().unwrap(),
+        qubit_operation::OperationOutcome::Failed(error)
+            if error.kind() == qubit_local_files::error::LocalFileErrorKind::NotFound
+    ));
+}
