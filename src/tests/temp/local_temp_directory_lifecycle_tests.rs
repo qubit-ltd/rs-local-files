@@ -77,3 +77,103 @@ fn test_temp_directory_persist_publishes_tree_and_releases_sandbox() {
     );
     assert_eq!(fs::read_dir(parent.path()).expect("parent entries").count(), 1);
 }
+
+fn missing_sandbox_name(fixture: &tempfile::TempDir, label: &str) -> std::path::PathBuf {
+    let name = format!(
+        "__qubit_local_files_{label}_{}_{}__",
+        std::process::id(),
+        fixture.path().file_name().expect("tempdir name").to_string_lossy()
+    );
+    let path = std::env::current_dir().expect("working directory").join(&name);
+    assert!(!path.exists(), "test sandbox candidate must not already exist");
+    name.into()
+}
+
+#[test]
+fn test_host_constructor_without_sandbox_parent_uses_empty_creation_parent() {
+    use crate::LocalSymlinkPolicy;
+    use crate::options::LocalTempCleanupLimits;
+    use crate::temp::LocalTempDirectory;
+
+    let fixture = tempfile::tempdir().expect("fixture");
+    let base = fs::canonicalize(fixture.path()).expect("canonical fixture path");
+    let path = base.join("resource");
+    fs::create_dir(&path).expect("resource directory");
+    let sandbox = missing_sandbox_name(&fixture, "host");
+    let mut temporary = LocalTempDirectory::host(
+        path.clone(),
+        sandbox,
+        LocalSymlinkPolicy::FollowWithinScope,
+        LocalTempCleanupLimits::default(),
+    )
+    .expect("host temp resource");
+
+    assert_eq!(temporary.creation_parent(), Path::new(""));
+    assert!(temporary.cleanup().is_err(), "the absent sandbox cannot be removed");
+    assert!(
+        !path.exists(),
+        "resource tree is removed before sandbox cleanup reports failure"
+    );
+}
+
+#[test]
+fn test_rooted_constructor_without_sandbox_parent_uses_empty_creation_parent() {
+    use std::sync::Arc;
+
+    use crate::LocalSymlinkPolicy;
+    use crate::options::LocalTempCleanupLimits;
+    use crate::rooted::Root;
+    use crate::temp::LocalTempDirectory;
+
+    let fixture = tempfile::tempdir().expect("fixture");
+    let root = Arc::new(Root::open(fixture.path()).expect("root authority"));
+    let path = std::path::PathBuf::from("resource");
+    fs::create_dir(fixture.path().join(&path)).expect("resource directory");
+    let sandbox = missing_sandbox_name(&fixture, "rooted");
+    let mut temporary = LocalTempDirectory::rooted(
+        root,
+        path,
+        sandbox,
+        LocalSymlinkPolicy::FollowWithinScope,
+        LocalTempCleanupLimits::default(),
+    )
+    .expect("rooted temp resource");
+
+    assert_eq!(temporary.creation_parent(), Path::new(""));
+    assert!(temporary.cleanup().is_err(), "the absent sandbox cannot be removed");
+    assert!(
+        !fixture.path().join("resource").exists(),
+        "rooted cleanup removes the resource tree"
+    );
+}
+
+#[test]
+fn test_rooted_created_handle_constructor_without_sandbox_parent_uses_empty_creation_parent() {
+    use std::sync::Arc;
+
+    use crate::LocalSymlinkPolicy;
+    use crate::options::LocalTempCleanupLimits;
+    use crate::rooted::Root;
+    use crate::temp::LocalTempDirectory;
+
+    let fixture = tempfile::tempdir().expect("fixture");
+    let root = Arc::new(Root::open(fixture.path()).expect("root authority"));
+    let path = std::path::PathBuf::from("resource");
+    let native_path = fixture.path().join(&path);
+    fs::create_dir(&native_path).expect("resource directory");
+    let handle = fs::File::open(&native_path).expect("open created resource handle");
+    let sandbox = missing_sandbox_name(&fixture, "rooted_handle");
+    let mut temporary = LocalTempDirectory::rooted_from_created_handle(
+        root,
+        path,
+        sandbox,
+        &handle,
+        LocalSymlinkPolicy::FollowWithinScope,
+        LocalTempCleanupLimits::default(),
+    )
+    .expect("rooted temp resource from handle");
+
+    assert_eq!(temporary.creation_parent(), Path::new(""));
+    assert!(temporary.cleanup().is_err(), "the absent sandbox cannot be removed");
+    assert!(!native_path.exists(), "rooted cleanup removes the resource tree");
+}
