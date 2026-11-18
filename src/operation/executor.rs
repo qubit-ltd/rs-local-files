@@ -108,6 +108,27 @@ mod tests {
     }
 
     #[test]
+    fn test_cancel_shutdown_closes_executor_group_without_stopping_manager_or_workers() {
+        let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+        let executor = LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).unwrap();
+
+        let report = executor.request_shutdown(ShutdownMode::Cancel).wait().unwrap();
+        assert_eq!(report.snapshot.active_operations, 0);
+        assert_eq!(report.snapshot.queued_operations, 0);
+        assert_eq!(report.snapshot.cleaning_resources, 0);
+
+        let mut manager_operation = manager.try_submit(Default::default(), |_| Ok::<_, ()>(())).unwrap();
+        assert!(matches!(
+            manager_operation.wait_outcome().unwrap(),
+            OperationOutcome::Succeeded(())
+        ));
+
+        let (done_tx, done_rx) = mpsc::channel();
+        executor.enqueue_task(move || done_tx.send(()).unwrap()).unwrap();
+        done_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+    }
+
+    #[test]
     fn test_prepared_jobs_preserve_typed_request_result_and_error() {
         let manager = OperationManager::new(ManagerOptions::default()).unwrap();
         let executor = LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).unwrap();
