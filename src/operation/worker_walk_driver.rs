@@ -270,3 +270,108 @@ impl LocalWalkDriver for WorkerWalkDriver {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+    use std::sync::Arc;
+    use std::task::Context;
+    use std::task::Poll;
+    use std::task::Wake;
+    use std::task::Waker;
+
+    use qubit_operation::ManagerOptions;
+    use qubit_operation::OperationManager;
+    use qubit_operation::OperationOutcome;
+
+    use crate::LocalListOptions;
+    use crate::operation::AsyncLocalFileSystem;
+    use crate::operation::LocalExecutionConfig;
+    use crate::operation::LocalIoExecutor;
+
+    fn block_on<F: std::future::Future>(future: F) -> F::Output {
+        struct ThreadWake(std::thread::Thread);
+        impl Wake for ThreadWake {
+            fn wake(self: Arc<Self>) {
+                self.0.unpark();
+            }
+            fn wake_by_ref(self: &Arc<Self>) {
+                self.0.unpark();
+            }
+        }
+
+        let waker = Waker::from(Arc::new(ThreadWake(std::thread::current())));
+        let mut context = Context::from_waker(&waker);
+        let mut future = std::pin::pin!(future);
+        loop {
+            match future.as_mut().poll(&mut context) {
+                Poll::Ready(value) => return value,
+                Poll::Pending => std::thread::park(),
+            }
+        }
+    }
+
+    #[test]
+    fn test_managed_walker_yields_all_entries_then_reports_end_of_stream() {
+        let directory = tempfile::tempdir().unwrap();
+        for name in ["alpha", "beta", "gamma"] {
+            std::fs::write(directory.path().join(name), name).unwrap();
+        }
+
+        let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+        let executor = LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).unwrap();
+        let filesystem = block_on(AsyncLocalFileSystem::rooted(executor, directory.path().to_path_buf())).unwrap();
+        let mut operation = filesystem
+            .submit_open_walker(
+                &manager,
+                Default::default(),
+                PathBuf::from("."),
+                LocalListOptions::default(),
+            )
+            .unwrap();
+        let mut walker = match operation.wait_outcome().unwrap() {
+            OperationOutcome::Succeeded(walker) => walker,
+            _ => panic!("expected the managed walker to open"),
+        };
+
+        let mut paths = Vec::new();
+        while let Some(batch) = block_on(walker.next_batch()).unwrap() {
+            paths.extend(batch);
+        }
+        let mut names: Vec<_> = paths.iter().map(|path| path.file_name().unwrap().to_owned()).collect();
+        names.sort();
+        assert_eq!(names, ["alpha", "beta", "gamma"].map(std::ffi::OsString::from));
+        operation.wait_settlement().unwrap();
+    }
+
+    #[test]
+    fn test_managed_walker_close_stops_iteration_and_confirms_native_cleanup() {
+        let directory = tempfile::tempdir().unwrap();
+        for index in 0..4 {
+            std::fs::write(directory.path().join(format!("entry-{index}")), b"x").unwrap();
+        }
+
+        let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+        let executor = LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).unwrap();
+        let filesystem = block_on(AsyncLocalFileSystem::rooted(executor, directory.path().to_path_buf())).unwrap();
+        let mut operation = filesystem
+            .submit_open_walker(
+                &manager,
+                Default::default(),
+                PathBuf::from("."),
+                LocalListOptions::default(),
+            )
+            .unwrap();
+        let mut walker = match operation.wait_outcome().unwrap() {
+            OperationOutcome::Succeeded(walker) => walker,
+            _ => panic!("expected the managed walker to open"),
+        };
+
+        assert!(block_on(walker.next_batch()).unwrap().is_some());
+        let observer = walker.close_observer();
+        block_on(walker.close()).unwrap();
+        block_on(observer.wait_closed()).unwrap();
+        drop(observer);
+        operation.wait_settlement().unwrap();
+    }
+}
