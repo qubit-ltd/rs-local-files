@@ -1447,12 +1447,15 @@ mod native_resolution_failure_tests {
 
 #[cfg(test)]
 mod rooted_resolution_behavior_tests {
+    use std::ffi::OsString;
     use std::fs;
     use std::path::Path;
+    use std::time::Instant;
 
     use crate::LocalFileErrorKind;
     use crate::LocalFileOperation;
     use crate::LocalSymlinkPolicy;
+    use crate::directory::LocalComponentPolicy;
     use crate::rooted::Root;
 
     #[test]
@@ -1537,5 +1540,116 @@ mod rooted_resolution_behavior_tests {
         )
         .expect("a final link should resolve when final following is enabled");
         assert_eq!(Path::new("target"), followed.as_path());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_list_start_follows_directory_links_only_when_requested() {
+        use std::os::unix::fs::symlink;
+
+        let fixture = tempfile::tempdir().expect("root fixture should exist");
+        fs::create_dir(fixture.path().join("directory")).expect("directory should exist");
+        symlink("directory", fixture.path().join("alias")).expect("directory link should exist");
+        let root = Root::open(fixture.path()).expect("root authority should open");
+
+        let start =
+            super::validate_rooted_list_start(&root, Path::new("alias"), LocalSymlinkPolicy::FollowWithinScope, None)
+                .expect("an in-root directory link should be a valid list start");
+        assert_eq!(Path::new("directory"), start.as_path());
+
+        let error = super::validate_rooted_list_start(&root, Path::new("alias"), LocalSymlinkPolicy::Reject, None)
+            .expect_err("reject policy should reject the directory link");
+        assert_eq!(LocalFileErrorKind::Unsupported, error.kind());
+        assert_eq!(LocalFileOperation::List, error.operation());
+        assert_eq!(Some(Path::new("alias")), error.path());
+    }
+
+    #[test]
+    fn test_component_policy_and_path_budget_keep_resolution_context() {
+        let fixture = tempfile::tempdir().expect("root fixture should exist");
+        fs::create_dir(fixture.path().join("blocked")).expect("directory should exist");
+        let root = Root::open(fixture.path()).expect("root authority should open");
+        let policy = LocalComponentPolicy::deny_names(vec![OsString::from("blocked")]).expect("policy is valid");
+
+        let error = super::resolve_rooted_path_allow_root_with_component_policy_and_budget(
+            &root,
+            Path::new("blocked/child"),
+            LocalSymlinkPolicy::Reject,
+            true,
+            LocalFileOperation::Metadata,
+            &policy,
+            None,
+            None,
+        )
+        .expect_err("a denied component should stop resolution");
+        assert_eq!(LocalFileErrorKind::InvalidPath, error.kind());
+        assert_eq!(LocalFileOperation::Metadata, error.operation());
+        assert_eq!(Some(Path::new("blocked/child")), error.path());
+
+        let mut budget = crate::directory::binding::PathBindingBudget::new(Some(1));
+        let error = super::resolve_rooted_path_allow_root_with_component_policy_and_budget(
+            &root,
+            Path::new("blocked"),
+            LocalSymlinkPolicy::Reject,
+            true,
+            LocalFileOperation::Metadata,
+            &LocalComponentPolicy::allow_all(),
+            None,
+            Some(&mut budget),
+        )
+        .expect_err("the path-byte budget should reject a component larger than its allowance");
+        assert_eq!(LocalFileErrorKind::ResourceLimit, error.kind());
+        assert_eq!(Some(Path::new("blocked")), error.path());
+    }
+
+    #[test]
+    fn test_host_root_resolution_stays_at_root_for_parent_components() {
+        let fixture = tempfile::tempdir().expect("root fixture should exist");
+        fs::write(fixture.path().join("child"), b"payload").expect("file should exist");
+        let root = Root::open(fixture.path()).expect("root authority should open");
+        let policy = LocalComponentPolicy::allow_all();
+
+        let resolved = super::resolve_host_root_path_with_component_policy_and_budget(
+            &root,
+            Path::new("../child"),
+            LocalSymlinkPolicy::Reject,
+            true,
+            LocalFileOperation::Metadata,
+            &policy,
+            None,
+            None,
+        )
+        .expect("host-root traversal should clamp a parent step at the opened root");
+        assert_eq!(Path::new("child"), resolved.as_path());
+
+        let error = super::resolve_rooted_path_allow_root_with_component_policy_and_budget(
+            &root,
+            Path::new("../child"),
+            LocalSymlinkPolicy::Reject,
+            true,
+            LocalFileOperation::Metadata,
+            &policy,
+            None,
+            None,
+        )
+        .expect_err("ordinary rooted resolution should reject escape above its virtual root");
+        assert_eq!(LocalFileErrorKind::InvalidPath, error.kind());
+    }
+
+    #[test]
+    fn test_resolution_deadline_reports_operation_and_original_path() {
+        let path = Path::new("requested/path");
+        let error = super::check_resolution_deadline(
+            Some(Instant::now() - std::time::Duration::from_secs(1)),
+            path,
+            LocalFileOperation::List,
+        )
+        .expect_err("an elapsed absolute deadline should stop resolution");
+        assert_eq!(LocalFileErrorKind::Io, error.kind());
+        assert_eq!(LocalFileOperation::List, error.operation());
+        assert_eq!(Some(path), error.path());
+        assert_eq!(std::io::ErrorKind::TimedOut, error.io_error_kind());
+        super::check_resolution_deadline(None, path, LocalFileOperation::List)
+            .expect("an absent deadline should not stop resolution");
     }
 }
