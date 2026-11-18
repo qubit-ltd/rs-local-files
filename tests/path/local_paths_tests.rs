@@ -46,6 +46,35 @@ fn test_local_path_and_filename_policy_accessors_and_generation() {
 }
 
 #[test]
+fn test_local_paths_bind_native_names_and_namespace_roots() {
+    let host = LocalPaths::host();
+    let rooted = LocalPaths::rooted();
+
+    assert_eq!(LocalFileSystemScope::Host, host.scope());
+    assert_eq!(LocalFileSystemScope::Rooted, rooted.scope());
+    for paths in [host, rooted] {
+        let names = paths.file_names();
+        assert!(names.validate(OsStr::new("report.txt")).is_ok());
+        assert!(names.validate(OsStr::new("../report.txt")).is_err());
+    }
+
+    #[cfg(unix)]
+    let host_root = host
+        .from_canonical_components(std::iter::empty::<&str>())
+        .expect("empty Unix Host components should identify the native root");
+    let rooted_root = rooted
+        .from_canonical_components(std::iter::empty::<&str>())
+        .expect("empty Rooted components should identify the virtual root");
+    #[cfg(unix)]
+    {
+        assert_eq!(Path::new("/"), host_root);
+        assert!(host.to_canonical_components(&host_root).unwrap().is_empty());
+    }
+    assert_eq!(Path::new("/"), rooted_root);
+    assert!(rooted.to_canonical_components(&rooted_root).unwrap().is_empty());
+}
+
+#[test]
 fn test_reader_exposes_metadata_captured_from_its_open_handle() {
     let directory = tempfile::tempdir().expect("temporary directory should be created");
     let path = directory.path().join("payload");
