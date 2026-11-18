@@ -895,6 +895,41 @@ mod missing_path_tests {
 
     #[cfg(unix)]
     #[test]
+    fn test_tree_validation_checks_the_exact_owner_access_policy_for_root_and_entries() {
+        use crate::policy::LocalOwnerAccessPolicy;
+
+        let fixture = tempfile::tempdir().expect("fixture");
+        let mut stage = staged_directory(fixture.path());
+        stage
+            .write_file_new(Path::new("payload"), &mut &b"payload"[..], 7)
+            .expect("write staged file");
+        let options = LocalTreeValidationOptions::new()
+            .with_owner_access_policy(LocalOwnerAccessPolicy::new().with_unix_modes(0o700, 0o600));
+
+        verify_tree(&stage, None, &options).expect("the stage root and file match the exact owner access policy");
+        stage.cleanup().expect("cleanup stage");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_tree_validation_rejects_a_symlink_when_symlinks_are_forbidden() {
+        use std::os::unix::fs::symlink;
+
+        let fixture = tempfile::tempdir().expect("fixture");
+        let stage = staged_directory(fixture.path());
+        let link_path = stage.directory().diagnostic_path().join("link");
+        symlink("target", &link_path).expect("create a symlink entry");
+        let options = LocalTreeValidationOptions::new().with_reject_symlinks();
+
+        let error = verify_tree(&stage, None, &options).expect_err("symlink entries violate the requested policy");
+        assert_eq!(crate::LocalFileErrorKind::RequirementNotMet, error.kind());
+        assert_eq!(Some("symbolic link rejected by tree validation"), error.reason());
+        assert_eq!(Some(link_path.as_path()), error.path());
+        stage.cleanup().expect("cleanup stage");
+    }
+
+    #[cfg(unix)]
+    #[test]
     fn test_tree_validation_distinguishes_internal_and_external_hardlinks() {
         let fixture = tempfile::tempdir().expect("fixture");
         let mut stage = staged_directory(fixture.path());
