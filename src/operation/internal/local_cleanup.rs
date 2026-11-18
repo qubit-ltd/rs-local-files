@@ -196,6 +196,11 @@ mod tests {
         unsafe { Arc::increment_strong_count(data.cast::<CleanupState>()) };
         RawWaker::new(data, &COMPLETION_ON_CLONE_VTABLE)
     }
+    unsafe fn publish_completion_then_panic_on_clone(data: *const ()) -> RawWaker {
+        let state = unsafe { &*(data.cast::<CleanupState>()) };
+        *state.result.lock().expect("cleanup result lock") = Some(None);
+        std::panic::panic_any(());
+    }
     unsafe fn drop_state_waker(data: *const ()) {
         unsafe { Arc::decrement_strong_count(data.cast::<CleanupState>()) };
     }
@@ -206,6 +211,12 @@ mod tests {
     static WAKE_PANIC_VTABLE: RawWakerVTable = RawWakerVTable::new(raw_clone, wake_panics, wake_panics, raw_noop);
     static COMPLETION_ON_CLONE_VTABLE: RawWakerVTable =
         RawWakerVTable::new(publish_completion_on_clone, raw_noop, raw_noop, drop_state_waker);
+    static COMPLETION_THEN_CLONE_PANIC_VTABLE: RawWakerVTable = RawWakerVTable::new(
+        publish_completion_then_panic_on_clone,
+        raw_noop,
+        raw_noop,
+        drop_state_waker,
+    );
 
     unsafe fn raw_clone(data: *const ()) -> RawWaker {
         RawWaker::new(data, &WAKE_PANIC_VTABLE)
@@ -431,6 +442,56 @@ mod tests {
             Poll::Ready(CleanupOutcome::Released)
         ));
         assert!(state.waker.lock().expect("cleanup waker lock").is_none());
+    }
+
+    #[test]
+    fn test_cleanup_wait_rechecks_result_after_waker_clone_panics() {
+        let state = Arc::new(CleanupState {
+            result: Mutex::new(None),
+            waker: Mutex::new(None),
+            owner: Mutex::new(None),
+        });
+        let mut wait = Box::pin(CleanupWait {
+            state: Arc::clone(&state),
+            marker: std::marker::PhantomData,
+        });
+        let raw = RawWaker::new(
+            Arc::into_raw(Arc::clone(&state)).cast(),
+            &COMPLETION_THEN_CLONE_PANIC_VTABLE,
+        );
+        let waker = unsafe { Waker::from_raw(raw) };
+        let mut context = Context::from_waker(&waker);
+
+        assert!(matches!(
+            wait.as_mut().poll(&mut context),
+            Poll::Ready(CleanupOutcome::Released)
+        ));
+        assert!(state.waker.lock().expect("cleanup waker lock").is_none());
+        assert!(state.result.lock().expect("cleanup result lock").is_none());
+    }
+
+    #[test]
+    fn test_cleanup_wait_replaces_and_safely_drops_the_previous_waker() {
+        let state = Arc::new(CleanupState {
+            result: Mutex::new(None),
+            waker: Mutex::new(Some(Waker::from(Arc::new(DropPanics)))),
+            owner: Mutex::new(None),
+        });
+        let mut wait = Box::pin(CleanupWait {
+            state: Arc::clone(&state),
+            marker: std::marker::PhantomData,
+        });
+        let current_waker = plain_waker();
+        let mut context = Context::from_waker(&current_waker);
+
+        assert!(matches!(wait.as_mut().poll(&mut context), Poll::Pending));
+        let stored_waker = state.waker.lock().expect("cleanup waker lock");
+        assert!(
+            stored_waker
+                .as_ref()
+                .expect("current waker is stored")
+                .will_wake(&current_waker)
+        );
     }
 
     #[test]
