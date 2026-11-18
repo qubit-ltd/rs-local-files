@@ -538,6 +538,37 @@ mod tests {
     }
 
     #[test]
+    fn test_panicking_managed_native_command_reports_failure_and_cleanup_completes() {
+        let parent = tempfile::tempdir().expect("temp parent");
+        let manager = OperationManager::new(ManagerOptions::default()).expect("manager");
+        let executor = LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).expect("executor");
+        let mut operation = super::submit_temp_file(
+            LocalFileSystem::host().expect("filesystem"),
+            executor.clone(),
+            &manager.as_async(),
+            Default::default(),
+            LocalTempFileOptions::new().with_parent(parent.path()),
+        )
+        .expect("request accepted");
+        let access = match block_on(operation.wait_outcome()).expect("outcome") {
+            OperationOutcome::Succeeded(access) => access,
+            _ => panic!("temporary file should be created"),
+        };
+
+        let command = access
+            .enqueue_native_command(&executor, |_| -> () { panic!("injected native command panic") })
+            .expect("command queued");
+        assert_eq!(block_on(command), Err(LocalTempCommandError::Panicked));
+        assert_eq!(std::fs::read_dir(parent.path()).unwrap().count(), 1);
+
+        drop(access);
+        let settlement = block_on(operation.wait_settlement());
+        assert_eq!(settlement.recovery_count, 0);
+        assert!(settlement.cleanup_failures.is_empty());
+        assert_eq!(std::fs::read_dir(parent.path()).unwrap().count(), 0);
+    }
+
+    #[test]
     fn test_temp_submission_reports_native_creation_failures_without_retaining_resources() {
         let parent = tempfile::tempdir().expect("temp parent");
         let missing_parent = parent.path().join("missing");
