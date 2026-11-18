@@ -372,6 +372,8 @@ mod tests {
     use std::sync::Mutex;
     use std::task::Context;
     use std::task::Poll;
+    use std::task::RawWaker;
+    use std::task::RawWakerVTable;
     use std::task::Waker;
 
     use qubit_operation::ManagerOptions;
@@ -388,6 +390,58 @@ mod tests {
     use super::LocalTempNative;
     use super::LocalTempResource;
     use super::async_result;
+
+    fn panic_on_clone(_: *const ()) -> RawWaker {
+        panic!("injected waker clone panic");
+    }
+
+    fn panic_on_wake(_: *const ()) {
+        panic!("injected waker wake panic");
+    }
+
+    fn no_op(_: *const ()) {}
+
+    fn panic_on_drop(_: *const ()) {
+        panic!("injected waker drop panic");
+    }
+
+    static PANIC_CLONE_VTABLE: RawWakerVTable = RawWakerVTable::new(panic_on_clone, no_op, no_op, no_op);
+    static PANIC_WAKE_VTABLE: RawWakerVTable = RawWakerVTable::new(
+        |data| RawWaker::new(data, &PANIC_WAKE_VTABLE),
+        panic_on_wake,
+        no_op,
+        no_op,
+    );
+    static PANIC_DROP_VTABLE: RawWakerVTable = RawWakerVTable::new(
+        |data| RawWaker::new(data, &PANIC_DROP_VTABLE),
+        no_op,
+        no_op,
+        panic_on_drop,
+    );
+
+    fn raw_waker(vtable: &'static RawWakerVTable) -> Waker {
+        // The static vtables use a null data pointer and never dereference it.
+        unsafe { Waker::from_raw(RawWaker::new(std::ptr::null(), vtable)) }
+    }
+
+    #[test]
+    fn test_waker_panics_are_contained_and_failed_clone_leaves_receiver_pending() {
+        let clone_panics = raw_waker(&PANIC_CLONE_VTABLE);
+        assert!(super::safe_clone_waker(&clone_panics).is_none());
+
+        let (sender, mut receiver) = async_result::<u8>();
+        let mut context = Context::from_waker(&clone_panics);
+        assert!(Pin::new(&mut receiver).poll(&mut context).is_pending());
+        assert!(sender.send(9).is_ok());
+        let mut normal_context = Context::from_waker(Waker::noop());
+        assert!(matches!(
+            Pin::new(&mut receiver).poll(&mut normal_context),
+            Poll::Ready(9)
+        ));
+
+        assert!(std::panic::catch_unwind(|| super::safe_wake(raw_waker(&PANIC_WAKE_VTABLE))).is_ok());
+        assert!(std::panic::catch_unwind(|| super::safe_drop_waker(Some(raw_waker(&PANIC_DROP_VTABLE)))).is_ok());
+    }
     use crate::LocalFileOperation;
     use crate::LocalFileSystem;
     use crate::operation::LocalExecutionConfig;
