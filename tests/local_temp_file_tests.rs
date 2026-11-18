@@ -109,6 +109,24 @@ fn test_local_temp_file_close_retains_path_and_persist_responsibility() {
     assert!(target.exists());
 }
 
+/// Debug output reports useful lifecycle state without disclosing the host
+/// path.
+#[test]
+fn test_local_temp_file_debug_redacts_native_path_and_reports_state() {
+    let parent = tempdir().expect("temporary parent should be created");
+    let mut temporary = LocalFileSystem::host()
+        .expect("Host filesystem should open")
+        .create_temp_file_with_options(&LocalTempFileOptions::new().with_parent(parent.path()))
+        .expect("temporary file should be created");
+
+    let debug = format!("{temporary:?}");
+    assert!(debug.contains("LocalTempFile"));
+    assert!(debug.contains("handle_open: true"));
+    assert!(!debug.contains(&parent.path().to_string_lossy().to_string()));
+
+    temporary.cleanup().expect("temporary file should be cleaned up");
+}
+
 /// Verifies explicit options create a missing host temporary-file parent.
 #[test]
 fn test_local_temp_file_create_parent_creates_missing_host_parent() {
