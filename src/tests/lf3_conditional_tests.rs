@@ -5,20 +5,32 @@
 //
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
+#[cfg(feature = "test-support")]
 use std::fs;
+#[cfg(feature = "test-support")]
 use std::path::PathBuf;
 
+#[cfg(feature = "test-support")]
 use qubit_io::Output;
+#[cfg(feature = "test-support")]
 use sha2::Digest;
+#[cfg(feature = "test-support")]
 use sha2::Sha256;
 
+#[cfg(feature = "test-support")]
 use crate::LocalFileSystem;
+#[cfg(feature = "test-support")]
 use crate::LocalWriteMode;
+#[cfg(feature = "test-support")]
 use crate::LocalWriteOptions;
+#[cfg(feature = "test-support")]
 use crate::options::LocalWritePrecondition;
+#[cfg(feature = "test-support")]
 use crate::policy::LocalFileSyncRequirement;
+#[cfg(feature = "test-support")]
 use crate::policy::LocalSymlinkPolicy;
 
+#[cfg(feature = "test-support")]
 fn fixture_root(fixture: &tempfile::TempDir) -> PathBuf {
     fs::canonicalize(fixture.path()).expect("canonicalize fixture directory")
 }

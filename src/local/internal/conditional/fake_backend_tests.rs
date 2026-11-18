@@ -337,6 +337,7 @@ impl FakeBackend {
         self.rollback_method = rollback;
         self
     }
+    #[cfg(feature = "test-support")]
     #[must_use]
     pub(super) fn fail_after_first_rollback_rename_once(self) -> Self {
         self.partial_rollback.set(true);
