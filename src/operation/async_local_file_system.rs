@@ -934,4 +934,81 @@ mod tests {
             OperationOutcome::Succeeded(bytes) if bytes == b"reader input"
         ));
     }
+
+    #[test]
+    fn test_open_submissions_reject_invalid_scope_authority_and_exhausted_handles() {
+        use crate::operation::LocalSubmitRejection;
+        use crate::options::LocalListOptions;
+        use crate::options::LocalReadOptions;
+
+        let directory = tempfile::tempdir().unwrap();
+        let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+        let other_manager = OperationManager::new(ManagerOptions::default()).unwrap();
+        let executor = LocalIoExecutor::new(
+            manager.clone(),
+            LocalExecutionConfig {
+                max_open_handles: 1,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let filesystem = block_on(AsyncLocalFileSystem::rooted(
+            executor.clone(),
+            directory.path().to_path_buf(),
+        ))
+        .unwrap();
+
+        let wrong_manager_path = PathBuf::from("wrong-manager");
+        let rejected = match filesystem.submit_open_reader(
+            &other_manager,
+            Default::default(),
+            wrong_manager_path.clone(),
+            LocalReadOptions::default(),
+        ) {
+            Err(error) => error,
+            Ok(_) => panic!("wrong manager must reject reader submission"),
+        };
+        assert_eq!(rejected.rejection(), LocalSubmitRejection::WrongManager);
+        assert_eq!(rejected.into_request(), wrong_manager_path);
+
+        let uncaptured_host =
+            AsyncLocalFileSystem::new(crate::LocalFileSystem::host().unwrap(), executor.clone(), None);
+        let relative_path = PathBuf::from("relative-input");
+        let rejected = match uncaptured_host.submit_open_walker(
+            &manager,
+            Default::default(),
+            relative_path.clone(),
+            LocalListOptions::default(),
+        ) {
+            Err(error) => error,
+            Ok(_) => panic!("uncaptured relative Host path must be rejected"),
+        };
+        assert_eq!(rejected.rejection(), LocalSubmitRejection::AuthorityNotCaptured);
+        assert_eq!(rejected.into_request(), relative_path);
+
+        let held_handle = executor.reserve_handle().unwrap();
+        let exhausted_path = PathBuf::from("handle-limit");
+        let rejected = match filesystem.submit_open_reader(
+            &manager,
+            Default::default(),
+            exhausted_path.clone(),
+            LocalReadOptions::default(),
+        ) {
+            Err(error) => error,
+            Ok(_) => panic!("exhausted handle capacity must reject reader submission"),
+        };
+        assert_eq!(rejected.rejection(), LocalSubmitRejection::CapacityExceeded);
+        assert_eq!(rejected.into_request(), exhausted_path);
+        drop(held_handle);
+
+        let accepted_path = PathBuf::from(".");
+        let mut opened = filesystem
+            .submit_open_walker(&manager, Default::default(), accepted_path, LocalListOptions::default())
+            .expect("released handle permit should allow another open");
+        match opened.wait_outcome().unwrap() {
+            qubit_operation::OperationOutcome::Succeeded(walker) => drop(walker),
+            _ => panic!("expected walker after permit release"),
+        }
+        opened.wait_settlement().unwrap();
+    }
 }
