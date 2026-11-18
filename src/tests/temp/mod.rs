@@ -7,6 +7,7 @@
 // =============================================================================
 
 mod internal;
+mod local_temp_directory_lifecycle_tests;
 #[cfg(unix)]
 mod local_temp_recovery_tests;
 mod persist_target_tests;
