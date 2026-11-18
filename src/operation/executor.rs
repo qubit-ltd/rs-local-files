@@ -129,6 +129,51 @@ mod tests {
     }
 
     #[test]
+    fn test_drain_shutdown_waits_for_accepted_operation_to_settle() {
+        let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+        let executor = LocalIoExecutor::new(
+            manager.clone(),
+            LocalExecutionConfig {
+                worker_count: 1,
+                ..LocalExecutionConfig::default()
+            },
+        )
+        .unwrap();
+        let (started_tx, started_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        let mut operation = executor
+            .inner
+            .group
+            .try_submit(Default::default(), move |_| {
+                started_tx.send(()).unwrap();
+                release_rx.recv().unwrap();
+                Ok::<_, ()>(())
+            })
+            .expect("operation is accepted before shutdown");
+        started_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+
+        let shutdown = executor.request_shutdown(ShutdownMode::Drain);
+        let (shutdown_tx, shutdown_rx) = mpsc::channel();
+        let shutdown_thread = std::thread::spawn(move || {
+            shutdown_tx.send(shutdown.wait().unwrap()).unwrap();
+        });
+        assert!(matches!(
+            shutdown_rx.recv_timeout(Duration::from_millis(50)),
+            Err(mpsc::RecvTimeoutError::Timeout)
+        ));
+
+        release_tx.send(()).unwrap();
+        assert!(matches!(
+            operation.wait_outcome().unwrap(),
+            OperationOutcome::Succeeded(())
+        ));
+        let report = shutdown_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        assert_eq!(report.snapshot.active_operations, 0);
+        assert_eq!(report.snapshot.queued_operations, 0);
+        shutdown_thread.join().unwrap();
+    }
+
+    #[test]
     fn test_prepared_jobs_preserve_typed_request_result_and_error() {
         let manager = OperationManager::new(ManagerOptions::default()).unwrap();
         let executor = LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).unwrap();
