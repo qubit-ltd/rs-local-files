@@ -102,6 +102,7 @@ mod tests {
         requests: Arc<AtomicUsize>,
         drops: Arc<AtomicUsize>,
         result: Poll<io::Result<()>>,
+        resource_id: Arc<std::sync::Mutex<Option<qubit_operation::ResourceId>>>,
     }
 
     impl Drop for TestResource {
@@ -124,18 +125,23 @@ mod tests {
         }
 
         fn resource_id(&self) -> Arc<std::sync::Mutex<Option<qubit_operation::ResourceId>>> {
-            Arc::new(std::sync::Mutex::new(None))
+            Arc::clone(&self.resource_id)
         }
     }
 
-    fn resource(result: Poll<io::Result<()>>) -> (TestResource, Arc<AtomicUsize>, Arc<AtomicUsize>) {
+    fn resource(
+        result: Poll<io::Result<()>>,
+        id: Option<qubit_operation::ResourceId>,
+    ) -> (TestResource, Arc<AtomicUsize>, Arc<AtomicUsize>) {
         let requests = Arc::new(AtomicUsize::new(0));
         let drops = Arc::new(AtomicUsize::new(0));
+        let resource_id = Arc::new(std::sync::Mutex::new(id));
         (
             TestResource {
                 requests: Arc::clone(&requests),
                 drops: Arc::clone(&drops),
                 result,
+                resource_id,
             },
             requests,
             drops,
@@ -148,7 +154,7 @@ mod tests {
 
     #[test]
     fn cleanup_retains_resource_until_worker_confirmation() {
-        let (pending_resource, requests, drops) = resource(Poll::Pending);
+        let (pending_resource, requests, drops) = resource(Poll::Pending, None);
         let mut cleanup = Box::pin(WorkerCleanup::<TestResource>::policy().cleanup(pending_resource, context()));
         let mut cx = Context::from_waker(Waker::noop());
 
@@ -158,7 +164,7 @@ mod tests {
         drop(cleanup);
         assert_eq!(drops.load(Ordering::SeqCst), 1);
 
-        let (resource, requests, drops) = resource(Poll::Ready(Ok(())));
+        let (resource, requests, drops) = resource(Poll::Ready(Ok(())), None);
         let mut cleanup = Box::pin(WorkerCleanup::<TestResource>::policy().cleanup(resource, context()));
         assert!(matches!(
             cleanup.as_mut().poll(&mut cx),
@@ -170,9 +176,51 @@ mod tests {
 
     #[test]
     fn dispose_requests_cleanup_and_drops_resource() {
-        let (resource, requests, drops) = resource(Poll::Pending);
+        let (resource, requests, drops) = resource(Poll::Pending, None);
         WorkerCleanup::<TestResource>::dispose(resource);
         assert_eq!(requests.load(Ordering::SeqCst), 1);
         assert_eq!(drops.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn cleanup_failure_returns_resource_with_failure_identity() {
+        let manager = qubit_operation::OperationManager::new(qubit_operation::ManagerOptions::default())
+            .expect("operation manager should be created");
+        let resource_id = Arc::new(std::sync::Mutex::new(None));
+        let id_for_operation = Arc::clone(&resource_id);
+        let completion = manager
+            .run_and_settle(qubit_operation::OperationOptions::default(), move |scope| {
+                let resource_scope = scope
+                    .resource_scope(qubit_operation::ResourceScopeOptions { capacity: 1 })
+                    .expect("resource scope should be created");
+                let managed = resource_scope.manage(()).expect("resource should be registered");
+                *id_for_operation.lock().unwrap() = Some(managed.id());
+                drop(managed);
+                resource_scope.end();
+                Ok::<_, ()>(())
+            })
+            .expect("operation should settle");
+        drop(completion);
+        let expected_id = resource_id.lock().unwrap().expect("registered resource ID");
+
+        let (resource, requests, drops) = resource(
+            Poll::Ready(Err(io::Error::other("worker cleanup failed"))),
+            Some(expected_id),
+        );
+        let mut cleanup = Box::pin(WorkerCleanup::<TestResource>::policy().cleanup(resource, context()));
+        let mut cx = Context::from_waker(Waker::noop());
+        let outcome = cleanup.as_mut().poll(&mut cx);
+
+        match outcome {
+            Poll::Ready(qubit_operation::CleanupOutcome::Failed { failure, resource }) => {
+                assert_eq!(failure.resource_id, expected_id);
+                assert_eq!(failure.stage, qubit_operation::CleanupStage::AsyncRelease);
+                assert_eq!(requests.load(Ordering::SeqCst), 1);
+                assert_eq!(drops.load(Ordering::SeqCst), 0);
+                drop(resource);
+                assert_eq!(drops.load(Ordering::SeqCst), 1);
+            }
+            _ => panic!("expected failed cleanup outcome"),
+        }
     }
 }
