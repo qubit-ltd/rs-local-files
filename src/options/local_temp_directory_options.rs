@@ -298,10 +298,15 @@ impl Default for LocalTempDirectoryOptions {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use std::path::Path;
+
+    use super::LocalOwnerAccessPolicy;
+    use super::LocalPrivacyRequirement;
+    use super::LocalTempCleanupLimits;
+    use super::LocalTempDirectoryOptions;
 
     #[test]
-    fn builders_retain_directory_creation_and_cleanup_configuration() {
+    fn test_directory_builders_retain_creation_and_cleanup_configuration() {
         let parent = Path::new("cache/builds");
         let access = LocalOwnerAccessPolicy::new().with_unix_modes(0o700, 0o600);
         let cleanup = LocalTempCleanupLimits::new()

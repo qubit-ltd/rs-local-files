@@ -177,10 +177,13 @@ impl Default for LocalTempFileOptions {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use std::path::Path;
+
+    use super::LocalPrivacyRequirement;
+    use super::LocalTempFileOptions;
 
     #[test]
-    fn builders_preserve_temporary_file_creation_settings() {
+    fn test_file_builders_preserve_temporary_creation_settings() {
         let parent = Path::new("scratch/nested");
         let options = LocalTempFileOptions::new()
             .with_parent(parent)

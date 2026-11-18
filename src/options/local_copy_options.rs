@@ -447,10 +447,19 @@ impl Default for LocalCopyOptions {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use std::time::Duration;
+
+    use super::LocalAtomicityRequirement;
+    use super::LocalCopyConflictPolicy;
+    use super::LocalCopyOptions;
+    use super::LocalCopySourceMode;
+    use super::LocalCopyTypeConflictPolicy;
+    use super::LocalDurabilityRequirement;
+    use super::LocalMetadataPreservePolicy;
+    use super::LocalSymlinkPolicy;
 
     #[test]
-    fn builders_configure_copy_behavior_and_resource_limits() {
+    fn test_copy_builders_configure_behavior_and_resource_limits() {
         let options = LocalCopyOptions::new()
             .with_conflict(LocalCopyConflictPolicy::Overwrite)
             .with_type_conflict(LocalCopyTypeConflictPolicy::Replace)
@@ -496,7 +505,7 @@ mod tests {
     }
 
     #[test]
-    fn tightening_resource_limits_preserves_copy_policy_and_applies_minimums() {
+    fn test_tightening_copy_limits_preserves_policy_and_applies_minimums() {
         let request = LocalCopyOptions::new()
             .with_conflict(LocalCopyConflictPolicy::Overwrite)
             .with_create_parent()
