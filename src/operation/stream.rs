@@ -383,3 +383,163 @@ pub(super) fn map_walk_error(error: io::Error) -> crate::LocalFileError {
         crate::error::LocalFileError::from_io(crate::error::LocalFileOperation::List, None, None, error)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::fs::File;
+    use std::io::SeekFrom;
+    use std::time::SystemTime;
+    use std::time::UNIX_EPOCH;
+
+    use super::LocalNativeStream;
+    use super::LocalStreamCommand;
+    use super::LocalStreamCompletion;
+    use super::execute_stream_command;
+    use super::map_walk_error;
+    use super::stream_state::resource_limit;
+
+    fn temp_path(label: &str) -> std::path::PathBuf {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system clock is after the Unix epoch")
+            .as_nanos();
+        std::env::temp_dir().join(format!("qubit-local-stream-{label}-{}-{nonce}", std::process::id()))
+    }
+
+    #[test]
+    fn test_reader_commands_preserve_cursor_and_reject_writer_only_operations() {
+        let path = temp_path("reader");
+        std::fs::write(&path, b"stream bytes").expect("write fixture");
+        let reader =
+            crate::LocalFileReader::from_file(File::open(&path).expect("open fixture")).expect("construct reader");
+        let mut native = Some(LocalNativeStream::Reader(reader));
+
+        assert!(matches!(
+            execute_stream_command(&mut native, &LocalStreamCommand::Read { max_bytes: 6 }).unwrap(),
+            LocalStreamCompletion::Read(bytes) if bytes == b"stream"
+        ));
+        assert!(matches!(
+            execute_stream_command(&mut native, &LocalStreamCommand::Seek(SeekFrom::Start(7))).unwrap(),
+            LocalStreamCompletion::Seeked(7)
+        ));
+        assert!(matches!(
+            execute_stream_command(&mut native, &LocalStreamCommand::Read { max_bytes: 99 }).unwrap(),
+            LocalStreamCompletion::Read(bytes) if bytes == b"bytes"
+        ));
+        assert_eq!(
+            execute_stream_command(&mut native, &LocalStreamCommand::Flush)
+                .expect_err("reader cannot flush")
+                .kind(),
+            std::io::ErrorKind::InvalidInput
+        );
+        assert_eq!(
+            execute_stream_command(
+                &mut native,
+                &LocalStreamCommand::Write {
+                    bytes: std::sync::Arc::from(&b"x"[..])
+                }
+            )
+            .expect_err("reader cannot write")
+            .kind(),
+            std::io::ErrorKind::InvalidInput
+        );
+        assert!(matches!(
+            execute_stream_command(&mut native, &LocalStreamCommand::Close).unwrap(),
+            LocalStreamCompletion::Closed
+        ));
+        assert!(matches!(
+            execute_stream_command(&mut native, &LocalStreamCommand::Abort).unwrap(),
+            LocalStreamCompletion::Closed
+        ));
+        assert_eq!(
+            execute_stream_command(&mut native, &LocalStreamCommand::Read { max_bytes: 1 })
+                .expect_err("closed stream rejects reads")
+                .kind(),
+            std::io::ErrorKind::BrokenPipe
+        );
+        std::fs::remove_file(path).expect("remove fixture");
+    }
+
+    #[test]
+    fn test_append_writer_commands_write_flush_commit_and_reject_reads_and_seek() {
+        let path = temp_path("writer");
+        let file = File::create(&path).expect("create fixture");
+        let backend = crate::writer::internal::LocalFileWriterBackend::Append(file);
+        let writer = crate::LocalFileWriter::new(path.clone(), backend, crate::LocalWriteOptions::default());
+        let mut native = Some(LocalNativeStream::Writer(Box::new(writer)));
+
+        assert!(matches!(
+            execute_stream_command(
+                &mut native,
+                &LocalStreamCommand::Write {
+                    bytes: std::sync::Arc::from(&b"append"[..])
+                }
+            )
+            .unwrap(),
+            LocalStreamCompletion::Written(6)
+        ));
+        assert!(matches!(
+            execute_stream_command(&mut native, &LocalStreamCommand::Flush).unwrap(),
+            LocalStreamCompletion::Flushed
+        ));
+        assert_eq!(
+            execute_stream_command(&mut native, &LocalStreamCommand::Seek(SeekFrom::Start(0)))
+                .expect_err("writer cannot seek")
+                .kind(),
+            std::io::ErrorKind::Unsupported
+        );
+        assert_eq!(
+            execute_stream_command(&mut native, &LocalStreamCommand::Read { max_bytes: 1 })
+                .expect_err("writer cannot read")
+                .kind(),
+            std::io::ErrorKind::InvalidInput
+        );
+        assert!(matches!(
+            execute_stream_command(&mut native, &LocalStreamCommand::Commit).unwrap(),
+            LocalStreamCompletion::Committed(_)
+        ));
+        assert!(native.is_none());
+        assert_eq!(std::fs::read(&path).expect("read committed fixture"), b"append");
+        std::fs::remove_file(path).expect("remove fixture");
+    }
+
+    #[test]
+    fn test_commit_and_close_are_safe_when_the_native_stream_is_missing_or_wrong_kind() {
+        let mut missing = None;
+        assert_eq!(
+            execute_stream_command(&mut missing, &LocalStreamCommand::Commit)
+                .expect_err("commit requires a writer")
+                .kind(),
+            std::io::ErrorKind::InvalidInput
+        );
+        assert!(matches!(
+            execute_stream_command(&mut missing, &LocalStreamCommand::Close).unwrap(),
+            LocalStreamCompletion::Closed
+        ));
+
+        let mut reader = None;
+        reader.replace(LocalNativeStream::Reader(
+            crate::LocalFileReader::from_file(File::open("Cargo.toml").expect("open package manifest"))
+                .expect("construct reader"),
+        ));
+        assert_eq!(
+            execute_stream_command(&mut reader, &LocalStreamCommand::Commit)
+                .expect_err("commit cannot consume a reader")
+                .kind(),
+            std::io::ErrorKind::InvalidInput
+        );
+        assert!(reader.is_none());
+    }
+
+    #[test]
+    fn test_walk_error_mapping_preserves_resource_limits_and_regular_io_context() {
+        let error = map_walk_error(resource_limit("batch exceeds configured limit"));
+        assert_eq!(error.kind(), crate::LocalFileErrorKind::ResourceLimit);
+        assert!(error.reason().unwrap().contains("resource limit"));
+
+        let error = map_walk_error(std::io::Error::new(std::io::ErrorKind::NotFound, "missing entry"));
+        assert_eq!(error.kind(), crate::LocalFileErrorKind::NotFound);
+        assert_eq!(error.operation(), crate::LocalFileOperation::List);
+        assert!(error.to_string().contains("missing entry"));
+    }
+}
