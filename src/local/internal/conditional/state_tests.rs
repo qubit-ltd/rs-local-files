@@ -809,6 +809,32 @@ mod conditional_state_tests {
     }
 
     #[test]
+    fn test_conditional_state_directory_snapshot_is_attached_to_cleanup_diagnostics() {
+        use super::super::ConditionalHooks;
+        use super::super::ConditionalPoint;
+
+        let backend = super::super::fake_backend_tests::FakeBackend::new(b"A", b"B").with_hooks(
+            ConditionalHooks::fail_once(ConditionalPoint::SaveComplete, std::io::ErrorKind::PermissionDenied),
+        );
+        let directory = std::path::PathBuf::from("/resolver/snapshot");
+        let outcome = super::super::commit::commit_conditional_with_directory::<Sha256, _>(
+            backend,
+            LocalWritePrecondition::Content(Sha256::digest(b"A")),
+            super::super::fake_backend_tests::required_options(),
+            1,
+            Some(directory.clone()),
+        )
+        .expect("cleanup diagnostics do not invalidate successful publication");
+
+        assert_eq!(outcome.cleanup_errors().len(), 1);
+        assert_eq!(
+            outcome.cleanup_errors()[0].current_directory(),
+            Some(directory.as_path())
+        );
+        assert_eq!(outcome.digest(), &Sha256::digest(b"B"));
+    }
+
+    #[test]
     fn test_conditional_state_postpublication_race_rolls_back_once_and_retains_files() {
         use super::super::ConditionalHookAction;
         use super::super::ConditionalHooks;
