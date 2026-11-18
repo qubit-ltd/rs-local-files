@@ -400,6 +400,40 @@ mod tests {
     }
 
     #[test]
+    fn test_cleanup_wait_replaces_waker_on_repeated_pending_poll() {
+        let state = Arc::new(CleanupState {
+            result: Mutex::new(None),
+            waker: Mutex::new(None),
+            owner: Mutex::new(None),
+        });
+        let mut wait = Box::pin(CleanupWait {
+            state: Arc::clone(&state),
+            marker: std::marker::PhantomData,
+        });
+        let first_waker = plain_waker();
+        let second_waker = Waker::from(Arc::new(ThreadWake(std::thread::current())));
+        let mut first_context = Context::from_waker(&first_waker);
+        let mut second_context = Context::from_waker(&second_waker);
+
+        assert!(matches!(wait.as_mut().poll(&mut first_context), Poll::Pending));
+        assert!(
+            state
+                .waker
+                .lock()
+                .expect("cleanup waker lock")
+                .as_ref()
+                .expect("first poll registers a waker")
+                .will_wake(&first_waker)
+        );
+
+        assert!(matches!(wait.as_mut().poll(&mut second_context), Poll::Pending));
+        let stored_waker = state.waker.lock().expect("cleanup waker lock");
+        let stored_waker = stored_waker.as_ref().expect("second poll retains a waker");
+        assert!(stored_waker.will_wake(&second_waker));
+        assert!(!stored_waker.will_wake(&first_waker));
+    }
+
+    #[test]
     fn test_cleanup_runs_on_reserved_worker_and_returns_the_owner_on_capacity_failure() {
         let parent = tempfile::tempdir().expect("temp parent");
         let manager = OperationManager::new(ManagerOptions::default()).expect("manager");
