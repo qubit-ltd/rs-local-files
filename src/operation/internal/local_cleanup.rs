@@ -404,4 +404,71 @@ mod tests {
         ));
         assert_eq!(0, std::fs::read_dir(parent.path()).unwrap().count());
     }
+
+    #[test]
+    fn test_cleanup_wait_observes_pending_then_returns_worker_error_owner() {
+        let parent = tempfile::tempdir().expect("temp parent");
+        let manager = OperationManager::new(ManagerOptions::default()).expect("manager");
+        let executor = LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).expect("executor");
+        let cleanup = Arc::new(LocalCleanup {
+            executor: executor.clone(),
+        });
+
+        let (started_tx, started_rx) = std::sync::mpsc::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        let gate_permit = executor.reserve_cleanup().expect("cleanup worker permit");
+        if executor
+            .enqueue_cleanup(
+                Box::new(move || {
+                    started_tx.send(()).expect("test receiver remains open");
+                    release_rx.recv().expect("test releases cleanup worker");
+                }),
+                gate_permit,
+            )
+            .is_err()
+        {
+            panic!("gate job should queue");
+        }
+        started_rx.recv().expect("cleanup worker reaches gate");
+
+        let owner = test_owner(&manager, &executor, parent.path());
+        let source = {
+            let native = owner.native.lock().expect("native lock");
+            let Some(LocalTempNative::File(file)) = native.as_ref() else {
+                panic!("test owner should contain a temporary file");
+            };
+            file.path().to_path_buf()
+        };
+        let blocker = source
+            .parent()
+            .expect("temporary file has a sandbox")
+            .join("cleanup-blocker");
+        std::fs::write(&blocker, b"keep sandbox nonempty").expect("block sandbox release");
+        let context = CleanupContext::new(qubit_operation::ContextOptions::default()).expect("cleanup context");
+        let mut wait = Box::pin(Arc::clone(&cleanup).cleanup(owner, context));
+        let waker = plain_waker();
+        let mut task_context = Context::from_waker(&waker);
+        assert!(matches!(wait.as_mut().poll(&mut task_context), Poll::Pending));
+
+        release_tx.send(()).expect("release cleanup worker");
+        let outcome = loop {
+            match wait.as_mut().poll(&mut task_context) {
+                Poll::Ready(outcome) => break outcome,
+                Poll::Pending => std::thread::park_timeout(std::time::Duration::from_millis(1)),
+            }
+        };
+        let CleanupOutcome::Failed { resource, .. } = outcome else {
+            panic!("native worker error should return the cleanup owner");
+        };
+        std::fs::remove_file(blocker).expect("allow sandbox recovery");
+        let retry_context = CleanupContext::new(qubit_operation::ContextOptions::default()).expect("retry context");
+        assert!(matches!(
+            block_on(cleanup.cleanup(resource, retry_context)),
+            CleanupOutcome::Released
+        ));
+        assert_eq!(
+            0,
+            std::fs::read_dir(parent.path()).expect("temp parent remains").count()
+        );
+    }
 }
