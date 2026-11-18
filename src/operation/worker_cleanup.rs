@@ -82,3 +82,97 @@ impl<T: WorkerClosable> qubit_operation::AsyncCleanup<T> for WorkerCleanup<T> {
         }))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::io;
+    use std::sync::Arc;
+    use std::sync::atomic::AtomicUsize;
+    use std::sync::atomic::Ordering;
+    use std::task::Context;
+    use std::task::Poll;
+    use std::task::Waker;
+
+    use qubit_operation::AsyncCleanup;
+
+    use super::super::worker_closable::WorkerClosable;
+    use super::WorkerCleanup;
+
+    struct TestResource {
+        requests: Arc<AtomicUsize>,
+        drops: Arc<AtomicUsize>,
+        result: Poll<io::Result<()>>,
+    }
+
+    impl Drop for TestResource {
+        fn drop(&mut self) {
+            self.drops.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+
+    impl WorkerClosable for TestResource {
+        fn request_cleanup(&self) {
+            self.requests.fetch_add(1, Ordering::SeqCst);
+        }
+
+        fn poll_cleanup(&self, _cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+            match &self.result {
+                Poll::Pending => Poll::Pending,
+                Poll::Ready(Ok(())) => Poll::Ready(Ok(())),
+                Poll::Ready(Err(error)) => Poll::Ready(Err(io::Error::new(error.kind(), error.to_string()))),
+            }
+        }
+
+        fn resource_id(&self) -> Arc<std::sync::Mutex<Option<qubit_operation::ResourceId>>> {
+            Arc::new(std::sync::Mutex::new(None))
+        }
+    }
+
+    fn resource(result: Poll<io::Result<()>>) -> (TestResource, Arc<AtomicUsize>, Arc<AtomicUsize>) {
+        let requests = Arc::new(AtomicUsize::new(0));
+        let drops = Arc::new(AtomicUsize::new(0));
+        (
+            TestResource {
+                requests: Arc::clone(&requests),
+                drops: Arc::clone(&drops),
+                result,
+            },
+            requests,
+            drops,
+        )
+    }
+
+    fn context() -> qubit_operation::CleanupContext {
+        qubit_operation::CleanupContext::new(qubit_operation::ContextOptions::default()).unwrap()
+    }
+
+    #[test]
+    fn cleanup_retains_resource_until_worker_confirmation() {
+        let (pending_resource, requests, drops) = resource(Poll::Pending);
+        let mut cleanup = Box::pin(WorkerCleanup::<TestResource>::policy().cleanup(pending_resource, context()));
+        let mut cx = Context::from_waker(Waker::noop());
+
+        assert!(cleanup.as_mut().poll(&mut cx).is_pending());
+        assert_eq!(requests.load(Ordering::SeqCst), 1);
+        assert_eq!(drops.load(Ordering::SeqCst), 0);
+        drop(cleanup);
+        assert_eq!(drops.load(Ordering::SeqCst), 1);
+
+        let (resource, requests, drops) = resource(Poll::Ready(Ok(())));
+        let mut cleanup = Box::pin(WorkerCleanup::<TestResource>::policy().cleanup(resource, context()));
+        assert!(matches!(
+            cleanup.as_mut().poll(&mut cx),
+            Poll::Ready(qubit_operation::CleanupOutcome::Released)
+        ));
+        assert_eq!(requests.load(Ordering::SeqCst), 1);
+        assert_eq!(drops.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn dispose_requests_cleanup_and_drops_resource() {
+        let (resource, requests, drops) = resource(Poll::Pending);
+        WorkerCleanup::<TestResource>::dispose(resource);
+        assert_eq!(requests.load(Ordering::SeqCst), 1);
+        assert_eq!(drops.load(Ordering::SeqCst), 1);
+    }
+}
