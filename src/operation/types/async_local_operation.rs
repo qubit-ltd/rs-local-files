@@ -202,6 +202,27 @@ mod tests {
     }
 
     #[test]
+    fn test_async_handle_wait_outcome_preserves_failure_and_releases_budget() {
+        let group = group();
+        let inner = block_on(group.try_submit_async(OperationOptions::default(), |_| async {
+            Err::<u8, _>("expected failure")
+        }))
+        .expect("submission");
+        let released = Arc::new(AtomicBool::new(false));
+        let mut operation = AsyncLocalOperation {
+            inner: Some(inner),
+            budget: Some(budget(&released)),
+        };
+
+        assert!(matches!(
+            block_on(operation.wait_outcome()).expect("outcome delivery"),
+            OperationOutcome::Failed("expected failure")
+        ));
+        let _ = operation.request_stop(qubit_operation::StopReason::UserCancelled);
+        assert!(released.load(Ordering::SeqCst));
+    }
+
+    #[test]
     fn test_async_handle_conversions_transfer_budget_and_observer_ownership() {
         let group = group();
         let inner = block_on(group.try_submit_async(OperationOptions::default(), |_| async { Ok::<_, ()>(23_u8) }))
