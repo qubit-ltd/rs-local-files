@@ -378,4 +378,56 @@ mod tests {
         drop(observer);
         operation.wait_settlement().unwrap();
     }
+
+    #[test]
+    fn test_managed_walker_empty_directory_returns_end_of_stream() {
+        let directory = tempfile::tempdir().unwrap();
+        let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+        let executor = LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).unwrap();
+        let filesystem = block_on(AsyncLocalFileSystem::rooted(executor, directory.path().to_path_buf())).unwrap();
+        let mut operation = filesystem
+            .submit_open_walker(
+                &manager,
+                Default::default(),
+                PathBuf::from("."),
+                LocalListOptions::default(),
+            )
+            .unwrap();
+        let mut walker = match operation.wait_outcome().unwrap() {
+            OperationOutcome::Succeeded(walker) => walker,
+            _ => panic!("expected the managed walker to open"),
+        };
+
+        assert_eq!(block_on(walker.next_batch()).unwrap(), None);
+        operation.wait_settlement().unwrap();
+    }
+
+    #[test]
+    fn test_managed_walker_close_before_first_batch_confirms_cleanup() {
+        let directory = tempfile::tempdir().unwrap();
+        std::fs::write(directory.path().join("unread-entry"), b"x").unwrap();
+
+        let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+        let executor = LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).unwrap();
+        let filesystem = block_on(AsyncLocalFileSystem::rooted(executor, directory.path().to_path_buf())).unwrap();
+        let mut operation = filesystem
+            .submit_open_walker(
+                &manager,
+                Default::default(),
+                PathBuf::from("."),
+                LocalListOptions::default(),
+            )
+            .unwrap();
+        let mut walker = match operation.wait_outcome().unwrap() {
+            OperationOutcome::Succeeded(walker) => walker,
+            _ => panic!("expected the managed walker to open"),
+        };
+
+        let observer = walker.close_observer();
+        block_on(walker.close()).unwrap();
+        block_on(observer.wait_closed()).unwrap();
+        assert_eq!(block_on(walker.next_batch()).unwrap(), None);
+        drop(observer);
+        operation.wait_settlement().unwrap();
+    }
 }
