@@ -494,6 +494,54 @@ fn test_async_filesystem_opens_real_reader_writer_and_bounded_walker() {
 }
 
 #[test]
+fn test_real_worker_stream_preserves_large_write_order_through_flush_and_commit() {
+    use qubit_local_files::LocalFileSystem;
+    use qubit_local_files::operation::LocalExecutionConfig;
+    use qubit_local_files::operation::LocalIoExecutor;
+    use qubit_local_files::options::LocalWriteMode;
+    use qubit_local_files::options::LocalWriteOptions;
+    use qubit_operation::ManagerOptions;
+    use qubit_operation::OperationManager;
+    use qubit_operation::OperationOutcome;
+
+    let directory = tempfile::tempdir().unwrap();
+    let output = directory.path().join("large-stream.bin");
+    let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+    let executor = LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).unwrap();
+    let filesystem = LocalFileSystem::host().unwrap().into_async(executor).unwrap();
+    let (mut opening, _) = filesystem
+        .submit_open_writer(
+            &manager,
+            Default::default(),
+            output.clone(),
+            LocalWriteOptions::new(LocalWriteMode::CreateOrReplace),
+        )
+        .unwrap();
+    let mut writer = match opening.wait_outcome().unwrap() {
+        OperationOutcome::Succeeded(writer) => writer,
+        _ => panic!("writer open failed"),
+    };
+
+    let expected = (0..(LOCAL_STREAM_BUFFER_SIZE * 2 + 17))
+        .map(|index| (index % 251) as u8)
+        .collect::<Vec<_>>();
+    let mut offset = 0;
+    while offset < expected.len() {
+        let written = poll_worker(|cx| Pin::new(&mut writer).poll_write(cx, &expected[offset..])).unwrap();
+        assert!(written > 0, "a non-empty worker write must make progress");
+        offset += written;
+    }
+    poll_worker(|cx| Pin::new(&mut writer).poll_flush(cx)).unwrap();
+    assert!(!output.exists(), "flush must not publish an uncommitted writer");
+    let outcome = poll_worker(|cx| Box::pin(writer.commit()).as_mut().poll(cx)).unwrap();
+    assert_eq!(outcome.state(), qubit_local_files::outcome::LocalWriterState::Committed);
+    drop(writer);
+    opening.wait_settlement().unwrap();
+
+    assert_eq!(std::fs::read(output).unwrap(), expected);
+}
+
+#[test]
 fn test_real_writer_commit_preserves_typed_error_and_observer() {
     use qubit_local_files::LocalFileSystem;
     use qubit_local_files::operation::LocalExecutionConfig;
