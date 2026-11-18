@@ -16,6 +16,7 @@ use qubit_local_files::LocalReadRequest;
 use qubit_local_files::operation::AsyncLocalFileSystem;
 use qubit_local_files::operation::LocalIoExecutor;
 use qubit_local_files::operation::complete::LocalCopyRequest;
+use qubit_local_files::operation::complete::LocalCreateDirectoryRequest;
 use qubit_local_files::operation::complete::LocalDeleteRequest;
 use qubit_local_files::operation::complete::LocalReadAtRequest;
 use qubit_local_files::operation::complete::LocalReadPrefixRequest;
@@ -646,4 +647,115 @@ fn test_copy_rename_create_and_delete_retain_structured_results_and_facts() {
         missing_rename_facts.snapshot().publication,
         qubit_local_files::operation::LocalPublicationState::NotPublished
     );
+}
+
+#[test]
+fn test_complete_operation_edge_results_and_failures() {
+    let directory = tempfile::tempdir().unwrap();
+    let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+    let filesystem = facade(&manager);
+
+    // A seek beyond EOF is a successful empty read.
+    let empty_path = directory.path().join("empty-read");
+    std::fs::write(&empty_path, b"x").unwrap();
+    let mut read_at = filesystem
+        .submit_read_at(
+            &manager,
+            Default::default(),
+            LocalReadAtRequest {
+                path: empty_path,
+                read: Default::default(),
+                offset: SeekFrom::Start(2),
+                max_bytes: 2,
+            },
+            Default::default(),
+        )
+        .unwrap()
+        .0;
+    assert!(matches!(read_at.wait_outcome().unwrap(),
+        qubit_operation::OperationOutcome::Succeeded(bytes) if bytes.is_empty()));
+
+    // Prefix reads probe one byte past the requested prefix. This deterministically
+    // exercises the executor byte-budget failure while retaining no partial output.
+    let prefix_path = directory.path().join("prefix-budget");
+    std::fs::write(&prefix_path, b"ab").unwrap();
+    let mut prefix = filesystem
+        .submit_read_prefix(
+            &manager,
+            Default::default(),
+            LocalReadPrefixRequest {
+                path: prefix_path,
+                read: Default::default(),
+                max_bytes: 1,
+            },
+            qubit_local_files::LocalOperationOptions {
+                max_owned_bytes: Some(1),
+                ..Default::default()
+            },
+        )
+        .unwrap()
+        .0;
+    assert!(matches!(prefix.wait_outcome().unwrap(),
+        qubit_operation::OperationOutcome::Failed(error)
+            if error.kind() == qubit_local_files::error::LocalFileErrorKind::Io));
+
+    // Creating an already existing directory succeeds with created=false.
+    let existing = directory.path().join("existing");
+    std::fs::create_dir(&existing).unwrap();
+    let mut create = filesystem
+        .submit_create_directory(
+            &manager,
+            Default::default(),
+            LocalCreateDirectoryRequest {
+                path: existing.clone(),
+                options: qubit_local_files::options::LocalCreateDirectoryOptions::new().with_exists_ok(),
+            },
+            Default::default(),
+        )
+        .unwrap()
+        .0;
+    assert!(matches!(create.wait_outcome().unwrap(),
+        qubit_operation::OperationOutcome::Succeeded(result) if !result.outcome.created()));
+
+    // A file blocking a parent component makes directory creation fail.
+    let blocker = directory.path().join("blocker");
+    std::fs::write(&blocker, b"file").unwrap();
+    let mut failed_create = filesystem
+        .submit_create_directory(
+            &manager,
+            Default::default(),
+            LocalCreateDirectoryRequest {
+                path: blocker.join("child"),
+                options: Default::default(),
+            },
+            Default::default(),
+        )
+        .unwrap()
+        .0;
+    assert!(matches!(
+        failed_create.wait_outcome().unwrap(),
+        qubit_operation::OperationOutcome::Failed(_)
+    ));
+
+    // Recursive deletion succeeds but cannot report an exact entry count.
+    let tree = directory.path().join("tree");
+    std::fs::create_dir(&tree).unwrap();
+    std::fs::write(tree.join("child"), b"x").unwrap();
+    let mut delete = filesystem
+        .submit_delete(
+            &manager,
+            Default::default(),
+            LocalDeleteRequest {
+                path: tree.clone(),
+                options: LocalDeleteOptions::new().with_recursive(),
+                directory: true,
+            },
+            Default::default(),
+        )
+        .unwrap()
+        .0;
+    assert!(matches!(delete.wait_outcome().unwrap(),
+        qubit_operation::OperationOutcome::Succeeded(result)
+            if result.outcome.deleted() && result.deleted_entries.is_none()));
+    assert!(!tree.exists());
 }
