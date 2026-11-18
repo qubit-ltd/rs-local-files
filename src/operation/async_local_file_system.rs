@@ -1081,4 +1081,132 @@ mod tests {
         assert_eq!(error.rejection(), LocalSubmitRejection::CapacityExceeded);
         assert_eq!(error.into_request().path, PathBuf::from("requested-input"));
     }
+
+    #[test]
+    fn test_open_submissions_reject_when_worker_buffer_exceeds_byte_budget() {
+        use crate::operation::LocalSubmitRejection;
+        use crate::options::LocalListOptions;
+        use crate::options::LocalReadOptions;
+        use crate::options::LocalWriteMode;
+        use crate::options::LocalWriteOptions;
+
+        let directory = tempfile::tempdir().unwrap();
+        let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+        let executor = LocalIoExecutor::new(
+            manager.clone(),
+            LocalExecutionConfig {
+                max_owned_bytes: 1,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let filesystem = block_on(AsyncLocalFileSystem::rooted(executor, directory.path().to_path_buf())).unwrap();
+
+        let reader_path = PathBuf::from("reader-request");
+        let reader_error = match filesystem.submit_open_reader(
+            &manager,
+            Default::default(),
+            reader_path.clone(),
+            LocalReadOptions::default(),
+        ) {
+            Err(error) => error,
+            Ok(_) => panic!("reader must reject when its worker buffer exceeds the byte budget"),
+        };
+        assert_eq!(reader_error.rejection(), LocalSubmitRejection::CapacityExceeded);
+        assert_eq!(reader_error.into_request(), reader_path);
+
+        let writer_path = PathBuf::from("writer-request");
+        let writer_error = match filesystem.submit_open_writer(
+            &manager,
+            Default::default(),
+            writer_path.clone(),
+            LocalWriteOptions::new(LocalWriteMode::CreateOrReplace),
+        ) {
+            Err(error) => error,
+            Ok(_) => panic!("writer must reject when its worker buffer exceeds the byte budget"),
+        };
+        assert_eq!(writer_error.rejection(), LocalSubmitRejection::CapacityExceeded);
+        assert_eq!(writer_error.into_request(), writer_path);
+
+        let walker_path = PathBuf::from("walker-request");
+        let walker_error = match filesystem.submit_open_walker(
+            &manager,
+            Default::default(),
+            walker_path.clone(),
+            LocalListOptions::default(),
+        ) {
+            Err(error) => error,
+            Ok(_) => panic!("walker must reject when its worker buffer exceeds the byte budget"),
+        };
+        assert_eq!(walker_error.rejection(), LocalSubmitRejection::CapacityExceeded);
+        assert_eq!(walker_error.into_request(), walker_path);
+    }
+
+    #[test]
+    fn test_open_submissions_reject_when_fact_capacity_is_exhausted() {
+        use crate::operation::LocalSubmitRejection;
+        use crate::options::LocalListOptions;
+        use crate::options::LocalReadOptions;
+        use crate::options::LocalWriteMode;
+        use crate::options::LocalWriteOptions;
+
+        let directory = tempfile::tempdir().unwrap();
+        let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+        let executor = LocalIoExecutor::new(
+            manager.clone(),
+            LocalExecutionConfig {
+                max_fact_records: 1,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let filesystem = block_on(AsyncLocalFileSystem::rooted(
+            executor.clone(),
+            directory.path().to_path_buf(),
+        ))
+        .unwrap();
+        let held_fact = executor.reserve_fact().unwrap();
+
+        let reader_path = PathBuf::from("reader-request");
+        let reader_error = match filesystem.submit_open_reader(
+            &manager,
+            Default::default(),
+            reader_path.clone(),
+            LocalReadOptions::default(),
+        ) {
+            Err(error) => error,
+            Ok(_) => panic!("reader must reject when no fact record is available"),
+        };
+        assert_eq!(reader_error.rejection(), LocalSubmitRejection::CapacityExceeded);
+        assert_eq!(reader_error.into_request(), reader_path);
+
+        let writer_path = PathBuf::from("writer-request");
+        let writer_error = match filesystem.submit_open_writer(
+            &manager,
+            Default::default(),
+            writer_path.clone(),
+            LocalWriteOptions::new(LocalWriteMode::CreateOrReplace),
+        ) {
+            Err(error) => error,
+            Ok(_) => panic!("writer must reject when no fact record is available"),
+        };
+        assert_eq!(writer_error.rejection(), LocalSubmitRejection::CapacityExceeded);
+        assert_eq!(writer_error.into_request(), writer_path);
+
+        let walker_path = PathBuf::from("walker-request");
+        let walker_error = match filesystem.submit_open_walker(
+            &manager,
+            Default::default(),
+            walker_path.clone(),
+            LocalListOptions::default(),
+        ) {
+            Err(error) => error,
+            Ok(_) => panic!("walker must reject when no fact record is available"),
+        };
+        assert_eq!(walker_error.rejection(), LocalSubmitRejection::CapacityExceeded);
+        assert_eq!(walker_error.into_request(), walker_path);
+
+        drop(held_fact);
+        assert!(executor.reserve_fact().is_some());
+    }
 }
