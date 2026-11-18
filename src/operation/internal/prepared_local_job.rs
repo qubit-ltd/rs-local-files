@@ -753,6 +753,27 @@ mod waker_tests {
     }
 
     #[test]
+    fn test_register_keeps_an_equivalent_waker() {
+        let target = Arc::new(CountWake(AtomicUsize::new(0)));
+        let registered = Waker::from(Arc::clone(&target));
+        let same_target = registered.clone();
+        let mut port = empty_port();
+        port.wakers[1] = Some(registered);
+        let mut replacement = Some(same_target);
+
+        assert!(PreparedLocalJob::<(), (), ()>::register(&mut port, 1, &mut replacement).is_none());
+        assert!(replacement.is_some(), "equivalent waker stays owned by the caller");
+        assert!(
+            port.wakers[1]
+                .as_ref()
+                .unwrap()
+                .will_wake(replacement.as_ref().unwrap())
+        );
+        drop(replacement);
+        assert_eq!(0, target.0.load(Ordering::SeqCst));
+    }
+
+    #[test]
     fn test_wake_all_wakes_registered_waiters_and_clears_slots() {
         let first = Arc::new(CountWake(AtomicUsize::new(0)));
         let second = Arc::new(CountWake(AtomicUsize::new(0)));
@@ -863,6 +884,7 @@ mod lifecycle_tests {
                 PreparedExternalOperation::bind(&*job, scope.id()).expect("bind job identity");
                 *observed_job.lock().unwrap_or_else(|error| error.into_inner()) = Some(Arc::clone(&job));
                 OperationControl::request_stop(&*job, StopReason::UserCancelled);
+                OperationControl::request_stop(&*job, StopReason::Timeout);
                 PreparedExternalOperation::activate(job, scope).expect("activation queues the stopped job");
                 Ok::<_, ()>(())
             })
@@ -951,6 +973,48 @@ mod tests {
             OperationOutcome::Succeeded(42)
         ));
         assert!(OperationControl::snapshot(&*prepared).input_released);
+    }
+
+    #[test]
+    fn test_non_unit_request_and_error_traverse_external_lifecycle() {
+        use std::task::Context;
+        use std::task::Poll;
+        use std::task::Waker;
+
+        let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+        let executor = LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).unwrap();
+        let prepared = PreparedLocalJob::new(
+            std::sync::Arc::clone(&executor.inner),
+            String::from("request payload"),
+            executor.reserve_slot().unwrap(),
+            std::sync::Arc::new(std::sync::Mutex::new(executor.reserve_bytes(0).unwrap())),
+            executor.reserve_handle().unwrap(),
+            LocalFactObserver::new(),
+            |request| {
+                assert_eq!("request payload", request);
+                OperationOutcome::<usize, std::io::Error>::Failed(std::io::Error::other("domain failure"))
+            },
+        );
+        let mut handle = manager
+            .try_submit_external(Default::default(), std::sync::Arc::clone(&prepared))
+            .unwrap();
+
+        assert!(matches!(
+            handle.wait_outcome().unwrap(),
+            OperationOutcome::Failed(error) if error.to_string() == "domain failure"
+        ));
+        let summary = OperationControl::snapshot(&*prepared)
+            .outcome
+            .expect("worker publishes an outcome summary");
+        assert_eq!(qubit_operation::ChildOutcomeKind::Failed, summary.kind);
+
+        let mut context = Context::from_waker(Waker::noop());
+        assert!(matches!(
+            OperationControl::poll_outcome(&*prepared, &mut context),
+            Poll::Ready(summary) if summary.kind == qubit_operation::ChildOutcomeKind::Failed
+        ));
+        assert!(OperationControl::poll_release(&*prepared, &mut context).is_ready());
+        assert!(OperationControl::poll_settlement(&*prepared, &mut context).is_ready());
     }
 
     #[test]
