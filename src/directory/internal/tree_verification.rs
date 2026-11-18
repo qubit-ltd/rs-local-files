@@ -801,6 +801,67 @@ mod missing_path_tests {
     }
 
     #[test]
+    fn test_tree_validation_reports_unexpected_entries_and_kind_mismatches() {
+        let fixture = tempfile::tempdir().expect("fixture");
+        let mut stage = staged_directory(fixture.path());
+        stage
+            .write_file_new(Path::new("payload"), &mut &b"payload"[..], 7)
+            .expect("write staged file");
+
+        let unexpected =
+            LocalTreeEntry::new(Path::new("other").to_path_buf(), LocalFileKind::File).expect("expected entry");
+        let error = verify_tree(
+            &stage,
+            Some(std::slice::from_ref(&unexpected)),
+            &LocalTreeValidationOptions::new(),
+        )
+        .expect_err("an observed path outside the expected set must fail");
+        assert_eq!(crate::LocalFileErrorKind::RequirementNotMet, error.kind());
+        assert_eq!(Some("unexpected tree entry"), error.reason());
+        assert_eq!(
+            Some(stage.directory().diagnostic_path().join("payload").as_path()),
+            error.path()
+        );
+
+        let wrong_kind = LocalTreeEntry::new(Path::new("payload").to_path_buf(), LocalFileKind::Directory)
+            .expect("expected directory entry");
+        let error = verify_tree(
+            &stage,
+            Some(std::slice::from_ref(&wrong_kind)),
+            &LocalTreeValidationOptions::new(),
+        )
+        .expect_err("an observed entry with the wrong kind must fail");
+        assert_eq!(crate::LocalFileErrorKind::RequirementNotMet, error.kind());
+        assert_eq!(Some("tree entry kind mismatch"), error.reason());
+        assert_eq!(
+            Some(stage.directory().diagnostic_path().join("payload").as_path()),
+            error.path()
+        );
+
+        stage.cleanup().expect("cleanup stage");
+    }
+
+    #[test]
+    fn test_tree_validation_fails_instead_of_truncating_at_depth_limit() {
+        let fixture = tempfile::tempdir().expect("fixture");
+        let mut stage = staged_directory(fixture.path());
+        stage
+            .write_file_new(Path::new("payload"), &mut &b"payload"[..], 7)
+            .expect("write staged file");
+
+        let options = LocalTreeValidationOptions::new().with_limits(LocalListOptions::new().with_max_depth(0));
+        let error = verify_tree(&stage, None, &options).expect_err("the file is beyond the allowed depth");
+        assert_eq!(crate::LocalFileErrorKind::ResourceLimit, error.kind());
+        assert_eq!(Some("tree validation depth limit exceeded"), error.reason());
+        assert_eq!(
+            Some(stage.directory().diagnostic_path().join("payload").as_path()),
+            error.path()
+        );
+
+        stage.cleanup().expect("cleanup stage");
+    }
+
+    #[test]
     fn test_missing_entry_identity_is_reported_before_privacy_reopen() {
         let fixture = tempfile::tempdir().expect("fixture");
         let filesystem = LocalFileSystem::host().expect("host filesystem");
