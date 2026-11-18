@@ -260,6 +260,28 @@ fn test_sync_tree_rejects_different_stage_identity_under_supplied_parent() {
 }
 
 #[test]
+fn test_sync_tree_rejects_stage_name_replaced_after_creation() {
+    let scratch = tempfile::tempdir().expect("scratch directory");
+    let parent = parent(scratch.path());
+    let stage = stage(&parent, &LocalTempDirectoryOptions::new());
+    let stage_path = scratch.path().join(stage.relative_name());
+    let displaced_path = scratch.path().join("displaced-stage");
+
+    std::fs::rename(&stage_path, &displaced_path).expect("move the observed stage aside");
+    std::fs::create_dir(&stage_path).expect("replace the stage name with a different directory");
+
+    let error = stage
+        .sync_tree_with_options(&parent, &LocalListOptions::new())
+        .expect_err("the parent name must still identify the stage being synchronized");
+    assert_eq!(LocalFileErrorKind::ChangedDuringRead, error.kind());
+    assert_eq!(LocalFileOperation::Metadata, error.operation());
+
+    std::fs::remove_dir(&stage_path).expect("remove the replacement directory");
+    std::fs::rename(&displaced_path, &stage_path).expect("restore the stage name for cleanup");
+    stage.cleanup().expect("cleanup the original stage");
+}
+
+#[test]
 fn test_verify_entries_rejects_conflicting_expected_sets() {
     let scratch = tempfile::tempdir().expect("scratch directory");
     let parent = parent(scratch.path());
