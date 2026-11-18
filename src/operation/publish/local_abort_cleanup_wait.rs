@@ -154,4 +154,34 @@ mod tests {
         );
         assert_eq!(0, wake_count.load(std::sync::atomic::Ordering::SeqCst));
     }
+
+    fn panic_on_clone(_: *const ()) -> std::task::RawWaker {
+        panic!("injected waker clone panic");
+    }
+
+    fn no_op(_: *const ()) {}
+
+    static PANIC_CLONE_VTABLE: std::task::RawWakerVTable =
+        std::task::RawWakerVTable::new(panic_on_clone, no_op, no_op, no_op);
+
+    #[test]
+    fn test_abort_wait_stays_pending_when_waker_clone_panics() {
+        let (mut wait, state) = wait::<u8>();
+        // The static vtable uses null data and never dereferences it.
+        let hostile = unsafe { Waker::from_raw(std::task::RawWaker::new(std::ptr::null(), &PANIC_CLONE_VTABLE)) };
+        let mut context = Context::from_waker(&hostile);
+
+        assert!(matches!(
+            Future::poll(std::pin::Pin::new(&mut wait), &mut context),
+            Poll::Pending
+        ));
+        assert!(state.waker.lock().expect("registered waker lock").is_none());
+
+        *state.result.lock().expect("cleanup result lock") = Some(CleanupOutcome::Released);
+        let mut normal_context = Context::from_waker(Waker::noop());
+        assert!(matches!(
+            Future::poll(std::pin::Pin::new(&mut wait), &mut normal_context),
+            Poll::Ready(CleanupOutcome::Released)
+        ));
+    }
 }
