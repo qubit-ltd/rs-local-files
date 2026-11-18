@@ -1350,3 +1350,78 @@ fn test_partial_tree_cleanup_failure_keeps_a_retryable_recovery_owner() {
     assert!(retained.cleanup().is_ok());
     drop(reservation);
 }
+
+#[test]
+fn test_writer_open_failure_returns_error_without_recording_publication() {
+    let directory = tempfile::tempdir().unwrap();
+    let destination = directory.path().join("missing-parent").join("published");
+    let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+    let filesystem = facade(&manager);
+    let (mut operation, observer) = filesystem
+        .submit_writer_commit(
+            &manager,
+            Default::default(),
+            LocalWriterCommitRequest {
+                path: destination.clone(),
+                options: LocalWriteOptions::new(LocalWriteMode::CreateOrReplace),
+                bytes: b"candidate".to_vec(),
+            },
+            LocalOperationOptions::default(),
+        )
+        .unwrap();
+
+    assert!(matches!(
+        operation.wait_outcome().unwrap(),
+        OperationOutcome::Failed(qubit_local_files::operation::publish::LocalWriterCommandError::Open(_))
+    ));
+    assert!(!destination.exists());
+    let facts = observer.snapshot();
+    assert_eq!(
+        facts.publication,
+        qubit_local_files::operation::LocalPublicationState::NotPublished
+    );
+    assert_eq!(facts.modified_count, 0);
+    assert_eq!(facts.modified_bytes, 0);
+}
+
+#[cfg(feature = "digest")]
+#[test]
+fn test_conditional_writer_open_failure_does_not_claim_a_destination_change() {
+    use qubit_local_files::operation::publish::LocalConditionalWriterCommitRequest;
+    use qubit_local_files::options::LocalWritePrecondition;
+    use sha2::Sha256;
+
+    let directory = tempfile::tempdir().unwrap();
+    let root = std::fs::canonicalize(directory.path()).unwrap();
+    let destination = root.join("missing-parent").join("published");
+    let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+    let filesystem = facade(&manager)
+        .with_symlink_policy(qubit_local_files::policy::LocalSymlinkPolicy::Reject)
+        .unwrap();
+    let (mut operation, observer) = filesystem
+        .submit_conditional_writer_commit::<Sha256>(
+            &manager,
+            Default::default(),
+            LocalConditionalWriterCommitRequest {
+                path: destination.clone(),
+                precondition: LocalWritePrecondition::Absent,
+                options: LocalWriteOptions::new(LocalWriteMode::CreateOrReplace),
+                bytes: b"candidate".to_vec(),
+            },
+            LocalOperationOptions::default(),
+        )
+        .unwrap();
+
+    assert!(matches!(
+        operation.wait_outcome().unwrap(),
+        OperationOutcome::Failed(qubit_local_files::operation::publish::LocalConditionalWriterCommandError::Open(_))
+    ));
+    assert!(!destination.exists());
+    let facts = observer.snapshot();
+    assert_eq!(
+        facts.publication,
+        qubit_local_files::operation::LocalPublicationState::NotPublished
+    );
+    assert_eq!(facts.modified_count, 0);
+    assert_eq!(facts.modified_bytes, 0);
+}
