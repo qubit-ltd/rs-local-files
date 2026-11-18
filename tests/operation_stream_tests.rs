@@ -660,6 +660,45 @@ fn test_walker_batches_return_every_entry_on_portable_paths() {
     opening.wait_settlement().unwrap();
 }
 
+#[cfg(feature = "test-support")]
+#[test]
+fn test_recursive_worker_walker_returns_native_entry_error() {
+    use qubit_local_files::LocalFileSystem;
+    use qubit_local_files::operation::LocalExecutionConfig;
+    use qubit_local_files::operation::LocalIoExecutor;
+    use qubit_local_files::options::LocalListOptions;
+    use qubit_local_files::test_support::install_test_fault_shared;
+    use qubit_operation::ManagerOptions;
+    use qubit_operation::OperationManager;
+    use qubit_operation::OperationOutcome;
+
+    let directory = tempfile::tempdir().unwrap();
+    std::fs::create_dir(directory.path().join("nested")).unwrap();
+    std::fs::write(directory.path().join("nested/entry"), b"").unwrap();
+    let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+    let executor = LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).unwrap();
+    let filesystem = LocalFileSystem::host().unwrap().into_async(executor).unwrap();
+    let mut opening = filesystem
+        .submit_open_walker(
+            &manager,
+            Default::default(),
+            directory.path().to_path_buf(),
+            LocalListOptions::default().with_recursive(),
+        )
+        .unwrap();
+    let mut walker = match opening.wait_outcome().unwrap() {
+        OperationOutcome::Succeeded(walker) => walker,
+        _ => panic!("walker open failed"),
+    };
+
+    let _fault = install_test_fault_shared("walker-entry").unwrap();
+    let error = poll_worker(|cx| Box::pin(walker.next_batch()).as_mut().poll(cx)).unwrap_err();
+    assert_eq!(error.kind(), qubit_local_files::error::LocalFileErrorKind::Io);
+    assert!(error.to_string().contains("injected walker directory entry failure"));
+    drop(walker);
+    opening.wait_settlement().unwrap();
+}
+
 #[test]
 fn test_stream_handle_permit_lives_until_worker_cleanup_settles() {
     use qubit_local_files::LocalFileSystem;
