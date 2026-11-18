@@ -128,6 +128,7 @@ impl<W: Send + 'static> AsyncCleanup<LocalManagedAbortResource<W>> for LocalMana
 mod tests {
     use std::future::Future;
     use std::sync::Arc;
+    use std::sync::mpsc;
     use std::task::Context;
     use std::task::Poll;
     use std::task::Wake;
@@ -210,6 +211,17 @@ mod tests {
 
     fn abort_panics(_: &mut u8) -> Result<(), LocalFileError> {
         panic!("abort callback panic")
+    }
+
+    struct AbortGate {
+        entered: mpsc::Sender<()>,
+        release: mpsc::Receiver<()>,
+    }
+
+    fn abort_waits(gate: &mut AbortGate) -> Result<(), LocalFileError> {
+        gate.entered.send(()).expect("test is waiting for abort start");
+        gate.release.recv().expect("test releases blocked abort");
+        Ok(())
     }
 
     fn resource(
@@ -297,6 +309,31 @@ mod tests {
             block_on(cleanup.cleanup(resource, cleanup_context())),
             CleanupOutcome::Released
         ));
+    }
+
+    #[test]
+    fn test_abort_wait_remains_pending_until_the_worker_finishes() {
+        let (_manager, executor, id) = setup();
+        let cleanup = Arc::new(LocalManagedAbortCleanup::<AbortGate>::new(
+            executor.clone().cleanup_executor(),
+        ));
+        let (entered_tx, entered_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        let resource = LocalManagedAbortResource::new(executor.reserve_cleanup().expect("cleanup permit"), abort_waits);
+        *resource.native.lock().expect("native lock") = Some(AbortGate {
+            entered: entered_tx,
+            release: release_rx,
+        });
+        *resource.id.lock().expect("resource id lock") = Some(id);
+
+        let mut future = Box::pin(cleanup.cleanup(resource, cleanup_context()));
+        entered_rx.recv().expect("worker starts the abort callback");
+        let waker = Waker::from(Arc::new(ThreadWake(std::thread::current())));
+        let mut context = Context::from_waker(&waker);
+        assert!(matches!(future.as_mut().poll(&mut context), Poll::Pending));
+
+        release_tx.send(()).expect("worker is waiting for release");
+        assert!(matches!(block_on(future), CleanupOutcome::Released));
     }
 
     #[test]
