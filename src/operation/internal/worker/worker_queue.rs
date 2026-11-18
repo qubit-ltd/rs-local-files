@@ -147,3 +147,68 @@ impl WorkerQueue {
         self.wake.notify_all();
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::sync::mpsc;
+    use std::time::Duration;
+
+    use super::WorkerQueue;
+    use crate::operation::internal::permits::PermitPool;
+
+    #[test]
+    fn test_stop_drains_enqueued_ordinary_and_cleanup_jobs() {
+        let queue = WorkerQueue::default();
+        let (tx, rx) = mpsc::channel();
+        let ordinary_tx = tx.clone();
+        assert!(
+            queue
+                .push(Box::new(move || ordinary_tx.send("ordinary").unwrap()), false, 1)
+                .is_ok()
+        );
+
+        let permits = PermitPool::new(1);
+        let permit = permits.try_acquire(1).unwrap();
+        let cleanup_tx = tx.clone();
+        assert!(
+            queue
+                .push_cleanup(Box::new(move || cleanup_tx.send("cleanup").unwrap()), permit, 1,)
+                .is_ok()
+        );
+        drop(tx);
+
+        queue.stop();
+        queue.run();
+
+        let mut completed = vec![
+            rx.recv_timeout(Duration::from_secs(1)).unwrap(),
+            rx.recv_timeout(Duration::from_secs(1)).unwrap(),
+        ];
+        completed.sort_unstable();
+        assert_eq!(completed, ["cleanup", "ordinary"]);
+        assert_eq!(permits.used(), 0);
+    }
+
+    #[test]
+    fn test_stopped_queue_returns_rejected_jobs_and_cleanup_permits() {
+        let queue = WorkerQueue::default();
+        queue.stop();
+
+        let (ordinary_tx, ordinary_rx) = mpsc::channel();
+        let ordinary_job = Box::new(move || ordinary_tx.send(()).unwrap());
+        let ordinary_job = queue.push(ordinary_job, false, 1).unwrap_err();
+        ordinary_job();
+        ordinary_rx.recv_timeout(Duration::from_secs(1)).unwrap();
+
+        let permits = PermitPool::new(1);
+        let permit = permits.try_acquire(1).unwrap();
+        let (cleanup_tx, cleanup_rx) = mpsc::channel();
+        let cleanup_job = Box::new(move || cleanup_tx.send(()).unwrap());
+        let (cleanup_job, permit) = queue.push_cleanup(cleanup_job, permit, 1).unwrap_err();
+        assert_eq!(permits.used(), 1);
+        cleanup_job();
+        drop(permit);
+        cleanup_rx.recv_timeout(Duration::from_secs(1)).unwrap();
+        assert_eq!(permits.used(), 0);
+    }
+}
