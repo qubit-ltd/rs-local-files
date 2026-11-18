@@ -76,6 +76,48 @@ fn test_read_text_debug_stays_bounded_for_large_invalid_input() {
     }
 }
 
+/// Verifies the standard source chain and consuming conversions retain an
+/// invalid-encoding failure produced by a real text read.
+#[test]
+fn test_read_text_invalid_encoding_source_survives_error_conversions() {
+    let directory = tempfile::tempdir().expect("temporary directory should be created");
+    let path = directory.path().join("invalid");
+    std::fs::write(&path, [0xff, b'x']).expect("invalid UTF-8 fixture should be written");
+    let filesystem = LocalFileSystem::host().expect("host filesystem should initialize");
+
+    let error = filesystem.read_text(&path).expect_err("invalid UTF-8 should fail");
+    assert_eq!(LocalFileErrorKind::InvalidEncoding, error.kind());
+    assert_eq!(LocalFileOperation::Read, error.operation());
+    assert_eq!(Some(path.as_path()), error.path());
+    assert!(
+        error
+            .source()
+            .and_then(|source| source.downcast_ref::<std::string::FromUtf8Error>())
+            .is_some()
+    );
+
+    let source = error.into_source().expect("typed UTF-8 source should transfer");
+    match source {
+        LocalFileErrorSource::InvalidEncoding(source) => assert_eq!(source.as_bytes(), [0xff, b'x']),
+        other => panic!("expected invalid-encoding source, got {other:?}"),
+    }
+
+    let error = filesystem
+        .read_text(&path)
+        .expect_err("invalid UTF-8 should still fail");
+    let io_error = error.into_io_error();
+    assert_eq!(io::ErrorKind::InvalidData, io_error.kind());
+    let structured = io_error
+        .get_ref()
+        .and_then(|source| source.downcast_ref::<LocalFileError>())
+        .expect("I/O adapter should own the structured error");
+    assert_eq!(Some(path.as_path()), structured.path());
+    assert!(matches!(
+        structured.typed_source(),
+        Some(LocalFileErrorSource::InvalidEncoding(source)) if source.as_bytes() == [0xff, b'x']
+    ));
+}
+
 /// Verifies non-encoding source variants retain tuple Debug and source links.
 #[test]
 fn test_other_local_file_error_sources_keep_debug_shape_and_source() {
