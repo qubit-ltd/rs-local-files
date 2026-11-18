@@ -1107,3 +1107,139 @@ mod tests {
         assert!(OperationControl::poll_settlement(&*prepared, &mut context).is_ready());
     }
 }
+
+#[cfg(test)]
+mod prepared_job_ownership_tests {
+    use std::sync::Arc;
+    use std::sync::Mutex;
+    use std::sync::atomic::AtomicUsize;
+    use std::sync::atomic::Ordering;
+    use std::task::Wake;
+    use std::task::Waker;
+
+    use qubit_operation::ManagerOptions;
+    use qubit_operation::OperationControl;
+    use qubit_operation::OperationManager;
+    use qubit_operation::OperationOutcome;
+    use qubit_operation::PreparedExternalOperation;
+
+    use super::PreparedLocalJob;
+    use crate::operation::LocalExecutionConfig;
+    use crate::operation::LocalFactObserver;
+    use crate::operation::LocalIoExecutor;
+
+    struct WakeCount(AtomicUsize);
+
+    impl Wake for WakeCount {
+        fn wake(self: Arc<Self>) {
+            self.wake_by_ref();
+        }
+
+        fn wake_by_ref(self: &Arc<Self>) {
+            self.0.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+
+    fn make_job(executor: &LocalIoExecutor) -> Arc<PreparedLocalJob<String, (), ()>> {
+        PreparedLocalJob::new(
+            Arc::clone(&executor.inner),
+            String::from("owned request"),
+            executor.reserve_slot().expect("queue slot"),
+            Arc::new(Mutex::new(executor.reserve_bytes(0).expect("owned permit"))),
+            executor.reserve_handle().expect("handle permit"),
+            LocalFactObserver::new(),
+            |_| OperationOutcome::<(), ()>::Succeeded(()),
+        )
+    }
+
+    fn operation_id(manager: &OperationManager) -> qubit_operation::OperationId {
+        manager
+            .try_submit(Default::default(), |_| Ok::<(), ()>(()))
+            .expect("operation admitted")
+            .id()
+    }
+
+    #[test]
+    fn test_prepared_request_is_transferred_at_most_once() {
+        let manager = OperationManager::new(ManagerOptions::default()).expect("manager");
+        let executor = LocalIoExecutor::new(manager, LocalExecutionConfig::default()).expect("executor");
+        let job = make_job(&executor);
+
+        assert_eq!(Some(String::from("owned request")), job.take_request());
+        assert_eq!(None, job.take_request());
+    }
+
+    #[test]
+    fn test_finish_released_clears_prepared_state_and_publishes_settlement() {
+        let manager = OperationManager::new(ManagerOptions::default()).expect("manager");
+        let executor = LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).expect("executor");
+        let job = make_job(&executor);
+        let id = operation_id(&manager);
+        PreparedExternalOperation::bind(&*job, id).expect("bind job identity");
+        let wakes: Vec<_> = (0..4).map(|_| Arc::new(WakeCount(AtomicUsize::new(0)))).collect();
+        {
+            let mut port = job.port.lock().unwrap_or_else(|error| error.into_inner());
+            port.wakers = std::array::from_fn(|index| Some(Waker::from(Arc::clone(&wakes[index]))));
+        }
+
+        job.finish_released(id);
+
+        let snapshot = OperationControl::snapshot(&*job);
+        assert_eq!(qubit_operation::ExecutionPhase::Finished, snapshot.execution);
+        assert!(snapshot.input_released);
+        assert_eq!(
+            Some(qubit_operation::SettlementStatus::Released),
+            snapshot.settlement.map(|s| s.status)
+        );
+        assert_eq!(None, job.take_request());
+        assert!(job.task.lock().unwrap_or_else(|error| error.into_inner()).is_none());
+        assert!(job._slot.lock().unwrap_or_else(|error| error.into_inner()).is_none());
+        assert!(
+            job._owned_permit
+                .lock()
+                .unwrap_or_else(|error| error.into_inner())
+                .is_none()
+        );
+        assert!(
+            job._handle_permit
+                .lock()
+                .unwrap_or_else(|error| error.into_inner())
+                .is_none()
+        );
+        assert!(
+            job._fact_observer
+                .lock()
+                .unwrap_or_else(|error| error.into_inner())
+                .is_none()
+        );
+        assert!(wakes.iter().all(|wake| wake.0.load(Ordering::SeqCst) == 1));
+    }
+
+    #[test]
+    fn test_abandon_only_publishes_terminal_state_after_binding() {
+        let manager = OperationManager::new(ManagerOptions::default()).expect("manager");
+        let executor = LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).expect("executor");
+
+        let unbound = make_job(&executor);
+        PreparedExternalOperation::abandon(Arc::clone(&unbound));
+        {
+            let port = unbound.port.lock().unwrap_or_else(|error| error.into_inner());
+            assert_eq!(qubit_operation::ExecutionPhase::Queued, port.phase);
+            assert!(!port.released);
+            assert!(port.settlement.is_none());
+        }
+
+        let bound = make_job(&executor);
+        let id = operation_id(&manager);
+        PreparedExternalOperation::bind(&*bound, id).expect("bind job identity");
+        PreparedExternalOperation::abandon(Arc::clone(&bound));
+        let snapshot = OperationControl::snapshot(&*bound);
+        assert_eq!(qubit_operation::ExecutionPhase::Finished, snapshot.execution);
+        assert!(snapshot.input_released);
+        assert_eq!(
+            Some(qubit_operation::SettlementStatus::Released),
+            snapshot.settlement.map(|s| s.status)
+        );
+        assert_eq!(None, bound.take_request());
+    }
+}
