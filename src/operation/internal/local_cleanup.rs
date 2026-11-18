@@ -190,11 +190,22 @@ mod tests {
         std::panic::panic_any(())
     }
     unsafe fn raw_noop(_: *const ()) {}
+    unsafe fn publish_completion_on_clone(data: *const ()) -> RawWaker {
+        let state = unsafe { &*(data.cast::<CleanupState>()) };
+        *state.result.lock().expect("cleanup result lock") = Some(None);
+        unsafe { Arc::increment_strong_count(data.cast::<CleanupState>()) };
+        RawWaker::new(data, &COMPLETION_ON_CLONE_VTABLE)
+    }
+    unsafe fn drop_state_waker(data: *const ()) {
+        unsafe { Arc::decrement_strong_count(data.cast::<CleanupState>()) };
+    }
     unsafe fn wake_panics(_: *const ()) {
         std::panic::panic_any(())
     }
     static CLONE_PANIC_VTABLE: RawWakerVTable = RawWakerVTable::new(clone_panics, raw_noop, raw_noop, raw_noop);
     static WAKE_PANIC_VTABLE: RawWakerVTable = RawWakerVTable::new(raw_clone, wake_panics, wake_panics, raw_noop);
+    static COMPLETION_ON_CLONE_VTABLE: RawWakerVTable =
+        RawWakerVTable::new(publish_completion_on_clone, raw_noop, raw_noop, drop_state_waker);
 
     unsafe fn raw_clone(data: *const ()) -> RawWaker {
         RawWaker::new(data, &WAKE_PANIC_VTABLE)
@@ -364,6 +375,28 @@ mod tests {
             CleanupOutcome::Released
         ));
         assert_eq!(std::fs::read_dir(parent.path()).expect("read temp parent").count(), 0);
+    }
+
+    #[test]
+    fn test_cleanup_wait_observes_completion_during_waker_registration() {
+        let state = Arc::new(CleanupState {
+            result: Mutex::new(None),
+            waker: Mutex::new(None),
+            owner: Mutex::new(None),
+        });
+        let mut wait = Box::pin(CleanupWait {
+            state: Arc::clone(&state),
+            marker: std::marker::PhantomData,
+        });
+        let raw = RawWaker::new(Arc::into_raw(Arc::clone(&state)).cast(), &COMPLETION_ON_CLONE_VTABLE);
+        let waker = unsafe { Waker::from_raw(raw) };
+        let mut context = Context::from_waker(&waker);
+
+        assert!(matches!(
+            wait.as_mut().poll(&mut context),
+            Poll::Ready(CleanupOutcome::Released)
+        ));
+        assert!(state.waker.lock().expect("cleanup waker lock").is_none());
     }
 
     #[test]
