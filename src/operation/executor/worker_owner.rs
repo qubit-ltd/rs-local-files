@@ -55,3 +55,96 @@ impl Drop for WorkerOwner {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+    use std::sync::mpsc;
+    use std::time::Duration;
+
+    use super::WorkerOwner;
+    use crate::operation::internal::worker::WorkerQueue;
+
+    #[test]
+    fn test_drop_stops_queue_and_joins_workers_after_drain() {
+        let queue = Arc::new(WorkerQueue::default());
+        let worker_queue = Arc::clone(&queue);
+        let (started_tx, started_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        let (drained_tx, drained_rx) = mpsc::channel();
+        let (exited_tx, exited_rx) = mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            worker_queue.run();
+            exited_tx.send(()).unwrap();
+        });
+        let owner = WorkerOwner::new(Arc::clone(&queue), vec![worker]);
+
+        assert!(
+            queue
+                .push(
+                    Box::new(move || {
+                        started_tx.send(()).unwrap();
+                        release_rx.recv().unwrap();
+                    }),
+                    false,
+                    2,
+                )
+                .is_ok()
+        );
+        started_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        assert!(
+            queue
+                .push(Box::new(move || drained_tx.send(()).unwrap()), false, 2)
+                .is_ok()
+        );
+
+        let (dropped_tx, dropped_rx) = mpsc::channel();
+        let drop_thread = std::thread::spawn(move || {
+            drop(owner);
+            dropped_tx.send(()).unwrap();
+        });
+        release_tx.send(()).unwrap();
+        drained_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        exited_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        dropped_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        drop_thread.join().unwrap();
+        assert!(queue.push(Box::new(|| {}), false, 1).is_err());
+    }
+
+    #[test]
+    fn test_drop_on_worker_detaches_self_and_exits() {
+        let queue = Arc::new(WorkerQueue::default());
+        let worker_queue = Arc::clone(&queue);
+        let (exited_tx, exited_rx) = mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            worker_queue.run();
+            exited_tx.send(()).unwrap();
+        });
+        let owner = Arc::new(WorkerOwner::new(Arc::clone(&queue), vec![worker]));
+        let worker_owner = Arc::clone(&owner);
+        let (started_tx, started_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        let (dropped_tx, dropped_rx) = mpsc::channel();
+        assert!(
+            queue
+                .push(
+                    Box::new(move || {
+                        started_tx.send(()).unwrap();
+                        release_rx.recv().unwrap();
+                        drop(worker_owner);
+                        dropped_tx.send(()).unwrap();
+                    }),
+                    false,
+                    1,
+                )
+                .is_ok()
+        );
+        started_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        drop(owner);
+        release_tx.send(()).unwrap();
+
+        dropped_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        exited_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        assert!(queue.push(Box::new(|| {}), false, 1).is_err());
+    }
+}
