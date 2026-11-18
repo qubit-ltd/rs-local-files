@@ -803,6 +803,7 @@ mod activation_state_tests {
     use std::sync::Mutex;
 
     use qubit_operation::ManagerOptions;
+    use qubit_operation::OperationControl;
     use qubit_operation::OperationManager;
     use qubit_operation::OperationOutcome;
     use qubit_operation::PreparedExternalOperation;
@@ -840,6 +841,55 @@ mod activation_state_tests {
             operation.wait_outcome().expect("parent outcome"),
             OperationOutcome::Succeeded(())
         ));
+    }
+
+    #[test]
+    fn test_activation_releases_job_when_request_was_already_taken() {
+        let manager = OperationManager::new(ManagerOptions::default()).expect("manager");
+        let executor = LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).expect("executor");
+        let observed = Arc::new(Mutex::new(None));
+        let observed_job = Arc::clone(&observed);
+        let mut operation = manager
+            .try_submit(Default::default(), move |scope| {
+                let job = PreparedLocalJob::new(
+                    Arc::clone(&executor.inner),
+                    String::from("one-shot request"),
+                    executor.reserve_slot().expect("queue slot"),
+                    Arc::new(Mutex::new(executor.reserve_bytes(0).expect("owned permit"))),
+                    executor.reserve_handle().expect("handle permit"),
+                    LocalFactObserver::new(),
+                    |request| {
+                        assert_eq!("one-shot request", request);
+                        OperationOutcome::<usize, ()>::Succeeded(1)
+                    },
+                );
+                assert_eq!(Some(String::from("one-shot request")), job.take_request());
+                PreparedExternalOperation::bind(&*job, scope.id()).expect("bind job identity");
+                let failure = PreparedExternalOperation::activate(Arc::clone(&job), scope)
+                    .expect_err("activation must fail after the owned request was consumed");
+                assert_eq!("local request already taken", failure.summary.as_str());
+                *observed_job.lock().unwrap_or_else(|error| error.into_inner()) = Some(job);
+                Ok::<_, ()>(())
+            })
+            .expect("parent operation");
+        assert!(matches!(
+            operation.wait_outcome().expect("parent outcome"),
+            OperationOutcome::Succeeded(())
+        ));
+
+        let job = observed
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .take()
+            .expect("prepared job");
+        let snapshot = OperationControl::snapshot(&*job);
+        assert_eq!(qubit_operation::ExecutionPhase::Finished, snapshot.execution);
+        assert!(snapshot.input_released);
+        assert_eq!(
+            Some(qubit_operation::SettlementStatus::Released),
+            snapshot.settlement.map(|s| s.status)
+        );
+        assert!(job.task.lock().unwrap_or_else(|error| error.into_inner()).is_none());
     }
 }
 
