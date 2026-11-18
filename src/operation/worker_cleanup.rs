@@ -153,7 +153,7 @@ mod tests {
     }
 
     #[test]
-    fn cleanup_retains_resource_until_worker_confirmation() {
+    fn test_worker_cleanup_retains_resource_until_worker_confirmation() {
         let (pending_resource, requests, drops) = resource(Poll::Pending, None);
         let mut cleanup = Box::pin(WorkerCleanup::<TestResource>::policy().cleanup(pending_resource, context()));
         let mut cx = Context::from_waker(Waker::noop());
@@ -175,7 +175,7 @@ mod tests {
     }
 
     #[test]
-    fn dispose_requests_cleanup_and_drops_resource() {
+    fn test_dispose_requests_cleanup_and_drops_resource() {
         let (resource, requests, drops) = resource(Poll::Pending, None);
         WorkerCleanup::<TestResource>::dispose(resource);
         assert_eq!(requests.load(Ordering::SeqCst), 1);
@@ -183,7 +183,7 @@ mod tests {
     }
 
     #[test]
-    fn cleanup_failure_returns_resource_with_failure_identity() {
+    fn test_worker_cleanup_failure_returns_resource_with_failure_identity() {
         let manager = qubit_operation::OperationManager::new(qubit_operation::ManagerOptions::default())
             .expect("operation manager should be created");
         let resource_id = Arc::new(std::sync::Mutex::new(None));

@@ -211,4 +211,36 @@ mod tests {
         cleanup_rx.recv_timeout(Duration::from_secs(1)).unwrap();
         assert_eq!(permits.used(), 0);
     }
+
+    #[test]
+    fn test_run_alternates_lanes_while_both_have_pending_jobs() {
+        let queue = WorkerQueue::default();
+        let (tx, rx) = mpsc::channel();
+
+        for label in ["ordinary-1", "ordinary-2"] {
+            let tx = tx.clone();
+            assert!(queue.push(Box::new(move || tx.send(label).unwrap()), false, 2).is_ok());
+        }
+
+        let permits = PermitPool::new(2);
+        for label in ["cleanup-1", "cleanup-2"] {
+            let permit = permits.try_acquire(1).unwrap();
+            let tx = tx.clone();
+            assert!(
+                queue
+                    .push_cleanup(Box::new(move || tx.send(label).unwrap()), permit, 2)
+                    .is_ok()
+            );
+        }
+
+        drop(tx);
+        queue.stop();
+        queue.run();
+
+        let completed = (0..4)
+            .map(|_| rx.recv_timeout(Duration::from_secs(1)).unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(completed, ["cleanup-1", "ordinary-1", "cleanup-2", "ordinary-2"]);
+        assert_eq!(permits.used(), 0);
+    }
 }
