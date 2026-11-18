@@ -280,6 +280,50 @@ fn test_digest_conditional_conflict_keeps_existing_data_and_published_state_corr
     );
 }
 
+#[cfg(feature = "digest")]
+#[test]
+fn test_digest_conditional_content_mismatch_preserves_existing_data_and_effect_facts() {
+    use qubit_local_files::operation::publish::LocalConditionalWriterCommitRequest;
+    use qubit_local_files::options::LocalWritePrecondition;
+    use sha2::Digest;
+    use sha2::Sha256;
+
+    let directory = tempfile::tempdir().unwrap();
+    let root = std::fs::canonicalize(directory.path()).unwrap();
+    let destination = root.join("content-mismatch");
+    std::fs::write(&destination, b"current content").unwrap();
+    let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+    let filesystem = facade(&manager)
+        .with_symlink_policy(qubit_local_files::policy::LocalSymlinkPolicy::Reject)
+        .unwrap();
+    let (mut operation, observer) = filesystem
+        .submit_conditional_writer_commit::<Sha256>(
+            &manager,
+            Default::default(),
+            LocalConditionalWriterCommitRequest {
+                path: destination.clone(),
+                precondition: LocalWritePrecondition::Content(Sha256::digest(b"stale content")),
+                options: LocalWriteOptions::new(LocalWriteMode::CreateOrReplace),
+                bytes: b"candidate content".to_vec(),
+            },
+            LocalOperationOptions::default(),
+        )
+        .unwrap();
+
+    assert!(matches!(
+        operation.wait_outcome().unwrap(),
+        OperationOutcome::Failed(qubit_local_files::operation::publish::LocalConditionalWriterCommandError::Commit(_))
+    ));
+    assert_eq!(std::fs::read(destination).unwrap(), b"current content");
+    let facts = observer.snapshot();
+    assert_eq!(
+        facts.publication,
+        qubit_local_files::operation::LocalPublicationState::NotPublished
+    );
+    assert_eq!(facts.modified_count, 0);
+    assert_eq!(facts.modified_bytes, 0);
+}
+
 #[cfg(all(feature = "digest", feature = "test-support"))]
 #[test]
 fn test_conditional_writer_cancellation_at_precommit_gate_aborts_without_publishing() {
@@ -957,6 +1001,70 @@ fn test_temp_directory_keep_and_persist_are_supported() {
     };
     assert!(kept.path().is_dir());
     std::fs::remove_dir_all(kept.path()).unwrap();
+}
+
+#[test]
+fn test_temp_lifecycle_rejects_wrong_manager_and_returns_original_access() {
+    use qubit_local_files::LocalFileSystem;
+    use qubit_local_files::operation::LocalSubmitRejection;
+    use qubit_local_files::operation::publish::LocalTempLifecycleCommand;
+    use qubit_local_files::operation::publish::LocalTempLifecycleRequest;
+    use qubit_local_files::operation::publish::LocalTempLifecycleResult;
+    use qubit_local_files::operation::submit_temp_file;
+    use qubit_local_files::options::LocalTempFileOptions;
+
+    let directory = tempfile::tempdir().unwrap();
+    let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+    let other_manager = OperationManager::new(ManagerOptions::default()).unwrap();
+    let executor = LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).unwrap();
+    let filesystem = LocalFileSystem::host().unwrap();
+    let async_filesystem = block_on(AsyncLocalFileSystem::host(executor.clone())).unwrap();
+    let mut creation = submit_temp_file(
+        filesystem,
+        executor,
+        &manager.as_async(),
+        Default::default(),
+        LocalTempFileOptions::new().with_parent(directory.path()),
+    )
+    .unwrap();
+    let access = match block_on(creation.wait_outcome()).unwrap() {
+        OperationOutcome::Succeeded(access) => access,
+        _ => panic!("temp file creation failed"),
+    };
+    let resource_id = access.resource_id();
+
+    let rejection = match async_filesystem.submit_temp_lifecycle(
+        &other_manager,
+        Default::default(),
+        LocalTempLifecycleRequest {
+            access,
+            command: LocalTempLifecycleCommand::Keep,
+        },
+    ) {
+        Err(rejection) => rejection,
+        Ok(_) => panic!("a different manager cannot submit to this executor"),
+    };
+    assert_eq!(rejection.rejection(), LocalSubmitRejection::WrongManager);
+    let request = rejection.into_request();
+    assert_eq!(request.access.resource_id(), resource_id);
+
+    let (mut kept, returned_access, _) = async_filesystem
+        .submit_temp_lifecycle(
+            &manager,
+            Default::default(),
+            LocalTempLifecycleRequest {
+                access: request.access,
+                command: LocalTempLifecycleCommand::Keep,
+            },
+        )
+        .unwrap();
+    assert_eq!(returned_access.resource_id(), resource_id);
+    let persisted = match block_on(kept.wait_outcome()).unwrap() {
+        OperationOutcome::Succeeded(LocalTempLifecycleResult::Persisted(outcome)) => outcome,
+        _ => panic!("temp keep failed after recovering the rejected request"),
+    };
+    assert!(persisted.path().exists());
+    std::fs::remove_file(persisted.path()).unwrap();
 }
 
 #[cfg(feature = "test-support")]
