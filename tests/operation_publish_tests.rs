@@ -571,6 +571,7 @@ fn test_partial_stage_write_failure_keeps_the_unpublished_stage_for_cleanup() {
     use qubit_local_files::operation::publish::LocalStagedTreeFile;
     use qubit_local_files::operation::publish::LocalStagedTreePublishError;
     use qubit_local_files::operation::publish::LocalStagedTreePublishRequest;
+    use qubit_local_files::options::LocalTempCleanupLimits;
     use qubit_local_files::options::LocalTempDirectoryOptions;
     use qubit_local_files::options::LocalTreePublishOptions;
 
@@ -602,7 +603,17 @@ fn test_partial_stage_write_failure_keeps_the_unpublished_stage_for_cleanup() {
         )
         .unwrap();
     match operation.wait_outcome().unwrap() {
-        OperationOutcome::Failed(LocalStagedTreePublishError::Write { stage, .. }) => {
+        OperationOutcome::Failed(LocalStagedTreePublishError::Write { mut stage, .. }) => {
+            let stage_name = stage.relative_name().to_os_string();
+            assert!(!stage_name.is_empty());
+            assert!(stage.observation().is_ok());
+            assert!(format!("{stage:?}").contains("LocalStagedTreeRecovery"));
+
+            // Exercise mutable dereferencing as a caller configuring the
+            // native retained stage through the recovery owner.
+            std::ops::DerefMut::deref_mut(&mut stage).set_cleanup_limits(LocalTempCleanupLimits::new());
+            stage.set_cleanup_limits(LocalTempCleanupLimits::new());
+
             stage.cleanup().unwrap();
         }
         outcome => panic!("expected retained stage after duplicate write, got {outcome:?}"),
@@ -614,6 +625,63 @@ fn test_partial_stage_write_failure_keeps_the_unpublished_stage_for_cleanup() {
     );
     assert_eq!(observer.snapshot().modified_count, 2);
     assert!(observer.snapshot().range_unknown);
+}
+
+#[test]
+fn test_staged_recovery_cleanup_failure_keeps_disk_quota_and_retry_owner() {
+    use qubit_local_files::directory::LocalTreeRetainedResource;
+    use qubit_local_files::operation::publish::LocalStagedTreeFile;
+    use qubit_local_files::operation::publish::LocalStagedTreePublishError;
+    use qubit_local_files::operation::publish::LocalStagedTreePublishRequest;
+    use qubit_local_files::options::LocalTempCleanupLimits;
+    use qubit_local_files::options::LocalTempDirectoryOptions;
+    use qubit_local_files::options::LocalTreePublishOptions;
+
+    let directory = tempfile::tempdir().unwrap();
+    let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+    let filesystem = facade(&manager);
+    let (mut operation, _) = filesystem
+        .submit_staged_tree_publish(
+            &manager,
+            Default::default(),
+            LocalStagedTreePublishRequest {
+                parent: directory.path().into(),
+                name: "recovery-cleanup-failure".into(),
+                stage_options: LocalTempDirectoryOptions::new(),
+                files: vec![
+                    LocalStagedTreeFile {
+                        path: PathBuf::from("same"),
+                        bytes: b"first".to_vec(),
+                    },
+                    LocalStagedTreeFile {
+                        path: PathBuf::from("same"),
+                        bytes: b"second".to_vec(),
+                    },
+                ],
+                publish_options: LocalTreePublishOptions::new(),
+            },
+            LocalOperationOptions::default(),
+        )
+        .unwrap();
+
+    let mut recovery = match operation.wait_outcome().unwrap() {
+        OperationOutcome::Failed(LocalStagedTreePublishError::Write { stage, .. }) => stage,
+        outcome => panic!("expected retained stage after duplicate write, got {outcome:?}"),
+    };
+    recovery.set_cleanup_limits(LocalTempCleanupLimits::new().with_max_entries(0));
+
+    let cleanup = recovery
+        .cleanup()
+        .expect_err("the zero-entry cleanup limit should retain the recovery owner");
+    let (native_error, reservation) = cleanup.into_parts();
+    assert!(reservation.bytes() >= 1);
+    assert_eq!(native_error.retained_resources().len(), 1);
+
+    let mut retained: Vec<LocalTreeRetainedResource> = native_error.into_retained_resources();
+    let mut retry = retained.pop().expect("failed cleanup retains its stage");
+    retry.set_cleanup_limits(LocalTempCleanupLimits::new());
+    retry.cleanup().unwrap();
+    drop(reservation);
 }
 
 #[cfg(unix)]
