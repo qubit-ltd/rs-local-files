@@ -298,6 +298,77 @@ mod tests {
     }
 
     #[test]
+    fn test_terminal_close_uses_reserved_cleanup_when_worker_queue_is_full() {
+        let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+        let executor = LocalIoExecutor::new(
+            manager,
+            LocalExecutionConfig {
+                worker_count: 1,
+                queue_capacity: 1,
+                waiter_capacity: 1,
+                max_open_handles: 2,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let (started_tx, started_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        executor
+            .enqueue_task(move || {
+                started_tx.send(()).unwrap();
+                release_rx.recv().unwrap();
+            })
+            .unwrap();
+        started_rx.recv().unwrap();
+        executor.enqueue_task(|| {}).unwrap();
+
+        let fixture = tempfile::NamedTempFile::new().unwrap();
+        let native = crate::LocalFileReader::from_file(fixture.reopen().unwrap()).unwrap();
+        let buffer_budget = Arc::new(Mutex::new(executor.reserve_bytes(0).unwrap()));
+        let handle_budget = Arc::new(executor.reserve_handle().unwrap());
+        let cleanup_permit = executor.reserve_cleanup().unwrap();
+        let driver = WorkerStreamDriver(Arc::new(WorkerStreamInner {
+            executor,
+            native: Mutex::new(Some(LocalNativeStream::Reader(native))),
+            state: Mutex::new(WorkerStreamState {
+                commands: HashMap::new(),
+            }),
+            queue: Mutex::new(VecDeque::new()),
+            active: AtomicBool::new(false),
+            cleanup_permit: Mutex::new(Some(cleanup_permit)),
+            _buffer_budget: buffer_budget,
+            _handle_budget: handle_budget,
+            observer: None,
+            written_bytes: std::sync::atomic::AtomicU64::new(0),
+            append_mode: false,
+        }));
+        let request = LocalStreamRequest {
+            id: 9,
+            command: LocalStreamCommand::Close,
+        };
+        let mut cx = Context::from_waker(Waker::noop());
+        assert!(matches!(
+            driver.poll_command(&mut cx, &request),
+            std::task::Poll::Pending
+        ));
+        release_tx.send(()).unwrap();
+
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        loop {
+            match driver.poll_command(&mut cx, &request) {
+                std::task::Poll::Ready(Ok(super::super::LocalStreamCompletion::Closed)) => break,
+                std::task::Poll::Ready(Err(error)) => panic!("terminal close failed: {error}"),
+                std::task::Poll::Ready(Ok(other)) => panic!("unexpected completion: {other:?}"),
+                std::task::Poll::Pending => {
+                    assert!(std::time::Instant::now() < deadline, "terminal close did not finish");
+                    std::thread::sleep(std::time::Duration::from_millis(1));
+                }
+            }
+        }
+        assert!(driver.0.native.lock().unwrap().is_none());
+    }
+
+    #[test]
     fn test_managed_rejects_when_cleanup_capacity_is_reserved() {
         let manager = OperationManager::new(ManagerOptions::default()).unwrap();
         let executor = LocalIoExecutor::new(
