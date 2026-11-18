@@ -1575,7 +1575,22 @@ fn test_rooted_writer_retries_an_injected_staging_collision() {
         let mut writer = rooted
             .open_writer_with_options(Path::new("payload"), &LocalWriteOptions::new(LocalWriteMode::CreateNew))
             .expect("writer creation should retry the one-shot collision");
-        let _ = writer.abort().expect("retried staging entry should clean up");
+        Output::write_fully(&mut writer, b"recovered after collision").expect("writer should accept bytes");
+        let _outcome = writer.commit().expect("writer should publish after staging retry");
+
+        assert_eq!(
+            b"recovered after collision",
+            fs::read(directory.path().join("payload"))
+                .expect("committed payload should be readable")
+                .as_slice()
+        );
+        assert_eq!(
+            1,
+            fs::read_dir(directory.path())
+                .expect("root entries should be inspectable")
+                .count(),
+            "successful retry should leave no staging entry behind"
+        );
     });
 }
 
