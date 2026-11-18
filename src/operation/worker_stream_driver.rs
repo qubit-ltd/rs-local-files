@@ -214,3 +214,138 @@ impl LocalStreamDriver for WorkerStreamDriver {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+    use std::collections::VecDeque;
+    use std::io;
+    use std::sync::Arc;
+    use std::sync::Mutex;
+    use std::sync::atomic::AtomicBool;
+    use std::sync::mpsc;
+    use std::task::Context;
+    use std::task::Wake;
+    use std::task::Waker;
+
+    use qubit_operation::ManagerOptions;
+    use qubit_operation::OperationManager;
+
+    use super::super::LocalNativeStream;
+    use super::LocalStreamCommand;
+    use super::LocalStreamDriver;
+    use super::LocalStreamRequest;
+    use super::WorkerStreamDriver;
+    use super::WorkerStreamInner;
+    use super::WorkerStreamState;
+    use crate::LocalExecutionConfig;
+    use crate::LocalIoExecutor;
+
+    struct NoopWake;
+
+    impl Wake for NoopWake {
+        fn wake(self: Arc<Self>) {}
+    }
+
+    #[test]
+    fn test_poll_command_reports_full_worker_queue() {
+        let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+        let executor = LocalIoExecutor::new(
+            manager,
+            LocalExecutionConfig {
+                worker_count: 1,
+                queue_capacity: 1,
+                waiter_capacity: 1,
+                max_open_handles: 2,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let (started_tx, started_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        executor
+            .enqueue_task(move || {
+                started_tx.send(()).unwrap();
+                release_rx.recv().unwrap();
+            })
+            .unwrap();
+        started_rx.recv().unwrap();
+        executor.enqueue_task(|| {}).unwrap();
+        executor.enqueue_task(|| {}).unwrap();
+
+        let fixture = tempfile::NamedTempFile::new().unwrap();
+        std::fs::write(fixture.path(), b"stream").unwrap();
+        let native = crate::LocalFileReader::from_file(fixture.reopen().unwrap()).unwrap();
+        let buffer_budget = Arc::new(Mutex::new(executor.reserve_bytes(0).unwrap()));
+        let handle_budget = Arc::new(executor.reserve_handle().unwrap());
+        let cleanup_permit = executor.reserve_cleanup().unwrap();
+        let driver = WorkerStreamDriver(Arc::new(WorkerStreamInner {
+            executor,
+            native: Mutex::new(Some(LocalNativeStream::Reader(native))),
+            state: Mutex::new(WorkerStreamState {
+                commands: HashMap::new(),
+            }),
+            queue: Mutex::new(VecDeque::new()),
+            active: AtomicBool::new(false),
+            cleanup_permit: Mutex::new(Some(cleanup_permit)),
+            _buffer_budget: buffer_budget,
+            _handle_budget: handle_budget,
+            observer: None,
+            written_bytes: std::sync::atomic::AtomicU64::new(0),
+            append_mode: false,
+        }));
+        let request = LocalStreamRequest {
+            id: 1,
+            command: LocalStreamCommand::Read { max_bytes: 1 },
+        };
+        let waker = Waker::from(Arc::new(NoopWake));
+        let mut cx = Context::from_waker(&waker);
+        let result = driver.poll_command(&mut cx, &request);
+        release_tx.send(()).unwrap();
+        assert!(matches!(result, std::task::Poll::Ready(Err(ref error)) if error.kind() == io::ErrorKind::WouldBlock));
+    }
+
+    #[test]
+    fn test_managed_rejects_when_cleanup_capacity_is_reserved() {
+        let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+        let executor = LocalIoExecutor::new(
+            manager.clone(),
+            LocalExecutionConfig {
+                max_open_handles: 1,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let held_cleanup = executor.reserve_cleanup().unwrap();
+        let buffer_budget = Arc::new(Mutex::new(executor.reserve_bytes(0).unwrap()));
+        let handle_budget = Arc::new(executor.reserve_handle().unwrap());
+        let fixture = tempfile::NamedTempFile::new().unwrap();
+        std::fs::write(fixture.path(), b"stream").unwrap();
+        let native = crate::LocalFileReader::from_file(fixture.reopen().unwrap()).unwrap();
+        let executor_for_operation = executor.clone();
+        let (result_tx, result_rx) = mpsc::channel();
+        let mut operation = manager
+            .try_submit(Default::default(), move |scope| {
+                let result = WorkerStreamDriver::managed(
+                    &scope,
+                    executor_for_operation,
+                    LocalNativeStream::Reader(native),
+                    buffer_budget,
+                    handle_budget,
+                    None,
+                    false,
+                );
+                result_tx
+                    .send(result.err().expect("cleanup capacity must reject stream").kind())
+                    .unwrap();
+                Ok::<_, ()>(())
+            })
+            .unwrap();
+        assert_eq!(result_rx.recv().unwrap(), io::ErrorKind::WouldBlock);
+        assert!(matches!(
+            operation.wait_outcome().unwrap(),
+            qubit_operation::OperationOutcome::Succeeded(())
+        ));
+        drop(held_cleanup);
+    }
+}
