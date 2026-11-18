@@ -92,4 +92,39 @@ mod tests {
         assert!(debug.contains("modified_count: 2"));
         assert!(debug.contains("modified_bytes: 5"));
     }
+
+    #[test]
+    fn test_snapshot_recovers_the_latest_value_after_mutex_poisoning() {
+        let observer = LocalFactObserver::new();
+        let expected = LocalFactSnapshot {
+            modified_count: 3,
+            ..LocalFactSnapshot::default()
+        };
+        observer.update(expected);
+
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _guard = observer.snapshot.lock().unwrap();
+            panic!("poison observer snapshot mutex");
+        }));
+
+        assert_eq!(observer.snapshot(), expected);
+    }
+
+    #[test]
+    fn test_update_recovers_and_replaces_value_after_mutex_poisoning() {
+        let observer = LocalFactObserver::new();
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _guard = observer.snapshot.lock().unwrap();
+            panic!("poison observer snapshot mutex");
+        }));
+
+        let expected = LocalFactSnapshot {
+            modified_bytes: 11,
+            range_unknown: true,
+            ..LocalFactSnapshot::default()
+        };
+        observer.update(expected);
+
+        assert_eq!(observer.snapshot(), expected);
+    }
 }
