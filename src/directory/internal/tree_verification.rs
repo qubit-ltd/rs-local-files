@@ -780,6 +780,39 @@ mod missing_path_tests {
     }
 
     #[test]
+    fn test_required_privacy_rejects_symlink_entries_before_reopen() {
+        let fixture = tempfile::tempdir().expect("fixture");
+        let filesystem = LocalFileSystem::host().expect("host filesystem");
+        let parent = filesystem
+            .open_directory_with_options(fixture.path(), &LocalDirectoryOpenOptions::new())
+            .expect("parent directory");
+        let stage = parent
+            .create_staged_directory(&LocalTempDirectoryOptions::new())
+            .expect("staged directory");
+
+        let error = verify_entry_privacy(
+            &stage,
+            Path::new("link"),
+            LocalFileKind::Symlink,
+            None,
+            &LocalTreeValidationOptions::new().with_privacy(LocalPrivacyRequirement::Required),
+        )
+        .expect_err("privacy verification excludes symlink entries");
+        assert_eq!(error.kind(), crate::LocalFileErrorKind::RequirementNotMet);
+        assert_eq!(
+            error.path(),
+            Some(stage.directory().diagnostic_path().join("link").as_path())
+        );
+        assert!(
+            error
+                .reason()
+                .expect("reason")
+                .contains("excludes this tree entry kind")
+        );
+        stage.cleanup().expect("cleanup stage");
+    }
+
+    #[test]
     fn test_privacy_reopen_failure_keeps_the_entry_path_context() {
         let fixture = tempfile::tempdir().expect("fixture");
         let filesystem = LocalFileSystem::host().expect("host filesystem");
