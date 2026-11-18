@@ -429,4 +429,71 @@ mod tests {
         drop(observer);
         operation.wait_settlement().unwrap();
     }
+
+    #[test]
+    fn test_managed_walker_reports_full_worker_queue_without_blocking() {
+        use std::sync::mpsc;
+        use std::time::Duration;
+
+        struct ReleaseOnDrop(Option<mpsc::Sender<()>>);
+        impl Drop for ReleaseOnDrop {
+            fn drop(&mut self) {
+                if let Some(sender) = self.0.take() {
+                    let _ = sender.send(());
+                }
+            }
+        }
+
+        let directory = tempfile::tempdir().unwrap();
+        std::fs::write(directory.path().join("entry"), b"x").unwrap();
+        let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+        let executor = LocalIoExecutor::new(
+            manager.clone(),
+            LocalExecutionConfig {
+                worker_count: 1,
+                queue_capacity: 1,
+                waiter_capacity: 1,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let filesystem = block_on(AsyncLocalFileSystem::rooted(
+            executor.clone(),
+            directory.path().to_path_buf(),
+        ))
+        .unwrap();
+        let mut operation = filesystem
+            .submit_open_walker(
+                &manager,
+                Default::default(),
+                PathBuf::from("."),
+                LocalListOptions::default(),
+            )
+            .unwrap();
+        let mut walker = match operation.wait_outcome().unwrap() {
+            OperationOutcome::Succeeded(walker) => walker,
+            _ => panic!("expected the managed walker to open"),
+        };
+
+        let (started_tx, started_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        let release_guard = ReleaseOnDrop(Some(release_tx));
+        executor
+            .enqueue_task(move || {
+                started_tx.send(()).unwrap();
+                release_rx.recv().unwrap();
+            })
+            .unwrap();
+        started_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        executor.enqueue_task(|| {}).unwrap();
+        executor.enqueue_task(|| {}).unwrap();
+
+        let error = block_on(walker.next_batch()).expect_err("a saturated worker queue must reject traversal");
+        assert_eq!(error.kind(), crate::LocalFileErrorKind::Io);
+        assert!(error.to_string().contains("local worker queue is full"));
+
+        drop(release_guard);
+        block_on(walker.close()).unwrap();
+        operation.wait_settlement().unwrap();
+    }
 }
