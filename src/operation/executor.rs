@@ -1196,6 +1196,31 @@ mod tests {
             }
         }
     }
+
+    /// Runs the test executor clone retains workers after original drop
+    /// behavior while preserving the operation lifecycle invariants.
+    #[test]
+    fn test_executor_clone_retains_workers_after_original_drop() {
+        let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+        let executor = LocalIoExecutor::new(
+            manager,
+            LocalExecutionConfig {
+                worker_count: 1,
+                ..LocalExecutionConfig::default()
+            },
+        )
+        .unwrap();
+        let queue = std::sync::Arc::clone(&executor.inner.queue);
+        let clone = executor.clone();
+        drop(executor);
+        let (done_tx, done_rx) = mpsc::channel();
+        clone.enqueue_task(move || done_tx.send(()).unwrap()).unwrap();
+        done_rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("remaining executor clone must keep its worker alive");
+        drop(clone);
+        assert!(queue.push(Box::new(|| {}), false, 1).is_err());
+    }
     /// Runs the test duplicate arc submission is rejected without abandoning
     /// claimed job behavior while preserving the operation lifecycle
     /// invariants.
