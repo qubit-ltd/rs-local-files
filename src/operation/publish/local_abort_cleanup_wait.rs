@@ -57,3 +57,61 @@ impl<W: Send + 'static> Future for LocalAbortCleanupWait<W> {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::future::Future;
+    use std::sync::Arc;
+    use std::sync::Mutex;
+    use std::task::Context;
+    use std::task::Poll;
+    use std::task::Waker;
+
+    use qubit_operation::CleanupOutcome;
+
+    use super::super::LocalAbortCleanupState;
+    use super::LocalAbortCleanupWait;
+
+    fn wait() -> (LocalAbortCleanupWait<u8>, Arc<LocalAbortCleanupState<u8>>) {
+        let state = Arc::new(LocalAbortCleanupState {
+            owner: Mutex::new(None),
+            result: Mutex::new(None),
+            waker: Mutex::new(None),
+        });
+        (LocalAbortCleanupWait(Arc::clone(&state)), state)
+    }
+
+    #[test]
+    fn test_abort_wait_returns_a_result_present_before_the_first_poll() {
+        let (mut wait, state) = wait();
+        *state.result.lock().expect("cleanup result lock") = Some(CleanupOutcome::Released);
+        let waker = Waker::noop();
+        let mut context = Context::from_waker(waker);
+
+        assert!(matches!(
+            Future::poll(std::pin::Pin::new(&mut wait), &mut context),
+            Poll::Ready(CleanupOutcome::Released)
+        ));
+    }
+
+    #[test]
+    fn test_abort_wait_observes_worker_result_after_registering_waker() {
+        let (mut wait, state) = wait();
+        let waker = Waker::noop();
+        let mut context = Context::from_waker(waker);
+
+        assert!(matches!(
+            Future::poll(std::pin::Pin::new(&mut wait), &mut context),
+            Poll::Pending
+        ));
+        assert!(state.waker.lock().expect("registered waker lock").is_some());
+
+        // This is the worker's publication point after a pending poll; the
+        // next poll must consume the outcome even if the caller missed a wake.
+        *state.result.lock().expect("cleanup result lock") = Some(CleanupOutcome::Released);
+        assert!(matches!(
+            Future::poll(std::pin::Pin::new(&mut wait), &mut context),
+            Poll::Ready(CleanupOutcome::Released)
+        ));
+    }
+}
