@@ -538,6 +538,48 @@ mod tests {
     }
 
     #[test]
+    fn test_temp_submission_reports_native_creation_failures_without_retaining_resources() {
+        let parent = tempfile::tempdir().expect("temp parent");
+        let missing_parent = parent.path().join("missing");
+        let manager = OperationManager::new(ManagerOptions::default()).expect("manager");
+        let executor = LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).expect("local executor");
+        let filesystem = LocalFileSystem::host().expect("filesystem");
+        let async_manager = manager.as_async();
+
+        let mut file_operation = super::submit_temp_file(
+            filesystem.clone(),
+            executor.clone(),
+            &async_manager,
+            Default::default(),
+            LocalTempFileOptions::new().with_parent(&missing_parent),
+        )
+        .expect("file request accepted before native creation");
+        assert!(matches!(
+            block_on(file_operation.wait_outcome()).expect("file outcome"),
+            OperationOutcome::Failed(LocalCreateFailure::Local(_))
+        ));
+        let file_settlement = block_on(file_operation.wait_settlement());
+        assert_eq!(file_settlement.recovery_count, 0);
+        assert!(!missing_parent.exists());
+
+        let mut directory_operation = super::submit_temp_directory(
+            filesystem,
+            executor,
+            &async_manager,
+            Default::default(),
+            LocalTempDirectoryOptions::new().with_parent(&missing_parent),
+        )
+        .expect("directory request accepted before native creation");
+        assert!(matches!(
+            block_on(directory_operation.wait_outcome()).expect("directory outcome"),
+            OperationOutcome::Failed(LocalCreateFailure::Local(_))
+        ));
+        let directory_settlement = block_on(directory_operation.wait_settlement());
+        assert_eq!(directory_settlement.recovery_count, 0);
+        assert!(!missing_parent.exists());
+    }
+
+    #[test]
     fn test_temp_creation_capacity_is_retained_until_resource_cleanup_then_retry_succeeds() {
         let parent = tempfile::tempdir().expect("temp parent");
         let manager = OperationManager::new(ManagerOptions::default()).expect("manager");
