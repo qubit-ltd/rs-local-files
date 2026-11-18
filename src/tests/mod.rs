@@ -71,5 +71,6 @@ mod test_support_conditional_hooks_tests;
 mod tree_privacy_failure_tests;
 mod vectored_read_tests;
 mod vectored_tests;
+mod walker_public_api_tests;
 mod write;
 mod writer;
