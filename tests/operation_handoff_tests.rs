@@ -210,6 +210,53 @@ fn test_stage_stream_returns_unpolled_input_when_disk_budget_is_too_small() {
 }
 
 #[test]
+fn test_stage_admission_rejection_returns_owned_payloads() {
+    use qubit_operation::ShutdownMode;
+
+    let (manager, executor, filesystem) = setup();
+    let shutdown = manager.request_shutdown(ShutdownMode::Drain).wait().unwrap();
+    assert_eq!(shutdown.snapshot.active_operations, 0);
+
+    let bytes = Vec::from(&b"owned bytes"[..]);
+    let pointer = bytes.as_ptr();
+    let error = match stage_bytes(
+        filesystem.clone(),
+        executor.clone(),
+        &manager.as_async(),
+        OperationOptions::default(),
+        bytes,
+        LocalStageOptions::default(),
+    ) {
+        Err(error) => error,
+        Ok(_) => panic!("a closed manager must reject stage admission"),
+    };
+    let qubit_local_files::operation::handoff::LocalStageSubmitError::Admission { bytes, .. } = error else {
+        panic!("closed manager rejection must preserve the admission reason and payload");
+    };
+    assert_eq!(bytes, b"owned bytes");
+    assert_eq!(bytes.as_ptr(), pointer);
+
+    let (input, polls) = slice_input(b"owned input");
+    let error = match stage_stream(
+        filesystem,
+        executor,
+        &manager.as_async(),
+        OperationOptions::default(),
+        input,
+        LocalStageOptions::default(),
+    ) {
+        Err(error) => error,
+        Ok(_) => panic!("a closed manager must reject stream admission"),
+    };
+    let qubit_local_files::operation::handoff::LocalStageStreamSubmitError::Admission { input, .. } = error else {
+        panic!("closed manager rejection must return the original input");
+    };
+    assert_eq!(input.bytes, b"owned input");
+    assert_eq!(input.position, 0);
+    assert_eq!(polls.load(Ordering::SeqCst), 0);
+}
+
+#[test]
 fn test_sealed_export_is_read_only_and_keeps_same_resource_until_last_helper_releases() {
     let (manager, executor, filesystem) = setup();
     let mut operation = stage_bytes(
