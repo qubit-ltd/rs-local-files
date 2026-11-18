@@ -376,6 +376,7 @@ mod tests {
 
     use qubit_operation::ManagerOptions;
     use qubit_operation::OperationManager;
+    use qubit_operation::OperationOutcome;
     use qubit_operation::StopReason;
 
     use super::LocalCleanup;
@@ -389,6 +390,7 @@ mod tests {
     use super::async_result;
     use crate::LocalFileOperation;
     use crate::LocalFileSystem;
+    use crate::operation::LocalExecutionConfig;
     use crate::operation::LocalIoExecutor;
     use crate::options::LocalTempDirectoryOptions;
     use crate::options::LocalTempFileOptions;
@@ -431,6 +433,118 @@ mod tests {
             })
             .expect("operation completed");
         assert_eq!(completion.settlement.recovery_count, 0);
+        assert_eq!(std::fs::read_dir(parent.path()).unwrap().count(), 0);
+    }
+
+    #[test]
+    fn test_async_temp_file_and_directory_submission_create_managed_resources() {
+        let parent = tempfile::tempdir().expect("temp parent");
+        let manager = OperationManager::new(ManagerOptions::default()).expect("manager");
+        let executor = LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).expect("local executor");
+        let filesystem = LocalFileSystem::host().expect("filesystem");
+        let async_manager = manager.as_async();
+
+        let mut file_operation = super::submit_temp_file(
+            filesystem.clone(),
+            executor.clone(),
+            &async_manager,
+            Default::default(),
+            LocalTempFileOptions::new().with_parent(parent.path()),
+        )
+        .expect("file request accepted");
+        let file_access = match block_on(file_operation.wait_outcome()).expect("file outcome") {
+            OperationOutcome::Succeeded(access) => access,
+            _ => panic!("expected temporary file creation"),
+        };
+        assert_eq!(std::fs::read_dir(parent.path()).unwrap().count(), 1);
+        drop(file_access);
+        let file_settlement = block_on(file_operation.wait_settlement());
+        assert_eq!(file_settlement.recovery_count, 0);
+        assert!(file_settlement.cleanup_failures.is_empty());
+        assert_eq!(std::fs::read_dir(parent.path()).unwrap().count(), 0);
+
+        let mut directory_operation = super::submit_temp_directory(
+            filesystem,
+            executor,
+            &async_manager,
+            Default::default(),
+            LocalTempDirectoryOptions::new().with_parent(parent.path()),
+        )
+        .expect("directory request accepted");
+        let directory_access = match block_on(directory_operation.wait_outcome()).expect("directory outcome") {
+            OperationOutcome::Succeeded(access) => access,
+            _ => panic!("expected temporary directory creation"),
+        };
+        assert_eq!(std::fs::read_dir(parent.path()).unwrap().count(), 1);
+        drop(directory_access);
+        let directory_settlement = block_on(directory_operation.wait_settlement());
+        assert_eq!(directory_settlement.recovery_count, 0);
+        assert!(directory_settlement.cleanup_failures.is_empty());
+        assert_eq!(std::fs::read_dir(parent.path()).unwrap().count(), 0);
+    }
+
+    #[test]
+    fn test_temp_creation_capacity_is_retained_until_resource_cleanup_then_retry_succeeds() {
+        let parent = tempfile::tempdir().expect("temp parent");
+        let manager = OperationManager::new(ManagerOptions::default()).expect("manager");
+        let executor = LocalIoExecutor::new(
+            manager.clone(),
+            LocalExecutionConfig {
+                max_disk_bytes: 1,
+                ..LocalExecutionConfig::default()
+            },
+        )
+        .expect("local executor");
+        let filesystem = LocalFileSystem::host().expect("filesystem");
+        let async_manager = manager.as_async();
+
+        let mut first = super::submit_temp_file(
+            filesystem.clone(),
+            executor.clone(),
+            &async_manager,
+            Default::default(),
+            LocalTempFileOptions::new().with_parent(parent.path()),
+        )
+        .expect("first request accepted");
+        let first_access = match block_on(first.wait_outcome()).expect("first outcome") {
+            OperationOutcome::Succeeded(access) => access,
+            _ => panic!("expected first temporary file"),
+        };
+
+        let mut rejected = super::submit_temp_directory(
+            filesystem.clone(),
+            executor.clone(),
+            &async_manager,
+            Default::default(),
+            LocalTempDirectoryOptions::new().with_parent(parent.path()),
+        )
+        .expect("operation admission is independent of disk capacity");
+        assert!(matches!(
+            block_on(rejected.wait_outcome()).expect("rejected outcome"),
+            OperationOutcome::Failed(LocalCreateFailure::Capacity)
+        ));
+        let rejected_settlement = block_on(rejected.wait_settlement());
+        assert_eq!(rejected_settlement.recovery_count, 0);
+        assert_eq!(std::fs::read_dir(parent.path()).unwrap().count(), 1);
+
+        drop(first_access);
+        assert_eq!(block_on(first.wait_settlement()).recovery_count, 0);
+        assert_eq!(std::fs::read_dir(parent.path()).unwrap().count(), 0);
+
+        let mut retry = super::submit_temp_directory(
+            filesystem,
+            executor,
+            &async_manager,
+            Default::default(),
+            LocalTempDirectoryOptions::new().with_parent(parent.path()),
+        )
+        .expect("retry admitted after capacity release");
+        let retry_access = match block_on(retry.wait_outcome()).expect("retry outcome") {
+            OperationOutcome::Succeeded(access) => access,
+            _ => panic!("expected retry to create directory"),
+        };
+        drop(retry_access);
+        assert_eq!(block_on(retry.wait_settlement()).recovery_count, 0);
         assert_eq!(std::fs::read_dir(parent.path()).unwrap().count(), 0);
     }
 
