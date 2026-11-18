@@ -1330,6 +1330,60 @@ mod tests {
     }
 
     #[test]
+    fn test_read_all_enforces_per_operation_handle_limits_and_read_cap() {
+        use qubit_operation::OperationOutcome;
+
+        use crate::operation::LocalReadRequest;
+        use crate::operation::LocalSubmitRejection;
+        use crate::options::LocalReadAllOptions;
+
+        let directory = tempfile::tempdir().unwrap();
+        std::fs::write(directory.path().join("input"), b"payload").unwrap();
+        let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+        let executor = LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).unwrap();
+        let filesystem = block_on(AsyncLocalFileSystem::rooted(
+            executor.clone(),
+            directory.path().to_path_buf(),
+        ))
+        .unwrap();
+        let request = || LocalReadRequest {
+            path: PathBuf::from("input"),
+            read: Default::default(),
+        };
+        for max_open_handles in [Some(0), Some(executor.inner.config.max_open_handles + 1)] {
+            let result = filesystem.submit_read_all_with_observer(
+                &manager,
+                Default::default(),
+                request(),
+                crate::operation::LocalOperationOptions {
+                    max_open_handles,
+                    ..Default::default()
+                },
+            );
+            let error = match result {
+                Err(error) => error,
+                Ok(_) => panic!("invalid handle limit must be rejected"),
+            };
+            assert_eq!(error.rejection(), LocalSubmitRejection::CapacityExceeded);
+            assert_eq!(error.into_request().path, PathBuf::from("input"));
+        }
+        let (mut operation, _) = filesystem
+            .submit_read_all_with_observer(
+                &manager,
+                Default::default(),
+                LocalReadRequest {
+                    path: PathBuf::from("input"),
+                    read: LocalReadAllOptions::new().with_max_bytes(3),
+                },
+                Default::default(),
+            )
+            .unwrap();
+        assert!(matches!(operation.wait_outcome().unwrap(), OperationOutcome::Failed(_)));
+        operation.wait_settlement().unwrap();
+        assert_eq!(executor.inner.handle_slots.used(), 0);
+    }
+
+    #[test]
     fn test_open_submissions_reject_when_worker_buffer_exceeds_byte_budget() {
         use crate::operation::LocalSubmitRejection;
         use crate::options::LocalListOptions;
