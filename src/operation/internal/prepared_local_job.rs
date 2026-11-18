@@ -607,3 +607,132 @@ fn outcome_summary<T, E>(id: OperationId, outcome: &OperationOutcome<T, E>) -> C
         summary: DiagnosticSummary::new(text),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::sync::atomic::AtomicUsize;
+    use std::sync::atomic::Ordering;
+
+    use qubit_operation::ManagerOptions;
+    use qubit_operation::OperationControl;
+    use qubit_operation::OperationManager;
+    use qubit_operation::OperationOutcome;
+    use qubit_operation::PreparedExternalOperation;
+
+    use super::PreparedLocalJob;
+    use crate::operation::LocalExecutionConfig;
+    use crate::operation::LocalFactObserver;
+    use crate::operation::executor::LocalIoExecutor;
+
+    fn prepare<T, E, F>(executor: &LocalIoExecutor, task: F) -> std::sync::Arc<PreparedLocalJob<(), T, E>>
+    where
+        T: Send + 'static,
+        E: Send + 'static,
+        F: FnOnce(()) -> OperationOutcome<T, E> + Send + 'static,
+    {
+        PreparedLocalJob::new(
+            std::sync::Arc::clone(&executor.inner),
+            (),
+            executor.reserve_slot().unwrap(),
+            std::sync::Arc::new(std::sync::Mutex::new(executor.reserve_bytes(0).unwrap())),
+            executor.reserve_handle().unwrap(),
+            LocalFactObserver::new(),
+            task,
+        )
+    }
+
+    #[test]
+    fn test_external_bind_is_one_shot_and_success_is_observable() {
+        let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+        let executor = LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).unwrap();
+        let prepared = prepare(&executor, |_| OperationOutcome::<u8, ()>::Succeeded(42));
+        let mut handle = manager
+            .try_submit_external(Default::default(), std::sync::Arc::clone(&prepared))
+            .unwrap();
+
+        let id = OperationControl::snapshot(&*prepared).operation_id;
+        assert!(matches!(
+            PreparedExternalOperation::bind(&*prepared, id),
+            Err(qubit_operation::ExternalBindError::AlreadyBound)
+        ));
+        assert!(matches!(
+            handle.wait_outcome().unwrap(),
+            OperationOutcome::Succeeded(42)
+        ));
+        assert!(OperationControl::snapshot(&*prepared).input_released);
+    }
+
+    #[test]
+    fn test_external_worker_failure_and_panic_become_typed_outcomes() {
+        let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+        let executor = LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).unwrap();
+
+        let failed = prepare(&executor, |_| OperationOutcome::<(), _>::Failed("expected"));
+        let mut failed_handle = manager.try_submit_external(Default::default(), failed).unwrap();
+        assert!(matches!(
+            failed_handle.wait_outcome().unwrap(),
+            OperationOutcome::Failed("expected")
+        ));
+
+        let panicked = prepare::<(), (), _>(&executor, |_| panic!("injected worker panic"));
+        let mut panic_handle = manager.try_submit_external(Default::default(), panicked).unwrap();
+        assert!(matches!(
+            panic_handle.wait_outcome().unwrap(),
+            OperationOutcome::ExecutionFailed(_)
+        ));
+    }
+
+    #[test]
+    fn test_registered_lifecycle_wakers_are_notified_and_polls_become_ready() {
+        use std::sync::mpsc;
+        use std::task::Context;
+        use std::task::Wake;
+        use std::task::Waker;
+
+        struct Counter(AtomicUsize);
+        impl Wake for Counter {
+            fn wake(self: std::sync::Arc<Self>) {
+                self.wake_by_ref();
+            }
+
+            fn wake_by_ref(self: &std::sync::Arc<Self>) {
+                self.0.fetch_add(1, Ordering::SeqCst);
+            }
+        }
+
+        let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+        let executor = LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).unwrap();
+        let (started_tx, started_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        let prepared = prepare(&executor, move |_| {
+            started_tx.send(()).unwrap();
+            release_rx.recv().unwrap();
+            OperationOutcome::<(), ()>::Succeeded(())
+        });
+        let mut handle = manager
+            .try_submit_external(Default::default(), std::sync::Arc::clone(&prepared))
+            .unwrap();
+        started_rx.recv_timeout(std::time::Duration::from_secs(5)).unwrap();
+
+        let counter = std::sync::Arc::new(Counter(AtomicUsize::new(0)));
+        let waker = Waker::from(std::sync::Arc::clone(&counter));
+        let mut context = Context::from_waker(&waker);
+        assert!(OperationControl::poll_outcome(&*prepared, &mut context).is_pending());
+        assert!(OperationControl::poll_release(&*prepared, &mut context).is_pending());
+        assert!(OperationControl::poll_settlement(&*prepared, &mut context).is_pending());
+        assert!(PreparedExternalOperation::poll_take_outcome(&*prepared, &mut context).is_pending());
+
+        // A stop request wakes all registered control polls while the worker
+        // is held at the channel barrier, so the notification is deterministic.
+        OperationControl::request_stop(&*prepared, qubit_operation::StopReason::UserCancelled);
+        assert!(counter.0.load(Ordering::SeqCst) > 0);
+        release_tx.send(()).unwrap();
+        assert!(matches!(
+            handle.wait_outcome().unwrap(),
+            OperationOutcome::Succeeded(())
+        ));
+        assert!(OperationControl::poll_outcome(&*prepared, &mut context).is_ready());
+        assert!(OperationControl::poll_release(&*prepared, &mut context).is_ready());
+        assert!(OperationControl::poll_settlement(&*prepared, &mut context).is_ready());
+    }
+}
