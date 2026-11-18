@@ -719,13 +719,86 @@ mod missing_path_tests {
 
     use super::resource_overflow;
     use super::verify_entry_privacy;
+    use super::verify_tree;
     use crate::LocalFileKind;
     use crate::LocalFileSystem;
     use crate::LocalResourceKind;
+    use crate::directory::LocalTreeEntry;
     use crate::directory::LocalTreeValidationOptions;
     use crate::options::LocalDirectoryOpenOptions;
+    use crate::options::LocalListOptions;
     use crate::options::LocalTempDirectoryOptions;
     use crate::policy::LocalPrivacyRequirement;
+
+    fn staged_directory(fixture: &Path) -> crate::directory::LocalStagedDirectory {
+        LocalFileSystem::host()
+            .expect("host filesystem")
+            .open_directory_with_options(fixture, &LocalDirectoryOpenOptions::new())
+            .expect("parent directory")
+            .create_staged_directory(&LocalTempDirectoryOptions::new())
+            .expect("staged directory")
+    }
+
+    #[test]
+    fn test_exact_tree_validation_accepts_expected_entries_and_rejects_set_mismatches() {
+        let fixture = tempfile::tempdir().expect("fixture");
+        let mut stage = staged_directory(fixture.path());
+        stage
+            .write_file_new(Path::new("payload"), &mut &b"payload"[..], 7)
+            .expect("write staged file");
+        let expected = LocalTreeEntry::new("payload".into(), LocalFileKind::File).expect("expected entry");
+        assert!(
+            verify_tree(
+                &stage,
+                Some(std::slice::from_ref(&expected)),
+                &LocalTreeValidationOptions::new()
+            )
+            .is_ok()
+        );
+
+        let duplicate = LocalTreeEntry::new("payload".into(), LocalFileKind::File).expect("duplicate entry");
+        let error = verify_tree(
+            &stage,
+            Some(&[expected.clone(), duplicate]),
+            &LocalTreeValidationOptions::new(),
+        )
+        .expect_err("duplicate expected paths are invalid");
+        assert_eq!(crate::LocalFileErrorKind::InvalidOptions, error.kind());
+
+        let missing = LocalTreeEntry::new("missing".into(), LocalFileKind::File).expect("missing entry");
+        let error = verify_tree(&stage, Some(&[missing]), &LocalTreeValidationOptions::new())
+            .expect_err("an absent expected path fails exact-set validation");
+        assert!(error.reason().is_some());
+        stage.cleanup().expect("cleanup stage");
+    }
+
+    #[test]
+    fn test_tree_validation_enforces_expected_and_observed_resource_limits() {
+        let fixture = tempfile::tempdir().expect("fixture");
+        let mut stage = staged_directory(fixture.path());
+        stage
+            .write_file_new(Path::new("payload"), &mut &b"payload"[..], 7)
+            .expect("write staged file");
+        let expected = LocalTreeEntry::new("payload".into(), LocalFileKind::File).expect("expected entry");
+
+        let entry_limit = LocalTreeValidationOptions::new().with_limits(LocalListOptions::new().with_max_entries(0));
+        let error = verify_tree(&stage, Some(std::slice::from_ref(&expected)), &entry_limit)
+            .expect_err("expected entries are charged before traversal");
+        assert_eq!(crate::LocalFileErrorKind::ResourceLimit, error.kind());
+
+        let name_limit =
+            LocalTreeValidationOptions::new().with_limits(LocalListOptions::new().with_max_seen_name_bytes(1));
+        let error = verify_tree(&stage, Some(std::slice::from_ref(&expected)), &name_limit)
+            .expect_err("expected encoded names are charged to the configured budget");
+        assert_eq!(crate::LocalFileErrorKind::ResourceLimit, error.kind());
+
+        let observed_limit =
+            LocalTreeValidationOptions::new().with_limits(LocalListOptions::new().with_recursive().with_max_entries(0));
+        let error = verify_tree(&stage, None, &observed_limit)
+            .expect_err("observed entries exceed a zero-entry traversal limit");
+        assert_eq!(crate::LocalFileErrorKind::ResourceLimit, error.kind());
+        stage.cleanup().expect("cleanup stage");
+    }
 
     #[test]
     fn test_missing_entry_identity_is_reported_before_privacy_reopen() {
