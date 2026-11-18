@@ -115,16 +115,23 @@ mod tests {
         ));
     }
 
-    struct TestWake;
+    struct TestWake(std::sync::Arc<std::sync::atomic::AtomicUsize>);
 
     impl std::task::Wake for TestWake {
-        fn wake(self: Arc<Self>) {}
+        fn wake(self: Arc<Self>) {
+            self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        }
+
+        fn wake_by_ref(self: &Arc<Self>) {
+            self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        }
     }
 
     #[test]
     fn test_abort_wait_replaces_waker_when_a_second_poll_is_pending() {
         let (mut wait, state) = wait::<u16>();
-        let first_waker = Waker::from(Arc::new(TestWake));
+        let wake_count = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let first_waker = Waker::from(Arc::new(TestWake(Arc::clone(&wake_count))));
         let mut first_context = Context::from_waker(&first_waker);
 
         assert!(matches!(
@@ -132,7 +139,7 @@ mod tests {
             Poll::Pending
         ));
 
-        let replacement_waker = Waker::from(Arc::new(TestWake));
+        let replacement_waker = Waker::from(Arc::new(TestWake(Arc::clone(&wake_count))));
         let mut replacement_context = Context::from_waker(&replacement_waker);
         assert!(matches!(
             Future::poll(std::pin::Pin::new(&mut wait), &mut replacement_context),
@@ -145,5 +152,6 @@ mod tests {
                 .as_ref()
                 .is_some_and(|waker| waker.will_wake(&replacement_waker))
         );
+        assert_eq!(0, wake_count.load(std::sync::atomic::Ordering::SeqCst));
     }
 }
