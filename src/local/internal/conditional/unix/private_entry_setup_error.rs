@@ -56,3 +56,29 @@ impl Error for PrivateEntrySetupError {
         Some(&self.primary)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::error::Error;
+    use std::io;
+    use std::path::PathBuf;
+
+    use super::PrivateEntrySetupError;
+
+    #[test]
+    fn test_reports_setup_failure_as_source_and_cleanup_failure_in_display() {
+        let error = PrivateEntrySetupError {
+            primary: io::Error::other("setup failed"),
+            cleanup: io::Error::other("cleanup failed"),
+            path: PathBuf::from("candidate"),
+        };
+
+        assert_eq!(
+            error.source().expect("primary error should be source").to_string(),
+            "setup failed"
+        );
+        let diagnostic = error.to_string();
+        assert!(diagnostic.contains("setup failed"));
+        assert!(diagnostic.contains("private-entry cleanup failed at candidate: cleanup failed"));
+    }
+}
