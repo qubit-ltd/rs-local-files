@@ -65,9 +65,12 @@ impl<R: 'static> std::error::Error for LocalSubmitError<R> {}
 #[cfg(test)]
 mod tests {
     use std::error::Error;
+    use std::path::PathBuf;
 
+    use super::super::LocalReadRequest;
     use super::LocalSubmitError;
     use super::LocalSubmitRejection;
+    use crate::options::LocalReadAllOptions;
 
     #[test]
     fn test_rejection_formats_without_debugging_or_losing_the_request() {
@@ -81,5 +84,43 @@ mod tests {
         );
         assert!(Error::source(&error).is_none());
         assert_eq!(error.into_request(), [1, 2]);
+    }
+
+    #[test]
+    fn test_concrete_read_request_survives_error_conversion_and_recovery() {
+        let request = LocalReadRequest {
+            path: PathBuf::from("data/input.bin"),
+            read: LocalReadAllOptions::new().with_max_bytes(64),
+        };
+        let error = LocalSubmitError::new(request, LocalSubmitRejection::WrongManager);
+        let diagnostic = error.to_string();
+        let boxed: Box<dyn Error> = Box::new(error);
+
+        assert_eq!(diagnostic, "local operation rejected: WrongManager");
+        let error = boxed
+            .downcast::<LocalSubmitError<LocalReadRequest>>()
+            .expect("the concrete submit error remains recoverable");
+        assert_eq!(error.rejection(), LocalSubmitRejection::WrongManager);
+        assert_eq!(error.into_request().path, PathBuf::from("data/input.bin"));
+    }
+
+    #[test]
+    fn test_each_rejection_has_a_stable_display_diagnostic() {
+        let cases = [
+            (LocalSubmitRejection::Closed, "Closed"),
+            (LocalSubmitRejection::CapacityExceeded, "CapacityExceeded"),
+            (LocalSubmitRejection::WrongManager, "WrongManager"),
+            (LocalSubmitRejection::ScopeEnded, "ScopeEnded"),
+            (LocalSubmitRejection::Stopped, "Stopped"),
+            (LocalSubmitRejection::AlreadyBound, "AlreadyBound"),
+            (LocalSubmitRejection::AuthorityNotCaptured, "AuthorityNotCaptured"),
+        ];
+
+        for (rejection, name) in cases {
+            let error = LocalSubmitError::new(PathBuf::from("requested/path"), rejection);
+            assert_eq!(error.rejection(), rejection);
+            assert_eq!(error.to_string(), format!("local operation rejected: {name}"));
+            assert_eq!(error.into_request(), PathBuf::from("requested/path"));
+        }
     }
 }
