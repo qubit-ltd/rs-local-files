@@ -1444,3 +1444,98 @@ mod native_resolution_failure_tests {
         }
     }
 }
+
+#[cfg(test)]
+mod rooted_resolution_behavior_tests {
+    use std::fs;
+    use std::path::Path;
+
+    use crate::LocalFileErrorKind;
+    use crate::LocalFileOperation;
+    use crate::LocalSymlinkPolicy;
+    use crate::rooted::Root;
+
+    #[test]
+    fn test_list_start_accepts_root_and_rejects_non_directories() {
+        let fixture = tempfile::tempdir().expect("root fixture should exist");
+        fs::write(fixture.path().join("file"), b"payload").expect("file fixture should be written");
+        let root = Root::open(fixture.path()).expect("root authority should open");
+
+        let start = super::validate_rooted_list_start(&root, Path::new(""), LocalSymlinkPolicy::Reject, None)
+            .expect("empty list start should select the root directory");
+        assert!(start.as_os_str().is_empty());
+
+        let error = super::validate_rooted_list_start(&root, Path::new("file"), LocalSymlinkPolicy::Reject, None)
+            .expect_err("a regular file cannot be a listing start");
+        assert_eq!(LocalFileErrorKind::TypeConflict, error.kind());
+        assert_eq!(LocalFileOperation::List, error.operation());
+        assert_eq!(Some(Path::new("file")), error.path());
+    }
+
+    #[test]
+    fn test_rooted_resolver_distinguishes_root_allowed_and_descendant_results() {
+        let fixture = tempfile::tempdir().expect("root fixture should exist");
+        let root = Root::open(fixture.path()).expect("root authority should open");
+
+        let root_path = super::resolve_rooted_path_allow_root(
+            &root,
+            Path::new("."),
+            LocalSymlinkPolicy::Reject,
+            true,
+            LocalFileOperation::Metadata,
+        )
+        .expect("dot should resolve to the virtual root when permitted");
+        assert!(root_path.as_os_str().is_empty());
+
+        let error = super::resolve_rooted_path(
+            &root,
+            Path::new("."),
+            LocalSymlinkPolicy::Reject,
+            true,
+            LocalFileOperation::Metadata,
+        )
+        .expect_err("descendant resolution must reject the virtual root");
+        assert_eq!(LocalFileErrorKind::InvalidPath, error.kind());
+
+        let across_scope = super::resolve_rooted_path_allow_root(
+            &root,
+            Path::new("child"),
+            LocalSymlinkPolicy::FollowAcrossScope,
+            true,
+            LocalFileOperation::Metadata,
+        )
+        .expect_err("rooted resolution cannot follow links across its authority");
+        assert_eq!(LocalFileErrorKind::InvalidOptions, across_scope.kind());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_final_symlink_resolution_obeys_follow_final_flag() {
+        use std::os::unix::fs::symlink;
+
+        let fixture = tempfile::tempdir().expect("root fixture should exist");
+        fs::write(fixture.path().join("target"), b"payload").expect("target should be written");
+        symlink("target", fixture.path().join("link")).expect("link should be created");
+        let root = Root::open(fixture.path()).expect("root authority should open");
+
+        let kept = super::resolve_rooted_path_allow_root(
+            &root,
+            Path::new("link"),
+            LocalSymlinkPolicy::FollowWithinScope,
+            false,
+            LocalFileOperation::Metadata,
+        )
+        .expect("a final link should remain lexical when final following is disabled");
+        assert_eq!(Path::new("link"), kept.as_path());
+
+        let followed = super::resolve_rooted_path_allow_root(
+            &root,
+            Path::new("link"),
+            LocalSymlinkPolicy::FollowWithinScope,
+            true,
+            LocalFileOperation::Metadata,
+        )
+        .expect("a final link should resolve when final following is enabled");
+        assert_eq!(Path::new("target"), followed.as_path());
+    }
+}
