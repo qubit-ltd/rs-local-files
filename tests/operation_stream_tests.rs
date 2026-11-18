@@ -553,6 +553,76 @@ fn test_real_worker_stream_preserves_large_write_order_through_flush_and_commit(
 }
 
 #[test]
+fn test_dropped_real_worker_writer_releases_single_handle_for_reopen() {
+    use qubit_local_files::LocalFileSystem;
+    use qubit_local_files::operation::LocalExecutionConfig;
+    use qubit_local_files::operation::LocalIoExecutor;
+    use qubit_local_files::options::LocalWriteMode;
+    use qubit_local_files::options::LocalWriteOptions;
+    use qubit_operation::ManagerOptions;
+    use qubit_operation::OperationManager;
+    use qubit_operation::OperationOutcome;
+
+    let directory = tempfile::tempdir().unwrap();
+    let output = directory.path().join("single-handle.txt");
+    let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+    let executor = LocalIoExecutor::new(
+        manager.clone(),
+        LocalExecutionConfig {
+            max_open_handles: 1,
+            ..LocalExecutionConfig::default()
+        },
+    )
+    .unwrap();
+    let filesystem = LocalFileSystem::host().unwrap().into_async(executor).unwrap();
+
+    let (mut abandoned_open, _) = filesystem
+        .submit_open_writer(
+            &manager,
+            Default::default(),
+            output.clone(),
+            LocalWriteOptions::new(LocalWriteMode::CreateOrReplace),
+        )
+        .unwrap();
+    let mut abandoned = match abandoned_open.wait_outcome().unwrap() {
+        OperationOutcome::Succeeded(writer) => writer,
+        _ => panic!("initial worker writer failed to open"),
+    };
+    assert_eq!(
+        poll_worker(|cx| Pin::new(&mut abandoned).poll_write(cx, b"discarded")).unwrap(),
+        9
+    );
+    drop(abandoned);
+    abandoned_open.wait_settlement().unwrap();
+    assert!(
+        !output.exists(),
+        "dropping an uncommitted writer must abort its publication"
+    );
+
+    let (mut replacement_open, _) = filesystem
+        .submit_open_writer(
+            &manager,
+            Default::default(),
+            output.clone(),
+            LocalWriteOptions::new(LocalWriteMode::CreateOrReplace),
+        )
+        .unwrap();
+    let mut replacement = match replacement_open.wait_outcome().unwrap() {
+        OperationOutcome::Succeeded(writer) => writer,
+        _ => panic!("worker writer did not reopen after abort cleanup"),
+    };
+    assert_eq!(
+        poll_worker(|cx| Pin::new(&mut replacement).poll_write(cx, b"published")).unwrap(),
+        9
+    );
+    let outcome = poll_worker(|cx| Box::pin(replacement.commit()).as_mut().poll(cx)).unwrap();
+    assert_eq!(outcome.state(), qubit_local_files::outcome::LocalWriterState::Committed);
+    drop(replacement);
+    replacement_open.wait_settlement().unwrap();
+    assert_eq!(std::fs::read(output).unwrap(), b"published");
+}
+
+#[test]
 fn test_real_writer_commit_preserves_typed_error_and_observer() {
     use qubit_local_files::LocalFileSystem;
     use qubit_local_files::operation::LocalExecutionConfig;
