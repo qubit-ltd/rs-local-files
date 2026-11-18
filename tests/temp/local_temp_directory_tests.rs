@@ -23,11 +23,11 @@ use qubit_local_files::error::LocalFileErrorKind;
 use qubit_local_files::error::LocalFileOperation;
 use qubit_local_files::error::LocalPersistErrorParts;
 use qubit_local_files::options::LocalPersistOptions;
+use qubit_local_files::options::LocalTempCleanupLimits;
 use qubit_local_files::options::LocalTempDirectoryOptions;
 #[cfg(all(unix, feature = "test-support"))]
 use qubit_local_files::outcome::LocalPersistCleanupState;
 use qubit_local_files::outcome::LocalPersistFailureState;
-#[cfg(feature = "test-support")]
 use qubit_local_files::outcome::LocalTempSourceState;
 use qubit_local_files::policy::LocalDurabilityRequirement;
 #[cfg(feature = "test-support")]
@@ -356,6 +356,80 @@ fn test_local_temp_directory_resolves_safe_children() {
             .descendant(Path::new("nested/entry"))
             .expect("safe descendant should resolve")
     );
+}
+
+/// Verifies creation metadata and cleanup limits remain attached to the
+/// temporary directory and can be replaced before cleanup.
+#[test]
+fn test_local_temp_directory_exposes_creation_parent_and_cleanup_limits() {
+    let parent = tempdir().expect("temporary parent should be created");
+    let mut temporary = LocalFileSystem::host()
+        .expect("Host filesystem should open")
+        .create_temp_directory_with_options(&LocalTempDirectoryOptions::new().with_parent(parent.path()))
+        .expect("temporary directory should be created");
+    let creation_parent = fs::canonicalize(parent.path()).expect("parent should canonicalize");
+    let initial_limits = temporary.cleanup_limits();
+
+    assert!(temporary.path().starts_with(&creation_parent));
+    assert_eq!(creation_parent, temporary.creation_parent());
+    assert_eq!(LocalTempSourceState::Owned, temporary.source_state());
+    assert_eq!(LocalTempCleanupLimits::new(), initial_limits);
+
+    let limits = LocalTempCleanupLimits::new().with_max_depth(2).with_max_entries(8);
+    temporary.set_cleanup_limits(limits);
+    assert_eq!(limits, temporary.cleanup_limits());
+
+    temporary.cleanup().expect("temporary directory should clean up");
+    assert_eq!(LocalTempSourceState::Released, temporary.source_state());
+}
+
+/// Verifies Host and Rooted publication report parent preparation failures
+/// while retaining cleanup authority for the source directory.
+#[test]
+fn test_local_temp_directory_persist_rejects_non_directory_parent_without_creation() {
+    let parent = tempdir().expect("temporary parent should be created");
+    let blocked_parent = parent.path().join("blocked");
+    fs::write(&blocked_parent, b"not a directory").expect("blocked parent fixture should be written");
+
+    let host_parent = tempdir().expect("Host temporary parent should be created");
+    let host_temporary = LocalFileSystem::host()
+        .expect("Host filesystem should open")
+        .create_temp_directory_with_options(&LocalTempDirectoryOptions::new().with_parent(host_parent.path()))
+        .expect("Host temporary directory should be created");
+    let host_source = host_temporary.path().to_path_buf();
+    let error = host_temporary
+        .persist_with(&blocked_parent.join("target"), LocalPersistOptions::new())
+        .expect_err("Host publication should reject a file as its parent");
+    assert_eq!(LocalPersistFailureState::NotPublished, error.state());
+    assert_eq!(Some(blocked_parent.join("target").as_path()), error.resolved_target());
+    let LocalPersistErrorParts {
+        resource: mut host_temporary,
+        ..
+    } = error.into_parts();
+    host_temporary.cleanup().expect("Host source should remain cleanable");
+    assert!(!host_source.exists());
+
+    let rooted_parent = tempdir().expect("Rooted temporary parent should be created");
+    fs::write(rooted_parent.path().join("blocked"), b"not a directory")
+        .expect("Rooted blocked parent fixture should be written");
+    let rooted = LocalFileSystem::rooted(rooted_parent.path()).expect("root authority should open");
+    let rooted_temporary = rooted
+        .create_temp_directory_with_options(&LocalTempDirectoryOptions::new())
+        .expect("Rooted temporary directory should be created");
+    let rooted_source = rooted_temporary.path().to_path_buf();
+    let error = rooted_temporary
+        .persist_with(Path::new("/blocked/target"), LocalPersistOptions::new())
+        .expect_err("Rooted publication should reject a file as its parent");
+    assert_eq!(LocalPersistFailureState::NotPublished, error.state());
+    assert_eq!(Some(Path::new("/blocked/target")), error.resolved_target());
+    let LocalPersistErrorParts {
+        resource: mut rooted_temporary,
+        ..
+    } = error.into_parts();
+    rooted_temporary
+        .cleanup()
+        .expect("Rooted source should remain cleanable");
+    assert!(!rooted_host_path(rooted_parent.path(), &rooted_source).exists());
 }
 
 /// Verifies cleanup is idempotent after a temporary directory has released
