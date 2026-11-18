@@ -190,6 +190,73 @@ fn test_copy_failure_reports_partial_destination_removal() {
     );
 }
 
+/// Verifies partial replacement removes a nested directory child before
+/// failing.
+#[cfg(all(feature = "test-support", unix))]
+#[test]
+fn test_copy_failure_reports_partial_destination_removal_of_directory_child() {
+    let directory = tempfile::tempdir().expect("fixture directory should be created");
+    let source = directory.path().join("source");
+    let target = directory.path().join("target");
+    fs::write(&source, b"replacement").expect("source file should be written");
+    fs::create_dir(&target).expect("destination directory should be created");
+    let child = target.join("child-directory");
+    fs::create_dir(&child).expect("child directory should be created");
+    fs::write(child.join("nested"), b"nested").expect("nested child should be written");
+    let _fault =
+        install_test_fault("copy-destination-remove-after-child").expect("partial removal fault should install");
+
+    let failure = LocalFileSystem::host()
+        .expect("Host filesystem should open")
+        .copy_with_options(
+            &source,
+            &target,
+            &LocalCopyOptions::new().with_type_conflict(LocalCopyTypeConflictPolicy::Replace),
+        )
+        .expect_err("injected removal failure should fail the copy");
+
+    assert_ne!(LocalCopyFailureState::Unchanged, failure.state());
+    assert!(target.is_dir(), "the incompletely removed destination should remain");
+    assert_eq!(
+        0,
+        fs::read_dir(&target)
+            .expect("remaining children should be listed")
+            .count(),
+        "the selected directory child should be removed recursively"
+    );
+}
+
+/// Verifies the partial-removal fault rejects an empty destination explicitly.
+#[cfg(all(feature = "test-support", unix))]
+#[test]
+fn test_copy_failure_reports_empty_destination_partial_removal_guard() {
+    let directory = tempfile::tempdir().expect("fixture directory should be created");
+    let source = directory.path().join("source");
+    let target = directory.path().join("target");
+    fs::write(&source, b"replacement").expect("source file should be written");
+    fs::create_dir(&target).expect("empty destination directory should be created");
+    let _fault =
+        install_test_fault("copy-destination-remove-after-child").expect("partial removal fault should install");
+
+    let failure = LocalFileSystem::host()
+        .expect("Host filesystem should open")
+        .copy_with_options(
+            &source,
+            &target,
+            &LocalCopyOptions::new().with_type_conflict(LocalCopyTypeConflictPolicy::Replace),
+        )
+        .expect_err("empty destination must trigger the injected guard");
+
+    assert_eq!(LocalCopyFailureState::Unchanged, failure.state());
+    assert!(target.is_dir(), "the empty destination should remain intact");
+    assert_eq!(
+        0,
+        fs::read_dir(&target)
+            .expect("empty destination should be listable")
+            .count()
+    );
+}
+
 /// Verifies a failed symlink replacement cannot report unchanged after the
 /// previous destination has already been removed.
 #[cfg(all(feature = "test-support", unix))]
