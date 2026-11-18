@@ -398,7 +398,7 @@ fn test_local_temp_directory_persist_rejects_non_directory_parent_without_creati
         .expect("Host temporary directory should be created");
     let host_source = host_temporary.path().to_path_buf();
     let error = host_temporary
-        .persist_with(&blocked_parent.join("target"), LocalPersistOptions::new())
+        .persist_with(blocked_parent.join("target"), LocalPersistOptions::new())
         .expect_err("Host publication should reject a file as its parent");
     assert_eq!(LocalPersistFailureState::NotPublished, error.state());
     assert_eq!(Some(blocked_parent.join("target").as_path()), error.resolved_target());
