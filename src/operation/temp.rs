@@ -1192,6 +1192,41 @@ mod tests {
         assert_eq!(std::fs::read_dir(parent.path()).expect("read parent").count(), 0);
     }
 
+    #[cfg(all(feature = "test-support", unix))]
+    #[test]
+    fn test_async_partial_creation_commits_recovery_and_cleans_after_fault_is_removed() {
+        let parent = tempfile::tempdir().expect("temp parent");
+        let manager = OperationManager::new(ManagerOptions::default()).expect("manager");
+        let executor =
+            super::super::LocalIoExecutor::new(manager.clone(), super::super::LocalExecutionConfig::default())
+                .expect("local executor");
+        let filesystem = LocalFileSystem::host().expect("filesystem");
+        let fault = crate::test_support::install_test_fault_shared("host-temp-file-recovery-clone-cleanup")
+            .expect("install partial-creation fault");
+        let mut operation = super::submit_temp_file(
+            filesystem,
+            executor,
+            &manager.as_async(),
+            qubit_operation::OperationOptions::default(),
+            crate::options::LocalTempFileOptions::new().with_parent(parent.path()),
+        )
+        .expect("operation admitted");
+
+        let outcome = block_on(operation.wait_outcome()).expect("operation outcome");
+        let OperationOutcome::Failed(LocalCreateFailure::PartialRetained { error, resource_id: _ }) = outcome else {
+            panic!("partial creation should retain its cleanup resource");
+        };
+        assert_eq!(error.operation(), crate::error::LocalFileOperation::CreateTempFile);
+
+        drop(fault);
+        let settlement = block_on(operation.wait_settlement());
+        assert_eq!(
+            settlement.recovery_count, 0,
+            "the retained owner should clean up after fault removal"
+        );
+        assert_eq!(std::fs::read_dir(parent.path()).expect("read parent").count(), 0);
+    }
+
     struct WakePanics;
     struct ThreadWake(std::thread::Thread);
     impl std::task::Wake for ThreadWake {
