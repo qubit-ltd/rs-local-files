@@ -48,3 +48,37 @@ impl<I> std::fmt::Debug for LocalStageStreamSubmitError<I> {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::LocalStageStreamSubmitError;
+
+    #[test]
+    fn test_budget_rejection_hides_input_in_debug_and_returns_ownership() {
+        let error = LocalStageStreamSubmitError::Budget { input: vec![1, 2, 3] };
+        assert_eq!(
+            format!("{error:?}"),
+            "LocalStageStreamSubmitError::Budget { input: <owned> }"
+        );
+        let LocalStageStreamSubmitError::Budget { input } = error else {
+            panic!("budget failure variant is preserved");
+        };
+        assert_eq!(input, [1, 2, 3]);
+    }
+
+    #[test]
+    fn test_admission_rejection_hides_input_and_preserves_reason_and_ownership() {
+        let error = LocalStageStreamSubmitError::Admission {
+            reason: qubit_operation::AdmissionError::CapacityExceeded,
+            input: vec![4, 5],
+        };
+        let debug = format!("{error:?}");
+        assert!(debug.contains("CapacityExceeded"));
+        assert!(debug.contains("input: \"<owned>\""));
+        let LocalStageStreamSubmitError::Admission { reason, input } = error else {
+            panic!("admission failure variant is preserved");
+        };
+        assert_eq!(reason, qubit_operation::AdmissionError::CapacityExceeded);
+        assert_eq!(input, [4, 5]);
+    }
+}

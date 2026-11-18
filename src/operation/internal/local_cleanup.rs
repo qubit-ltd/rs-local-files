@@ -150,6 +150,7 @@ mod tests {
     use super::CleanupState;
     use super::CleanupWait;
     use super::LocalCleanup;
+    #[cfg(feature = "test-support")]
     use super::cleanup_resource;
     use super::safe_wake;
     use crate::LocalFileOperation;
@@ -363,5 +364,44 @@ mod tests {
             CleanupOutcome::Released
         ));
         assert_eq!(std::fs::read_dir(parent.path()).expect("read temp parent").count(), 0);
+    }
+
+    #[test]
+    fn test_cleanup_runs_on_reserved_worker_and_returns_the_owner_on_capacity_failure() {
+        let parent = tempfile::tempdir().expect("temp parent");
+        let manager = OperationManager::new(ManagerOptions::default()).expect("manager");
+        let executor = LocalIoExecutor::new(
+            manager.clone(),
+            LocalExecutionConfig {
+                max_open_handles: 1,
+                ..Default::default()
+            },
+        )
+        .expect("executor");
+        let cleanup = Arc::new(LocalCleanup {
+            executor: executor.clone(),
+        });
+        let context = || CleanupContext::new(qubit_operation::ContextOptions::default()).expect("cleanup context");
+
+        let owner = test_owner(&manager, &executor, parent.path());
+        let outcome = block_on(Arc::clone(&cleanup).cleanup(owner, context()));
+        assert!(matches!(outcome, CleanupOutcome::Released));
+        assert_eq!(0, std::fs::read_dir(parent.path()).unwrap().count());
+
+        let owner = test_owner(&manager, &executor, parent.path());
+        drop(owner.cleanup_permit.lock().expect("cleanup permit lock").take());
+        let held = executor.reserve_cleanup().expect("consume the only cleanup slot");
+        let outcome = block_on(Arc::clone(&cleanup).cleanup(owner, context()));
+        let CleanupOutcome::Failed { failure, resource } = outcome else {
+            panic!("cleanup without a reservation returns the recoverable owner");
+        };
+        assert_eq!("local cleanup queue capacity exhausted", failure.summary.as_str());
+        assert!(resource.native.lock().expect("native lock").is_some());
+        drop(held);
+        assert!(matches!(
+            block_on(cleanup.cleanup(resource, context())),
+            CleanupOutcome::Released
+        ));
+        assert_eq!(0, std::fs::read_dir(parent.path()).unwrap().count());
     }
 }

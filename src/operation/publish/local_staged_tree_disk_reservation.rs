@@ -46,3 +46,23 @@ impl LocalStagedTreeDiskReservation {
         self.0.amount()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use super::LocalStagedTreeDiskReservation;
+    use crate::operation::internal::permits::DiskPermitPool;
+
+    #[test]
+    fn test_bytes_and_debug_report_the_retained_quota() {
+        let pool = DiskPermitPool::new(16);
+        let reservation = LocalStagedTreeDiskReservation(Arc::new(pool.try_acquire(9).unwrap()));
+
+        assert_eq!(reservation.bytes(), 9);
+        assert_eq!(format!("{reservation:?}"), "LocalStagedTreeDiskReservation(9)");
+        assert_eq!(pool.used(), 9);
+        drop(reservation);
+        assert_eq!(pool.used(), 0);
+    }
+}

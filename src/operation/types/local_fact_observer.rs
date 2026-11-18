@@ -67,3 +67,29 @@ impl LocalFactObserver {
         *self.snapshot.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = snapshot;
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::LocalFactObserver;
+    use super::LocalFactSnapshot;
+
+    #[test]
+    fn test_observer_clone_reads_the_updated_fixed_size_snapshot() {
+        let observer = LocalFactObserver::new();
+        let clone = observer.clone();
+        assert_eq!(observer.snapshot(), LocalFactSnapshot::default());
+
+        let snapshot = LocalFactSnapshot {
+            modified_count: 2,
+            modified_bytes: 5,
+            range_unknown: true,
+            ..LocalFactSnapshot::default()
+        };
+        observer.update(snapshot);
+
+        assert_eq!(clone.snapshot(), snapshot);
+        let debug = format!("{clone:?}");
+        assert!(debug.contains("modified_count: 2"));
+        assert!(debug.contains("modified_bytes: 5"));
+    }
+}

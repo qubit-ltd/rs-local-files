@@ -77,3 +77,30 @@ impl<E: std::fmt::Debug> std::fmt::Debug for LocalStagedTreeReservedError<E> {
             .finish()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::LocalStagedTreeDiskReservation;
+    use super::LocalStagedTreeReservedError;
+    use crate::operation::internal::permits::DiskPermitPool;
+
+    #[test]
+    fn test_error_borrow_deref_debug_and_parts_keep_reservation_together() {
+        let pool = DiskPermitPool::new(16);
+        let reservation = LocalStagedTreeDiskReservation(std::sync::Arc::new(pool.try_acquire(7).unwrap()));
+        let error = LocalStagedTreeReservedError::new("stage write failed", reservation);
+
+        assert_eq!(error.error(), &"stage write failed");
+        assert_eq!(*error, "stage write failed");
+        let debug = format!("{error:?}");
+        assert!(debug.contains("stage write failed"));
+        assert!(debug.contains("LocalStagedTreeDiskReservation(7)"));
+        assert_eq!(pool.used(), 7);
+
+        let (error, reservation) = error.into_parts();
+        assert_eq!(error, "stage write failed");
+        assert_eq!(reservation.bytes(), 7);
+        drop(reservation);
+        assert_eq!(pool.used(), 0);
+    }
+}

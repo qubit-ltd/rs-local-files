@@ -53,3 +53,27 @@ impl std::error::Error for LocalExecutorCreateError {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::error::Error;
+
+    use super::LocalExecutorConfigError;
+    use super::LocalExecutorCreateError;
+
+    #[test]
+    fn test_invalid_configuration_display_has_no_source() {
+        let error = LocalExecutorCreateError::InvalidConfig(LocalExecutorConfigError::ZeroWorkers);
+
+        assert_eq!(error.to_string(), "invalid local executor config: ZeroWorkers");
+        assert!(Error::source(&error).is_none());
+    }
+
+    #[test]
+    fn test_worker_start_display_and_source_preserve_io_error() {
+        let error = LocalExecutorCreateError::WorkerStart(std::io::Error::other("thread limit"));
+
+        assert_eq!(error.to_string(), "failed to start local I/O worker: thread limit");
+        assert_eq!(Error::source(&error).unwrap().to_string(), "thread limit");
+    }
+}

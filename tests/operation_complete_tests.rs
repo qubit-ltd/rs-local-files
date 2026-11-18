@@ -378,6 +378,71 @@ fn test_prefix_bound_larger_than_executor_budget_only_charges_retained_capacity(
 }
 
 #[test]
+fn test_complete_read_rejections_return_the_original_request_for_invalid_limits() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("payload");
+    std::fs::write(&path, b"payload").unwrap();
+    let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+    let config = LocalExecutionConfig {
+        max_owned_bytes: 8,
+        ..LocalExecutionConfig::default()
+    };
+    let executor = LocalIoExecutor::new(manager.clone(), config).unwrap();
+    let filesystem = block_on(AsyncLocalFileSystem::host(executor)).unwrap();
+    let limits = qubit_local_files::LocalOperationOptions {
+        max_owned_bytes: Some(9),
+        ..Default::default()
+    };
+
+    let read_all = LocalReadRequest {
+        path: path.clone(),
+        read: Default::default(),
+    };
+    let error = match filesystem.submit_read_all(&manager, Default::default(), read_all, limits) {
+        Ok(_) => panic!("read-all must reject a per-operation limit above the executor limit"),
+        Err(error) => error,
+    };
+    assert_eq!(
+        error.rejection(),
+        qubit_local_files::operation::LocalSubmitRejection::CapacityExceeded
+    );
+    assert_eq!(error.into_request().path, path);
+
+    let path = directory.path().join("payload");
+    let read_prefix = LocalReadPrefixRequest {
+        path: path.clone(),
+        read: Default::default(),
+        max_bytes: 4,
+    };
+    let error = match filesystem.submit_read_prefix(&manager, Default::default(), read_prefix, limits) {
+        Ok(_) => panic!("prefix must reject a per-operation limit above the executor limit"),
+        Err(error) => error,
+    };
+    assert_eq!(
+        error.rejection(),
+        qubit_local_files::operation::LocalSubmitRejection::CapacityExceeded
+    );
+    assert_eq!(error.into_request().path, path);
+
+    let path = directory.path().join("payload");
+    let read_at = LocalReadAtRequest {
+        path: path.clone(),
+        read: Default::default(),
+        offset: SeekFrom::Start(0),
+        max_bytes: 4,
+    };
+    let error = match filesystem.submit_read_at(&manager, Default::default(), read_at, limits) {
+        Ok(_) => panic!("read-at must reject a per-operation limit above the executor limit"),
+        Err(error) => error,
+    };
+    assert_eq!(
+        error.rejection(),
+        qubit_local_files::operation::LocalSubmitRejection::CapacityExceeded
+    );
+    assert_eq!(error.into_request().path, path);
+}
+
+#[test]
 fn test_operation_handle_limits_reserve_the_required_native_handle_count() {
     let directory = tempfile::tempdir().unwrap();
     let source = directory.path().join("source");

@@ -9,13 +9,77 @@
 use std::io;
 use std::path::Path;
 
+use crate::LocalFileSystem;
+use crate::LocalTempRecovery;
 use crate::error::LocalFileEffectState;
 use crate::error::LocalFileError;
 use crate::error::LocalFileErrorKind;
+use crate::error::LocalFileErrorSource;
 use crate::error::LocalFileOperation;
 use crate::error::LocalPathCodecError;
+use crate::error::LocalReadLimitError;
 use crate::error::LocalResourceKind;
 use crate::error::LocalResourceLimitError;
+
+#[test]
+fn test_recovery_source_forwards_nested_io_context() {
+    let file = LocalFileSystem::host().unwrap().create_temp_file().unwrap();
+    let primary = LocalFileError::from_io(
+        LocalFileOperation::Read,
+        Some("read-path".into()),
+        None,
+        io::Error::from(io::ErrorKind::PermissionDenied),
+    );
+    let error = primary.with_temp_recovery(LocalTempRecovery::from_file(file));
+    let source = error.into_source().unwrap();
+    let LocalFileErrorSource::Recovery(nested) = source else {
+        panic!("a recovery owner is represented by a recovery source");
+    };
+
+    assert_eq!(Some(LocalFileErrorKind::PermissionDenied), nested.cause_kind());
+    assert_eq!(
+        Some(io::ErrorKind::PermissionDenied),
+        nested.io_error().map(io::Error::kind)
+    );
+    assert_eq!(io::ErrorKind::PermissionDenied, nested.io_error_kind());
+    assert_eq!(Some(LocalFileErrorKind::PermissionDenied), nested.cause_kind());
+}
+
+#[test]
+fn test_recovery_source_forwards_resource_and_read_limit_context() {
+    let filesystem = LocalFileSystem::host().unwrap();
+    let recovery = LocalTempRecovery::from_file(filesystem.create_temp_file().unwrap());
+    let resource = LocalFileError::from_resource_limit(
+        LocalFileOperation::Read,
+        None,
+        LocalResourceLimitError::new(LocalResourceKind::Entry, 8, 3, 5),
+    )
+    .with_temp_recovery(recovery);
+    let source = resource.into_source().unwrap();
+    let LocalFileErrorSource::Recovery(nested) = source else {
+        panic!("a recovery owner is represented by a recovery source");
+    };
+    assert_eq!(Some(LocalFileErrorKind::ResourceLimit), nested.cause_kind());
+    assert_eq!(io::ErrorKind::Other, nested.io_error_kind());
+    assert_eq!(
+        Some(5),
+        nested.resource_limit_error().map(LocalResourceLimitError::requested)
+    );
+
+    let recovery = LocalTempRecovery::from_file(filesystem.create_temp_file().unwrap());
+    let read = LocalFileError::from_read_limit(LocalFileOperation::Read, None, LocalReadLimitError::new(4, 7))
+        .with_temp_recovery(recovery);
+    let source = read.into_source().unwrap();
+    let LocalFileErrorSource::Recovery(nested) = source else {
+        panic!("a recovery owner is represented by a recovery source");
+    };
+    assert_eq!(Some(LocalFileErrorKind::ResourceLimit), nested.cause_kind());
+    assert_eq!(io::ErrorKind::Other, nested.io_error_kind());
+    assert_eq!(
+        Some((4, 7)),
+        nested.read_limit_error().map(|error| (error.limit(), error.observed()))
+    );
+}
 
 #[test]
 fn test_effect_queries_preserve_cause_and_effect_for_reclassified_io() {

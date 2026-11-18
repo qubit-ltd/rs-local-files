@@ -182,6 +182,77 @@ fn test_oversized_owned_read_limit_is_rejected_with_original_request() {
 }
 
 #[test]
+fn test_read_submission_returns_request_when_fact_observer_capacity_is_exhausted() {
+    let directory = tempfile::tempdir().unwrap();
+    let first_path = directory.path().join("first");
+    let second_path = directory.path().join("second");
+    std::fs::write(&first_path, b"first").unwrap();
+    std::fs::write(&second_path, b"second").unwrap();
+
+    let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+    let executor = LocalIoExecutor::new(
+        manager.clone(),
+        LocalExecutionConfig {
+            max_fact_records: 1,
+            ..LocalExecutionConfig::default()
+        },
+    )
+    .unwrap();
+    let filesystem = block_on(AsyncLocalFileSystem::host(executor)).unwrap();
+    let (mut first, observer) = filesystem
+        .submit_read_all_with_observer(
+            &manager,
+            Default::default(),
+            LocalReadRequest {
+                path: first_path,
+                read: Default::default(),
+            },
+            Default::default(),
+        )
+        .unwrap();
+    assert!(matches!(
+        first.wait_outcome().unwrap(),
+        qubit_operation::OperationOutcome::Succeeded(_)
+    ));
+    first.wait_settlement().unwrap();
+
+    let read = LocalReadAllOptions::new().with_max_bytes(17);
+    let request = LocalReadRequest {
+        path: second_path.clone(),
+        read,
+    };
+    let rejected =
+        match filesystem.submit_read_all_with_observer(&manager, Default::default(), request, Default::default()) {
+            Ok(_) => panic!("the retained observer should own the only fact slot"),
+            Err(error) => error,
+        };
+    assert_eq!(
+        rejected.rejection(),
+        qubit_local_files::operation::LocalSubmitRejection::CapacityExceeded
+    );
+    let returned = rejected.into_request();
+    assert_eq!(returned.path, second_path);
+    assert_eq!(returned.read, read);
+
+    drop(observer);
+    let (mut retry, _) = filesystem
+        .submit_read_all_with_observer(
+            &manager,
+            Default::default(),
+            LocalReadRequest {
+                path: returned.path,
+                read: returned.read,
+            },
+            Default::default(),
+        )
+        .unwrap();
+    assert!(matches!(
+        retry.wait_outcome().unwrap(),
+        qubit_operation::OperationOutcome::Succeeded(_)
+    ));
+}
+
+#[test]
 fn test_stopped_parent_rejects_child_read_before_worker_io() {
     let _cwd_guard = PROCESS_CWD_TEST_LOCK.lock().unwrap();
     use std::sync::mpsc;

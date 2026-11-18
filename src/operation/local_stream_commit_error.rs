@@ -69,3 +69,40 @@ impl std::error::Error for LocalStreamCommitError {
         Some(&self.error)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::error::Error;
+
+    use super::LocalStreamCommitError;
+    use crate::LocalFileCommitError;
+    use crate::LocalFileError;
+    use crate::LocalFileErrorKind;
+    use crate::LocalFileOperation;
+    use crate::LocalWriteFailureState;
+
+    #[test]
+    fn test_commit_error_exposes_retry_state_and_preserves_native_source() {
+        let source = LocalFileError::new(LocalFileErrorKind::ResourceLimit, LocalFileOperation::Commit);
+        let commit = LocalFileCommitError::new(source, LocalWriteFailureState::NotPublished, None);
+        let error = LocalStreamCommitError::new(commit, true);
+
+        assert!(error.retryable());
+        assert_eq!(error.commit_error().state(), LocalWriteFailureState::NotPublished);
+        assert_eq!(error.to_string(), error.commit_error().to_string());
+        assert_eq!(
+            Error::source(&error).unwrap().to_string(),
+            error.commit_error().to_string()
+        );
+
+        let non_retryable = LocalStreamCommitError::new(
+            LocalFileCommitError::new(
+                LocalFileError::new(LocalFileErrorKind::ResourceLimit, LocalFileOperation::Commit),
+                LocalWriteFailureState::Indeterminate,
+                None,
+            ),
+            false,
+        );
+        assert!(!non_retryable.retryable());
+    }
+}

@@ -61,3 +61,25 @@ impl<R> std::fmt::Display for LocalSubmitError<R> {
 }
 
 impl<R: 'static> std::error::Error for LocalSubmitError<R> {}
+
+#[cfg(test)]
+mod tests {
+    use std::error::Error;
+
+    use super::LocalSubmitError;
+    use super::LocalSubmitRejection;
+
+    #[test]
+    fn test_rejection_formats_without_debugging_or_losing_the_request() {
+        let error = LocalSubmitError::new(vec![1, 2], LocalSubmitRejection::CapacityExceeded);
+
+        assert_eq!(error.rejection(), LocalSubmitRejection::CapacityExceeded);
+        assert_eq!(error.to_string(), "local operation rejected: CapacityExceeded");
+        assert_eq!(
+            format!("{error:?}"),
+            "LocalSubmitError { rejection: CapacityExceeded, .. }"
+        );
+        assert!(Error::source(&error).is_none());
+        assert_eq!(error.into_request(), [1, 2]);
+    }
+}

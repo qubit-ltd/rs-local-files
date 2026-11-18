@@ -113,3 +113,132 @@ impl<T: Send + 'static, E: Send + 'static> Drop for AsyncLocalOperation<T, E> {
         self.budget.take();
     }
 }
+
+#[cfg(all(test, feature = "async"))]
+mod tests {
+    use std::future::Future;
+    use std::sync::Arc;
+    use std::sync::atomic::AtomicBool;
+    use std::sync::atomic::Ordering;
+    use std::task::Wake;
+    use std::task::Waker;
+
+    use qubit_operation::GroupOptions;
+    use qubit_operation::ManagerOptions;
+    use qubit_operation::OperationManager;
+    use qubit_operation::OperationOptions;
+    use qubit_operation::OperationOutcome;
+
+    use super::AsyncLocalOperation;
+
+    struct DropFlag(Arc<AtomicBool>);
+
+    impl Drop for DropFlag {
+        fn drop(&mut self) {
+            self.0.store(true, Ordering::SeqCst);
+        }
+    }
+
+    struct ThreadWake(std::thread::Thread);
+
+    impl Wake for ThreadWake {
+        fn wake(self: Arc<Self>) {
+            self.0.unpark();
+        }
+
+        fn wake_by_ref(self: &Arc<Self>) {
+            self.0.unpark();
+        }
+    }
+
+    fn block_on<F: Future>(future: F) -> F::Output {
+        let waker = Waker::from(Arc::new(ThreadWake(std::thread::current())));
+        let mut context = std::task::Context::from_waker(&waker);
+        let mut future = std::pin::pin!(future);
+        loop {
+            match future.as_mut().poll(&mut context) {
+                std::task::Poll::Ready(value) => return value,
+                std::task::Poll::Pending => std::thread::park(),
+            }
+        }
+    }
+
+    fn group() -> qubit_operation::OperationGroup {
+        let manager = OperationManager::new(ManagerOptions::default()).expect("manager");
+        manager.group(GroupOptions { capacity: 4 }).expect("operation group")
+    }
+
+    fn budget(flag: &Arc<AtomicBool>) -> Arc<dyn Send + Sync> {
+        Arc::new(DropFlag(Arc::clone(flag)))
+    }
+
+    #[test]
+    fn test_async_handle_waits_for_outcome_and_settlement_then_releases_budget() {
+        let group = group();
+        let inner = block_on(group.try_submit_async(OperationOptions::default(), |_| async { Ok::<_, ()>(17_u8) }))
+            .expect("submission");
+        let released = Arc::new(AtomicBool::new(false));
+        let mut operation = AsyncLocalOperation {
+            inner: Some(inner),
+            budget: Some(budget(&released)),
+        };
+
+        let id = operation.id();
+        assert_eq!(operation.snapshot().operation_id, id);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        let outcome = loop {
+            match operation.try_take_outcome().unwrap() {
+                Some(outcome) => break outcome,
+                None => {
+                    assert!(!released.load(Ordering::SeqCst));
+                    assert!(std::time::Instant::now() < deadline, "operation did not finish");
+                    std::thread::yield_now();
+                }
+            }
+        };
+        assert!(matches!(outcome, OperationOutcome::Succeeded(17)));
+        assert!(released.load(Ordering::SeqCst));
+        assert_eq!(block_on(operation.wait_settlement()).operation_id, id);
+    }
+
+    #[test]
+    fn test_async_handle_conversions_transfer_budget_and_observer_ownership() {
+        let group = group();
+        let inner = block_on(group.try_submit_async(OperationOptions::default(), |_| async { Ok::<_, ()>(23_u8) }))
+            .expect("submission");
+        let released = Arc::new(AtomicBool::new(false));
+        let operation = AsyncLocalOperation {
+            inner: Some(inner),
+            budget: Some(budget(&released)),
+        };
+        let mut sync = operation.into_sync();
+        assert!(matches!(sync.wait_outcome().unwrap(), OperationOutcome::Succeeded(23)));
+        assert!(released.load(Ordering::SeqCst));
+        sync.wait_settlement().unwrap();
+
+        let inner = block_on(group.try_submit_async(OperationOptions::default(), |_| async { Ok::<_, ()>(29_u8) }))
+            .expect("submission");
+        let released = Arc::new(AtomicBool::new(false));
+        let operation = AsyncLocalOperation {
+            inner: Some(inner),
+            budget: Some(budget(&released)),
+        };
+        let observer = operation.into_observer();
+        assert!(released.load(Ordering::SeqCst));
+        assert_eq!(block_on(observer.wait_settlement()).operation_id, observer.id());
+    }
+
+    #[test]
+    fn test_dropping_async_handle_releases_budget_and_requests_operation_drop() {
+        let group = group();
+        let inner = block_on(group.try_submit_async(OperationOptions::default(), |_| async { Ok::<_, ()>(31_u8) }))
+            .expect("submission");
+        let released = Arc::new(AtomicBool::new(false));
+        let operation = AsyncLocalOperation {
+            inner: Some(inner),
+            budget: Some(budget(&released)),
+        };
+        drop(operation);
+        assert!(released.load(Ordering::SeqCst));
+    }
+}

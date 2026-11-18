@@ -163,6 +163,44 @@ fn test_created_temp_directory_is_cleaned_after_scope_ends_and_access_returns() 
 }
 
 #[test]
+fn test_rejected_temp_creation_returns_the_original_request_options() {
+    let manager = OperationManager::new(ManagerOptions::default()).expect("manager");
+    let executor = LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).expect("executor");
+    let filesystem = LocalFileSystem::host().expect("filesystem");
+    manager.close_admission();
+
+    let file_options = LocalTempFileOptions::new()
+        .with_prefix("retry-")
+        .with_suffix(".tmp")
+        .with_parent(std::path::Path::new("retry-parent"));
+    let rejected_file = submit_temp_file(
+        filesystem.clone(),
+        executor.clone(),
+        &manager.as_async(),
+        OperationOptions::default(),
+        file_options.clone(),
+    )
+    .err()
+    .expect("closed manager rejects new temporary-file operations");
+    assert_eq!(rejected_file.into_request(), file_options);
+
+    let directory_options = LocalTempDirectoryOptions::new()
+        .with_prefix("retry-")
+        .with_suffix("-dir")
+        .with_parent(std::path::Path::new("retry-parent"));
+    let rejected_directory = submit_temp_directory(
+        filesystem,
+        executor,
+        &manager.as_async(),
+        OperationOptions::default(),
+        directory_options.clone(),
+    )
+    .err()
+    .expect("closed manager rejects new temporary-directory operations");
+    assert_eq!(rejected_directory.into_request(), directory_options);
+}
+
+#[test]
 fn test_failed_cleanup_keeps_resource_permit_and_public_recovery_can_retry() {
     let parent = tempfile::tempdir().expect("temporary parent");
     let manager = OperationManager::new(ManagerOptions::default()).expect("manager");

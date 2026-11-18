@@ -898,3 +898,72 @@ fn classify_io_error(error: &io::Error) -> LocalFileErrorKind {
         _ => LocalFileErrorKind::Io,
     }
 }
+
+#[cfg(test)]
+mod recovery_source_tests {
+    use super::LocalFileError;
+    use super::LocalFileErrorKind;
+    use super::LocalFileErrorSource;
+    use super::LocalFileOperation;
+    use super::LocalReadLimitError;
+    use super::LocalResourceLimitError;
+    use crate::error::LocalResourceKind;
+
+    fn with_recovery_source(kind: LocalFileErrorKind, nested: LocalFileError) -> LocalFileError {
+        let mut error = LocalFileError::new(kind, LocalFileOperation::Read);
+        error.source = Some(LocalFileErrorSource::Recovery(Box::new(nested)));
+        error
+    }
+
+    #[test]
+    fn test_recovery_source_forwards_cause_io_and_resource_facts() {
+        let nested = LocalFileError::from_resource_limit(
+            LocalFileOperation::Read,
+            None,
+            LocalResourceLimitError::new(LocalResourceKind::Entry, 8, 3, 5),
+        );
+        let error = with_recovery_source(LocalFileErrorKind::PublicationIncomplete, nested);
+        assert_eq!(Some(LocalFileErrorKind::ResourceLimit), error.cause_kind());
+        assert_eq!(
+            Some(5),
+            error.resource_limit_error().map(LocalResourceLimitError::requested)
+        );
+        assert_eq!(std::io::ErrorKind::Other, error.io_error_kind());
+        assert!(error.io_error().is_none());
+
+        let nested = LocalFileError::from_io(
+            LocalFileOperation::Read,
+            None,
+            None,
+            std::io::Error::from(std::io::ErrorKind::PermissionDenied),
+        );
+        let error = with_recovery_source(LocalFileErrorKind::Indeterminate, nested);
+        assert_eq!(Some(LocalFileErrorKind::PermissionDenied), error.cause_kind());
+        assert_eq!(
+            Some(std::io::ErrorKind::PermissionDenied),
+            error.io_error().map(std::io::Error::kind)
+        );
+        assert_eq!(std::io::ErrorKind::PermissionDenied, error.io_error_kind());
+    }
+
+    #[test]
+    fn test_recovery_source_forwards_read_limit_and_invalid_encoding_facts() {
+        let nested = LocalFileError::from_read_limit(LocalFileOperation::Read, None, LocalReadLimitError::new(4, 7));
+        let error = with_recovery_source(LocalFileErrorKind::PublicationIncomplete, nested);
+        assert_eq!(Some(LocalFileErrorKind::ResourceLimit), error.cause_kind());
+        assert_eq!(
+            Some((4, 7)),
+            error.read_limit_error().map(|limit| (limit.limit(), limit.observed()))
+        );
+        assert_eq!(std::io::ErrorKind::Other, error.io_error_kind());
+
+        let nested = LocalFileError::from_utf8(
+            LocalFileOperation::Read,
+            None,
+            String::from_utf8(vec![0xff]).unwrap_err(),
+        );
+        let error = with_recovery_source(LocalFileErrorKind::Indeterminate, nested);
+        assert_eq!(Some(LocalFileErrorKind::InvalidEncoding), error.cause_kind());
+        assert_eq!(std::io::ErrorKind::InvalidData, error.io_error_kind());
+    }
+}

@@ -607,3 +607,217 @@ fn outcome_summary<T, E>(id: OperationId, outcome: &OperationOutcome<T, E>) -> C
         summary: DiagnosticSummary::new(text),
     }
 }
+
+#[cfg(test)]
+mod outcome_summary_tests {
+    use qubit_operation::ChildFailureSummary;
+    use qubit_operation::ChildOutcomeKind;
+    use qubit_operation::ChildOutcomeSummary;
+    use qubit_operation::DiagnosticSummary;
+    use qubit_operation::ExecutionFailure;
+    use qubit_operation::ExecutionPhase;
+    use qubit_operation::OperationManager;
+    use qubit_operation::OperationOptions;
+    use qubit_operation::OperationOutcome;
+    use qubit_operation::PanicSummary;
+    use qubit_operation::StopReason;
+    use qubit_operation::StopReport;
+
+    use super::outcome_summary;
+
+    #[test]
+    fn test_outcome_summary_preserves_each_child_result_category() {
+        let manager = OperationManager::new(Default::default()).expect("operation manager");
+        let id = manager
+            .try_submit(OperationOptions::default(), |_| Ok::<(), ()>(()))
+            .expect("operation admitted")
+            .id();
+        let failed_child = ChildFailureSummary {
+            operation_id: id,
+            outcome: ChildOutcomeSummary {
+                operation_id: id,
+                kind: ChildOutcomeKind::Failed,
+                summary: DiagnosticSummary::new("nested failure"),
+            },
+        };
+        let panic = PanicSummary {
+            operation_id: id,
+            phase: ExecutionPhase::Running,
+            summary: DiagnosticSummary::new("worker panic"),
+        };
+        let execution_failure = ExecutionFailure {
+            operation_id: id,
+            summary: DiagnosticSummary::new("executor failure"),
+            source: None,
+        };
+
+        let cases = [
+            (
+                OperationOutcome::<(), ()>::Succeeded(()),
+                ChildOutcomeKind::Succeeded,
+                "child succeeded",
+            ),
+            (
+                OperationOutcome::<(), ()>::Failed(()),
+                ChildOutcomeKind::Failed,
+                "child failed",
+            ),
+            (
+                OperationOutcome::<(), ()>::ChildFailed(failed_child),
+                ChildOutcomeKind::Failed,
+                "child failed",
+            ),
+            (
+                OperationOutcome::<(), ()>::Stopped(StopReport {
+                    reason: StopReason::UserCancelled,
+                    accepted_at: None,
+                }),
+                ChildOutcomeKind::Stopped,
+                "child stopped",
+            ),
+            (
+                OperationOutcome::<(), ()>::Panicked(panic),
+                ChildOutcomeKind::Panicked,
+                "worker panic",
+            ),
+            (
+                OperationOutcome::<(), ()>::ExecutionFailed(execution_failure),
+                ChildOutcomeKind::ExecutionFailed,
+                "executor failure",
+            ),
+        ];
+
+        for (outcome, expected_kind, expected_summary) in cases {
+            let summary = outcome_summary(id, &outcome);
+            assert_eq!(summary.operation_id, id);
+            assert_eq!(summary.kind, expected_kind);
+            assert_eq!(summary.summary.as_str(), expected_summary);
+        }
+    }
+}
+
+#[cfg(test)]
+mod waker_tests {
+    use std::sync::Arc;
+    use std::sync::atomic::AtomicUsize;
+    use std::sync::atomic::Ordering;
+    use std::task::Wake;
+    use std::task::Waker;
+
+    use qubit_operation::ExecutionPhase;
+
+    use super::Port;
+    use super::PreparedLocalJob;
+
+    struct CountWake(AtomicUsize);
+
+    impl Wake for CountWake {
+        fn wake(self: Arc<Self>) {
+            self.0.fetch_add(1, Ordering::SeqCst);
+        }
+
+        fn wake_by_ref(self: &Arc<Self>) {
+            self.0.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+
+    fn empty_port() -> Port<(), ()> {
+        Port {
+            id: None,
+            phase: ExecutionPhase::Queued,
+            stop: None,
+            outcome: None,
+            summary: None,
+            released: false,
+            settlement: None,
+            wakers: std::array::from_fn(|_| None),
+        }
+    }
+
+    #[test]
+    fn test_register_replaces_the_previous_waker() {
+        let first = Arc::new(CountWake(AtomicUsize::new(0)));
+        let second = Arc::new(CountWake(AtomicUsize::new(0)));
+        let first_waker = Waker::from(Arc::clone(&first));
+        let mut port = empty_port();
+        let mut pending = Some(first_waker);
+
+        assert!(PreparedLocalJob::<(), (), ()>::register(&mut port, 1, &mut pending).is_none());
+        assert!(pending.is_none());
+
+        let mut replacement = Some(Waker::from(second));
+        let old = PreparedLocalJob::<(), (), ()>::register(&mut port, 1, &mut replacement);
+        assert!(old.is_some());
+        assert!(replacement.is_none());
+        PreparedLocalJob::<(), (), ()>::discard_waker(old);
+    }
+
+    #[test]
+    fn test_wake_all_wakes_registered_waiters_and_clears_slots() {
+        let first = Arc::new(CountWake(AtomicUsize::new(0)));
+        let second = Arc::new(CountWake(AtomicUsize::new(0)));
+        let mut port = empty_port();
+        port.wakers[0] = Some(Waker::from(Arc::clone(&first)));
+        port.wakers[2] = Some(Waker::from(Arc::clone(&second)));
+
+        let wakers = PreparedLocalJob::<(), (), ()>::take_wakers(&mut port);
+        assert!(port.wakers.iter().all(Option::is_none));
+        PreparedLocalJob::<(), (), ()>::wake_all(wakers);
+
+        assert_eq!(first.0.load(Ordering::SeqCst), 1);
+        assert_eq!(second.0.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn test_owned_waker_wake_notifies_the_registered_target() {
+        let notified = Arc::new(CountWake(AtomicUsize::new(0)));
+        Waker::from(Arc::clone(&notified)).wake();
+        assert_eq!(notified.0.load(Ordering::SeqCst), 1);
+    }
+}
+
+#[cfg(test)]
+mod activation_state_tests {
+    use std::sync::Arc;
+    use std::sync::Mutex;
+
+    use qubit_operation::ManagerOptions;
+    use qubit_operation::OperationManager;
+    use qubit_operation::OperationOutcome;
+    use qubit_operation::PreparedExternalOperation;
+
+    use super::PreparedLocalJob;
+    use crate::operation::LocalExecutionConfig;
+    use crate::operation::LocalFactObserver;
+    use crate::operation::LocalIoExecutor;
+
+    #[test]
+    fn test_activation_rejects_a_prepared_job_without_its_task() {
+        let manager = OperationManager::new(ManagerOptions::default()).expect("manager");
+        let executor = LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).expect("executor");
+        let mut operation = manager
+            .try_submit(Default::default(), move |scope| {
+                let job = PreparedLocalJob::new(
+                    Arc::clone(&executor.inner),
+                    (),
+                    executor.reserve_slot().expect("queue slot"),
+                    Arc::new(Mutex::new(executor.reserve_bytes(0).expect("owned permit"))),
+                    executor.reserve_handle().expect("handle permit"),
+                    LocalFactObserver::new(),
+                    |_| OperationOutcome::<(), ()>::Succeeded(()),
+                );
+                job.task.lock().unwrap_or_else(|error| error.into_inner()).take();
+                PreparedExternalOperation::bind(&*job, scope.id()).expect("bind job identity");
+                let failure = PreparedExternalOperation::activate(job.clone(), scope)
+                    .expect_err("activation reports a job whose one-shot task was consumed");
+                assert_eq!("local job was already activated", failure.summary.as_str());
+                assert!(qubit_operation::OperationControl::snapshot(&*job).input_released);
+                Ok::<_, ()>(())
+            })
+            .expect("parent operation");
+        assert!(matches!(
+            operation.wait_outcome().expect("parent outcome"),
+            OperationOutcome::Succeeded(())
+        ));
+    }
+}

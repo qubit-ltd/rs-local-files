@@ -282,6 +282,55 @@ fn test_digest_conditional_conflict_keeps_existing_data_and_published_state_corr
 
 #[cfg(all(feature = "digest", feature = "test-support"))]
 #[test]
+fn test_conditional_writer_cancellation_at_precommit_gate_aborts_without_publishing() {
+    use qubit_local_files::operation::publish::LocalConditionalWriterCommitRequest;
+    use qubit_local_files::options::LocalWritePrecondition;
+    use qubit_local_files::test_support::install_test_gate;
+    use qubit_operation::StopReason;
+    use sha2::Sha256;
+
+    let _support_lock = PUBLISH_TEST_SUPPORT_LOCK
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
+    let directory = tempfile::tempdir().unwrap();
+    let destination = std::fs::canonicalize(directory.path())
+        .unwrap()
+        .join("cancelled-conditional");
+    let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+    let filesystem = facade(&manager)
+        .with_symlink_policy(qubit_local_files::policy::LocalSymlinkPolicy::Reject)
+        .unwrap();
+    let gate = install_test_gate("lf7-conditional-before-publish").unwrap();
+    let (mut operation, observer) = filesystem
+        .submit_conditional_writer_commit::<Sha256>(
+            &manager,
+            Default::default(),
+            LocalConditionalWriterCommitRequest {
+                path: destination.clone(),
+                precondition: LocalWritePrecondition::Absent,
+                options: LocalWriteOptions::new(LocalWriteMode::CreateOrReplace),
+                bytes: b"never published".to_vec(),
+            },
+            LocalOperationOptions::default(),
+        )
+        .unwrap();
+    gate.wait_until_entered();
+    operation.request_stop(StopReason::UserCancelled);
+    gate.release();
+
+    assert!(matches!(
+        operation.wait_outcome().unwrap(),
+        OperationOutcome::Stopped(report) if report.reason == StopReason::UserCancelled
+    ));
+    assert!(!destination.exists());
+    assert_eq!(
+        observer.snapshot().publication,
+        qubit_local_files::operation::LocalPublicationState::NotPublished
+    );
+}
+
+#[cfg(all(feature = "digest", feature = "test-support"))]
+#[test]
 fn test_conditional_abort_failure_after_stop_retains_recovery_owner() {
     use qubit_local_files::operation::publish::LocalConditionalWriterCommitRequest;
     use qubit_local_files::options::LocalWriteMode;
