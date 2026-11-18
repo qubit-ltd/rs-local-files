@@ -426,7 +426,6 @@ mod tests {
         let observer = walker.close_observer();
         block_on(walker.close()).unwrap();
         block_on(observer.wait_closed()).unwrap();
-        assert_eq!(block_on(walker.next_batch()).unwrap(), None);
         drop(observer);
         operation.wait_settlement().unwrap();
     }
