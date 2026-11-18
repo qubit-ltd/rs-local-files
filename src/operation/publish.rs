@@ -535,7 +535,6 @@ pub(super) fn stop_report(scope: &qubit_operation::OperationScope) -> Option<Sto
 /// # Parameters
 ///
 /// * `error` - Internal worker result for a temporary-resource command.
-#[cfg(feature = "digest")]
 pub(super) fn map_temp_worker_error(error: LocalTempCommandError) -> LocalTempWorkerCommandFailure {
     match error {
         LocalTempCommandError::Capacity => LocalTempWorkerCommandFailure::Capacity,

@@ -21,8 +21,11 @@ use super::super::LocalOperation;
 use super::super::LocalOperationOptions;
 use super::super::LocalPublicationState;
 use super::super::LocalSubmitError;
+#[cfg(feature = "digest")]
 use super::super::publish::LocalConditionalWriterCommandError;
+#[cfg(feature = "digest")]
 use super::super::publish::LocalConditionalWriterCommitRequest;
+#[cfg(feature = "digest")]
 use super::super::publish::LocalConditionalWriterOperation;
 use super::super::publish::LocalManagedAbortCleanup;
 use super::super::publish::LocalManagedAbortResource;
@@ -42,8 +45,11 @@ use super::AsyncLocalFileSystem;
 use super::OwnedSubmission;
 use crate::LocalFileError;
 use crate::LocalWriteOutcome;
+#[cfg(feature = "digest")]
 use crate::operation::publish::abort_conditional_writer;
+#[cfg(feature = "digest")]
 use crate::operation::publish::abort_managed_conditional_after_error;
+#[cfg(feature = "digest")]
 use crate::operation::publish::abort_managed_conditional_after_stop;
 use crate::operation::publish::abort_managed_file_writer;
 use crate::operation::publish::abort_managed_writer_after_error;
@@ -540,6 +546,7 @@ impl AsyncLocalFileSystem {
     /// * `request` - Destination precondition, options, and owned candidate
     ///   bytes.
     /// * `limits` - Per-operation memory, I/O, and resource limits.
+    #[cfg(feature = "digest")]
     pub fn submit_conditional_writer_commit<D: digest::Digest + Send + 'static>(
         &self,
         manager: &qubit_operation::OperationManager,

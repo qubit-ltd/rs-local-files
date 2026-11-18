@@ -270,7 +270,7 @@ async fn seal_access(
             if command_context.stop_reason().is_some() {
                 return Err((LocalTempNative::File(file), LocalStageFailure::Stopped));
             }
-            #[cfg(test)]
+            #[cfg(all(test, feature = "test-support"))]
             tests::SEAL_ATTEMPTS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             let transition = match file
                 .seal_with_options(&crate::options::LocalSealOptions::new().with_file_sync(stage.file_sync))
@@ -464,7 +464,9 @@ fn command_error(error: LocalTempCommandError) -> LocalStageFailure {
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
+    #[cfg(feature = "test-support")]
     use std::sync::Mutex;
+    #[cfg(feature = "test-support")]
     use std::sync::atomic::AtomicUsize;
     use std::task::Context;
     use std::task::Poll;
@@ -475,13 +477,18 @@ mod tests {
     use qubit_operation::OperationOutcome;
 
     use super::LocalReadLease;
+    #[cfg(feature = "test-support")]
     use super::LocalStageFailure;
+    #[cfg(feature = "test-support")]
     use super::LocalStageOptions;
+    #[cfg(feature = "test-support")]
     use super::stage_bytes;
     use crate::operation::executor::LocalIoExecutor;
     use crate::operation::temp::submit_temp_file;
 
+    #[cfg(feature = "test-support")]
     pub(super) static SEAL_ATTEMPTS: AtomicUsize = AtomicUsize::new(0);
+    #[cfg(feature = "test-support")]
     static SEAL_TEST_LOCK: Mutex<()> = Mutex::new(());
 
     struct ThreadWake(std::thread::Thread);

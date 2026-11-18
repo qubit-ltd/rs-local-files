@@ -380,6 +380,7 @@ mod tests {
 
     use super::LocalCleanup;
     use super::LocalCreateFailure;
+    #[cfg(feature = "test-support")]
     use super::LocalTempCleanupAnchor;
     use super::LocalTempCommandError;
     use super::LocalTempFileAccess;
