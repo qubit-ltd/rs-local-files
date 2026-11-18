@@ -179,11 +179,25 @@ impl AsyncLocalFileSystem {
     }
     /// Submits a bounded prefix read and reports whether EOF was observed.
     ///
+    /// The result contains at most `request.max_bytes` bytes. The worker may
+    /// read one additional byte to distinguish a complete prefix from a
+    /// truncated one. `complete` is true only when EOF was observed within
+    /// the requested prefix (including an empty file with a zero-byte limit).
+    /// If the shared byte pool cannot retain the requested bytes plus the
+    /// extra EOF-check byte, the operation fails with a resource-limit error
+    /// rather than returning a truncated successful prefix.
+    /// The operation's `max_owned_bytes` limit must be nonzero and no greater
+    /// than the executor limit; the read is also subject to the shared executor
+    /// byte pool. Other per-operation limits further restrict, rather than
+    /// reserve, shared capacity.
+    ///
     /// # Parameters
     /// - `manager` — operation manager that owns the admission scope.
     /// - `operation` — operation options used for admission and cancellation.
-    /// - `request` — owned input retained if submission is rejected.
-    /// - `limits` — per-operation resource ceilings.
+    /// - `request` — owned path, reader options, and prefix byte limit;
+    ///   returned intact if submission is rejected.
+    /// - `limits` — per-operation resource ceilings; `None` inherits executor
+    ///   limits and `Some` can only tighten them.
     pub fn submit_read_prefix(
         &self,
         manager: &OperationManager,
@@ -303,13 +317,24 @@ impl AsyncLocalFileSystem {
             },
         )
     }
-    /// Seeks and reads on one opened reader; it never reopens the path.
+    /// Reads at most the requested number of bytes from a position in one
+    /// opened reader.
+    ///
+    /// The worker opens the path once under the captured filesystem authority,
+    /// applies `request.offset` to that reader, and reads no more than the
+    /// smaller of `request.max_bytes` and the operation's owned-byte limit.
+    /// EOF may produce fewer bytes. A zero-byte request succeeds with an empty
+    /// result if opening and seeking succeed. The operation limit must be
+    /// nonzero and no greater than the executor limit; accepted reads also
+    /// compete for the shared executor byte pool.
     ///
     /// # Parameters
     /// - `manager` — operation manager that owns the admission scope.
     /// - `operation` — operation options used for admission and cancellation.
-    /// - `request` — owned input retained if submission is rejected.
-    /// - `limits` — per-operation resource ceilings.
+    /// - `request` — owned path, reader options, position, and byte limit;
+    ///   returned intact if submission is rejected.
+    /// - `limits` — per-operation resource ceilings; `None` inherits executor
+    ///   limits and `Some` can only tighten them.
     pub fn submit_read_at(
         &self,
         manager: &OperationManager,

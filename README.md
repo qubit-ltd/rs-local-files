@@ -145,8 +145,11 @@ traversal, staged publication, or recovery after partial success otherwise
 have to design those contracts themselves. `qubit-local-files` keeps those
 decisions in one stateful filesystem object and reports outcomes explicitly.
 
-The crate remains synchronous and local: it does not provide remote storage,
-provider registration, application authorization, or async I/O.
+The local filesystem core remains synchronous. The optional `async` feature
+adds a runtime-independent facade that runs blocking filesystem calls on a
+bounded worker group; it does not provide kernel-native asynchronous file I/O.
+The crate does not provide remote storage, provider registration, or
+application authorization.
 
 ## What It Provides
 
@@ -163,6 +166,7 @@ provider registration, application authorization, or async I/O.
 | `directory::LocalTreeEntry` / `options::LocalTreeValidationOptions` | Validate an exact staged-tree entry set with optional link, special-file, hard-link, and traversal-budget rules. |
 | `LocalTempFile` / `LocalTempDirectory` | Owned cleanup, `keep`, and persistence operations. |
 | `LocalSealedTempFile` | A private cleanup owner that retains a read-only handle; `native_path()` is optional and Host-only. |
+| `AsyncLocalFileSystem` / `LocalIoExecutor` | Optional runtime-independent facade and bounded workers for blocking local operations. |
 | `path::LocalFileNames` / `path::LocalPaths` | Native filename and lexical-path helpers without lossy UTF-8 conversion. |
 
 Request `LocalPrivacyRequirement::Required` at creation when a cache or

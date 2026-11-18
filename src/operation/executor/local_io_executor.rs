@@ -39,9 +39,16 @@ pub struct LocalIoExecutor {
 
 impl LocalIoExecutor {
     /// Starts a bounded worker group attached to `manager`.
+    ///
+    /// All worker and capacity fields in `config` must be nonzero. Ordinary
+    /// submissions acquire either a queue or waiter permit and count against
+    /// the operation group's combined queue-plus-waiter capacity. Dropping the
+    /// last executor owner stops admission and drains accepted work before the
+    /// workers exit.
     /// # Parameters
     /// - `manager` — operation manager that owns the local worker group.
-    /// - `config` — finite worker and resource limits.
+    /// - `config` — finite, nonzero worker and resource limits shared by all
+    ///   executor clones.
     pub fn new(manager: OperationManager, config: LocalExecutionConfig) -> Result<Self, LocalExecutorCreateError> {
         validate(&config).map_err(LocalExecutorCreateError::InvalidConfig)?;
         let group_capacity = config

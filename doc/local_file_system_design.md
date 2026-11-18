@@ -2,9 +2,15 @@
 
 [User guide](user_guide.md) · [README](../README.md)
 
-> Status: normative design specification for qubit-local-files 0.5
+> Status: normative design specification for qubit-local-files 0.6
 >
-> Last updated: 2026-09-11
+> Last updated: 2026-11-18
+
+This specification applies to the current 0.6 release. It defines the
+synchronous local filesystem core and the optional `async` facade. The facade
+runs blocking filesystem operations on bounded workers and does not promise
+kernel-native asynchronous file I/O. The [Simplified Chinese design](local_file_system_design.zh_CN.md)
+is the normative source for this English counterpart.
 
 The [Simplified Chinese design](local_file_system_design.zh_CN.md) is the
 normative source for this English counterpart. Public APIs, platform
@@ -1638,6 +1644,34 @@ concurrent configuration. Caller-owned locking is required for one mutable insta
 Readers, writers, walkers, and temporary resources remain valid after
 the originating filesystem is reconfigured or dropped because they retain their
 creation-time state.
+
+### 21.4 Runtime-independent asynchronous facade
+
+The optional `async` feature exposes `AsyncLocalFileSystem` and operation
+handles. It runs blocking local filesystem calls on a bounded `LocalIoExecutor`
+worker group; it is not kernel-native asynchronous file I/O and does not select
+an application runtime. Host paths are bound to the facade's captured base;
+Rooted operations retain the opened authority. Accepted requests carry owned
+inputs and the options supplied at submission, so later facade configuration
+changes do not rewrite queued work.
+
+`LocalExecutionConfig` supplies the worker, queue, waiter, owned-byte, native
+handle, temporary-disk, and fact-record ceilings. `LocalOperationOptions`
+may tighten byte, handle, and disk ceilings; it cannot exceed or reserve beyond
+the executor's shared pools. Queue/waiter permits are acquired before
+submission and released as work starts or is rejected. A successful operation
+result is distinct from settlement: returned resources and cleanup owners must
+be closed or transferred before callers wait for their final release. A
+stopped or cancelled operation does not imply that an already-started native
+call was interrupted, and recovery owners remain available when cleanup is
+unconfirmed.
+
+Worker ownership is shared with queued jobs and cleanup/recovery policies.
+Dropping the last owner stops the queue and drains accepted work. If that last
+drop occurs on a worker itself, it must not join its own thread; the stopped
+worker exits its loop after completing the current job. Platform behavior is
+claimed only for targets where the corresponding native CI or local runtime
+evidence was recorded; a build on another platform is not runtime evidence.
 
 ## 22. Path and Filename Utilities
 

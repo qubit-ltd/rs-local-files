@@ -130,8 +130,9 @@ let saved = writer.commit()?; // 检查 saved.digest()、cleanup_errors() 和 re
 定义一整套契约。`qubit-local-files` 将这些决策收敛到一个有状态的文件系统对象中，并用
 明确的结果类型报告实际状态。
 
-本 crate 只处理同步的本地文件系统操作，不提供远程存储、provider 注册、应用层授权或
-异步 I/O。
+本地文件系统核心仍采用同步实现。可选的 `async` feature 提供与运行时无关的 facade，
+通过有界 worker 组执行阻塞文件操作；它不提供内核原生异步文件 I/O。本 crate 不提供
+远程存储、provider 注册或应用层授权。
 
 ## 提供的能力
 
@@ -148,6 +149,7 @@ let saved = writer.commit()?; // 检查 saved.digest()、cleanup_errors() 和 re
 | `directory::LocalTreeEntry` / `options::LocalTreeValidationOptions` | 按精确条目集合验证暂存树，并按需启用链接、特殊文件、硬链接和遍历预算规则。 |
 | `LocalTempFile` / `LocalTempDirectory` | 拥有清理责任，并支持 `keep` 与持久化。 |
 | `LocalSealedTempFile` | 保留只读句柄的私有清理 owner；`native_path()` 可选且仅适用于 Host。 |
+| `AsyncLocalFileSystem` / `LocalIoExecutor` | 可选的运行时无关 facade，通过有界 worker 执行阻塞的本地文件操作。 |
 | `path::LocalFileNames` / `path::LocalPaths` | 不丢失 UTF-8 以外文件名信息的原生文件名和词法路径工具。 |
 
 缓存或临时产物要求私有时，应在创建时请求 `LocalPrivacyRequirement::Required`；先公开创建再

@@ -6,13 +6,18 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 
-/// Per-operation resource limits. None inherits the executor's limit.
+/// Per-operation upper bounds for resources retained by one operation.
+///
+/// `None` inherits the corresponding executor-wide limit. `Some` may tighten,
+/// but cannot exceed, that executor limit; zero or an invalid limit causes
+/// submission rejection. These limits do not reserve capacity by themselves:
+/// accepted operations also compete for the shared executor pools.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct LocalOperationOptions {
-    /// Maximum bytes retained for this operation, if overridden.
+    /// Maximum owned payload bytes this operation may retain, if overridden.
     pub max_owned_bytes: Option<usize>,
-    /// Maximum native handles retained for this operation, if overridden.
+    /// Maximum native handles this operation may retain, if overridden.
     pub max_open_handles: Option<usize>,
-    /// Maximum temporary disk bytes retained, if overridden.
+    /// Maximum temporary disk bytes this operation may reserve, if overridden.
     pub max_disk_bytes: Option<u64>,
 }

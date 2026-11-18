@@ -6,22 +6,32 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 
-/// Finite limits for the local worker group and its owned resources.
+/// Finite limits shared by a local I/O worker group and its retained resources.
+///
+/// All fields must be nonzero. These executor-wide ceilings cannot be raised
+/// by per-operation options. Queue and waiter permits are acquired at
+/// submission and held until a worker starts the job; both capacities
+/// contribute to the operation group's admission capacity. Byte, handle, disk,
+/// and fact limits account for resources retained by accepted operations.
+/// Cleanup queue permits use a separate pool with the configured
+/// `max_open_handles` capacity; they do not share the ordinary handle counter.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LocalExecutionConfig {
-    /// Number of local I/O workers.
+    /// Number of worker threads servicing ordinary I/O and cleanup jobs.
     pub worker_count: usize,
-    /// Maximum queued ordinary jobs.
+    /// Number of ordinary-job queue permits available to accepted work.
     pub queue_capacity: usize,
-    /// Maximum jobs waiting for queue capacity.
+    /// Additional ordinary-job permits available while the queue is full.
     pub waiter_capacity: usize,
-    /// Total owned in-memory payload capacity.
+    /// Maximum combined capacity reserved for operation-owned in-memory
+    /// payloads, in bytes.
     pub max_owned_bytes: usize,
-    /// Maximum simultaneously retained native handles.
+    /// Maximum ordinary native handles reserved at once. The cleanup queue has
+    /// a separate reservation pool of the same capacity.
     pub max_open_handles: usize,
-    /// Maximum simultaneously reserved temporary disk bytes.
+    /// Maximum temporary disk bytes reserved at once.
     pub max_disk_bytes: u64,
-    /// Maximum live fixed-size local fact snapshots.
+    /// Maximum number of live local fact snapshots.
     pub max_fact_records: usize,
 }
 

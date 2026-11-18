@@ -3,9 +3,13 @@
 [English design document](local_file_system_design.md) ·
 [用户手册](user_guide.zh_CN.md) · [README](../README.zh_CN.md)
 
-> 状态：规范性设计文档，适用 qubit-local-files 0.5
+> 状态：规范性设计文档，适用当前 qubit-local-files 0.6
 >
-> 最后更新：2026-09-11
+> 最后更新：2026-11-18
+
+本文适用于当前 0.6 版本，定义同步本地文件系统核心和可选 `async` facade。该 facade
+通过有界 worker 执行阻塞文件操作，不承诺内核原生异步文件 I/O。英文版
+[完整设计](local_file_system_design.md)应与本文保持语义一致。
 
 本文定义 `qubit-local-files` 的完整、稳定设计。公共 API、平台实现、测试、README 和用户
 指南都应与本文保持一致。本文描述库完成后的最终形态。
@@ -133,7 +137,7 @@ unit。只有明确用于跨层传输的 codec 才转换成 canonical UTF-8 text
 - 依赖或公开 `qubit_fs::Path`、`FsError`、`FileResource`；
 - 绕过操作系统账户权限；
 - 自动替调用方选择业务资源预算；
-- 提供异步 I/O；异步调用方应在适当的 blocking 执行环境中使用本库；
+- 提供内核原生异步文件 I/O；`async` facade 在有界 worker 上运行阻塞文件操作；
 - 保证底层文件系统或硬件已经真正持久化超过操作系统所能证明的范围；
 - 在不受信任并发者可任意替换同名条目的目录中消除所有 TOCTOU 风险；
 - 默认阻止 mount/device 边界；需要同设备隔离的调用方必须提供更高层策略。
@@ -1802,6 +1806,25 @@ setter 修改进程全局 PWD，因此所有 Host clones 都可观察。Rooted c
 Reader、Writer、Walker 和 temp resource 不借用可变 filesystem 状态。它们拥有或共享所需
 handle、规范化路径、Options 和 PWD snapshot，因此可以在 filesystem 修改配置或销毁后继续
 遵循创建时契约。
+
+### 21.4 与运行时无关的异步 facade
+
+可选 `async` feature 提供 `AsyncLocalFileSystem` 和 operation handle。它通过有界
+`LocalIoExecutor` worker 组执行阻塞的本地文件操作，不是内核原生异步文件 I/O，也不选择
+应用使用的运行时。Host 路径绑定到 facade 捕获的基准目录；Rooted 操作继续使用已打开的
+authority。已接纳请求持有自己的输入和提交时 options，之后修改 facade 配置不会改写排队任务。
+
+`LocalExecutionConfig` 为 worker、队列、waiter、自有字节、原生句柄、临时磁盘和事实记录
+设置上限。`LocalOperationOptions` 可以收紧字节、句柄和磁盘额度，但不能超过 executor 的
+总额度，也不会预留共享池之外的资源。提交前获取 queue/waiter permit，任务开始或被拒绝时
+释放。operation result 与 settlement 是两个阶段：等待最终释放前，调用方须关闭或转交返回资源
+及清理 owner。取消或停止操作不代表已经开始的原生调用会被中断；清理尚未确认时，恢复 owner
+仍可继续提供核查与重试入口。
+
+排队任务与清理/恢复策略会共同持有 worker owner。最后一个 owner 析构时会停止队列并排空已
+接纳任务。如果最后一次释放发生在 worker 自身，该线程不得 join 自己；当前任务结束后，worker
+会从已停止的队列循环中退出。平台行为只按记录了对应原生 CI 或本机运行结果的平台报告；在其他
+平台上的编译不构成运行时证据。
 
 ## 22. Path 与 filename 工具
 

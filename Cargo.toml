@@ -76,6 +76,6 @@ unexpected_cfgs = { level = "warn", check-cfg = ["cfg(coverage)"] }
 sanitizers = ["address"]
 
 [package.metadata.docs.rs]
-features = ["digest"]
+features = ["async", "digest"]
 
 [workspace]
