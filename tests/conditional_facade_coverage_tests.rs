@@ -41,6 +41,16 @@ fn test_conditional_writer_rejects_directory_qualified_regular_file_without_stag
 
     assert_eq!(error.kind(), LocalFileErrorKind::InvalidPath);
     assert_eq!(Some(directory_qualified.as_path()), error.path());
-    assert_eq!(b"original", std::fs::read(&target).expect("target should remain readable").as_slice());
-    assert_eq!(1, std::fs::read_dir(directory.path()).expect("fixture should be readable").count());
+    assert_eq!(
+        b"original",
+        std::fs::read(&target)
+            .expect("target should remain readable")
+            .as_slice()
+    );
+    assert_eq!(
+        1,
+        std::fs::read_dir(directory.path())
+            .expect("fixture should be readable")
+            .count()
+    );
 }
