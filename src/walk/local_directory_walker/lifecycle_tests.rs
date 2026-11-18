@@ -118,6 +118,29 @@ fn test_fail_fast_releases_both_backend_states() {
 }
 
 #[test]
+#[cfg(feature = "test-support")]
+fn test_rooted_named_entry_error_beyond_max_depth_is_skipped() {
+    let directory = tempfile::tempdir().expect("walker fixture should be created");
+    fs::write(directory.path().join("uninspectable"), b"entry").expect("entry should be created");
+    let mut walker = rooted(&directory, LocalListOptions::new().with_max_depth(1));
+    // Model a retained rooted frame whose cursor reports an entry deeper than
+    // the configured limit. The injected child-inspection fault carries that
+    // entry's name, exercising the skip path without manufacturing an error.
+    walker.rooted.as_mut().expect("rooted walker state should exist").stack[0].entry_depth = 2;
+
+    let _fault = crate::test_support::install_test_fault("rooted-child-inspection-first")
+        .expect("named child inspection fault should install");
+
+    assert!(walker.next().is_none(), "over-depth named failures must not be yielded");
+    assert_eq!(
+        1,
+        crate::local::test_fault_occurrence_count(),
+        "the named child fault should fire once"
+    );
+    assert!(walker.terminated);
+}
+
+#[test]
 fn test_expired_deadline_releases_both_backend_states() {
     let directory = fixture();
     for rooted_backend in [false, true] {
