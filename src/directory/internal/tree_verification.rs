@@ -802,6 +802,42 @@ mod missing_path_tests {
     }
 
     #[test]
+    fn test_tree_validation_enforces_observed_entry_limit_after_first_entry() {
+        let fixture = tempfile::tempdir().expect("fixture");
+        let mut stage = staged_directory(fixture.path());
+        stage
+            .write_file_new(Path::new("first"), &mut &b"1"[..], 1)
+            .expect("write first staged file");
+        stage
+            .write_file_new(Path::new("second"), &mut &b"2"[..], 1)
+            .expect("write second staged file");
+
+        let options =
+            LocalTreeValidationOptions::new().with_limits(LocalListOptions::new().with_recursive().with_max_entries(1));
+        let error =
+            verify_tree(&stage, None, &options).expect_err("the second observed entry exceeds the configured limit");
+
+        assert_eq!(crate::LocalFileErrorKind::ResourceLimit, error.kind());
+        assert_eq!(Some("tree entry observation failed"), error.reason());
+        assert!(error.resource_limit_error().is_some());
+        stage.cleanup().expect("cleanup stage");
+    }
+
+    #[test]
+    fn test_tree_validation_skips_walk_when_no_entry_check_is_requested() {
+        let fixture = tempfile::tempdir().expect("fixture");
+        let mut stage = staged_directory(fixture.path());
+        stage
+            .write_file_new(Path::new("payload"), &mut &b"payload"[..], 7)
+            .expect("write staged file");
+
+        verify_tree(&stage, None, &LocalTreeValidationOptions::new())
+            .expect("root identity is checked while unconstrained entry enumeration is skipped");
+
+        stage.cleanup().expect("cleanup stage");
+    }
+
+    #[test]
     fn test_tree_validation_reports_unexpected_entries_and_kind_mismatches() {
         let fixture = tempfile::tempdir().expect("fixture");
         let mut stage = staged_directory(fixture.path());
