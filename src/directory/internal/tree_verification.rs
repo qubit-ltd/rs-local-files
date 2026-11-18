@@ -716,6 +716,7 @@ fn resource_overflow(
 #[cfg(test)]
 mod missing_path_tests {
     use std::path::Path;
+    use std::time::Duration;
 
     use super::resource_overflow;
     use super::verify_entry_privacy;
@@ -858,6 +859,101 @@ mod missing_path_tests {
             error.path()
         );
 
+        stage.cleanup().expect("cleanup stage");
+    }
+
+    #[test]
+    fn test_tree_validation_checks_deadline_before_walking() {
+        let fixture = tempfile::tempdir().expect("fixture");
+        let stage = staged_directory(fixture.path());
+        let options =
+            LocalTreeValidationOptions::new().with_limits(LocalListOptions::new().with_deadline(Duration::ZERO));
+
+        let error = verify_tree(&stage, None, &options).expect_err("an elapsed deadline stops validation");
+        assert_eq!(crate::LocalFileErrorKind::ResourceLimit, error.kind());
+        assert_eq!(Some("tree validation deadline exceeded"), error.reason());
+        assert_eq!(Some(stage.directory().diagnostic_path()), error.path());
+        stage.cleanup().expect("cleanup stage");
+    }
+
+    #[test]
+    fn test_tree_validation_checks_privacy_for_a_private_staged_tree() {
+        let fixture = tempfile::tempdir().expect("fixture");
+        let mut stage = staged_directory(fixture.path());
+        stage
+            .write_file_new(Path::new("payload"), &mut &b"payload"[..], 7)
+            .expect("write staged file");
+
+        verify_tree(
+            &stage,
+            None,
+            &LocalTreeValidationOptions::new().with_privacy(LocalPrivacyRequirement::Required),
+        )
+        .expect("the default staged-directory permissions satisfy required privacy");
+        stage.cleanup().expect("cleanup stage");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_tree_validation_distinguishes_internal_and_external_hardlinks() {
+        let fixture = tempfile::tempdir().expect("fixture");
+        let mut stage = staged_directory(fixture.path());
+        stage
+            .write_file_new(Path::new("payload"), &mut &b"payload"[..], 7)
+            .expect("write staged file");
+        let payload = stage.directory().diagnostic_path().join("payload");
+        std::fs::hard_link(&payload, stage.directory().diagnostic_path().join("alias"))
+            .expect("create a second name inside the staged tree");
+        let options = LocalTreeValidationOptions::new().with_reject_external_hardlinks();
+
+        verify_tree(&stage, None, &options).expect("all native links are inside the verified tree");
+
+        std::fs::hard_link(&payload, fixture.path().join("outside-link"))
+            .expect("create a link outside the staged tree");
+        let error = verify_tree(&stage, None, &options).expect_err("an external hard link violates the policy");
+        assert_eq!(crate::LocalFileErrorKind::RequirementNotMet, error.kind());
+        assert_eq!(Some("tree contains external hard links"), error.reason());
+        assert_eq!(
+            Some(stage.directory().diagnostic_path().join(".").as_path()),
+            error.path()
+        );
+        stage.cleanup().expect("cleanup stage");
+    }
+
+    #[test]
+    fn test_tree_validation_charges_observed_names_during_traversal() {
+        let fixture = tempfile::tempdir().expect("fixture");
+        let mut stage = staged_directory(fixture.path());
+        stage
+            .write_file_new(Path::new("payload"), &mut &b"payload"[..], 7)
+            .expect("write staged file");
+        let options = LocalTreeValidationOptions::new()
+            .with_limits(LocalListOptions::new().with_recursive().with_max_seen_name_bytes(1));
+
+        let error = verify_tree(&stage, None, &options)
+            .expect_err("the observed encoded path exceeds the configured name-byte budget");
+        assert_eq!(crate::LocalFileErrorKind::ResourceLimit, error.kind());
+        assert_eq!(Some("tree entry observation failed"), error.reason());
+        stage.cleanup().expect("cleanup stage");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_tree_validation_rejects_a_socket_when_special_files_are_forbidden() {
+        use std::os::unix::net::UnixListener;
+
+        let fixture = tempfile::tempdir().expect("fixture");
+        let stage = staged_directory(fixture.path());
+        let socket_path = stage.directory().diagnostic_path().join("socket");
+        let socket = UnixListener::bind(&socket_path).expect("create a filesystem socket entry");
+        let options = LocalTreeValidationOptions::new().with_reject_special_files();
+
+        let error = verify_tree(&stage, None, &options).expect_err("special entries are excluded by policy");
+        assert_eq!(crate::LocalFileErrorKind::RequirementNotMet, error.kind());
+        assert_eq!(Some("special file rejected by tree validation"), error.reason());
+        assert_eq!(Some(socket_path.as_path()), error.path());
+        drop(socket);
+        std::fs::remove_file(socket_path).expect("remove socket before stage cleanup");
         stage.cleanup().expect("cleanup stage");
     }
 
