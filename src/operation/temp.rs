@@ -569,6 +569,47 @@ mod tests {
     }
 
     #[test]
+    fn test_resource_command_serializes_access_and_contains_panics() {
+        let parent = tempfile::tempdir().expect("temp parent");
+        let manager = OperationManager::new(ManagerOptions::default()).expect("manager");
+        let executor = LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).expect("executor");
+        let mut operation = super::submit_temp_file(
+            LocalFileSystem::host().expect("filesystem"),
+            executor.clone(),
+            &manager.as_async(),
+            Default::default(),
+            LocalTempFileOptions::new().with_parent(parent.path()),
+        )
+        .expect("request accepted");
+        let access = match block_on(operation.wait_outcome()).expect("outcome") {
+            OperationOutcome::Succeeded(access) => access,
+            _ => panic!("temporary file should be created"),
+        };
+
+        let reference = access.clone_resource_ref();
+        let exists = super::enqueue_resource_command(
+            &executor,
+            reference,
+            |native| matches!(native, LocalTempNative::File(file) if file.path().exists()),
+        )
+        .expect("resource command queued");
+        assert!(block_on(exists).expect("resource remains available"));
+
+        let reference = access.clone_resource_ref();
+        let panic = super::enqueue_resource_command(&executor, reference, |_| -> () {
+            panic!("injected resource command panic")
+        })
+        .expect("panicking command queued");
+        assert_eq!(block_on(panic), Err(LocalTempCommandError::Panicked));
+
+        drop(access);
+        let settlement = block_on(operation.wait_settlement());
+        assert_eq!(settlement.recovery_count, 0);
+        assert!(settlement.cleanup_failures.is_empty());
+        assert_eq!(std::fs::read_dir(parent.path()).unwrap().count(), 0);
+    }
+
+    #[test]
     fn test_temp_submission_reports_native_creation_failures_without_retaining_resources() {
         let parent = tempfile::tempdir().expect("temp parent");
         let missing_parent = parent.path().join("missing");
