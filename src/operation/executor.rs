@@ -22,16 +22,256 @@ mod tests {
     use std::time::Duration;
 
     use qubit_operation::ManagerOptions;
+    use qubit_operation::OperationControl;
     use qubit_operation::OperationManager;
     use qubit_operation::OperationOutcome;
+    use qubit_operation::ShutdownMode;
 
     use super::LocalIoExecutor;
     use super::local_io_executor::spawn_workers;
     use crate::operation::AsyncLocalFileSystem;
     use crate::operation::LocalExecutionConfig;
+    use crate::operation::LocalExecutorConfigError;
     use crate::operation::LocalFactObserver;
     use crate::operation::internal::prepared_local_job::PreparedLocalJob;
     use crate::operation::internal::worker::WorkerQueue;
+
+    #[test]
+    fn test_executor_config_rejects_each_zero_limit_and_exposes_shutdown() {
+        let invalid_configs = [
+            (
+                LocalExecutionConfig {
+                    worker_count: 0,
+                    ..Default::default()
+                },
+                LocalExecutorConfigError::ZeroWorkers,
+            ),
+            (
+                LocalExecutionConfig {
+                    queue_capacity: 0,
+                    ..Default::default()
+                },
+                LocalExecutorConfigError::ZeroQueueCapacity,
+            ),
+            (
+                LocalExecutionConfig {
+                    waiter_capacity: 0,
+                    ..Default::default()
+                },
+                LocalExecutorConfigError::ZeroWaiterCapacity,
+            ),
+            (
+                LocalExecutionConfig {
+                    max_owned_bytes: 0,
+                    ..Default::default()
+                },
+                LocalExecutorConfigError::ZeroOwnedBytes,
+            ),
+            (
+                LocalExecutionConfig {
+                    max_open_handles: 0,
+                    ..Default::default()
+                },
+                LocalExecutorConfigError::ZeroOpenHandles,
+            ),
+            (
+                LocalExecutionConfig {
+                    max_disk_bytes: 0,
+                    ..Default::default()
+                },
+                LocalExecutorConfigError::ZeroDiskBytes,
+            ),
+            (
+                LocalExecutionConfig {
+                    max_fact_records: 0,
+                    ..Default::default()
+                },
+                LocalExecutorConfigError::ZeroFactRecords,
+            ),
+        ];
+
+        for (config, expected) in invalid_configs {
+            let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+            assert!(matches!(
+                LocalIoExecutor::new(manager, config),
+                Err(crate::operation::LocalExecutorCreateError::InvalidConfig(actual)) if actual == expected
+            ));
+        }
+
+        let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+        let executor = LocalIoExecutor::new(manager, LocalExecutionConfig::default()).unwrap();
+        assert_eq!(executor.config(), &LocalExecutionConfig::default());
+        let report = executor.request_shutdown(ShutdownMode::Drain).wait().unwrap();
+        assert_eq!(report.snapshot.active_operations, 0);
+        assert_eq!(report.snapshot.queued_operations, 0);
+        assert_eq!(report.snapshot.cleaning_resources, 0);
+    }
+
+    #[test]
+    fn test_prepared_jobs_preserve_typed_request_result_and_error() {
+        let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+        let executor = LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).unwrap();
+
+        let make_typed_job = |request: String, fail: bool| {
+            PreparedLocalJob::new(
+                std::sync::Arc::clone(&executor.inner),
+                request,
+                executor.reserve_slot().unwrap(),
+                std::sync::Arc::new(std::sync::Mutex::new(executor.reserve_bytes(0).unwrap())),
+                executor.reserve_handle().unwrap(),
+                LocalFactObserver::new(),
+                move |request| {
+                    if fail {
+                        OperationOutcome::Failed(crate::LocalFileError::new(
+                            crate::LocalFileErrorKind::NotFound,
+                            crate::LocalFileOperation::Read,
+                        ))
+                    } else {
+                        OperationOutcome::Succeeded(request.into_bytes())
+                    }
+                },
+            )
+        };
+
+        let success = make_typed_job("owned request".to_owned(), false);
+        let control = std::sync::Arc::clone(&success);
+        let mut success_handle = manager
+            .try_submit_external(Default::default(), success)
+            .expect("typed job admission");
+        let id = success_handle.id();
+        assert_eq!(control.snapshot().operation_id, id);
+        assert!(matches!(
+            success_handle.wait_outcome().unwrap(),
+            OperationOutcome::Succeeded(bytes) if bytes == b"owned request"
+        ));
+        assert!(control.snapshot().input_released);
+
+        let failure = make_typed_job("request retained until execution".to_owned(), true);
+        let mut failure_handle = manager
+            .try_submit_external(Default::default(), failure)
+            .expect("typed job admission");
+        assert!(matches!(
+            failure_handle.wait_outcome().unwrap(),
+            OperationOutcome::Failed(error)
+                if error.kind() == crate::LocalFileErrorKind::NotFound
+        ));
+
+        macro_rules! assert_typed_success {
+            ($request_type:ty, $result_type:ty, $request:expr, $result:expr) => {{
+                let request = $request;
+                let expected: $result_type = $result;
+                let produced = expected.clone();
+                let job = PreparedLocalJob::<$request_type, $result_type, crate::LocalFileError>::new(
+                    std::sync::Arc::clone(&executor.inner),
+                    request,
+                    executor.reserve_slot().unwrap(),
+                    std::sync::Arc::new(std::sync::Mutex::new(executor.reserve_bytes(0).unwrap())),
+                    executor.reserve_handle().unwrap(),
+                    LocalFactObserver::new(),
+                    move |_request| OperationOutcome::Succeeded(produced),
+                );
+                let mut handle = manager
+                    .try_submit_external(Default::default(), job)
+                    .expect("typed job admission");
+                assert!(matches!(
+                    handle.wait_outcome().unwrap(),
+                    OperationOutcome::Succeeded(actual) if actual == expected
+                ));
+            }};
+        }
+
+        assert_typed_success!(
+            std::path::PathBuf,
+            Vec<u8>,
+            std::path::PathBuf::from("payload"),
+            b"file contents".to_vec()
+        );
+        assert_typed_success!(Vec<u8>, usize, b"append payload".to_vec(), 14);
+        assert_typed_success!(String, String, "temporary resource".to_owned(), "committed".to_owned());
+    }
+
+    #[test]
+    fn test_prepared_job_rejects_mismatched_identity_and_consumed_request() {
+        use qubit_operation::PreparedExternalOperation;
+
+        let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+        let executor = LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).unwrap();
+        let unrelated_id = manager
+            .try_submit(Default::default(), |_| Ok::<_, ()>(()))
+            .unwrap()
+            .id();
+
+        let identity_executor = executor.clone();
+        let mut identity_check = manager
+            .try_submit(Default::default(), move |scope| {
+                let job = make_job(&identity_executor, |_| OperationOutcome::Succeeded(()));
+                PreparedExternalOperation::bind(&*job, unrelated_id).unwrap();
+                let failure = PreparedExternalOperation::activate(std::sync::Arc::clone(&job), scope)
+                    .expect_err("a job cannot activate under an identity other than the one it was bound to");
+                assert_eq!("local job identity mismatch", failure.summary.as_str());
+                assert!(qubit_operation::OperationControl::snapshot(&*job).input_released);
+                Ok::<_, ()>(())
+            })
+            .unwrap();
+        assert!(matches!(
+            identity_check.wait_outcome().unwrap(),
+            OperationOutcome::Succeeded(())
+        ));
+
+        let mut request_check = manager
+            .try_submit(Default::default(), move |scope| {
+                let job = make_job(&executor, |_| OperationOutcome::Succeeded(()));
+                PreparedExternalOperation::bind(&*job, scope.id()).unwrap();
+                assert_eq!(Some(()), job.take_request());
+                let failure = PreparedExternalOperation::activate(job, scope)
+                    .expect_err("activation must reject a request already taken by its owner");
+                assert_eq!("local request already taken", failure.summary.as_str());
+                Ok::<_, ()>(())
+            })
+            .unwrap();
+        assert!(matches!(
+            request_check.wait_outcome().unwrap(),
+            OperationOutcome::Succeeded(())
+        ));
+    }
+
+    #[test]
+    fn test_prepared_job_activation_is_one_shot_across_operation_scopes() {
+        use qubit_operation::PreparedExternalOperation;
+
+        let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+        let executor = LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).unwrap();
+        let (retained_sender, retained_receiver) = std::sync::mpsc::channel();
+
+        let mut first = manager
+            .try_submit(Default::default(), move |scope| {
+                let job = make_job(&executor, |_| OperationOutcome::Succeeded(()));
+                PreparedExternalOperation::bind(&*job, scope.id()).expect("first bind succeeds");
+                retained_sender
+                    .send(std::sync::Arc::clone(&job))
+                    .expect("parent retains the job for the retry");
+                PreparedExternalOperation::activate(job, scope).expect("first activation succeeds");
+                Ok::<_, ()>(())
+            })
+            .unwrap();
+
+        let retained = retained_receiver.recv().expect("first scope published the job");
+        let mut second = manager
+            .try_submit(Default::default(), move |scope| {
+                let failure = PreparedExternalOperation::activate(retained, scope)
+                    .expect_err("activation cannot be retried under a second operation scope");
+                assert_eq!("local job activation was already attempted", failure.summary.as_str());
+                Ok::<_, ()>(())
+            })
+            .unwrap();
+
+        assert!(matches!(first.wait_outcome().unwrap(), OperationOutcome::Succeeded(())));
+        assert!(matches!(
+            second.wait_outcome().unwrap(),
+            OperationOutcome::Succeeded(())
+        ));
+    }
+
     /// Runs the make job behavior while preserving the operation lifecycle
     /// invariants.
     /// # Type Parameters
@@ -214,6 +454,70 @@ mod tests {
             .recv_timeout(Duration::from_secs(5))
             .expect("reentrant Waker callback should complete outside the control lock");
         thread.join().unwrap();
+    }
+    #[test]
+    fn test_replacing_a_control_waker_wakes_only_the_latest_waiter() {
+        use std::sync::Arc;
+        use std::sync::atomic::AtomicUsize;
+        use std::sync::atomic::Ordering;
+        use std::task::Context;
+        use std::task::Wake;
+        use std::task::Waker;
+
+        struct CountWake(Arc<AtomicUsize>);
+        impl Wake for CountWake {
+            fn wake(self: Arc<Self>) {
+                self.wake_by_ref();
+            }
+
+            fn wake_by_ref(self: &Arc<Self>) {
+                self.0.fetch_add(1, Ordering::SeqCst);
+            }
+        }
+
+        let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+        let executor = LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).unwrap();
+        let prepared = make_job(&executor, |_| OperationOutcome::Succeeded(()));
+        let old_wakes = Arc::new(AtomicUsize::new(0));
+        let latest_wakes = Arc::new(AtomicUsize::new(0));
+        let prepared_for_parent = Arc::clone(&prepared);
+        let old_wakes_for_parent = Arc::clone(&old_wakes);
+        let latest_wakes_for_parent = Arc::clone(&latest_wakes);
+        let mut parent = manager
+            .try_submit(Default::default(), move |scope| {
+                qubit_operation::PreparedExternalOperation::bind(&*prepared_for_parent, scope.id()).unwrap();
+
+                let old_waker = Waker::from(Arc::new(CountWake(old_wakes_for_parent)));
+                let mut old_context = Context::from_waker(&old_waker);
+                assert!(
+                    qubit_operation::OperationControl::poll_outcome(&*prepared_for_parent, &mut old_context,)
+                        .is_pending()
+                );
+                assert!(
+                    qubit_operation::OperationControl::poll_outcome(&*prepared_for_parent, &mut old_context,)
+                        .is_pending()
+                );
+
+                let latest_waker = Waker::from(Arc::new(CountWake(latest_wakes_for_parent)));
+                let mut latest_context = Context::from_waker(&latest_waker);
+                assert!(
+                    qubit_operation::OperationControl::poll_outcome(&*prepared_for_parent, &mut latest_context,)
+                        .is_pending()
+                );
+                qubit_operation::OperationControl::request_stop(
+                    &*prepared_for_parent,
+                    qubit_operation::StopReason::UserCancelled,
+                );
+                Ok::<_, ()>(())
+            })
+            .unwrap();
+
+        assert!(matches!(
+            parent.wait_outcome().unwrap(),
+            OperationOutcome::Succeeded(())
+        ));
+        assert_eq!(old_wakes.load(Ordering::SeqCst), 0);
+        assert_eq!(latest_wakes.load(Ordering::SeqCst), 1);
     }
     /// Runs the test panicking waker does not unwind or corrupt control state
     /// behavior while preserving the operation lifecycle invariants.
@@ -538,6 +842,69 @@ mod tests {
         assert!(executor.reserve_slot().is_some());
         assert!(executor.reserve_slot().is_some());
     }
+
+    #[test]
+    fn test_queued_stop_skips_worker_and_worker_panic_becomes_execution_failure() {
+        use std::sync::atomic::AtomicUsize;
+        use std::sync::atomic::Ordering;
+
+        let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+        let executor = LocalIoExecutor::new(
+            manager.clone(),
+            LocalExecutionConfig {
+                worker_count: 1,
+                queue_capacity: 2,
+                waiter_capacity: 1,
+                ..LocalExecutionConfig::default()
+            },
+        )
+        .unwrap();
+        let (started_tx, started_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        let first = make_job(&executor, move |_| {
+            started_tx.send(()).unwrap();
+            release_rx.recv().unwrap();
+            OperationOutcome::Succeeded(())
+        });
+        let mut first_handle = manager
+            .try_submit_external(Default::default(), std::sync::Arc::clone(&first))
+            .unwrap();
+        started_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+
+        let executions = std::sync::Arc::new(AtomicUsize::new(0));
+        let executions_for_job = std::sync::Arc::clone(&executions);
+        let queued = make_job(&executor, move |_| {
+            executions_for_job.fetch_add(1, Ordering::SeqCst);
+            OperationOutcome::Succeeded(())
+        });
+        let queued_for_control = std::sync::Arc::clone(&queued);
+        let mut queued_handle = manager.try_submit_external(Default::default(), queued).unwrap();
+        qubit_operation::OperationControl::request_stop(
+            &*queued_for_control,
+            qubit_operation::StopReason::UserCancelled,
+        );
+        release_tx.send(()).unwrap();
+
+        assert!(matches!(
+            first_handle.wait_outcome().unwrap(),
+            OperationOutcome::Succeeded(())
+        ));
+        assert!(matches!(
+            queued_handle.wait_outcome().unwrap(),
+            OperationOutcome::Stopped(_)
+        ));
+        assert_eq!(executions.load(Ordering::SeqCst), 0);
+
+        let panicking = make_job(&executor, |_| -> OperationOutcome<(), ()> {
+            panic!("injected worker task panic")
+        });
+        let mut panic_handle = manager.try_submit_external(Default::default(), panicking).unwrap();
+        assert!(matches!(
+            panic_handle.wait_outcome().unwrap(),
+            OperationOutcome::ExecutionFailed(_)
+        ));
+    }
+
     /// Runs the test stop after bind before activate prevents task from running
     /// behavior while preserving the operation lifecycle invariants.
     #[test]
@@ -726,6 +1093,108 @@ mod tests {
         );
         drop_thread.join().unwrap();
         assert!(queue.push(Box::new(|| {}), false, 1).is_err());
+    }
+    /// Runs the test last executor owner can be dropped by a worker without
+    /// self-joining behavior while preserving the operation lifecycle
+    /// invariants.
+    #[test]
+    fn test_last_owner_drop_on_worker_stops_and_drains_without_self_join() {
+        const CHILD: &str = "QUBIT_LOCAL_FILES_LAST_OWNER_CHILD";
+        if std::env::var_os(CHILD).is_some() {
+            let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+            let executor = LocalIoExecutor::new(
+                manager,
+                LocalExecutionConfig {
+                    worker_count: 2,
+                    queue_capacity: 2,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+            let queue = std::sync::Arc::clone(&executor.inner.queue);
+            let (started_tx, started_rx) = mpsc::channel();
+            let (release_tx, release_rx) = mpsc::channel();
+            let (finished_tx, finished_rx) = mpsc::channel();
+            let worker_owned_executor = executor.clone();
+            executor
+                .enqueue_task(move || {
+                    started_tx.send(()).unwrap();
+                    release_rx.recv().unwrap();
+                    drop(worker_owned_executor);
+                    finished_tx.send(()).unwrap();
+                })
+                .unwrap();
+            started_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+            drop(executor);
+            release_tx.send(()).unwrap();
+            finished_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+            assert!(queue.push(Box::new(|| {}), false, 1).is_err());
+
+            let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+            let executor = LocalIoExecutor::new(
+                manager,
+                LocalExecutionConfig {
+                    worker_count: 2,
+                    queue_capacity: 2,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+            let cleanup = executor.cleanup_executor();
+            let queue = std::sync::Arc::clone(&cleanup.queue);
+            let permit = cleanup.reserve_cleanup().unwrap();
+            let (started_tx, started_rx) = mpsc::channel();
+            let (release_tx, release_rx) = mpsc::channel();
+            let (finished_tx, finished_rx) = mpsc::channel();
+            let worker_owned_cleanup = cleanup.clone();
+            if cleanup
+                .enqueue_cleanup(
+                    Box::new(move || {
+                        started_tx.send(()).unwrap();
+                        release_rx.recv().unwrap();
+                        drop(worker_owned_cleanup);
+                        finished_tx.send(()).unwrap();
+                    }),
+                    permit,
+                )
+                .is_err()
+            {
+                panic!("cleanup job should be admitted");
+            }
+            started_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+            drop(cleanup);
+            drop(executor);
+            release_tx.send(()).unwrap();
+            finished_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+            assert!(queue.push(Box::new(|| {}), false, 1).is_err());
+            return;
+        }
+
+        let executable = std::env::current_exe().unwrap();
+        let mut child = std::process::Command::new(executable)
+            .arg("--exact")
+            .arg("operation::executor::tests::test_last_owner_drop_on_worker_stops_and_drains_without_self_join")
+            .arg("--nocapture")
+            .env(CHILD, "1")
+            .spawn()
+            .unwrap();
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        loop {
+            match child.try_wait().unwrap() {
+                Some(status) => {
+                    assert!(status.success(), "last-owner child failed: {status}");
+                    break;
+                }
+                None if std::time::Instant::now() < deadline => {
+                    std::thread::yield_now();
+                }
+                None => {
+                    child.kill().unwrap();
+                    let status = child.wait().unwrap();
+                    panic!("last-owner child timed out and was reaped: {status}");
+                }
+            }
+        }
     }
     /// Runs the test duplicate arc submission is rejected without abandoning
     /// claimed job behavior while preserving the operation lifecycle

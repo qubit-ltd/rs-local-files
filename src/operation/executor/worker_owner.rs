@@ -41,7 +41,16 @@ impl Drop for WorkerOwner {
     fn drop(&mut self) {
         self.queue.stop();
         let workers = self.workers.get_mut().unwrap_or_else(|e| e.into_inner());
+        let current = std::thread::current().id();
         for worker in workers.drain(..) {
+            // A queued job can own the last executor handle. In that case the
+            // owner is dropped as the job returns on this worker, so joining
+            // this handle would make the worker wait for itself. The queue is
+            // already stopped; dropping this handle detaches it and lets the
+            // worker leave its run loop after the current job finishes.
+            if worker.thread().id() == current {
+                continue;
+            }
             let _ = worker.join();
         }
     }
