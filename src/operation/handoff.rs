@@ -477,10 +477,11 @@ mod tests {
     use qubit_operation::OperationOutcome;
 
     use super::LocalReadLease;
-    #[cfg(feature = "test-support")]
     use super::LocalStageFailure;
     #[cfg(feature = "test-support")]
     use super::LocalStageOptions;
+    use super::LocalTempCommandError;
+    use super::command_error;
     #[cfg(feature = "test-support")]
     use super::stage_bytes;
     use crate::operation::executor::LocalIoExecutor;
@@ -539,6 +540,31 @@ mod tests {
         drop(clone);
         drop(lease);
         assert_eq!(block_on(create.wait_settlement()).recovery_count, 0);
+    }
+
+    #[test]
+    fn test_command_error_preserves_each_worker_failure_category() {
+        let cases = [
+            (LocalTempCommandError::Capacity, "local worker queue capacity exhausted"),
+            (
+                LocalTempCommandError::ResourceUnavailable,
+                "managed temp resource is unavailable",
+            ),
+            (
+                LocalTempCommandError::UnsupportedKind,
+                "managed temp resource kind is unsupported",
+            ),
+            (
+                LocalTempCommandError::Panicked,
+                "managed temp command panicked; completion is unconfirmed",
+            ),
+        ];
+        for (error, expected) in cases {
+            let LocalStageFailure::Command(message) = command_error(error) else {
+                panic!("worker command errors must remain stage command failures");
+            };
+            assert_eq!(message, expected);
+        }
     }
 
     #[cfg(feature = "test-support")]
