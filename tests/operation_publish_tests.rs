@@ -324,6 +324,47 @@ fn test_digest_conditional_content_mismatch_preserves_existing_data_and_effect_f
     assert_eq!(facts.modified_bytes, 0);
 }
 
+#[cfg(feature = "digest")]
+#[test]
+fn test_digest_conditional_absent_commit_publishes_and_records_effect() {
+    use qubit_local_files::operation::publish::LocalConditionalWriterCommitRequest;
+    use qubit_local_files::options::LocalWritePrecondition;
+    use sha2::Sha256;
+
+    let directory = tempfile::tempdir().unwrap();
+    let destination = std::fs::canonicalize(directory.path())
+        .unwrap()
+        .join("created-conditionally");
+    let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+    let filesystem = facade(&manager)
+        .with_symlink_policy(qubit_local_files::policy::LocalSymlinkPolicy::Reject)
+        .unwrap();
+    let (mut operation, observer) = filesystem
+        .submit_conditional_writer_commit::<Sha256>(
+            &manager,
+            Default::default(),
+            LocalConditionalWriterCommitRequest {
+                path: destination.clone(),
+                precondition: LocalWritePrecondition::Absent,
+                options: LocalWriteOptions::new(LocalWriteMode::CreateOrReplace),
+                bytes: b"conditional payload".to_vec(),
+            },
+            LocalOperationOptions::default(),
+        )
+        .unwrap();
+
+    let outcome = operation.wait_outcome().unwrap();
+    assert!(matches!(outcome, OperationOutcome::Succeeded(_)));
+    assert_eq!(std::fs::read(destination).unwrap(), b"conditional payload");
+    let facts = observer.snapshot();
+    assert_eq!(
+        facts.publication,
+        qubit_local_files::operation::LocalPublicationState::Published
+    );
+    assert_eq!(facts.modified_bytes, 19);
+    assert_eq!(facts.modified_count, 1);
+}
+
 #[cfg(all(feature = "digest", feature = "test-support"))]
 #[test]
 fn test_conditional_writer_cancellation_at_precommit_gate_aborts_without_publishing() {
