@@ -1013,6 +1013,60 @@ mod tests {
     }
 
     #[test]
+    fn test_worker_constructor_replaces_pending_waker_before_completion() {
+        use std::sync::mpsc;
+        use std::time::Duration;
+
+        struct ChannelWake(mpsc::Sender<()>);
+        impl Wake for ChannelWake {
+            fn wake(self: Arc<Self>) {
+                let _ = self.0.send(());
+            }
+            fn wake_by_ref(self: &Arc<Self>) {
+                let _ = self.0.send(());
+            }
+        }
+
+        let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+        let executor = LocalIoExecutor::new(
+            manager,
+            LocalExecutionConfig {
+                worker_count: 1,
+                queue_capacity: 1,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let (started_tx, started_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        executor
+            .enqueue_task(move || {
+                started_tx.send(()).unwrap();
+                release_rx.recv().unwrap();
+            })
+            .unwrap();
+        started_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+
+        let (first_wake_tx, first_wake_rx) = mpsc::channel();
+        let (second_wake_tx, second_wake_rx) = mpsc::channel();
+        let first_waker = Waker::from(Arc::new(ChannelWake(first_wake_tx)));
+        let second_waker = Waker::from(Arc::new(ChannelWake(second_wake_tx)));
+        let mut first_context = Context::from_waker(&first_waker);
+        let mut second_context = Context::from_waker(&second_waker);
+        let mut future = Box::pin(super::run_on_worker(&executor, || Ok::<_, crate::LocalFileError>(23)));
+
+        assert!(matches!(future.as_mut().poll(&mut first_context), Poll::Pending));
+        assert!(matches!(future.as_mut().poll(&mut second_context), Poll::Pending));
+        release_tx.send(()).unwrap();
+
+        second_wake_rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("completion should wake the latest registered waker");
+        assert!(first_wake_rx.try_recv().is_err());
+        assert!(matches!(future.as_mut().poll(&mut second_context), Poll::Ready(Ok(23))));
+    }
+
+    #[test]
     fn test_read_all_with_observer_reports_success_failure_and_authority_rejection() {
         use qubit_operation::OperationOutcome;
 
