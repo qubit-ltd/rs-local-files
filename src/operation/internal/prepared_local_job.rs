@@ -821,3 +821,80 @@ mod activation_state_tests {
         ));
     }
 }
+
+#[cfg(test)]
+mod lifecycle_tests {
+    use std::sync::Arc;
+    use std::sync::Mutex;
+    use std::task::Context;
+    use std::task::Poll;
+    use std::task::Waker;
+
+    use qubit_operation::ExecutionPhase;
+    use qubit_operation::ManagerOptions;
+    use qubit_operation::OperationControl;
+    use qubit_operation::OperationManager;
+    use qubit_operation::OperationOutcome;
+    use qubit_operation::PreparedExternalOperation;
+    use qubit_operation::StopReason;
+
+    use super::PreparedLocalJob;
+    use crate::operation::LocalExecutionConfig;
+    use crate::operation::LocalFactObserver;
+    use crate::operation::LocalIoExecutor;
+
+    #[test]
+    fn test_stop_before_worker_start_releases_and_publishes_all_results() {
+        let manager = OperationManager::new(ManagerOptions::default()).expect("manager");
+        let executor = LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).expect("executor");
+        let observed = Arc::new(Mutex::new(None));
+        let observed_job = Arc::clone(&observed);
+        let mut parent = manager
+            .try_submit(Default::default(), move |scope| {
+                let job = PreparedLocalJob::<(), (), ()>::new(
+                    Arc::clone(&executor.inner),
+                    (),
+                    executor.reserve_slot().expect("queue slot"),
+                    Arc::new(Mutex::new(executor.reserve_bytes(0).expect("owned permit"))),
+                    executor.reserve_handle().expect("handle permit"),
+                    LocalFactObserver::new(),
+                    |_| panic!("a stop accepted before start must skip the worker"),
+                );
+                PreparedExternalOperation::bind(&*job, scope.id()).expect("bind job identity");
+                *observed_job.lock().unwrap_or_else(|error| error.into_inner()) = Some(Arc::clone(&job));
+                OperationControl::request_stop(&*job, StopReason::UserCancelled);
+                PreparedExternalOperation::activate(job, scope).expect("activation queues the stopped job");
+                Ok::<_, ()>(())
+            })
+            .expect("parent operation");
+        assert!(matches!(
+            parent.wait_outcome().expect("parent outcome"),
+            OperationOutcome::Succeeded(())
+        ));
+
+        let job = observed
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .take()
+            .expect("prepared job");
+        let snapshot = OperationControl::snapshot(&*job);
+        assert_eq!(ExecutionPhase::Finished, snapshot.execution);
+        assert!(snapshot.input_released);
+        assert_eq!(Some(StopReason::UserCancelled), snapshot.stop.map(|stop| stop.reason));
+        assert_eq!(
+            Some(qubit_operation::ChildOutcomeKind::Stopped),
+            snapshot.outcome.map(|outcome| outcome.kind)
+        );
+
+        let mut cx = Context::from_waker(Waker::noop());
+        assert!(matches!(OperationControl::poll_outcome(&*job, &mut cx), Poll::Ready(_)));
+        assert!(matches!(OperationControl::poll_release(&*job, &mut cx), Poll::Ready(_)));
+        assert!(
+            matches!(OperationControl::poll_settlement(&*job, &mut cx), Poll::Ready(report) if report.status == qubit_operation::SettlementStatus::Released)
+        );
+        assert!(matches!(
+            PreparedExternalOperation::poll_take_outcome(&*job, &mut cx),
+            Poll::Ready(OperationOutcome::Stopped(_))
+        ));
+    }
+}
