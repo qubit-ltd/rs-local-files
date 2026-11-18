@@ -90,12 +90,38 @@ mod tests {
 
     unsafe fn drop_raw_waker(_: *const ()) {}
 
+    unsafe fn clone_waker_with_panicking_drop(_: *const ()) -> std::task::RawWaker {
+        std::task::RawWaker::new(std::ptr::null(), &PANIC_DROP_VTABLE)
+    }
+
+    unsafe fn panic_on_drop(_: *const ()) {
+        panic!("waker drop failed");
+    }
+
     const PANIC_CLONE_VTABLE: std::task::RawWakerVTable =
         std::task::RawWakerVTable::new(panic_on_clone, |_| {}, |_| {}, drop_raw_waker);
+
+    const PANIC_DROP_VTABLE: std::task::RawWakerVTable = std::task::RawWakerVTable::new(
+        clone_waker_with_panicking_drop,
+        |_| {},
+        panic_on_drop,
+        |_| {},
+    );
 
     fn panic_clone_waker() -> Waker {
         // SAFETY: the callbacks never access or drop the null data pointer.
         unsafe { Waker::from_raw(std::task::RawWaker::new(std::ptr::null(), &PANIC_CLONE_VTABLE)) }
+    }
+
+    fn panic_drop_waker() -> Waker {
+        // SAFETY: clone and wake callbacks do not access the null data pointer;
+        // the drop callback intentionally panics to exercise panic containment.
+        unsafe {
+            Waker::from_raw(std::task::RawWaker::new(
+                std::ptr::null(),
+                &PANIC_DROP_VTABLE,
+            ))
+        }
     }
 
     #[test]
@@ -159,6 +185,34 @@ mod tests {
         assert!(matches!(
             std::pin::Pin::new(&mut receiver).poll(&mut ordinary_context),
             std::task::Poll::Ready(9)
+        ));
+    }
+
+    #[test]
+    fn test_receiver_replaces_a_waker_whose_drop_panics() {
+        let (sender, mut receiver) = async_result::<u8>();
+        let old_waker = panic_drop_waker();
+        let mut old_context = std::task::Context::from_waker(&old_waker);
+
+        assert!(std::pin::Pin::new(&mut receiver)
+            .poll(&mut old_context)
+            .is_pending());
+        // Its retained clone will be safely dropped by the next poll. Avoid
+        // invoking the intentionally panicking callback for the original.
+        std::mem::forget(old_waker);
+
+        let wakes = Arc::new(AtomicUsize::new(0));
+        let replacement = Waker::from(Arc::new(CountWake(Arc::clone(&wakes))));
+        let mut replacement_context = std::task::Context::from_waker(&replacement);
+        assert!(std::pin::Pin::new(&mut receiver)
+            .poll(&mut replacement_context)
+            .is_pending());
+
+        assert!(sender.send(23).is_ok());
+        assert_eq!(wakes.load(Ordering::SeqCst), 1);
+        assert!(matches!(
+            std::pin::Pin::new(&mut receiver).poll(&mut replacement_context),
+            std::task::Poll::Ready(23)
         ));
     }
 
