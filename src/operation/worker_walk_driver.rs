@@ -459,6 +459,35 @@ mod tests {
     }
 
     #[test]
+    fn test_managed_walker_operation_cancellation_closes_native_iterator() {
+        let directory = tempfile::tempdir().unwrap();
+        std::fs::write(directory.path().join("unread-entry"), b"x").unwrap();
+
+        let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+        let executor = LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).unwrap();
+        let filesystem = block_on(AsyncLocalFileSystem::rooted(executor, directory.path().to_path_buf())).unwrap();
+        let mut operation = filesystem
+            .submit_open_walker(
+                &manager,
+                Default::default(),
+                PathBuf::from("."),
+                LocalListOptions::default(),
+            )
+            .unwrap();
+        let walker = match operation.wait_outcome().unwrap() {
+            OperationOutcome::Succeeded(walker) => walker,
+            _ => panic!("expected the managed walker to open"),
+        };
+        let observer = walker.close_observer();
+
+        operation.request_stop(qubit_operation::StopReason::UserCancelled);
+        drop(walker);
+        block_on(observer.wait_closed()).unwrap();
+        drop(observer);
+        operation.wait_settlement().unwrap();
+    }
+
+    #[test]
     fn test_managed_walker_reports_full_worker_queue_without_blocking() {
         use std::sync::mpsc;
         use std::time::Duration;
