@@ -146,6 +146,70 @@ fn test_stage_bytes_rejects_over_limit_and_returns_the_original_vec_before_admis
 }
 
 #[test]
+fn test_stage_bytes_returns_original_allocation_for_content_and_disk_budget_rejections() {
+    let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+    let executor = LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).unwrap();
+    let filesystem = LocalFileSystem::host().unwrap();
+
+    for stage in [
+        LocalStageOptions {
+            max_content_bytes: 1,
+            ..LocalStageOptions::default()
+        },
+        LocalStageOptions {
+            disk_reservation_bytes: 1,
+            ..LocalStageOptions::default()
+        },
+    ] {
+        let mut bytes = Vec::with_capacity(16);
+        bytes.extend_from_slice(b"ab");
+        let pointer = bytes.as_ptr();
+        let returned = match stage_bytes(
+            filesystem.clone(),
+            executor.clone(),
+            &manager.as_async(),
+            OperationOptions::default(),
+            bytes,
+            stage,
+        ) {
+            Err(error) => error.into_bytes(),
+            Ok(_) => panic!("invalid payload or disk budget must be rejected"),
+        };
+        assert_eq!(returned, b"ab");
+        assert_eq!(returned.capacity(), 16);
+        assert_eq!(returned.as_ptr(), pointer);
+    }
+}
+
+#[test]
+fn test_stage_stream_returns_unpolled_input_when_disk_budget_is_too_small() {
+    let (manager, executor, filesystem) = setup();
+    let (input, polls) = slice_input(b"payload");
+    let result = stage_stream(
+        filesystem,
+        executor,
+        &manager.as_async(),
+        OperationOptions::default(),
+        input,
+        LocalStageOptions {
+            max_content_bytes: 8,
+            disk_reservation_bytes: 7,
+            ..LocalStageOptions::default()
+        },
+    );
+    let error = match result {
+        Err(error) => error,
+        Ok(_) => panic!("disk reservation below the content limit must be rejected"),
+    };
+    let qubit_local_files::operation::handoff::LocalStageStreamSubmitError::Budget { input } = error else {
+        panic!("the original input must be returned as a budget rejection");
+    };
+    assert_eq!(input.bytes, b"payload");
+    assert_eq!(input.position, 0);
+    assert_eq!(polls.load(Ordering::SeqCst), 0);
+}
+
+#[test]
 fn test_sealed_export_is_read_only_and_keeps_same_resource_until_last_helper_releases() {
     let (manager, executor, filesystem) = setup();
     let mut operation = stage_bytes(
