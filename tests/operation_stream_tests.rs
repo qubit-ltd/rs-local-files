@@ -644,9 +644,14 @@ fn test_walker_batches_return_every_entry_on_portable_paths() {
         _ => panic!("walker open failed"),
     };
     let mut found = Vec::new();
+    let mut batch_count = 0;
     while let Some(batch) = poll_worker(|cx| Box::pin(walker.next_batch()).as_mut().poll(cx)).unwrap() {
+        assert!(!batch.is_empty(), "a live iterator must not yield empty batches");
+        assert!(batch.len() <= 128, "worker batch must respect the entry limit");
+        batch_count += 1;
         found.extend(batch);
     }
+    assert!(batch_count > 1, "the real iterator must continue across batches");
     assert_eq!(
         found
             .iter()
