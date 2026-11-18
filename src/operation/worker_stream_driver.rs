@@ -225,7 +225,6 @@ mod tests {
     use std::sync::atomic::AtomicBool;
     use std::sync::mpsc;
     use std::task::Context;
-    use std::task::Wake;
     use std::task::Waker;
 
     use qubit_operation::ManagerOptions;
@@ -240,12 +239,6 @@ mod tests {
     use super::WorkerStreamState;
     use crate::LocalExecutionConfig;
     use crate::LocalIoExecutor;
-
-    struct NoopWake;
-
-    impl Wake for NoopWake {
-        fn wake(self: Arc<Self>) {}
-    }
 
     #[test]
     fn test_poll_command_reports_full_worker_queue() {
@@ -298,8 +291,7 @@ mod tests {
             id: 1,
             command: LocalStreamCommand::Read { max_bytes: 1 },
         };
-        let waker = Waker::from(Arc::new(NoopWake));
-        let mut cx = Context::from_waker(&waker);
+        let mut cx = Context::from_waker(Waker::noop());
         let result = driver.poll_command(&mut cx, &request);
         release_tx.send(()).unwrap();
         assert!(matches!(result, std::task::Poll::Ready(Err(ref error)) if error.kind() == io::ErrorKind::WouldBlock));
