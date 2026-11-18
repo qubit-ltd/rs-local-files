@@ -934,4 +934,74 @@ mod tests {
             OperationOutcome::Succeeded(bytes) if bytes == b"reader input"
         ));
     }
+
+    #[test]
+    fn test_async_writer_commit_publishes_bytes_and_reports_fact() {
+        use qubit_io::AsyncOutput;
+        use qubit_operation::OperationOutcome;
+
+        use crate::operation::LocalPublicationState;
+        use crate::options::LocalWriteMode;
+        use crate::options::LocalWriteOptions;
+
+        let directory = tempfile::tempdir().unwrap();
+        let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+        let executor = LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).unwrap();
+        let filesystem = block_on(AsyncLocalFileSystem::rooted(executor, directory.path().to_path_buf())).unwrap();
+        let (mut operation, observer) = filesystem
+            .submit_open_writer(
+                &manager,
+                Default::default(),
+                PathBuf::from("published"),
+                LocalWriteOptions::new(LocalWriteMode::CreateOrReplace),
+            )
+            .unwrap();
+        let mut writer = match operation.wait_outcome().unwrap() {
+            OperationOutcome::Succeeded(writer) => writer,
+            _ => panic!("expected writer to open"),
+        };
+
+        block_on(writer.write_fully_async(b"committed payload")).unwrap();
+        let outcome = block_on(writer.commit()).unwrap();
+        assert_eq!(outcome.bytes_written(), b"committed payload".len() as u64);
+        assert_eq!(
+            std::fs::read(directory.path().join("published")).unwrap(),
+            b"committed payload"
+        );
+        let fact = observer.snapshot();
+        assert_eq!(fact.publication, LocalPublicationState::Published);
+        assert_eq!(fact.modified_count, 1);
+        assert_eq!(fact.modified_bytes, b"committed payload".len() as u64);
+        drop(writer);
+        operation.wait_settlement().unwrap();
+    }
+
+    #[test]
+    fn test_async_read_capacity_rejection_returns_the_owned_request() {
+        use crate::operation::LocalReadRequest;
+        use crate::operation::LocalSubmitRejection;
+
+        let directory = tempfile::tempdir().unwrap();
+        let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+        let executor = LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).unwrap();
+        let filesystem = block_on(AsyncLocalFileSystem::rooted(executor, directory.path().to_path_buf())).unwrap();
+        let request = LocalReadRequest {
+            path: PathBuf::from("requested-input"),
+            read: Default::default(),
+        };
+        let error = match filesystem.submit_read_all_with_observer(
+            &manager,
+            Default::default(),
+            request,
+            crate::operation::LocalOperationOptions {
+                max_owned_bytes: Some(0),
+                ..Default::default()
+            },
+        ) {
+            Err(error) => error,
+            Ok(_) => panic!("zero owned-byte limit must reject the read"),
+        };
+        assert_eq!(error.rejection(), LocalSubmitRejection::CapacityExceeded);
+        assert_eq!(error.into_request().path, PathBuf::from("requested-input"));
+    }
 }
