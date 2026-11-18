@@ -577,7 +577,6 @@ fn check_acl_length(length: usize, options: &LocalSecurityObservationOptions) ->
 }
 #[cfg(test)]
 mod tests {
-    #[cfg(target_os = "linux")]
     use std::fs;
 
     use super::File;
@@ -588,7 +587,6 @@ mod tests {
     #[cfg(target_os = "linux")]
     use super::LocalResourceKind;
     use super::LocalResult;
-    #[cfg(target_os = "linux")]
     use super::LocalSecurityObservationOptions;
     use super::acl_read_requires_retry;
     #[cfg(target_os = "linux")]
@@ -598,6 +596,7 @@ mod tests {
     use super::io_error;
     #[cfg(target_os = "linux")]
     use super::query_linux_acl;
+    use super::query_security;
     use super::requested_value;
     #[cfg(target_os = "linux")]
     use super::validate_linux_acl;
@@ -836,5 +835,45 @@ mod tests {
             query_linux_acl(&file, b"system.posix_acl_default\0", &options).expect("read absent default ACL"),
             LocalAclPresence::Absent,
         );
+    }
+
+    #[test]
+    fn test_query_security_reports_metadata_from_the_retained_file() {
+        use std::os::unix::fs::MetadataExt;
+        use std::os::unix::fs::PermissionsExt;
+
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let path = directory.path().join("observed");
+        fs::write(&path, b"security facts").expect("create fixture");
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o640)).expect("set file mode");
+        let file = File::open(&path).expect("open retained file");
+        let metadata = file.metadata().expect("read fixture metadata");
+
+        let observation =
+            query_security(&file, &LocalSecurityObservationOptions::new()).expect("query retained file security facts");
+        assert_eq!(
+            observation.identity().expect("Unix identity"),
+            &crate::observation::LocalFileIdentity::unix(metadata.dev(), metadata.ino())
+        );
+        assert_eq!(observation.link_count(), Some(1));
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
+        assert!(observation.filesystem().is_some());
+
+        #[cfg(target_os = "linux")]
+        {
+            use crate::observation::LocalAclPresence;
+
+            let access = observation
+                .access()
+                .and_then(|value| value.unix())
+                .expect("Unix access facts");
+            assert_eq!(access.mode(), metadata.mode() & 0o7777);
+            assert_eq!(
+                access.owner_is_current_user(),
+                metadata.uid() == unsafe { libc::geteuid() }
+            );
+            assert_eq!(access.access_acl(), LocalAclPresence::Absent);
+            assert_eq!(access.default_acl(), LocalAclPresence::Absent);
+        }
     }
 }
