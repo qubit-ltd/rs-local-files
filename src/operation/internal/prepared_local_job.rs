@@ -1466,4 +1466,44 @@ mod prepared_job_ownership_tests {
         );
         assert_eq!(None, bound.take_request());
     }
+
+    #[test]
+    fn test_abandon_wakes_registered_lifecycle_polls_and_publishes_ready_results() {
+        use std::task::Context;
+        use std::task::Poll;
+
+        let manager = OperationManager::new(ManagerOptions::default()).expect("manager");
+        let executor = LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).expect("executor");
+        let job = make_job(&executor);
+        let id = operation_id(&manager);
+        PreparedExternalOperation::bind(&*job, id).expect("bind job identity");
+        let wake = Arc::new(WakeCount(AtomicUsize::new(0)));
+        let waker = Waker::from(Arc::clone(&wake));
+        let mut context = Context::from_waker(&waker);
+
+        assert!(OperationControl::poll_outcome(&*job, &mut context).is_pending());
+        assert!(OperationControl::poll_release(&*job, &mut context).is_pending());
+        assert!(OperationControl::poll_settlement(&*job, &mut context).is_pending());
+
+        PreparedExternalOperation::abandon(Arc::clone(&job));
+
+        // All three control polls share one task waker, so wake_all deduplicates it.
+        assert_eq!(1, wake.0.load(Ordering::SeqCst));
+        assert!(matches!(
+            OperationControl::poll_outcome(&*job, &mut context),
+            Poll::Pending
+        ));
+        assert!(matches!(
+            OperationControl::poll_release(&*job, &mut context),
+            Poll::Ready(release) if release.operation_id == id
+        ));
+        assert!(matches!(
+            OperationControl::poll_settlement(&*job, &mut context),
+            Poll::Ready(report) if report.operation_id == id && report.status == qubit_operation::SettlementStatus::Released
+        ));
+        let snapshot = OperationControl::snapshot(&*job);
+        assert_eq!(qubit_operation::ExecutionPhase::Finished, snapshot.execution);
+        assert!(snapshot.input_released);
+        assert!(snapshot.outcome.is_none());
+    }
 }
