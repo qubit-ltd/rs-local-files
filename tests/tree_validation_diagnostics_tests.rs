@@ -222,6 +222,30 @@ fn test_validation_reports_entry_budget_and_walker_start_failures() {
 }
 
 #[test]
+fn test_expected_entry_set_is_rejected_when_it_exceeds_the_entry_budget() {
+    let (_fixture, _filesystem, stage, root) = make_stage(false);
+    let error = stage
+        .verify_entries(
+            &[
+                entry("first", LocalFileKind::File),
+                entry("second", LocalFileKind::File),
+            ],
+            &LocalTreeValidationOptions::new().with_limits(LocalListOptions::new().with_max_entries(1)),
+        )
+        .expect_err("the expected set itself exceeds the entry budget");
+
+    assert_eq!(error.kind(), LocalFileErrorKind::ResourceLimit);
+    assert_same_path(error.path(), &root);
+    let facts = error.resource_limit_error().expect("entry budget facts");
+    assert_eq!(facts.resource(), LocalResourceKind::Entry);
+    assert_eq!(facts.limit(), 1);
+    assert_eq!(facts.requested(), 2);
+    assert_eq!(facts.observed(), Some(2));
+    assert!(error.reason().expect("reason").contains("entry limit"));
+    stage.cleanup().expect("cleanup");
+}
+
+#[test]
 fn test_publish_validation_diagnostic_preserves_state_and_recovery() {
     let (_fixture, filesystem, mut stage, root) = make_stage(false);
     write_file(&mut stage, "extra");
