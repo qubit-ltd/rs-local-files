@@ -1147,6 +1147,27 @@ mod lifecycle_tests {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+    use std::sync::Mutex;
+
+    #[derive(Debug, PartialEq)]
+    struct MatrixRequest(u16);
+
+    #[derive(Debug, PartialEq)]
+    struct MatrixResult(String);
+
+    #[derive(Debug, PartialEq)]
+    struct MatrixError(&'static str);
+
+    #[derive(Debug, PartialEq)]
+    struct AlternateRequest(Vec<u8>);
+
+    #[derive(Debug, PartialEq)]
+    struct AlternateResult(usize);
+
+    #[derive(Debug, PartialEq)]
+    struct AlternateError(u8);
+
     use std::sync::atomic::AtomicUsize;
     use std::sync::atomic::Ordering;
 
@@ -1239,6 +1260,81 @@ mod tests {
         ));
         assert!(OperationControl::poll_release(&*prepared, &mut context).is_ready());
         assert!(OperationControl::poll_settlement(&*prepared, &mut context).is_ready());
+    }
+
+    #[test]
+    fn test_external_lifecycle_matrix_covers_distinct_typed_jobs_and_release() {
+        let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+        let executor = LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).unwrap();
+
+        let first = PreparedLocalJob::new(
+            Arc::clone(&executor.inner),
+            MatrixRequest(7),
+            executor.reserve_slot().unwrap(),
+            Arc::new(Mutex::new(executor.reserve_bytes(0).unwrap())),
+            executor.reserve_handle().unwrap(),
+            LocalFactObserver::new(),
+            |request| {
+                assert_eq!(7, request.0);
+                OperationOutcome::<MatrixResult, MatrixError>::Succeeded(MatrixResult("seven".into()))
+            },
+        );
+        let mut first_handle = manager
+            .try_submit_external(Default::default(), Arc::clone(&first))
+            .unwrap();
+        assert!(matches!(
+            first_handle.wait_outcome().unwrap(),
+            OperationOutcome::Succeeded(MatrixResult(value)) if value == "seven"
+        ));
+
+        let second = PreparedLocalJob::new(
+            Arc::clone(&executor.inner),
+            AlternateRequest(vec![2, 3]),
+            executor.reserve_slot().unwrap(),
+            Arc::new(Mutex::new(executor.reserve_bytes(0).unwrap())),
+            executor.reserve_handle().unwrap(),
+            LocalFactObserver::new(),
+            |request| {
+                assert_eq!(vec![2, 3], request.0);
+                OperationOutcome::<AlternateResult, AlternateError>::Failed(AlternateError(9))
+            },
+        );
+        let mut second_handle = manager
+            .try_submit_external(Default::default(), Arc::clone(&second))
+            .unwrap();
+        assert!(matches!(
+            second_handle.wait_outcome().unwrap(),
+            OperationOutcome::Failed(AlternateError(9))
+        ));
+
+        // A mismatched scope exercises the same typed job's release path
+        // before its worker consumes the request.
+        let other_id = manager
+            .try_submit(Default::default(), |_| Ok::<_, ()>(()))
+            .unwrap()
+            .id();
+        let mut mismatch = manager
+            .try_submit(Default::default(), move |scope| {
+                let job = PreparedLocalJob::new(
+                    Arc::clone(&executor.inner),
+                    AlternateRequest(vec![5]),
+                    executor.reserve_slot().unwrap(),
+                    Arc::new(Mutex::new(executor.reserve_bytes(0).unwrap())),
+                    executor.reserve_handle().unwrap(),
+                    LocalFactObserver::new(),
+                    |_| OperationOutcome::<AlternateResult, AlternateError>::Succeeded(AlternateResult(1)),
+                );
+                PreparedExternalOperation::bind(&*job, other_id).unwrap();
+                let failure = PreparedExternalOperation::activate(job.clone(), scope).unwrap_err();
+                assert_eq!("local job identity mismatch", failure.summary.as_str());
+                assert!(OperationControl::snapshot(&*job).input_released);
+                Ok::<_, ()>(())
+            })
+            .unwrap();
+        assert!(matches!(
+            mismatch.wait_outcome().unwrap(),
+            OperationOutcome::Succeeded(())
+        ));
     }
 
     #[test]
