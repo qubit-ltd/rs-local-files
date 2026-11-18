@@ -432,6 +432,7 @@ fn test_async_filesystem_opens_real_reader_writer_and_bounded_walker() {
         poll_worker(|cx| Pin::new(&mut writer).poll_write(cx, b"written on worker")).unwrap(),
         17
     );
+    poll_worker(|cx| Pin::new(&mut writer).poll_flush(cx)).unwrap();
     let outcome = poll_worker(|cx| Box::pin(writer.commit()).as_mut().poll(cx)).unwrap();
     assert_eq!(outcome.state(), qubit_local_files::outcome::LocalWriterState::Committed);
     assert_eq!(
