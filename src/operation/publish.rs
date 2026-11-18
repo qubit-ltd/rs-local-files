@@ -754,3 +754,60 @@ pub(super) fn record_temp_failure(
         _ => {}
     }
 }
+
+#[cfg(test)]
+mod temp_error_mapping_tests {
+    use super::LocalTempCommandError;
+    use super::LocalTempLifecycleError;
+    use super::LocalTempWorkerCommandFailure;
+    use super::map_temp_command_error;
+    use super::map_temp_worker_error;
+
+    #[test]
+    fn test_temp_worker_errors_map_to_stable_failures() {
+        let cases = [
+            (LocalTempCommandError::Capacity, LocalTempWorkerCommandFailure::Capacity),
+            (
+                LocalTempCommandError::ResourceUnavailable,
+                LocalTempWorkerCommandFailure::ResourceUnavailable,
+            ),
+            (
+                LocalTempCommandError::UnsupportedKind,
+                LocalTempWorkerCommandFailure::ResourceUnavailable,
+            ),
+            (LocalTempCommandError::Panicked, LocalTempWorkerCommandFailure::Panicked),
+        ];
+
+        for (error, expected) in cases {
+            assert_eq!(map_temp_worker_error(error), expected);
+        }
+    }
+
+    #[test]
+    fn test_temp_command_errors_classify_unsupported_and_worker_failures() {
+        let operation = crate::LocalFileOperation::PersistTemp;
+        let unsupported = map_temp_command_error(LocalTempCommandError::UnsupportedKind, operation);
+        match unsupported {
+            LocalTempLifecycleError::Unsupported(error) => {
+                assert_eq!(error.kind(), crate::LocalFileErrorKind::Unsupported);
+                assert_eq!(error.operation(), operation);
+            }
+            other => panic!("expected unsupported lifecycle error, got {other:?}"),
+        }
+
+        let cases = [
+            (LocalTempCommandError::Capacity, LocalTempWorkerCommandFailure::Capacity),
+            (
+                LocalTempCommandError::ResourceUnavailable,
+                LocalTempWorkerCommandFailure::ResourceUnavailable,
+            ),
+            (LocalTempCommandError::Panicked, LocalTempWorkerCommandFailure::Panicked),
+        ];
+        for (error, expected) in cases {
+            match map_temp_command_error(error, operation) {
+                LocalTempLifecycleError::Worker(actual) => assert_eq!(actual, expected),
+                other => panic!("expected worker lifecycle error, got {other:?}"),
+            }
+        }
+    }
+}
