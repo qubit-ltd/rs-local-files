@@ -814,6 +814,62 @@ mod activation_state_tests {
     use crate::operation::LocalIoExecutor;
 
     #[test]
+    fn test_activation_rejects_a_second_attempt_without_disturbing_original_job() {
+        let manager = OperationManager::new(ManagerOptions::default()).expect("manager");
+        let executor = LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).expect("executor");
+        let prepared_slot = Arc::new(Mutex::new(None));
+        let slot_for_first = Arc::clone(&prepared_slot);
+        let mut first = manager
+            .try_submit(Default::default(), move |scope| {
+                let job = PreparedLocalJob::new(
+                    Arc::clone(&executor.inner),
+                    (),
+                    executor.reserve_slot().expect("queue slot"),
+                    Arc::new(Mutex::new(executor.reserve_bytes(0).expect("owned permit"))),
+                    executor.reserve_handle().expect("handle permit"),
+                    LocalFactObserver::new(),
+                    |_| OperationOutcome::<(), ()>::Succeeded(()),
+                );
+                PreparedExternalOperation::bind(&*job, scope.id()).expect("bind job identity");
+                PreparedExternalOperation::activate(Arc::clone(&job), scope)
+                    .expect("first activation queues the worker");
+                *slot_for_first.lock().unwrap_or_else(|error| error.into_inner()) = Some(job);
+                Ok::<_, ()>(())
+            })
+            .expect("first operation");
+        assert!(matches!(
+            first.wait_outcome().expect("first outcome"),
+            OperationOutcome::Succeeded(())
+        ));
+
+        let job = prepared_slot
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .take()
+            .expect("prepared job");
+        let job_after_retry = Arc::clone(&job);
+        let mut second = manager
+            .try_submit(Default::default(), move |scope| {
+                let failure = PreparedExternalOperation::activate(job, scope)
+                    .expect_err("a prepared job accepts only one activation attempt");
+                assert_eq!("local job activation was already attempted", failure.summary.as_str());
+                Ok::<_, ()>(())
+            })
+            .expect("second operation");
+        assert!(matches!(
+            second.wait_outcome().expect("second outcome"),
+            OperationOutcome::Succeeded(())
+        ));
+        let snapshot = qubit_operation::OperationControl::snapshot(&*job_after_retry);
+        assert_eq!(qubit_operation::ExecutionPhase::Finished, snapshot.execution);
+        assert!(snapshot.input_released);
+        assert_eq!(
+            Some(qubit_operation::SettlementStatus::Released),
+            snapshot.settlement.map(|report| report.status)
+        );
+    }
+
+    #[test]
     fn test_activation_releases_job_when_scope_identity_does_not_match_binding() {
         let manager = OperationManager::new(ManagerOptions::default()).expect("manager");
         let executor = LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).expect("executor");
