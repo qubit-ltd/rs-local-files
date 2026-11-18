@@ -396,7 +396,11 @@ mod tests {
     use super::LocalStreamCompletion;
     use super::execute_stream_command;
     use super::map_walk_error;
+    use super::record_stream_fact;
     use super::stream_state::resource_limit;
+    use crate::operation::LocalDurabilityState;
+    use crate::operation::LocalFactObserver;
+    use crate::operation::LocalPublicationState;
 
     fn temp_path(label: &str) -> std::path::PathBuf {
         let nonce = SystemTime::now()
@@ -541,5 +545,28 @@ mod tests {
         assert_eq!(error.kind(), crate::LocalFileErrorKind::NotFound);
         assert_eq!(error.operation(), crate::LocalFileOperation::List);
         assert!(error.to_string().contains("missing entry"));
+    }
+
+    #[test]
+    fn test_record_stream_fact_preserves_publication_and_maximum_confirmed_bytes() {
+        let observer = LocalFactObserver::new();
+        record_stream_fact(
+            &observer,
+            LocalPublicationState::Published,
+            LocalDurabilityState::Unknown,
+            8,
+        );
+        record_stream_fact(
+            &observer,
+            LocalPublicationState::Unknown,
+            LocalDurabilityState::Failed,
+            3,
+        );
+
+        let snapshot = observer.snapshot();
+        assert_eq!(snapshot.publication, LocalPublicationState::Published);
+        assert_eq!(snapshot.durability, LocalDurabilityState::Failed);
+        assert_eq!(snapshot.modified_count, 1);
+        assert_eq!(snapshot.modified_bytes, 8);
     }
 }
