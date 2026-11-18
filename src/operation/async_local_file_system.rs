@@ -1301,6 +1301,43 @@ mod tests {
     }
 
     #[test]
+    fn test_async_reader_worker_preserves_seek_order_and_closes_explicitly() {
+        use qubit_io::AsyncInput;
+        use qubit_operation::OperationOutcome;
+
+        use crate::options::LocalReadOptions;
+
+        let directory = tempfile::tempdir().unwrap();
+        std::fs::write(directory.path().join("input"), b"worker stream").unwrap();
+        let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+        let executor = LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).unwrap();
+        let filesystem = block_on(AsyncLocalFileSystem::rooted(executor, directory.path().to_path_buf())).unwrap();
+        let mut operation = filesystem
+            .submit_open_reader(
+                &manager,
+                Default::default(),
+                PathBuf::from("input"),
+                LocalReadOptions::default(),
+            )
+            .unwrap();
+        let mut reader = match operation.wait_outcome().unwrap() {
+            OperationOutcome::Succeeded(reader) => reader,
+            _ => panic!("expected reader to open"),
+        };
+
+        let mut first = [0; 6];
+        assert_eq!(block_on(reader.read_fully_async(&mut first)).unwrap(), 6);
+        assert_eq!(&first, b"worker");
+        assert_eq!(block_on(reader.seek(std::io::SeekFrom::Start(7))).unwrap(), 7);
+        let mut remainder = [0; 16];
+        let count = block_on(reader.read_fully_async(&mut remainder)).unwrap();
+        assert_eq!(&remainder[..count], b"stream");
+        assert_eq!(block_on(reader.read_fully_async(&mut remainder)).unwrap(), 0);
+        block_on(reader.close()).unwrap();
+        operation.wait_settlement().unwrap();
+    }
+
+    #[test]
     fn test_async_read_capacity_rejection_returns_the_owned_request() {
         use crate::operation::LocalReadRequest;
         use crate::operation::LocalSubmitRejection;
