@@ -1026,6 +1026,45 @@ mod activation_state_tests {
         );
         assert!(job.task.lock().unwrap_or_else(|error| error.into_inner()).is_none());
     }
+
+    #[test]
+    fn test_activation_releases_job_when_worker_queue_is_stopped() {
+        let manager = OperationManager::new(ManagerOptions::default()).expect("manager");
+        let executor = LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).expect("executor");
+        let mut operation = manager
+            .try_submit(Default::default(), move |scope| {
+                let job = PreparedLocalJob::new(
+                    Arc::clone(&executor.inner),
+                    (),
+                    executor.reserve_slot().expect("queue slot"),
+                    Arc::new(Mutex::new(executor.reserve_bytes(0).expect("owned permit"))),
+                    executor.reserve_handle().expect("handle permit"),
+                    LocalFactObserver::new(),
+                    |_| OperationOutcome::<(), ()>::Succeeded(()),
+                );
+                PreparedExternalOperation::bind(&*job, scope.id()).expect("bind job identity");
+                executor.inner.queue.stop();
+
+                let failure = PreparedExternalOperation::activate(Arc::clone(&job), scope)
+                    .expect_err("activation must report a stopped worker queue");
+                assert_eq!("local worker queue is full", failure.summary.as_str());
+                let snapshot = OperationControl::snapshot(&*job);
+                assert_eq!(qubit_operation::ExecutionPhase::Finished, snapshot.execution);
+                assert!(snapshot.input_released);
+                assert_eq!(
+                    Some(qubit_operation::SettlementStatus::Released),
+                    snapshot.settlement.map(|settlement| settlement.status)
+                );
+                assert!(job.task.lock().unwrap_or_else(|error| error.into_inner()).is_none());
+                Ok::<_, ()>(())
+            })
+            .expect("parent operation");
+
+        assert!(matches!(
+            operation.wait_outcome().expect("parent outcome"),
+            OperationOutcome::Succeeded(())
+        ));
+    }
 }
 
 #[cfg(test)]
