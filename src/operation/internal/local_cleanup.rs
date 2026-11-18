@@ -316,6 +316,40 @@ mod tests {
         assert_cleanup_dispatch_retries(directory_resource, parent.path(), "temp-directory-sandbox-remove");
     }
 
+    #[test]
+    fn test_local_cleanup_falls_back_to_reserving_capacity_and_recovers_poisoned_permit_lock() {
+        let parent = tempfile::tempdir().expect("temp parent");
+        let manager = OperationManager::new(ManagerOptions::default()).expect("manager");
+        let executor = LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).expect("executor");
+        let cleanup = Arc::new(LocalCleanup {
+            executor: executor.clone(),
+        });
+        let context = || CleanupContext::new(qubit_operation::ContextOptions::default()).expect("cleanup context");
+
+        let owner = test_owner(&manager, &executor, parent.path());
+        drop(owner.cleanup_permit.lock().expect("cleanup permit lock").take());
+        assert!(matches!(
+            block_on(Arc::clone(&cleanup).cleanup(owner, context())),
+            CleanupOutcome::Released
+        ));
+
+        let owner = test_owner(&manager, &executor, parent.path());
+        let poisoned = std::thread::scope(|scope| {
+            scope
+                .spawn(|| {
+                    let _permit = owner.cleanup_permit.lock().expect("cleanup permit lock");
+                    panic!("poison cleanup permit mutex");
+                })
+                .join()
+        });
+        assert!(poisoned.is_err());
+        assert!(matches!(
+            block_on(cleanup.cleanup(owner, context())),
+            CleanupOutcome::Released
+        ));
+        assert_eq!(0, std::fs::read_dir(parent.path()).expect("temp parent").count());
+    }
+
     fn cleanup_error() -> crate::LocalFileError {
         crate::LocalFileError::from_io(
             LocalFileOperation::Cleanup,
