@@ -507,6 +507,39 @@ mod tests {
     }
 
     #[test]
+    fn test_cleanup_returns_owner_when_reserved_job_cannot_be_enqueued() {
+        let parent = tempfile::tempdir().expect("temp parent");
+        let manager = OperationManager::new(ManagerOptions::default()).expect("manager");
+        let executor = LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).expect("executor");
+        let cleanup = Arc::new(LocalCleanup {
+            executor: executor.clone(),
+        });
+        let owner = test_owner(&manager, &executor, parent.path());
+        let path = {
+            let native = owner.native.lock().expect("native lock");
+            let Some(LocalTempNative::File(file)) = native.as_ref() else {
+                panic!("test owner should contain a temporary file");
+            };
+            file.path().to_path_buf()
+        };
+
+        // Stopping the shared queue simulates the worker disappearing between
+        // reservation and enqueue. The rejected job must leave ownership with
+        // the caller so it can diagnose or recover the still-existing file.
+        executor.inner.queue.stop();
+        let context = CleanupContext::new(qubit_operation::ContextOptions::default()).expect("cleanup context");
+        let outcome = block_on(cleanup.cleanup(owner, context));
+        let CleanupOutcome::Failed { failure, resource } = outcome else {
+            panic!("rejected cleanup enqueue should return the resource");
+        };
+        assert_eq!("local cleanup worker is unavailable", failure.summary.as_str());
+        assert!(path.exists(), "rejected enqueue must not release the native resource");
+        assert!(resource.native.lock().expect("native lock").is_some());
+        drop(resource);
+        assert!(!path.exists(), "dropping the returned owner still cleans up the file");
+    }
+
+    #[test]
     fn test_cleanup_wait_observes_pending_then_returns_worker_error_owner() {
         let parent = tempfile::tempdir().expect("temp parent");
         let manager = OperationManager::new(ManagerOptions::default()).expect("manager");
