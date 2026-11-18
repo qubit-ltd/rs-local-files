@@ -1003,6 +1003,38 @@ mod relative_host_publish_tests {
         assert_eq!(observer.snapshot().publication, LocalPublicationState::Published);
     }
 
+    #[test]
+    fn test_staged_tree_publish_accepts_an_empty_tree() {
+        let directory = tempfile::tempdir().unwrap();
+        let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+        let filesystem = filesystem(&manager, directory.path());
+        let (mut operation, observer) = filesystem
+            .submit_staged_tree_publish(
+                &manager,
+                Default::default(),
+                LocalStagedTreePublishRequest {
+                    parent: PathBuf::from("."),
+                    name: "empty-tree".into(),
+                    stage_options: LocalTempDirectoryOptions::new(),
+                    files: Vec::new(),
+                    publish_options: LocalTreePublishOptions::new(),
+                },
+                LocalOperationOptions::default(),
+            )
+            .unwrap();
+
+        assert!(matches!(
+            operation.wait_outcome().unwrap(),
+            OperationOutcome::Succeeded(_)
+        ));
+        assert!(directory.path().join("empty-tree").is_dir());
+        assert_eq!(
+            std::fs::read_dir(directory.path().join("empty-tree")).unwrap().count(),
+            0
+        );
+        assert_eq!(observer.snapshot().publication, LocalPublicationState::Published);
+    }
+
     #[cfg(feature = "digest")]
     #[test]
     fn test_relative_conditional_writer_commit_publishes_under_captured_host_base() {
