@@ -314,7 +314,8 @@ mod tests {
     #[test]
     fn test_managed_walker_yields_all_entries_then_reports_end_of_stream() {
         let directory = tempfile::tempdir().unwrap();
-        for name in ["alpha", "beta", "gamma"] {
+        let expected: Vec<_> = (0..130).map(|index| format!("entry-{index:03}")).collect();
+        for name in &expected {
             std::fs::write(directory.path().join(name), name).unwrap();
         }
 
@@ -340,7 +341,10 @@ mod tests {
         }
         let mut names: Vec<_> = paths.iter().map(|path| path.file_name().unwrap().to_owned()).collect();
         names.sort();
-        assert_eq!(names, ["alpha", "beta", "gamma"].map(std::ffi::OsString::from));
+        assert_eq!(
+            names,
+            expected.into_iter().map(std::ffi::OsString::from).collect::<Vec<_>>()
+        );
         operation.wait_settlement().unwrap();
     }
 
