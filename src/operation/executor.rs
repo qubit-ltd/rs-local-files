@@ -1046,6 +1046,28 @@ mod tests {
         assert_eq!(executor.inner.cleanup_slots.used(), 0);
         assert!(executor.reserve_cleanup().is_some());
     }
+    /// Ensures a rejected fire-and-forget task does not retain its admission
+    /// permit or execute after the worker queue has stopped.
+    #[test]
+    fn test_enqueue_task_rejection_returns_admission_capacity() {
+        use std::sync::atomic::AtomicBool;
+        use std::sync::atomic::Ordering;
+
+        let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+        let executor = LocalIoExecutor::new(manager, LocalExecutionConfig::default()).unwrap();
+        let executed = std::sync::Arc::new(AtomicBool::new(false));
+        executor.inner.queue.stop();
+
+        let executed_by_task = std::sync::Arc::clone(&executed);
+        assert!(
+            executor
+                .enqueue_task(move || executed_by_task.store(true, Ordering::SeqCst))
+                .is_err()
+        );
+        assert_eq!(executor.inner.queue_slots.used(), 0);
+        assert!(!executed.load(Ordering::SeqCst));
+        assert!(executor.reserve_slot().is_some());
+    }
     /// Runs the test dropping executor drains queued work and stops queue
     /// behavior while preserving the operation lifecycle invariants.
     #[test]
