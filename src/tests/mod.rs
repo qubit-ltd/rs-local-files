@@ -7,6 +7,7 @@
 // =============================================================================
 
 mod coverage_staged_directory_tests;
+mod delete_tree_budget_tests;
 mod deletion_native_failure_tests;
 mod directory;
 mod directory_access_policy_tests;
