@@ -265,7 +265,7 @@ mod tests {
         let cleanup = Arc::new(LocalManagedAbortCleanup::<u8>::new(executor.cleanup_executor()));
         let resource = resource(&executor, id, abort_error);
 
-        let outcome = block_on(cleanup.cleanup(resource, cleanup_context()));
+        let outcome = block_on(Arc::clone(&cleanup).cleanup(resource, cleanup_context()));
         let CleanupOutcome::Failed { failure, resource } = outcome else {
             panic!("failed abort must retain the writer for recovery");
         };
@@ -278,6 +278,15 @@ mod tests {
                 .contains("PermissionDenied")
         );
         assert_eq!(*resource.native.lock().expect("native lock"), Some(9));
+
+        // A failed abort keeps the managed owner available for a later recovery
+        // attempt. Model a transient native failure clearing, then retry it.
+        let mut resource = resource;
+        resource.abort = abort_ok;
+        assert!(matches!(
+            block_on(cleanup.cleanup(resource, cleanup_context())),
+            CleanupOutcome::Released
+        ));
     }
 
     #[test]
