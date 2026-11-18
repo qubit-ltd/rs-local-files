@@ -814,6 +814,48 @@ mod activation_state_tests {
     use crate::operation::LocalIoExecutor;
 
     #[test]
+    fn test_activation_releases_job_when_scope_identity_does_not_match_binding() {
+        let manager = OperationManager::new(ManagerOptions::default()).expect("manager");
+        let executor = LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).expect("executor");
+        let other_id = manager
+            .try_submit(Default::default(), |_| Ok::<_, ()>(()))
+            .expect("other operation")
+            .id();
+        let mut operation = manager
+            .try_submit(Default::default(), move |scope| {
+                let job = PreparedLocalJob::new(
+                    Arc::clone(&executor.inner),
+                    (),
+                    executor.reserve_slot().expect("queue slot"),
+                    Arc::new(Mutex::new(executor.reserve_bytes(0).expect("owned permit"))),
+                    executor.reserve_handle().expect("handle permit"),
+                    LocalFactObserver::new(),
+                    |_| OperationOutcome::<(), ()>::Succeeded(()),
+                );
+                PreparedExternalOperation::bind(&*job, other_id).expect("bind another identity");
+
+                let failure = PreparedExternalOperation::activate(job.clone(), scope)
+                    .expect_err("activation must reject a scope with a different identity");
+                assert_eq!("local job identity mismatch", failure.summary.as_str());
+                let snapshot = OperationControl::snapshot(&*job);
+                assert_eq!(qubit_operation::ExecutionPhase::Finished, snapshot.execution);
+                assert!(snapshot.input_released);
+                assert_eq!(
+                    Some(qubit_operation::SettlementStatus::Released),
+                    snapshot.settlement.map(|s| s.status)
+                );
+                assert!(job.task.lock().unwrap_or_else(|error| error.into_inner()).is_none());
+                Ok::<_, ()>(())
+            })
+            .expect("parent operation");
+
+        assert!(matches!(
+            operation.wait_outcome().expect("parent outcome"),
+            OperationOutcome::Succeeded(())
+        ));
+    }
+
+    #[test]
     fn test_activation_rejects_a_prepared_job_without_its_task() {
         let manager = OperationManager::new(ManagerOptions::default()).expect("manager");
         let executor = LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).expect("executor");
