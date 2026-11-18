@@ -851,3 +851,136 @@ impl AsyncLocalFileSystem {
         }
     }
 }
+
+#[cfg(test)]
+mod relative_host_publish_tests {
+    use std::path::PathBuf;
+
+    use qubit_operation::ManagerOptions;
+    use qubit_operation::OperationManager;
+    use qubit_operation::OperationOutcome;
+
+    use super::AsyncLocalFileSystem;
+    use crate::operation::LocalExecutionConfig;
+    use crate::operation::LocalIoExecutor;
+    use crate::operation::LocalOperationOptions;
+    use crate::operation::LocalPublicationState;
+    #[cfg(feature = "digest")]
+    use crate::operation::publish::LocalConditionalWriterCommitRequest;
+    use crate::operation::publish::LocalStagedTreeFile;
+    use crate::operation::publish::LocalStagedTreePublishRequest;
+    use crate::operation::publish::LocalWriterCommitRequest;
+    use crate::options::LocalTempDirectoryOptions;
+    use crate::options::LocalTreePublishOptions;
+    use crate::options::LocalWriteMode;
+    use crate::options::LocalWriteOptions;
+    #[cfg(feature = "digest")]
+    use crate::options::LocalWritePrecondition;
+
+    fn filesystem(manager: &OperationManager, root: &std::path::Path) -> AsyncLocalFileSystem {
+        let executor = LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).unwrap();
+        AsyncLocalFileSystem::new(
+            crate::LocalFileSystem::host().unwrap(),
+            executor,
+            Some(root.to_path_buf()),
+        )
+    }
+
+    #[test]
+    fn test_relative_writer_commit_publishes_under_captured_host_base() {
+        let directory = tempfile::tempdir().unwrap();
+        let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+        let filesystem = filesystem(&manager, directory.path());
+        let (mut operation, observer) = filesystem
+            .submit_writer_commit(
+                &manager,
+                Default::default(),
+                LocalWriterCommitRequest {
+                    path: PathBuf::from("published"),
+                    options: LocalWriteOptions::new(LocalWriteMode::CreateOrReplace),
+                    bytes: b"relative writer".to_vec(),
+                },
+                LocalOperationOptions::default(),
+            )
+            .unwrap();
+
+        assert!(matches!(
+            operation.wait_outcome().unwrap(),
+            OperationOutcome::Succeeded(_)
+        ));
+        assert_eq!(
+            std::fs::read(directory.path().join("published")).unwrap(),
+            b"relative writer"
+        );
+        assert_eq!(observer.snapshot().publication, LocalPublicationState::Published);
+    }
+
+    #[test]
+    fn test_relative_staged_tree_publish_uses_captured_host_base_as_parent() {
+        let directory = tempfile::tempdir().unwrap();
+        let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+        let filesystem = filesystem(&manager, directory.path());
+        let (mut operation, observer) = filesystem
+            .submit_staged_tree_publish(
+                &manager,
+                Default::default(),
+                LocalStagedTreePublishRequest {
+                    parent: PathBuf::from("."),
+                    name: "relative-tree".into(),
+                    stage_options: LocalTempDirectoryOptions::new(),
+                    files: vec![LocalStagedTreeFile {
+                        path: PathBuf::from("item"),
+                        bytes: b"relative tree".to_vec(),
+                    }],
+                    publish_options: LocalTreePublishOptions::new(),
+                },
+                LocalOperationOptions::default(),
+            )
+            .unwrap();
+
+        assert!(matches!(
+            operation.wait_outcome().unwrap(),
+            OperationOutcome::Succeeded(_)
+        ));
+        assert_eq!(
+            std::fs::read(directory.path().join("relative-tree/item")).unwrap(),
+            b"relative tree"
+        );
+        assert_eq!(observer.snapshot().publication, LocalPublicationState::Published);
+    }
+
+    #[cfg(feature = "digest")]
+    #[test]
+    fn test_relative_conditional_writer_commit_publishes_under_captured_host_base() {
+        use sha2::Sha256;
+
+        let directory = tempfile::tempdir().unwrap();
+        let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+        let filesystem = filesystem(&manager, directory.path())
+            .with_symlink_policy(crate::policy::LocalSymlinkPolicy::Reject)
+            .unwrap();
+        let (mut operation, observer) = filesystem
+            .submit_conditional_writer_commit::<Sha256>(
+                &manager,
+                Default::default(),
+                LocalConditionalWriterCommitRequest {
+                    path: PathBuf::from("conditional"),
+                    precondition: LocalWritePrecondition::Absent,
+                    options: LocalWriteOptions::new(LocalWriteMode::CreateOrReplace),
+                    bytes: b"relative conditional".to_vec(),
+                },
+                LocalOperationOptions::default(),
+            )
+            .unwrap();
+
+        assert!(matches!(
+            operation.wait_outcome().unwrap(),
+            OperationOutcome::Succeeded(_)
+        ));
+        assert_eq!(
+            std::fs::read(directory.path().join("conditional")).unwrap(),
+            b"relative conditional"
+        );
+        assert_eq!(observer.snapshot().publication, LocalPublicationState::Published);
+    }
+}
