@@ -667,6 +667,74 @@ fn test_append_facts_survive_close_and_drop() {
 }
 
 #[test]
+fn test_rooted_worker_streams_keep_the_captured_authority_after_path_replacement() {
+    use qubit_local_files::LocalFileSystem;
+    use qubit_local_files::operation::LocalExecutionConfig;
+    use qubit_local_files::operation::LocalIoExecutor;
+    use qubit_local_files::options::LocalWriteMode;
+    use qubit_local_files::options::LocalWriteOptions;
+    use qubit_operation::ManagerOptions;
+    use qubit_operation::OperationManager;
+    use qubit_operation::OperationOutcome;
+
+    let scratch = tempfile::tempdir().unwrap();
+    let root = scratch.path().join("root");
+    std::fs::create_dir(&root).unwrap();
+    std::fs::write(root.join("payload"), b"captured stream").unwrap();
+    std::fs::write(root.join("append"), b"before").unwrap();
+
+    let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+    let executor = LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).unwrap();
+    let filesystem = LocalFileSystem::rooted(&root).unwrap().into_async(executor).unwrap();
+    std::fs::rename(&root, scratch.path().join("moved-root")).unwrap();
+    std::fs::create_dir(&root).unwrap();
+    std::fs::write(root.join("payload"), b"replacement path").unwrap();
+    std::fs::write(root.join("append"), b"replacement").unwrap();
+
+    let mut opening = filesystem
+        .submit_open_reader(
+            &manager,
+            Default::default(),
+            PathBuf::from("payload"),
+            qubit_local_files::options::LocalReadOptions::default(),
+        )
+        .unwrap();
+    let mut reader = match opening.wait_outcome().unwrap() {
+        OperationOutcome::Succeeded(reader) => reader,
+        _ => panic!("rooted reader failed to open"),
+    };
+    let mut contents = [0; 32];
+    let count = poll_worker(|cx| Pin::new(&mut reader).poll_read(cx, &mut contents)).unwrap();
+    assert_eq!(&contents[..count], b"captured stream");
+    poll_worker(|cx| Box::pin(reader.close()).as_mut().poll(cx)).unwrap();
+    drop(reader);
+    opening.wait_settlement().unwrap();
+
+    let (mut opening, observer) = filesystem
+        .submit_open_writer(
+            &manager,
+            Default::default(),
+            PathBuf::from("append"),
+            LocalWriteOptions::new(LocalWriteMode::Append),
+        )
+        .unwrap();
+    let mut writer = match opening.wait_outcome().unwrap() {
+        OperationOutcome::Succeeded(writer) => writer,
+        _ => panic!("rooted append writer failed to open"),
+    };
+    poll_worker(|cx| Pin::new(&mut writer).poll_write(cx, b" plus stream")).unwrap();
+    poll_worker(|cx| Box::pin(writer.close()).as_mut().poll(cx)).unwrap();
+    assert_eq!(observer.snapshot().modified_bytes, 12);
+    drop(writer);
+    opening.wait_settlement().unwrap();
+    assert_eq!(
+        std::fs::read(scratch.path().join("moved-root/append")).unwrap(),
+        b"before plus stream"
+    );
+    assert_eq!(std::fs::read(root.join("append")).unwrap(), b"replacement");
+}
+
+#[test]
 fn test_walker_batches_return_every_entry_on_portable_paths() {
     use qubit_local_files::LocalFileSystem;
     use qubit_local_files::operation::LocalExecutionConfig;
