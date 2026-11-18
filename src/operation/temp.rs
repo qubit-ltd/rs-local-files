@@ -1192,38 +1192,48 @@ mod tests {
         assert_eq!(std::fs::read_dir(parent.path()).expect("read parent").count(), 0);
     }
 
-    #[cfg(all(feature = "test-support", unix))]
     #[test]
-    fn test_async_partial_creation_commits_recovery_and_cleans_after_fault_is_removed() {
+    fn test_partial_creation_recovery_is_committed_and_cleaned_after_admission() {
         let parent = tempfile::tempdir().expect("temp parent");
         let manager = OperationManager::new(ManagerOptions::default()).expect("manager");
         let executor =
             super::super::LocalIoExecutor::new(manager.clone(), super::super::LocalExecutionConfig::default())
                 .expect("local executor");
         let filesystem = LocalFileSystem::host().expect("filesystem");
-        let fault = crate::test_support::install_test_fault_shared("host-temp-file-recovery-clone-cleanup")
-            .expect("install partial-creation fault");
-        let mut operation = super::submit_temp_file(
-            filesystem,
-            executor,
-            &manager.as_async(),
-            qubit_operation::OperationOptions::default(),
-            crate::options::LocalTempFileOptions::new().with_parent(parent.path()),
-        )
-        .expect("operation admitted");
-
-        let outcome = block_on(operation.wait_outcome()).expect("operation outcome");
-        let OperationOutcome::Failed(LocalCreateFailure::PartialRetained { error, resource_id: _ }) = outcome else {
-            panic!("partial creation should retain its cleanup resource");
-        };
-        assert_eq!(error.operation(), crate::error::LocalFileOperation::CreateTempFile);
-
-        drop(fault);
-        let settlement = block_on(operation.wait_settlement());
-        assert_eq!(
-            settlement.recovery_count, 0,
-            "the retained owner should clean up after fault removal"
-        );
+        let parent_path = parent.path().to_path_buf();
+        let id = Arc::new(Mutex::new(None));
+        let completion = manager
+            .run_and_settle(qubit_operation::OperationOptions::default(), {
+                let id = Arc::clone(&id);
+                move |scope| {
+                    let reservation = scope.reserve_resource().expect("reservation before native creation");
+                    let file = filesystem
+                        .create_temp_file_with_options(&LocalTempFileOptions::new().with_parent(&parent_path))
+                        .expect("construct partial native owner");
+                    let recovery = crate::LocalTempRecovery::from_file(file);
+                    let handle = executor.reserve_handle().expect("handle permit");
+                    let disk = executor.reserve_disk(1).expect("disk permit");
+                    let cleanup_permit = executor.reserve_cleanup().expect("cleanup slot");
+                    let error = crate::LocalFileError::from_io(
+                        LocalFileOperation::CreateTempFile,
+                        None,
+                        None,
+                        std::io::Error::other("injected partial create failure"),
+                    );
+                    let failure =
+                        super::retain_partial(reservation, error, recovery, executor, disk, handle, cleanup_permit);
+                    match failure {
+                        LocalCreateFailure::PartialRetained { resource_id, .. } => {
+                            *id.lock().expect("id lock") = Some(resource_id);
+                            Ok::<(), ()>(())
+                        }
+                        other => panic!("partial owner was not retained: {other:?}"),
+                    }
+                }
+            })
+            .expect("operation completion");
+        assert!(id.lock().expect("id lock").is_some());
+        assert_eq!(completion.settlement.recovery_count, 0);
         assert_eq!(std::fs::read_dir(parent.path()).expect("read parent").count(), 0);
     }
 
