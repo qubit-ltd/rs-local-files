@@ -282,3 +282,140 @@ fn test_zero_attempt_stage_creation_reports_no_mutation() {
         2
     );
 }
+
+#[test]
+fn test_public_directory_handle_operations_cover_success_and_resolution_errors() {
+    use qubit_local_files::options::LocalCreateDirectoryOptions;
+    use qubit_local_files::options::LocalWriteMode;
+    use qubit_local_files::options::LocalWriteOptions;
+
+    let (scratch, handle) = fixture(false);
+
+    let directory = handle
+        .create_directory_with_options(
+            Path::new("created/nested"),
+            &LocalCreateDirectoryOptions::new().with_recursive(),
+        )
+        .expect("recursive directory creation should succeed");
+    let _ = directory;
+    assert!(scratch.path().join("parent/created/nested").is_dir());
+    let _existing = handle
+        .create_directory_with_options(
+            Path::new("created/nested"),
+            &LocalCreateDirectoryOptions::new().with_exists_ok(),
+        )
+        .expect("existing directory should be accepted when requested");
+
+    let child = handle
+        .open_directory(Path::new("child"), &LocalDirectoryOpenOptions::new())
+        .expect("child directory should open through the public handle");
+    assert_eq!(
+        child
+            .observe()
+            .expect("child authority should be observable")
+            .metadata()
+            .kind(),
+        qubit_local_files::outcome::LocalFileKind::Directory
+    );
+
+    for (path, expected, expected_operation) in [
+        (
+            Path::new("/absolute"),
+            LocalFileErrorKind::InvalidPath,
+            LocalFileOperation::BindPath,
+        ),
+        (
+            Path::new("../outside"),
+            LocalFileErrorKind::InvalidPath,
+            LocalFileOperation::OpenRoot,
+        ),
+        (
+            Path::new("absent"),
+            LocalFileErrorKind::NotFound,
+            LocalFileOperation::Metadata,
+        ),
+        (
+            Path::new("payload/child"),
+            LocalFileErrorKind::InvalidPath,
+            LocalFileOperation::OpenRoot,
+        ),
+    ] {
+        let error = handle
+            .open_directory(path, &LocalDirectoryOpenOptions::new())
+            .expect_err("invalid child paths should be rejected");
+        assert_eq!(error.kind(), expected, "path: {path:?}");
+        assert_eq!(error.operation(), expected_operation, "path: {path:?}");
+    }
+
+    fs::write(scratch.path().join("parent/copy-source"), b"copy me").expect("copy source should be created");
+    let copied = handle
+        .copy_with_options(
+            Path::new("copy-source"),
+            Path::new("copy-target"),
+            &qubit_local_files::options::LocalCopyOptions::new(),
+        )
+        .expect("handle copy should complete");
+    assert_eq!(copied.stats().files(), 1);
+    assert_eq!(fs::read(scratch.path().join("parent/copy-target")).unwrap(), b"copy me");
+
+    let missing = handle
+        .copy_with_options(
+            Path::new("missing-copy-source"),
+            Path::new("copy-failure-target"),
+            &qubit_local_files::options::LocalCopyOptions::new(),
+        )
+        .expect_err("missing handle copy source should preserve a typed failure");
+    assert_eq!(missing.error().kind(), LocalFileErrorKind::NotFound);
+    assert_eq!(missing.error().operation(), LocalFileOperation::Copy);
+    assert!(!scratch.path().join("parent/copy-failure-target").exists());
+
+    let error = handle
+        .open_writer_with_options(
+            Path::new("../escape"),
+            &LocalWriteOptions::new(LocalWriteMode::CreateNew),
+        )
+        .expect_err("writer paths cannot escape the retained authority");
+    assert_eq!(error.kind(), LocalFileErrorKind::InvalidPath);
+    assert_eq!(error.operation(), LocalFileOperation::BindPath);
+    assert!(!scratch.path().join("escape").exists());
+}
+
+#[test]
+fn test_public_directory_handle_listing_metadata_and_security_errors() {
+    use qubit_local_files::observation::LocalSecurityObservationOptions;
+
+    let (_scratch, handle) = fixture(false);
+    assert!(
+        handle
+            .entry_metadata(Path::new("payload"))
+            .expect("existing entry metadata should be available")
+            .is_some()
+    );
+
+    let entries = handle
+        .list_with_options(Path::new("."), &LocalListOptions::new())
+        .expect("listing the authority root should succeed")
+        .collect::<Result<Vec<_>, _>>()
+        .expect("listing entries should be readable");
+    assert!(
+        entries
+            .iter()
+            .any(|entry| entry.relative_path() == Path::new("payload"))
+    );
+
+    let error = handle
+        .list_with_options(Path::new("payload"), &LocalListOptions::new())
+        .expect_err("a file cannot be listed as a directory");
+    assert_eq!(error.kind(), LocalFileErrorKind::TypeConflict);
+    assert_eq!(error.operation(), LocalFileOperation::List);
+
+    let observation = handle
+        .security_observation(&LocalSecurityObservationOptions::new())
+        .expect("best effort security facts should be queryable");
+    assert!(
+        observation.identity().is_some()
+            || observation.filesystem().is_some()
+            || observation.access().is_some()
+            || observation.link_count().is_some()
+    );
+}
