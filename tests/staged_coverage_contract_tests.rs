@@ -11,6 +11,7 @@
 use std::ffi::OsStr;
 use std::io;
 use std::os::unix::fs::PermissionsExt;
+use std::os::unix::fs::symlink;
 use std::path::Path;
 
 use qubit_local_files::LocalFileSystem;
@@ -104,6 +105,56 @@ fn test_write_errors_remove_partial_files_and_allow_retry() {
         stage.cleanup().expect("cleanup tracks successful retries");
         assert!(!path.exists());
     }
+}
+
+#[test]
+fn test_stage_tree_observer_recurses_without_following_link_targets() {
+    let fixture = tempfile::tempdir().expect("fixture should be created");
+    let outside = tempfile::tempdir().expect("outside target should be created");
+    std::fs::create_dir(outside.path().join("linked-child")).expect("linked directory should exist");
+    std::fs::write(outside.path().join("linked-child/secret"), b"outside").expect("outside file should exist");
+
+    let authority = parent(fixture.path());
+    let mut stage = stage(&authority, &LocalTempDirectoryOptions::new());
+    let stage_path = fixture.path().join(stage.relative_name());
+    std::fs::create_dir(stage_path.join("nested")).expect("nested stage directory should exist");
+    stage
+        .write_file_new(Path::new("nested/payload"), &mut &b"inside"[..], 6)
+        .expect("nested stage file should be written");
+    symlink(outside.path(), stage_path.join("link")).expect("stage link should point outside");
+
+    let entries = stage
+        .observe_tree_with_options(
+            &LocalListOptions::new()
+                .with_symlink_policy(qubit_local_files::policy::LocalSymlinkPolicy::FollowAcrossScope),
+        )
+        .expect("observer should be created")
+        .map(|entry| {
+            entry
+                .expect("stage entry should be observed")
+                .relative_path()
+                .to_path_buf()
+        })
+        .collect::<std::collections::BTreeSet<_>>();
+
+    assert!(
+        entries.contains(Path::new("nested")),
+        "the stage observer recurses despite default shallow listing"
+    );
+    assert!(
+        entries.contains(Path::new("nested/payload")),
+        "the nested stage file is visible"
+    );
+    assert!(
+        entries.contains(Path::new("link")),
+        "the symbolic link itself is visible"
+    );
+    assert!(
+        !entries.contains(Path::new("link/linked-child")),
+        "the observer never enters a link target"
+    );
+    assert!(!entries.contains(Path::new("link/linked-child/secret")));
+    stage.cleanup().expect("stage should clean up");
 }
 
 #[test]
