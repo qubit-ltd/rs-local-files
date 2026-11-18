@@ -340,4 +340,44 @@ mod tests {
         ));
         drop(held_cleanup);
     }
+
+    #[test]
+    fn test_request_close_does_not_duplicate_a_pending_command() {
+        let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+        let executor = LocalIoExecutor::new(manager, LocalExecutionConfig::default()).unwrap();
+
+        let fixture = tempfile::NamedTempFile::new().unwrap();
+        let native = crate::LocalFileReader::from_file(fixture.reopen().unwrap()).unwrap();
+        let buffer_budget = Arc::new(Mutex::new(executor.reserve_bytes(0).unwrap()));
+        let handle_budget = Arc::new(executor.reserve_handle().unwrap());
+        let cleanup_permit = executor.reserve_cleanup().unwrap();
+        let driver = WorkerStreamDriver(Arc::new(WorkerStreamInner {
+            executor,
+            native: Mutex::new(Some(LocalNativeStream::Reader(native))),
+            state: Mutex::new(WorkerStreamState {
+                commands: HashMap::from([(
+                    7,
+                    super::super::worker_stream_command::WorkerCommand {
+                        result: None,
+                        waker: None,
+                    },
+                )]),
+            }),
+            queue: Mutex::new(VecDeque::new()),
+            active: AtomicBool::new(false),
+            cleanup_permit: Mutex::new(Some(cleanup_permit)),
+            _buffer_budget: buffer_budget,
+            _handle_budget: handle_budget,
+            observer: None,
+            written_bytes: std::sync::atomic::AtomicU64::new(0),
+            append_mode: false,
+        }));
+
+        LocalStreamDriver::request_close(&driver, 7);
+
+        let state = driver.0.state.lock().unwrap();
+        assert_eq!(state.commands.len(), 1);
+        assert!(state.commands.get(&7).unwrap().result.is_none());
+        assert!(driver.0.queue.lock().unwrap().is_empty());
+    }
 }
