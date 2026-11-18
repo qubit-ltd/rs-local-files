@@ -835,6 +835,42 @@ mod tests {
             query_linux_acl(&file, b"system.posix_acl_default\0", &options).expect("read absent default ACL"),
             LocalAclPresence::Absent,
         );
+
+        let too_small = LocalSecurityObservationOptions::new().with_max_acl_bytes(acl.len() - 1);
+        let error = io_error(
+            query_linux_acl(&file, b"system.posix_acl_access\0", &too_small)
+                .expect_err("configured byte bound rejects the retained ACL"),
+        );
+        assert_eq!(error.kind(), LocalFileErrorKind::ResourceLimit);
+        let limit = error.resource_limit_error().expect("structured byte limit");
+        assert_eq!(limit.resource(), LocalResourceKind::AclBytes);
+        assert_eq!(limit.observed(), Some(acl.len()));
+
+        let too_few_entries = LocalSecurityObservationOptions::new().with_max_acl_entries(4);
+        let error = io_error(
+            query_linux_acl(&file, b"system.posix_acl_access\0", &too_few_entries)
+                .expect_err("configured entry bound rejects the retained ACL"),
+        );
+        assert_eq!(error.kind(), LocalFileErrorKind::ResourceLimit);
+        let limit = error.resource_limit_error().expect("structured entry limit");
+        assert_eq!(limit.resource(), LocalResourceKind::AclEntries);
+        assert_eq!(limit.observed(), Some(5));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn test_query_security_satisfies_required_filesystem_and_access_facts() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let path = directory.path().join("required-security");
+        fs::write(&path, b"required facts").expect("create fixture");
+        let file = File::open(&path).expect("open retained file");
+        let options = LocalSecurityObservationOptions::new()
+            .with_filesystem(LocalObservationRequirement::Required)
+            .with_access(LocalObservationRequirement::Required);
+
+        let observation = query_security(&file, &options).expect("Linux supplies required security facts");
+        assert!(observation.filesystem().is_some());
+        assert!(observation.access().and_then(|value| value.unix()).is_some());
     }
 
     #[test]
