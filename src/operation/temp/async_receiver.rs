@@ -163,6 +163,33 @@ mod tests {
     }
 
     #[test]
+    fn test_receiver_recovers_poisoned_result_and_waker_locks() {
+        let (sender, mut receiver) = async_result::<u8>();
+        let state = Arc::clone(&receiver.0);
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _guard = state.value.lock().expect("result lock");
+            panic!("poison result lock");
+        }));
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _guard = state.waker.lock().expect("waker lock");
+            panic!("poison waker lock");
+        }));
+        assert!(state.value.is_poisoned());
+        assert!(state.waker.is_poisoned());
+
+        let wakes = Arc::new(AtomicUsize::new(0));
+        let waker = Waker::from(Arc::new(CountWake(Arc::clone(&wakes))));
+        let mut context = std::task::Context::from_waker(&waker);
+        assert!(std::pin::Pin::new(&mut receiver).poll(&mut context).is_pending());
+        assert!(sender.send(17).is_ok());
+        assert_eq!(wakes.load(Ordering::SeqCst), 1);
+        assert!(matches!(
+            std::pin::Pin::new(&mut receiver).poll(&mut context),
+            std::task::Poll::Ready(17)
+        ));
+    }
+
+    #[test]
     fn test_sender_transfers_an_owned_string_through_the_waiting_receiver() {
         let (sender, mut receiver) = async_result::<String>();
         let mut context = std::task::Context::from_waker(Waker::noop());
