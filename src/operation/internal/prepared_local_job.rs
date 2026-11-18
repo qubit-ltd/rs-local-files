@@ -790,6 +790,43 @@ mod waker_tests {
     }
 
     #[test]
+    fn test_wake_all_deduplicates_equivalent_wakers() {
+        let target = Arc::new(CountWake(AtomicUsize::new(0)));
+        let waker = Waker::from(Arc::clone(&target));
+        let wakers = [Some(waker.clone()), None, Some(waker.clone()), None];
+
+        PreparedLocalJob::<(), (), ()>::wake_all(wakers);
+
+        assert_eq!(1, target.0.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn test_wake_all_continues_after_a_waker_panics() {
+        struct PanicWake;
+        impl Wake for PanicWake {
+            fn wake(self: Arc<Self>) {
+                panic!("owned wake panic");
+            }
+
+            fn wake_by_ref(self: &Arc<Self>) {
+                panic!("wake by reference panic");
+            }
+        }
+
+        let target = Arc::new(CountWake(AtomicUsize::new(0)));
+        let wakers = [
+            Some(Waker::from(Arc::new(PanicWake))),
+            Some(Waker::from(Arc::clone(&target))),
+            None,
+            None,
+        ];
+
+        PreparedLocalJob::<(), (), ()>::wake_all(wakers);
+
+        assert_eq!(1, target.0.load(Ordering::SeqCst));
+    }
+
+    #[test]
     fn test_owned_waker_wake_notifies_the_registered_target() {
         let notified = Arc::new(CountWake(AtomicUsize::new(0)));
         Waker::from(Arc::clone(&notified)).wake();
