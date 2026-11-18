@@ -84,6 +84,20 @@ mod tests {
         }
     }
 
+    unsafe fn panic_on_clone(_: *const ()) -> std::task::RawWaker {
+        panic!("waker clone failed");
+    }
+
+    unsafe fn drop_raw_waker(_: *const ()) {}
+
+    const PANIC_CLONE_VTABLE: std::task::RawWakerVTable =
+        std::task::RawWakerVTable::new(panic_on_clone, |_| {}, |_| {}, drop_raw_waker);
+
+    fn panic_clone_waker() -> Waker {
+        // SAFETY: the callbacks never access or drop the null data pointer.
+        unsafe { Waker::from_raw(std::task::RawWaker::new(std::ptr::null(), &PANIC_CLONE_VTABLE)) }
+    }
+
     #[test]
     fn test_receiver_replaces_waiter_and_delivers_one_published_result() {
         let (sender, mut receiver) = async_result::<u8>();
@@ -126,6 +140,26 @@ mod tests {
             std::task::Poll::Ready(7)
         ));
         assert!(std::pin::Pin::new(&mut receiver).poll(&mut context).is_pending());
+    }
+
+    #[test]
+    fn test_receiver_recovers_when_task_waker_clone_panics() {
+        let (sender, mut receiver) = async_result::<u8>();
+        let hostile_waker = panic_clone_waker();
+        let mut hostile_context = std::task::Context::from_waker(&hostile_waker);
+
+        assert!(
+            std::pin::Pin::new(&mut receiver)
+                .poll(&mut hostile_context)
+                .is_pending()
+        );
+        assert!(sender.send(9).is_ok());
+
+        let mut ordinary_context = std::task::Context::from_waker(Waker::noop());
+        assert!(matches!(
+            std::pin::Pin::new(&mut receiver).poll(&mut ordinary_context),
+            std::task::Poll::Ready(9)
+        ));
     }
 
     #[test]
