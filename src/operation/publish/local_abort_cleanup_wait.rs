@@ -72,7 +72,7 @@ mod tests {
     use super::super::LocalAbortCleanupState;
     use super::LocalAbortCleanupWait;
 
-    fn wait() -> (LocalAbortCleanupWait<u8>, Arc<LocalAbortCleanupState<u8>>) {
+    fn wait<W: Send + 'static>() -> (LocalAbortCleanupWait<W>, Arc<LocalAbortCleanupState<W>>) {
         let state = Arc::new(LocalAbortCleanupState {
             owner: Mutex::new(None),
             result: Mutex::new(None),
@@ -83,7 +83,7 @@ mod tests {
 
     #[test]
     fn test_abort_wait_returns_a_result_present_before_the_first_poll() {
-        let (mut wait, state) = wait();
+        let (mut wait, state) = wait::<u8>();
         *state.result.lock().expect("cleanup result lock") = Some(CleanupOutcome::Released);
         let waker = Waker::noop();
         let mut context = Context::from_waker(waker);
@@ -96,7 +96,7 @@ mod tests {
 
     #[test]
     fn test_abort_wait_observes_worker_result_after_registering_waker() {
-        let (mut wait, state) = wait();
+        let (mut wait, state) = wait::<u8>();
         let waker = Waker::noop();
         let mut context = Context::from_waker(waker);
 
@@ -113,5 +113,37 @@ mod tests {
             Future::poll(std::pin::Pin::new(&mut wait), &mut context),
             Poll::Ready(CleanupOutcome::Released)
         ));
+    }
+
+    struct TestWake;
+
+    impl std::task::Wake for TestWake {
+        fn wake(self: Arc<Self>) {}
+    }
+
+    #[test]
+    fn test_abort_wait_replaces_waker_when_a_second_poll_is_pending() {
+        let (mut wait, state) = wait::<u16>();
+        let first_waker = Waker::from(Arc::new(TestWake));
+        let mut first_context = Context::from_waker(&first_waker);
+
+        assert!(matches!(
+            Future::poll(std::pin::Pin::new(&mut wait), &mut first_context),
+            Poll::Pending
+        ));
+
+        let replacement_waker = Waker::from(Arc::new(TestWake));
+        let mut replacement_context = Context::from_waker(&replacement_waker);
+        assert!(matches!(
+            Future::poll(std::pin::Pin::new(&mut wait), &mut replacement_context),
+            Poll::Pending
+        ));
+
+        let registered_waker = state.waker.lock().expect("registered waker lock");
+        assert!(
+            registered_waker
+                .as_ref()
+                .is_some_and(|waker| waker.will_wake(&replacement_waker))
+        );
     }
 }
