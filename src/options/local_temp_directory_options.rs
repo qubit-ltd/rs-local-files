@@ -295,3 +295,38 @@ impl Default for LocalTempDirectoryOptions {
         Self::new()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn builders_retain_directory_creation_and_cleanup_configuration() {
+        let parent = Path::new("cache/builds");
+        let access = LocalOwnerAccessPolicy::new().with_unix_modes(0o700, 0o600);
+        let cleanup = LocalTempCleanupLimits::new()
+            .with_max_depth(4)
+            .with_max_entries(24)
+            .with_max_pending_path_bytes(2048)
+            .with_deadline(std::time::Duration::from_secs(3));
+        let options = LocalTempDirectoryOptions::new()
+            .with_parent(parent)
+            .with_prefix("work-")
+            .with_suffix("-stage")
+            .with_max_attempts(5)
+            .with_create_parent()
+            .with_privacy(LocalPrivacyRequirement::Required)
+            .with_owner_access_policy(access)
+            .with_cleanup_limits(cleanup);
+
+        assert_eq!(options.parent(), Some(parent));
+        assert_eq!(options.prefix(), Some("work-"));
+        assert_eq!(options.suffix(), Some("-stage"));
+        assert_eq!(options.max_attempts(), Some(5));
+        assert!(options.creates_parent());
+        assert_eq!(options.privacy(), LocalPrivacyRequirement::Required);
+        assert_eq!(options.owner_access_policy(), Some(&access));
+        assert_eq!(options.cleanup_limits(), cleanup);
+        assert_eq!(options.without_max_attempts().max_attempts(), None);
+    }
+}

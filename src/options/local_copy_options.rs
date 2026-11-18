@@ -444,3 +444,80 @@ impl Default for LocalCopyOptions {
         Self::new()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn builders_configure_copy_behavior_and_resource_limits() {
+        let options = LocalCopyOptions::new()
+            .with_conflict(LocalCopyConflictPolicy::Overwrite)
+            .with_type_conflict(LocalCopyTypeConflictPolicy::Replace)
+            .with_metadata_preservation(LocalMetadataPreservePolicy::Permissions)
+            .with_symlink_policy(LocalSymlinkPolicy::Reject)
+            .with_tree_source()
+            .with_create_parent()
+            .with_atomicity(LocalAtomicityRequirement::Required)
+            .with_durability(LocalDurabilityRequirement::Required)
+            .with_max_depth(4)
+            .with_max_entries(12)
+            .with_max_bytes(4096)
+            .with_max_open_directories(3)
+            .with_deadline(Duration::from_secs(2));
+
+        assert_eq!(options.conflict(), LocalCopyConflictPolicy::Overwrite);
+        assert_eq!(options.type_conflict(), LocalCopyTypeConflictPolicy::Replace);
+        assert_eq!(options.preserve_metadata(), LocalMetadataPreservePolicy::Permissions);
+        assert_eq!(options.symlink_policy_override(), Some(LocalSymlinkPolicy::Reject));
+        assert_eq!(options.source_mode(), LocalCopySourceMode::Tree);
+        assert!(options.creates_parent());
+        assert_eq!(options.atomicity(), LocalAtomicityRequirement::Required);
+        assert_eq!(options.durability(), LocalDurabilityRequirement::Required);
+        assert_eq!(options.max_depth(), Some(4));
+        assert_eq!(options.max_entries(), Some(12));
+        assert_eq!(options.max_bytes(), Some(4096));
+        assert_eq!(options.max_open_directories(), Some(3));
+        assert_eq!(options.deadline(), Some(Duration::from_secs(2)));
+
+        let reset = options
+            .with_entry_source()
+            .without_max_depth()
+            .without_max_entries()
+            .without_max_bytes()
+            .without_max_open_directories()
+            .without_deadline();
+        assert_eq!(reset.source_mode(), LocalCopySourceMode::Entry);
+        assert_eq!(reset.max_depth(), None);
+        assert_eq!(reset.max_entries(), None);
+        assert_eq!(reset.max_bytes(), None);
+        assert_eq!(reset.max_open_directories(), None);
+        assert_eq!(reset.deadline(), None);
+    }
+
+    #[test]
+    fn tightening_resource_limits_preserves_copy_policy_and_applies_minimums() {
+        let request = LocalCopyOptions::new()
+            .with_conflict(LocalCopyConflictPolicy::Overwrite)
+            .with_create_parent()
+            .with_max_depth(8)
+            .with_max_entries(10)
+            .with_max_bytes(100)
+            .with_deadline(Duration::from_secs(4));
+        let ceilings = LocalCopyOptions::new()
+            .with_max_depth(3)
+            .with_max_entries(20)
+            .with_max_bytes(0)
+            .with_max_open_directories(2)
+            .with_deadline(Duration::from_secs(2));
+
+        let tightened = request.tighten_resource_limits(&ceilings);
+        assert_eq!(tightened.conflict(), LocalCopyConflictPolicy::Overwrite);
+        assert!(tightened.creates_parent());
+        assert_eq!(tightened.max_depth(), Some(3));
+        assert_eq!(tightened.max_entries(), Some(10));
+        assert_eq!(tightened.max_bytes(), Some(0));
+        assert_eq!(tightened.max_open_directories(), Some(2));
+        assert_eq!(tightened.deadline(), Some(Duration::from_secs(2)));
+    }
+}

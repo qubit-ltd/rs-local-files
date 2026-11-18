@@ -174,3 +174,28 @@ impl Default for LocalTempFileOptions {
         Self::new()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn builders_preserve_temporary_file_creation_settings() {
+        let parent = Path::new("scratch/nested");
+        let options = LocalTempFileOptions::new()
+            .with_parent(parent)
+            .with_prefix("upload-")
+            .with_suffix(".part")
+            .with_max_attempts(7)
+            .with_create_parent()
+            .with_privacy(LocalPrivacyRequirement::Required);
+
+        assert_eq!(options.parent(), Some(parent));
+        assert_eq!(options.prefix(), Some("upload-"));
+        assert_eq!(options.suffix(), Some(".part"));
+        assert_eq!(options.max_attempts(), Some(7));
+        assert!(options.creates_parent());
+        assert_eq!(options.privacy(), LocalPrivacyRequirement::Required);
+        assert_eq!(options.without_max_attempts().max_attempts(), None);
+    }
+}
