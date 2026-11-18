@@ -412,6 +412,15 @@ fn test_async_filesystem_opens_real_reader_writer_and_bounded_walker() {
     let mut bytes = [0; 64];
     let count = poll_worker(|cx| Pin::new(&mut reader).poll_read(cx, &mut bytes)).unwrap();
     assert_eq!(&bytes[..count], b"real local reader");
+    let mut seek = Box::pin(reader.seek(SeekFrom::End(-6)));
+    assert_eq!(poll_worker(|cx| seek.as_mut().poll(cx)).unwrap(), 11);
+    drop(seek);
+    let count = poll_worker(|cx| Pin::new(&mut reader).poll_read(cx, &mut bytes)).unwrap();
+    assert_eq!(&bytes[..count], b"reader");
+    assert_eq!(
+        poll_worker(|cx| Pin::new(&mut reader).poll_read(cx, &mut bytes)).unwrap(),
+        0
+    );
     poll_worker(|cx| Box::pin(reader.close()).as_mut().poll(cx)).unwrap();
     drop(reader);
     opening.wait_settlement().unwrap();
@@ -432,6 +441,8 @@ fn test_async_filesystem_opens_real_reader_writer_and_bounded_walker() {
         poll_worker(|cx| Pin::new(&mut writer).poll_write(cx, b"written on worker")).unwrap(),
         17
     );
+    poll_worker(|cx| Pin::new(&mut writer).poll_flush(cx)).unwrap();
+    assert!(!output.exists(), "flush must not publish an uncommitted writer");
     let outcome = poll_worker(|cx| Box::pin(writer.commit()).as_mut().poll(cx)).unwrap();
     assert_eq!(outcome.state(), qubit_local_files::outcome::LocalWriterState::Committed);
     assert_eq!(
