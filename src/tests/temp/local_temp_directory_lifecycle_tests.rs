@@ -79,6 +79,7 @@ fn test_temp_directory_persist_publishes_tree_and_releases_sandbox() {
 }
 
 #[test]
+#[cfg(feature = "async")]
 fn test_host_constructor_without_sandbox_parent_uses_empty_creation_parent() {
     use crate::LocalSymlinkPolicy;
     use crate::options::LocalTempCleanupLimits;
@@ -102,6 +103,7 @@ fn test_host_constructor_without_sandbox_parent_uses_empty_creation_parent() {
 }
 
 #[test]
+#[cfg(feature = "async")]
 fn test_rooted_constructor_without_sandbox_parent_uses_empty_creation_parent() {
     use std::sync::Arc;
 
@@ -129,6 +131,7 @@ fn test_rooted_constructor_without_sandbox_parent_uses_empty_creation_parent() {
 }
 
 #[test]
+#[cfg(feature = "async")]
 fn test_rooted_created_handle_constructor_without_sandbox_parent_uses_empty_creation_parent() {
     use std::sync::Arc;
 
