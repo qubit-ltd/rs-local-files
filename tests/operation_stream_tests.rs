@@ -1148,6 +1148,152 @@ fn test_append_facts_survive_close_and_drop() {
 }
 
 #[test]
+fn test_empty_append_commit_does_not_record_publication() {
+    use qubit_local_files::LocalFileSystem;
+    use qubit_local_files::operation::LocalExecutionConfig;
+    use qubit_local_files::operation::LocalIoExecutor;
+    use qubit_local_files::options::LocalWriteMode;
+    use qubit_local_files::options::LocalWriteOptions;
+    use qubit_operation::ManagerOptions;
+    use qubit_operation::OperationManager;
+    use qubit_operation::OperationOutcome;
+
+    let directory = tempfile::tempdir().unwrap();
+    let destination = directory.path().join("empty-append.txt");
+    std::fs::write(&destination, b"existing").unwrap();
+    let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+    let executor = LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).unwrap();
+    let filesystem = LocalFileSystem::host().unwrap().into_async(executor).unwrap();
+    let (mut opening, observer) = filesystem
+        .submit_open_writer(
+            &manager,
+            Default::default(),
+            destination.clone(),
+            LocalWriteOptions::new(LocalWriteMode::Append),
+        )
+        .unwrap();
+    let mut writer = match opening.wait_outcome().unwrap() {
+        OperationOutcome::Succeeded(writer) => writer,
+        _ => panic!("append writer open failed"),
+    };
+    let outcome = poll_worker(|cx| Box::pin(writer.commit()).as_mut().poll(cx)).unwrap();
+    assert_eq!(outcome.state(), qubit_local_files::outcome::LocalWriterState::Committed);
+    assert_eq!(std::fs::read(&destination).unwrap(), b"existing");
+    assert_eq!(
+        observer.snapshot().publication,
+        qubit_local_files::LocalPublicationState::NotPublished
+    );
+    assert_eq!(observer.snapshot().modified_count, 0);
+    assert_eq!(observer.snapshot().modified_bytes, 0);
+    drop(writer);
+    opening.wait_settlement().unwrap();
+}
+
+#[cfg(feature = "test-support")]
+#[test]
+fn test_real_writer_close_finishes_commit_started_before_enqueue() {
+    use qubit_local_files::LocalFileSystem;
+    use qubit_local_files::operation::LocalExecutionConfig;
+    use qubit_local_files::operation::LocalIoExecutor;
+    use qubit_local_files::options::LocalWriteMode;
+    use qubit_local_files::options::LocalWriteOptions;
+    use qubit_local_files::test_support::install_test_gate;
+    use qubit_operation::OperationOptions;
+    use qubit_operation::OperationOutcome;
+
+    let directory = tempfile::tempdir().unwrap();
+    let destination = directory.path().join("close-resumes-commit.txt");
+    std::fs::write(&destination, b"old").unwrap();
+    let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+    let executor = LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).unwrap();
+    let filesystem = LocalFileSystem::host().unwrap().into_async(executor).unwrap();
+    let (mut opening, _observer) = filesystem
+        .submit_open_writer(
+            &manager,
+            OperationOptions::default(),
+            destination.clone(),
+            LocalWriteOptions::new(LocalWriteMode::CreateOrReplace),
+        )
+        .unwrap();
+    let mut writer = match opening.wait_outcome().unwrap() {
+        OperationOutcome::Succeeded(writer) => writer,
+        _ => panic!("staged writer open failed"),
+    };
+
+    let gate = install_test_gate("rlf9-writer-after-stage-write").unwrap();
+    let mut write = Box::pin(writer.write_fully_async(b"new contents"));
+    assert!(matches!(poll(|cx| write.as_mut().poll(cx)), Poll::Ready(Ok(()))));
+    drop(write);
+    let mut settle = Box::pin(writer.settle());
+    assert!(poll(|cx| settle.as_mut().poll(cx)).is_pending());
+    gate.wait_until_entered();
+    drop(settle);
+    assert_eq!(std::fs::read(&destination).unwrap(), b"old");
+
+    let mut commit = Box::pin(writer.commit());
+    assert!(poll(|cx| commit.as_mut().poll(cx)).is_pending());
+    drop(commit);
+    assert_eq!(std::fs::read(&destination).unwrap(), b"old");
+    let blocked_write = poll_worker(|cx| Box::pin(writer.write_fully_async(b"later")).as_mut().poll(cx)).unwrap_err();
+    assert_eq!(blocked_write.kind(), io::ErrorKind::InvalidData, "{blocked_write}");
+    assert!(blocked_write.to_string().contains("commit is pending"));
+
+    let mut close = Box::pin(writer.close());
+    assert!(poll(|cx| close.as_mut().poll(cx)).is_pending());
+    gate.release();
+    poll_worker(|cx| close.as_mut().poll(cx)).unwrap();
+    drop(close);
+
+    let outcome = poll_worker(|cx| Box::pin(writer.commit()).as_mut().poll(cx)).unwrap();
+    assert_eq!(outcome.state(), qubit_local_files::outcome::LocalWriterState::Committed);
+    assert_eq!(std::fs::read(&destination).unwrap(), b"new contents");
+    drop(writer);
+    let settlement = opening.wait_settlement().unwrap();
+    assert_eq!(settlement.recovery_count, 0);
+}
+
+#[test]
+fn test_empty_staged_commit_records_publication() {
+    use qubit_local_files::LocalFileSystem;
+    use qubit_local_files::operation::LocalExecutionConfig;
+    use qubit_local_files::operation::LocalIoExecutor;
+    use qubit_local_files::options::LocalWriteMode;
+    use qubit_local_files::options::LocalWriteOptions;
+    use qubit_operation::ManagerOptions;
+    use qubit_operation::OperationManager;
+    use qubit_operation::OperationOutcome;
+
+    let directory = tempfile::tempdir().unwrap();
+    let destination = directory.path().join("empty-staged.txt");
+    let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+    let executor = LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).unwrap();
+    let filesystem = LocalFileSystem::host().unwrap().into_async(executor).unwrap();
+    let (mut opening, observer) = filesystem
+        .submit_open_writer(
+            &manager,
+            Default::default(),
+            destination.clone(),
+            LocalWriteOptions::new(LocalWriteMode::CreateOrReplace),
+        )
+        .unwrap();
+    let mut writer = match opening.wait_outcome().unwrap() {
+        OperationOutcome::Succeeded(writer) => writer,
+        _ => panic!("staged writer open failed"),
+    };
+    let outcome = poll_worker(|cx| Box::pin(writer.commit()).as_mut().poll(cx)).unwrap();
+    assert_eq!(outcome.state(), qubit_local_files::outcome::LocalWriterState::Committed);
+    assert_eq!(std::fs::read(&destination).unwrap(), b"");
+    assert_eq!(
+        observer.snapshot().publication,
+        qubit_local_files::LocalPublicationState::Published
+    );
+    assert_eq!(observer.snapshot().modified_count, 1);
+    assert_eq!(observer.snapshot().modified_bytes, 0);
+    drop(writer);
+    opening.wait_settlement().unwrap();
+}
+
+#[test]
 fn test_rooted_worker_streams_keep_the_captured_authority_after_path_replacement() {
     use qubit_local_files::LocalFileSystem;
     use qubit_local_files::operation::LocalExecutionConfig;

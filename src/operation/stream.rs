@@ -211,7 +211,9 @@ fn drain_stream_commands(inner: Arc<WorkerStreamInner>) {
                     }
                 }
                 LocalStreamCompletion::Committed(outcome) => {
-                    if let Some(observer) = &inner.observer {
+                    if let Some(observer) = &inner.observer
+                        && (!inner.append_mode || inner.written_bytes.load(Ordering::Acquire) > 0)
+                    {
                         record_stream_fact(
                             observer,
                             super::LocalPublicationState::Published,
@@ -339,6 +341,8 @@ fn execute_stream_command(
         }
         (LocalNativeStream::Writer(writer), LocalStreamCommand::Write { bytes }) => {
             let count = qubit_io::Output::write(writer.as_mut(), bytes)?;
+            #[cfg(feature = "test-support")]
+            crate::test_support::hit_test_gate("rlf9-writer-after-stage-write");
             Ok(LocalStreamCompletion::Written(count))
         }
         (LocalNativeStream::Writer(writer), LocalStreamCommand::Flush) => {
