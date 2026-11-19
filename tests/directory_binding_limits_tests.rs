@@ -182,6 +182,31 @@ fn test_unbound_parent_fallback_paths_are_charged() {
     parent.observe().expect("failed fallback binding leaves parent usable");
 }
 
+#[test]
+fn test_opening_path_binding_enforces_ancestor_limit_at_the_boundary() {
+    let scratch = tempdir().expect("fixture should exist");
+    fs::create_dir(scratch.path().join("child")).expect("child directory should exist");
+    let filesystem = LocalFileSystem::rooted(scratch.path()).expect("filesystem should open");
+
+    let error = filesystem
+        .open_directory_with_options(
+            Path::new("child"),
+            &LocalDirectoryOpenOptions::new().with_path_binding(LocalPathBindingOptions::new().with_max_ancestors(0)),
+        )
+        .expect_err("the opening path contains one ancestor");
+    assert_eq!(error.kind(), LocalFileErrorKind::ResourceLimit);
+    assert_eq!(error.operation(), LocalFileOperation::OpenRoot);
+    assert_eq!(error.path(), Some(scratch.path().join("child").as_path()));
+
+    let child = filesystem
+        .open_directory_with_options(
+            Path::new("child"),
+            &LocalDirectoryOpenOptions::new().with_path_binding(LocalPathBindingOptions::new().with_max_ancestors(1)),
+        )
+        .expect("the exact ancestor limit should allow opening the child");
+    assert_eq!(child.ancestor_observations(&LocalListOptions::new()).unwrap().len(), 2);
+}
+
 #[cfg(windows)]
 mod support;
 
