@@ -1250,4 +1250,64 @@ mod relative_host_publish_tests {
         assert_eq!(std::fs::read(destination).unwrap(), b"original");
         assert_eq!(observer.snapshot().publication, LocalPublicationState::NotPublished);
     }
+
+    #[cfg(feature = "test-support")]
+    #[cfg(feature = "digest")]
+    #[cfg(unix)]
+    #[test]
+    fn test_managed_conditional_write_error_aborts_candidate_and_preserves_destination() {
+        use sha2::Digest;
+        use sha2::Sha256;
+
+        use crate::test_support::TestConditionalHooks;
+        use crate::test_support::TestConditionalPoint;
+
+        let directory = tempfile::tempdir().unwrap();
+        let destination = directory.path().join("conditional-write-error");
+        std::fs::write(&destination, b"original").unwrap();
+        let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+        let executor = LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).unwrap();
+        let filesystem = AsyncLocalFileSystem::new(
+            crate::LocalFileSystem::host()
+                .unwrap()
+                .with_conditional_test_hooks(TestConditionalHooks::once(TestConditionalPoint::BeforeWrite, || {
+                    Err(std::io::Error::new(
+                        std::io::ErrorKind::PermissionDenied,
+                        "injected write failure",
+                    ))
+                })),
+            executor,
+            Some(directory.path().to_path_buf()),
+        )
+        .with_symlink_policy(crate::policy::LocalSymlinkPolicy::Reject)
+        .unwrap();
+        let (mut operation, observer) = filesystem
+            .submit_conditional_writer_commit::<Sha256>(
+                &manager,
+                Default::default(),
+                LocalConditionalWriterCommitRequest {
+                    path: PathBuf::from("conditional-write-error"),
+                    precondition: LocalWritePrecondition::Content(Sha256::digest(b"original")),
+                    options: LocalWriteOptions::new(LocalWriteMode::CreateOrReplace),
+                    bytes: b"replacement".to_vec(),
+                },
+                LocalOperationOptions::default(),
+            )
+            .unwrap();
+
+        match operation.wait_outcome().unwrap() {
+            OperationOutcome::Failed(crate::LocalConditionalWriterCommandError::Write {
+                cause,
+                cleanup_error: None,
+                recovery_resource: None,
+                retryable_writer: None,
+            }) => {
+                assert_eq!(cause.operation(), crate::LocalFileOperation::Commit);
+                assert_eq!(cause.kind(), crate::LocalFileErrorKind::PermissionDenied);
+            }
+            other => panic!("expected managed conditional write failure, got {other:?}"),
+        }
+        assert_eq!(std::fs::read(destination).unwrap(), b"original");
+        assert_eq!(observer.snapshot().publication, LocalPublicationState::NotPublished);
+    }
 }
