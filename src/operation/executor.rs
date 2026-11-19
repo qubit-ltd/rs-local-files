@@ -910,6 +910,34 @@ mod tests {
     }
 
     #[test]
+    fn test_reserve_slot_falls_back_to_waiter_capacity_then_exhausts() {
+        let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+        let executor = LocalIoExecutor::new(
+            manager,
+            LocalExecutionConfig {
+                queue_capacity: 1,
+                waiter_capacity: 1,
+                ..LocalExecutionConfig::default()
+            },
+        )
+        .unwrap();
+
+        let queue_slot = executor.reserve_slot().expect("queue slot is available");
+        let waiter_slot = executor
+            .reserve_slot()
+            .expect("waiter slot is used after the queue is full");
+        assert!(executor.reserve_slot().is_none(), "both bounded pools are full");
+
+        drop(queue_slot);
+        drop(waiter_slot);
+        let reused_queue_slot = executor.reserve_slot().expect("released queue capacity is reusable");
+        let reused_waiter_slot = executor.reserve_slot().expect("released waiter capacity is reusable");
+        assert!(executor.reserve_slot().is_none());
+        drop(reused_queue_slot);
+        drop(reused_waiter_slot);
+    }
+
+    #[test]
     fn test_queued_stop_skips_worker_and_worker_panic_becomes_execution_failure() {
         use std::sync::atomic::AtomicUsize;
         use std::sync::atomic::Ordering;
