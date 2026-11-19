@@ -90,6 +90,26 @@ mod tests {
 
     unsafe fn drop_raw_waker(_: *const ()) {}
 
+    unsafe fn send_during_waker_clone(data: *const ()) -> std::task::RawWaker {
+        // SAFETY: this waker is used only while the pointed-to sender cell is
+        // alive, and its callbacks do not outlive the receiver poll.
+        let sender = unsafe { &*(data as *const std::sync::Mutex<Option<super::super::AsyncSender<u8>>>) }
+            .lock()
+            .unwrap()
+            .take();
+        assert!(sender.expect("sender available").send(31).is_ok());
+        std::task::RawWaker::new(data, &SEND_DURING_CLONE_VTABLE)
+    }
+
+    unsafe fn no_op_raw_waker(_: *const ()) {}
+
+    const SEND_DURING_CLONE_VTABLE: std::task::RawWakerVTable = std::task::RawWakerVTable::new(
+        send_during_waker_clone,
+        no_op_raw_waker,
+        no_op_raw_waker,
+        no_op_raw_waker,
+    );
+
     unsafe fn clone_waker_with_panicking_drop(_: *const ()) -> std::task::RawWaker {
         std::task::RawWaker::new(std::ptr::null(), &PANIC_DROP_VTABLE)
     }
@@ -113,6 +133,25 @@ mod tests {
         // SAFETY: clone and wake callbacks do not access the null data pointer;
         // the drop callback intentionally panics to exercise panic containment.
         unsafe { Waker::from_raw(std::task::RawWaker::new(std::ptr::null(), &PANIC_DROP_VTABLE)) }
+    }
+
+    #[test]
+    fn test_receiver_takes_a_result_published_while_registering_its_waker() {
+        let (sender, mut receiver) = async_result::<u8>();
+        let sender_cell = std::sync::Mutex::new(Some(sender));
+        // SAFETY: sender_cell outlives the waker and all of its callbacks.
+        let waker = unsafe {
+            Waker::from_raw(std::task::RawWaker::new(
+                &sender_cell as *const _ as *const (),
+                &SEND_DURING_CLONE_VTABLE,
+            ))
+        };
+        let mut context = std::task::Context::from_waker(&waker);
+
+        assert!(matches!(
+            std::pin::Pin::new(&mut receiver).poll(&mut context),
+            std::task::Poll::Ready(31)
+        ));
     }
 
     #[test]
