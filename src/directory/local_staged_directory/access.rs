@@ -49,6 +49,7 @@ thread_local! {
 #[cfg(test)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum OwnerPolicyDeadlineBoundary {
+    AfterCollection,
     IndexBuild,
     FinalMatch,
     PinnedHandle,
@@ -375,6 +376,8 @@ impl LocalStagedDirectory {
         }
         let (entries, traversal, maximum_entries, directory_mode_restricts_traversal) =
             self.collect_owner_policy_entries_started_at(policy, limits, started_at)?;
+        #[cfg(test)]
+        reach_owner_policy_deadline_boundary(OwnerPolicyDeadlineBoundary::AfterCollection, started_at);
         if owner_policy_deadline_exceeded(limits, started_at) {
             return Err(super::super::tree_recovery::LocalTreeAccessError::new(
                 resource_limit(),
@@ -2380,6 +2383,44 @@ mod owner_policy_checkpoint_tests {
             );
             let _recovery = stage.retain_in_place();
         }
+    }
+
+    #[test]
+    fn test_owner_policy_collection_enforces_name_byte_limit_before_mutation() {
+        let (scratch, mut stage, policy) = fixture(true);
+        let root = scratch.path().join(stage.relative_name());
+        let error = stage
+            .apply_owner_access_policy_with_options(&policy, &LocalListOptions::new().with_max_seen_name_bytes(0))
+            .expect_err("owner-policy collection must honor the encoded-name byte budget");
+
+        assert_eq!(LocalFileErrorKind::ResourceLimit, error.cause().kind());
+        assert_eq!(LocalTreeAccessState::Preserved, error.access_state());
+        assert_eq!(
+            0o600,
+            fs::metadata(root.join("payload")).unwrap().permissions().mode() & 0o777
+        );
+        let _recovery = stage.retain_in_place();
+    }
+
+    #[test]
+    fn test_owner_policy_deadline_expiring_after_collection_preserves_access() {
+        let (scratch, mut stage, policy) = fixture(true);
+        let root = scratch.path().join(stage.relative_name());
+        let _clock = DeadlineBoundaryGuard::expire_at(OwnerPolicyDeadlineBoundary::AfterCollection);
+        let error = stage
+            .apply_owner_access_policy_with_options(
+                &policy,
+                &LocalListOptions::new().with_deadline(std::time::Duration::from_secs(30)),
+            )
+            .expect_err("an expired shared deadline must stop before entries are pinned or changed");
+
+        assert_eq!(LocalFileErrorKind::ResourceLimit, error.cause().kind());
+        assert_eq!(LocalTreeAccessState::Preserved, error.access_state());
+        assert_eq!(
+            0o600,
+            fs::metadata(root.join("payload")).unwrap().permissions().mode() & 0o777
+        );
+        let _recovery = stage.retain_in_place();
     }
 
     #[test]
