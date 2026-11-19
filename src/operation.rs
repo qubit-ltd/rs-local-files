@@ -165,3 +165,13 @@ pub use types::LocalPublicationState;
 pub use types::LocalReadRequest;
 pub use types::LocalSubmitError;
 pub use types::LocalSubmitRejection;
+
+#[cfg(all(test, feature = "async", panic = "unwind"))]
+fn poison_test_mutex<T>(mutex: &std::sync::Mutex<T>) {
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let _guard = mutex.lock().expect("mutex starts unpoisoned");
+        panic!("poison mutex for recovery test");
+    }));
+    assert!(result.is_err());
+    assert!(mutex.is_poisoned());
+}

@@ -322,6 +322,30 @@ mod symlink_source_read_tests {
     use super::copy_symlink_with_options;
     use crate::LocalCopyTypeConflictPolicy;
 
+    #[cfg(unix)]
+    #[test]
+    fn test_expired_symlink_copy_preserves_existing_destination() {
+        let fixture = tempfile::tempdir().expect("fixture");
+        let source = fixture.path().join("source");
+        let destination = fixture.path().join("destination");
+        std::os::unix::fs::symlink("stored-target", &source).expect("source link");
+        std::fs::write(&destination, b"existing").expect("existing destination");
+        let options = LocalCopyDirOptions::new()
+            .with_conflict(LocalCopyConflictPolicy::Overwrite)
+            .with_deadline(std::time::Duration::ZERO);
+        let budget = CopyBudget::new(options);
+        let mut stats = LocalCopyDirStats::default();
+        let failure = copy_symlink_with_options(&source, &destination, options, &mut stats, &budget)
+            .expect_err("deadline must stop the link copy before destination inspection");
+        assert_eq!(failure.stage(), LocalCopyDirStage::PublishSymlinkUnchanged);
+        assert_eq!(std::fs::read(&destination).expect("preserved destination"), b"existing");
+        assert_eq!(
+            std::fs::read_link(&source).expect("preserved link"),
+            std::path::Path::new("stored-target")
+        );
+        assert_eq!(stats, LocalCopyDirStats::default());
+    }
+
     #[test]
     fn test_symlink_source_read_failure_keeps_destination() {
         let fixture = tempfile::tempdir().expect("fixture");

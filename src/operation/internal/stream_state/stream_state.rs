@@ -707,6 +707,16 @@ impl StreamState {
             Poll::Ready(Err(error)) => {
                 self.close_request = None;
                 self.closed = true;
+                let error = if self.direction == Direction::Write
+                    && let Some(write_error) = &self.write_error
+                {
+                    io::Error::new(
+                        error.kind(),
+                        format!("{error}; earlier write failed: {}", write_error.make()),
+                    )
+                } else {
+                    error
+                };
                 self.close_error = Some(SavedError::capture(error));
                 self.completed_close()
             }

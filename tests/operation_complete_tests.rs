@@ -119,7 +119,7 @@ fn test_read_text_preserves_utf8_conversion_error() {
             Default::default(),
             LocalReadRequest {
                 path,
-                read: Default::default(),
+                read: LocalReadAllOptions::new().with_max_bytes(2),
             },
             Default::default(),
         )
@@ -701,8 +701,9 @@ fn test_complete_operation_edge_results_and_failures() {
     assert!(matches!(read_at.wait_outcome().unwrap(),
         qubit_operation::OperationOutcome::Succeeded(bytes) if bytes.is_empty()));
 
-    // Prefix reads probe one byte past the requested prefix. This deterministically
-    // exercises the executor byte-budget failure while retaining no partial output.
+    // Prefix reads probe one byte past the requested prefix. This
+    // deterministically exercises the executor byte-budget failure while
+    // retaining no partial output.
     let prefix_path = directory.path().join("prefix-budget");
     std::fs::write(&prefix_path, b"ab").unwrap();
     let mut prefix = filesystem

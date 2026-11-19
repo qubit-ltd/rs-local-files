@@ -265,6 +265,28 @@ mod tests {
     }
 
     #[test]
+    fn test_deadline_during_directory_enumeration_preserves_all_entries() {
+        let _fault = install_test_fault("local-delete-deadline-6").expect("deadline fault");
+        let backend = RecordingBackend::new();
+        backend.yield_child.set(true);
+        let error = remove_directory_tree(
+            &backend,
+            &PathBuf::from("tree"),
+            LocalDeleteOptions::new().with_recursive(),
+            Instant::now(),
+        )
+        .expect_err("deadline must stop enumeration before removing entries");
+        assert_eq!(error.io_error_kind(), io::ErrorKind::TimedOut);
+        assert_eq!(
+            error.effect_state(),
+            Some(crate::error::LocalFileEffectState::Unchanged)
+        );
+        assert_eq!(backend.metadata_calls.get(), 1);
+        assert_eq!(backend.open_calls.get(), 1);
+        assert_eq!(backend.before_remove_calls.get(), 0);
+    }
+
+    #[test]
     fn test_directory_tree_removes_empty_directory_without_fault() {
         let backend = RecordingBackend::new();
         remove_directory_tree(

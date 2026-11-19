@@ -12,9 +12,11 @@ use std::time::Duration;
 use qubit_local_files::LocalFileSystem;
 use qubit_local_files::error::LocalFileErrorKind;
 use qubit_local_files::error::LocalFileOperation;
+use qubit_local_files::options::LocalCopyOptions;
 use qubit_local_files::options::LocalDirectoryOpenOptions;
 use qubit_local_files::options::LocalObservedReadOptions;
 use qubit_local_files::options::LocalPathBindingOptions;
+use qubit_local_files::outcome::LocalCopyFailureState;
 
 #[test]
 fn test_observed_reader_rejects_unrepresentable_binding_deadline() {
@@ -133,4 +135,47 @@ fn test_fixed_directory_reader_accepts_finite_authority_and_reader_deadlines() {
                 .with_path_binding(LocalPathBindingOptions::new().with_deadline(Duration::from_secs(5))),
         )
         .expect("finite reader deadline should combine with the authority deadline");
+}
+
+#[test]
+fn test_directory_copy_combines_binding_and_operation_deadlines() {
+    let fixture = tempfile::tempdir().expect("temporary directory");
+    let source = Path::new("source");
+    let destination = Path::new("destination");
+    std::fs::write(fixture.path().join(source), b"payload").expect("source file");
+    let filesystem = LocalFileSystem::rooted(fixture.path()).expect("rooted filesystem");
+    let handle = filesystem
+        .open_directory_with_options(
+            Path::new("/"),
+            &LocalDirectoryOpenOptions::new()
+                .with_path_binding(LocalPathBindingOptions::new().with_deadline(Duration::from_secs(60))),
+        )
+        .expect("directory handle with binding deadline");
+
+    let failure = handle
+        .copy_with_options(
+            source,
+            destination,
+            &LocalCopyOptions::new().with_deadline(Duration::ZERO),
+        )
+        .expect_err("operation deadline expires before the binding deadline");
+    assert_eq!(failure.state(), LocalCopyFailureState::Unchanged);
+    assert_eq!(failure.error().io_error_kind(), std::io::ErrorKind::TimedOut);
+    assert_eq!(failure.error().operation(), LocalFileOperation::Copy);
+    assert_eq!(failure.error().path(), Some(source));
+    assert_eq!(failure.error().target(), Some(destination));
+    assert!(!fixture.path().join(destination).exists());
+
+    let escaping_destination = Path::new("../destination");
+    let failure = handle
+        .copy_with_options(source, escaping_destination, &LocalCopyOptions::new())
+        .expect_err("destination cannot escape the directory authority");
+    assert_eq!(failure.state(), LocalCopyFailureState::Unchanged);
+    assert_eq!(failure.error().kind(), LocalFileErrorKind::InvalidPath);
+    assert_eq!(failure.error().path(), Some(source));
+    assert_eq!(failure.error().target(), Some(escaping_destination));
+    assert_eq!(
+        std::fs::read(fixture.path().join(source)).expect("preserved source"),
+        b"payload"
+    );
 }

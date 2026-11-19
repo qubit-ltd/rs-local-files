@@ -106,6 +106,11 @@ impl LocalStreamResource {
         }
     }
 
+    /// Returns write facts established by the underlying worker, if available.
+    pub(super) fn write_facts(&self) -> Option<(crate::LocalWriteFailureState, u64)> {
+        self.driver.write_facts()
+    }
+
     /// Requests an idempotent close while containing driver panics.
     ///
     /// # Parameters

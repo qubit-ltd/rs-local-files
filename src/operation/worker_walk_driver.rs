@@ -153,8 +153,9 @@ impl LocalWalkDriver for WorkerWalkDriver {
                                 let size = path.as_os_str().as_encoded_bytes().len();
                                 if size > max_bytes {
                                     if entries.is_empty() {
-                                        // Return the single oversized path so the public
-                                        // bounded-batch validator reports the resource limit.
+                                        // Return the single oversized path so
+                                        // the public bounded-batch validator
+                                        // reports the resource limit.
                                         entries.push(path);
                                     } else {
                                         cursor.pending_entry = Some(path);
@@ -221,7 +222,8 @@ impl LocalWalkDriver for WorkerWalkDriver {
                 let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| waker.wake()));
             }
         });
-        if let Some(permit) = self.0.cleanup_permit.lock().unwrap_or_else(|e| e.into_inner()).take() {
+        let cleanup_permit = self.0.cleanup_permit.lock().unwrap_or_else(|e| e.into_inner()).take();
+        if let Some(permit) = cleanup_permit {
             let mut permit = Some(permit);
             let mut job = Some(job);
             let mut queued = false;
@@ -526,6 +528,16 @@ mod tests {
         let manager = OperationManager::new(ManagerOptions::default()).unwrap();
         let executor = LocalIoExecutor::new(manager, LocalExecutionConfig::default()).unwrap();
         let driver = direct_driver(&directory, executor);
+        #[cfg(panic = "unwind")]
+        {
+            use crate::operation::poison_test_mutex;
+
+            poison_test_mutex(&driver.0.commands);
+            poison_test_mutex(&driver.0.walker);
+            poison_test_mutex(&driver.0.close_error);
+            poison_test_mutex(&driver.0.close_waker);
+            poison_test_mutex(&driver.0.cleanup_permit);
+        }
         let byte_limit = PathBuf::from("first").as_os_str().as_encoded_bytes().len();
         let first = block_on(poll_batch(&driver, 41, 8, byte_limit)).unwrap().unwrap();
         assert_eq!(first.len(), 1, "the byte limit should admit one equal-sized path");
@@ -553,6 +565,111 @@ mod tests {
         assert_eq!(batch.len(), 1, "a first path cannot be split across batches");
         assert!(!batch[0].as_os_str().as_encoded_bytes().is_empty());
         stop_driver(&driver);
+    }
+
+    #[test]
+    fn test_walker_is_exclusive_and_cleanup_capacity_is_required_for_admission() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let manager = OperationManager::new(ManagerOptions::default()).expect("manager");
+        let executor = LocalIoExecutor::new(
+            manager.clone(),
+            LocalExecutionConfig {
+                max_open_handles: 1,
+                ..Default::default()
+            },
+        )
+        .expect("executor");
+        let driver = direct_driver(&directory, executor.clone());
+        let walker = crate::LocalFileSystem::rooted(directory.path())
+            .expect("rooted filesystem")
+            .list_with_options(std::path::Path::new("."), &LocalListOptions::new())
+            .expect("native walker");
+        let port = super::LocalWalkResource::new(driver);
+        port.claim().expect("first handle claims the walker");
+        assert_eq!(
+            port.claim().expect_err("second claim must fail").kind(),
+            io::ErrorKind::AlreadyExists
+        );
+
+        let outcome = manager
+            .run(Default::default(), move |scope| {
+                let buffer_budget = Arc::new(Mutex::new(executor.reserve_bytes(0).expect("buffer permit")));
+                let handle_budget = Arc::new(executor.reserve_handle().expect("handle permit"));
+                let result = WorkerWalkDriver::managed(&scope, executor, walker, buffer_budget, handle_budget);
+                assert_eq!(
+                    result.err().expect("cleanup permit already in use").kind(),
+                    io::ErrorKind::WouldBlock
+                );
+                Ok::<(), ()>(())
+            })
+            .expect("run operation");
+        assert!(matches!(outcome, OperationOutcome::Succeeded(())));
+        port.request_stop();
+        block_on(std::future::poll_fn(|cx| port.poll_closed(cx))).expect("first walker closes");
+    }
+
+    #[test]
+    fn test_stopped_worker_rejects_batch_without_consuming_walker() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let manager = OperationManager::new(ManagerOptions::default()).expect("manager");
+        let executor = LocalIoExecutor::new(manager, LocalExecutionConfig::default()).expect("executor");
+        let driver = direct_driver(&directory, executor.clone());
+        executor.inner.queue.stop();
+        #[cfg(panic = "unwind")]
+        crate::operation::poison_test_mutex(&driver.0.commands);
+
+        let error = block_on(poll_batch(&driver, 1, 1, 1024)).expect_err("stopped queue rejects traversal");
+        assert_eq!(error.kind(), io::ErrorKind::WouldBlock);
+        let commands = driver
+            .0
+            .commands
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        assert!(commands.is_empty());
+        assert!(driver.0.walker.lock().expect("walker lock").walker.is_some());
+        assert!(driver.0.cleanup_permit.lock().expect("permit lock").is_some());
+    }
+
+    #[test]
+    fn test_stopped_worker_reports_cleanup_rejection_without_losing_walker() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let manager = OperationManager::new(ManagerOptions::default()).expect("manager");
+        let executor = LocalIoExecutor::new(manager, LocalExecutionConfig::default()).expect("executor");
+        let driver = direct_driver(&directory, executor.clone());
+        executor.inner.queue.stop();
+        #[cfg(panic = "unwind")]
+        {
+            use crate::operation::poison_test_mutex;
+
+            poison_test_mutex(&driver.0.close_error);
+            poison_test_mutex(&driver.0.cleanup_permit);
+        }
+
+        let (finished, completion) = std::sync::mpsc::channel();
+        let stopper = std::thread::spawn(move || {
+            driver.request_stop();
+            finished.send(driver).expect("test is waiting for stop to return");
+        });
+        let driver = completion
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .expect("stop must return when the cleanup queue rejects every attempt");
+        stopper.join().expect("stop thread should complete");
+
+        let mut context = Context::from_waker(Waker::noop());
+        let Poll::Ready(Err(error)) = driver.poll_closed(&mut context) else {
+            panic!("close must report rejection immediately");
+        };
+        assert_eq!(error.kind(), io::ErrorKind::WouldBlock);
+        assert_eq!(error.to_string(), "reserved local walker cleanup queue is unavailable");
+        assert!(driver.0.walker.lock().expect("walker lock").walker.is_some());
+        assert!(
+            driver
+                .0
+                .cleanup_permit
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .is_some()
+        );
     }
 
     #[test]

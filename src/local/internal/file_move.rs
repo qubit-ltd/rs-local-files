@@ -518,6 +518,18 @@ mod tests {
 
     use super::sync_parent_directory_with;
 
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    #[test]
+    fn test_native_rename_path_rejects_an_interior_nul() {
+        use std::ffi::OsStr;
+        use std::os::unix::ffi::OsStrExt;
+
+        let path = Path::new(OsStr::from_bytes(b"entry\0suffix"));
+        let error = super::c_path(path).expect_err("native path must not be truncated at NUL");
+        assert_eq!(error.kind(), ErrorKind::InvalidInput);
+        assert!(error.to_string().contains("interior NUL byte"));
+    }
+
     #[test]
     fn test_parent_directory_open_errors_are_preserved() {
         for error in [

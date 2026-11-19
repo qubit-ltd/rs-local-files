@@ -260,6 +260,10 @@ mod tests {
         let resource = resource(&executor, id, abort_ok);
         let reserved = resource.cleanup_permit.lock().expect("permit lock").take();
         drop(reserved);
+        #[cfg(panic = "unwind")]
+        crate::operation::poison_test_mutex(&resource.id);
+        #[cfg(panic = "unwind")]
+        crate::operation::poison_test_mutex(&resource.cleanup_permit);
         let full = executor.reserve_cleanup().expect("occupy cleanup capacity");
 
         let outcome = block_on(cleanup.cleanup(resource, cleanup_context()));
@@ -271,6 +275,38 @@ mod tests {
         assert!(failure.source.is_none());
         assert_eq!(*resource.native.lock().expect("native lock"), Some(9));
         drop(full);
+    }
+
+    #[test]
+    fn test_stopped_cleanup_worker_returns_the_native_writer() {
+        let (_manager, executor, id) = setup();
+        let cleanup = Arc::new(LocalManagedAbortCleanup::<u8>::new(executor.cleanup_executor()));
+        let resource = resource(&executor, id, abort_ok);
+        executor.inner.queue.stop();
+
+        let CleanupOutcome::Failed { failure, resource } = block_on(cleanup.cleanup(resource, cleanup_context()))
+        else {
+            panic!("rejected abort must return the native writer");
+        };
+        assert_eq!(failure.resource_id, id);
+        assert_eq!(failure.summary.as_str(), "local cleanup queue is unavailable");
+        assert_eq!(*resource.native.lock().expect("native lock"), Some(9));
+    }
+
+    #[test]
+    fn test_cleanup_without_native_writer_releases_reserved_capacity() {
+        let (_manager, executor, id) = setup();
+        let cleanup = Arc::new(LocalManagedAbortCleanup::<u8>::new(executor.cleanup_executor()));
+        let resource = resource(&executor, id, abort_panics);
+        assert_eq!(resource.native.lock().expect("native lock").take(), Some(9));
+        #[cfg(panic = "unwind")]
+        crate::operation::poison_test_mutex(&resource.native);
+
+        assert!(matches!(
+            block_on(cleanup.cleanup(resource, cleanup_context())),
+            CleanupOutcome::Released
+        ));
+        assert!(executor.reserve_cleanup().is_some());
     }
 
     #[test]
@@ -328,6 +364,8 @@ mod tests {
         let cleanup = Arc::new(LocalManagedAbortCleanup::<u8>::new(executor.cleanup_executor()));
         let resource = resource(&executor, id, abort_ok);
 
+        #[cfg(panic = "unwind")]
+        crate::operation::poison_test_mutex(&resource.native);
         assert!(matches!(
             block_on(cleanup.cleanup(resource, cleanup_context())),
             CleanupOutcome::Released

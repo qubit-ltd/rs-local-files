@@ -141,6 +141,8 @@ mod tests {
             panic!("poison registered waker lock");
         });
         assert!(poisoner.join().is_err());
+        #[cfg(panic = "unwind")]
+        crate::operation::poison_test_mutex(&state.result);
         let wake_count = Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let waker = Waker::from(Arc::new(TestWake(Arc::clone(&wake_count))));
         let mut context = Context::from_waker(&waker);

@@ -473,10 +473,18 @@ mod tests {
                 );
                 let id_slot = Arc::clone(&owner.id);
                 let reference = reservation
-                    .commit_with(owner, LocalCleanup { executor })
+                    .commit_with(
+                        owner,
+                        LocalCleanup {
+                            executor: executor.clone(),
+                        },
+                    )
                     .expect("managed temp resource");
                 *id_slot.lock().unwrap_or_else(|e| e.into_inner()) = Some(reference.id());
                 let original = LocalTempFileAccess { resource: reference };
+                #[cfg(panic = "unwind")]
+                crate::operation::poison_test_mutex(&original.resource._disk);
+                original.retain_disk_permit(executor.reserve_disk(1).expect("additional disk permit"));
                 let clone = original.clone_access();
                 assert_eq!(original.resource_id(), clone.resource_id());
 
@@ -555,6 +563,8 @@ mod tests {
             _ => panic!("temporary file should be created"),
         };
 
+        #[cfg(panic = "unwind")]
+        crate::operation::poison_test_mutex(&access.resource.native);
         let command = access
             .enqueue_native_command(&executor, |_| -> () { panic!("injected native command panic") })
             .expect("command queued");
@@ -586,6 +596,8 @@ mod tests {
             _ => panic!("temporary file should be created"),
         };
 
+        #[cfg(panic = "unwind")]
+        crate::operation::poison_test_mutex(&access.resource.native);
         let reference = access.clone_resource_ref();
         let exists = super::enqueue_resource_command(
             &executor,
@@ -640,6 +652,10 @@ mod tests {
                         },
                     )
                     .expect("managed temp resource");
+                #[cfg(panic = "unwind")]
+                crate::operation::poison_test_mutex(&id_slot);
+                #[cfg(panic = "unwind")]
+                crate::operation::poison_test_mutex(&reference.native);
                 *id_slot.lock().unwrap_or_else(|e| e.into_inner()) = Some(reference.id());
                 reference.native.lock().unwrap_or_else(|e| e.into_inner()).take();
                 let command = super::enqueue_resource_command(&executor, reference, |_| ()).expect("command queued");
@@ -789,6 +805,8 @@ mod tests {
                     .expect("managed temp resource");
                 *id_slot.lock().unwrap_or_else(|e| e.into_inner()) = Some(reference.id());
                 let access = LocalTempFileAccess { resource: reference };
+                #[cfg(panic = "unwind")]
+                crate::operation::poison_test_mutex(&access.resource.native);
                 let receiver = access
                     .enqueue_native_transition(&executor, |owner| Ok::<_, (LocalTempNative, ())>((Some(owner), ())))
                     .expect("command queued");

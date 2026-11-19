@@ -232,8 +232,8 @@ mod tests {
     }
 
     fn clone_panic_waker() -> Waker {
-        // The raw pointer is never dereferenced; all operations are explicit no-ops
-        // except clone, which intentionally panics for this regression.
+        // The raw pointer is never dereferenced; all operations are explicit
+        // no-ops except clone, which intentionally panics for this regression.
         unsafe { Waker::from_raw(RawWaker::new(std::ptr::null(), &CLONE_PANIC_VTABLE)) }
     }
 
@@ -364,6 +364,8 @@ mod tests {
                 .join()
         });
         assert!(poisoned.is_err());
+        #[cfg(panic = "unwind")]
+        crate::operation::poison_test_mutex(&owner.native);
         assert!(matches!(
             block_on(cleanup.cleanup(owner, context())),
             CleanupOutcome::Released
@@ -551,6 +553,9 @@ mod tests {
         assert!(poisoned.is_err());
         assert!(state.waker.is_poisoned());
 
+        #[cfg(panic = "unwind")]
+        crate::operation::poison_test_mutex(&state.result);
+
         let mut wait = Box::pin(CleanupWait {
             state: Arc::clone(&state),
             marker: std::marker::PhantomData,
@@ -561,12 +566,26 @@ mod tests {
 
         assert!(matches!(wait.as_mut().poll(&mut context), Poll::Pending));
         assert!(state.waker.is_poisoned());
-        let registered_waker = state.waker.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-        registered_waker
+        state
+            .waker
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .as_ref()
             .expect("pending cleanup registers its waker")
             .wake_by_ref();
         assert_eq!(1, wake_count.load(std::sync::atomic::Ordering::SeqCst));
+        *state.result.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(None);
+        assert!(matches!(
+            wait.as_mut().poll(&mut context),
+            Poll::Ready(CleanupOutcome::Released)
+        ));
+        assert!(
+            state
+                .waker
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .is_none()
+        );
     }
 
     #[test]
@@ -643,6 +662,8 @@ mod tests {
 
         let owner = test_owner(&manager, &executor, parent.path());
         drop(owner.cleanup_permit.lock().expect("cleanup permit lock").take());
+        #[cfg(panic = "unwind")]
+        crate::operation::poison_test_mutex(&owner.id);
         let held = executor.reserve_cleanup().expect("consume the only cleanup slot");
         let outcome = block_on(Arc::clone(&cleanup).cleanup(owner, context()));
         let CleanupOutcome::Failed { failure, resource } = outcome else {

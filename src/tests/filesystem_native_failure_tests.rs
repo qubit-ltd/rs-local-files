@@ -590,3 +590,46 @@ fn test_rooted_directory_qualified_canonicalization_reports_each_root_metadata_f
         assert_eq!(fs::read(&sentinel).expect("user data intact after retry"), CONTENT);
     }
 }
+
+#[test]
+fn test_rooted_root_metadata_and_file_canonicalization_keep_native_error_context() {
+    let (_fixture, filesystem) = rooted_fixture();
+    let fault = NativeIoFaultGuard::fail_on(NativeIoPoint::RootMetadata, 1);
+    let error = filesystem
+        .target_metadata(Path::new("/"))
+        .expect_err("native root metadata failure");
+    assert!(fault.fired());
+    assert_context(
+        &error,
+        LocalFileOperation::Metadata,
+        Some(Path::new("/")),
+        Some(Path::new("/work")),
+    );
+    drop(fault);
+    assert_eq!(
+        filesystem
+            .target_metadata(Path::new("/"))
+            .expect("retry root metadata")
+            .kind(),
+        crate::LocalFileKind::Directory
+    );
+
+    let fault = NativeIoFaultGuard::fail_on(NativeIoPoint::EntryMetadata, 1);
+    let error = filesystem
+        .canonicalize(Path::new("item"))
+        .expect_err("native entry metadata failure");
+    assert!(fault.fired());
+    assert_context(
+        &error,
+        LocalFileOperation::Metadata,
+        Some(Path::new("/work/item")),
+        Some(Path::new("/work")),
+    );
+    drop(fault);
+    assert_eq!(
+        filesystem
+            .canonicalize(Path::new("item"))
+            .expect("retry canonicalization"),
+        Path::new("/work/item")
+    );
+}

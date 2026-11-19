@@ -46,8 +46,8 @@ impl DescriptorExhaustion {
             rlim_cur: original.rlim_cur.min(128),
             rlim_max: original.rlim_max,
         };
-        // SAFETY: Only this isolated child's soft limit changes; the hard limit is
-        // preserved.
+        // SAFETY: Only this isolated child's soft limit changes; the hard limit
+        // is preserved.
         assert_eq!(unsafe { libc::setrlimit(libc::RLIMIT_NOFILE, &limited) }, 0);
         let mut exhaustion = Self {
             original,
@@ -78,8 +78,8 @@ impl DescriptorExhaustion {
 
 impl Drop for DescriptorExhaustion {
     fn drop(&mut self) {
-        // SAFETY: Restoring the saved soft limit leaves the unchanged hard limit
-        // intact.
+        // SAFETY: Restoring the saved soft limit leaves the unchanged hard
+        // limit intact.
         assert_eq!(unsafe { libc::setrlimit(libc::RLIMIT_NOFILE, &self.original) }, 0);
     }
 }
@@ -121,6 +121,7 @@ fn test_directory_resource_failures_are_isolated_and_recoverable() {
         "reopen",
         "ancestors",
         "create-stage",
+        "verify-stage",
         "bound-dot-observation-slot1",
         "bound-dot-anchor-slot2",
         "plain-dot-cursor-slot1",
@@ -198,6 +199,26 @@ fn test_directory_resource_failure_child() {
         .identity()
         .expect("identity should exist")
         .clone();
+    if scenario == "verify-stage" {
+        let stage = parent
+            .create_staged_directory(&LocalTempDirectoryOptions::new())
+            .expect("stage should exist before exhausting descriptors");
+        let stage_path = parent_path.join(stage.relative_name());
+        let exhaustion = DescriptorExhaustion::new();
+        let error = stage
+            .verify_entries(&[], &LocalTreeValidationOptions::new())
+            .expect_err("stage root observation requires an available descriptor");
+        assert_emfile(&error, LocalFileOperation::Metadata, &stage_path);
+        assert_eq!(error.reason(), Some("tree root observation failed"));
+
+        drop(exhaustion);
+        stage
+            .verify_entries(&[], &LocalTreeValidationOptions::new())
+            .expect("the same stage should be verifiable after descriptor recovery");
+        stage.cleanup().expect("stage should remain owned and cleanable");
+        assert!(!stage_path.exists());
+        return;
+    }
     let mut exhaustion = DescriptorExhaustion::new();
     let available = match scenario.as_str() {
         "bound-dot-observation-slot1" | "plain-dot-cursor-slot1" => 1,
@@ -366,8 +387,8 @@ fn test_directory_resource_failure_child() {
             assert_eq!(cleanup.operation(), LocalFileOperation::Cleanup);
             assert_eq!(cleanup.path(), Some(stage_path.as_path()));
             assert!(stage_path.is_dir(), "failed cleanup must preserve the unproven object");
-            // The fixture now explicitly observes the named object before authorizing
-            // cleanup.
+            // The fixture now explicitly observes the named object before
+            // authorizing cleanup.
             let relative = Path::new(stage_path.file_name().expect("stage should have a basename"));
             let identity = parent
                 .observe_entry(relative)

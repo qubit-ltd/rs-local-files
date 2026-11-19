@@ -21,6 +21,8 @@ use std::sync::mpsc::sync_channel;
 use std::task::Context;
 use std::task::Poll;
 use std::task::Waker;
+use std::time::Duration;
+use std::time::Instant;
 
 use qubit_io::AsyncInput;
 use qubit_io::AsyncOutput;
@@ -59,6 +61,8 @@ struct FakeState {
     oversized_read: Option<Vec<u8>>,
     hold_read_after_execute: bool,
     completed_reads: HashMap<u64, Vec<u8>>,
+    commit_calls: usize,
+    reported_write_facts: Option<(qubit_local_files::outcome::LocalWriteFailureState, u64)>,
 }
 
 #[derive(Default)]
@@ -92,6 +96,10 @@ impl FakeWorker {
         self.0.lock().unwrap().writes.clone()
     }
 
+    fn commit_calls(&self) -> usize {
+        self.0.lock().unwrap().commit_calls
+    }
+
     fn partial_then_fail(&self, partial: usize) {
         let mut state = self.0.lock().unwrap();
         state.partial_write = Some(partial);
@@ -104,6 +112,10 @@ impl FakeWorker {
 
     fn unconfirmed_next(&self) {
         self.0.lock().unwrap().unconfirmed_next = true;
+    }
+
+    fn report_write_facts(&self, state: qubit_local_files::outcome::LocalWriteFailureState, bytes: u64) {
+        self.0.lock().unwrap().reported_write_facts = Some((state, bytes));
     }
 
     fn fail_next_seek(&self) {
@@ -198,13 +210,28 @@ impl LocalStreamDriver for FakeWorker {
                 state.close_count += 1;
                 Ok(LocalStreamCompletion::Closed)
             }
-            LocalStreamCommand::Commit => Ok(LocalStreamCompletion::Closed),
+            LocalStreamCommand::Commit => {
+                state.commit_calls += 1;
+                Ok(LocalStreamCompletion::Closed)
+            }
         };
         Poll::Ready(result)
     }
 
     fn request_close(&self, _request_id: u64) {
         self.0.lock().unwrap().close_requested = true;
+    }
+
+    fn write_facts(&self) -> Option<(qubit_local_files::outcome::LocalWriteFailureState, u64)> {
+        let state = self.0.lock().unwrap();
+        Some(state.reported_write_facts.unwrap_or((
+            if state.writes.is_empty() {
+                qubit_local_files::outcome::LocalWriteFailureState::NotPublished
+            } else {
+                qubit_local_files::outcome::LocalWriteFailureState::Published
+            },
+            state.writes.len() as u64,
+        )))
     }
 }
 
@@ -241,6 +268,365 @@ fn test_async_local_file_streams_report_worker_buffering() {
     // copied bytes on its serial worker until commit.
     assert!(AsyncInput::is_buffered(&reader));
     assert!(AsyncOutput::is_buffered(&writer));
+}
+
+#[test]
+fn test_pending_commit_blocks_new_writes_and_preserves_result() {
+    let worker = Arc::new(FakeWorker::default());
+    let mut writer = writer(&worker);
+    assert_eq!(
+        poll_worker(|cx| Pin::new(&mut writer).poll_write(cx, b"first")).unwrap(),
+        5
+    );
+    poll_worker(|cx| Box::pin(writer.settle()).as_mut().poll(cx)).unwrap();
+
+    worker.hold_next();
+    let mut commit = Box::pin(writer.commit());
+    let mut cx = Context::from_waker(Waker::noop());
+    assert!(matches!(commit.as_mut().poll(&mut cx), Poll::Pending));
+    drop(commit);
+
+    let blocked_write = poll_worker(|cx| Pin::new(&mut writer).poll_write(cx, b"second")).unwrap_err();
+    assert_eq!(blocked_write.kind(), io::ErrorKind::InvalidData, "{blocked_write}");
+    assert!(blocked_write.to_string().contains("commit is pending"));
+    assert_eq!(
+        poll_worker(|cx| Pin::new(&mut writer).poll_flush(cx))
+            .unwrap_err()
+            .kind(),
+        io::ErrorKind::WouldBlock
+    );
+
+    worker.release();
+    let first = poll_worker(|cx| Box::pin(writer.commit()).as_mut().poll(cx)).unwrap_err();
+    assert_eq!(worker.commit_calls(), 1);
+    assert!(first.to_string().contains("unexpected commit completion"));
+}
+
+#[test]
+fn test_append_commit_reports_publication_after_later_write_failure() {
+    let worker = Arc::new(FakeWorker::default());
+    worker.partial_then_fail(2);
+    let mut writer = writer(&worker);
+    assert_eq!(
+        poll_worker(|cx| Pin::new(&mut writer).poll_write(cx, b"first batch")).unwrap(),
+        11
+    );
+
+    let error = poll_worker(|cx| Box::pin(writer.commit()).as_mut().poll(cx)).unwrap_err();
+    assert!(!error.retryable());
+    assert_eq!(
+        error.commit_error().state(),
+        qubit_local_files::outcome::LocalWriteFailureState::Published
+    );
+    assert_eq!(worker.writes(), b"fi");
+    assert!(error.to_string().contains("2 bytes written before failure"));
+    let blocked_write =
+        match Pin::new(&mut writer).poll_write(&mut Context::from_waker(Waker::noop()), b"must not replay") {
+            Poll::Ready(Err(error)) => error,
+            other => panic!("terminal append writer must reject a later write, got {other:?}"),
+        };
+    assert_eq!(blocked_write.kind(), io::ErrorKind::BrokenPipe);
+}
+
+#[cfg(feature = "test-support")]
+#[test]
+fn test_native_append_commit_preserves_bytes_after_later_write_failure() {
+    use qubit_local_files::LocalFileSystem;
+    use qubit_local_files::LocalPublicationState;
+    use qubit_local_files::operation::LocalExecutionConfig;
+    use qubit_local_files::operation::LocalIoExecutor;
+    use qubit_local_files::options::LocalWriteMode;
+    use qubit_local_files::options::LocalWriteOptions;
+    use qubit_local_files::outcome::LocalWriteFailureState;
+    use qubit_local_files::test_support::install_test_fault_shared;
+    use qubit_operation::ManagerOptions;
+    use qubit_operation::OperationManager;
+    use qubit_operation::OperationOutcome;
+
+    // The worker consumes a process-wide fault. Isolate it from other stream tests.
+    const CHILD: &str = "QUBIT_TEST_NATIVE_APPEND_FAILURE_CHILD";
+    if std::env::var_os(CHILD).is_none() {
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .env(CHILD, "1")
+            .args([
+                "--exact",
+                "test_native_append_commit_preserves_bytes_after_later_write_failure",
+                "--nocapture",
+            ])
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "append test child failed: {}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr),
+        );
+        return;
+    }
+
+    let directory = tempfile::tempdir().unwrap();
+    let destination = directory.path().join("append.txt");
+    std::fs::write(&destination, b"before").unwrap();
+    let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+    let executor = LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).unwrap();
+    let filesystem = LocalFileSystem::host().unwrap().into_async(executor).unwrap();
+    let (mut opening, observer) = filesystem
+        .submit_open_writer(
+            &manager,
+            Default::default(),
+            destination.clone(),
+            LocalWriteOptions::new(LocalWriteMode::Append),
+        )
+        .unwrap();
+    let OperationOutcome::Succeeded(mut writer) = opening.wait_outcome().unwrap() else {
+        panic!("append writer open failed");
+    };
+
+    assert_eq!(
+        poll_worker(|cx| Pin::new(&mut writer).poll_write(cx, b" plus")).unwrap(),
+        5
+    );
+    poll_worker(|cx| Box::pin(writer.settle()).as_mut().poll(cx)).unwrap();
+    let fault = install_test_fault_shared("local-writer-write-failed").unwrap();
+    assert_eq!(
+        poll_worker(|cx| Pin::new(&mut writer).poll_write(cx, b" rejected")).unwrap(),
+        9
+    );
+    let error = poll_worker(|cx| Box::pin(writer.commit()).as_mut().poll(cx)).unwrap_err();
+    drop(fault);
+
+    assert_eq!(error.commit_error().state(), LocalWriteFailureState::Published);
+    assert!(!error.retryable());
+    assert_eq!(observer.snapshot().publication, LocalPublicationState::Published);
+    assert_eq!(observer.snapshot().modified_bytes, 5);
+    assert_eq!(std::fs::read(destination).unwrap(), b"before plus");
+    drop(writer);
+    opening.wait_settlement().unwrap();
+}
+
+#[test]
+fn test_unconfirmed_write_drain_uses_worker_publication_facts() {
+    let worker = Arc::new(FakeWorker::default());
+    worker.report_write_facts(qubit_local_files::outcome::LocalWriteFailureState::Indeterminate, 4);
+    let mut writer = writer(&worker);
+    assert_eq!(
+        poll_worker(|cx| Pin::new(&mut writer).poll_write(cx, b"bytes")).unwrap(),
+        5
+    );
+    worker.unconfirmed_next();
+
+    let error = poll_worker(|cx| Box::pin(writer.commit()).as_mut().poll(cx)).unwrap_err();
+    assert!(!error.retryable());
+    assert_eq!(
+        error.commit_error().state(),
+        qubit_local_files::outcome::LocalWriteFailureState::Indeterminate
+    );
+    assert!(error.to_string().contains("Unconfirmed"));
+    let blocked_write =
+        match Pin::new(&mut writer).poll_write(&mut Context::from_waker(Waker::noop()), b"do not replay") {
+            Poll::Ready(Err(error)) => error,
+            other => panic!("unconfirmed writer must reject a later write, got {other:?}"),
+        };
+    assert_eq!(blocked_write.kind(), io::ErrorKind::BrokenPipe);
+}
+
+#[cfg(feature = "test-support")]
+#[test]
+fn test_staged_commit_reports_unpublished_failure_and_can_retry() {
+    use qubit_local_files::LocalFileSystem;
+    use qubit_local_files::operation::LocalExecutionConfig;
+    use qubit_local_files::operation::LocalIoExecutor;
+    use qubit_local_files::options::LocalWriteMode;
+    use qubit_local_files::options::LocalWriteOptions;
+    use qubit_local_files::policy::LocalDurabilityRequirement;
+    use qubit_local_files::test_support::install_test_fault_shared;
+    use qubit_operation::ManagerOptions;
+    use qubit_operation::OperationManager;
+    use qubit_operation::OperationOutcome;
+
+    let directory = tempfile::tempdir().unwrap();
+    let target = directory.path().join("staged-commit.txt");
+    let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+    let executor = LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).unwrap();
+    let filesystem = LocalFileSystem::host().unwrap().into_async(executor).unwrap();
+    let (mut opening, _) = filesystem
+        .submit_open_writer(
+            &manager,
+            Default::default(),
+            target.clone(),
+            LocalWriteOptions::new(LocalWriteMode::CreateOrReplace)
+                .with_durability(LocalDurabilityRequirement::Required),
+        )
+        .unwrap();
+    let mut writer = match opening.wait_outcome().unwrap() {
+        OperationOutcome::Succeeded(writer) => writer,
+        _ => panic!("writer open failed"),
+    };
+    assert_eq!(
+        poll_worker(|cx| Pin::new(&mut writer).poll_write(cx, b"staged")).unwrap(),
+        6
+    );
+
+    let fault = install_test_fault_shared("writer-staged-file-sync").unwrap();
+    let error = poll_worker(|cx| Box::pin(writer.commit()).as_mut().poll(cx)).unwrap_err();
+    assert!(error.retryable());
+    assert_eq!(
+        error.commit_error().state(),
+        qubit_local_files::outcome::LocalWriteFailureState::NotPublished
+    );
+    assert!(!target.exists());
+    drop(fault);
+
+    let outcome = poll_worker(|cx| Box::pin(writer.commit()).as_mut().poll(cx)).unwrap();
+    assert_eq!(outcome.state(), qubit_local_files::outcome::LocalWriterState::Committed);
+    drop(writer);
+    opening.wait_settlement().unwrap();
+    assert_eq!(std::fs::read(target).unwrap(), b"staged");
+}
+
+#[test]
+fn test_close_reports_write_and_cleanup_failures_together() {
+    let worker = Arc::new(FakeWorker::default());
+    worker.partial_then_fail(2);
+    let mut writer = writer(&worker);
+    assert_eq!(
+        poll_worker(|cx| Pin::new(&mut writer).poll_write(cx, b"before close")).unwrap(),
+        12
+    );
+    let write_error = poll_worker(|cx| Box::pin(writer.settle()).as_mut().poll(cx)).unwrap_err();
+    assert!(write_error.to_string().contains("2 bytes written before failure"));
+
+    worker.panic_next();
+    let error = poll_worker(|cx| Box::pin(writer.close()).as_mut().poll(cx)).unwrap_err();
+    assert!(error.to_string().contains("Unconfirmed"));
+    assert!(error.to_string().contains("2 bytes written before failure"));
+}
+
+#[test]
+fn test_close_preserves_unobserved_commit_result() {
+    let worker = Arc::new(FakeWorker::default());
+    let mut writer = writer(&worker);
+    worker.hold_next();
+    let mut commit = Box::pin(writer.commit());
+    let mut cx = Context::from_waker(Waker::noop());
+    assert!(matches!(commit.as_mut().poll(&mut cx), Poll::Pending));
+    drop(commit);
+
+    worker.release();
+    poll_worker(|cx| Box::pin(writer.close()).as_mut().poll(cx)).unwrap();
+    let error = poll_worker(|cx| Box::pin(writer.commit()).as_mut().poll(cx)).unwrap_err();
+    assert!(error.to_string().contains("unexpected commit completion"));
+    assert_eq!(worker.commit_calls(), 1);
+}
+
+#[test]
+fn test_close_resumes_commit_cancelled_while_settling_writes() {
+    let worker = Arc::new(FakeWorker::default());
+    let mut writer = writer(&worker);
+    assert_eq!(
+        poll_worker(|cx| Pin::new(&mut writer).poll_write(cx, b"pending flush")).unwrap(),
+        13
+    );
+
+    worker.hold_next();
+    let mut commit = Box::pin(writer.commit());
+    let mut cx = Context::from_waker(Waker::noop());
+    assert!(matches!(commit.as_mut().poll(&mut cx), Poll::Pending));
+    drop(commit);
+    worker.release();
+
+    poll_worker(|cx| Box::pin(writer.close()).as_mut().poll(cx)).unwrap();
+    let error = poll_worker(|cx| Box::pin(writer.commit()).as_mut().poll(cx)).unwrap_err();
+    assert!(error.to_string().contains("unexpected commit completion"));
+    assert_eq!(worker.commit_calls(), 1);
+}
+
+#[cfg(feature = "test-support")]
+#[test]
+fn test_staged_async_writer_cleanup_failure_can_be_retried() {
+    use qubit_local_files::LocalFileSystem;
+    use qubit_local_files::operation::LocalExecutionConfig;
+    use qubit_local_files::operation::LocalIoExecutor;
+    use qubit_local_files::options::LocalWriteMode;
+    use qubit_local_files::options::LocalWriteOptions;
+    use qubit_local_files::test_support::install_test_fault_shared;
+    use qubit_operation::ManagerOptions;
+    use qubit_operation::OperationManager;
+    use qubit_operation::OperationOutcome;
+
+    let directory = tempfile::tempdir().unwrap();
+    let target = directory.path().join("staged-abort.txt");
+    let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+    let executor = LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).unwrap();
+    let filesystem = LocalFileSystem::host().unwrap().into_async(executor).unwrap();
+    let (mut opening, _) = filesystem
+        .submit_open_writer(
+            &manager,
+            Default::default(),
+            target.clone(),
+            LocalWriteOptions::new(LocalWriteMode::CreateOrReplace),
+        )
+        .unwrap();
+    let mut writer = match opening.wait_outcome().unwrap() {
+        OperationOutcome::Succeeded(writer) => writer,
+        _ => panic!("writer open failed"),
+    };
+    assert_eq!(
+        poll_worker(|cx| Pin::new(&mut writer).poll_write(cx, b"staged")).unwrap(),
+        6
+    );
+
+    let fault = install_test_fault_shared("writer-staged-abort-cleanup").unwrap();
+    let error = poll_worker(|cx| Box::pin(writer.close()).as_mut().poll(cx)).unwrap_err();
+    drop(fault);
+    assert!(error.to_string().contains("Abort"));
+    assert!(
+        !target.exists(),
+        "failed staged cleanup must not publish the destination"
+    );
+
+    opening.wait_settlement().unwrap();
+    assert!(!target.exists());
+    assert_eq!(
+        std::fs::read_dir(directory.path()).unwrap().count(),
+        0,
+        "the retained worker owner must retry and remove its staging entry"
+    );
+
+    let rooted_directory = tempfile::tempdir().unwrap();
+    let rooted_manager = OperationManager::new(ManagerOptions::default()).unwrap();
+    let rooted_executor = LocalIoExecutor::new(rooted_manager.clone(), LocalExecutionConfig::default()).unwrap();
+    let rooted_filesystem = LocalFileSystem::rooted(rooted_directory.path())
+        .unwrap()
+        .into_async(rooted_executor)
+        .unwrap();
+    let rooted_target = std::path::PathBuf::from("staged-abort.txt");
+    let (mut rooted_opening, _) = rooted_filesystem
+        .submit_open_writer(
+            &rooted_manager,
+            Default::default(),
+            rooted_target,
+            LocalWriteOptions::new(LocalWriteMode::CreateOrReplace),
+        )
+        .unwrap();
+    let mut rooted_writer = match rooted_opening.wait_outcome().unwrap() {
+        OperationOutcome::Succeeded(writer) => writer,
+        _ => panic!("Rooted writer open failed"),
+    };
+    assert_eq!(
+        poll_worker(|cx| Pin::new(&mut rooted_writer).poll_write(cx, b"staged")).unwrap(),
+        6
+    );
+    let fault = install_test_fault_shared("writer-staged-abort-cleanup").unwrap();
+    let error = poll_worker(|cx| Box::pin(rooted_writer.close()).as_mut().poll(cx)).unwrap_err();
+    drop(fault);
+    assert!(error.to_string().contains("Abort"));
+    rooted_opening.wait_settlement().unwrap();
+    assert_eq!(
+        std::fs::read_dir(rooted_directory.path()).unwrap().count(),
+        0,
+        "Rooted recovery must retain ownership and remove the staging entry"
+    );
 }
 
 #[derive(Default)]
@@ -373,6 +759,10 @@ impl LocalStreamDriver for FakeProxy {
     fn request_close(&self, request_id: u64) {
         self.0.request_close(request_id);
     }
+
+    fn write_facts(&self) -> Option<(qubit_local_files::outcome::LocalWriteFailureState, u64)> {
+        self.0.write_facts()
+    }
 }
 
 fn poll<T>(future: impl FnOnce(&mut Context<'_>) -> Poll<T>) -> Poll<T> {
@@ -384,13 +774,14 @@ fn poll<T>(future: impl FnOnce(&mut Context<'_>) -> Poll<T>) -> Poll<T> {
 fn poll_worker<T>(mut future: impl FnMut(&mut Context<'_>) -> Poll<T>) -> T {
     let waker = Waker::noop();
     let mut cx = Context::from_waker(waker);
-    for _ in 0..100_000 {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
         if let Poll::Ready(value) = future(&mut cx) {
             return value;
         }
-        std::thread::yield_now();
+        assert!(Instant::now() < deadline, "worker-backed operation did not complete");
+        std::thread::sleep(Duration::from_millis(1));
     }
-    panic!("worker-backed operation did not complete");
 }
 
 #[test]
@@ -461,6 +852,14 @@ fn test_async_filesystem_opens_real_reader_writer_and_bounded_walker() {
         observer.snapshot().publication,
         qubit_local_files::LocalPublicationState::Published
     );
+    let error = match Pin::new(&mut writer).poll_write(&mut Context::from_waker(Waker::noop()), b"late") {
+        Poll::Ready(Err(error)) => error,
+        other => panic!("terminal writer must reject later writes, got {other:?}"),
+    };
+    assert_eq!(error.kind(), std::io::ErrorKind::BrokenPipe);
+    let error = poll_worker(|cx| Box::pin(writer.commit()).as_mut().poll(cx)).unwrap_err();
+    assert!(!error.retryable());
+    assert!(error.to_string().contains("already terminal"));
     drop(writer);
     opening.wait_settlement().unwrap();
     assert_eq!(std::fs::read(&output).unwrap(), b"written on worker");
@@ -1273,6 +1672,7 @@ fn test_cloned_resource_reference_cannot_create_a_second_mutable_stream() {
 fn test_partial_write_failure_latches_actual_count_and_driver_panic_is_unconfirmed() {
     let worker = Arc::new(FakeWorker::default());
     worker.partial_then_fail(2);
+    worker.report_write_facts(qubit_local_files::outcome::LocalWriteFailureState::NotPublished, 2);
     let mut writer = writer(&worker);
     assert!(matches!(
         poll(|cx| Pin::new(&mut writer).poll_write(cx, b"abcdef")),
@@ -1283,6 +1683,22 @@ fn test_partial_write_failure_latches_actual_count_and_driver_panic_is_unconfirm
         other => panic!("expected latched worker failure, got {other:?}"),
     };
     assert!(error.to_string().contains("2 bytes written before failure"));
+    assert_eq!(worker.writes(), b"ab");
+
+    let error = poll_worker(|cx| Box::pin(writer.commit()).as_mut().poll(cx))
+        .expect_err("commit must surface the failed write during settlement");
+    assert!(!error.retryable());
+    assert_eq!(
+        error.commit_error().state(),
+        qubit_local_files::outcome::LocalWriteFailureState::NotPublished
+    );
+    assert!(
+        error
+            .commit_error()
+            .error()
+            .to_string()
+            .contains("2 bytes written before failure")
+    );
     assert_eq!(worker.writes(), b"ab");
 
     let worker = Arc::new(FakeWorker::with_bytes(b"unconfirmed"));

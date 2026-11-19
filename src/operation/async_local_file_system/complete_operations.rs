@@ -1258,6 +1258,10 @@ mod stop_gate_tests {
             .try_submit(Default::default(), move |scope| {
                 entered_tx.send(()).unwrap();
                 release_rx.recv().unwrap();
+                assert!(matches!(
+                    super::stop_outcome::<(), ()>(&scope),
+                    Some(OperationOutcome::Stopped(report)) if report.reason == StopReason::UserCancelled
+                ));
                 let result = before_native_call(&scope, || native_calls_for_task.fetch_add(1, Ordering::SeqCst));
                 Ok::<_, ()>(result.map_err(|stop| stop.reason))
             })
@@ -1272,5 +1276,25 @@ mod stop_gate_tests {
             OperationOutcome::Stopped(report) if report.reason == StopReason::UserCancelled
         ));
         assert_eq!(native_calls.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn test_read_buffer_reservation_recovers_poisoned_permit_and_checks_overflow() {
+        let pool = crate::operation::internal::permits::PermitPool::new(8);
+        let mut bytes = vec![1];
+        let permit = Arc::new(std::sync::Mutex::new(
+            pool.try_acquire(bytes.capacity()).expect("initial permit"),
+        ));
+        #[cfg(panic = "unwind")]
+        crate::operation::poison_test_mutex(&permit);
+
+        let error = super::reserve_capacity(&mut bytes, usize::MAX, &permit, 8).expect_err("length overflow");
+        assert_eq!(error.to_string(), "read capacity overflow");
+        assert_eq!(pool.used(), 1);
+        super::reserve_capacity(&mut bytes, 1, &permit, 8).expect("grow within byte budget");
+        assert_eq!(pool.used(), bytes.capacity());
+        assert_eq!(bytes, [1]);
+        super::shrink_to_zero(&permit);
+        assert_eq!(pool.used(), 0);
     }
 }

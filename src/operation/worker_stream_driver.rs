@@ -163,6 +163,22 @@ impl LocalStreamDriver for WorkerStreamDriver {
         Poll::Pending
     }
 
+    /// Reports the latest publication state confirmed by this worker.
+    fn write_facts(&self) -> Option<(crate::LocalWriteFailureState, u64)> {
+        let snapshot = self.0.observer.as_ref()?.snapshot();
+        let state = match snapshot.publication {
+            super::super::LocalPublicationState::NotPublished => crate::LocalWriteFailureState::NotPublished,
+            super::super::LocalPublicationState::Published => crate::LocalWriteFailureState::Published,
+            super::super::LocalPublicationState::Unknown => crate::LocalWriteFailureState::Indeterminate,
+        };
+        Some((
+            state,
+            snapshot
+                .modified_bytes
+                .max(self.0.written_bytes.load(Ordering::Acquire)),
+        ))
+    }
+
     /// Enqueues a terminal abort command and retries queue admission briefly.
     ///
     /// # Parameters
@@ -287,6 +303,10 @@ mod tests {
             written_bytes: std::sync::atomic::AtomicU64::new(0),
             append_mode: false,
         }));
+        #[cfg(panic = "unwind")]
+        crate::operation::poison_test_mutex(&driver.0.state);
+        #[cfg(panic = "unwind")]
+        crate::operation::poison_test_mutex(&driver.0.queue);
         let request = LocalStreamRequest {
             id: 1,
             command: LocalStreamCommand::Read { max_bytes: 1 },
@@ -321,6 +341,7 @@ mod tests {
             .unwrap();
         started_rx.recv().unwrap();
         executor.enqueue_task(|| {}).unwrap();
+        executor.enqueue_task(|| {}).unwrap();
 
         let fixture = tempfile::NamedTempFile::new().unwrap();
         let native = crate::LocalFileReader::from_file(fixture.reopen().unwrap()).unwrap();
@@ -342,6 +363,10 @@ mod tests {
             written_bytes: std::sync::atomic::AtomicU64::new(0),
             append_mode: false,
         }));
+        #[cfg(panic = "unwind")]
+        crate::operation::poison_test_mutex(&driver.0.native);
+        #[cfg(panic = "unwind")]
+        crate::operation::poison_test_mutex(&driver.0.cleanup_permit);
         let request = LocalStreamRequest {
             id: 9,
             command: LocalStreamCommand::Close,
@@ -351,7 +376,14 @@ mod tests {
             driver.poll_command(&mut cx, &request),
             std::task::Poll::Pending
         ));
+        let used_cleanup_lane = driver
+            .0
+            .cleanup_permit
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .is_none();
         release_tx.send(()).unwrap();
+        assert!(used_cleanup_lane, "terminal close uses its reserved cleanup slot");
 
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
         loop {
@@ -365,7 +397,14 @@ mod tests {
                 }
             }
         }
-        assert!(driver.0.native.lock().unwrap().is_none());
+        assert!(
+            driver
+                .0
+                .native
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .is_none()
+        );
     }
 
     #[test]
@@ -453,6 +492,50 @@ mod tests {
     }
 
     #[test]
+    fn test_stopped_worker_returns_close_error_and_retains_native_stream() {
+        let manager = OperationManager::new(ManagerOptions::default()).expect("manager");
+        let executor = LocalIoExecutor::new(manager, LocalExecutionConfig::default()).expect("executor");
+        let fixture = tempfile::NamedTempFile::new().expect("temporary file");
+        let native =
+            crate::LocalFileReader::from_file(fixture.reopen().expect("reopen fixture")).expect("native reader");
+        let driver = WorkerStreamDriver(Arc::new(WorkerStreamInner {
+            native: Mutex::new(Some(LocalNativeStream::Reader(native))),
+            state: Mutex::new(WorkerStreamState {
+                commands: HashMap::new(),
+            }),
+            queue: Mutex::new(VecDeque::new()),
+            active: AtomicBool::new(false),
+            cleanup_permit: Mutex::new(Some(executor.reserve_cleanup().expect("cleanup permit"))),
+            _buffer_budget: Arc::new(Mutex::new(executor.reserve_bytes(0).expect("buffer permit"))),
+            _handle_budget: Arc::new(executor.reserve_handle().expect("handle permit")),
+            observer: None,
+            written_bytes: std::sync::atomic::AtomicU64::new(0),
+            append_mode: false,
+            executor: executor.clone(),
+        }));
+        executor.inner.queue.stop();
+        #[cfg(panic = "unwind")]
+        crate::operation::poison_test_mutex(&driver.0.cleanup_permit);
+
+        let request = LocalStreamRequest {
+            id: 1,
+            command: LocalStreamCommand::Close,
+        };
+        let mut cx = Context::from_waker(Waker::noop());
+        assert!(matches!(
+            driver.poll_command(&mut cx, &request),
+            std::task::Poll::Ready(Err(error)) if error.kind() == io::ErrorKind::WouldBlock
+        ));
+        assert!(driver.0.native.lock().expect("native lock").is_some());
+        let permit = driver
+            .0
+            .cleanup_permit
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        assert!(permit.is_some());
+    }
+
+    #[test]
     fn test_request_close_records_error_when_all_scheduling_lanes_are_full() {
         let manager = OperationManager::new(ManagerOptions::default()).unwrap();
         let executor = LocalIoExecutor::new(
@@ -499,11 +582,13 @@ mod tests {
             append_mode: false,
         }));
 
+        #[cfg(panic = "unwind")]
+        crate::operation::poison_test_mutex(&driver.0.state);
         LocalStreamDriver::request_close(&driver, 11);
         release_tx.send(()).unwrap();
 
         let result_kind = {
-            let state = driver.0.state.lock().unwrap();
+            let state = driver.0.state.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
             match state
                 .commands
                 .get(&11)

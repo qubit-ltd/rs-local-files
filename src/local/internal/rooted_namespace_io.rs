@@ -644,3 +644,28 @@ fn rename_without_replacing(
         "atomic rooted no-replace rename is unsupported on this platform",
     ))
 }
+
+#[cfg(test)]
+mod tests {
+    use std::ffi::OsStr;
+    use std::fs;
+    use std::io::ErrorKind;
+    use std::os::unix::ffi::OsStrExt;
+
+    use super::create_rooted_temp_child;
+
+    #[test]
+    fn test_rooted_temp_child_rejects_an_interior_nul_without_creating_a_prefix() {
+        let fixture = tempfile::tempdir().expect("fixture");
+        let parent = fs::File::open(fixture.path()).expect("parent authority");
+        let name = OsStr::from_bytes(b"entry\0suffix");
+        for directory in [false, true] {
+            let Err(error) = create_rooted_temp_child(&parent, name, directory) else {
+                panic!("temporary name must not be truncated at NUL");
+            };
+            assert_eq!(error.source.kind(), ErrorKind::InvalidInput);
+            assert!(error.retained.is_none());
+        }
+        assert_eq!(fs::read_dir(fixture.path()).expect("read fixture").count(), 0);
+    }
+}

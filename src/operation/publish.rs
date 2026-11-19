@@ -898,3 +898,107 @@ mod managed_writer_abort_tests {
         assert_eq!(facts.modified_bytes, 0);
     }
 }
+
+#[cfg(all(test, panic = "unwind"))]
+mod abort_recovery_tests {
+    use std::path::Path;
+
+    use qubit_operation::ManagerOptions;
+    use qubit_operation::OperationManager;
+    use qubit_operation::OperationOutcome;
+    use qubit_operation::StopReason;
+    use qubit_operation::StopReport;
+
+    use super::LocalManagedAbortResource;
+    use crate::LocalFileError;
+    use crate::LocalFileErrorKind;
+    use crate::LocalFileOperation;
+    use crate::LocalFileSystem;
+    use crate::operation::LocalExecutionConfig;
+    use crate::operation::LocalFactObserver;
+    use crate::operation::LocalIoExecutor;
+    use crate::operation::poison_test_mutex;
+    use crate::options::LocalWriteMode;
+    use crate::options::LocalWriteOptions;
+
+    #[test]
+    fn test_writer_abort_preserves_outcomes_after_native_lock_poisoning() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let manager = OperationManager::new(ManagerOptions::default()).expect("manager");
+        let executor = LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).expect("executor");
+        let filesystem = LocalFileSystem::rooted(directory.path()).expect("rooted filesystem");
+        let outcome = manager.run(Default::default(), move |scope| {
+            let observer = LocalFactObserver::new();
+            for stopped in [false, true] {
+                let path = Path::new("destination");
+                let writer = filesystem.open_writer_with_options(path, &LocalWriteOptions::new(LocalWriteMode::CreateOrReplace))
+                    .expect("staged writer");
+                let owner = LocalManagedAbortResource::new(executor.reserve_cleanup().expect("cleanup permit"), super::abort_managed_file_writer);
+                *owner.native.lock().expect("native lock") = Some(writer);
+                poison_test_mutex(&owner.native);
+                let reference = scope.reserve_resource().expect("resource reservation").commit(owner)
+                    .unwrap_or_else(|_| panic!("writer resource admission"));
+                if stopped {
+                    let stop = StopReport { reason: StopReason::UserCancelled, accepted_at: None };
+                    let result = super::abort_managed_writer_after_stop(&reference, stop, 0, &scope, &observer, false);
+                    assert!(matches!(result, OperationOutcome::Stopped(report) if report.reason == StopReason::UserCancelled));
+                } else {
+                    let cause = LocalFileError::new(LocalFileErrorKind::PermissionDenied, LocalFileOperation::Commit);
+                    let error = super::abort_managed_writer_after_error(&reference, cause, 0, &scope, &observer, false);
+                    assert!(matches!(
+                        error,
+                        super::LocalWriterCommandError::Write { cause, cleanup_error: None, recovery_resource: None, .. }
+                        if cause.kind() == LocalFileErrorKind::PermissionDenied
+                    ));
+                }
+                assert!(reference.native.lock().unwrap_or_else(std::sync::PoisonError::into_inner).is_none());
+            }
+            Ok::<(), ()>(())
+        }).expect("run operation");
+        assert!(matches!(outcome, OperationOutcome::Succeeded(())));
+        assert_eq!(std::fs::read_dir(directory.path()).expect("read directory").count(), 0);
+    }
+
+    #[cfg(all(feature = "digest", target_os = "linux"))]
+    #[test]
+    fn test_conditional_abort_preserves_outcomes_after_native_lock_poisoning() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let manager = OperationManager::new(ManagerOptions::default()).expect("manager");
+        let executor = LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).expect("executor");
+        let mut filesystem = LocalFileSystem::rooted(directory.path()).expect("rooted filesystem");
+        filesystem
+            .set_symlink_policy(crate::LocalSymlinkPolicy::Reject)
+            .expect("non-following policy");
+        let outcome = manager.run(Default::default(), move |scope| {
+            for stopped in [false, true] {
+                let writer = filesystem.open_conditional_writer::<sha2::Sha256>(
+                    Path::new("destination"),
+                    crate::options::LocalWritePrecondition::Absent,
+                    &LocalWriteOptions::new(LocalWriteMode::CreateOrReplace),
+                ).expect("conditional writer");
+                let owner = LocalManagedAbortResource::new(executor.reserve_cleanup().expect("cleanup permit"), super::abort_conditional_writer);
+                *owner.native.lock().expect("native lock") = Some(writer);
+                poison_test_mutex(&owner.native);
+                let reference = scope.reserve_resource().expect("resource reservation").commit(owner)
+                    .unwrap_or_else(|_| panic!("conditional resource admission"));
+                if stopped {
+                    let stop = StopReport { reason: StopReason::UserCancelled, accepted_at: None };
+                    let result = super::abort_managed_conditional_after_stop(&reference, stop);
+                    assert!(matches!(result, OperationOutcome::Stopped(report) if report.reason == StopReason::UserCancelled));
+                } else {
+                    let cause = LocalFileError::new(LocalFileErrorKind::PermissionDenied, LocalFileOperation::Commit);
+                    let error = super::abort_managed_conditional_after_error(&reference, cause);
+                    assert!(matches!(
+                        error,
+                        super::LocalConditionalWriterCommandError::Write { cause, cleanup_error: None, recovery_resource: None, .. }
+                        if cause.kind() == LocalFileErrorKind::PermissionDenied
+                    ));
+                }
+                assert!(reference.native.lock().unwrap_or_else(std::sync::PoisonError::into_inner).is_none());
+            }
+            Ok::<(), ()>(())
+        }).expect("run operation");
+        assert!(matches!(outcome, OperationOutcome::Succeeded(())));
+        assert_eq!(std::fs::read_dir(directory.path()).expect("read directory").count(), 0);
+    }
+}

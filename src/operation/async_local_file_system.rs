@@ -1013,6 +1013,26 @@ mod tests {
     }
 
     #[test]
+    fn test_read_buffer_reservation_recovers_poisoned_permit_and_checks_overflow() {
+        let pool = crate::operation::internal::permits::PermitPool::new(8);
+        let mut bytes = vec![1];
+        let permit = Arc::new(std::sync::Mutex::new(
+            pool.try_acquire(bytes.capacity()).expect("initial permit"),
+        ));
+        #[cfg(panic = "unwind")]
+        crate::operation::poison_test_mutex(&permit);
+
+        let error = super::reserve_vec_capacity(&mut bytes, usize::MAX, &permit, 8).expect_err("length overflow");
+        assert_eq!(error.to_string(), "read capacity overflow");
+        assert_eq!(pool.used(), 1);
+        super::reserve_vec_capacity(&mut bytes, 1, &permit, 8).expect("grow within byte budget");
+        assert_eq!(pool.used(), bytes.capacity());
+        assert_eq!(bytes, [1]);
+        drop(permit);
+        assert_eq!(pool.used(), 0);
+    }
+
+    #[test]
     fn test_worker_constructor_replaces_pending_waker_before_completion() {
         use std::sync::mpsc;
         use std::time::Duration;
@@ -1056,6 +1076,7 @@ mod tests {
         let mut future = Box::pin(super::run_on_worker(&executor, || Ok::<_, crate::LocalFileError>(23)));
 
         assert!(matches!(future.as_mut().poll(&mut first_context), Poll::Pending));
+        assert!(matches!(future.as_mut().poll(&mut second_context), Poll::Pending));
         assert!(matches!(future.as_mut().poll(&mut second_context), Poll::Pending));
         release_tx.send(()).unwrap();
 

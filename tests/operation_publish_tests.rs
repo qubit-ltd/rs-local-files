@@ -761,7 +761,11 @@ fn test_exhausted_fact_record_slots_reject_new_mutation_before_native_work() {
             LocalOperationOptions::default(),
         )
         .unwrap();
-    assert!(matches!(first.wait_outcome().unwrap(), OperationOutcome::Succeeded(_)));
+    let first_outcome = first.wait_outcome().unwrap();
+    assert!(
+        matches!(first_outcome, OperationOutcome::Succeeded(_)),
+        "first mutation should complete before the record limit is exhausted: {first_outcome:?}"
+    );
     let request = LocalWriterCommitRequest {
         path: second_path.clone(),
         options: LocalWriteOptions::new(LocalWriteMode::CreateOrReplace),

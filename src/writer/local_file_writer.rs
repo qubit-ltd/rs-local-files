@@ -344,6 +344,20 @@ impl LocalFileWriter {
             )));
         }
         let previous_failure_state = self.failure_state;
+        #[cfg(feature = "test-support")]
+        if crate::local::test_support_enabled("writer-staged-abort-cleanup")
+            && matches!(
+                self.backend.as_ref(),
+                Some(LocalFileWriterBackend::Staged(_) | LocalFileWriterBackend::Rooted(_))
+            )
+        {
+            self.failure_state.get_or_insert(LocalWriteFailureState::NotPublished);
+            return Err(self.contextualize_error(writer_io_error(
+                &self.path,
+                LocalFileOperation::Abort,
+                crate::local::test_fault_error(),
+            )));
+        }
         let backend = self.backend.as_mut().expect("open writer must retain one backend");
         match backend {
             backend @ (LocalFileWriterBackend::Staged(_) | LocalFileWriterBackend::Rooted(_)) => {

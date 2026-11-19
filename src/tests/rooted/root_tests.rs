@@ -89,3 +89,22 @@ fn test_root_authority_manages_descendant_entries() {
     root.remove_tree(&LocalRelativePath::new(Path::new("tree")).expect("tree root should be valid"))
         .expect("tree should be removed");
 }
+
+#[cfg(unix)]
+#[test]
+fn test_root_listing_orders_names_and_preserves_open_failure_context() {
+    let fixture = tempdir().expect("fixture");
+    fs::create_dir(fixture.path().join("entries")).expect("directory");
+    for name in ["zebra", "alpha", "middle"] {
+        fs::write(fixture.path().join("entries").join(name), name).expect("fixture entry");
+    }
+    let root = Root::open(fixture.path()).expect("root authority");
+    let missing = LocalRelativePath::new(Path::new("missing")).expect("relative path");
+    let error = root.read_dir(&missing).expect_err("missing listing must fail");
+    assert_eq!(error.kind(), std::io::ErrorKind::NotFound);
+    assert!(error.to_string().contains("open rooted directory for listing"));
+    let entries = LocalRelativePath::new(Path::new("entries")).expect("relative path");
+    let entries = root.read_dir(&entries).expect("list entries");
+    let names: Vec<_> = entries.iter().map(|entry| entry.name()).collect();
+    assert_eq!(names, ["alpha", "middle", "zebra"]);
+}

@@ -318,10 +318,13 @@ fn execute_stream_command(
         };
     }
     if matches!(command, LocalStreamCommand::Close | LocalStreamCommand::Abort) {
-        let Some(previous) = native.take() else {
+        let Some(previous) = native.as_mut() else {
             return Ok(LocalStreamCompletion::Closed);
         };
-        drop(previous);
+        if let LocalNativeStream::Writer(writer) = previous {
+            let _ = writer.abort().map_err(crate::LocalFileError::into_io_error)?;
+        }
+        native.take();
         return Ok(LocalStreamCompletion::Closed);
     }
     let Some(native) = native.as_mut() else {
@@ -618,15 +621,29 @@ mod tests {
             append_mode: true,
         });
 
+        #[cfg(panic = "unwind")]
+        {
+            use crate::operation::poison_test_mutex;
+
+            poison_test_mutex(&inner.queue);
+            poison_test_mutex(&inner.state);
+            poison_test_mutex(&inner.native);
+        }
         drain_stream_commands(std::sync::Arc::clone(&inner));
 
         assert!(!inner.active.load(Ordering::Acquire));
-        assert!(inner.queue.lock().unwrap().is_empty());
+        assert!(
+            inner
+                .queue
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .is_empty()
+        );
         assert_eq!(inner.written_bytes.load(Ordering::Acquire), 21);
         let result = inner
             .state
             .lock()
-            .unwrap()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .commands
             .get_mut(&41)
             .unwrap()
@@ -687,14 +704,25 @@ mod tests {
             append_mode: false,
         };
 
+        #[cfg(panic = "unwind")]
+        {
+            crate::operation::poison_test_mutex(&inner.queue);
+            crate::operation::poison_test_mutex(&inner.state);
+        }
         fail_stream_queue(
             &inner,
             std::io::Error::new(std::io::ErrorKind::WouldBlock, "queue full"),
         );
 
         assert!(!inner.active.load(Ordering::Acquire));
-        assert!(inner.queue.lock().unwrap().is_empty());
-        let state = inner.state.lock().unwrap();
+        assert!(
+            inner
+                .queue
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .is_empty()
+        );
+        let state = inner.state.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         for id in [41, 42] {
             assert_eq!(
                 state.commands[&id]

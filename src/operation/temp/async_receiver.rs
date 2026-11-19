@@ -204,6 +204,8 @@ mod tests {
         let hostile_waker = panic_clone_waker();
         let mut hostile_context = std::task::Context::from_waker(&hostile_waker);
 
+        #[cfg(panic = "unwind")]
+        crate::operation::poison_test_mutex(&receiver.0.value);
         assert!(
             std::pin::Pin::new(&mut receiver)
                 .poll(&mut hostile_context)

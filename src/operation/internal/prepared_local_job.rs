@@ -1248,6 +1248,8 @@ mod lifecycle_tests {
                     LocalFactObserver::new(),
                     |_| panic!("a stop accepted before start must skip the worker"),
                 );
+                #[cfg(panic = "unwind")]
+                job.poison_lifecycle_locks();
                 PreparedExternalOperation::bind(&*job, scope.id()).expect("bind job identity");
                 *observed_job.lock().unwrap_or_else(|error| error.into_inner()) = Some(Arc::clone(&job));
                 OperationControl::request_stop(&*job, StopReason::UserCancelled);
@@ -1668,6 +1670,8 @@ mod prepared_job_ownership_tests {
             port.wakers = std::array::from_fn(|index| Some(Waker::from(Arc::clone(&wakes[index]))));
         }
 
+        #[cfg(panic = "unwind")]
+        job.poison_lifecycle_locks();
         job.finish_released(id);
 
         let snapshot = OperationControl::snapshot(&*job);
@@ -1738,6 +1742,8 @@ mod prepared_job_ownership_tests {
         let executor = LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).expect("executor");
         let job = make_job(&executor);
         let id = operation_id(&manager);
+        #[cfg(panic = "unwind")]
+        job.poison_lifecycle_locks();
         PreparedExternalOperation::bind(&*job, id).expect("bind job identity");
         let wake = Arc::new(WakeCount(AtomicUsize::new(0)));
         let waker = Waker::from(Arc::clone(&wake));
@@ -1749,7 +1755,8 @@ mod prepared_job_ownership_tests {
 
         PreparedExternalOperation::abandon(Arc::clone(&job));
 
-        // All three control polls share one task waker, so wake_all deduplicates it.
+        // All three control polls share one task waker, so wake_all
+        // deduplicates it.
         assert_eq!(1, wake.0.load(Ordering::SeqCst));
         assert!(matches!(
             OperationControl::poll_outcome(&*job, &mut context),
@@ -1840,18 +1847,49 @@ mod scoped_job_tests {
                 OperationOutcome::<usize, &'static str>::Succeeded(37)
             },
         );
+        #[cfg(panic = "unwind")]
+        job.poison_lifecycle_locks();
         let mut handle = manager
             .try_submit_external(Default::default(), Arc::clone(&job))
             .expect("external operation admitted");
         let id = OperationControl::snapshot(&*job).operation_id;
         let outcome = handle.wait_outcome().expect("scoped worker outcome");
+        let mut context = Context::from_waker(Waker::noop());
+        assert!(matches!(
+            OperationControl::poll_outcome(&*job, &mut context),
+            Poll::Ready(summary) if summary.operation_id == id
+                && summary.kind == qubit_operation::ChildOutcomeKind::Succeeded
+        ));
+        assert!(matches!(
+            OperationControl::poll_release(&*job, &mut context),
+            Poll::Ready(release) if release.operation_id == id
+        ));
+        assert!(matches!(
+            OperationControl::poll_settlement(&*job, &mut context),
+            Poll::Ready(report) if report.operation_id == id
+                && report.status == qubit_operation::SettlementStatus::Released
+        ));
         assert_eq!(Some(id), *observed_id.lock().unwrap_or_else(|error| error.into_inner()));
         assert!(matches!(outcome, OperationOutcome::Succeeded(37)));
-        let mut context = Context::from_waker(Waker::noop());
         assert!(matches!(
             PreparedExternalOperation::poll_take_outcome(&*job, &mut context),
             Poll::Pending
         ));
         drop(handle);
+    }
+}
+
+#[cfg(all(test, panic = "unwind"))]
+impl<R, T, E> PreparedLocalJob<R, T, E> {
+    fn poison_lifecycle_locks(&self) {
+        use crate::operation::poison_test_mutex;
+
+        poison_test_mutex(&self.task);
+        poison_test_mutex(&self.request);
+        poison_test_mutex(&self._slot);
+        poison_test_mutex(&self._owned_permit);
+        poison_test_mutex(&self._handle_permit);
+        poison_test_mutex(&self._fact_observer);
+        poison_test_mutex(&self.port);
     }
 }

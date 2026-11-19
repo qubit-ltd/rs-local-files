@@ -170,3 +170,72 @@ fn test_preferred_native_file_sync_failure_reports_unsynced_without_losing_owner
     );
     stage.cleanup().expect("cleanup retryable source");
 }
+
+#[test]
+fn test_tree_validation_propagates_native_privacy_observation_failure() {
+    use crate::directory::LocalTreeEntry;
+    use crate::directory::LocalTreeValidationOptions;
+    use crate::policy::LocalPrivacyRequirement;
+
+    let fixture = tempfile::tempdir().expect("fixture");
+    let parent = LocalFileSystem::host()
+        .expect("host")
+        .open_directory_with_options(fixture.path(), &LocalDirectoryOpenOptions::new())
+        .expect("parent");
+    let mut stage = parent
+        .create_staged_directory(&LocalTempDirectoryOptions::new().with_privacy(LocalPrivacyRequirement::Required))
+        .expect("private stage");
+    let path = Path::new("payload");
+    stage.write_file_new(path, &mut &b"payload"[..], 7).expect("file");
+    let entries = [LocalTreeEntry::new(path.to_path_buf(), crate::LocalFileKind::File).expect("expected entry")];
+    let options = LocalTreeValidationOptions::new().with_privacy(LocalPrivacyRequirement::Required);
+    let fault = NativeIoFaultGuard::fail_on(NativeIoPoint::Observation, 2);
+    let error = stage
+        .verify_entries(&entries, &options)
+        .expect_err("entry privacy observation failure");
+    assert!(fault.fired());
+    assert_eq!(error.kind(), LocalFileErrorKind::Io);
+    assert_eq!(error.operation(), LocalFileOperation::Metadata);
+    assert_eq!(error.reason(), Some("tree entry privacy observation failed"));
+    assert_eq!(
+        error.path(),
+        Some(stage.directory().diagnostic_path().join(path).as_path())
+    );
+    drop(fault);
+    stage
+        .verify_entries(&entries, &options)
+        .expect("retry tree verification");
+    stage.cleanup().expect("verified stage remains cleanable");
+}
+
+#[test]
+fn test_tree_verification_propagates_hardlink_metadata_errors() {
+    use crate::directory::LocalTreeEntry;
+    use crate::directory::LocalTreeValidationOptions;
+
+    let fixture = tempfile::tempdir().expect("fixture");
+    let parent = LocalFileSystem::host()
+        .expect("host")
+        .open_directory_with_options(fixture.path(), &LocalDirectoryOpenOptions::new())
+        .expect("parent");
+    let mut stage = parent
+        .create_staged_directory(&LocalTempDirectoryOptions::new())
+        .expect("stage");
+    let path = Path::new("payload");
+    stage.write_file_new(path, &mut &b"payload"[..], 7).expect("file");
+    let entries = [LocalTreeEntry::new(path.to_path_buf(), crate::LocalFileKind::File).expect("expected entry")];
+    let options = LocalTreeValidationOptions::new().with_reject_external_hardlinks();
+    let fault = NativeIoFaultGuard::fail_on(NativeIoPoint::OpenCursor, 3);
+    let error = stage
+        .verify_entries(&entries, &options)
+        .expect_err("hard-link metadata failure");
+    assert!(fault.fired());
+    assert_eq!(error.kind(), LocalFileErrorKind::Io);
+    assert_eq!(error.operation(), LocalFileOperation::Metadata);
+    assert_eq!(error.reason(), Some("tree hard-link metadata observation failed"));
+    drop(fault);
+    stage
+        .verify_entries(&entries, &options)
+        .expect("retry tree verification");
+    stage.cleanup().expect("verified stage remains cleanable");
+}

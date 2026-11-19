@@ -209,6 +209,26 @@ fn test_copy_budget_matrix_enforces_max_open_directories() {
 }
 
 #[test]
+fn test_rooted_nested_copy_rejects_exhausted_directory_budget() {
+    let fixture = copy_fixture(Backend::Rooted);
+    let nested = fixture._directory.path().join("source/nested");
+    fs::create_dir(&nested).expect("nested source");
+    fs::write(nested.join("payload"), b"nested content").expect("nested payload");
+    let options = LocalCopyOptions::new().with_tree_source().with_max_open_directories(1);
+    let failure = fixture
+        .filesystem
+        .copy_with_options(&fixture.source, &fixture.target, &options)
+        .expect_err("opening a child directory would exceed the root frame's permit");
+    let limit = failure.error().resource_limit_error().expect("directory budget facts");
+    assert_eq!(limit.resource(), LocalResourceKind::OpenDirectory);
+    assert_eq!(limit.limit(), 1);
+    assert_eq!(
+        fs::read(nested.join("payload")).expect("preserved nested source"),
+        b"nested content"
+    );
+}
+
+#[test]
 fn test_copy_budget_matrix_enforces_deadline() {
     for backend in Backend::all() {
         let fixture = copy_fixture(backend);

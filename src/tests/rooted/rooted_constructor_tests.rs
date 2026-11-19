@@ -61,6 +61,37 @@ fn test_deleted_process_cwd_preserves_constructor_and_pair_operation_context() {
     let target = Path::new("relative-target");
     let copy_result = host.copy(source, target);
     let rename_result = host.rename(source, target);
+    #[cfg(feature = "async")]
+    {
+        use std::future::Future;
+        use std::task::Context;
+        use std::task::Poll;
+        use std::task::Waker;
+        use std::time::Duration;
+        use std::time::Instant;
+
+        let manager = qubit_operation::OperationManager::new(Default::default()).expect("manager");
+        let executor = crate::LocalIoExecutor::new(manager, Default::default()).expect("executor");
+        let mut constructor = std::pin::pin!(crate::operation::AsyncLocalFileSystem::host(executor));
+        let mut context = Context::from_waker(Waker::noop());
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let error = loop {
+            match constructor.as_mut().poll(&mut context) {
+                Poll::Ready(Err(error)) => break error,
+                Poll::Ready(Ok(_)) => panic!("removed cwd should prevent async Host construction"),
+                Poll::Pending => {
+                    assert!(Instant::now() < deadline, "async Host constructor should complete");
+                    std::thread::park_timeout(Duration::from_millis(1));
+                }
+            }
+        };
+        assert_eq!(error.operation(), LocalFileOperation::CurrentDirectory);
+        assert_eq!(error.io_error_kind(), std::io::ErrorKind::NotFound);
+        assert_eq!(
+            error.reason(),
+            Some("failed to capture process directory for async local filesystem")
+        );
+    }
     // Restore a live cwd before assertions and automatic fixture cleanup.
     std::env::set_current_dir(&original).expect("child should restore its original cwd");
 
@@ -91,8 +122,8 @@ fn test_deleted_process_cwd_preserves_constructor_and_pair_operation_context() {
 #[test]
 fn test_native_root_constructor_cursor_failure_retains_requested_root() {
     let path = Path::new("/");
-    // Opening the native root has no relative components, so the first cursor is
-    // constructor-owned.
+    // Opening the native root has no relative components, so the first cursor
+    // is constructor-owned.
     let guard = NativeIoFaultGuard::fail_on(NativeIoPoint::OpenCursor, 1);
     let error = RootedLocalFileSystem::open_with_contract(
         path,

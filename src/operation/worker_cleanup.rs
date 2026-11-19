@@ -207,6 +207,8 @@ mod tests {
             Poll::Ready(Err(io::Error::other("worker cleanup failed"))),
             Some(expected_id),
         );
+        #[cfg(panic = "unwind")]
+        crate::operation::poison_test_mutex(&resource.resource_id);
         let mut cleanup = Box::pin(WorkerCleanup::<TestResource>::policy().cleanup(resource, context()));
         let mut cx = Context::from_waker(Waker::noop());
         let outcome = cleanup.as_mut().poll(&mut cx);

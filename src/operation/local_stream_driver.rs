@@ -47,6 +47,12 @@ pub trait LocalStreamDriver: Send + Sync + 'static {
         request: &LocalStreamRequest,
     ) -> Poll<io::Result<LocalStreamCompletion>>;
 
+    /// Returns worker-confirmed write facts when this driver can establish
+    /// them. Drivers without an observer retain the conservative unknown state.
+    fn write_facts(&self) -> Option<(crate::LocalWriteFailureState, u64)> {
+        None
+    }
+
     /// Enqueues a close command without blocking when the owning handle drops.
     /// The command id must be idempotent with a later explicit `close` poll.
     /// # Parameters

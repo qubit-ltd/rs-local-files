@@ -24,8 +24,19 @@ use super::stream_state::StreamState;
 
 /// An exclusive asynchronous writer for a managed local file.
 ///
-/// The filesystem operation that opens a writer supplies this handle. Writes
-/// remain staged until `commit` confirms publication.
+/// The filesystem operation that opens a writer supplies this handle. Staged
+/// writes remain unpublished until `commit` confirms publication; append
+/// writes publish as the worker accepts them.
+///
+/// A commit first settles accepted writes. Once its command is queued, new
+/// writes and flushes are rejected until its result is observed. Cancelling
+/// the commit future keeps the same request for the next `commit` call. A
+/// retryable failure reopens the writer; success and non-retryable failure
+/// make it terminal. `close` observes any pending commit and retains its
+/// typed result for a later `commit` call before closing the remaining
+/// resource. Inspect publication state and retryability before deciding
+/// whether to retry; `Published` and `Indeterminate` do not authorize replay
+/// of the complete input.
 ///
 /// # Examples
 ///
@@ -39,14 +50,34 @@ use super::stream_state::StreamState;
 /// {
 ///     writer.commit().await
 /// }
+///
+/// async fn write_and_commit(
+///     writer: &mut AsyncLocalFileWriter,
+///     bytes: &[u8],
+/// ) -> Result<LocalWriteOutcome, Box<dyn std::error::Error>> {
+///     use qubit_io::AsyncOutput;
+///     writer.write_fully_async(bytes).await?;
+///     let mut result = writer.commit().await;
+///     if result.as_ref().is_err_and(|error| error.retryable()) {
+///         result = writer.commit().await;
+///     }
+///     writer.close().await?;
+///     Ok(result?)
+/// }
 /// ```
 pub struct AsyncLocalFileWriter {
     /// Managed worker port retained until writer closure.
     resource: Option<ResourceRef<LocalStreamResource>>,
     /// Pending command and cancellation state for the writer.
     state: StreamState,
-    /// Stable commit command reused when the future is polled again.
-    commit_request: Option<LocalStreamRequest>,
+    /// Stable commit command retained across cancellation.
+    request: Option<LocalStreamRequest>,
+    /// Commit result captured by close but not yet observed by the caller.
+    result: Option<Result<crate::LocalWriteOutcome, LocalStreamCommitError>>,
+    /// Whether the commit barrier has started.
+    started: bool,
+    /// Whether the commit completed or failed terminally.
+    terminal: bool,
 }
 
 impl AsyncLocalFileWriter {
@@ -60,7 +91,10 @@ impl AsyncLocalFileWriter {
         Ok(Self {
             resource: Some(resource),
             state: StreamState::new(Direction::Write),
-            commit_request: None,
+            request: None,
+            result: None,
+            started: false,
+            terminal: false,
         })
     }
 
@@ -80,77 +114,51 @@ impl AsyncLocalFileWriter {
     /// result. A retryable typed error leaves the writer available for
     /// another call.
     pub async fn commit(&mut self) -> Result<crate::LocalWriteOutcome, LocalStreamCommitError> {
-        self.settle().await.map_err(|error| {
-            LocalStreamCommitError::new(
-                crate::LocalFileCommitError::new(
-                    crate::LocalFileError::from_io(crate::LocalFileOperation::Commit, None, None, error),
-                    crate::LocalWriteFailureState::NotPublished,
-                    None,
-                ),
-                false,
-            )
-        })?;
-        let Some(resource) = self.resource.as_deref() else {
-            return Err(LocalStreamCommitError::new(
-                crate::LocalFileCommitError::new(
-                    crate::LocalFileError::from_io(
-                        crate::LocalFileOperation::Commit,
-                        None,
-                        None,
-                        StreamState::closed_error(),
-                    ),
-                    crate::LocalWriteFailureState::Indeterminate,
-                    None,
-                ),
-                false,
+        if let Some(result) = self.result.take() {
+            return result;
+        }
+        if self.terminal {
+            return Err(commit_stream_error(
+                io::Error::new(io::ErrorKind::BrokenPipe, "local writer commit is already terminal"),
+                crate::LocalWriteFailureState::Indeterminate,
+                0,
             ));
-        };
-        let id = self
-            .commit_request
-            .get_or_insert(LocalStreamRequest {
+        }
+        self.started = true;
+        if self.request.is_none() {
+            if let Err(error) = self.settle().await {
+                let (state, bytes) = self
+                    .resource
+                    .as_deref()
+                    .and_then(LocalStreamResource::write_facts)
+                    .unwrap_or((crate::LocalWriteFailureState::Indeterminate, 0));
+                self.terminal = true;
+                return Err(commit_stream_error(error, state, bytes));
+            }
+            self.request = Some(LocalStreamRequest {
                 id: 0x8000_0000_0000_0001,
                 command: LocalStreamCommand::Commit,
-            })
-            .id;
-        let request = self.commit_request.as_ref().expect("commit request inserted");
-        let result = std::future::poll_fn(|cx| match resource.poll_command(cx, request) {
-            Poll::Pending => Poll::Pending,
-            Poll::Ready(Ok(LocalStreamCompletion::Committed(outcome))) => Poll::Ready(Ok(outcome)),
-            Poll::Ready(Ok(LocalStreamCompletion::CommitFailed { error, retryable })) => {
-                Poll::Ready(Err(LocalStreamCommitError::new(error, retryable)))
-            }
-            Poll::Ready(Ok(_)) => Poll::Ready(Err(LocalStreamCommitError::new(
-                crate::LocalFileCommitError::new(
-                    crate::LocalFileError::from_io(
-                        crate::LocalFileOperation::Commit,
-                        None,
-                        None,
-                        io::Error::new(io::ErrorKind::InvalidData, "unexpected commit completion"),
-                    ),
-                    crate::LocalWriteFailureState::Indeterminate,
-                    None,
-                ),
-                false,
-            ))),
-            Poll::Ready(Err(error)) => Poll::Ready(Err(LocalStreamCommitError::new(
-                crate::LocalFileCommitError::new(
-                    crate::LocalFileError::from_io(crate::LocalFileOperation::Commit, None, None, error),
-                    crate::LocalWriteFailureState::Indeterminate,
-                    None,
-                ),
-                false,
-            ))),
-        })
-        .await;
-        if result.is_ok() || result.as_ref().is_err_and(|error| !error.retryable()) {
-            self.commit_request = None;
+            });
         }
-        let _ = id;
-        result
+        let Some(resource) = self.resource.as_deref() else {
+            self.terminal = true;
+            return Err(commit_stream_error(
+                StreamState::closed_error(),
+                crate::LocalWriteFailureState::Indeterminate,
+                0,
+            ));
+        };
+        let request = &mut self.request;
+        let started = &mut self.started;
+        let terminal = &mut self.terminal;
+        std::future::poll_fn(move |cx| poll_commit(resource, request, started, terminal, cx)).await
     }
 
     /// Closes this port without waiting for operation settlement.
     pub async fn close(&mut self) -> io::Result<()> {
+        if self.request.is_some() || (self.started && !self.terminal) {
+            self.result = Some(self.commit().await);
+        }
         let Some(resource) = self.resource.as_deref() else {
             return match self.state.completed_close() {
                 Poll::Ready(result) => result,
@@ -217,6 +225,9 @@ impl AsyncOutput for AsyncLocalFileWriter {
         if this.resource.is_none() {
             return Poll::Ready(Err(StreamState::closed_error()));
         }
+        if this.started {
+            return Poll::Ready(Err(commit_barrier_error(this.terminal)));
+        }
         let resource = this.resource.as_deref().expect("resource retained until close");
         this.state.poll_write(resource, cx, &input[index..end])
     }
@@ -232,8 +243,91 @@ impl AsyncOutput for AsyncLocalFileWriter {
         if this.resource.is_none() {
             return Poll::Ready(Err(StreamState::closed_error()));
         }
+        if this.started {
+            return Poll::Ready(Err(commit_barrier_error(this.terminal)));
+        }
         let resource = this.resource.as_deref().expect("resource retained until close");
         this.state.poll_flush(resource, cx)
+    }
+}
+
+/// Polls the stable commit request and retains its terminal status.
+///
+/// # Parameters
+///
+/// * `resource` - Worker resource that owns the writer and pending request.
+/// * `request` - Stable request retained across caller cancellation.
+/// * `started` - Commit barrier state to update after polling.
+/// * `terminal` - Terminal state to update after completion.
+/// * `cx` - Task context used to register the caller for wakeup.
+fn poll_commit(
+    resource: &LocalStreamResource,
+    request_slot: &mut Option<LocalStreamRequest>,
+    started: &mut bool,
+    terminal: &mut bool,
+    cx: &mut Context<'_>,
+) -> Poll<Result<crate::LocalWriteOutcome, LocalStreamCommitError>> {
+    let Some(request) = request_slot.as_ref() else {
+        return Poll::Ready(Err(commit_stream_error(
+            io::Error::new(io::ErrorKind::InvalidInput, "no pending writer commit"),
+            crate::LocalWriteFailureState::Indeterminate,
+            0,
+        )));
+    };
+    let result = match resource.poll_command(cx, request) {
+        Poll::Pending => return Poll::Pending,
+        Poll::Ready(Ok(LocalStreamCompletion::Committed(outcome))) => Ok(outcome),
+        Poll::Ready(Ok(LocalStreamCompletion::CommitFailed { error, retryable })) => {
+            *request_slot = None;
+            *started = !retryable;
+            *terminal = !retryable;
+            return Poll::Ready(Err(LocalStreamCommitError::new(error, retryable)));
+        }
+        Poll::Ready(Ok(_)) => Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "unexpected commit completion",
+        )),
+        Poll::Ready(Err(error)) => Err(error),
+    };
+    *request_slot = None;
+    *started = true;
+    *terminal = true;
+    Poll::Ready(result.map_err(|error| {
+        let (state, bytes) = resource
+            .write_facts()
+            .unwrap_or((crate::LocalWriteFailureState::Indeterminate, 0));
+        commit_stream_error(error, state, bytes)
+    }))
+}
+
+/// Maps a worker I/O error into the public local commit error type.
+///
+/// # Parameters
+///
+/// * `error` - I/O error returned by the worker.
+/// * `state` - Publication state observed after the failed command.
+/// * `bytes` - Number of bytes the worker reports as modified.
+fn commit_stream_error(error: io::Error, state: crate::LocalWriteFailureState, _bytes: u64) -> LocalStreamCommitError {
+    LocalStreamCommitError::new(
+        crate::LocalFileCommitError::new(
+            crate::LocalFileError::from_io(crate::LocalFileOperation::Commit, None, None, error),
+            state,
+            None,
+        ),
+        false,
+    )
+}
+
+/// Creates the I/O error used to reject operations behind a commit barrier.
+///
+/// # Parameters
+///
+/// * `terminal` - Whether the commit barrier has reached a terminal state.
+fn commit_barrier_error(terminal: bool) -> io::Error {
+    if terminal {
+        io::Error::new(io::ErrorKind::BrokenPipe, "local writer commit is terminal")
+    } else {
+        io::Error::new(io::ErrorKind::WouldBlock, "local writer commit is pending")
     }
 }
 

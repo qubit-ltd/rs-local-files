@@ -57,6 +57,7 @@ pub(super) struct SyncEvent {
 
 thread_local! {
     static SYNC_EVENTS: RefCell<Option<Vec<SyncEvent>>> = const { RefCell::new(None) };
+    static SYNC_FAILURE_KIND: RefCell<Option<SyncKind>> = const { RefCell::new(None) };
     static SYNC_FAILURE_PATH: RefCell<Option<PathBuf>> = const { RefCell::new(None) };
 }
 
@@ -76,6 +77,7 @@ impl SyncOrderObserverGuard {
 impl Drop for SyncOrderObserverGuard {
     fn drop(&mut self) {
         SYNC_EVENTS.with(|events| events.borrow_mut().take());
+        SYNC_FAILURE_KIND.with(|slot| slot.borrow_mut().take());
         SYNC_FAILURE_PATH.with(|slot| slot.borrow_mut().take());
     }
 }
@@ -120,7 +122,7 @@ pub(super) fn record_sync_event(event: SyncEvent) -> std::io::Result<()> {
         super::TREE_SYNC_TEST_EXPIRED.with(|expired| expired.set(true));
     }
     let should_fail = SYNC_FAILURE_PATH.with(|slot| slot.borrow().as_deref() == Some(event.path.as_path()));
-    if should_fail {
+    if should_fail || SYNC_FAILURE_KIND.with(|slot| *slot.borrow() == Some(event.kind)) {
         SYNC_FAILURE_PATH.with(|slot| slot.borrow_mut().take());
         Err(std::io::Error::other("injected directory sync failure"))
     } else {
@@ -430,4 +432,55 @@ fn assert_sync_order(
             );
         }
     }
+}
+
+#[test]
+fn test_tree_sync_reports_root_and_parent_failures_at_their_own_paths() {
+    let fixture = tempfile::tempdir().expect("fixture");
+    let parent = LocalFileSystem::host()
+        .expect("host")
+        .open_directory_with_options(fixture.path(), &LocalDirectoryOpenOptions::new())
+        .expect("parent");
+    let stage = parent
+        .create_staged_directory(&sync_test_temp_options())
+        .expect("stage");
+    for (kind, path, order) in [
+        (
+            SyncKind::Root,
+            stage.directory().diagnostic_path(),
+            &[SyncKind::Root][..],
+        ),
+        (
+            SyncKind::Parent,
+            parent.diagnostic_path(),
+            &[SyncKind::Root, SyncKind::Parent][..],
+        ),
+    ] {
+        let observer = SyncOrderObserverGuard::install(None);
+        SYNC_FAILURE_KIND.with(|slot| *slot.borrow_mut() = Some(kind));
+        let error = stage
+            .sync_tree_with_options(&parent, &LocalListOptions::new())
+            .expect_err("injected synchronization failure");
+        assert_eq!(error.operation(), crate::LocalFileOperation::Commit);
+        assert_eq!(error.path(), Some(path));
+        assert_eq!(
+            error.io_error().expect("native source").to_string(),
+            "injected directory sync failure"
+        );
+        SYNC_EVENTS.with(|events| {
+            let events = events.borrow();
+            let calls: Vec<_> = events
+                .as_ref()
+                .expect("events")
+                .iter()
+                .map(|event| event.kind)
+                .collect();
+            assert_eq!(calls, order);
+        });
+        drop(observer);
+    }
+    stage
+        .sync_tree_with_options(&parent, &LocalListOptions::new())
+        .expect("retry sync");
+    stage.cleanup().expect("unpublished stage remains cleanable");
 }
