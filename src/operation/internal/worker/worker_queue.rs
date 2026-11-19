@@ -243,4 +243,46 @@ mod tests {
         assert_eq!(completed, ["cleanup-1", "ordinary-1", "cleanup-2", "ordinary-2"]);
         assert_eq!(permits.used(), 0);
     }
+
+    #[test]
+    fn test_queue_recovers_and_drains_after_state_mutex_is_poisoned() {
+        use std::panic::AssertUnwindSafe;
+        use std::panic::catch_unwind;
+
+        let queue = WorkerQueue::default();
+        let poison = catch_unwind(AssertUnwindSafe(|| {
+            let _state = queue.state.lock().unwrap();
+            panic!("poison worker queue state");
+        }));
+        assert!(poison.is_err());
+
+        let (tx, rx) = mpsc::channel();
+        let ordinary_tx = tx.clone();
+        assert!(
+            queue
+                .push(Box::new(move || ordinary_tx.send("ordinary").unwrap()), false, 1)
+                .is_ok()
+        );
+
+        let permits = PermitPool::new(1);
+        let permit = permits.try_acquire(1).unwrap();
+        let cleanup_tx = tx.clone();
+        assert!(
+            queue
+                .push_cleanup(Box::new(move || cleanup_tx.send("cleanup").unwrap()), permit, 1)
+                .is_ok()
+        );
+        drop(tx);
+
+        queue.stop();
+        queue.run();
+
+        let mut completed = vec![
+            rx.recv_timeout(Duration::from_secs(1)).unwrap(),
+            rx.recv_timeout(Duration::from_secs(1)).unwrap(),
+        ];
+        completed.sort_unstable();
+        assert_eq!(completed, ["cleanup", "ordinary"]);
+        assert_eq!(permits.used(), 0);
+    }
 }
