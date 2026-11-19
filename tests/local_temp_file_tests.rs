@@ -1639,6 +1639,24 @@ fn test_local_temp_file_close_rejects_stream_access_and_allows_cleanup() {
     assert!(!path.exists());
 }
 
+/// Verifies a temporary file keeps its creation-parent snapshot through
+/// cleanup.
+#[test]
+fn test_local_temp_file_creation_parent_and_source_state_track_lifecycle() {
+    let parent = tempdir().expect("temporary parent should be created");
+    let mut temporary = LocalFileSystem::host()
+        .expect("Host filesystem should open")
+        .create_temp_file_with_options(&LocalTempFileOptions::new().with_parent(parent.path()))
+        .expect("temporary file should be created");
+
+    assert_eq!(parent.path(), temporary.creation_parent());
+    assert!(temporary.path().starts_with(temporary.creation_parent()));
+    assert_eq!(LocalTempSourceState::Owned, temporary.source_state());
+
+    temporary.cleanup().expect("temporary file should clean up");
+    assert_eq!(LocalTempSourceState::Released, temporary.source_state());
+}
+
 /// Verifies cleanup reports and retries a sandbox removal failure.
 #[cfg(feature = "test-support")]
 #[test]
