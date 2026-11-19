@@ -386,18 +386,26 @@ pub(super) fn map_walk_error(error: io::Error) -> crate::LocalFileError {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
+    use std::collections::VecDeque;
     use std::fs::File;
     use std::io::SeekFrom;
+    use std::sync::Mutex;
+    use std::sync::atomic::Ordering;
     use std::time::SystemTime;
     use std::time::UNIX_EPOCH;
 
     use super::LocalNativeStream;
     use super::LocalStreamCommand;
     use super::LocalStreamCompletion;
+    use super::drain_stream_commands;
     use super::execute_stream_command;
     use super::map_walk_error;
     use super::record_stream_fact;
     use super::stream_state::resource_limit;
+    use super::worker_stream_command::WorkerCommand;
+    use super::worker_stream_inner::WorkerStreamInner;
+    use super::worker_stream_state::WorkerStreamState;
     use crate::operation::LocalDurabilityState;
     use crate::operation::LocalFactObserver;
     use crate::operation::LocalPublicationState;
@@ -568,5 +576,65 @@ mod tests {
         assert_eq!(snapshot.durability, LocalDurabilityState::Failed);
         assert_eq!(snapshot.modified_count, 1);
         assert_eq!(snapshot.modified_bytes, 8);
+    }
+
+    #[test]
+    fn test_worker_drain_records_append_write_and_completes_request() {
+        let path = temp_path("drain-append");
+        let manager = qubit_operation::OperationManager::new(qubit_operation::ManagerOptions::default()).unwrap();
+        let executor = super::super::LocalIoExecutor::new(manager, crate::LocalExecutionConfig::default()).unwrap();
+        let file = File::create(&path).expect("create append fixture");
+        let backend = crate::writer::internal::LocalFileWriterBackend::Append(file);
+        let writer = crate::LocalFileWriter::new(path.clone(), backend, crate::LocalWriteOptions::default());
+        let observer = LocalFactObserver::new();
+        let inner = std::sync::Arc::new(WorkerStreamInner {
+            executor: executor.clone(),
+            native: Mutex::new(Some(LocalNativeStream::Writer(Box::new(writer)))),
+            state: Mutex::new(WorkerStreamState {
+                commands: HashMap::from([(
+                    41,
+                    WorkerCommand {
+                        result: None,
+                        waker: None,
+                    },
+                )]),
+            }),
+            queue: Mutex::new(VecDeque::from([super::LocalStreamRequest {
+                id: 41,
+                command: LocalStreamCommand::Write {
+                    bytes: std::sync::Arc::from(&b"append through worker"[..]),
+                },
+            }])),
+            active: std::sync::atomic::AtomicBool::new(true),
+            cleanup_permit: Mutex::new(Some(executor.reserve_cleanup().unwrap())),
+            _buffer_budget: std::sync::Arc::new(Mutex::new(executor.reserve_bytes(0).unwrap())),
+            _handle_budget: std::sync::Arc::new(executor.reserve_handle().unwrap()),
+            observer: Some(observer.clone()),
+            written_bytes: std::sync::atomic::AtomicU64::new(0),
+            append_mode: true,
+        });
+
+        drain_stream_commands(std::sync::Arc::clone(&inner));
+
+        assert!(!inner.active.load(Ordering::Acquire));
+        assert!(inner.queue.lock().unwrap().is_empty());
+        assert_eq!(inner.written_bytes.load(Ordering::Acquire), 21);
+        let result = inner
+            .state
+            .lock()
+            .unwrap()
+            .commands
+            .get(&41)
+            .unwrap()
+            .result
+            .take()
+            .unwrap();
+        assert!(matches!(result, Ok(LocalStreamCompletion::Written(21))));
+        let snapshot = observer.snapshot();
+        assert_eq!(snapshot.publication, LocalPublicationState::Published);
+        assert_eq!(snapshot.modified_count, 1);
+        assert_eq!(snapshot.modified_bytes, 21);
+        assert_eq!(std::fs::read(&path).unwrap(), b"append through worker");
+        std::fs::remove_file(path).expect("remove fixture");
     }
 }
