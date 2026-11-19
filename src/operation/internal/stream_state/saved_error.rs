@@ -7,37 +7,94 @@
 // =============================================================================
 
 use std::io;
+use std::sync::Arc;
 
-/// Stores an I/O error in cloneable form for repeated polling.
-/// Reconstructing the error preserves its kind and message without sharing a
-/// non-cloneable `io::Error` value.
+#[path = "saved_error_source.rs"]
+mod source;
+
+use source::SavedErrorSource;
+
+/// Stores an I/O error in shared form so repeated polls retain its source.
 #[derive(Clone)]
 pub(super) struct SavedError {
     /// Original error category used when reconstructing the I/O failure.
     kind: io::ErrorKind,
-    /// Owned diagnostic text retained across asynchronous polls.
-    message: String,
+    /// Original error object, including any structured source.
+    error: Arc<io::Error>,
 }
 
 impl SavedError {
-    /// Stores the stable, cloneable parts of a native I/O error.
+    /// Stores the original I/O error without formatting away its source.
     ///
     /// # Parameters
     ///
-    /// * `error` — native failure whose kind and message must survive polling.
+    /// * `error` — I/O failure to retain across repeated polls.
     pub(super) fn capture(error: io::Error) -> Self {
         Self {
             kind: error.kind(),
-            message: error.to_string(),
+            error: Arc::new(error),
         }
     }
 
-    /// Recreates an equivalent I/O error for the current poll result.
+    /// Stores an error with additional write-progress context.
     ///
     /// # Parameters
     ///
-    /// * `self` — stored error details used to create a fresh I/O error.
+    /// * `error` — Original I/O failure whose source must remain available.
+    /// * `context` — Additional diagnostic text displayed with the failure.
+    pub(super) fn capture_with_context(error: io::Error, context: impl Into<String>) -> Self {
+        let kind = error.kind();
+        let source = SavedErrorSource {
+            primary: Arc::new(error),
+            context: Some(context.into()),
+            secondary: None,
+        };
+        Self {
+            kind,
+            error: Arc::new(io::Error::new(kind, source)),
+        }
+    }
+
+    /// Retains the close failure as the primary source and the earlier write
+    /// failure as an additional diagnostic.
+    ///
+    /// # Parameters
+    ///
+    /// * `primary` — Close failure that remains the main cause.
+    /// * `secondary` — Previously saved write failure displayed as context.
+    pub(super) fn capture_combined(primary: io::Error, secondary: &Self) -> Self {
+        let kind = primary.kind();
+        let source = SavedErrorSource {
+            primary: Arc::new(primary),
+            context: None,
+            secondary: Some(Arc::clone(&secondary.error)),
+        };
+        Self {
+            kind,
+            error: Arc::new(io::Error::new(kind, source)),
+        }
+    }
+
+    /// Recreates an I/O error that retains the original error as its payload.
+    ///
+    /// # Parameters
+    ///
+    /// * `self` — Saved error details used to create the current poll result.
+    ///
+    /// # Returns
+    ///
+    /// An I/O error with the saved category and inspectable payload.
     pub(super) fn make(&self) -> io::Error {
-        io::Error::new(self.kind, self.message.clone())
+        if let Some(code) = self.error.raw_os_error() {
+            return io::Error::from_raw_os_error(code);
+        }
+        io::Error::new(
+            self.kind,
+            SavedErrorSource {
+                primary: Arc::clone(&self.error),
+                context: None,
+                secondary: None,
+            },
+        )
     }
 }

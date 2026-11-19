@@ -94,6 +94,12 @@ published as accepted, and an empty append commit creates no publication or
 modification event. `settle()` waits for accepted writes to reach the native
 writer; `flush_async()` does not publish staged content.
 
+The first poll of `close()` marks the writer as closing. From then on, new
+non-empty writes, flushes, and commits that had not already started fail
+immediately, even if the close future is dropped. Polling `close()` again
+resumes the same close operation. Creating and dropping a close future without
+polling it has no effect; zero-length writes keep their existing behavior.
+
 The first poll of `commit()` establishes a barrier and starts settling accepted
 writes; writes and flushes are rejected from then on. The native commit command
 is queued only after settlement succeeds. Cancelling the future cancels only
@@ -111,6 +117,11 @@ close fails. If writing fails, still close the writer and report the write and
 close errors when both occur. Drop the writer reference before waiting for
 open-operation settlement and pass its recovery handles to the caller with
 the close result.
+
+To inspect a structured close cause, first inspect `io::Error::get_ref()` and
+then follow the contained error's `source()` chain. When both writing and
+closing fail, the close failure remains the primary cause and the write
+diagnostic is retained as additional context.
 
 ```rust,no_run
 # #[cfg(feature = "async")]

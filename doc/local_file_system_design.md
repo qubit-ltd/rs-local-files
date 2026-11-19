@@ -1697,6 +1697,16 @@ and close diagnostics independently, including when both fail. A write error
 still follows the close path and remains reportable together with any close
 error.
 
+The first poll of `close()` marks the writer as closing. Subsequent non-empty
+writes, flushes, and not-yet-started commits fail immediately; dropping the
+close future does not reopen the writer, and polling `close()` again resumes
+the same close operation. Creating but never polling the future has no effect,
+and zero-length writes retain their existing behavior. To inspect a structured
+close cause, callers first inspect `io::Error::get_ref()` and then follow the
+contained error's `source()` chain. If writing and closing both fail, the close
+failure remains primary while the write error remains additional diagnostic
+context.
+
 ```rust,no_run
 # #[cfg(feature = "async")]
 struct Diagnostics {

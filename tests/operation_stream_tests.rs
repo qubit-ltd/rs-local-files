@@ -54,12 +54,14 @@ struct FakeState {
     held: Vec<u64>,
     wake: Option<Waker>,
     close_count: usize,
+    command_kinds: Vec<&'static str>,
     close_requested: bool,
     partial_write: Option<usize>,
     fail_after_write: Option<usize>,
     write_calls: usize,
     panic_next: bool,
     unconfirmed_next: bool,
+    close_error: Option<io::Error>,
     fail_seek: bool,
     oversized_read: Option<Vec<u8>>,
     hold_read_after_execute: bool,
@@ -103,6 +105,10 @@ impl FakeWorker {
         self.0.lock().unwrap().commit_calls
     }
 
+    fn command_kinds(&self) -> Vec<&'static str> {
+        self.0.lock().unwrap().command_kinds.clone()
+    }
+
     fn partial_then_fail(&self, partial: usize) {
         let mut state = self.0.lock().unwrap();
         state.partial_write = Some(partial);
@@ -115,6 +121,16 @@ impl FakeWorker {
 
     fn unconfirmed_next(&self) {
         self.0.lock().unwrap().unconfirmed_next = true;
+    }
+
+    fn fail_next_close_with_abort_error(&self) {
+        self.0.lock().unwrap().close_error = Some(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            qubit_local_files::LocalFileError::new(
+                qubit_local_files::error::LocalFileErrorKind::InvalidState,
+                qubit_local_files::error::LocalFileOperation::Abort,
+            ),
+        ));
     }
 
     fn report_write_facts(&self, state: qubit_local_files::outcome::LocalWriteFailureState, bytes: u64) {
@@ -166,6 +182,15 @@ impl LocalStreamDriver for FakeWorker {
             state.wake = Some(cx.waker().clone());
             return Poll::Pending;
         }
+        state.command_kinds.push(match request.command {
+            LocalStreamCommand::Read { .. } => "read",
+            LocalStreamCommand::Write { .. } => "write",
+            LocalStreamCommand::Flush => "flush",
+            LocalStreamCommand::Seek(_) => "seek",
+            LocalStreamCommand::Commit => "commit",
+            LocalStreamCommand::Close => "close",
+            LocalStreamCommand::Abort => "abort",
+        });
         let result = match &request.command {
             LocalStreamCommand::Read { max_bytes } => {
                 if let Some(bytes) = state.oversized_read.take() {
@@ -209,7 +234,14 @@ impl LocalStreamDriver for FakeWorker {
                 state.position = next;
                 Ok(LocalStreamCompletion::Seeked(next as u64))
             }
-            LocalStreamCommand::Close | LocalStreamCommand::Abort => {
+            LocalStreamCommand::Close => {
+                state.close_count += 1;
+                if let Some(error) = state.close_error.take() {
+                    return Poll::Ready(Err(error));
+                }
+                Ok(LocalStreamCompletion::Closed)
+            }
+            LocalStreamCommand::Abort => {
                 state.close_count += 1;
                 Ok(LocalStreamCompletion::Closed)
             }
@@ -573,10 +605,103 @@ fn test_close_reports_write_and_cleanup_failures_together() {
     let write_error = poll_worker(|cx| Box::pin(writer.settle()).as_mut().poll(cx)).unwrap_err();
     assert!(write_error.to_string().contains("2 bytes written before failure"));
 
-    worker.panic_next();
+    worker.fail_next_close_with_abort_error();
     let error = poll_worker(|cx| Box::pin(writer.close()).as_mut().poll(cx)).unwrap_err();
-    assert!(error.to_string().contains("Unconfirmed"));
+    assert!(error.to_string().contains("InvalidState"));
     assert!(error.to_string().contains("2 bytes written before failure"));
+    let close_cause = local_file_error_in_chain(&error).expect("close error remains structured");
+    assert_eq!(
+        close_cause.operation(),
+        qubit_local_files::error::LocalFileOperation::Abort
+    );
+}
+
+#[test]
+fn test_close_blocks_new_work_while_draining_accepted_writes() {
+    let worker = Arc::new(FakeWorker::default());
+    let mut writer = writer(&worker);
+    assert_eq!(
+        poll_worker(|cx| Pin::new(&mut writer).poll_write(cx, b"accepted")).unwrap(),
+        8
+    );
+
+    worker.hold_next();
+    let mut settle = Box::pin(writer.settle());
+    let mut cx = Context::from_waker(Waker::noop());
+    assert!(matches!(settle.as_mut().poll(&mut cx), Poll::Pending));
+    drop(settle);
+
+    let mut close = Box::pin(writer.close());
+    assert!(matches!(close.as_mut().poll(&mut cx), Poll::Pending));
+    drop(close);
+
+    let write_error = match Pin::new(&mut writer).poll_write(&mut cx, b"late") {
+        Poll::Ready(Err(error)) => error,
+        other => panic!("write after close starts must fail immediately, got {other:?}"),
+    };
+    assert_eq!(write_error.kind(), io::ErrorKind::BrokenPipe);
+    assert!(write_error.to_string().contains("closing"));
+    let flush_error = match Pin::new(&mut writer).poll_flush(&mut cx) {
+        Poll::Ready(Err(error)) => error,
+        other => panic!("flush after close starts must fail immediately, got {other:?}"),
+    };
+    assert_eq!(flush_error.kind(), io::ErrorKind::BrokenPipe);
+    assert!(flush_error.to_string().contains("closing"));
+    let commit_error = poll_worker(|cx| Box::pin(writer.commit()).as_mut().poll(cx)).unwrap_err();
+    assert!(commit_error.to_string().contains("closing"));
+    assert!(worker.command_kinds().is_empty(), "accepted commands remain pending");
+
+    worker.release();
+    poll_worker(|cx| Box::pin(writer.close()).as_mut().poll(cx)).unwrap();
+    assert_eq!(worker.command_kinds(), vec!["write", "close"]);
+    assert_eq!(
+        worker.command_kinds().iter().filter(|kind| **kind == "close").count(),
+        1
+    );
+}
+
+#[test]
+fn test_close_blocks_new_work_after_close_command_is_queued() {
+    let worker = Arc::new(FakeWorker::default());
+    let mut writer = writer(&worker);
+    worker.hold_next();
+    let mut close = Box::pin(writer.close());
+    let mut cx = Context::from_waker(Waker::noop());
+    assert!(matches!(close.as_mut().poll(&mut cx), Poll::Pending));
+    drop(close);
+
+    let write_error = match Pin::new(&mut writer).poll_write(&mut cx, b"late") {
+        Poll::Ready(Err(error)) => error,
+        other => panic!("write after close is queued must fail immediately, got {other:?}"),
+    };
+    assert_eq!(write_error.kind(), io::ErrorKind::BrokenPipe);
+    assert!(write_error.to_string().contains("closing"));
+    let flush_error = match Pin::new(&mut writer).poll_flush(&mut cx) {
+        Poll::Ready(Err(error)) => error,
+        other => panic!("flush after close is queued must fail immediately, got {other:?}"),
+    };
+    assert_eq!(flush_error.kind(), io::ErrorKind::BrokenPipe);
+    let commit_error = poll_worker(|cx| Box::pin(writer.commit()).as_mut().poll(cx)).unwrap_err();
+    assert!(commit_error.to_string().contains("closing"));
+
+    worker.release();
+    poll_worker(|cx| Box::pin(writer.close()).as_mut().poll(cx)).unwrap();
+    assert_eq!(worker.command_kinds(), vec!["close"]);
+}
+
+#[test]
+fn test_unpolled_close_future_does_not_block_writer_work() {
+    let worker = Arc::new(FakeWorker::default());
+    let mut writer = writer(&worker);
+    let close = Box::pin(writer.close());
+    drop(close);
+
+    assert_eq!(
+        poll_worker(|cx| Pin::new(&mut writer).poll_write(cx, b"still open")).unwrap(),
+        10
+    );
+    poll_worker(|cx| Box::pin(writer.close()).as_mut().poll(cx)).unwrap();
+    assert_eq!(worker.command_kinds(), vec!["write", "close"]);
 }
 
 #[test]
@@ -659,6 +784,14 @@ fn test_staged_async_writer_cleanup_failure_can_be_retried() {
 
     let fault = install_test_fault_shared("writer-staged-abort-cleanup").unwrap();
     let error = poll_worker(|cx| Box::pin(writer.close()).as_mut().poll(cx)).unwrap_err();
+    let cause = local_file_error_in_chain(&error).expect("close error retains LocalFileError");
+    assert_eq!(cause.operation(), qubit_local_files::error::LocalFileOperation::Abort);
+    let repeated = poll_worker(|cx| Box::pin(writer.close()).as_mut().poll(cx)).unwrap_err();
+    let repeated_cause = local_file_error_in_chain(&repeated).expect("repeated close retains LocalFileError");
+    assert_eq!(
+        repeated_cause.operation(),
+        qubit_local_files::error::LocalFileOperation::Abort
+    );
     assert!(error.to_string().contains("Abort"));
     assert!(
         !target.exists(),
@@ -871,6 +1004,29 @@ fn poll_worker<T>(mut future: impl FnMut(&mut Context<'_>) -> Poll<T>) -> T {
         assert!(Instant::now() < deadline, "worker-backed operation did not complete");
         std::thread::sleep(Duration::from_millis(1));
     }
+}
+
+fn local_file_error_in_chain<'a>(error: &'a io::Error) -> Option<&'a qubit_local_files::LocalFileError> {
+    let mut pending: Vec<&'a (dyn std::error::Error + 'static)> = Vec::new();
+    pending.extend(
+        error
+            .get_ref()
+            .map(|source| source as &(dyn std::error::Error + 'static)),
+    );
+    while let Some(source) = pending.pop() {
+        if let Some(file_error) = source.downcast_ref::<qubit_local_files::LocalFileError>() {
+            return Some(file_error);
+        }
+        if let Some(io_error) = source.downcast_ref::<io::Error>() {
+            pending.extend(
+                io_error
+                    .get_ref()
+                    .map(|source| source as &(dyn std::error::Error + 'static)),
+            );
+        }
+        pending.extend(std::error::Error::source(source));
+    }
+    None
 }
 
 #[test]

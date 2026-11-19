@@ -83,6 +83,10 @@ Outcome 报告操作的类型化结果；settlement 报告 executor 是否已释
 commit 不产生发布或修改事件。`settle()` 等待已接纳字节送达 native writer；`flush_async()` 不会
 发布 staged 内容。
 
+第一次 poll `close()` 时 writer 进入 closing 状态。此后尚未开始的非空 write、flush 和 commit
+都会立即失败，即使 close future 随后被丢弃也不恢复接纳。再次 poll `close()` 会继续同一关闭流程。
+仅创建并丢弃、从未 poll 的 close future 没有副作用；零长度写入继续保持原有行为。
+
 第一次 poll `commit()` 会建立写入屏障并开始排空先前已接纳的写入；从这时起 write 和 flush
 会被拒绝。排空成功后才会将 native commit 命令入队。取消 future 只取消调用方的等待；再次调用
 `commit()` 会继续排空或观察同一入队请求。只有类型化错误可重试且
@@ -90,6 +94,9 @@ commit 不产生发布或修改事件。`settle()` 等待已接纳字节送达 n
 `Indeterminate` 需要核对，两者都不能授权重放整批输入。即使等待 `commit()` 超时，调用 `close()` 仍会推进已开始的提交，并可能发布该内容；`close()` 会
 暂存其类型化结果供之后的 `commit()` 取回。分别保留提交和关闭错误；两者都失败时同时报告。写入
 失败后仍须关闭 writer；若关闭也失败，应同时报告写入和关闭诊断。close 缓存的提交失败仍保留原始类型化错误和发布状态，但因 writer 已进入终态而不可重试；writer 仍打开时直接观察到的可重试失败仍可重试。关闭失败时也要保留成功的 `LocalWriteOutcome`。等待 open operation settlement 前先释放 writer 引用，并将恢复 handle 与关闭结果一起交给调用方。
+
+检查结构化关闭原因时，先读取 `io::Error::get_ref()`，再沿其中错误的 `source()` 链查找。
+写入和关闭同时失败时，关闭错误仍是主原因，写入诊断作为附加上下文保留。
 
 ```rust,no_run
 # #[cfg(feature = "async")]

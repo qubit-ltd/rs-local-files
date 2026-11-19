@@ -39,7 +39,10 @@ use super::stream_state::StreamState;
 /// completion, even if its command was not queued yet, and retains its typed
 /// result for one later `commit` call. A cached failure is non-retryable
 /// because the writer has entered its terminal close path, even when the
-/// original failure allowed retry while open. Only closing a staged writer
+/// original failure allowed retry while open. Once the first `close` poll
+/// begins, new non-empty writes, flushes, and commits that have not already
+/// started are rejected, even if that close future is later dropped. Only
+/// closing a staged writer
 /// before any commit starts discards the stage. Inspect publication state and
 /// retryability before deciding whether to retry; `Published` and
 /// `Indeterminate` do not authorize replay of the complete input.
@@ -107,6 +110,8 @@ pub struct AsyncLocalFileWriter {
     started: bool,
     /// Whether the commit completed or failed terminally.
     terminal: bool,
+    /// Whether polling close has begun, preventing new public work.
+    close_started: bool,
 }
 
 impl AsyncLocalFileWriter {
@@ -124,6 +129,7 @@ impl AsyncLocalFileWriter {
             result: None,
             started: false,
             terminal: false,
+            close_started: false,
         })
     }
 
@@ -143,12 +149,30 @@ impl AsyncLocalFileWriter {
     /// write barrier, settles bytes already accepted by the worker, then
     /// queues the native commit command. Dropping this future only cancels the
     /// caller's wait. Call `commit` again to resume settling or observe the
-    /// same queued command result. A retryable typed error leaves the writer
-    /// available for another call; inspect its typed state before retrying.
+    /// same queued command result while the writer remains open. Once `close`
+    /// has been polled, use `close` to resume the operation; its cached result
+    /// remains available to one later `commit` call. A retryable typed error
+    /// leaves an open writer available for another call; inspect its typed
+    /// state before retrying.
     pub async fn commit(&mut self) -> Result<crate::LocalWriteOutcome, LocalStreamCommitError> {
         if let Some(result) = self.result.take() {
             return result;
         }
+        if self.close_started {
+            if self.terminal {
+                return self.commit_inner().await;
+            }
+            return Err(commit_stream_error(
+                io::Error::new(io::ErrorKind::BrokenPipe, "local writer is closing"),
+                crate::LocalWriteFailureState::Indeterminate,
+                0,
+            ));
+        }
+        self.commit_inner().await
+    }
+
+    /// Drives a commit already accepted before close began.
+    async fn commit_inner(&mut self) -> Result<crate::LocalWriteOutcome, LocalStreamCommitError> {
         if self.terminal {
             return Err(commit_stream_error(
                 io::Error::new(io::ErrorKind::BrokenPipe, "local writer commit is already terminal"),
@@ -194,10 +218,16 @@ impl AsyncLocalFileWriter {
     /// cached failure is non-retryable because this writer is closed. Closing a
     /// staged writer before the first commit poll discards the unpublished
     /// stage. This closes the writer port; an owning open operation must
-    /// still be released before waiting for that operation's settlement.
+    /// still be released before waiting for that operation's settlement. The
+    /// first poll marks the writer as closing. Subsequent non-empty writes,
+    /// flushes, and not-yet-started commits fail immediately, and the mark
+    /// remains if this future is dropped. Errors returned by this method keep
+    /// their original payload; inspect `io::Error::get_ref()` and then follow
+    /// the contained error's `source()` chain to find structured causes.
     pub async fn close(&mut self) -> io::Result<()> {
+        self.close_started = true;
         if self.request.is_some() || (self.started && !self.terminal) {
-            self.result = Some(self.commit().await.map_err(LocalStreamCommitError::without_retry));
+            self.result = Some(self.commit_inner().await.map_err(LocalStreamCommitError::without_retry));
             self.terminal = true;
         }
         let Some(resource) = self.resource.as_deref() else {
@@ -266,6 +296,12 @@ impl AsyncOutput for AsyncLocalFileWriter {
         if this.resource.is_none() {
             return Poll::Ready(Err(StreamState::closed_error()));
         }
+        if this.close_started {
+            return Poll::Ready(Err(io::Error::new(
+                io::ErrorKind::BrokenPipe,
+                "local writer is closing",
+            )));
+        }
         if this.started {
             return Poll::Ready(Err(commit_barrier_error(this.terminal)));
         }
@@ -283,6 +319,12 @@ impl AsyncOutput for AsyncLocalFileWriter {
         let this = self.as_mut().get_mut();
         if this.resource.is_none() {
             return Poll::Ready(Err(StreamState::closed_error()));
+        }
+        if this.close_started {
+            return Poll::Ready(Err(io::Error::new(
+                io::ErrorKind::BrokenPipe,
+                "local writer is closing",
+            )));
         }
         if this.started {
             return Poll::Ready(Err(commit_barrier_error(this.terminal)));

@@ -1839,6 +1839,12 @@ Append close 保留已经发布的字节。close 缓存的提交结果只交付�
 重放整批写入。提交和关闭诊断必须分别保留，包括两者都失败时。写入错误也必须走关闭路径；若关闭
 失败，应同时报告两项错误。
 
+首次 poll `close()` 时 writer 进入 closing 状态。此后非空 write、flush 和未开始的 commit
+都会立即失败；丢弃 close future 不会重新开放 writer，再次 poll `close()` 会继续同一关闭流程。
+仅创建但从未 poll 的 future 没有副作用，零长度写入维持原有行为。检查结构化关闭原因时，调用方
+先读取 `io::Error::get_ref()`，再沿其中错误的 `source()` 链查找。写入和关闭同时失败时，关闭错误
+仍为主原因，写入错误作为附加诊断上下文保留。
+
 ```rust,no_run
 # #[cfg(feature = "async")]
 struct Diagnostics {

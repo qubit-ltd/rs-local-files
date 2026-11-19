@@ -180,9 +180,8 @@ impl StreamState {
                         if bytes.len() > LOCAL_STREAM_BUFFER_SIZE {
                             let error =
                                 io::Error::new(io::ErrorKind::InvalidData, "stream worker exceeded read buffer limit");
-                            self.write_error =
-                                Some(SavedError::capture(io::Error::new(error.kind(), error.to_string())));
-                            return Poll::Ready(Err(error));
+                            self.write_error = Some(SavedError::capture(error));
+                            return Poll::Ready(Err(self.write_error.as_ref().expect("error stored").make()));
                         }
                         self.eof = bytes.is_empty();
                         self.read_buffer.extend(bytes);
@@ -194,16 +193,16 @@ impl StreamState {
                     }
                     Ok(LocalStreamCompletion::Unconfirmed { operation, detail }) => {
                         let error = io::Error::other(format!("Unconfirmed {operation}: {detail}"));
-                        self.write_error = Some(SavedError::capture(io::Error::new(error.kind(), error.to_string())));
-                        Poll::Ready(Err(error))
+                        self.write_error = Some(SavedError::capture(error));
+                        Poll::Ready(Err(self.write_error.as_ref().expect("error stored").make()))
                     }
                     Ok(_) => Poll::Ready(Err(io::Error::new(
                         io::ErrorKind::InvalidData,
                         "stream worker returned an unexpected read completion",
                     ))),
                     Err(error) => {
-                        self.write_error = Some(SavedError::capture(io::Error::new(error.kind(), error.to_string())));
-                        Poll::Ready(Err(error))
+                        self.write_error = Some(SavedError::capture(error));
+                        Poll::Ready(Err(self.write_error.as_ref().expect("error stored").make()))
                     }
                 }
             }
@@ -288,10 +287,10 @@ impl StreamState {
                 Poll::Pending => return Poll::Pending,
                 Poll::Ready(Err(error)) => {
                     let actual = self.written_bytes;
-                    self.write_error = Some(SavedError::capture(io::Error::new(
-                        error.kind(),
-                        format!("{} ({} bytes written before failure)", error, actual),
-                    )));
+                    self.write_error = Some(SavedError::capture_with_context(
+                        error,
+                        format!("{actual} bytes written before failure"),
+                    ));
                     self.writes.clear();
                     self.queued_write_bytes = 0;
                     return Poll::Ready(());
@@ -398,8 +397,8 @@ impl StreamState {
                     "Unconfirmed {operation} after {} bytes written: {detail}",
                     self.written_bytes
                 ));
-                self.write_error = Some(SavedError::capture(io::Error::new(error.kind(), error.to_string())));
-                Poll::Ready(Err(error))
+                self.write_error = Some(SavedError::capture(error));
+                Poll::Ready(Err(self.write_error.as_ref().expect("error stored").make()))
             }
             Poll::Ready(Ok(_)) => {
                 self.flush_request = None;
@@ -410,10 +409,10 @@ impl StreamState {
             }
             Poll::Ready(Err(error)) => {
                 self.flush_request = None;
-                self.write_error = Some(SavedError::capture(io::Error::new(
-                    error.kind(),
-                    format!("{} ({} bytes written before failure)", error, self.written_bytes),
-                )));
+                self.write_error = Some(SavedError::capture_with_context(
+                    error,
+                    format!("{} bytes written before failure", self.written_bytes),
+                ));
                 Poll::Ready(Err(self.write_error.as_ref().expect("error stored").make()))
             }
         }
@@ -525,21 +524,26 @@ impl StreamState {
             Poll::Ready(Ok(LocalStreamCompletion::Unconfirmed { operation, detail })) => {
                 self.seek_request = None;
                 let error = io::Error::other(format!("Unconfirmed {operation}: {detail}"));
-                self.write_error = Some(SavedError::capture(io::Error::new(error.kind(), error.to_string())));
+                self.write_error = Some(SavedError::capture(error));
+                let error = self.write_error.as_ref().expect("error stored").make();
                 self.seek_result = Some((owner_id, Err(error)));
                 Poll::Ready(())
             }
             Poll::Ready(Ok(_)) => {
                 self.seek_request = None;
                 let error = io::Error::other("stream position unknown after unexpected seek completion");
-                self.write_error = Some(SavedError::capture(io::Error::new(error.kind(), error.to_string())));
+                self.write_error = Some(SavedError::capture(error));
+                let error = self.write_error.as_ref().expect("error stored").make();
                 self.seek_result = Some((owner_id, Err(error)));
                 Poll::Ready(())
             }
             Poll::Ready(Err(error)) => {
                 self.seek_request = None;
-                let unknown = io::Error::other(format!("stream position unknown after failed seek: {error}"));
-                self.write_error = Some(SavedError::capture(io::Error::new(unknown.kind(), unknown.to_string())));
+                self.write_error = Some(SavedError::capture_with_context(
+                    io::Error::other(error),
+                    "stream position unknown after failed seek",
+                ));
+                let unknown = self.write_error.as_ref().expect("error stored").make();
                 self.seek_result = Some((owner_id, Err(unknown)));
                 Poll::Ready(())
             }
@@ -563,8 +567,8 @@ impl StreamState {
                 self.read_request = None;
                 if bytes.len() > LOCAL_STREAM_BUFFER_SIZE {
                     let error = io::Error::new(io::ErrorKind::InvalidData, "stream worker exceeded read buffer limit");
-                    self.write_error = Some(SavedError::capture(io::Error::new(error.kind(), error.to_string())));
-                    return Poll::Ready(Err(error));
+                    self.write_error = Some(SavedError::capture(error));
+                    return Poll::Ready(Err(self.write_error.as_ref().expect("error stored").make()));
                 }
                 self.eof = bytes.is_empty();
                 self.read_buffer.extend(bytes);
@@ -573,8 +577,8 @@ impl StreamState {
             Poll::Ready(Ok(LocalStreamCompletion::Unconfirmed { operation, detail })) => {
                 self.read_request = None;
                 let error = io::Error::other(format!("Unconfirmed {operation}: {detail}"));
-                self.write_error = Some(SavedError::capture(io::Error::new(error.kind(), error.to_string())));
-                Poll::Ready(Err(error))
+                self.write_error = Some(SavedError::capture(error));
+                Poll::Ready(Err(self.write_error.as_ref().expect("error stored").make()))
             }
             Poll::Ready(Ok(_)) => {
                 self.read_request = None;
@@ -582,13 +586,13 @@ impl StreamState {
                     io::ErrorKind::InvalidData,
                     "stream worker returned an unexpected read completion",
                 );
-                self.write_error = Some(SavedError::capture(io::Error::new(error.kind(), error.to_string())));
-                Poll::Ready(Err(error))
+                self.write_error = Some(SavedError::capture(error));
+                Poll::Ready(Err(self.write_error.as_ref().expect("error stored").make()))
             }
             Poll::Ready(Err(error)) => {
                 self.read_request = None;
-                self.write_error = Some(SavedError::capture(io::Error::new(error.kind(), error.to_string())));
-                Poll::Ready(Err(error))
+                self.write_error = Some(SavedError::capture(error));
+                Poll::Ready(Err(self.write_error.as_ref().expect("error stored").make()))
             }
         }
     }
@@ -707,17 +711,14 @@ impl StreamState {
             Poll::Ready(Err(error)) => {
                 self.close_request = None;
                 self.closed = true;
-                let error = if self.direction == Direction::Write
+                let saved = if self.direction == Direction::Write
                     && let Some(write_error) = &self.write_error
                 {
-                    io::Error::new(
-                        error.kind(),
-                        format!("{error}; earlier write failed: {}", write_error.make()),
-                    )
+                    SavedError::capture_combined(error, write_error)
                 } else {
-                    error
+                    SavedError::capture(error)
                 };
-                self.close_error = Some(SavedError::capture(error));
+                self.close_error = Some(saved);
                 self.completed_close()
             }
         }
