@@ -716,7 +716,14 @@ mod tests {
     fn test_cleanup_wait_observes_pending_then_returns_worker_error_owner() {
         let parent = tempfile::tempdir().expect("temp parent");
         let manager = OperationManager::new(ManagerOptions::default()).expect("manager");
-        let executor = LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).expect("executor");
+        let executor = LocalIoExecutor::new(
+            manager.clone(),
+            LocalExecutionConfig {
+                worker_count: 1,
+                ..LocalExecutionConfig::default()
+            },
+        )
+        .expect("executor");
         let cleanup = Arc::new(LocalCleanup {
             executor: executor.clone(),
         });
