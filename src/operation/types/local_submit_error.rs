@@ -74,7 +74,13 @@ mod tests {
 
     #[test]
     fn test_rejection_formats_without_debugging_or_losing_the_request() {
-        let error = LocalSubmitError::new(vec![1, 2], LocalSubmitRejection::CapacityExceeded);
+        struct OpaqueRequest {
+            identity: Box<()>,
+        }
+
+        let request = OpaqueRequest { identity: Box::new(()) };
+        let identity = &*request.identity as *const ();
+        let error = LocalSubmitError::new(request, LocalSubmitRejection::CapacityExceeded);
 
         assert_eq!(error.rejection(), LocalSubmitRejection::CapacityExceeded);
         assert_eq!(error.to_string(), "local operation rejected: CapacityExceeded");
@@ -83,7 +89,8 @@ mod tests {
             "LocalSubmitError { rejection: CapacityExceeded, .. }"
         );
         assert!(Error::source(&error).is_none());
-        assert_eq!(error.into_request(), [1, 2]);
+        let request = error.into_request();
+        assert_eq!(&*request.identity as *const (), identity);
     }
 
     #[test]
