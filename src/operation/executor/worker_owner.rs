@@ -147,4 +147,29 @@ mod tests {
         exited_rx.recv_timeout(Duration::from_secs(5)).unwrap();
         assert!(queue.push(Box::new(|| {}), false, 1).is_err());
     }
+
+    #[test]
+    fn test_drop_recovers_poisoned_worker_list_and_stops_workers() {
+        let queue = Arc::new(WorkerQueue::default());
+        let worker_queue = Arc::clone(&queue);
+        let (exited_tx, exited_rx) = mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            worker_queue.run();
+            exited_tx.send(()).unwrap();
+        });
+        let owner = Arc::new(WorkerOwner::new(Arc::clone(&queue), vec![worker]));
+
+        let owner_for_poison = Arc::clone(&owner);
+        let poisoner = std::thread::spawn(move || {
+            let _workers = owner_for_poison.workers.lock().unwrap();
+            panic!("inject worker-list mutex poison");
+        });
+        assert!(poisoner.join().is_err());
+
+        drop(owner);
+        exited_rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("drop must recover the poisoned list and join the worker");
+        assert!(queue.push(Box::new(|| {}), false, 1).is_err());
+    }
 }
