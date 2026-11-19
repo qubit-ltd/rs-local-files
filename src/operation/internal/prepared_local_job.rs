@@ -1602,6 +1602,38 @@ mod prepared_job_ownership_tests {
         assert!(snapshot.input_released);
         assert!(snapshot.outcome.is_none());
     }
+
+    #[test]
+    fn test_activation_after_request_transfer_fails_and_releases_job() {
+        let manager = OperationManager::new(ManagerOptions::default()).expect("manager");
+        let executor = LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).expect("executor");
+        let mut parent = manager
+            .try_submit(Default::default(), move |scope| {
+                let job = make_job(&executor);
+                PreparedExternalOperation::bind(&*job, scope.id()).expect("bind job identity");
+
+                assert_eq!(Some(String::from("owned request")), job.take_request());
+                let failure = PreparedExternalOperation::activate(Arc::clone(&job), scope)
+                    .expect_err("activation cannot proceed after the request was transferred");
+                assert_eq!("local request already taken", failure.summary.as_str());
+
+                let snapshot = OperationControl::snapshot(&*job);
+                assert_eq!(qubit_operation::ExecutionPhase::Finished, snapshot.execution);
+                assert!(snapshot.input_released);
+                assert_eq!(
+                    Some(qubit_operation::SettlementStatus::Released),
+                    snapshot.settlement.map(|report| report.status)
+                );
+                assert_eq!(None, job.take_request());
+                Ok::<_, ()>(())
+            })
+            .expect("parent operation");
+
+        assert!(matches!(
+            parent.wait_outcome().expect("parent outcome"),
+            OperationOutcome::Succeeded(())
+        ));
+    }
 }
 
 #[cfg(test)]
