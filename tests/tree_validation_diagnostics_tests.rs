@@ -172,6 +172,36 @@ fn test_diagnostics_include_depth_and_name_budget_facts() {
 }
 
 #[test]
+fn test_exact_validation_charges_expected_and_observed_names_to_one_budget() {
+    let (_fixture, _filesystem, mut stage, root) = make_stage(false);
+    write_file(&mut stage, "a");
+    let expected = [entry("a", LocalFileKind::File)];
+
+    stage
+        .verify_entries(
+            &expected,
+            &LocalTreeValidationOptions::new().with_limits(LocalListOptions::new().with_max_seen_name_bytes(2)),
+        )
+        .expect("one expected byte plus one observed byte fits the budget");
+
+    let error = stage
+        .verify_entries(
+            &expected,
+            &LocalTreeValidationOptions::new().with_limits(LocalListOptions::new().with_max_seen_name_bytes(1)),
+        )
+        .expect_err("the observed path must consume the byte already charged to the expected set");
+    assert_eq!(error.kind(), LocalFileErrorKind::ResourceLimit);
+    assert_same_path(error.path(), &root.join("a"));
+    let facts = error.resource_limit_error().expect("observed name-byte facts");
+    assert_eq!(facts.resource(), LocalResourceKind::SeenNameBytes);
+    assert_eq!(facts.limit(), 1);
+    assert_eq!(facts.requested(), 1);
+    assert_eq!(facts.observed(), Some(2));
+    assert!(error.reason().expect("reason").contains("name-byte limit"));
+    stage.cleanup().expect("cleanup");
+}
+
+#[test]
 fn test_validation_deadline_overflow_is_reported_as_resource_limit() {
     let (_fixture, _filesystem, stage, root) = make_stage(false);
     let error = stage
