@@ -231,6 +231,18 @@ fn writer(worker: &Arc<FakeWorker>) -> AsyncLocalFileWriter {
     AsyncLocalFileWriter::new(resource(Arc::clone(worker))).unwrap()
 }
 
+#[test]
+fn test_async_local_file_streams_report_worker_buffering() {
+    let worker = Arc::new(FakeWorker::with_bytes(b"buffered"));
+    let reader = reader(&worker);
+    let writer = writer(&worker);
+
+    // The reader fills a bounded worker-owned buffer, while the writer stages
+    // copied bytes on its serial worker until commit.
+    assert!(AsyncInput::is_buffered(&reader));
+    assert!(AsyncOutput::is_buffered(&writer));
+}
+
 #[derive(Default)]
 struct FakeWalkState {
     batches: VecDeque<Option<Vec<PathBuf>>>,
