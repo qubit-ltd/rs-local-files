@@ -610,6 +610,48 @@ mod tests {
     }
 
     #[test]
+    fn test_resource_command_reports_unavailable_when_native_owner_was_taken() {
+        let parent = tempfile::tempdir().expect("temp parent");
+        let parent_path = parent.path().to_path_buf();
+        let manager = OperationManager::new(ManagerOptions::default()).expect("manager");
+        let executor = LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).expect("executor");
+        let completion = manager
+            .run_and_settle(qubit_operation::OperationOptions::default(), move |scope| {
+                let reservation = scope.reserve_resource().expect("resource reservation");
+                let owner = LocalTempResource::new(
+                    // A missing owner models a resource already taken by a
+                    // consuming transition or cleanup command.
+                    LocalTempNative::File(
+                        LocalFileSystem::host()
+                            .expect("filesystem")
+                            .create_temp_file_with_options(&LocalTempFileOptions::new().with_parent(&parent_path))
+                            .expect("temporary file"),
+                    ),
+                    executor.reserve_disk(1).expect("disk permit"),
+                    executor.reserve_handle().expect("handle permit"),
+                    executor.reserve_cleanup().expect("cleanup permit"),
+                );
+                let id_slot = Arc::clone(&owner.id);
+                let reference = reservation
+                    .commit_with(
+                        owner,
+                        LocalCleanup {
+                            executor: executor.clone(),
+                        },
+                    )
+                    .expect("managed temp resource");
+                *id_slot.lock().unwrap_or_else(|e| e.into_inner()) = Some(reference.id());
+                reference.native.lock().unwrap_or_else(|e| e.into_inner()).take();
+                let command = super::enqueue_resource_command(&executor, reference, |_| ()).expect("command queued");
+                assert_eq!(block_on(command), Err(LocalTempCommandError::ResourceUnavailable));
+                Ok::<(), ()>(())
+            })
+            .expect("operation completed");
+        assert_eq!(completion.settlement.recovery_count, 0);
+        assert_eq!(std::fs::read_dir(parent.path()).unwrap().count(), 0);
+    }
+
+    #[test]
     fn test_temp_submission_reports_native_creation_failures_without_retaining_resources() {
         let parent = tempfile::tempdir().expect("temp parent");
         let missing_parent = parent.path().join("missing");
