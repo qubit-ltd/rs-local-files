@@ -9,6 +9,7 @@
 #![cfg(feature = "async")]
 
 use std::io::SeekFrom;
+use std::path::Path;
 use std::path::PathBuf;
 
 use qubit_local_files::LocalExecutionConfig;
@@ -758,6 +759,99 @@ fn test_complete_operation_edge_results_and_failures() {
         qubit_operation::OperationOutcome::Succeeded(result)
             if result.outcome.deleted() && result.deleted_entries.is_none()));
     assert!(!tree.exists());
+}
+
+#[test]
+fn test_rooted_complete_mutations_bind_relative_paths_to_captured_root() {
+    let scratch = tempfile::tempdir().unwrap();
+    let root = scratch.path().join("root");
+    std::fs::create_dir(&root).unwrap();
+    std::fs::write(root.join("source"), b"rooted payload").unwrap();
+    let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+    let executor = LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).unwrap();
+    let filesystem = block_on(AsyncLocalFileSystem::rooted(executor, root.clone())).unwrap();
+
+    let mut copy = filesystem
+        .submit_copy(
+            &manager,
+            Default::default(),
+            LocalCopyRequest {
+                source: PathBuf::from("source"),
+                destination: PathBuf::from("copied"),
+                options: LocalCopyOptions::new(),
+            },
+            Default::default(),
+        )
+        .unwrap()
+        .0;
+    assert!(matches!(
+        copy.wait_outcome().unwrap(),
+        qubit_operation::OperationOutcome::Succeeded(result)
+            if result.source.as_path() == Path::new("source")
+                && result.destination.as_path() == Path::new("copied")
+    ));
+    assert_eq!(std::fs::read(root.join("copied")).unwrap(), b"rooted payload");
+    assert!(!scratch.path().join("copied").exists());
+
+    let mut rename = filesystem
+        .submit_rename(
+            &manager,
+            Default::default(),
+            LocalRenameRequest {
+                source: PathBuf::from("copied"),
+                destination: PathBuf::from("renamed"),
+                options: LocalRenameOptions::new(),
+            },
+            Default::default(),
+        )
+        .unwrap()
+        .0;
+    assert!(matches!(
+        rename.wait_outcome().unwrap(),
+        qubit_operation::OperationOutcome::Succeeded(result)
+            if result.source.as_path() == Path::new("copied")
+                && result.destination.as_path() == Path::new("renamed")
+    ));
+    assert!(!root.join("copied").exists());
+    assert_eq!(std::fs::read(root.join("renamed")).unwrap(), b"rooted payload");
+
+    let mut create = filesystem
+        .submit_create_directory(
+            &manager,
+            Default::default(),
+            LocalCreateDirectoryRequest {
+                path: PathBuf::from("created"),
+                options: Default::default(),
+            },
+            Default::default(),
+        )
+        .unwrap()
+        .0;
+    assert!(matches!(
+        create.wait_outcome().unwrap(),
+        qubit_operation::OperationOutcome::Succeeded(result) if result.outcome.created()
+    ));
+    assert!(root.join("created").is_dir());
+    assert!(!scratch.path().join("created").exists());
+
+    let mut delete = filesystem
+        .submit_delete(
+            &manager,
+            Default::default(),
+            LocalDeleteRequest {
+                path: PathBuf::from("renamed"),
+                options: LocalDeleteOptions::new(),
+                directory: false,
+            },
+            Default::default(),
+        )
+        .unwrap()
+        .0;
+    assert!(matches!(
+        delete.wait_outcome().unwrap(),
+        qubit_operation::OperationOutcome::Succeeded(result) if result.outcome.deleted()
+    ));
+    assert!(!root.join("renamed").exists());
 }
 
 #[test]
