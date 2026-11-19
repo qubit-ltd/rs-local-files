@@ -255,6 +255,26 @@ fn test_rooted_local_file_system_copy_creates_missing_parent() {
     );
 }
 
+/// Verifies rooted copy refuses to replace its own source file.
+#[test]
+fn test_rooted_copy_rejects_same_source_and_destination_file() {
+    let directory = tempdir().expect("temporary root should be created");
+    fs::write(directory.path().join("same"), b"keep original").expect("source file should be written");
+    let rooted = LocalFileSystem::rooted(directory.path()).expect("root authority should open");
+
+    let failure = rooted
+        .copy_with_options(Path::new("same"), Path::new("same"), &LocalCopyOptions::new())
+        .expect_err("copying a file onto itself must fail");
+
+    assert_eq!(LocalFileErrorKind::InvalidPath, failure.error().kind());
+    assert_eq!(
+        b"keep original",
+        fs::read(directory.path().join("same"))
+            .expect("source file should remain readable")
+            .as_slice(),
+    );
+}
+
 /// Verifies rooted recursive creation reports a regular file component.
 #[test]
 fn test_rooted_recursive_create_reports_file_component_conflict() {
