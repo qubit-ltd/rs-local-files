@@ -838,6 +838,8 @@ mod waker_tests {
 mod activation_state_tests {
     use std::sync::Arc;
     use std::sync::Mutex;
+    use std::sync::atomic::AtomicUsize;
+    use std::sync::atomic::Ordering;
 
     use qubit_operation::ManagerOptions;
     use qubit_operation::OperationControl;
@@ -1064,6 +1066,138 @@ mod activation_state_tests {
             operation.wait_outcome().expect("parent outcome"),
             OperationOutcome::Succeeded(())
         ));
+    }
+
+    #[test]
+    fn test_activation_releases_job_when_worker_queue_is_full() {
+        use std::sync::mpsc;
+        use std::time::Duration;
+
+        let manager = OperationManager::new(ManagerOptions::default()).expect("manager");
+        let executor = LocalIoExecutor::new(
+            manager.clone(),
+            LocalExecutionConfig {
+                worker_count: 1,
+                queue_capacity: 1,
+                waiter_capacity: 1,
+                ..LocalExecutionConfig::default()
+            },
+        )
+        .expect("executor");
+        let (started_tx, started_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        let mut release = Some(release_tx);
+        executor
+            .enqueue_task(move || {
+                started_tx.send(()).expect("test receiver remains alive");
+                release_rx
+                    .recv_timeout(Duration::from_secs(5))
+                    .expect("test releases the worker before its barrier expires");
+            })
+            .expect("worker barrier is accepted");
+        started_rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("worker reaches the barrier");
+
+        let queued_work = Arc::new(AtomicUsize::new(0));
+        let queue_limit = executor.inner.config.queue_capacity + executor.inner.config.waiter_capacity;
+        for _ in 0..queue_limit {
+            let queued_work = Arc::clone(&queued_work);
+            assert!(
+                executor
+                    .inner
+                    .queue
+                    .push(
+                        Box::new(move || {
+                            queued_work.fetch_add(1, Ordering::SeqCst);
+                        }),
+                        false,
+                        queue_limit,
+                    )
+                    .is_ok(),
+                "fill one ordinary queue slot"
+            );
+        }
+
+        let observed = Arc::new(Mutex::new(None));
+        let observed_job = Arc::clone(&observed);
+        let executor_for_job = executor.clone();
+        let queued_work_for_job = Arc::clone(&queued_work);
+        let mut parent = manager
+            .try_submit(Default::default(), move |scope| {
+                let job = PreparedLocalJob::<String, (), ()>::new(
+                    Arc::clone(&executor_for_job.inner),
+                    String::from("rejected request"),
+                    executor_for_job.reserve_slot().expect("queue or waiter permit"),
+                    Arc::new(Mutex::new(executor_for_job.reserve_bytes(7).expect("owned permit"))),
+                    executor_for_job.reserve_handle().expect("handle permit"),
+                    LocalFactObserver::new(),
+                    |_| panic!("a rejected worker job must not run"),
+                );
+                PreparedExternalOperation::bind(&*job, scope.id()).expect("bind job identity");
+                let failure = PreparedExternalOperation::activate(Arc::clone(&job), scope)
+                    .expect_err("activation must reject a full worker queue");
+                assert_eq!("local worker queue is full", failure.summary.as_str());
+
+                let snapshot = OperationControl::snapshot(&*job);
+                assert_eq!(qubit_operation::ExecutionPhase::Finished, snapshot.execution);
+                assert!(snapshot.input_released);
+                assert_eq!(
+                    Some(qubit_operation::SettlementStatus::Released),
+                    snapshot.settlement.map(|s| s.status)
+                );
+                assert_eq!(None, job.take_request());
+                assert!(job.task.lock().unwrap_or_else(|error| error.into_inner()).is_none());
+                assert!(job._slot.lock().unwrap_or_else(|error| error.into_inner()).is_none());
+                assert!(
+                    job._owned_permit
+                        .lock()
+                        .unwrap_or_else(|error| error.into_inner())
+                        .is_none()
+                );
+                assert!(
+                    job._handle_permit
+                        .lock()
+                        .unwrap_or_else(|error| error.into_inner())
+                        .is_none()
+                );
+                assert_eq!(0, executor_for_job.inner.queue_slots.used());
+                assert_eq!(0, executor_for_job.inner.waiter_slots.used());
+                assert_eq!(0, executor_for_job.inner.byte_slots.used());
+                assert_eq!(0, executor_for_job.inner.handle_slots.used());
+                assert_eq!(0, queued_work_for_job.load(Ordering::SeqCst));
+                *observed_job.lock().unwrap_or_else(|error| error.into_inner()) = Some(job);
+                Ok::<_, ()>(())
+            })
+            .expect("parent operation");
+        assert!(matches!(
+            parent.wait_outcome().expect("parent outcome"),
+            OperationOutcome::Succeeded(())
+        ));
+
+        release
+            .take()
+            .expect("worker release sender")
+            .send(())
+            .expect("worker is still waiting");
+        let drain_deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while queued_work.load(Ordering::SeqCst) < queue_limit && std::time::Instant::now() < drain_deadline {
+            std::thread::yield_now();
+        }
+        assert_eq!(
+            queue_limit,
+            queued_work.load(Ordering::SeqCst),
+            "accepted queue entries drain"
+        );
+        let job = observed
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .take()
+            .expect("rejected prepared job");
+        assert!(
+            OperationControl::poll_release(&*job, &mut std::task::Context::from_waker(std::task::Waker::noop()))
+                .is_ready()
+        );
     }
 }
 
