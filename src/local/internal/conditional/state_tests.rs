@@ -1654,6 +1654,75 @@ mod conditional_state_tests {
     }
 
     #[test]
+    fn test_conditional_state_preferred_prepublication_namespace_sync_failure_downgrades_durability() {
+        use super::super::ConditionalHooks;
+        use super::super::ConditionalPoint;
+        use crate::options::LocalWriteMode;
+        use crate::options::LocalWriteOptions;
+        use crate::policy::LocalAtomicityRequirement;
+        use crate::policy::LocalDurabilityRequirement;
+
+        let options = LocalWriteOptions::new(LocalWriteMode::CreateOrReplace)
+            .with_atomicity(LocalAtomicityRequirement::Required)
+            .with_durability(LocalDurabilityRequirement::Preferred);
+        let backend = super::super::fake_backend_tests::FakeBackend::new(b"A", b"B").with_hooks(
+            ConditionalHooks::fail_once(ConditionalPoint::SyncNamespace, std::io::ErrorKind::PermissionDenied),
+        );
+        let namespace_sync_calls = backend.namespace_sync_observer();
+        let (_lease, target_path) = backend.target_observer();
+        let outcome = super::super::commit::commit_conditional::<Sha256, _>(
+            backend,
+            LocalWritePrecondition::Content(Sha256::digest(b"A")),
+            options,
+            1,
+        )
+        .expect("preferred prepublication namespace sync failure may downgrade durability");
+
+        assert_eq!(namespace_sync_calls.get(), 3);
+        assert!(!outcome.write_outcome().durable());
+        assert_eq!(outcome.digest(), &Sha256::digest(b"B"));
+        assert_eq!(std::fs::read(target_path).expect("candidate was published"), b"B");
+    }
+
+    #[test]
+    fn test_conditional_state_preferred_postpublication_namespace_sync_failure_downgrades_durability() {
+        use super::super::ConditionalHookAction;
+        use super::super::ConditionalHooks;
+        use super::super::ConditionalPoint;
+        use crate::options::LocalWriteMode;
+        use crate::options::LocalWriteOptions;
+        use crate::policy::LocalAtomicityRequirement;
+        use crate::policy::LocalDurabilityRequirement;
+
+        let options = LocalWriteOptions::new(LocalWriteMode::CreateOrReplace)
+            .with_atomicity(LocalAtomicityRequirement::Required)
+            .with_durability(LocalDurabilityRequirement::Preferred);
+        let hooks = ConditionalHooks::sequence(vec![
+            (ConditionalPoint::SyncNamespace, ConditionalHookAction::Noop),
+            (
+                ConditionalPoint::SyncNamespace,
+                ConditionalHookAction::Fail(std::io::ErrorKind::PermissionDenied),
+            ),
+        ]);
+        let backend = super::super::fake_backend_tests::FakeBackend::new(b"A", b"B").with_hooks(hooks);
+        let namespace_sync_calls = backend.namespace_sync_observer();
+        let (_lease, target_path) = backend.target_observer();
+        let outcome = super::super::commit::commit_conditional::<Sha256, _>(
+            backend,
+            LocalWritePrecondition::Content(Sha256::digest(b"A")),
+            options,
+            1,
+        )
+        .expect("preferred postpublication namespace sync failure preserves the published save");
+
+        assert_eq!(namespace_sync_calls.get(), 3);
+        assert!(!outcome.write_outcome().durable());
+        assert_eq!(outcome.digest(), &Sha256::digest(b"B"));
+        assert_eq!(std::fs::read(target_path).expect("published candidate remains"), b"B");
+        assert!(outcome.cleanup_errors().is_empty());
+    }
+
+    #[test]
     fn test_conditional_state_copy_cleanup_failure_returns_ok_with_candidate_copy_retained() {
         use super::super::ConditionalHooks;
         use super::super::ConditionalPoint;
