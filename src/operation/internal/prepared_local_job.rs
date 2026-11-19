@@ -1226,6 +1226,7 @@ mod lifecycle_tests {
     fn test_stop_before_worker_start_releases_and_publishes_all_results() {
         let manager = OperationManager::new(ManagerOptions::default()).expect("manager");
         let executor = LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).expect("executor");
+        let executor_for_assertions = executor.clone();
         let observed = Arc::new(Mutex::new(None));
         let observed_job = Arc::clone(&observed);
         let mut parent = manager
@@ -1234,7 +1235,7 @@ mod lifecycle_tests {
                     Arc::clone(&executor.inner),
                     (),
                     executor.reserve_slot().expect("queue slot"),
-                    Arc::new(Mutex::new(executor.reserve_bytes(0).expect("owned permit"))),
+                    Arc::new(Mutex::new(executor.reserve_bytes(19).expect("owned permit"))),
                     executor.reserve_handle().expect("handle permit"),
                     LocalFactObserver::new(),
                     |_| panic!("a stop accepted before start must skip the worker"),
@@ -1265,6 +1266,7 @@ mod lifecycle_tests {
             Some(qubit_operation::ChildOutcomeKind::Stopped),
             snapshot.outcome.map(|outcome| outcome.kind)
         );
+        assert_eq!(19, executor_for_assertions.inner.byte_slots.used());
 
         let mut cx = Context::from_waker(Waker::noop());
         assert!(matches!(OperationControl::poll_outcome(&*job, &mut cx), Poll::Ready(_)));
@@ -1276,6 +1278,7 @@ mod lifecycle_tests {
             PreparedExternalOperation::poll_take_outcome(&*job, &mut cx),
             Poll::Ready(OperationOutcome::Stopped(_))
         ));
+        assert_eq!(0, executor_for_assertions.inner.byte_slots.used());
     }
 }
 
