@@ -214,6 +214,31 @@ fn test_complete_reads_cover_success_and_native_open_failures() {
 }
 
 #[test]
+fn test_read_text_preserves_native_open_failure() {
+    let directory = tempfile::tempdir().unwrap();
+    let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+    let filesystem = facade(&manager);
+    let mut operation = filesystem
+        .submit_read_text(
+            &manager,
+            Default::default(),
+            LocalReadRequest {
+                path: directory.path().join("missing-text"),
+                read: Default::default(),
+            },
+            Default::default(),
+        )
+        .unwrap()
+        .0;
+
+    assert!(matches!(
+        operation.wait_outcome().unwrap(),
+        qubit_operation::OperationOutcome::Failed(error)
+            if error.kind() == qubit_local_files::error::LocalFileErrorKind::NotFound
+    ));
+}
+
+#[test]
 fn test_invalid_text_keeps_its_owned_byte_permit_until_the_outcome_is_taken() {
     let directory = tempfile::tempdir().unwrap();
     let invalid = directory.path().join("invalid-utf8");
