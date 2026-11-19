@@ -118,3 +118,19 @@ impl LocalWindowsFileDetails {
         self.change_time
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::LocalWindowsFileDetails;
+
+    #[test]
+    fn test_windows_file_details_preserve_native_values() {
+        let file_id = [0xA5; 16];
+        let details = LocalWindowsFileDetails::new(0x1234_5678, file_id, -1, i64::MAX);
+
+        assert_eq!(details.volume_serial(), 0x1234_5678);
+        assert_eq!(details.file_id(), &file_id);
+        assert_eq!(details.last_write_time(), -1);
+        assert_eq!(details.change_time(), i64::MAX);
+    }
+}
