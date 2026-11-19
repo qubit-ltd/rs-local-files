@@ -1135,19 +1135,24 @@ mod relative_host_publish_tests {
             publish_options: LocalTreePublishOptions::new(),
         };
 
-        let rejected = filesystem
-            .submit_staged_tree_publish(
-                &manager,
-                Default::default(),
-                request,
-                LocalOperationOptions {
-                    max_disk_bytes: Some(1),
-                    ..LocalOperationOptions::default()
-                },
-            )
-            .expect_err("disk limit below the staged payload must reject submission");
+        let submission = filesystem.submit_staged_tree_publish(
+            &manager,
+            Default::default(),
+            request,
+            LocalOperationOptions {
+                max_disk_bytes: Some(1),
+                ..LocalOperationOptions::default()
+            },
+        );
+        let rejected = match submission {
+            Err(error) => error,
+            Ok(_) => panic!("disk limit below the staged payload must reject submission"),
+        };
 
-        assert_eq!(rejected.rejection(), crate::operation::LocalSubmitRejection::CapacityExceeded);
+        assert_eq!(
+            rejected.rejection(),
+            crate::operation::LocalSubmitRejection::CapacityExceeded
+        );
         assert!(!directory.path().join("limited-tree").exists());
     }
 
