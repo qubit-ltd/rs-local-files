@@ -811,3 +811,90 @@ mod temp_error_mapping_tests {
         }
     }
 }
+
+#[cfg(all(test, feature = "async", unix))]
+mod managed_writer_abort_tests {
+    use std::fs::File;
+    use std::path::PathBuf;
+
+    use qubit_io::Output;
+    use qubit_operation::ManagerOptions;
+    use qubit_operation::OperationManager;
+    use qubit_operation::OperationOptions;
+    use qubit_operation::OperationOutcome;
+
+    use super::LocalManagedAbortCleanup;
+    use super::LocalManagedAbortResource;
+    use super::LocalWriterCommandError;
+    use super::abort_managed_file_writer;
+    use super::abort_managed_writer_after_error;
+    use crate::LocalFileError;
+    use crate::LocalFileOperation;
+    use crate::LocalWriteMode;
+    use crate::LocalWriteOptions;
+    use crate::operation::LocalExecutionConfig;
+    use crate::operation::LocalFactObserver;
+    use crate::operation::LocalIoExecutor;
+    use crate::writer::internal::LocalFileWriterBackend;
+
+    #[test]
+    fn test_managed_append_write_error_aborts_and_does_not_claim_publication() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let path = directory.path().join("append-target");
+        std::fs::write(&path, b"existing").expect("append target");
+        let readonly_file = File::open(&path).expect("read-only file handle");
+        let manager = OperationManager::new(ManagerOptions::default()).expect("operation manager");
+        let executor = LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).expect("I/O executor");
+        let writer = crate::LocalFileWriter::new(
+            PathBuf::from(&path),
+            LocalFileWriterBackend::Append(readonly_file),
+            LocalWriteOptions::new(LocalWriteMode::Append),
+        );
+        let observer = LocalFactObserver::new();
+        let worker_observer = observer.clone();
+        let outcome = manager
+            .run(OperationOptions::default(), move |scope| {
+                let reservation = scope.reserve_resource().expect("writer resource capacity");
+                let owner = LocalManagedAbortResource::new(
+                    executor.reserve_cleanup().expect("cleanup permit"),
+                    abort_managed_file_writer,
+                );
+                *owner.native.lock().expect("writer owner lock") = Some(writer);
+                let resource = reservation
+                    .commit_with(
+                        owner,
+                        LocalManagedAbortCleanup::<crate::LocalFileWriter>::new(executor.cleanup_executor()),
+                    )
+                    .expect("managed writer resource");
+                *resource.id.lock().expect("resource id lock") = Some(resource.id());
+
+                let mut native = resource.native.lock().expect("writer lock");
+                let writer = native.as_mut().expect("managed writer");
+                let write_error = writer
+                    .write(b"new bytes")
+                    .expect_err("read-only append must reject writes");
+                let cause = LocalFileError::from_io(LocalFileOperation::Commit, Some(path.clone()), None, write_error);
+                drop(native);
+
+                let error = abort_managed_writer_after_error(&resource, cause, 0, &scope, &worker_observer, false);
+                match error {
+                    LocalWriterCommandError::Write {
+                        cause,
+                        cleanup_error: None,
+                        retryable_writer: None,
+                        recovery_resource: None,
+                    } => assert_eq!(cause.operation(), LocalFileOperation::Commit),
+                    other => panic!("unexpected managed write error: {other:?}"),
+                }
+                assert!(resource.native.lock().expect("writer lock").is_none());
+                assert_eq!(std::fs::read(&path).expect("destination remains readable"), b"existing");
+                Ok::<_, ()>(())
+            })
+            .expect("operation submission");
+
+        assert!(matches!(outcome, OperationOutcome::Succeeded(())));
+        let facts = observer.snapshot();
+        assert_eq!(facts.publication, crate::operation::LocalPublicationState::NotPublished);
+        assert_eq!(facts.modified_bytes, 0);
+    }
+}
