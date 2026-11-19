@@ -1120,6 +1120,35 @@ mod relative_host_publish_tests {
     }
 
     #[test]
+    fn test_staged_tree_publish_reports_missing_parent_without_publishing() {
+        let directory = tempfile::tempdir().unwrap();
+        let missing_parent = directory.path().join("missing-parent");
+        let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+        let filesystem = filesystem(&manager, directory.path());
+        let (mut operation, observer) = filesystem
+            .submit_staged_tree_publish(
+                &manager,
+                Default::default(),
+                LocalStagedTreePublishRequest {
+                    parent: missing_parent.clone(),
+                    name: "tree".into(),
+                    stage_options: LocalTempDirectoryOptions::new(),
+                    files: vec![LocalStagedTreeFile {
+                        path: PathBuf::from("item"),
+                        bytes: b"must not publish".to_vec(),
+                    }],
+                    publish_options: LocalTreePublishOptions::new(),
+                },
+                LocalOperationOptions::default(),
+            )
+            .unwrap();
+
+        assert!(matches!(operation.wait_outcome().unwrap(), OperationOutcome::Failed(_)));
+        assert!(!missing_parent.exists());
+        assert_eq!(observer.snapshot().publication, LocalPublicationState::NotPublished);
+    }
+
+    #[test]
     fn test_staged_tree_publish_rejects_disk_limit_before_submission() {
         let directory = tempfile::tempdir().unwrap();
         let manager = OperationManager::new(ManagerOptions::default()).unwrap();
