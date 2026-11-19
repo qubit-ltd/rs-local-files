@@ -5,6 +5,8 @@
 > [英文版](local_file_system_design.md)为准；本文早期的 0.1 接口示意不是当前 API，未实现的
 > 前置条件也不再适用。
 
+> **已替代（2026-11-16）：** 本文保留历史依据。新的协议、资源生命周期与实施顺序以 [基于 operation 0.2 核对的重构设计](refactor-0.6.0-operation-0.2.zh_CN.md) 和 [详细实施计划](implementation-plan-0.6.0-operation-0.2.zh_CN.md) 为准；完整目标依赖待实现验收的 operation 0.3 公共 adapter，不可将本文 0.1 示意接口作为当前 API。
+
 - 状态：待评审设计，尚未实现。
 - 日期：2026-11-11。
 - 当前版本：qubit-local-files 0.5.1；下一破坏性版本：0.6.0。
