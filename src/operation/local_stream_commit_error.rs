@@ -41,6 +41,13 @@ impl LocalStreamCommitError {
         Self { error, retryable }
     }
 
+    /// Disables retry after the writer has been closed while retaining the
+    /// original structured commit failure.
+    pub(in crate::operation) fn without_retry(mut self) -> Self {
+        self.retryable = false;
+        self
+    }
+
     /// Returns the structured local file commit error.
     pub fn commit_error(&self) -> &crate::LocalFileCommitError {
         &self.error

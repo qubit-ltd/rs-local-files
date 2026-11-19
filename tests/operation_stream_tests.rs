@@ -42,6 +42,8 @@ use qubit_operation::OperationManager;
 use qubit_operation::ResourceRef;
 use qubit_operation::ResourceScopeOptions;
 
+static TEST_STAGE_WRITE_GATE: Mutex<()> = Mutex::new(());
+
 #[derive(Default)]
 struct FakeState {
     bytes: Vec<u8>,
@@ -484,6 +486,80 @@ fn test_staged_commit_reports_unpublished_failure_and_can_retry() {
     assert_eq!(std::fs::read(target).unwrap(), b"staged");
 }
 
+#[cfg(feature = "test-support")]
+#[test]
+fn test_closed_writer_retains_commit_error_without_retry_permission() {
+    use qubit_local_files::LocalFileSystem;
+    use qubit_local_files::operation::LocalExecutionConfig;
+    use qubit_local_files::operation::LocalIoExecutor;
+    use qubit_local_files::options::LocalWriteMode;
+    use qubit_local_files::options::LocalWriteOptions;
+    use qubit_local_files::policy::LocalDurabilityRequirement;
+    use qubit_local_files::test_support::install_test_fault_shared;
+    use qubit_local_files::test_support::install_test_gate;
+    use qubit_operation::OperationOptions;
+    use qubit_operation::OperationOutcome;
+
+    let _gate_lock = TEST_STAGE_WRITE_GATE.lock().unwrap();
+
+    let directory = tempfile::tempdir().unwrap();
+    let target = directory.path().join("closed-commit-error.txt");
+    let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+    let executor = LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).unwrap();
+    let filesystem = LocalFileSystem::host().unwrap().into_async(executor).unwrap();
+    let (mut opening, observer) = filesystem
+        .submit_open_writer(
+            &manager,
+            OperationOptions::default(),
+            target.clone(),
+            LocalWriteOptions::new(LocalWriteMode::CreateOrReplace)
+                .with_durability(LocalDurabilityRequirement::Required),
+        )
+        .unwrap();
+    let mut writer = match opening.wait_outcome().unwrap() {
+        OperationOutcome::Succeeded(writer) => writer,
+        _ => panic!("staged writer open failed"),
+    };
+
+    let gate = install_test_gate("rlf9-writer-after-stage-write").unwrap();
+    let mut write = Box::pin(writer.write_fully_async(b"staged"));
+    assert!(matches!(poll(|cx| write.as_mut().poll(cx)), Poll::Ready(Ok(()))));
+    drop(write);
+    let mut settle = Box::pin(writer.settle());
+    assert!(poll(|cx| settle.as_mut().poll(cx)).is_pending());
+    gate.wait_until_entered();
+    drop(settle);
+
+    let mut commit = Box::pin(writer.commit());
+    assert!(poll(|cx| commit.as_mut().poll(cx)).is_pending());
+    drop(commit);
+    let fault = install_test_fault_shared("writer-staged-file-sync").unwrap();
+    let mut close = Box::pin(writer.close());
+    assert!(poll(|cx| close.as_mut().poll(cx)).is_pending());
+    gate.release();
+    poll_worker(|cx| close.as_mut().poll(cx)).unwrap();
+    drop(close);
+
+    let error = poll_worker(|cx| Box::pin(writer.commit()).as_mut().poll(cx)).unwrap_err();
+    assert!(!error.retryable(), "{error:?}, {}", error.commit_error());
+    assert_eq!(
+        error.commit_error().state(),
+        qubit_local_files::outcome::LocalWriteFailureState::NotPublished
+    );
+    assert!(error.commit_error().to_string().contains("SyncTemporaryFile"));
+    let terminal = poll_worker(|cx| Box::pin(writer.commit()).as_mut().poll(cx)).unwrap_err();
+    assert!(!terminal.retryable());
+    assert!(!target.exists());
+    drop(fault);
+    drop(writer);
+    let settlement = opening.wait_settlement().unwrap();
+    assert_eq!(settlement.recovery_count, 0);
+    assert_eq!(
+        observer.snapshot().publication,
+        qubit_local_files::LocalPublicationState::NotPublished
+    );
+}
+
 #[test]
 fn test_close_reports_write_and_cleanup_failures_together() {
     let worker = Arc::new(FakeWorker::default());
@@ -537,7 +613,11 @@ fn test_close_resumes_commit_cancelled_while_settling_writes() {
 
     poll_worker(|cx| Box::pin(writer.close()).as_mut().poll(cx)).unwrap();
     let error = poll_worker(|cx| Box::pin(writer.commit()).as_mut().poll(cx)).unwrap_err();
+    assert!(!error.retryable());
     assert!(error.to_string().contains("unexpected commit completion"));
+    let terminal = poll_worker(|cx| Box::pin(writer.commit()).as_mut().poll(cx)).unwrap_err();
+    assert!(!terminal.retryable());
+    assert!(terminal.to_string().contains("already terminal"));
     assert_eq!(worker.commit_calls(), 1);
 }
 
@@ -1200,6 +1280,8 @@ fn test_real_writer_close_finishes_commit_started_before_enqueue() {
     use qubit_local_files::test_support::install_test_gate;
     use qubit_operation::OperationOptions;
     use qubit_operation::OperationOutcome;
+
+    let _gate_lock = TEST_STAGE_WRITE_GATE.lock().unwrap();
 
     let directory = tempfile::tempdir().unwrap();
     let destination = directory.path().join("close-resumes-commit.txt");

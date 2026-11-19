@@ -194,7 +194,12 @@ impl AsyncLocalFileWriter {
     /// released before waiting for that operation's settlement.
     pub async fn close(&mut self) -> io::Result<()> {
         if self.request.is_some() || (self.started && !self.terminal) {
-            self.result = Some(self.commit().await);
+            self.result = Some(
+                self.commit()
+                    .await
+                    .map_err(LocalStreamCommitError::without_retry),
+            );
+            self.terminal = true;
         }
         let Some(resource) = self.resource.as_deref() else {
             return match self.state.completed_close() {
