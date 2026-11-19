@@ -445,6 +445,28 @@ mod tests {
     }
 
     #[test]
+    fn test_cleanup_wait_returns_published_result_before_cloning_waker() {
+        let state = Arc::new(CleanupState {
+            result: Mutex::new(Some(None)),
+            waker: Mutex::new(None),
+            owner: Mutex::new(None),
+        });
+        let mut wait = Box::pin(CleanupWait {
+            state: Arc::clone(&state),
+            marker: std::marker::PhantomData,
+        });
+        let panicking_waker = clone_panic_waker();
+        let mut context = Context::from_waker(&panicking_waker);
+
+        assert!(matches!(
+            wait.as_mut().poll(&mut context),
+            Poll::Ready(CleanupOutcome::Released)
+        ));
+        assert!(state.result.lock().expect("cleanup result lock").is_none());
+        assert!(state.waker.lock().expect("cleanup waker lock").is_none());
+    }
+
+    #[test]
     fn test_cleanup_wait_rechecks_result_after_waker_clone_panics() {
         let state = Arc::new(CleanupState {
             result: Mutex::new(None),
