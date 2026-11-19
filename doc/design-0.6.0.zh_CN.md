@@ -5,7 +5,7 @@
 > [英文版](local_file_system_design.md)为准；本文早期的 0.1 接口示意不是当前 API，未实现的
 > 前置条件也不再适用。
 
-> **已替代（2026-11-16）：** 本文保留历史依据。新的协议、资源生命周期与实施顺序以 [基于 operation 0.2 核对的重构设计](refactor-0.6.0-operation-0.2.zh_CN.md) 和 [详细实施计划](implementation-plan-0.6.0-operation-0.2.zh_CN.md) 为准；完整目标依赖待实现验收的 operation 0.3 公共 adapter，不可将本文 0.1 示意接口作为当前 API。
+> **已替代（2026-11-16）：** 本文保留历史依据。此前针对 operation 0.2 的重构设计与实施顺序已过时；当前协议、资源生命周期和异步边界以[完整本地文件系统设计](local_file_system_design.zh_CN.md)及[英文版](local_file_system_design.md)为准。不得将本文早期的 0.1 示意接口作为当前 API。
 
 - 状态：待评审设计，尚未实现。
 - 日期：2026-11-11。
@@ -16,7 +16,7 @@
 
 **必须先实现并验收 rs-operation 0.1.0 的基础协议，再开始本设计的库实现。** 只有设计文档或空 crate 不满足此前置条件；本轮仅修订设计，不修改实现或 Cargo 清单。
 
-上游入口为 [rs-operation 设计](../../rs-operation/doc/design-0.1.0.zh_CN.md)。开始实施前，必须固定其已验收版本/不可变提交并验证：同步/异步观察同一操作、取消树与单调期限、子操作 reserve/attach/commit、ResourceUse、OwnedCleanup、恢复所有权、结果与释放分离、Drop 托管及 shutdown 超期继续观察。若上游缺少必需能力，应先在 rs-operation 补齐契约和测试，不在下游复制一套替代机制。
+上游入口为 [rs-operation 设计](https://github.com/qubit-ltd/rs-operation/blob/7fcda0375286f9466dbdfbb63d720d10c88fb423/doc/design-0.3.0.zh_CN.md)。开始实施前，必须固定其已验收版本/不可变提交并验证：同步/异步观察同一操作、取消树与单调期限、子操作 reserve/attach/commit、ResourceUse、OwnedCleanup、恢复所有权、结果与释放分离、Drop 托管及 shutdown 超期继续观察。若上游缺少必需能力，应先在 rs-operation 补齐契约和测试，不在下游复制一套替代机制。
 
 ### 0.1 统一职责与接口规则
 
@@ -168,7 +168,7 @@ writer commit 的“最后可取消点”在发布原语前；越过后必须取
 
 ## 10. 与 rs-fs 0.4 和下游的对齐
 
-rs-fs 0.4 的通用语义应尽可能覆盖本库：有限完整读取/前缀/随机访问、一致性事实、条件写入、writer 提交与放弃、copy/rename 部分结果、有限遍历、temp cleanup/persist/seal 和目录树暂存发布。两库使用相同公共 scope/control/recovery 协议，但不共享本地原生类型。详见 [rs-fs 0.4 设计](../../rs-fs/doc/design-0.4.0.zh_CN.md) 的能力矩阵。
+rs-fs 0.4 的通用语义应尽可能覆盖本库：有限完整读取/前缀/随机访问、一致性事实、条件写入、writer 提交与放弃、copy/rename 部分结果、有限遍历、temp cleanup/persist/seal 和目录树暂存发布。两库使用相同公共 scope/control/recovery 协议，但不共享本地原生类型。详见 [rs-fs 设计](https://github.com/qubit-ltd/rs-fs/blob/bbb7a5d269f2f3a955fcd25839177eae4795898f/doc/file_system_design.zh_CN.md) 的能力矩阵。
 
 本地 authority、非 UTF-8 原生路径、ACL/Unix mode、安全观测、原生句柄导出仍是本库职责；rs-fs 用标准化能力/requirement 和类型化本地扩展，不把 POSIX 或 Host 路径强塞给对象存储。不具备原子性/持久性/条件写入的平台必须明确 Unsupported 或 Conditional，不能映射为 Guaranteed。
 
@@ -176,7 +176,7 @@ rs-fs-local 需在后续适配中把 FsOperationContext 与 LocalIoControl 绑�
 
 rs-command 0.12 接收标准文件与 ResourceUse，不直接依赖本库。rs-mime 0.22 通过公共 scope 组合暂存/命令/清理，不另建 MIME reaper。rs-magika 0.19 的 provider 输入通过 rs-fs 0.4 的同对象随机访问会话，直接本地路径异步打开也由本库执行器负责。
 
-关联文档：[rs-command](../../rs-command/doc/design-0.12.0.zh_CN.md)、[rs-mime](../../rs-mime/doc/design-0.22.0.zh_CN.md)、[rs-magika](../../rs-magika/doc/design-0.19.0.zh_CN.md)。
+关联文档：[rs-command](https://github.com/qubit-ltd/rs-command/blob/36579c289a9cd6e9fb981854e87a7e3137cb6512/doc/design.zh_CN.md)、[rs-mime](https://github.com/qubit-ltd/rs-mime/blob/147903915c1fa0f57f4d6eb458ce92d207dd3dac/doc/design-0.22.0.zh_CN.md)、[rs-magika](https://github.com/qubit-ltd/rs-magika/blob/da7b188396bcfda7d3972f87840ea4ca1828c818/doc/design-0.19.0.zh_CN.md)。
 
 ## 11. 迁移与实施顺序
 

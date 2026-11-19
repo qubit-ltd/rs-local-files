@@ -30,6 +30,12 @@ qubit-local-files = { version = "0.6", features = ["async"] }
 qubit-operation = "^0.3"
 ```
 
+The 0.6.0 candidate integration matrix covers `qubit-fs-local` 0.11.2 and
+`qubit-mime` 0.22.0 against the candidate source. Run
+[`scripts/verify-local-0.6-downstreams.sh`](scripts/verify-local-0.6-downstreams.sh)
+from a checkout with those repositories beside it to verify their dependency
+graphs and focused consumer tests.
+
 Readers use `qubit_io::ByteInput`; writers and temporary files use
 `qubit_io::ByteOutput`. These marker traits are implemented automatically for
 `Input<Item = u8>` and `Output<Item = u8>`, which continue to provide the

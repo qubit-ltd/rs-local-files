@@ -1821,6 +1821,40 @@ authority。已接纳请求持有自己的输入和提交时 options，之后修
 及清理 owner。取消或停止操作不代表已经开始的原生调用会被中断；清理尚未确认时，恢复 owner
 仍可继续提供核查与重试入口。
 
+`AsyncLocalFileWriter` 保留同步 writer 的 staged/append 区别。Staged 字节在 commit 前不会
+发布；append 字节在 worker 确认每次写入时即已发布。Commit 先等待已接纳字节完成，再入队一个
+稳定 worker 请求。请求未决期间，新的 write 和 flush 会被拒绝。取消 future 不会替换请求；再次
+调用 `commit()` 会观察原请求结果。可重试提交失败会重新开放 writer；成功和不可重试失败均为
+终态。Staged 的 settle 失败依据 worker 确认事实映射发布状态；无法提供事实的自定义 driver
+必须报告 `Indeterminate`。Append observer 即使遇到后续写入失败，也保留已确认的字节数和发布事实。
+
+`close()` 会先观察未决提交，再关闭剩余 owner。若提交结果尚未返回，`close()` 会保留该类型化
+结果供下一次 `commit()` 取回。关闭未提交的 staged writer 会调用 native abort 并报告清理错误；
+worker 保留 native owner，使托管清理或 recovery 可以重试。Append close 保留已经发布的字节。
+调用方在重放输入前应检查类型化状态和 retryability；`Published` 与 `Indeterminate` 都不允许整批
+重放。
+
+```rust,no_run
+#[cfg(feature = "async")]
+async fn publish(
+    writer: &mut qubit_local_files::operation::stream::AsyncLocalFileWriter,
+    bytes: &[u8],
+) -> Result<qubit_local_files::outcome::LocalWriteOutcome, Box<dyn std::error::Error>> {
+use qubit_io::AsyncOutput;
+    writer.write_fully_async(bytes).await?;
+    let mut result = writer.commit().await;
+    let retry = result.as_ref().is_err_and(|error| {
+        let _publication = error.commit_error().state();
+        error.retryable()
+    });
+    if retry {
+        result = writer.commit().await;
+    }
+    writer.close().await?;
+    Ok(result?)
+}
+```
+
 排队任务与清理/恢复策略会共同持有 worker owner。最后一个 owner 析构时会停止队列并排空已
 接纳任务。如果最后一次释放发生在 worker 自身，该线程不得 join 自己；当前任务结束后，worker
 会从已停止的队列循环中退出。平台行为只按记录了对应原生 CI 或本机运行结果的平台报告；在其他

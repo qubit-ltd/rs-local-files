@@ -84,9 +84,44 @@ Rooted temporary resources are not exportable as read-only OS handles unless
 the stage request explicitly grants that capability. Any `File::try_clone`
 used by a helper must remain paired with a cloned read lease until that helper
 finishes. Close streams and release helper leases before waiting for settlement;
-keep recovery handles when cleanup reports a retained resource. A stream
-writer must call `commit()` to publish or `abort()` to discard before closing;
-dropping an uncommitted writer aborts its staged data.
+keep recovery handles when cleanup reports a retained resource. For a
+synchronous writer, call `commit()` to publish or `abort()` to discard. The
+asynchronous `AsyncLocalFileWriter` uses `commit()` to publish staged content
+and `close()` to end the handle: closing an uncommitted staged writer aborts
+its temporary file, while closing an append writer flushes bytes already
+published as they were accepted. `settle()` waits for accepted writes to reach
+the native writer; `flush_async()` does not publish staged content.
+
+Once an asynchronous commit is queued, writes and flushes are rejected until
+the original result is observed. If its future is cancelled while pending,
+call `commit()` again to observe the same worker request. Retryable errors can
+be retried on that writer; inspect `commit_error().state()` before deciding,
+because `Published` or `Indeterminate` does not authorize replaying the whole
+input. `close()` waits for a pending commit and retains its typed result so a
+later `commit()` can still return it. Drop the writer reference before waiting
+for settlement and retain any recovery handle reported there.
+
+```rust,no_run
+# #[cfg(feature = "async")]
+# async fn example(
+#     writer: &mut qubit_local_files::operation::stream::AsyncLocalFileWriter,
+#     bytes: &[u8],
+# ) -> Result<qubit_local_files::outcome::LocalWriteOutcome, Box<dyn std::error::Error>> {
+use qubit_io::AsyncOutput;
+
+writer.write_fully_async(bytes).await?;
+let mut result = writer.commit().await;
+let retry = result.as_ref().is_err_and(|error| {
+    let _state = error.commit_error().state();
+    error.retryable()
+});
+if retry {
+    result = writer.commit().await;
+}
+writer.close().await?;
+# Ok(result?)
+# }
+```
 
 Choose the authority before configuring operation policy. Host mode uses the
 process-visible namespace. Rooted mode opens one existing directory and treats

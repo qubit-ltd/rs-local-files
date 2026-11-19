@@ -16,6 +16,7 @@ const DOCUMENTS: &[&str] = &[
     "doc/user_guide.zh_CN.md",
     "doc/local_file_system_design.md",
     "doc/local_file_system_design.zh_CN.md",
+    "doc/design-0.6.0.zh_CN.md",
     "doc/review-rlf3-windows-evidence.md",
     "doc/review-rlf4-windows-staging-cleanup-evidence.md",
 ];

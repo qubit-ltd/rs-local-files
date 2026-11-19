@@ -28,6 +28,11 @@ qubit-local-files = { version = "0.6", features = ["async"] }
 qubit-operation = "^0.3"
 ```
 
+0.6.0 候选版接入矩阵覆盖 `qubit-fs-local` 0.11.2 和 `qubit-mime` 0.22.0，
+两者均针对候选源码验证。从旁边包含这两个仓库的 checkout 运行
+[`scripts/verify-local-0.6-downstreams.sh`](scripts/verify-local-0.6-downstreams.sh)，
+可复核实际依赖图和对应的消费者测试。
+
 Reader 使用 `qubit_io::ByteInput`，writer 和临时文件使用
 `qubit_io::ByteOutput`。这两个标记 trait 会由 `Input<Item = u8>` 和
 `Output<Item = u8>` 自动实现；读写方法仍由这两个父 trait 提供。

@@ -76,8 +76,39 @@ Outcome 报告操作的类型化结果；settlement 报告 executor 是否已释
 或保留了可恢复 owner。丢弃操作 handle 不会取消已接纳任务。Rooted 临时资源默认不能导出
 只读 OS 句柄，除非 stage 请求显式授予该能力。helper 使用 `File::try_clone` 时，整个使用期
 都必须同时保留一个克隆的 read lease。等待 settlement 前应先关闭流并归还 helper lease；
-清理报告保留资源时，应继续保留恢复 handle。发布流式 writer 前先调用 `commit()`；
-决定放弃时调用 `abort()`，然后再关闭。丢弃尚未提交的 writer 会终止暂存数据。
+清理报告保留资源时，应继续保留恢复 handle。同步 writer 使用 `commit()` 发布或使用
+`abort()` 放弃。异步 `AsyncLocalFileWriter` 使用 `commit()` 发布 staged 内容，并用
+`close()` 结束句柄：未提交的 staged writer 会清理暂存文件；append writer 关闭时会 flush
+已随写入发布的字节。`settle()` 等待已接纳字节送达 native writer；`flush_async()` 不会发布
+staged 内容。
+
+异步 commit 一旦入队，在原结果被观察前，新的 write 和 flush 都会被拒绝。若 commit future
+在等待时取消，再调用 `commit()` 会继续观察同一个 worker 请求。可重试错误能在同一 writer 上
+再次提交；重试前应检查 `commit_error().state()`，`Published` 和 `Indeterminate` 不能作为整批
+重放信号。`close()` 会等待未决提交，并暂存其类型化结果供之后的 `commit()` 取回。关闭后应释放
+writer 引用再等待 settlement，并保留 settlement 返回的恢复 handle。
+
+```rust,no_run
+# #[cfg(feature = "async")]
+# async fn example(
+#     writer: &mut qubit_local_files::operation::stream::AsyncLocalFileWriter,
+#     bytes: &[u8],
+# ) -> Result<qubit_local_files::outcome::LocalWriteOutcome, Box<dyn std::error::Error>> {
+use qubit_io::AsyncOutput;
+
+writer.write_fully_async(bytes).await?;
+let mut result = writer.commit().await;
+let retry = result.as_ref().is_err_and(|error| {
+    let _state = error.commit_error().state();
+    error.retryable()
+});
+if retry {
+    result = writer.commit().await;
+}
+writer.close().await?;
+# Ok(result?)
+# }
+```
 
 配置操作策略前，先选择权限范围。Host 模式使用进程可见的命名空间；Rooted 模式打开一个
 已存在目录并将其映射为虚拟 `/`。权限句柄打开后，构造时传入的 Host 路径只用于诊断。

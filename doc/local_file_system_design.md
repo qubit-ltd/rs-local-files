@@ -1666,6 +1666,47 @@ stopped or cancelled operation does not imply that an already-started native
 call was interrupted, and recovery owners remain available when cleanup is
 unconfirmed.
 
+`AsyncLocalFileWriter` preserves the synchronous staged/append distinction.
+Staged bytes remain unpublished until commit; append bytes become published
+when the worker confirms each write. Commit first settles accepted bytes and
+then queues one stable worker request. While that request is pending, write
+and flush reject new input. Cancelling the future does not replace the request:
+the next `commit()` observes its original result. A retryable commit failure
+reopens the writer; success and non-retryable failure are terminal. A staged
+settle failure maps publication from worker-confirmed facts, while a custom
+driver that has no facts must report `Indeterminate`. Append observer facts
+retain confirmed bytes and publication even when a later write fails.
+
+`close()` observes any pending commit before it closes the remaining owner. If
+the commit result was not yet returned, `close()` retains that typed result for
+the next `commit()` call. Closing an uncommitted staged writer calls native
+abort and reports cleanup failure; the worker retains the native owner so
+managed cleanup or recovery can retry. Append close preserves bytes already
+published. Callers inspect the typed state and retryability before replaying
+input; `Published` and `Indeterminate` never authorize replay of the whole
+write.
+
+```rust,no_run
+# #[cfg(feature = "async")]
+# async fn publish(
+#     writer: &mut qubit_local_files::operation::stream::AsyncLocalFileWriter,
+#     bytes: &[u8],
+# ) -> Result<qubit_local_files::outcome::LocalWriteOutcome, Box<dyn std::error::Error>> {
+use qubit_io::AsyncOutput;
+    writer.write_fully_async(bytes).await?;
+    let mut result = writer.commit().await;
+    let retry = result.as_ref().is_err_and(|error| {
+        let _publication = error.commit_error().state();
+        error.retryable()
+    });
+    if retry {
+        result = writer.commit().await;
+    }
+    writer.close().await?;
+    Ok(result?)
+# }
+```
+
 Worker ownership is shared with queued jobs and cleanup/recovery policies.
 Dropping the last owner stops the queue and drains accepted work. If that last
 drop occurs on a worker itself, it must not join its own thread; the stopped
