@@ -493,6 +493,75 @@ mod tests {
     }
 
     #[test]
+    fn test_cleanup_wait_recovers_poisoned_result_lock_after_waker_clone_panics() {
+        let state = Arc::new(CleanupState {
+            result: Mutex::new(None),
+            waker: Mutex::new(None),
+            owner: Mutex::new(None),
+        });
+        let poisoned = std::thread::scope(|scope| {
+            let state = Arc::clone(&state);
+            scope
+                .spawn(move || {
+                    let _result = state.result.lock().expect("result lock before poisoning");
+                    panic!("poison cleanup result mutex");
+                })
+                .join()
+        });
+        assert!(poisoned.is_err());
+        assert!(state.result.is_poisoned());
+
+        let mut wait = Box::pin(CleanupWait {
+            state: Arc::clone(&state),
+            marker: std::marker::PhantomData,
+        });
+        let panicking_waker = clone_panic_waker();
+        let mut context = Context::from_waker(&panicking_waker);
+
+        assert!(matches!(wait.as_mut().poll(&mut context), Poll::Pending));
+        assert!(state.result.is_poisoned());
+    }
+
+    #[test]
+    fn test_cleanup_wait_recovers_poisoned_waker_lock_while_pending() {
+        let state = Arc::new(CleanupState {
+            result: Mutex::new(None),
+            waker: Mutex::new(None),
+            owner: Mutex::new(None),
+        });
+        let poisoned = std::thread::scope(|scope| {
+            let state = Arc::clone(&state);
+            scope
+                .spawn(move || {
+                    let _waker = state.waker.lock().expect("waker lock before poisoning");
+                    panic!("poison cleanup waker mutex");
+                })
+                .join()
+        });
+        assert!(poisoned.is_err());
+        assert!(state.waker.is_poisoned());
+
+        let mut wait = Box::pin(CleanupWait {
+            state: Arc::clone(&state),
+            marker: std::marker::PhantomData,
+        });
+        let waker = plain_waker();
+        let mut context = Context::from_waker(&waker);
+
+        assert!(matches!(wait.as_mut().poll(&mut context), Poll::Pending));
+        assert!(state.waker.is_poisoned());
+        assert!(
+            state
+                .waker
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .as_ref()
+                .expect("pending cleanup registers its waker")
+                .will_wake(&waker)
+        );
+    }
+
+    #[test]
     fn test_cleanup_wait_replaces_and_safely_drops_the_previous_waker() {
         let state = Arc::new(CleanupState {
             result: Mutex::new(None),
