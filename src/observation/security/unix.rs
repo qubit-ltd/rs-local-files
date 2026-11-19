@@ -912,4 +912,24 @@ mod tests {
             assert_eq!(access.default_acl(), LocalAclPresence::Absent);
         }
     }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn test_query_security_preserves_descriptor_metadata_failures() {
+        use std::os::fd::AsRawFd;
+
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let path = directory.path().join("closed-descriptor");
+        fs::write(&path, b"descriptor failure").expect("create fixture");
+        let file = std::mem::ManuallyDrop::new(File::open(&path).expect("open retained file"));
+        // SAFETY: this test intentionally closes the descriptor to verify that
+        // the fstat failure is preserved by the metadata query. ManuallyDrop
+        // prevents File from closing the same descriptor a second time.
+        assert_eq!(unsafe { libc::close(file.as_raw_fd()) }, 0);
+
+        let error = query_security(&file, &LocalSecurityObservationOptions::new())
+            .expect_err("a closed retained descriptor cannot be observed");
+        assert_eq!(error.operation(), super::LocalFileOperation::Metadata);
+        assert_eq!(error.io_error().and_then(io::Error::raw_os_error), Some(libc::EBADF));
+    }
 }
