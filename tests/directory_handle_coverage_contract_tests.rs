@@ -120,6 +120,33 @@ fn test_child_binding_counts_inherited_ancestors_before_accepting_limit() {
 }
 
 #[test]
+fn test_child_can_enable_binding_when_parent_handle_is_unbound() {
+    let (_scratch, parent) = fixture(false);
+    let child = parent
+        .open_directory(
+            Path::new("child"),
+            &LocalDirectoryOpenOptions::new().with_path_binding(LocalPathBindingOptions::new().with_max_ancestors(1)),
+        )
+        .expect("child should establish binding from an unbound parent");
+
+    let ancestors = child
+        .ancestor_observations(&LocalListOptions::new())
+        .expect("newly bound child should expose its retained observation chain");
+    assert_eq!(ancestors.len(), 2);
+    assert_eq!(
+        ancestors[0].identity(),
+        parent
+            .observe()
+            .expect("unbound parent should remain observable")
+            .identity()
+    );
+    assert_eq!(
+        ancestors[1].identity(),
+        child.observe().expect("bound child should be observable").identity()
+    );
+}
+
+#[test]
 fn test_observe_entry_rejects_empty_entry_and_retains_missing_context() {
     let (scratch, handle) = fixture(false);
     for relative in [Path::new(""), Path::new("."), Path::new("child/..")] {
