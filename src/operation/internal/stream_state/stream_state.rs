@@ -754,3 +754,20 @@ impl StreamState {
         self.closed
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::io;
+
+    use super::StreamState;
+
+    #[test]
+    fn test_closed_stream_errors_are_broken_pipe() {
+        let errors = [StreamState::error_closed(), StreamState::closed_error()];
+
+        for error in errors {
+            assert_eq!(error.kind(), io::ErrorKind::BrokenPipe);
+            assert_eq!(error.to_string(), "local stream is closed");
+        }
+    }
+}
