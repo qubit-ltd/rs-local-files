@@ -162,6 +162,20 @@ mod tests {
         }
     }
 
+    struct PanicWake(mpsc::Sender<()>);
+
+    impl Wake for PanicWake {
+        fn wake(self: Arc<Self>) {
+            let _ = self.0.send(());
+            panic!("test waker panic");
+        }
+
+        fn wake_by_ref(self: &Arc<Self>) {
+            let _ = self.0.send(());
+            panic!("test waker panic");
+        }
+    }
+
     fn block_on<F: Future>(future: F) -> F::Output {
         let waker = Waker::from(Arc::new(ThreadWake(std::thread::current())));
         let mut context = Context::from_waker(&waker);
@@ -343,6 +357,38 @@ mod tests {
 
         release_tx.send(()).expect("worker is waiting for release");
         assert!(matches!(block_on(future), CleanupOutcome::Released));
+    }
+
+    #[test]
+    fn test_panicking_waker_does_not_lose_cleanup_completion() {
+        let (_manager, executor, id) = setup();
+        let cleanup = Arc::new(LocalManagedAbortCleanup::<AbortGate>::new(
+            executor.clone().cleanup_executor(),
+        ));
+        let (entered_tx, entered_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        let resource = LocalManagedAbortResource::new(executor.reserve_cleanup().expect("cleanup permit"), abort_waits);
+        *resource.native.lock().expect("native lock") = Some(AbortGate {
+            entered: entered_tx,
+            release: release_rx,
+        });
+        *resource.id.lock().expect("resource id lock") = Some(id);
+
+        let mut future = Box::pin(cleanup.cleanup(resource, cleanup_context()));
+        entered_rx.recv().expect("worker starts the abort callback");
+        let (woken_tx, woken_rx) = mpsc::channel();
+        let panic_waker = Waker::from(Arc::new(PanicWake(woken_tx)));
+        let mut panic_context = Context::from_waker(&panic_waker);
+        assert!(matches!(future.as_mut().poll(&mut panic_context), Poll::Pending));
+
+        release_tx.send(()).expect("worker is waiting for release");
+        woken_rx.recv().expect("worker invokes the registered waker");
+        let normal_waker = Waker::from(Arc::new(ThreadWake(std::thread::current())));
+        let mut normal_context = Context::from_waker(&normal_waker);
+        assert!(matches!(
+            future.as_mut().poll(&mut normal_context),
+            Poll::Ready(CleanupOutcome::Released)
+        ));
     }
 
     #[test]
