@@ -150,11 +150,9 @@ mod tests {
             Poll::Pending
         ));
         let registered_waker = state.waker.lock().unwrap_or_else(|error| error.into_inner());
-        assert!(
-            registered_waker
-                .as_ref()
-                .is_some_and(|waker| waker.will_wake(context.waker()))
-        );
+        let registered_waker = registered_waker.as_ref().expect("pending poll registers a waker");
+        registered_waker.wake_by_ref();
+        assert_eq!(1, wake_count.load(std::sync::atomic::Ordering::SeqCst));
     }
 
     struct TestWake(std::sync::Arc<std::sync::atomic::AtomicUsize>);
@@ -172,8 +170,9 @@ mod tests {
     #[test]
     fn test_abort_wait_replaces_waker_when_a_second_poll_is_pending() {
         let (mut wait, state) = wait::<u16>();
-        let wake_count = Arc::new(std::sync::atomic::AtomicUsize::new(0));
-        let first_waker = Waker::from(Arc::new(TestWake(Arc::clone(&wake_count))));
+        let first_wake_count = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let replacement_wake_count = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let first_waker = Waker::from(Arc::new(TestWake(Arc::clone(&first_wake_count))));
         let mut first_context = Context::from_waker(&first_waker);
 
         assert!(matches!(
@@ -181,7 +180,7 @@ mod tests {
             Poll::Pending
         ));
 
-        let replacement_waker = Waker::from(Arc::new(TestWake(Arc::clone(&wake_count))));
+        let replacement_waker = Waker::from(Arc::new(TestWake(Arc::clone(&replacement_wake_count))));
         let mut replacement_context = Context::from_waker(&replacement_waker);
         assert!(matches!(
             Future::poll(std::pin::Pin::new(&mut wait), &mut replacement_context),
@@ -189,16 +188,16 @@ mod tests {
         ));
 
         let registered_waker = state.waker.lock().expect("registered waker lock");
-        assert!(
-            registered_waker
-                .as_ref()
-                .is_some_and(|waker| waker.will_wake(&replacement_waker))
-        );
-        assert_eq!(0, wake_count.load(std::sync::atomic::Ordering::SeqCst));
+        registered_waker
+            .as_ref()
+            .expect("second pending poll retains a waker")
+            .wake_by_ref();
+        assert_eq!(0, first_wake_count.load(std::sync::atomic::Ordering::SeqCst));
+        assert_eq!(1, replacement_wake_count.load(std::sync::atomic::Ordering::SeqCst));
     }
 
     fn panic_on_clone(_: *const ()) -> std::task::RawWaker {
-        panic!("injected waker clone panic");
+        std::panic::panic_any(());
     }
 
     fn no_op(_: *const ()) {}

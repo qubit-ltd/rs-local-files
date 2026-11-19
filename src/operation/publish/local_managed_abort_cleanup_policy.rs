@@ -167,12 +167,12 @@ mod tests {
     impl Wake for PanicWake {
         fn wake(self: Arc<Self>) {
             let _ = self.0.send(());
-            panic!("test waker panic");
+            std::panic::panic_any(());
         }
 
         fn wake_by_ref(self: &Arc<Self>) {
             let _ = self.0.send(());
-            panic!("test waker panic");
+            std::panic::panic_any(());
         }
     }
 

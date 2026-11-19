@@ -392,17 +392,17 @@ mod tests {
     use super::async_result;
 
     fn panic_on_clone(_: *const ()) -> RawWaker {
-        panic!("injected waker clone panic");
+        std::panic::panic_any(());
     }
 
     fn panic_on_wake(_: *const ()) {
-        panic!("injected waker wake panic");
+        std::panic::panic_any(());
     }
 
     fn no_op(_: *const ()) {}
 
     fn panic_on_drop(_: *const ()) {
-        panic!("injected waker drop panic");
+        std::panic::panic_any(());
     }
 
     static PANIC_CLONE_VTABLE: RawWakerVTable = RawWakerVTable::new(panic_on_clone, no_op, no_op, no_op);

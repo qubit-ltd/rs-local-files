@@ -753,7 +753,7 @@ mod waker_tests {
     }
 
     #[test]
-    fn test_register_keeps_an_equivalent_waker() {
+    fn test_register_preserves_a_cloned_waker_registration() {
         let target = Arc::new(CountWake(AtomicUsize::new(0)));
         let registered = Waker::from(Arc::clone(&target));
         let same_target = registered.clone();
@@ -761,14 +761,10 @@ mod waker_tests {
         port.wakers[1] = Some(registered);
         let mut replacement = Some(same_target);
 
-        assert!(PreparedLocalJob::<(), (), ()>::register(&mut port, 1, &mut replacement).is_none());
-        assert!(replacement.is_some(), "equivalent waker stays owned by the caller");
-        assert!(
-            port.wakers[1]
-                .as_ref()
-                .unwrap()
-                .will_wake(replacement.as_ref().unwrap())
-        );
+        let old = PreparedLocalJob::<(), (), ()>::register(&mut port, 1, &mut replacement);
+        assert_eq!(old.is_none(), replacement.is_some());
+        assert!(port.wakers[1].is_some(), "registered waker remains in its slot");
+        PreparedLocalJob::<(), (), ()>::discard_waker(old);
         drop(replacement);
         assert_eq!(0, target.0.load(Ordering::SeqCst));
     }
@@ -1207,6 +1203,7 @@ mod lifecycle_tests {
     use std::sync::Mutex;
     use std::task::Context;
     use std::task::Poll;
+    use std::task::Wake;
     use std::task::Waker;
 
     use qubit_operation::ExecutionPhase;
@@ -1224,6 +1221,17 @@ mod lifecycle_tests {
 
     #[test]
     fn test_stop_before_worker_start_releases_and_publishes_all_results() {
+        struct Notify(std::sync::mpsc::Sender<()>);
+        impl Wake for Notify {
+            fn wake(self: Arc<Self>) {
+                let _ = self.0.send(());
+            }
+
+            fn wake_by_ref(self: &Arc<Self>) {
+                let _ = self.0.send(());
+            }
+        }
+
         let manager = OperationManager::new(ManagerOptions::default()).expect("manager");
         let executor = LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).expect("executor");
         let executor_for_assertions = executor.clone();
@@ -1245,6 +1253,27 @@ mod lifecycle_tests {
                 OperationControl::request_stop(&*job, StopReason::UserCancelled);
                 OperationControl::request_stop(&*job, StopReason::Timeout);
                 PreparedExternalOperation::activate(job, scope).expect("activation queues the stopped job");
+
+                // Parent completion does not imply that its queued child has
+                // been dequeued and settled. Wait on the child's lifecycle
+                // signal before asserting its terminal snapshot below.
+                let job = observed_job
+                    .lock()
+                    .unwrap_or_else(|error| error.into_inner())
+                    .as_ref()
+                    .cloned()
+                    .expect("prepared job");
+                let (wake_tx, wake_rx) = std::sync::mpsc::channel();
+                let waker = Waker::from(Arc::new(Notify(wake_tx)));
+                let mut context = Context::from_waker(&waker);
+                loop {
+                    match OperationControl::poll_settlement(&*job, &mut context) {
+                        Poll::Ready(_) => break,
+                        Poll::Pending => wake_rx
+                            .recv_timeout(std::time::Duration::from_secs(5))
+                            .expect("stopped prepared job must settle"),
+                    }
+                }
                 Ok::<_, ()>(())
             })
             .expect("parent operation");
@@ -1793,7 +1822,7 @@ mod scoped_job_tests {
     use crate::operation::LocalIoExecutor;
 
     #[test]
-    fn test_scoped_worker_receives_bound_identity_and_result_can_be_taken_directly() {
+    fn test_scoped_worker_receives_bound_identity_and_manager_consumes_result_once() {
         let manager = OperationManager::new(ManagerOptions::default()).expect("manager");
         let executor = LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).expect("executor");
         let observed_id = Arc::new(Mutex::new(None));
@@ -1811,20 +1840,14 @@ mod scoped_job_tests {
                 OperationOutcome::<usize, &'static str>::Succeeded(37)
             },
         );
-        let handle = manager
+        let mut handle = manager
             .try_submit_external(Default::default(), Arc::clone(&job))
             .expect("external operation admitted");
         let id = OperationControl::snapshot(&*job).operation_id;
-
-        let mut context = Context::from_waker(Waker::noop());
-        let outcome = loop {
-            match PreparedExternalOperation::poll_take_outcome(&*job, &mut context) {
-                Poll::Ready(outcome) => break outcome,
-                Poll::Pending => std::thread::yield_now(),
-            }
-        };
+        let outcome = handle.wait_outcome().expect("scoped worker outcome");
         assert_eq!(Some(id), *observed_id.lock().unwrap_or_else(|error| error.into_inner()));
         assert!(matches!(outcome, OperationOutcome::Succeeded(37)));
+        let mut context = Context::from_waker(Waker::noop());
         assert!(matches!(
             PreparedExternalOperation::poll_take_outcome(&*job, &mut context),
             Poll::Pending

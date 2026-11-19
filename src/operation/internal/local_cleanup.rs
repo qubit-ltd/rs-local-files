@@ -167,12 +167,21 @@ mod tests {
 
     struct DropPanics;
     struct ThreadWake(std::thread::Thread);
+    struct CountingWake(Arc<std::sync::atomic::AtomicUsize>);
     impl std::task::Wake for ThreadWake {
         fn wake(self: Arc<Self>) {
             self.0.unpark();
         }
         fn wake_by_ref(self: &Arc<Self>) {
             self.0.unpark();
+        }
+    }
+    impl std::task::Wake for CountingWake {
+        fn wake(self: Arc<Self>) {
+            self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        }
+        fn wake_by_ref(self: &Arc<Self>) {
+            self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         }
     }
     impl std::task::Wake for DropPanics {
@@ -233,7 +242,8 @@ mod tests {
     }
 
     fn block_on<F: Future>(future: F) -> F::Output {
-        let waker = plain_waker();
+        let wake_count = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let waker = Waker::from(Arc::new(CountingWake(Arc::clone(&wake_count))));
         let mut context = Context::from_waker(&waker);
         let mut future = Box::pin(future);
         loop {
@@ -545,20 +555,18 @@ mod tests {
             state: Arc::clone(&state),
             marker: std::marker::PhantomData,
         });
-        let waker = plain_waker();
+        let wake_count = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let waker = Waker::from(Arc::new(CountingWake(Arc::clone(&wake_count))));
         let mut context = Context::from_waker(&waker);
 
         assert!(matches!(wait.as_mut().poll(&mut context), Poll::Pending));
         assert!(state.waker.is_poisoned());
-        assert!(
-            state
-                .waker
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .as_ref()
-                .expect("pending cleanup registers its waker")
-                .will_wake(&waker)
-        );
+        let registered_waker = state.waker.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        registered_waker
+            .as_ref()
+            .expect("pending cleanup registers its waker")
+            .wake_by_ref();
+        assert_eq!(1, wake_count.load(std::sync::atomic::Ordering::SeqCst));
     }
 
     #[test]
@@ -572,17 +580,14 @@ mod tests {
             state: Arc::clone(&state),
             marker: std::marker::PhantomData,
         });
-        let current_waker = plain_waker();
+        let wake_count = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let current_waker = Waker::from(Arc::new(CountingWake(Arc::clone(&wake_count))));
         let mut context = Context::from_waker(&current_waker);
 
         assert!(matches!(wait.as_mut().poll(&mut context), Poll::Pending));
         let stored_waker = state.waker.lock().expect("cleanup waker lock");
-        assert!(
-            stored_waker
-                .as_ref()
-                .expect("current waker is stored")
-                .will_wake(&current_waker)
-        );
+        stored_waker.as_ref().expect("current waker is stored").wake_by_ref();
+        assert_eq!(1, wake_count.load(std::sync::atomic::Ordering::SeqCst));
     }
 
     #[test]
@@ -596,27 +601,22 @@ mod tests {
             state: Arc::clone(&state),
             marker: std::marker::PhantomData,
         });
-        let first_waker = plain_waker();
-        let second_waker = Waker::from(Arc::new(ThreadWake(std::thread::current())));
+        let first_wake_count = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let second_wake_count = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let first_waker = Waker::from(Arc::new(CountingWake(Arc::clone(&first_wake_count))));
+        let second_waker = Waker::from(Arc::new(CountingWake(Arc::clone(&second_wake_count))));
         let mut first_context = Context::from_waker(&first_waker);
         let mut second_context = Context::from_waker(&second_waker);
 
         assert!(matches!(wait.as_mut().poll(&mut first_context), Poll::Pending));
-        assert!(
-            state
-                .waker
-                .lock()
-                .expect("cleanup waker lock")
-                .as_ref()
-                .expect("first poll registers a waker")
-                .will_wake(&first_waker)
-        );
+        assert!(state.waker.lock().expect("cleanup waker lock").is_some());
 
         assert!(matches!(wait.as_mut().poll(&mut second_context), Poll::Pending));
         let stored_waker = state.waker.lock().expect("cleanup waker lock");
         let stored_waker = stored_waker.as_ref().expect("second poll retains a waker");
-        assert!(stored_waker.will_wake(&second_waker));
-        assert!(!stored_waker.will_wake(&first_waker));
+        stored_waker.wake_by_ref();
+        assert_eq!(0, first_wake_count.load(std::sync::atomic::Ordering::SeqCst));
+        assert_eq!(1, second_wake_count.load(std::sync::atomic::Ordering::SeqCst));
     }
 
     #[test]

@@ -313,10 +313,11 @@ mod tests {
             .try_submit(Default::default(), move |scope| {
                 let job = make_job(&executor, |_| OperationOutcome::Succeeded(()));
                 PreparedExternalOperation::bind(&*job, scope.id()).expect("first bind succeeds");
+                PreparedExternalOperation::activate(std::sync::Arc::clone(&job), scope)
+                    .expect("first activation succeeds");
                 retained_sender
-                    .send(std::sync::Arc::clone(&job))
-                    .expect("parent retains the job for the retry");
-                PreparedExternalOperation::activate(job, scope).expect("first activation succeeds");
+                    .send(job)
+                    .expect("parent retains the activated job for the retry");
                 Ok::<_, ()>(())
             })
             .unwrap();

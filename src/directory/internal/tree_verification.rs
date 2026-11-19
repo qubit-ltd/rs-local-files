@@ -1013,7 +1013,7 @@ mod missing_path_tests {
     fn test_tree_validation_rejects_a_socket_when_special_files_are_forbidden() {
         use std::os::unix::net::UnixListener;
 
-        let fixture = tempfile::tempdir().expect("fixture");
+        let fixture = tempfile::tempdir_in("/tmp").expect("fixture");
         let stage = staged_directory(fixture.path());
         let socket_path = stage.directory().diagnostic_path().join("socket");
         let socket = UnixListener::bind(&socket_path).expect("create a filesystem socket entry");

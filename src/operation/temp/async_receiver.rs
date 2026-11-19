@@ -85,7 +85,7 @@ mod tests {
     }
 
     unsafe fn panic_on_clone(_: *const ()) -> std::task::RawWaker {
-        panic!("waker clone failed");
+        std::panic::panic_any(());
     }
 
     unsafe fn drop_raw_waker(_: *const ()) {}

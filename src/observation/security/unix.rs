@@ -917,11 +917,29 @@ mod tests {
     #[test]
     fn test_query_security_preserves_descriptor_metadata_failures() {
         use std::os::fd::AsRawFd;
+        use std::os::fd::FromRawFd;
 
         let directory = tempfile::tempdir().expect("temporary directory");
         let path = directory.path().join("closed-descriptor");
         fs::write(&path, b"descriptor failure").expect("create fixture");
-        let file = std::mem::ManuallyDrop::new(File::open(&path).expect("open retained file"));
+        let source = File::open(&path).expect("open retained file");
+        // Reserve a high descriptor number before closing it. Other parallel
+        // tests allocate low descriptors, so they cannot reuse this number
+        // between close and the fstat exercised by query_security.
+        let mut limit = std::mem::MaybeUninit::<libc::rlimit>::uninit();
+        // SAFETY: getrlimit writes the complete rlimit structure on success.
+        assert_eq!(unsafe { libc::getrlimit(libc::RLIMIT_NOFILE, limit.as_mut_ptr()) }, 0);
+        // SAFETY: successful getrlimit initialized the structure.
+        let descriptor_limit = unsafe { limit.assume_init() }.rlim_cur;
+        let duplicate_at = descriptor_limit.saturating_sub(1).min(65_535) as libc::c_int;
+        // SAFETY: fcntl only reads the live source descriptor and returns a
+        // new owned descriptor at or above the requested minimum.
+        let duplicate = unsafe { libc::fcntl(source.as_raw_fd(), libc::F_DUPFD_CLOEXEC, duplicate_at) };
+        assert!(duplicate >= duplicate_at, "duplicate should use a high descriptor");
+        // SAFETY: `duplicate` was returned as a newly owned descriptor above.
+        let retained = unsafe { File::from_raw_fd(duplicate) };
+        drop(source);
+        let file = std::mem::ManuallyDrop::new(retained);
         // SAFETY: this test intentionally closes the descriptor to verify that
         // the fstat failure is preserved by the metadata query. ManuallyDrop
         // prevents File from closing the same descriptor a second time.
