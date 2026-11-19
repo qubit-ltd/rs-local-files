@@ -306,7 +306,15 @@ mod tests {
             block_on(cleanup.cleanup(resource, cleanup_context())),
             CleanupOutcome::Released
         ));
-        assert!(executor.reserve_cleanup().is_some());
+        // The worker publishes its result before its queue slot is dropped.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while executor.reserve_cleanup().is_none() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "worker retained the cleanup permit"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
     }
 
     #[test]
