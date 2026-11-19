@@ -275,3 +275,25 @@ fn test_host_current_directory_failure_preserves_existing_directory() {
             .expect("current directory remains unchanged")
     );
 }
+
+#[test]
+fn test_temp_file_persist_publishes_contents_and_releases_source() {
+    let fixture = tempdir().expect("fixture");
+    let filesystem = LocalFileSystem::host().expect("host filesystem");
+    let mut temporary = filesystem
+        .create_temp_file_with_options(&LocalTempFileOptions::new().with_parent(fixture.path()))
+        .expect("temporary file");
+    qubit_io::Output::write_fully(&mut temporary, b"persisted through default options")
+        .expect("write temporary contents");
+    let source = temporary.path().to_path_buf();
+    let target = fixture.path().join("persisted-default-options");
+
+    let outcome = temporary.persist(&target).expect("default persistence");
+
+    assert_eq!(target, outcome.path());
+    assert_eq!(
+        b"persisted through default options",
+        std::fs::read(&target).expect("published contents").as_slice()
+    );
+    assert!(!source.exists(), "successful persistence releases the source");
+}
