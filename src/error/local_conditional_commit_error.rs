@@ -309,8 +309,18 @@ mod conditional_types_tests {
             native_error.downcast_ref::<io::Error>().map(io::Error::kind),
             Some(io::ErrorKind::PermissionDenied)
         );
-        assert!(error.to_string().contains("conditional commit failed at Publish"));
-        assert!(error.source().is_some());
+        assert_eq!(
+            "conditional commit failed at Publish: Commit failed with PermissionDenied; caused by native failure",
+            error.to_string(),
+        );
+        let structured_source = error.source().expect("structured local error source");
+        assert!(structured_source.downcast_ref::<LocalFileError>().is_some());
+        assert_eq!(
+            Some(io::ErrorKind::PermissionDenied),
+            Error::source(structured_source)
+                .and_then(|source| source.downcast_ref::<io::Error>())
+                .map(io::Error::kind),
+        );
         assert!(error.into_recovery_files().is_empty());
     }
 }

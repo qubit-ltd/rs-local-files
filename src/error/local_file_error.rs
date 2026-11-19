@@ -967,3 +967,32 @@ mod recovery_source_tests {
         assert_eq!(std::io::ErrorKind::InvalidData, error.io_error_kind());
     }
 }
+
+#[cfg(test)]
+mod display_source_contract_tests {
+    use std::error::Error;
+    use std::io;
+
+    use super::LocalFileError;
+    use super::LocalFileOperation;
+
+    #[test]
+    fn test_display_and_error_source_retain_native_failure() {
+        let error = LocalFileError::from_io(
+            LocalFileOperation::Read,
+            Some("input.bin".into()),
+            None,
+            io::Error::new(io::ErrorKind::PermissionDenied, "read denied"),
+        );
+
+        assert_eq!(
+            "Read failed with PermissionDenied at input.bin; caused by read denied",
+            error.to_string(),
+        );
+        let source = error.source().expect("native I/O failure is the source");
+        assert_eq!(
+            Some(io::ErrorKind::PermissionDenied),
+            source.downcast_ref::<io::Error>().map(io::Error::kind),
+        );
+    }
+}

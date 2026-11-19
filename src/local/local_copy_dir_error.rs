@@ -311,3 +311,35 @@ impl Error for LocalCopyDirError {
         Some(&self.error)
     }
 }
+
+#[cfg(test)]
+mod error_contract_tests {
+    use std::error::Error;
+    use std::io;
+
+    use super::LocalCopyDirError;
+    use super::LocalCopyDirStage;
+    use super::LocalCopyDirStats;
+
+    #[test]
+    fn test_display_and_source_preserve_copy_diagnostic_context() {
+        let error = LocalCopyDirError::new(
+            LocalCopyDirStage::CopyFileContents,
+            "source/file".into(),
+            "destination/file".into(),
+            LocalCopyDirStats::default(),
+            io::Error::new(io::ErrorKind::PermissionDenied, "read denied"),
+        )
+        .with_staging_context("destination/.file.tmp".into(), None);
+
+        assert_eq!(
+            "failed to copy 'source/file' to 'destination/file' during CopyFileContents after LocalCopyDirStats { files: 0, directories: 0, bytes: 0, skipped: 0, overwritten: 0, non_atomic_publication: false, files_durable: true, metadata_effect: None }: read denied; staging path 'destination/.file.tmp'",
+            error.to_string(),
+        );
+        let source = error.source().expect("native I/O failure is the source");
+        assert_eq!(
+            Some(io::ErrorKind::PermissionDenied),
+            source.downcast_ref::<io::Error>().map(io::Error::kind),
+        );
+    }
+}
