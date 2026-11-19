@@ -1823,36 +1823,92 @@ authority。已接纳请求持有自己的输入和提交时 options，之后修
 
 `AsyncLocalFileWriter` 保留同步 writer 的 staged/append 区别。Staged 字节在 commit 前不会
 发布；append 字节在 worker 确认每次写入时即已发布。Commit 先等待已接纳字节完成，再入队一个
-稳定 worker 请求。请求未决期间，新的 write 和 flush 会被拒绝。取消 future 不会替换请求；再次
-调用 `commit()` 会观察原请求结果。可重试提交失败会重新开放 writer；成功和不可重试失败均为
-终态。Staged 的 settle 失败依据 worker 确认事实映射发布状态；无法提供事实的自定义 driver
-必须报告 `Indeterminate`。Append observer 即使遇到后续写入失败，也保留已确认的字节数和发布事实。
+稳定 worker 请求。第一次 poll 会先建立屏障，再开始排空；从这时起新的 write 和 flush 会被拒绝。
+排空成功后才会入队 native commit。取消 future 只取消这次等待；再次调用 `commit()` 会继续排空，
+或观察原先入队请求的结果。可重试提交失败会重新开放 writer；成功和不可重试失败均为终态。
+Staged writer 只有在 commit 尚未开始时关闭才会被放弃。Staged 的 settle 失败依据 worker 确认事实
+映射发布状态；无法提供事实的自定义 driver 必须报告 `Indeterminate`。Append observer 即使遇到
+后续写入失败，也保留已确认的字节数和发布事实；空 append commit 不增加发布或修改事件。
 
-`close()` 会先观察未决提交，再关闭剩余 owner。若提交结果尚未返回，`close()` 会保留该类型化
-结果供下一次 `commit()` 取回。关闭未提交的 staged writer 会调用 native abort 并报告清理错误；
-worker 保留 native owner，使托管清理或 recovery 可以重试。Append close 保留已经发布的字节。
-调用方在重放输入前应检查类型化状态和 retryability；`Published` 与 `Indeterminate` 都不允许整批
-重放。
+即使等待提交超时，`close()` 仍会完成所有已开始的提交（因此可能发布内容），再关闭剩余 owner，包括仍在排空且尚未入队的提交。若提交结果
+尚未返回，`close()` 会保留该类型化结果供下一次 `commit()` 取回。commit 开始前关闭 staged writer
+会调用 native abort 并报告清理错误；worker 保留 native owner，使托管清理或 recovery 可以重试。
+Append close 保留已经发布的字节。只有类型化错误可重试且 `commit_error().state()` 为
+`NotPublished` 时才重试。`Published` 表示发布已确认，`Indeterminate` 需要核对；两者都不能授权
+重放整批写入。提交和关闭诊断必须分别保留，包括两者都失败时。写入错误也必须走关闭路径；若关闭
+失败，应同时报告两项错误。
 
 ```rust,no_run
-#[cfg(feature = "async")]
-async fn publish(
-    writer: &mut qubit_local_files::operation::stream::AsyncLocalFileWriter,
-    bytes: &[u8],
-) -> Result<qubit_local_files::outcome::LocalWriteOutcome, Box<dyn std::error::Error>> {
-use qubit_io::AsyncOutput;
-    writer.write_fully_async(bytes).await?;
-    let mut result = writer.commit().await;
-    let retry = result.as_ref().is_err_and(|error| {
-        let _publication = error.commit_error().state();
-        error.retryable()
-    });
-    if retry {
-        result = writer.commit().await;
-    }
-    writer.close().await?;
-    Ok(result?)
+# #[cfg(feature = "async")]
+struct Diagnostics {
+    write: Option<std::io::Error>,
+    commit: Option<qubit_local_files::operation::stream::LocalStreamCommitError>,
+    close: Option<std::io::Error>,
 }
+
+# #[cfg(feature = "async")]
+# async fn publish(
+#     writer: &mut qubit_local_files::operation::stream::AsyncLocalFileWriter,
+#     bytes: &[u8],
+# ) -> Result<qubit_local_files::outcome::LocalWriteOutcome, Diagnostics> {
+use qubit_io::AsyncOutput;
+let write_error = writer.write_fully_async(bytes).await.err();
+let mut commit_result = None;
+if write_error.is_none() {
+    let mut result = writer.commit().await;
+    if let Err(error) = &result {
+        let state = error.commit_error().state();
+        if error.retryable()
+            && state == qubit_local_files::outcome::LocalWriteFailureState::NotPublished
+        {
+            result = writer.commit().await;
+        }
+    }
+    commit_result = Some(result);
+}
+let close_error = writer.close().await.err();
+let commit_error = commit_result.as_ref().and_then(|result| result.as_ref().err());
+if write_error.is_some() || commit_error.is_some() || close_error.is_some() {
+    return Err(Diagnostics {
+        write: write_error,
+        commit: commit_result.and_then(Result::err),
+        close: close_error,
+    });
+}
+# Ok(commit_result.expect("写入成功后已提交").expect("提交成功"))
+# }
+```
+
+公开 open operation 同时返回 writer 和 operation handle。等待 settlement 前先关闭并释放 writer，
+然后保留报告中的恢复 handle：
+
+```rust,no_run
+# #[cfg(feature = "async")]
+# async fn example(
+#     filesystem: &qubit_local_files::operation::AsyncLocalFileSystem,
+#     manager: &qubit_operation::OperationManager,
+# ) -> Result<(), Box<dyn std::error::Error>> {
+use std::path::PathBuf;
+use qubit_local_files::options::{LocalWriteMode, LocalWriteOptions};
+use qubit_operation::{OperationOptions, OperationOutcome};
+
+let opening = filesystem.submit_open_writer(
+    manager,
+    OperationOptions::default(),
+    PathBuf::from("output.txt"),
+    LocalWriteOptions::new(LocalWriteMode::CreateOrReplace),
+)?.0;
+let mut opening = opening.into_async();
+let mut writer = match opening.wait_outcome().await? {
+    OperationOutcome::Succeeded(writer) => writer,
+    _ => return Err(std::io::Error::other("writer open failed").into()),
+};
+writer.close().await?;
+drop(writer);
+let settlement = opening.wait_settlement().await;
+let _recovery_handles = settlement.recoveries.clone();
+# Ok(())
+# }
 ```
 
 排队任务与清理/恢复策略会共同持有 worker owner。最后一个 owner 析构时会停止队列并排空已

@@ -1669,41 +1669,102 @@ unconfirmed.
 `AsyncLocalFileWriter` preserves the synchronous staged/append distinction.
 Staged bytes remain unpublished until commit; append bytes become published
 when the worker confirms each write. Commit first settles accepted bytes and
-then queues one stable worker request. While that request is pending, write
-and flush reject new input. Cancelling the future does not replace the request:
-the next `commit()` observes its original result. A retryable commit failure
-reopens the writer; success and non-retryable failure are terminal. A staged
-settle failure maps publication from worker-confirmed facts, while a custom
-driver that has no facts must report `Indeterminate`. Append observer facts
-retain confirmed bytes and publication even when a later write fails.
+then queues one stable worker request. The first poll establishes a barrier
+before settling; write and flush reject new input from then on. The native
+commit is queued only after settlement succeeds. Cancelling the future cancels
+only that wait: another `commit()` resumes settling or observes the original
+queued request. A retryable commit failure reopens the writer; success and
+non-retryable failure are terminal. Closing a staged writer discards it only
+if commit has not started. A staged settle failure maps publication from
+worker-confirmed facts, while a custom driver that has no facts must report
+`Indeterminate`. Append observer facts retain confirmed bytes and publication
+even when a later write fails; an empty append commit adds no publication or
+modification event.
 
-`close()` observes any pending commit before it closes the remaining owner. If
-the commit result was not yet returned, `close()` retains that typed result for
-the next `commit()` call. Closing an uncommitted staged writer calls native
-abort and reports cleanup failure; the worker retains the native owner so
-managed cleanup or recovery can retry. Append close preserves bytes already
-published. Callers inspect the typed state and retryability before replaying
-input; `Published` and `Indeterminate` never authorize replay of the whole
-write.
+Even after a commit wait times out, `close()` completes that started commit before closing the remaining owner and may publish it,
+including one still settling and not yet queued. If the commit result was not
+yet returned, `close()` retains that typed result for the next `commit()` call.
+Closing a staged writer before commit starts calls native abort and reports
+cleanup failure; the worker retains the native owner so managed cleanup or
+recovery can retry. Append close preserves bytes already published. Retry only
+when the typed error is retryable and `commit_error().state()` is
+`NotPublished`. `Published` confirms publication and `Indeterminate` requires
+reconciliation; neither authorizes replay of the whole write. Preserve commit
+and close diagnostics independently, including when both fail. A write error
+still follows the close path and remains reportable together with any close
+error.
 
 ```rust,no_run
+# #[cfg(feature = "async")]
+struct Diagnostics {
+    write: Option<std::io::Error>,
+    commit: Option<qubit_local_files::operation::stream::LocalStreamCommitError>,
+    close: Option<std::io::Error>,
+}
+
 # #[cfg(feature = "async")]
 # async fn publish(
 #     writer: &mut qubit_local_files::operation::stream::AsyncLocalFileWriter,
 #     bytes: &[u8],
-# ) -> Result<qubit_local_files::outcome::LocalWriteOutcome, Box<dyn std::error::Error>> {
+# ) -> Result<qubit_local_files::outcome::LocalWriteOutcome, Diagnostics> {
 use qubit_io::AsyncOutput;
-    writer.write_fully_async(bytes).await?;
+let write_error = writer.write_fully_async(bytes).await.err();
+let mut commit_result = None;
+if write_error.is_none() {
     let mut result = writer.commit().await;
-    let retry = result.as_ref().is_err_and(|error| {
-        let _publication = error.commit_error().state();
-        error.retryable()
-    });
-    if retry {
-        result = writer.commit().await;
+    if let Err(error) = &result {
+        let state = error.commit_error().state();
+        if error.retryable()
+            && state == qubit_local_files::outcome::LocalWriteFailureState::NotPublished
+        {
+            result = writer.commit().await;
+        }
     }
-    writer.close().await?;
-    Ok(result?)
+    commit_result = Some(result);
+}
+let close_error = writer.close().await.err();
+let commit_error = commit_result.as_ref().and_then(|result| result.as_ref().err());
+if write_error.is_some() || commit_error.is_some() || close_error.is_some() {
+    return Err(Diagnostics {
+        write: write_error,
+        commit: commit_result.and_then(Result::err),
+        close: close_error,
+    });
+}
+# Ok(commit_result.expect("successful write is committed").expect("commit succeeded"))
+# }
+```
+
+An open operation returns both the writer and the operation handle. Close and
+drop the writer before waiting for settlement, then retain reported recovery
+handles:
+
+```rust,no_run
+# #[cfg(feature = "async")]
+# async fn example(
+#     filesystem: &qubit_local_files::operation::AsyncLocalFileSystem,
+#     manager: &qubit_operation::OperationManager,
+# ) -> Result<(), Box<dyn std::error::Error>> {
+use std::path::PathBuf;
+use qubit_local_files::options::{LocalWriteMode, LocalWriteOptions};
+use qubit_operation::{OperationOptions, OperationOutcome};
+
+let opening = filesystem.submit_open_writer(
+    manager,
+    OperationOptions::default(),
+    PathBuf::from("output.txt"),
+    LocalWriteOptions::new(LocalWriteMode::CreateOrReplace),
+)?.0;
+let mut opening = opening.into_async();
+let mut writer = match opening.wait_outcome().await? {
+    OperationOutcome::Succeeded(writer) => writer,
+    _ => return Err(std::io::Error::other("writer open failed").into()),
+};
+writer.close().await?;
+drop(writer);
+let settlement = opening.wait_settlement().await;
+let _recovery_handles = settlement.recoveries.clone();
+# Ok(())
 # }
 ```
 

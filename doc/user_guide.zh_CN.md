@@ -78,35 +78,90 @@ Outcome 报告操作的类型化结果；settlement 报告 executor 是否已释
 都必须同时保留一个克隆的 read lease。等待 settlement 前应先关闭流并归还 helper lease；
 清理报告保留资源时，应继续保留恢复 handle。同步 writer 使用 `commit()` 发布或使用
 `abort()` 放弃。异步 `AsyncLocalFileWriter` 使用 `commit()` 发布 staged 内容，并用
-`close()` 结束句柄：未提交的 staged writer 会清理暂存文件；append writer 关闭时会 flush
-已随写入发布的字节。`settle()` 等待已接纳字节送达 native writer；`flush_async()` 不会发布
-staged 内容。
+`close()` 结束句柄：第一次 poll commit 前关闭 staged writer 会清理暂存文件；commit 开始后，
+即使已接纳写入仍在排空，close 也会继续完成该提交。Append 字节在写入被接纳时发布；空 append
+commit 不产生发布或修改事件。`settle()` 等待已接纳字节送达 native writer；`flush_async()` 不会
+发布 staged 内容。
 
-异步 commit 一旦入队，在原结果被观察前，新的 write 和 flush 都会被拒绝。若 commit future
-在等待时取消，再调用 `commit()` 会继续观察同一个 worker 请求。可重试错误能在同一 writer 上
-再次提交；重试前应检查 `commit_error().state()`，`Published` 和 `Indeterminate` 不能作为整批
-重放信号。`close()` 会等待未决提交，并暂存其类型化结果供之后的 `commit()` 取回。关闭后应释放
-writer 引用再等待 settlement，并保留 settlement 返回的恢复 handle。
+第一次 poll `commit()` 会建立写入屏障并开始排空先前已接纳的写入；从这时起 write 和 flush
+会被拒绝。排空成功后才会将 native commit 命令入队。取消 future 只取消调用方的等待；再次调用
+`commit()` 会继续排空或观察同一入队请求。只有类型化错误可重试且
+`commit_error().state()` 为 `NotPublished` 时才重试；`Published` 表示发布已确认，
+`Indeterminate` 需要核对，两者都不能授权重放整批输入。即使等待 `commit()` 超时，调用 `close()` 仍会推进已开始的提交，并可能发布该内容；`close()` 会
+暂存其类型化结果供之后的 `commit()` 取回。分别保留提交和关闭错误；两者都失败时同时报告。写入
+失败后仍须关闭 writer；若关闭也失败，应同时报告写入和关闭诊断。等待 open operation settlement
+前先释放 writer 引用，并保留 settlement 报告中的恢复 handle。
 
 ```rust,no_run
+# #[cfg(feature = "async")]
+struct Diagnostics {
+    write: Option<std::io::Error>,
+    commit: Option<qubit_local_files::operation::stream::LocalStreamCommitError>,
+    close: Option<std::io::Error>,
+}
+
 # #[cfg(feature = "async")]
 # async fn example(
 #     writer: &mut qubit_local_files::operation::stream::AsyncLocalFileWriter,
 #     bytes: &[u8],
-# ) -> Result<qubit_local_files::outcome::LocalWriteOutcome, Box<dyn std::error::Error>> {
+# ) -> Result<qubit_local_files::outcome::LocalWriteOutcome, Diagnostics> {
 use qubit_io::AsyncOutput;
-
-writer.write_fully_async(bytes).await?;
-let mut result = writer.commit().await;
-let retry = result.as_ref().is_err_and(|error| {
-    let _state = error.commit_error().state();
-    error.retryable()
-});
-if retry {
-    result = writer.commit().await;
+let write_error = writer.write_fully_async(bytes).await.err();
+let mut commit_result = None;
+if write_error.is_none() {
+    let mut result = writer.commit().await;
+    if let Err(error) = &result {
+        let state = error.commit_error().state();
+        if error.retryable()
+            && state == qubit_local_files::outcome::LocalWriteFailureState::NotPublished
+        {
+            result = writer.commit().await;
+        }
+    }
+    commit_result = Some(result);
 }
+let close_error = writer.close().await.err();
+let commit_error = commit_result.as_ref().and_then(|result| result.as_ref().err());
+if write_error.is_some() || commit_error.is_some() || close_error.is_some() {
+    return Err(Diagnostics {
+        write: write_error,
+        commit: commit_result.and_then(Result::err),
+        close: close_error,
+    });
+}
+# Ok(commit_result.expect("写入成功后已提交").expect("提交成功"))
+# }
+```
+
+若 writer 来自公开的 open operation，应先释放返回的 writer，再等待 operation settlement，
+并保留其中报告的恢复 handle：
+
+```rust,no_run
+# #[cfg(feature = "async")]
+# async fn example(
+#     filesystem: &qubit_local_files::operation::AsyncLocalFileSystem,
+#     manager: &qubit_operation::OperationManager,
+# ) -> Result<(), Box<dyn std::error::Error>> {
+use std::path::PathBuf;
+use qubit_local_files::options::{LocalWriteMode, LocalWriteOptions};
+use qubit_operation::{OperationOptions, OperationOutcome};
+
+let opening = filesystem.submit_open_writer(
+    manager,
+    OperationOptions::default(),
+    PathBuf::from("output.txt"),
+    LocalWriteOptions::new(LocalWriteMode::CreateOrReplace),
+)?.0;
+let mut opening = opening.into_async();
+let mut writer = match opening.wait_outcome().await? {
+    OperationOutcome::Succeeded(writer) => writer,
+    _ => return Err(std::io::Error::other("writer open failed").into()),
+};
 writer.close().await?;
-# Ok(result?)
+drop(writer);
+let settlement = opening.wait_settlement().await;
+let _recovery_handles = settlement.recoveries.clone();
+# Ok(())
 # }
 ```
 

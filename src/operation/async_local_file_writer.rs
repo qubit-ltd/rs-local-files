@@ -26,17 +26,21 @@ use super::stream_state::StreamState;
 ///
 /// The filesystem operation that opens a writer supplies this handle. Staged
 /// writes remain unpublished until `commit` confirms publication; append
-/// writes publish as the worker accepts them.
+/// writes publish as the worker accepts them. An empty append commit confirms
+/// the session without recording a target publication or modification.
 ///
-/// A commit first settles accepted writes. Once its command is queued, new
-/// writes and flushes are rejected until its result is observed. Cancelling
-/// the commit future keeps the same request for the next `commit` call. A
-/// retryable failure reopens the writer; success and non-retryable failure
-/// make it terminal. `close` observes any pending commit and retains its
-/// typed result for a later `commit` call before closing the remaining
-/// resource. Inspect publication state and retryability before deciding
-/// whether to retry; `Published` and `Indeterminate` do not authorize replay
-/// of the complete input.
+/// Polling `commit` for the first time establishes a barrier immediately and
+/// starts settling writes already accepted by the worker. New writes and
+/// flushes are rejected from that point. The native commit command is queued
+/// only after settling succeeds. Dropping the future stops that caller's wait,
+/// not the request: another `commit` resumes settling or observes the same
+/// queued result. A retryable failure reopens the writer; success and
+/// non-retryable failure make it terminal. `close` drives a started commit to
+/// completion, even if its command was not queued yet, and retains its typed
+/// result for a later `commit` call. Only closing a staged writer before any
+/// commit starts discards the stage. Inspect publication state and
+/// retryability before deciding whether to retry; `Published` and
+/// `Indeterminate` do not authorize replay of the complete input.
 ///
 /// # Examples
 ///
@@ -51,18 +55,41 @@ use super::stream_state::StreamState;
 ///     writer.commit().await
 /// }
 ///
+/// struct Diagnostics {
+///     write: Option<std::io::Error>,
+///     commit: Option<LocalStreamCommitError>,
+///     close: Option<std::io::Error>,
+/// }
+///
 /// async fn write_and_commit(
 ///     writer: &mut AsyncLocalFileWriter,
 ///     bytes: &[u8],
-/// ) -> Result<LocalWriteOutcome, Box<dyn std::error::Error>> {
+/// ) -> Result<LocalWriteOutcome, Diagnostics> {
 ///     use qubit_io::AsyncOutput;
-///     writer.write_fully_async(bytes).await?;
-///     let mut result = writer.commit().await;
-///     if result.as_ref().is_err_and(|error| error.retryable()) {
-///         result = writer.commit().await;
+///     let write_error = writer.write_fully_async(bytes).await.err();
+///     let mut commit_result = None;
+///     if write_error.is_none() {
+///         let mut result = writer.commit().await;
+///         if let Err(error) = &result {
+///             let state = error.commit_error().state();
+///             if error.retryable()
+///                 && state == qubit_local_files::outcome::LocalWriteFailureState::NotPublished
+///             {
+///                 result = writer.commit().await;
+///             }
+///         }
+///         commit_result = Some(result);
 ///     }
-///     writer.close().await?;
-///     Ok(result?)
+///     let close_error = writer.close().await.err();
+///     let commit_error = commit_result.as_ref().and_then(|result| result.as_ref().err());
+///     if write_error.is_some() || commit_error.is_some() || close_error.is_some() {
+///         return Err(Diagnostics {
+///             write: write_error,
+///             commit: commit_result.and_then(Result::err),
+///             close: close_error,
+///         });
+///     }
+///     Ok(commit_result.expect("successful write is committed").expect("commit succeeded"))
 /// }
 /// ```
 pub struct AsyncLocalFileWriter {
@@ -110,9 +137,12 @@ impl AsyncLocalFileWriter {
         std::future::poll_fn(move |cx| state.poll_settle(resource, cx)).await
     }
 
-    /// Commits the staged file and returns its publication and durability
-    /// result. A retryable typed error leaves the writer available for
-    /// another call.
+    /// Starts or resumes the commit. On the first poll this establishes a
+    /// write barrier, settles bytes already accepted by the worker, then
+    /// queues the native commit command. Dropping this future only cancels the
+    /// caller's wait. Call `commit` again to resume settling or observe the
+    /// same queued command result. A retryable typed error leaves the writer
+    /// available for another call; inspect its typed state before retrying.
     pub async fn commit(&mut self) -> Result<crate::LocalWriteOutcome, LocalStreamCommitError> {
         if let Some(result) = self.result.take() {
             return result;
@@ -154,7 +184,14 @@ impl AsyncLocalFileWriter {
         std::future::poll_fn(move |cx| poll_commit(resource, request, started, terminal, cx)).await
     }
 
-    /// Closes this port without waiting for operation settlement.
+    /// Completes a started commit, then closes this writer port.
+    ///
+    /// If a commit was started, close keeps driving it even when it was still
+    /// settling accepted writes and had not queued its native command. Its
+    /// result remains available from the next `commit` call. Closing a staged
+    /// writer before the first commit poll discards the unpublished stage.
+    /// This closes the writer port; an owning open operation must still be
+    /// released before waiting for that operation's settlement.
     pub async fn close(&mut self) -> io::Result<()> {
         if self.request.is_some() || (self.started && !self.terminal) {
             self.result = Some(self.commit().await);
