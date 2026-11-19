@@ -2056,6 +2056,41 @@ mod owner_policy_checkpoint_tests {
     }
 
     #[test]
+    fn test_pinning_rejects_symbolic_links_without_following_the_target() {
+        use std::os::unix::fs::symlink;
+
+        let (scratch, stage, policy) = fixture(false);
+        let root = scratch.path().join(stage.relative_name());
+        let target = scratch.path().join("outside-target");
+        fs::write(&target, b"target remains unchanged").expect("outside target");
+        symlink(&target, root.join("link")).expect("stage symbolic link");
+
+        let (entries, _, _, _) = stage
+            .collect_owner_policy_entries(&policy, &LocalListOptions::new())
+            .expect("collect link as an entry");
+        assert_eq!(1, entries.len());
+        assert_eq!(crate::LocalFileKind::Symlink, entries[0].1);
+
+        let error = stage
+            .open_and_pin_owner_policy_entries(&entries, LocalFileSyncRequirement::NotRequired)
+            .expect_err("owner policy must reject links before opening their targets");
+        assert_eq!(LocalFileErrorKind::RequirementNotMet, error.cause().kind());
+        assert_eq!(LocalFileOperation::Metadata, error.cause().operation());
+        assert_eq!(LocalTreeAccessState::Preserved, error.access_state());
+        assert_eq!(
+            b"target remains unchanged",
+            fs::read(&target).expect("target contents").as_slice()
+        );
+        assert!(
+            fs::symlink_metadata(root.join("link"))
+                .expect("link metadata")
+                .file_type()
+                .is_symlink()
+        );
+        let _recovery = stage.retain_in_place();
+    }
+
+    #[test]
     fn test_pinning_rejects_a_replaced_root_binding_even_for_an_empty_tree() {
         let (scratch, stage, policy) = fixture(false);
         let root = scratch.path().join(stage.relative_name());
