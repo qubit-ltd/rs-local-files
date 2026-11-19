@@ -970,6 +970,29 @@ mod relative_host_publish_tests {
     }
 
     #[test]
+    fn test_writer_commit_reports_missing_parent_without_publishing() {
+        let directory = tempfile::tempdir().unwrap();
+        let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+        let filesystem = filesystem(&manager, directory.path());
+        let (mut operation, observer) = filesystem
+            .submit_writer_commit(
+                &manager,
+                Default::default(),
+                LocalWriterCommitRequest {
+                    path: PathBuf::from("missing/output"),
+                    options: LocalWriteOptions::new(LocalWriteMode::CreateOrReplace),
+                    bytes: b"cannot publish".to_vec(),
+                },
+                LocalOperationOptions::default(),
+            )
+            .unwrap();
+
+        assert!(matches!(operation.wait_outcome().unwrap(), OperationOutcome::Failed(_)));
+        assert!(!directory.path().join("missing/output").exists());
+        assert_eq!(observer.snapshot().publication, LocalPublicationState::NotPublished);
+    }
+
+    #[test]
     fn test_relative_staged_tree_publish_uses_captured_host_base_as_parent() {
         let directory = tempfile::tempdir().unwrap();
         let manager = OperationManager::new(ManagerOptions::default()).unwrap();
@@ -1065,6 +1088,67 @@ mod relative_host_publish_tests {
         assert_eq!(std::fs::read(destination.join("original")).unwrap(), b"keep me");
         assert!(!destination.join("replacement").exists());
         assert_eq!(observer.snapshot().publication, LocalPublicationState::NotPublished);
+    }
+
+    #[test]
+    fn test_staged_tree_publish_rejects_parent_traversal_entry() {
+        let directory = tempfile::tempdir().unwrap();
+        let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+        let filesystem = filesystem(&manager, directory.path());
+        let (mut operation, observer) = filesystem
+            .submit_staged_tree_publish(
+                &manager,
+                Default::default(),
+                LocalStagedTreePublishRequest {
+                    parent: PathBuf::from("."),
+                    name: "tree".into(),
+                    stage_options: LocalTempDirectoryOptions::new(),
+                    files: vec![LocalStagedTreeFile {
+                        path: PathBuf::from("../outside"),
+                        bytes: b"must remain staged".to_vec(),
+                    }],
+                    publish_options: LocalTreePublishOptions::new(),
+                },
+                LocalOperationOptions::default(),
+            )
+            .unwrap();
+
+        assert!(matches!(operation.wait_outcome().unwrap(), OperationOutcome::Failed(_)));
+        assert!(!directory.path().join("tree").exists());
+        assert!(!directory.path().join("outside").exists());
+        assert_eq!(observer.snapshot().publication, LocalPublicationState::NotPublished);
+    }
+
+    #[test]
+    fn test_staged_tree_publish_rejects_disk_limit_before_submission() {
+        let directory = tempfile::tempdir().unwrap();
+        let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+        let filesystem = filesystem(&manager, directory.path());
+        let request = LocalStagedTreePublishRequest {
+            parent: PathBuf::from("."),
+            name: "limited-tree".into(),
+            stage_options: LocalTempDirectoryOptions::new(),
+            files: vec![LocalStagedTreeFile {
+                path: PathBuf::from("item"),
+                bytes: b"payload".to_vec(),
+            }],
+            publish_options: LocalTreePublishOptions::new(),
+        };
+
+        let rejected = filesystem
+            .submit_staged_tree_publish(
+                &manager,
+                Default::default(),
+                request,
+                LocalOperationOptions {
+                    max_disk_bytes: Some(1),
+                    ..LocalOperationOptions::default()
+                },
+            )
+            .expect_err("disk limit below the staged payload must reject submission");
+
+        assert_eq!(rejected.rejection(), crate::operation::LocalSubmitRejection::CapacityExceeded);
+        assert!(!directory.path().join("limited-tree").exists());
     }
 
     #[cfg(feature = "digest")]
