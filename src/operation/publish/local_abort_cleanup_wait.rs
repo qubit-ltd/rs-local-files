@@ -115,6 +115,48 @@ mod tests {
         ));
     }
 
+    #[test]
+    fn test_abort_wait_recovers_a_poisoned_result_lock() {
+        let (mut wait, state) = wait::<u8>();
+        let result_state = Arc::clone(&state);
+        let poisoner = std::thread::spawn(move || {
+            *result_state.result.lock().expect("cleanup result lock") = Some(CleanupOutcome::Released);
+            panic!("poison cleanup result lock");
+        });
+        assert!(poisoner.join().is_err());
+        let mut context = Context::from_waker(Waker::noop());
+
+        assert!(matches!(
+            Future::poll(std::pin::Pin::new(&mut wait), &mut context),
+            Poll::Ready(CleanupOutcome::Released)
+        ));
+    }
+
+    #[test]
+    fn test_abort_wait_registers_waker_after_poisoned_waker_lock() {
+        let (mut wait, state) = wait::<u8>();
+        let waker_state = Arc::clone(&state);
+        let poisoner = std::thread::spawn(move || {
+            let _guard = waker_state.waker.lock().expect("registered waker lock");
+            panic!("poison registered waker lock");
+        });
+        assert!(poisoner.join().is_err());
+        let wake_count = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let waker = Waker::from(Arc::new(TestWake(Arc::clone(&wake_count))));
+        let mut context = Context::from_waker(&waker);
+
+        assert!(matches!(
+            Future::poll(std::pin::Pin::new(&mut wait), &mut context),
+            Poll::Pending
+        ));
+        let registered_waker = state.waker.lock().unwrap_or_else(|error| error.into_inner());
+        assert!(
+            registered_waker
+                .as_ref()
+                .is_some_and(|waker| waker.will_wake(context.waker()))
+        );
+    }
+
     struct TestWake(std::sync::Arc<std::sync::atomic::AtomicUsize>);
 
     impl std::task::Wake for TestWake {
