@@ -336,7 +336,9 @@ mod tests {
         };
 
         let mut paths = Vec::new();
+        let mut batch_sizes = Vec::new();
         while let Some(batch) = block_on(walker.next_batch()).unwrap() {
+            batch_sizes.push(batch.len());
             paths.extend(batch);
         }
         let mut names: Vec<_> = paths.iter().map(|path| path.file_name().unwrap().to_owned()).collect();
@@ -344,6 +346,11 @@ mod tests {
         assert_eq!(
             names,
             expected.into_iter().map(std::ffi::OsString::from).collect::<Vec<_>>()
+        );
+        assert_eq!(
+            batch_sizes,
+            [128, 2],
+            "the entry limit should split the final two paths into a second batch"
         );
         operation.wait_settlement().unwrap();
     }
