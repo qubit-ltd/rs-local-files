@@ -102,17 +102,21 @@ request. Retry only when the typed error is retryable and
 `commit_error().state()` is `NotPublished`; `Published` confirms publication,
 while `Indeterminate` needs reconciliation, and neither permits replaying the
 whole input. If waiting for `commit()` times out, calling `close()` still drives that started commit to completion and may publish it; `close()` retains its
-typed result for a later `commit()`. Keep commit and close errors separately
-so both diagnostics survive if both fail. If writing fails, still close the
-writer and report the write and close errors when both occur. Drop the writer
-reference before waiting for open-operation settlement and retain recovery
-handles from its report.
+typed result for one later `commit()`. That cached failure is non-retryable:
+the writer has entered its terminal close path, although the original typed
+failure and publication state are preserved. A failure observed before close
+can still be retried while the writer remains open. Keep the commit result and
+close error separately so a successful `LocalWriteOutcome` is retained when
+close fails. If writing fails, still close the writer and report the write and
+close errors when both occur. Drop the writer reference before waiting for
+open-operation settlement and pass its recovery handles to the caller with
+the close result.
 
 ```rust,no_run
 # #[cfg(feature = "async")]
 struct Diagnostics {
     write: Option<std::io::Error>,
-    commit: Option<qubit_local_files::operation::stream::LocalStreamCommitError>,
+    commit: Option<Result<qubit_local_files::outcome::LocalWriteOutcome, qubit_local_files::operation::stream::LocalStreamCommitError>>,
     close: Option<std::io::Error>,
 }
 
@@ -137,11 +141,10 @@ if write_error.is_none() {
     commit_result = Some(result);
 }
 let close_error = writer.close().await.err();
-let commit_error = commit_result.as_ref().and_then(|result| result.as_ref().err());
-if write_error.is_some() || commit_error.is_some() || close_error.is_some() {
+if write_error.is_some() || commit_result.as_ref().is_some_and(Result::is_err) || close_error.is_some() {
     return Err(Diagnostics {
         write: write_error,
-        commit: commit_result.and_then(Result::err),
+        commit: commit_result,
         close: close_error,
     });
 }
@@ -157,7 +160,7 @@ waiting for the operation's settlement and retain any recovery handles:
 # async fn example(
 #     filesystem: &qubit_local_files::operation::AsyncLocalFileSystem,
 #     manager: &qubit_operation::OperationManager,
-# ) -> Result<(), Box<dyn std::error::Error>> {
+# ) -> Result<(std::io::Result<()>, std::sync::Arc<qubit_operation::SettlementReport>), Box<dyn std::error::Error>> {
 use std::path::PathBuf;
 use qubit_local_files::options::{LocalWriteMode, LocalWriteOptions};
 use qubit_operation::{OperationOptions, OperationOutcome};
@@ -173,11 +176,10 @@ let mut writer = match opening.wait_outcome().await? {
     OperationOutcome::Succeeded(writer) => writer,
     _ => return Err(std::io::Error::other("writer open failed").into()),
 };
-writer.close().await?;
+let close_result = writer.close().await;
 drop(writer);
 let settlement = opening.wait_settlement().await;
-let _recovery_handles = settlement.recoveries.clone();
-# Ok(())
+Ok((close_result, settlement))
 # }
 ```
 

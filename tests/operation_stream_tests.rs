@@ -42,6 +42,7 @@ use qubit_operation::OperationManager;
 use qubit_operation::ResourceRef;
 use qubit_operation::ResourceScopeOptions;
 
+#[cfg(feature = "test-support")]
 static TEST_STAGE_WRITE_GATE: Mutex<()> = Mutex::new(());
 
 #[derive(Default)]
@@ -658,14 +659,22 @@ fn test_staged_async_writer_cleanup_failure_can_be_retried() {
 
     let fault = install_test_fault_shared("writer-staged-abort-cleanup").unwrap();
     let error = poll_worker(|cx| Box::pin(writer.close()).as_mut().poll(cx)).unwrap_err();
-    drop(fault);
     assert!(error.to_string().contains("Abort"));
     assert!(
         !target.exists(),
         "failed staged cleanup must not publish the destination"
     );
 
-    opening.wait_settlement().unwrap();
+    drop(writer);
+    let settlement = opening.wait_settlement().unwrap();
+    assert_eq!(settlement.recovery_count, 1);
+    let recovery = settlement
+        .recoveries
+        .first()
+        .expect("settlement retains failed staged cleanup")
+        .clone();
+    drop(fault);
+    recovery.try_retry().unwrap().wait().unwrap();
     assert!(!target.exists());
     assert_eq!(
         std::fs::read_dir(directory.path()).unwrap().count(),

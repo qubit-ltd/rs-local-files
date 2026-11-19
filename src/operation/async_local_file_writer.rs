@@ -37,8 +37,10 @@ use super::stream_state::StreamState;
 /// queued result. A retryable failure reopens the writer; success and
 /// non-retryable failure make it terminal. `close` drives a started commit to
 /// completion, even if its command was not queued yet, and retains its typed
-/// result for a later `commit` call. Only closing a staged writer before any
-/// commit starts discards the stage. Inspect publication state and
+/// result for one later `commit` call. A cached failure is non-retryable
+/// because the writer has entered its terminal close path, even when the
+/// original failure allowed retry while open. Only closing a staged writer
+/// before any commit starts discards the stage. Inspect publication state and
 /// retryability before deciding whether to retry; `Published` and
 /// `Indeterminate` do not authorize replay of the complete input.
 ///
@@ -188,17 +190,14 @@ impl AsyncLocalFileWriter {
     ///
     /// If a commit was started, close keeps driving it even when it was still
     /// settling accepted writes and had not queued its native command. Its
-    /// result remains available from the next `commit` call. Closing a staged
-    /// writer before the first commit poll discards the unpublished stage.
-    /// This closes the writer port; an owning open operation must still be
-    /// released before waiting for that operation's settlement.
+    /// result remains available from one subsequent `commit` call, but a
+    /// cached failure is non-retryable because this writer is closed. Closing a
+    /// staged writer before the first commit poll discards the unpublished
+    /// stage. This closes the writer port; an owning open operation must
+    /// still be released before waiting for that operation's settlement.
     pub async fn close(&mut self) -> io::Result<()> {
         if self.request.is_some() || (self.started && !self.terminal) {
-            self.result = Some(
-                self.commit()
-                    .await
-                    .map_err(LocalStreamCommitError::without_retry),
-            );
+            self.result = Some(self.commit().await.map_err(LocalStreamCommitError::without_retry));
             self.terminal = true;
         }
         let Some(resource) = self.resource.as_deref() else {

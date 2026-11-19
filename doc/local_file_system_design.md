@@ -1686,7 +1686,10 @@ including one still settling and not yet queued. If the commit result was not
 yet returned, `close()` retains that typed result for the next `commit()` call.
 Closing a staged writer before commit starts calls native abort and reports
 cleanup failure; the worker retains the native owner so managed cleanup or
-recovery can retry. Append close preserves bytes already published. Retry only
+recovery can retry. Append close preserves bytes already published. A commit
+result cached by `close()` is delivered once, but a cached failure is
+non-retryable because the writer is terminal; the same failure can remain
+retryable when observed before close. Retry only
 when the typed error is retryable and `commit_error().state()` is
 `NotPublished`. `Published` confirms publication and `Indeterminate` requires
 reconciliation; neither authorizes replay of the whole write. Preserve commit
@@ -1698,7 +1701,7 @@ error.
 # #[cfg(feature = "async")]
 struct Diagnostics {
     write: Option<std::io::Error>,
-    commit: Option<qubit_local_files::operation::stream::LocalStreamCommitError>,
+    commit: Option<Result<qubit_local_files::outcome::LocalWriteOutcome, qubit_local_files::operation::stream::LocalStreamCommitError>>,
     close: Option<std::io::Error>,
 }
 
@@ -1723,11 +1726,10 @@ if write_error.is_none() {
     commit_result = Some(result);
 }
 let close_error = writer.close().await.err();
-let commit_error = commit_result.as_ref().and_then(|result| result.as_ref().err());
-if write_error.is_some() || commit_error.is_some() || close_error.is_some() {
+if write_error.is_some() || commit_result.as_ref().is_some_and(Result::is_err) || close_error.is_some() {
     return Err(Diagnostics {
         write: write_error,
-        commit: commit_result.and_then(Result::err),
+        commit: commit_result,
         close: close_error,
     });
 }
@@ -1744,7 +1746,7 @@ handles:
 # async fn example(
 #     filesystem: &qubit_local_files::operation::AsyncLocalFileSystem,
 #     manager: &qubit_operation::OperationManager,
-# ) -> Result<(), Box<dyn std::error::Error>> {
+# ) -> Result<(std::io::Result<()>, std::sync::Arc<qubit_operation::SettlementReport>), Box<dyn std::error::Error>> {
 use std::path::PathBuf;
 use qubit_local_files::options::{LocalWriteMode, LocalWriteOptions};
 use qubit_operation::{OperationOptions, OperationOutcome};
@@ -1760,11 +1762,10 @@ let mut writer = match opening.wait_outcome().await? {
     OperationOutcome::Succeeded(writer) => writer,
     _ => return Err(std::io::Error::other("writer open failed").into()),
 };
-writer.close().await?;
+let close_result = writer.close().await;
 drop(writer);
 let settlement = opening.wait_settlement().await;
-let _recovery_handles = settlement.recoveries.clone();
-# Ok(())
+Ok((close_result, settlement))
 # }
 ```
 

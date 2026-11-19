@@ -89,14 +89,13 @@ commit 不产生发布或修改事件。`settle()` 等待已接纳字节送达 n
 `commit_error().state()` 为 `NotPublished` 时才重试；`Published` 表示发布已确认，
 `Indeterminate` 需要核对，两者都不能授权重放整批输入。即使等待 `commit()` 超时，调用 `close()` 仍会推进已开始的提交，并可能发布该内容；`close()` 会
 暂存其类型化结果供之后的 `commit()` 取回。分别保留提交和关闭错误；两者都失败时同时报告。写入
-失败后仍须关闭 writer；若关闭也失败，应同时报告写入和关闭诊断。等待 open operation settlement
-前先释放 writer 引用，并保留 settlement 报告中的恢复 handle。
+失败后仍须关闭 writer；若关闭也失败，应同时报告写入和关闭诊断。close 缓存的提交失败仍保留原始类型化错误和发布状态，但因 writer 已进入终态而不可重试；writer 仍打开时直接观察到的可重试失败仍可重试。关闭失败时也要保留成功的 `LocalWriteOutcome`。等待 open operation settlement 前先释放 writer 引用，并将恢复 handle 与关闭结果一起交给调用方。
 
 ```rust,no_run
 # #[cfg(feature = "async")]
 struct Diagnostics {
     write: Option<std::io::Error>,
-    commit: Option<qubit_local_files::operation::stream::LocalStreamCommitError>,
+    commit: Option<Result<qubit_local_files::outcome::LocalWriteOutcome, qubit_local_files::operation::stream::LocalStreamCommitError>>,
     close: Option<std::io::Error>,
 }
 
@@ -121,11 +120,10 @@ if write_error.is_none() {
     commit_result = Some(result);
 }
 let close_error = writer.close().await.err();
-let commit_error = commit_result.as_ref().and_then(|result| result.as_ref().err());
-if write_error.is_some() || commit_error.is_some() || close_error.is_some() {
+if write_error.is_some() || commit_result.as_ref().is_some_and(Result::is_err) || close_error.is_some() {
     return Err(Diagnostics {
         write: write_error,
-        commit: commit_result.and_then(Result::err),
+        commit: commit_result,
         close: close_error,
     });
 }
@@ -141,7 +139,7 @@ if write_error.is_some() || commit_error.is_some() || close_error.is_some() {
 # async fn example(
 #     filesystem: &qubit_local_files::operation::AsyncLocalFileSystem,
 #     manager: &qubit_operation::OperationManager,
-# ) -> Result<(), Box<dyn std::error::Error>> {
+# ) -> Result<(std::io::Result<()>, std::sync::Arc<qubit_operation::SettlementReport>), Box<dyn std::error::Error>> {
 use std::path::PathBuf;
 use qubit_local_files::options::{LocalWriteMode, LocalWriteOptions};
 use qubit_operation::{OperationOptions, OperationOutcome};
@@ -157,11 +155,10 @@ let mut writer = match opening.wait_outcome().await? {
     OperationOutcome::Succeeded(writer) => writer,
     _ => return Err(std::io::Error::other("writer open failed").into()),
 };
-writer.close().await?;
+let close_result = writer.close().await;
 drop(writer);
 let settlement = opening.wait_settlement().await;
-let _recovery_handles = settlement.recoveries.clone();
-# Ok(())
+Ok((close_result, settlement))
 # }
 ```
 

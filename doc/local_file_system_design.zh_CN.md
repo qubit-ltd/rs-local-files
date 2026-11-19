@@ -1833,7 +1833,8 @@ Staged writer 只有在 commit 尚未开始时关闭才会被放弃。Staged 的
 即使等待提交超时，`close()` 仍会完成所有已开始的提交（因此可能发布内容），再关闭剩余 owner，包括仍在排空且尚未入队的提交。若提交结果
 尚未返回，`close()` 会保留该类型化结果供下一次 `commit()` 取回。commit 开始前关闭 staged writer
 会调用 native abort 并报告清理错误；worker 保留 native owner，使托管清理或 recovery 可以重试。
-Append close 保留已经发布的字节。只有类型化错误可重试且 `commit_error().state()` 为
+Append close 保留已经发布的字节。close 缓存的提交结果只交付一次；其中的错误因 writer 已进入终态而
+不可重试，而在关闭前观察到的同一可重试失败仍允许重试。只有类型化错误可重试且 `commit_error().state()` 为
 `NotPublished` 时才重试。`Published` 表示发布已确认，`Indeterminate` 需要核对；两者都不能授权
 重放整批写入。提交和关闭诊断必须分别保留，包括两者都失败时。写入错误也必须走关闭路径；若关闭
 失败，应同时报告两项错误。
@@ -1842,7 +1843,7 @@ Append close 保留已经发布的字节。只有类型化错误可重试且 `co
 # #[cfg(feature = "async")]
 struct Diagnostics {
     write: Option<std::io::Error>,
-    commit: Option<qubit_local_files::operation::stream::LocalStreamCommitError>,
+    commit: Option<Result<qubit_local_files::outcome::LocalWriteOutcome, qubit_local_files::operation::stream::LocalStreamCommitError>>,
     close: Option<std::io::Error>,
 }
 
@@ -1867,11 +1868,10 @@ if write_error.is_none() {
     commit_result = Some(result);
 }
 let close_error = writer.close().await.err();
-let commit_error = commit_result.as_ref().and_then(|result| result.as_ref().err());
-if write_error.is_some() || commit_error.is_some() || close_error.is_some() {
+if write_error.is_some() || commit_result.as_ref().is_some_and(Result::is_err) || close_error.is_some() {
     return Err(Diagnostics {
         write: write_error,
-        commit: commit_result.and_then(Result::err),
+        commit: commit_result,
         close: close_error,
     });
 }
@@ -1887,7 +1887,7 @@ if write_error.is_some() || commit_error.is_some() || close_error.is_some() {
 # async fn example(
 #     filesystem: &qubit_local_files::operation::AsyncLocalFileSystem,
 #     manager: &qubit_operation::OperationManager,
-# ) -> Result<(), Box<dyn std::error::Error>> {
+# ) -> Result<(std::io::Result<()>, std::sync::Arc<qubit_operation::SettlementReport>), Box<dyn std::error::Error>> {
 use std::path::PathBuf;
 use qubit_local_files::options::{LocalWriteMode, LocalWriteOptions};
 use qubit_operation::{OperationOptions, OperationOutcome};
@@ -1903,11 +1903,10 @@ let mut writer = match opening.wait_outcome().await? {
     OperationOutcome::Succeeded(writer) => writer,
     _ => return Err(std::io::Error::other("writer open failed").into()),
 };
-writer.close().await?;
+let close_result = writer.close().await;
 drop(writer);
 let settlement = opening.wait_settlement().await;
-let _recovery_handles = settlement.recoveries.clone();
-# Ok(())
+Ok((close_result, settlement))
 # }
 ```
 
