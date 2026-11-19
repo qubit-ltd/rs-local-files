@@ -2,7 +2,7 @@
 
 ## Current status
 
-FreeBSD is temporarily unsupported by `qubit-local-files`. The current CI evidence is from FreeBSD 14.3 in GitHub Actions run [41173303438](https://github.com/qubit-ltd/rs-local-files/actions/runs/41173303438), revision `f72a5b26b0b598adc2d4f0d7edcbc0d019537892` (2026-10-31).
+FreeBSD is temporarily unsupported by `qubit-local-files`. The full-suite CI evidence is from FreeBSD 14.3 in GitHub Actions run [41173303438](https://github.com/qubit-ltd/rs-local-files/actions/runs/41173303438), revision `f72a5b26b0b598adc2d4f0d7edcbc0d019537892` (2026-10-31). A later run provides a passing result for one named recovery scenario on revision `51fb1b66850334bbafb09e7333960d4b287cb7c9`; see [the scoped result below](#operations-that-did-pass).
 
 “Unsupported” means the project does not currently promise that the APIs below work on FreeBSD. It does not mean every API is disabled or always returns `Unsupported`: reads, metadata queries, cleanup, and some feature-specific tests did succeed. Do not rely on a successful call or a build check as evidence that the complete operation contract is supported.
 
@@ -41,6 +41,8 @@ The FreeBSD-specific limitations in these examples are handled explicitly in the
 ## Operations that did pass
 
 The same FreeBSD run successfully exercised the FreeBSD xattr short-read/atomic-preservation test and the conditional-write `Unsupported` contract for the unsupported `Content` protocol. The xattr-focused `test_attribute_read` checks also passed. Those results cover only the named contracts; they do not imply support for the failing operation families above.
+
+The FreeBSD 14.3 job in [CI run 44577532911](https://github.com/qubit-ltd/rs-local-files/actions/runs/44577532911) checked out revision `51fb1b66850334bbafb09e7333960d4b287cb7c9` and passed `test_read_stage_cancel_late_consumer_cleanup_and_recovery_retry` once with `--features async,test-support` (`1 passed, 0 failed`). This is evidence for that exact cancellation and recovery scenario on the recorded runner only. The overall CI run failed in other jobs; the FreeBSD compatibility job itself succeeded.
 
 ## Why we do not emulate no-replace rename
 

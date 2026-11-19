@@ -2,7 +2,7 @@
 
 ## 当前状态
 
-`qubit-local-files` 暂时不支持 FreeBSD。当前 CI 证据来自 GitHub Actions 中的 FreeBSD 14.3，[run 41173303438](https://github.com/qubit-ltd/rs-local-files/actions/runs/41173303438)，revision `f72a5b26b0b598adc2d4f0d7edcbc0d019537892`（2026-10-31）。
+`qubit-local-files` 暂时不支持 FreeBSD。完整套件的 CI 证据来自 GitHub Actions 中的 FreeBSD 14.3，[run 41173303438](https://github.com/qubit-ltd/rs-local-files/actions/runs/41173303438)，revision `f72a5b26b0b598adc2d4f0d7edcbc0d019537892`（2026-10-31）。之后的 CI run 在 revision `51fb1b66850334bbafb09e7333960d4b287cb7c9` 上通过了一个指定的恢复场景；详见[下方该项测试的限定结果](#已通过的操作)。
 
 “暂不支持”表示项目目前不承诺下列 API 在 FreeBSD 上可用；不表示所有 API 都已禁用，或每次调用都会返回 `Unsupported`。本次运行中，读取、部分 metadata 查询、清理以及若干特定功能测试成功过。单次调用成功或编译检查通过，都不能证明完整操作契约受到支持。
 
@@ -41,6 +41,8 @@ FreeBSD all-features doctest 结果为 145 通过、8 失败、5 忽略。失败
 ## 已通过的操作
 
 同一次 FreeBSD CI 运行成功执行了 FreeBSD xattr 短读/原子保留测试，以及针对当前不支持的 `Content` 条件写入协议的 `Unsupported` 合同测试。聚焦的 `test_attribute_read` 检查也通过。这些结果只覆盖列出的合同，不能说明上表中的失败操作族已受支持。
+
+GitHub Actions [CI 运行 44577532911](https://github.com/qubit-ltd/rs-local-files/actions/runs/44577532911) 的 FreeBSD 14.3 job 检出了 revision `51fb1b66850334bbafb09e7333960d4b287cb7c9`，并以 `--features async,test-support` 成功运行一次 `test_read_stage_cancel_late_consumer_cleanup_and_recovery_retry`（1 通过、0 失败）。这仅证明该 runner 上列出的取消与恢复场景。整个 CI 运行因其他 job 失败；FreeBSD compatibility job 本身通过。
 
 ## 为什么不模拟 no-replace rename
 
