@@ -273,8 +273,12 @@ impl LocalWalkDriver for WorkerWalkDriver {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
+    use std::io;
     use std::path::PathBuf;
     use std::sync::Arc;
+    use std::sync::Mutex;
+    use std::sync::atomic::AtomicBool;
     use std::task::Context;
     use std::task::Poll;
     use std::task::Wake;
@@ -284,10 +288,58 @@ mod tests {
     use qubit_operation::OperationManager;
     use qubit_operation::OperationOutcome;
 
+    use super::LocalWalkDriver;
+    use super::WorkerWalkCursor;
+    use super::WorkerWalkDriver;
+    use super::WorkerWalkInner;
     use crate::LocalListOptions;
     use crate::operation::AsyncLocalFileSystem;
     use crate::operation::LocalExecutionConfig;
     use crate::operation::LocalIoExecutor;
+    use crate::operation::internal::permits::PermitPool;
+
+    fn direct_driver(directory: &tempfile::TempDir, executor: LocalIoExecutor) -> WorkerWalkDriver {
+        let filesystem = crate::LocalFileSystem::rooted(directory.path()).unwrap();
+        let walker = filesystem
+            .list_with_options(&PathBuf::from("."), &LocalListOptions::default())
+            .unwrap();
+        let cleanup_permit = executor.reserve_cleanup().unwrap();
+        let buffer_budget = Arc::new(Mutex::new(PermitPool::new(1).try_acquire(1).unwrap()));
+        let handle_budget = Arc::new(PermitPool::new(1).try_acquire(1).unwrap());
+        WorkerWalkDriver(Arc::new(WorkerWalkInner {
+            executor,
+            walker: Mutex::new(WorkerWalkCursor {
+                walker: Some(walker),
+                pending_entry: None,
+            }),
+            commands: Mutex::new(HashMap::new()),
+            stop_requested: AtomicBool::new(false),
+            closed: AtomicBool::new(false),
+            close_error: Mutex::new(None),
+            close_waker: Mutex::new(None),
+            cleanup_permit: Mutex::new(Some(cleanup_permit)),
+            _buffer_budget: buffer_budget,
+            _handle_budget: handle_budget,
+        }))
+    }
+
+    async fn poll_batch(
+        driver: &WorkerWalkDriver,
+        request_id: u64,
+        max_entries: usize,
+        max_bytes: usize,
+    ) -> io::Result<Option<Vec<PathBuf>>> {
+        std::future::poll_fn(|cx| driver.poll_batch(cx, request_id, max_entries, max_bytes)).await
+    }
+
+    async fn poll_closed(driver: &WorkerWalkDriver) -> io::Result<()> {
+        std::future::poll_fn(|cx| driver.poll_closed(cx)).await
+    }
+
+    fn stop_driver(driver: &WorkerWalkDriver) {
+        driver.request_stop();
+        block_on(poll_closed(driver)).unwrap();
+    }
 
     fn block_on<F: std::future::Future>(future: F) -> F::Output {
         struct ThreadWake(std::thread::Thread);
@@ -463,6 +515,62 @@ mod tests {
         block_on(observer.wait_closed()).unwrap();
         drop(observer);
         operation.wait_settlement().unwrap();
+    }
+
+    #[test]
+    fn test_worker_walk_driver_carries_entry_across_byte_limited_batches() {
+        let directory = tempfile::tempdir().unwrap();
+        std::fs::write(directory.path().join("first"), b"x").unwrap();
+        std::fs::write(directory.path().join("other"), b"x").unwrap();
+
+        let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+        let executor = LocalIoExecutor::new(manager, LocalExecutionConfig::default()).unwrap();
+        let driver = direct_driver(&directory, executor);
+        let byte_limit = PathBuf::from("first").as_os_str().as_encoded_bytes().len();
+        let first = block_on(poll_batch(&driver, 41, 8, byte_limit)).unwrap().unwrap();
+        assert_eq!(first.len(), 1, "the byte limit should admit one equal-sized path");
+        let second = block_on(poll_batch(&driver, 42, 8, byte_limit)).unwrap().unwrap();
+        assert_eq!(
+            second.len(),
+            1,
+            "the carried path should be returned on the next request"
+        );
+        let names = [first[0].file_name().unwrap(), second[0].file_name().unwrap()];
+        assert!(names.contains(&std::ffi::OsStr::new("first")));
+        assert!(names.contains(&std::ffi::OsStr::new("other")));
+        stop_driver(&driver);
+    }
+
+    #[test]
+    fn test_worker_walk_driver_returns_one_path_larger_than_byte_budget() {
+        let directory = tempfile::tempdir().unwrap();
+        std::fs::write(directory.path().join("oversized"), b"x").unwrap();
+
+        let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+        let executor = LocalIoExecutor::new(manager, LocalExecutionConfig::default()).unwrap();
+        let driver = direct_driver(&directory, executor);
+        let batch = block_on(poll_batch(&driver, 43, 8, 0)).unwrap().unwrap();
+        assert_eq!(batch.len(), 1, "a first path cannot be split across batches");
+        assert!(!batch[0].as_os_str().as_encoded_bytes().is_empty());
+        stop_driver(&driver);
+    }
+
+    #[test]
+    fn test_worker_walk_driver_reports_close_error() {
+        let directory = tempfile::tempdir().unwrap();
+        let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+        let executor = LocalIoExecutor::new(manager, LocalExecutionConfig::default()).unwrap();
+        let driver = direct_driver(&directory, executor);
+        driver
+            .0
+            .close_error
+            .lock()
+            .unwrap()
+            .replace((io::ErrorKind::WouldBlock, "cleanup unavailable".into()));
+        let error = block_on(poll_closed(&driver)).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::WouldBlock);
+        assert_eq!(error.to_string(), "cleanup unavailable");
+        driver.0.walker.lock().unwrap().walker.take();
     }
 
     #[test]
