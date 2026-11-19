@@ -1237,6 +1237,156 @@ mod tests {
     }
 
     #[test]
+    fn test_async_facade_submissions_reject_ended_scope_and_group_capacity() {
+        use qubit_operation::GroupOptions;
+        use qubit_operation::OperationOptions;
+        use qubit_operation::OperationOutcome;
+
+        use crate::operation::LocalReadRequest;
+        use crate::operation::LocalSubmitRejection;
+        use crate::options::LocalListOptions;
+        use crate::options::LocalReadOptions;
+        use crate::options::LocalWriteMode;
+        use crate::options::LocalWriteOptions;
+
+        let directory = tempfile::tempdir().unwrap();
+        let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+        let executor = LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).unwrap();
+        let filesystem = block_on(AsyncLocalFileSystem::rooted(
+            executor.clone(),
+            directory.path().to_path_buf(),
+        ))
+        .unwrap();
+
+        let ended_scope_manager = match manager
+            .run(OperationOptions::default(), |scope| Ok::<_, ()>(scope.manager()))
+            .unwrap()
+        {
+            OperationOutcome::Succeeded(scoped_manager) => scoped_manager,
+            _ => panic!("scope manager capture operation must succeed"),
+        };
+
+        macro_rules! assert_path_rejection {
+            ($result:expr, $path:expr, $expected:expr, $request:expr $(,)?) => {{
+                let error = match $result {
+                    Err(error) => error,
+                    Ok(_) => panic!("submission must be rejected"),
+                };
+                assert_eq!(error.rejection(), $expected);
+                assert_eq!($request(error), $path);
+            }};
+        }
+        let owned_path = |error: crate::operation::LocalSubmitError<PathBuf>| error.into_request();
+        let read_path = |error: crate::operation::LocalSubmitError<LocalReadRequest>| error.into_request().path;
+
+        assert_path_rejection!(
+            filesystem.submit_open_walker(
+                &ended_scope_manager,
+                Default::default(),
+                PathBuf::from("ended-walker"),
+                LocalListOptions::default(),
+            ),
+            PathBuf::from("ended-walker"),
+            LocalSubmitRejection::ScopeEnded,
+            owned_path,
+        );
+        assert_path_rejection!(
+            filesystem.submit_open_reader(
+                &ended_scope_manager,
+                Default::default(),
+                PathBuf::from("ended-reader"),
+                LocalReadOptions::default(),
+            ),
+            PathBuf::from("ended-reader"),
+            LocalSubmitRejection::ScopeEnded,
+            owned_path,
+        );
+        assert_path_rejection!(
+            filesystem.submit_open_writer(
+                &ended_scope_manager,
+                Default::default(),
+                PathBuf::from("ended-writer"),
+                LocalWriteOptions::new(LocalWriteMode::CreateOrReplace),
+            ),
+            PathBuf::from("ended-writer"),
+            LocalSubmitRejection::ScopeEnded,
+            owned_path,
+        );
+        assert_path_rejection!(
+            filesystem.submit_read_all_with_observer(
+                &ended_scope_manager,
+                Default::default(),
+                LocalReadRequest {
+                    path: PathBuf::from("ended-read-all"),
+                    read: Default::default(),
+                },
+                Default::default(),
+            ),
+            PathBuf::from("ended-read-all"),
+            LocalSubmitRejection::ScopeEnded,
+            read_path,
+        );
+
+        let constrained_manager = ManagerOptions {
+            max_groups_per_operation: 1,
+            ..Default::default()
+        };
+        let constrained = OperationManager::new(constrained_manager).unwrap();
+        let executor = LocalIoExecutor::new(constrained.clone(), LocalExecutionConfig::default()).unwrap();
+        let filesystem = block_on(AsyncLocalFileSystem::rooted(executor, directory.path().to_path_buf())).unwrap();
+        let other_group = constrained.group(GroupOptions { capacity: 1 }).unwrap();
+        let manager_at_capacity = constrained.with_group(&other_group).unwrap();
+
+        assert_path_rejection!(
+            filesystem.submit_open_walker(
+                &manager_at_capacity,
+                Default::default(),
+                PathBuf::from("capacity-walker"),
+                LocalListOptions::default(),
+            ),
+            PathBuf::from("capacity-walker"),
+            LocalSubmitRejection::CapacityExceeded,
+            owned_path,
+        );
+        assert_path_rejection!(
+            filesystem.submit_open_reader(
+                &manager_at_capacity,
+                Default::default(),
+                PathBuf::from("capacity-reader"),
+                LocalReadOptions::default(),
+            ),
+            PathBuf::from("capacity-reader"),
+            LocalSubmitRejection::CapacityExceeded,
+            owned_path,
+        );
+        assert_path_rejection!(
+            filesystem.submit_open_writer(
+                &manager_at_capacity,
+                Default::default(),
+                PathBuf::from("capacity-writer"),
+                LocalWriteOptions::new(LocalWriteMode::CreateOrReplace),
+            ),
+            PathBuf::from("capacity-writer"),
+            LocalSubmitRejection::CapacityExceeded,
+            owned_path,
+        );
+        assert_path_rejection!(
+            filesystem.submit_read_all_with_observer(
+                &manager_at_capacity,
+                Default::default(),
+                LocalReadRequest {
+                    path: PathBuf::from("capacity-read-all"),
+                    read: Default::default(),
+                },
+                Default::default(),
+            ),
+            PathBuf::from("capacity-read-all"),
+            LocalSubmitRejection::CapacityExceeded,
+            read_path,
+        );
+    }
+
+    #[test]
     fn test_open_submissions_reject_invalid_scope_authority_and_exhausted_handles() {
         use crate::operation::LocalSubmitRejection;
         use crate::options::LocalListOptions;
