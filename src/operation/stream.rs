@@ -391,7 +391,10 @@ mod tests {
     use std::fs::File;
     use std::io::SeekFrom;
     use std::sync::Mutex;
+    use std::sync::atomic::AtomicUsize;
     use std::sync::atomic::Ordering;
+    use std::task::Wake;
+    use std::task::Waker;
     use std::time::SystemTime;
     use std::time::UNIX_EPOCH;
 
@@ -400,6 +403,7 @@ mod tests {
     use super::LocalStreamCompletion;
     use super::drain_stream_commands;
     use super::execute_stream_command;
+    use super::fail_stream_queue;
     use super::map_walk_error;
     use super::record_stream_fact;
     use super::stream_state::resource_limit;
@@ -636,5 +640,73 @@ mod tests {
         assert_eq!(snapshot.modified_bytes, 21);
         assert_eq!(std::fs::read(&path).unwrap(), b"append through worker");
         std::fs::remove_file(path).expect("remove fixture");
+    }
+
+    #[test]
+    fn test_fail_stream_queue_fails_queued_commands_and_wakes_callers() {
+        struct CountWake(AtomicUsize);
+        impl Wake for CountWake {
+            fn wake(self: std::sync::Arc<Self>) {
+                self.0.fetch_add(1, Ordering::Relaxed);
+            }
+        }
+
+        let manager = qubit_operation::OperationManager::new(qubit_operation::ManagerOptions::default()).unwrap();
+        let executor = super::super::LocalIoExecutor::new(manager, crate::LocalExecutionConfig::default()).unwrap();
+        let wake = std::sync::Arc::new(CountWake(AtomicUsize::new(0)));
+        let mut commands = HashMap::new();
+        for id in [41, 42] {
+            commands.insert(
+                id,
+                WorkerCommand {
+                    result: None,
+                    waker: Some(Waker::from(std::sync::Arc::clone(&wake))),
+                },
+            );
+        }
+        let inner = WorkerStreamInner {
+            executor: executor.clone(),
+            native: Mutex::new(None),
+            state: Mutex::new(WorkerStreamState { commands }),
+            queue: Mutex::new(VecDeque::from([
+                super::LocalStreamRequest {
+                    id: 41,
+                    command: LocalStreamCommand::Close,
+                },
+                super::LocalStreamRequest {
+                    id: 42,
+                    command: LocalStreamCommand::Abort,
+                },
+            ])),
+            active: std::sync::atomic::AtomicBool::new(true),
+            cleanup_permit: Mutex::new(Some(executor.reserve_cleanup().unwrap())),
+            _buffer_budget: std::sync::Arc::new(Mutex::new(executor.reserve_bytes(0).unwrap())),
+            _handle_budget: std::sync::Arc::new(executor.reserve_handle().unwrap()),
+            observer: None,
+            written_bytes: std::sync::atomic::AtomicU64::new(0),
+            append_mode: false,
+        };
+
+        fail_stream_queue(
+            &inner,
+            std::io::Error::new(std::io::ErrorKind::WouldBlock, "queue full"),
+        );
+
+        assert!(!inner.active.load(Ordering::Acquire));
+        assert!(inner.queue.lock().unwrap().is_empty());
+        let state = inner.state.lock().unwrap();
+        for id in [41, 42] {
+            assert_eq!(
+                state.commands[&id]
+                    .result
+                    .as_ref()
+                    .unwrap()
+                    .as_ref()
+                    .unwrap_err()
+                    .kind(),
+                std::io::ErrorKind::WouldBlock
+            );
+        }
+        assert_eq!(wake.0.load(Ordering::Relaxed), 2);
     }
 }
