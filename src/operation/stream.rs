@@ -624,7 +624,7 @@ mod tests {
             .lock()
             .unwrap()
             .commands
-            .get(&41)
+            .get_mut(&41)
             .unwrap()
             .result
             .take()
