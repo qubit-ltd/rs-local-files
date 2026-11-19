@@ -451,4 +451,76 @@ mod tests {
         assert!(state.commands.get(&7).unwrap().result.is_none());
         assert!(driver.0.queue.lock().unwrap().is_empty());
     }
+
+    #[test]
+    fn test_request_close_records_error_when_all_scheduling_lanes_are_full() {
+        let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+        let executor = LocalIoExecutor::new(
+            manager,
+            LocalExecutionConfig {
+                worker_count: 1,
+                queue_capacity: 1,
+                waiter_capacity: 1,
+                max_open_handles: 1,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let held_cleanup = executor.reserve_cleanup().unwrap();
+        let (started_tx, started_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        executor
+            .enqueue_task(move || {
+                started_tx.send(()).unwrap();
+                release_rx.recv().unwrap();
+            })
+            .unwrap();
+        started_rx.recv().unwrap();
+        executor.enqueue_task(|| {}).unwrap();
+        executor.enqueue_task(|| {}).unwrap();
+
+        let fixture = tempfile::NamedTempFile::new().unwrap();
+        let native = crate::LocalFileReader::from_file(fixture.reopen().unwrap()).unwrap();
+        let buffer_budget = Arc::new(Mutex::new(executor.reserve_bytes(0).unwrap()));
+        let handle_budget = Arc::new(executor.reserve_handle().unwrap());
+        let driver = WorkerStreamDriver(Arc::new(WorkerStreamInner {
+            executor,
+            native: Mutex::new(Some(LocalNativeStream::Reader(native))),
+            state: Mutex::new(WorkerStreamState {
+                commands: HashMap::new(),
+            }),
+            queue: Mutex::new(VecDeque::new()),
+            active: std::sync::atomic::AtomicBool::new(false),
+            cleanup_permit: Mutex::new(None),
+            _buffer_budget: buffer_budget,
+            _handle_budget: handle_budget,
+            observer: None,
+            written_bytes: std::sync::atomic::AtomicU64::new(0),
+            append_mode: false,
+        }));
+
+        LocalStreamDriver::request_close(&driver, 11);
+        release_tx.send(()).unwrap();
+
+        let result_kind = {
+            let state = driver.0.state.lock().unwrap();
+            match state
+                .commands
+                .get(&11)
+                .unwrap()
+                .result
+                .as_ref()
+                .expect("failed request_close must retain its scheduling error")
+            {
+                Err(error) => error.kind(),
+                Ok(_) => panic!("failed request_close unexpectedly succeeded"),
+            }
+        };
+        assert_eq!(result_kind, io::ErrorKind::WouldBlock);
+        assert!(driver.0.queue.lock().unwrap().is_empty());
+        assert!(!driver.0.active.load(std::sync::atomic::Ordering::Acquire));
+        assert!(driver.0.native.lock().unwrap().is_some());
+
+        drop(held_cleanup);
+    }
 }
