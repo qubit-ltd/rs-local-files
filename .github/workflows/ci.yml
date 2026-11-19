@@ -75,6 +75,16 @@ jobs:
             su -m ci-runner -c 'cd "$GITHUB_WORKSPACE" && HOME=/tmp/ci-home CARGO_HOME=/tmp/ci-cargo CARGO_TARGET_DIR=/tmp/ci-target cargo test --locked --no-default-features --doc'
             su -m ci-runner -c 'cd "$GITHUB_WORKSPACE" && HOME=/tmp/ci-home CARGO_HOME=/tmp/ci-cargo CARGO_TARGET_DIR=/tmp/ci-target cargo test --locked --all-features --doc'
             su -m ci-runner -c 'cd "$GITHUB_WORKSPACE" && HOME=/tmp/ci-home CARGO_HOME=/tmp/ci-cargo CARGO_TARGET_DIR=/tmp/ci-target cargo test --locked --all-features --test host_fault_and_guarantee_tests test_freebsd_xattr_short_read_and_atomic_preservation'
+            if recovery_output=$(su -m ci-runner -c 'cd "$GITHUB_WORKSPACE" && HOME=/tmp/ci-home CARGO_HOME=/tmp/ci-cargo CARGO_TARGET_DIR=/tmp/ci-target cargo test --locked --features async,test-support --test operation_end_to_end_tests test_read_stage_cancel_late_consumer_cleanup_and_recovery_retry -- --exact --nocapture' 2>&1); then
+              printf '%s\n' "$recovery_output"
+            else
+              printf '%s\n' "$recovery_output"
+              exit 1
+            fi
+            if ! printf '%s\n' "$recovery_output" | grep -Fq 'test test_read_stage_cancel_late_consumer_cleanup_and_recovery_retry ... ok'; then
+              echo 'FreeBSD native cancellation and recovery retry test did not run successfully' >&2
+              exit 1
+            fi
             if conditional_output=$(su -m ci-runner -c 'cd "$GITHUB_WORKSPACE" && HOME=/tmp/ci-home CARGO_HOME=/tmp/ci-cargo CARGO_TARGET_DIR=/tmp/ci-target cargo test --locked --features digest --test conditional_lf3_tests lf3_conditional_ -- --nocapture' 2>&1); then
               printf '%s\n' "$conditional_output"
             else
