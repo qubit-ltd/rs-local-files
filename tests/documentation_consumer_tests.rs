@@ -130,8 +130,7 @@ fn test_readme_quick_start_runs_as_a_consumer() {
             String::from_utf8_lossy(&lock_status.stdout),
             String::from_utf8_lossy(&lock_status.stderr)
         );
-        let consumer_lock =
-            fs::read_to_string(project.join("Cargo.lock")).expect("consumer lock is generated");
+        let consumer_lock = fs::read_to_string(project.join("Cargo.lock")).expect("consumer lock is generated");
         let status = Command::new("cargo")
             .arg("run")
             .arg("--frozen")

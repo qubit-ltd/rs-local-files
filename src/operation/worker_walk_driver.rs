@@ -331,12 +331,14 @@ impl LocalWalkDriver for WorkerWalkDriver {
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
+    use std::future::Future;
     use std::io;
     use std::path::PathBuf;
     use std::sync::Arc;
     use std::sync::Mutex;
     use std::sync::atomic::AtomicBool;
     use std::sync::atomic::AtomicUsize;
+    use std::sync::atomic::Ordering;
     use std::task::Context;
     use std::task::Poll;
     use std::task::Wake;
@@ -542,6 +544,10 @@ mod tests {
 
         assert!(driver.poll_closed(&mut first_context).is_pending());
         assert!(driver.poll_closed(&mut second_context).is_pending());
+        let mut canceled = Box::pin(std::future::poll_fn(|cx| driver.poll_closed(cx)));
+        let mut canceled_context = Context::from_waker(Waker::noop());
+        assert!(canceled.as_mut().poll(&mut canceled_context).is_pending());
+        drop(canceled);
         driver.request_stop();
         release_tx.send(()).unwrap();
         notified_rx.recv_timeout(std::time::Duration::from_secs(5)).unwrap();
@@ -556,6 +562,53 @@ mod tests {
         );
         assert!(matches!(driver.poll_closed(&mut first_context), Poll::Ready(Ok(()))));
         assert!(matches!(driver.poll_closed(&mut second_context), Poll::Ready(Ok(()))));
+        assert!(matches!(driver.poll_closed(&mut first_context), Poll::Ready(Ok(()))));
+    }
+
+    #[test]
+    fn test_close_notifies_outside_lock_and_survives_panicking_waker() {
+        struct LockCheckingWake {
+            inner: Arc<WorkerWalkInner>,
+            notified: AtomicBool,
+        }
+        impl Wake for LockCheckingWake {
+            fn wake(self: Arc<Self>) {
+                self.wake_by_ref();
+            }
+            fn wake_by_ref(self: &Arc<Self>) {
+                self.notified
+                    .store(self.inner.close_state.try_lock().is_ok(), Ordering::SeqCst);
+            }
+        }
+        struct PanicWake;
+        impl Wake for PanicWake {
+            fn wake(self: Arc<Self>) {
+                panic!("waker panic is isolated");
+            }
+        }
+
+        let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+        let executor = LocalIoExecutor::new(manager, LocalExecutionConfig::default()).unwrap();
+        let directory = tempfile::tempdir().unwrap();
+        let driver = direct_driver(&directory, executor);
+        let checking = Arc::new(LockCheckingWake {
+            inner: Arc::clone(&driver.0),
+            notified: AtomicBool::new(false),
+        });
+        let panic_waker = Waker::from(Arc::new(PanicWake));
+        let checking_waker = Waker::from(Arc::clone(&checking));
+        let mut panic_context = Context::from_waker(&panic_waker);
+        let mut checking_context = Context::from_waker(&checking_waker);
+        assert!(driver.poll_closed(&mut panic_context).is_pending());
+        assert!(driver.poll_closed(&mut checking_context).is_pending());
+
+        driver.0.publish_close(Ok(()));
+
+        assert!(
+            checking.notified.load(Ordering::SeqCst),
+            "waiters are woken after unlocking close state"
+        );
+        assert!(matches!(driver.poll_closed(&mut checking_context), Poll::Ready(Ok(()))));
     }
 
     #[test]

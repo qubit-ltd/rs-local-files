@@ -36,17 +36,27 @@ use crate::LocalFileError;
 /// that resource before waiting for settlement.
 ///
 /// ```no_run
+/// #[cfg(feature = "async")]
 /// use std::path::PathBuf;
 ///
+/// #[cfg(feature = "async")]
 /// use qubit_local_files::LocalCreateDirectoryRequest;
+/// #[cfg(feature = "async")]
 /// use qubit_local_files::LocalOperationOptions;
+/// #[cfg(feature = "async")]
 /// use qubit_local_files::LocalOperation;
+/// #[cfg(feature = "async")]
 /// use qubit_local_files::operation::AsyncLocalFileSystem;
+/// #[cfg(feature = "async")]
 /// use qubit_local_files::options::LocalCreateDirectoryOptions;
+/// #[cfg(feature = "async")]
 /// use qubit_operation::OperationManager;
+/// #[cfg(feature = "async")]
 /// use qubit_operation::OperationOptions;
+/// #[cfg(feature = "async")]
 /// use qubit_operation::OperationOutcome;
 ///
+/// #[cfg(feature = "async")]
 /// fn observe_operation(
 ///     filesystem: &AsyncLocalFileSystem,
 ///     manager: &OperationManager,
@@ -72,6 +82,7 @@ use crate::LocalFileError;
 ///     assert_eq!(settlement.operation_id, operation_id);
 ///     Ok(())
 /// }
+/// fn main() {}
 /// ```
 ///
 /// # Type Parameters
@@ -118,9 +129,10 @@ impl<T: Send + 'static, E: Send + 'static> LocalOperation<T, E> {
     /// result slot.
     ///
     /// On success, this handle releases its owned-memory budget reference
-    /// before returning the outcome. An [`OutcomeError`](qubit_operation::OutcomeError)
-    /// means the outcome could not be taken; it is not an operation failure
-    /// delivered by `T` or `E`.
+    /// before returning the outcome. An
+    /// [`OutcomeError`](qubit_operation::OutcomeError) means the outcome
+    /// could not be taken; it is not an operation failure delivered by `T`
+    /// or `E`.
     pub fn wait_outcome(&mut self) -> Result<qubit_operation::OperationOutcome<T, E>, qubit_operation::OutcomeError> {
         let result = self.inner_mut().wait_outcome();
         if result.is_ok() {

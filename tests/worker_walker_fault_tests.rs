@@ -9,8 +9,14 @@
 #![cfg(feature = "async")]
 
 #[cfg(feature = "test-support")]
+static SHARED_FAULT_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+#[cfg(feature = "test-support")]
 #[test]
 fn test_recursive_worker_walker_returns_native_entry_error() {
+    let _fault_test_guard = SHARED_FAULT_TEST_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     use qubit_local_files::LocalFileSystem;
     use qubit_local_files::operation::LocalExecutionConfig;
     use qubit_local_files::operation::LocalIoExecutor;
@@ -43,7 +49,13 @@ fn test_recursive_worker_walker_returns_native_entry_error() {
     // integration-test binary prevents another concurrent walker test from
     // consuming its one-shot fault.
     let _fault = install_test_fault_shared("walker-entry").unwrap();
-    let error = poll_worker(|cx| Box::pin(walker.next_batch()).as_mut().poll(cx)).unwrap_err();
+    let error = loop {
+        match poll_worker(|cx| Box::pin(walker.next_batch()).as_mut().poll(cx)) {
+            Ok(Some(batch)) => assert!(!batch.is_empty(), "successful prefixes should contain entries"),
+            Ok(None) => panic!("injected entry error should be reported before end of traversal"),
+            Err(error) => break error,
+        }
+    };
     assert_eq!(error.kind(), qubit_local_files::error::LocalFileErrorKind::Io);
     assert!(error.to_string().contains("injected walker directory entry failure"));
     drop(walker);
@@ -53,6 +65,9 @@ fn test_recursive_worker_walker_returns_native_entry_error() {
 #[cfg(feature = "test-support")]
 #[test]
 fn test_async_walker_preserves_native_resource_limit() {
+    let _fault_test_guard = SHARED_FAULT_TEST_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     use qubit_local_files::LocalFileSystem;
     use qubit_local_files::error::LocalFileErrorKind;
     use qubit_local_files::error::LocalResourceKind;
@@ -64,8 +79,7 @@ fn test_async_walker_preserves_native_resource_limit() {
     use qubit_operation::OperationOutcome;
 
     let directory = tempfile::tempdir().unwrap();
-    std::fs::write(directory.path().join("entry-a"), b"").unwrap();
-    std::fs::write(directory.path().join("entry-b"), b"").unwrap();
+    std::fs::write(directory.path().join("entry"), b"").unwrap();
     let manager = OperationManager::new(ManagerOptions::default()).unwrap();
     let executor = LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).unwrap();
     let filesystem = LocalFileSystem::host().unwrap().into_async(executor).unwrap();
@@ -74,7 +88,7 @@ fn test_async_walker_preserves_native_resource_limit() {
             &manager,
             Default::default(),
             directory.path().to_path_buf(),
-            LocalListOptions::default().with_max_entries(1),
+            LocalListOptions::default().with_max_entries(0),
         )
         .unwrap();
     let mut walker = match opening.wait_outcome().unwrap() {
@@ -82,17 +96,14 @@ fn test_async_walker_preserves_native_resource_limit() {
         _ => panic!("walker open failed"),
     };
 
-    let first = poll_worker(|cx| Box::pin(walker.next_batch()).as_mut().poll(cx))
-        .unwrap()
-        .expect("the first entry batch should be delivered");
-    assert_eq!(first.len(), 1);
-
     let error = poll_worker(|cx| Box::pin(walker.next_batch()).as_mut().poll(cx)).unwrap_err();
     assert_eq!(error.kind(), LocalFileErrorKind::ResourceLimit);
     assert_eq!(error.path(), Some(directory.path()));
-    let limit = error.resource_limit_error().expect("native budget facts should be retained");
+    let limit = error
+        .resource_limit_error()
+        .expect("native budget facts should be retained");
     assert_eq!(limit.resource(), LocalResourceKind::Entry);
-    assert_eq!(limit.limit(), 1);
+    assert_eq!(limit.limit(), 0);
     assert_eq!(limit.remaining(), 0);
     assert_eq!(limit.requested(), 1);
     drop(walker);

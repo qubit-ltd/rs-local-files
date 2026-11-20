@@ -485,6 +485,8 @@ fn test_staged_commit_reports_unpublished_failure_and_can_retry() {
     use qubit_operation::OperationManager;
     use qubit_operation::OperationOutcome;
 
+    let _gate_lock = TEST_STAGE_WRITE_GATE.lock().unwrap();
+
     let directory = tempfile::tempdir().unwrap();
     let target = directory.path().join("staged-commit.txt");
     let manager = OperationManager::new(ManagerOptions::default()).unwrap();

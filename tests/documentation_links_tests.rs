@@ -63,26 +63,199 @@ fn missing_links(base: &Path, source: &str) -> Vec<(usize, String)> {
 }
 
 fn heading_anchors(source: &str) -> Vec<String> {
-    let mut anchors = Vec::new();
-    let mut counts = HashMap::<String, usize>::new();
-    for line in source.lines() {
-        let trimmed = line.trim_start();
+    fn heading_slug(title: &str) -> String {
+        let title = title.trim().trim_end_matches('#').trim();
+        let mut slug = String::new();
+        let mut separator = false;
+        for ch in title.chars().filter(|ch| *ch != '`' && *ch != '*') {
+            if ch.is_alphanumeric() || ch == '_' || ch == '-' {
+                if separator && !slug.is_empty() && !slug.ends_with('-') {
+                    slug.push('-');
+                }
+                separator = false;
+                slug.push(ch.to_lowercase().next().unwrap_or(ch));
+            } else {
+                separator = true;
+            }
+        }
+        slug
+    }
+
+    fn fence_marker(line: &str) -> Option<(char, usize)> {
+        let indentation = line.bytes().take_while(|byte| *byte == b' ').count();
+        if indentation > 3 {
+            return None;
+        }
+        let rest = &line[indentation..];
+        let marker = rest.chars().next()?;
+        if !matches!(marker, '`' | '~') {
+            return None;
+        }
+        let length = rest.chars().take_while(|ch| *ch == marker).count();
+        (length >= 3).then_some((marker, length))
+    }
+
+    fn closes_fence(line: &str, marker: char, minimum_length: usize) -> bool {
+        let Some((found_marker, length)) = fence_marker(line) else {
+            return false;
+        };
+        if found_marker != marker || length < minimum_length {
+            return false;
+        }
+        let indentation = line.bytes().take_while(|byte| *byte == b' ').count();
+        line[indentation + length..].trim().is_empty()
+    }
+
+    fn setext_level(line: &str) -> Option<char> {
+        let trimmed = line.trim();
+        let marker = trimmed.chars().next()?;
+        if !matches!(marker, '=' | '-') || trimmed.chars().any(|ch| ch != marker) {
+            return None;
+        }
+        (trimmed.len() >= 2).then_some(marker)
+    }
+
+    fn atx_title(line: &str) -> Option<&str> {
+        let indentation = line.bytes().take_while(|byte| *byte == b' ').count();
+        if indentation > 3 {
+            return None;
+        }
+        let trimmed = &line[indentation..];
         let hashes = trimmed.chars().take_while(|ch| *ch == '#').count();
-        if (1..=6).contains(&hashes) && trimmed[hashes..].starts_with(' ') {
-            let title = trimmed[hashes..].trim().trim_end_matches('#').trim();
-            let mut slug = String::new();
-            let mut separator = false;
-            for ch in title.chars().filter(|ch| *ch != '`' && *ch != '*') {
-                if ch.is_alphanumeric() || ch == '_' || ch == '-' {
-                    if separator && !slug.is_empty() && !slug.ends_with('-') {
-                        slug.push('-');
+        if !(1..=6).contains(&hashes) {
+            return None;
+        }
+        let rest = &trimmed[hashes..];
+        if !rest.is_empty() && !rest.chars().next().is_some_and(char::is_whitespace) {
+            return None;
+        }
+        Some(rest)
+    }
+
+    fn without_inline_code(line: &str) -> String {
+        let mut visible = String::with_capacity(line.len());
+        let mut index = 0;
+        let mut code_ticks = None;
+        while index < line.len() {
+            let rest = &line[index..];
+            let tick_count = rest.bytes().take_while(|byte| *byte == b'`').count();
+            if tick_count > 0 {
+                if let Some(expected) = code_ticks {
+                    if tick_count == expected {
+                        code_ticks = None;
                     }
-                    separator = false;
-                    slug.push(ch.to_lowercase().next().unwrap_or(ch));
                 } else {
-                    separator = true;
+                    code_ticks = Some(tick_count);
+                }
+                index += tick_count;
+                continue;
+            }
+            let ch = rest.chars().next().expect("index stays on a character boundary");
+            if code_ticks.is_none() {
+                visible.push(ch);
+            }
+            index += ch.len_utf8();
+        }
+        visible
+    }
+
+    fn without_html_comments(line: &str, in_comment: &mut bool) -> String {
+        let mut visible = String::with_capacity(line.len());
+        let mut rest = line;
+        while !rest.is_empty() {
+            if *in_comment {
+                if let Some((_, after)) = rest.split_once("-->") {
+                    *in_comment = false;
+                    rest = after;
+                } else {
+                    break;
+                }
+                continue;
+            }
+            let Some((before, after_open)) = rest.split_once('<') else {
+                visible.push_str(rest);
+                break;
+            };
+            visible.push_str(before);
+            if let Some(after_comment) = after_open.strip_prefix("!--") {
+                *in_comment = true;
+                rest = after_comment;
+                continue;
+            }
+            visible.push('<');
+            rest = after_open;
+        }
+        visible
+    }
+
+    fn html_anchor_attributes(line: &str) -> Vec<String> {
+        let mut anchors = Vec::new();
+        let mut rest = line;
+        while !rest.is_empty() {
+            let Some((_, after_open)) = rest.split_once('<') else {
+                break;
+            };
+            let Some((tag, after_tag)) = after_open.split_once('>') else {
+                break;
+            };
+            if tag
+                .chars()
+                .next()
+                .is_some_and(|first| first.is_ascii_alphabetic() || first == '/')
+            {
+                for attribute in tag.split_whitespace().skip(1) {
+                    let Some((name, value)) = attribute.split_once('=') else {
+                        continue;
+                    };
+                    if matches!(name, "id" | "name")
+                        && let Some(value) = value.strip_prefix('"').and_then(|value| value.strip_suffix('"'))
+                    {
+                        anchors.push(value.to_owned());
+                    }
                 }
             }
+            rest = after_tag;
+        }
+        anchors
+    }
+
+    let mut anchors = Vec::new();
+    let mut counts = HashMap::<String, usize>::new();
+    let lines: Vec<_> = source.lines().collect();
+    let mut fence = None;
+    let mut html_comment = false;
+    let mut index = 0;
+    while index < lines.len() {
+        let line = lines[index];
+        if let Some((marker, minimum_length)) = fence {
+            if closes_fence(line, marker, minimum_length) {
+                fence = None;
+            }
+            index += 1;
+            continue;
+        }
+        if line.starts_with("    ") || line.starts_with('\t') {
+            index += 1;
+            continue;
+        }
+        if let Some(opening) = fence_marker(line) {
+            fence = Some(opening);
+            index += 1;
+            continue;
+        }
+
+        let visible = without_inline_code(line);
+        let visible = without_html_comments(&visible, &mut html_comment);
+        let visible_next = lines.get(index + 1).map(|next| without_inline_code(next));
+        let title = atx_title(&visible).or_else(|| {
+            if visible_next.as_deref().is_some_and(|next| setext_level(next).is_some()) && !visible.trim().is_empty() {
+                Some(visible.trim())
+            } else {
+                None
+            }
+        });
+        if let Some(title) = title {
+            let slug = heading_slug(title);
             let count = counts.entry(slug.clone()).or_default();
             anchors.push(if *count == 0 {
                 slug
@@ -91,24 +264,8 @@ fn heading_anchors(source: &str) -> Vec<String> {
             });
             *count += 1;
         }
-        let mut rest = line;
-        while let Some((_, after_id)) = rest.split_once("id=\"") {
-            if let Some((id, after)) = after_id.split_once('"') {
-                anchors.push(id.to_owned());
-                rest = after;
-            } else {
-                break;
-            }
-        }
-        let mut rest = line;
-        while let Some((_, after_name)) = rest.split_once("name=\"") {
-            if let Some((name, after)) = after_name.split_once('"') {
-                anchors.push(name.to_owned());
-                rest = after;
-            } else {
-                break;
-            }
-        }
+        anchors.extend(html_anchor_attributes(&visible));
+        index += 1;
     }
     anchors
 }
@@ -143,10 +300,7 @@ fn missing_anchors(source_path: &Path, source: &str) -> Vec<(usize, String)> {
         let target_path = if path.is_empty() {
             source_path.to_path_buf()
         } else {
-            source_path
-                .parent()
-                .unwrap_or_else(|| Path::new("."))
-                .join(path)
+            source_path.parent().unwrap_or_else(|| Path::new(".")).join(path)
         };
         if !path.is_empty() && !target_path.is_file() {
             continue;
@@ -174,8 +328,8 @@ fn test_reader_document_relative_links_exist() {
     let mut missing = Vec::new();
     for document in DOCUMENTS {
         let source_path = root.join(document);
-        let source = std::fs::read_to_string(&source_path)
-            .unwrap_or_else(|error| panic!("cannot read {document}: {error}"));
+        let source =
+            std::fs::read_to_string(&source_path).unwrap_or_else(|error| panic!("cannot read {document}: {error}"));
         for (line, target) in missing_links(source_path.parent().unwrap(), &source) {
             missing.push(format!("{document}:{line}: {target}"));
         }
@@ -197,7 +351,7 @@ fn test_scanner_fixtures_cover_relative_missing_anchor_and_url_links() {
     std::fs::write(root.join("exists.md"), "fixture").expect("create linked file");
     std::fs::write(
         root.join("anchors.md"),
-        "# English Heading\n## 中文标题\n## Repeated! Heading\n## Repeated Heading\n<a id=\"custom-anchor\"></a>\n",
+        "# English Heading\n## 中文标题\n## Repeated! Heading\n## Repeated Heading\n<a id=\"custom-anchor\"></a>\n\nSetext Heading\n===============\n\n~~~md\n# Fake Heading\n<a id=\"fake-id\"></a>\n~~~\n\n```\n## Another Fake Heading\n```\n\n    <a id=\"indented-fake-id\"></a>\n\nInline ` <a id=\"inline-fake-id\"> ` code.\n\n<!-- <a id=\"comment-fake-id\"></a>\n# comment-fake-heading\n<a id=\"comment-fake-id-2\"></a> -->\n",
     )
     .expect("create anchor fixture");
 
@@ -207,18 +361,12 @@ fn test_scanner_fixtures_cover_relative_missing_anchor_and_url_links() {
         vec![(1, "absent.md".into())]
     );
     assert_eq!(missing_links(root, "[anchor](#section)"), Vec::new());
-    assert_eq!(
-        missing_links(root, "[web](https://example.com/page)"),
-        Vec::new()
-    );
+    assert_eq!(missing_links(root, "[web](https://example.com/page)"), Vec::new());
     assert_eq!(
         relative_markdown_links("[anchor](#section)"),
         vec![(1, "#section".into())]
     );
-    assert_eq!(
-        relative_markdown_links("[web](https://example.com/page)"),
-        Vec::new()
-    );
+    assert_eq!(relative_markdown_links("[web](https://example.com/page)"), Vec::new());
 
     let source_path = root.join("source.md");
     let fixture = "[english](anchors.md#english-heading) [中文](anchors.md#%E4%B8%AD%E6%96%87%E6%A0%87%E9%A2%98) [explicit](anchors.md#custom-anchor) [missing local](#not-here) [missing remote](anchors.md#absent) [missing file](absent.md#section)";
@@ -226,8 +374,19 @@ fn test_scanner_fixtures_cover_relative_missing_anchor_and_url_links() {
         missing_anchors(&source_path, fixture),
         vec![(1, "#not-here".into()), (1, "anchors.md#absent".into())]
     );
+    assert_eq!(missing_links(root, fixture), vec![(1, "absent.md#section".into())]);
+    let code_and_setext = "[real](anchors.md#setext-heading) [fake heading](anchors.md#fake-heading) [fake id](anchors.md#fake-id) [second fake](anchors.md#another-fake-heading) [indented](anchors.md#indented-fake-id) [inline](anchors.md#inline-fake-id) [comment](anchors.md#comment-fake-id) [second comment](anchors.md#comment-fake-id-2) [comment heading](anchors.md#comment-fake-heading)";
     assert_eq!(
-        missing_links(root, fixture),
-        vec![(1, "absent.md#section".into())]
+        missing_anchors(&source_path, code_and_setext),
+        vec![
+            (1, "anchors.md#fake-heading".into()),
+            (1, "anchors.md#fake-id".into()),
+            (1, "anchors.md#another-fake-heading".into()),
+            (1, "anchors.md#indented-fake-id".into()),
+            (1, "anchors.md#inline-fake-id".into()),
+            (1, "anchors.md#comment-fake-id".into()),
+            (1, "anchors.md#comment-fake-id-2".into()),
+            (1, "anchors.md#comment-fake-heading".into()),
+        ]
     );
 }
