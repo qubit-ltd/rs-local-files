@@ -12,10 +12,67 @@ use std::time::Duration;
 #[cfg(feature = "async")]
 use super::AsyncLocalOperation;
 use crate::LocalFileError;
-/// Handle for a typed local operation managed by qubit-operation.
+/// Synchronous handle for a typed local operation managed by
+/// [`qubit_operation`].
 ///
-/// Owned memory permits stay attached to this handle until its outcome is
-/// delivered or the handle is dropped and the upstream result slot discarded.
+/// The handle owns the operation's result slot and any local memory budget
+/// reserved for it. A successful call to [`wait_outcome`](Self::wait_outcome)
+/// or [`try_take_outcome`](Self::try_take_outcome) transfers the outcome to
+/// the caller and releases this handle's budget reference. Dropping the
+/// outcome is necessary when it owns a resource that should be closed before
+/// waiting for settlement. Settlement reports whether the operation and its
+/// cleanup have finished; it does not deliver or replace the outcome.
+///
+/// Requesting stop is also separate from observing the result: a stop request
+/// can be rejected or arrive too late, so callers must still observe the
+/// outcome. Dropping this handle discards its result slot and releases its
+/// budget reference, but does not wait for operation settlement.
+///
+/// # Example
+///
+/// This example submits an operation through the public asynchronous
+/// filesystem facade, consumes its outcome synchronously, then observes
+/// settlement. For operations whose outcome owns a resource, close and drop
+/// that resource before waiting for settlement.
+///
+/// ```no_run
+/// use std::path::PathBuf;
+///
+/// use qubit_local_files::LocalCreateDirectoryRequest;
+/// use qubit_local_files::LocalOperationOptions;
+/// use qubit_local_files::LocalOperation;
+/// use qubit_local_files::operation::AsyncLocalFileSystem;
+/// use qubit_local_files::options::LocalCreateDirectoryOptions;
+/// use qubit_operation::OperationManager;
+/// use qubit_operation::OperationOptions;
+/// use qubit_operation::OperationOutcome;
+///
+/// fn observe_operation(
+///     filesystem: &AsyncLocalFileSystem,
+///     manager: &OperationManager,
+/// ) -> Result<(), Box<dyn std::error::Error>> {
+///     let (mut operation, facts): (LocalOperation<_>, _) = filesystem.submit_create_directory(
+///         manager,
+///         OperationOptions::default(),
+///         LocalCreateDirectoryRequest {
+///             path: PathBuf::from("created"),
+///             options: LocalCreateDirectoryOptions::default(),
+///         },
+///         LocalOperationOptions::default(),
+///     )?;
+///     let operation_id = operation.id();
+///
+///     match operation.wait_outcome()? {
+///         OperationOutcome::Succeeded(result) => drop(result),
+///         OperationOutcome::Failed(error) => return Err(error.into()),
+///         other => return Err(format!("operation ended without a result: {other:?}").into()),
+///     }
+///     drop(facts);
+///     let settlement = operation.wait_settlement()?;
+///     assert_eq!(settlement.operation_id, operation_id);
+///     Ok(())
+/// }
+/// ```
 ///
 /// # Type Parameters
 /// - `T` — type carried through the operation contract.
@@ -39,25 +96,31 @@ impl<T: Send + 'static, E: Send + 'static> LocalOperation<T, E> {
             budget: Some(budget),
         }
     }
-    /// Runs the id behavior while preserving the operation lifecycle
-    /// invariants.
+    /// Returns this operation's stable identifier.
     pub fn id(&self) -> qubit_operation::OperationId {
         self.inner().id()
     }
-    /// Runs the request stop behavior while preserving the operation lifecycle
-    /// invariants.
+    /// Requests that the operation stop for `reason`.
+    ///
+    /// The returned status describes whether the request was accepted; it
+    /// does not indicate the final outcome. Observe the outcome separately.
+    ///
     /// # Parameters
-    /// - `reason` — supplies data or policy for this operation.
+    /// - `reason` — reason to attach to the stop request.
     pub fn request_stop(&self, reason: qubit_operation::StopReason) -> qubit_operation::StopRequestStatus {
         self.inner().request_stop(reason)
     }
-    /// Runs the snapshot behavior while preserving the operation lifecycle
-    /// invariants.
+    /// Returns a point-in-time snapshot of the operation's state.
     pub fn snapshot(&self) -> qubit_operation::OperationSnapshot {
         self.inner().snapshot()
     }
-    /// Runs the wait outcome behavior while preserving the operation lifecycle
-    /// invariants.
+    /// Blocks until the operation outcome is available and takes it from the
+    /// result slot.
+    ///
+    /// On success, this handle releases its owned-memory budget reference
+    /// before returning the outcome. An [`OutcomeError`](qubit_operation::OutcomeError)
+    /// means the outcome could not be taken; it is not an operation failure
+    /// delivered by `T` or `E`.
     pub fn wait_outcome(&mut self) -> Result<qubit_operation::OperationOutcome<T, E>, qubit_operation::OutcomeError> {
         let result = self.inner_mut().wait_outcome();
         if result.is_ok() {
@@ -65,8 +128,12 @@ impl<T: Send + 'static, E: Send + 'static> LocalOperation<T, E> {
         }
         result
     }
-    /// Runs the try take outcome behavior while preserving the operation
-    /// lifecycle invariants.
+    /// Takes the outcome if it is already available, without blocking.
+    ///
+    /// `Ok(None)` means the operation has not produced an outcome yet. When
+    /// `Ok(Some(_))` is returned, this handle releases its owned-memory budget
+    /// reference. An [`OutcomeError`](qubit_operation::OutcomeError) describes
+    /// failure to take the result slot, not the operation's `E` value.
     pub fn try_take_outcome(
         &mut self,
     ) -> Result<Option<qubit_operation::OperationOutcome<T, E>>, qubit_operation::OutcomeError> {
@@ -76,30 +143,42 @@ impl<T: Send + 'static, E: Send + 'static> LocalOperation<T, E> {
         }
         result
     }
-    /// Runs the wait settlement behavior while preserving the operation
-    /// lifecycle invariants.
+    /// Blocks until operation execution and cleanup have settled.
+    ///
+    /// Settlement observation is independent of taking the outcome. The
+    /// outcome may already have been consumed, and resource values returned
+    /// in it remain the caller's responsibility. An
+    /// [`ObservationError`](qubit_operation::ObservationError) indicates that
+    /// settlement could not be observed.
     pub fn wait_settlement(&self) -> Result<Arc<qubit_operation::SettlementReport>, qubit_operation::ObservationError> {
         self.inner().wait_settlement()
     }
-    /// Runs the wait settlement for behavior while preserving the operation
-    /// lifecycle invariants.
+    /// Waits up to `timeout` for operation execution and cleanup to settle.
+    ///
+    /// A pending result means the timeout elapsed before settlement; call
+    /// again or use [`wait_settlement`](Self::wait_settlement) to wait without
+    /// a timeout. This does not consume the operation outcome.
     /// # Parameters
-    /// - `timeout` — supplies data or policy for this operation.
+    /// - `timeout` — maximum duration to wait for settlement.
     pub fn wait_settlement_for(
         &self,
         timeout: Duration,
     ) -> Result<qubit_operation::SettlementWait, qubit_operation::ObservationError> {
         self.inner().wait_settlement_for(timeout)
     }
-    /// Runs the into observer behavior while preserving the operation lifecycle
-    /// invariants.
+    /// Converts this handle into an observer of operation completion.
+    ///
+    /// The result slot and this handle's budget reference are released. The
+    /// observer can inspect state and settlement but cannot take the outcome.
     pub fn into_observer(mut self) -> qubit_operation::OperationObserver {
         let observer = self.inner.take().expect("local handle is present").into_observer();
         self.budget.take();
         observer
     }
-    /// Runs the into async behavior while preserving the operation lifecycle
-    /// invariants.
+    /// Converts this synchronous handle into its asynchronous counterpart.
+    ///
+    /// The result slot and budget ownership move to the returned
+    /// [`AsyncLocalOperation`].
     #[cfg(feature = "async")]
     pub fn into_async(mut self) -> AsyncLocalOperation<T, E> {
         let inner = self.inner.take().expect("local handle is present").into_async();
@@ -121,8 +200,8 @@ impl<T: Send + 'static, E: Send + 'static> LocalOperation<T, E> {
 }
 
 impl<T: Send + 'static, E: Send + 'static> Drop for LocalOperation<T, E> {
-    /// Runs the drop behavior while preserving the operation lifecycle
-    /// invariants.
+    /// Discards any untaken result slot and releases this handle's budget
+    /// reference. Dropping does not wait for settlement.
     fn drop(&mut self) {
         drop(self.inner.take());
         self.budget.take();
