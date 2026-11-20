@@ -14,19 +14,11 @@ use std::sync::atomic::AtomicBool;
 use std::task::Poll;
 use std::task::Waker;
 
+use super::worker_walk_close_state::WorkerWalkCloseState;
 use super::worker_walk_command::WorkerWalkCommand;
 use super::worker_walk_cursor::WorkerWalkCursor;
 
 /// Shared executor, iterator, and close state for one directory worker.
-pub(super) enum WorkerWalkCloseState {
-    /// Close has not completed; all active waiters are registered here.
-    Waiting(Vec<Waker>),
-    /// Iterator cleanup and reserved capacity release completed.
-    Closed,
-    /// Close could not be confirmed; retain a repeatable I/O error.
-    Failed(io::ErrorKind, String),
-}
-
 pub(super) struct WorkerWalkInner {
     /// Executor that serializes directory operations and cleanup.
     pub(super) executor: super::super::LocalIoExecutor,
@@ -40,7 +32,7 @@ pub(super) struct WorkerWalkInner {
     pub(super) close_state: Mutex<WorkerWalkCloseState>,
     /// Reserved capacity for worker-side cleanup.
     pub(super) cleanup_permit: Mutex<Option<super::super::internal::permits::Permit>>,
-    /// Budget retained while returned path batches remain alive.
+    /// Reservation for one bounded path batch until walker closure.
     pub(super) _buffer_budget: Arc<Mutex<super::super::internal::permits::Permit>>,
     /// Budget retained while the native directory handle is open.
     pub(super) _handle_budget: Mutex<Option<Arc<super::super::internal::permits::Permit>>>,
@@ -48,35 +40,26 @@ pub(super) struct WorkerWalkInner {
 
 impl WorkerWalkInner {
     /// Registers a waiter atomically with checking the published close result.
+    ///
+    /// # Parameters
+    /// - `waker` — task to notify when close reaches a terminal state.
     pub(super) fn poll_closed(&self, waker: &Waker) -> Poll<io::Result<()>> {
-        let mut state = self.close_state.lock().unwrap_or_else(|e| e.into_inner());
-        match &mut *state {
-            WorkerWalkCloseState::Waiting(waiters) => {
-                if !waiters.iter().any(|registered| registered.will_wake(waker)) {
-                    waiters.push(waker.clone());
-                }
-                Poll::Pending
-            }
-            WorkerWalkCloseState::Closed => Poll::Ready(Ok(())),
-            WorkerWalkCloseState::Failed(kind, message) => {
-                Poll::Ready(Err(io::Error::new(*kind, message.clone())))
-            }
-        }
+        self.close_state.lock().unwrap_or_else(|e| e.into_inner()).poll(waker)
     }
 
-    /// Publishes one terminal result, then notifies every waiter outside the lock.
+    /// Publishes one terminal result, then notifies every waiter outside the
+    /// lock.
+    ///
+    /// # Parameters
+    /// - `result` — confirmed close or repeatable close failure to publish.
     pub(super) fn publish_close(&self, result: io::Result<()>) {
-        let waiters = {
-            let mut state = self.close_state.lock().unwrap_or_else(|e| e.into_inner());
-            let WorkerWalkCloseState::Waiting(waiters) = &mut *state else {
-                return;
-            };
-            let waiters = std::mem::take(waiters);
-            *state = match result {
-                Ok(()) => WorkerWalkCloseState::Closed,
-                Err(error) => WorkerWalkCloseState::Failed(error.kind(), error.to_string()),
-            };
-            waiters
+        let waiters = self
+            .close_state
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .publish(result);
+        let Some(waiters) = waiters else {
+            return;
         };
         for waker in waiters {
             let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| waker.wake()));

@@ -64,6 +64,8 @@ use worker_stream_inner::WorkerStreamInner;
 mod worker_stream_command;
 #[path = "worker_stream_state.rs"]
 mod worker_stream_state;
+#[path = "worker_walk_close_state.rs"]
+mod worker_walk_close_state;
 #[path = "worker_walk_driver.rs"]
 mod worker_walk_driver;
 #[path = "worker_walk_inner.rs"]

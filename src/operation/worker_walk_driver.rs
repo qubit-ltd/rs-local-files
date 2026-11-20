@@ -21,9 +21,9 @@ use qubit_operation::ResourceRef;
 use super::LocalWalkDriver;
 use super::LocalWalkResource;
 use super::WorkerCleanup;
+use super::worker_walk_close_state::WorkerWalkCloseState;
 use super::worker_walk_command::WorkerWalkCommand;
 use super::worker_walk_cursor::WorkerWalkCursor;
-use super::worker_walk_inner::WorkerWalkCloseState;
 use super::worker_walk_inner::WorkerWalkInner;
 
 /// Collects one batch, preserving an iterator error that follows valid paths.
@@ -127,7 +127,7 @@ impl WorkerWalkDriver {
             }),
             commands: Mutex::new(HashMap::new()),
             stop_requested: AtomicBool::new(false),
-            close_state: Mutex::new(WorkerWalkCloseState::Waiting(Vec::new())),
+            close_state: Mutex::new(WorkerWalkCloseState::default()),
             cleanup_permit: Mutex::new(Some(cleanup_permit)),
             _buffer_budget: buffer_budget,
             _handle_budget: Mutex::new(Some(handle_budget)),
@@ -273,9 +273,7 @@ impl LocalWalkDriver for WorkerWalkDriver {
                 buffer_budget.shrink(reserved_bytes);
             }));
             if result.is_err() {
-                close_inner.publish_close(Err(io::Error::other(
-                    "Unconfirmed: local walker cleanup task panicked",
-                )));
+                close_inner.publish_close(Err(io::Error::other("Unconfirmed: local walker cleanup task panicked")));
             }
         });
         let complete_inner = Arc::clone(&inner);
@@ -338,19 +336,19 @@ mod tests {
     use std::sync::Arc;
     use std::sync::Mutex;
     use std::sync::atomic::AtomicBool;
+    use std::sync::atomic::AtomicUsize;
     use std::task::Context;
     use std::task::Poll;
     use std::task::Wake;
     use std::task::Waker;
-    use std::sync::atomic::AtomicUsize;
 
     use qubit_operation::ManagerOptions;
     use qubit_operation::OperationManager;
     use qubit_operation::OperationOutcome;
 
     use super::LocalWalkDriver;
-    use super::WorkerWalkCursor;
     use super::WorkerWalkCloseState;
+    use super::WorkerWalkCursor;
     use super::WorkerWalkDriver;
     use super::WorkerWalkInner;
     use super::collect_walk_batch;
@@ -385,7 +383,7 @@ mod tests {
             }),
             commands: Mutex::new(HashMap::new()),
             stop_requested: AtomicBool::new(false),
-            close_state: Mutex::new(WorkerWalkCloseState::Waiting(Vec::new())),
+            close_state: Mutex::new(WorkerWalkCloseState::default()),
             cleanup_permit: Mutex::new(Some(cleanup_permit)),
             _buffer_budget: buffer_budget,
             _handle_budget: Mutex::new(Some(handle_budget)),
@@ -528,7 +526,9 @@ mod tests {
         let manager = OperationManager::new(ManagerOptions::default()).unwrap();
         let executor = LocalIoExecutor::new(manager, LocalExecutionConfig::default()).unwrap();
         let (release_tx, release_rx) = std::sync::mpsc::channel();
-        executor.enqueue_task(Box::new(move || release_rx.recv().unwrap())).unwrap();
+        executor
+            .enqueue_task(Box::new(move || release_rx.recv().unwrap()))
+            .unwrap();
 
         let directory = tempfile::tempdir().unwrap();
         let driver = direct_driver(&directory, executor);
@@ -546,8 +546,14 @@ mod tests {
         release_tx.send(()).unwrap();
         notified_rx.recv_timeout(std::time::Duration::from_secs(5)).unwrap();
         notified_rx.recv_timeout(std::time::Duration::from_secs(5)).unwrap();
-        assert!(first.0.load(std::sync::atomic::Ordering::SeqCst) > 0, "first waiter is notified");
-        assert!(second.0.load(std::sync::atomic::Ordering::SeqCst) > 0, "second waiter is notified");
+        assert!(
+            first.0.load(std::sync::atomic::Ordering::SeqCst) > 0,
+            "first waiter is notified"
+        );
+        assert!(
+            second.0.load(std::sync::atomic::Ordering::SeqCst) > 0,
+            "second waiter is notified"
+        );
         assert!(matches!(driver.poll_closed(&mut first_context), Poll::Ready(Ok(()))));
         assert!(matches!(driver.poll_closed(&mut second_context), Poll::Ready(Ok(()))));
     }
@@ -574,8 +580,9 @@ mod tests {
         let executor = LocalIoExecutor::new(manager, LocalExecutionConfig::default()).unwrap();
         let directory = tempfile::tempdir().unwrap();
         let driver = direct_driver(&directory, executor);
-        *driver.0._buffer_budget.lock().unwrap() =
-            byte_pool.try_acquire(crate::operation::stream::LOCAL_WALK_BATCH_BYTES).unwrap();
+        *driver.0._buffer_budget.lock().unwrap() = byte_pool
+            .try_acquire(crate::operation::stream::LOCAL_WALK_BATCH_BYTES)
+            .unwrap();
 
         let (notified_tx, notified_rx) = std::sync::mpsc::sync_channel(1);
         let (resume_tx, resume_rx) = std::sync::mpsc::sync_channel(1);
@@ -811,6 +818,7 @@ mod tests {
             poison_test_mutex(&driver.0.walker);
             poison_test_mutex(&driver.0.close_state);
             poison_test_mutex(&driver.0.cleanup_permit);
+            poison_test_mutex(&driver.0._handle_budget);
         }
         let byte_limit = PathBuf::from("first").as_os_str().as_encoded_bytes().len();
         let first = block_on(poll_batch(&driver, 41, 8, byte_limit)).unwrap().unwrap();
@@ -953,10 +961,9 @@ mod tests {
         let manager = OperationManager::new(ManagerOptions::default()).unwrap();
         let executor = LocalIoExecutor::new(manager, LocalExecutionConfig::default()).unwrap();
         let driver = direct_driver(&directory, executor);
-        driver.0.publish_close(Err(io::Error::new(
-            io::ErrorKind::WouldBlock,
-            "cleanup unavailable",
-        )));
+        driver
+            .0
+            .publish_close(Err(io::Error::new(io::ErrorKind::WouldBlock, "cleanup unavailable")));
         let error = block_on(poll_closed(&driver)).unwrap_err();
         assert_eq!(error.kind(), io::ErrorKind::WouldBlock);
         assert_eq!(error.to_string(), "cleanup unavailable");
