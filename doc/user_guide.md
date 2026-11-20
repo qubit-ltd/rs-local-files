@@ -117,6 +117,7 @@ let mut walker = match opening.wait_outcome().await? {
     OperationOutcome::Succeeded(walker) => walker,
     OperationOutcome::Failed(error) => return Err(error.into()),
     OperationOutcome::Stopped(_) => return Err(std::io::Error::other("walker open stopped").into()),
+    _ => return Err(std::io::Error::other("walker open failed").into()),
 };
 let observer = walker.close_observer();
 let walk_result: qubit_local_files::LocalResult<()> = async {
