@@ -25,6 +25,22 @@ fn set_mode(path: &Path, mode: u32) {
     fs::set_permissions(path, fs::Permissions::from_mode(mode)).expect("permissions should be set");
 }
 
+fn restore_directory_permissions(root: &Path) {
+    let mut directories = vec![root.to_path_buf()];
+    let mut index = 0;
+    while index < directories.len() {
+        let directory = directories[index].clone();
+        index += 1;
+        fs::set_permissions(&directory, fs::Permissions::from_mode(0o700)).expect("restore directory permissions");
+        for entry in fs::read_dir(&directory).expect("read fixture directory") {
+            let entry = entry.expect("fixture entry");
+            if entry.file_type().expect("fixture entry type").is_dir() {
+                directories.push(entry.path());
+            }
+        }
+    }
+}
+
 fn skip_options() -> LocalCopyOptions {
     LocalCopyOptions::new()
         .with_type_conflict(LocalCopyTypeConflictPolicy::Skip)
@@ -228,6 +244,7 @@ fn test_host_empty_directory_copy_reports_applied_permissions() {
             .mode()
             & 0o777
     );
+    restore_directory_permissions(fixture.path());
 }
 
 #[test]
@@ -262,4 +279,5 @@ fn test_rooted_empty_directory_copy_reports_applied_permissions() {
             .mode()
             & 0o777
     );
+    restore_directory_permissions(fixture.path());
 }

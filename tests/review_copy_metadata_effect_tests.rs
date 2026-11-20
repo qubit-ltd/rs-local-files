@@ -29,6 +29,25 @@ fn mode(path: &Path) -> u32 {
     fs::metadata(path).expect("metadata").permissions().mode() & 0o777
 }
 
+#[cfg(unix)]
+fn restore_directory_permissions(root: &Path) {
+    use std::os::unix::fs::PermissionsExt;
+
+    let mut directories = vec![root.to_path_buf()];
+    let mut index = 0;
+    while index < directories.len() {
+        let directory = directories[index].clone();
+        index += 1;
+        fs::set_permissions(&directory, fs::Permissions::from_mode(0o700)).expect("restore directory permissions");
+        for entry in fs::read_dir(&directory).expect("read fixture directory") {
+            let entry = entry.expect("fixture entry");
+            if entry.file_type().expect("fixture entry type").is_dir() {
+                directories.push(entry.path());
+            }
+        }
+    }
+}
+
 fn tree_permissions_options() -> LocalCopyOptions {
     LocalCopyOptions::new()
         .with_tree_source()
@@ -75,6 +94,7 @@ fn test_empty_directory_merge_reports_applied_permissions_for_both_backends() {
             LocalMetadataPreservePolicy::Permissions,
             outcome.metadata_preservation()
         );
+        restore_directory_permissions(fixture.path());
     }
 }
 
@@ -115,6 +135,7 @@ fn test_all_leaf_conflicts_skipped_still_report_directory_permissions() {
             LocalMetadataPreservePolicy::Permissions,
             outcome.metadata_preservation()
         );
+        restore_directory_permissions(fixture.path());
     }
 }
 
@@ -145,6 +166,7 @@ fn test_directory_permissions_remain_unchanged_when_not_requested() {
 
         assert_eq!(0o700, mode(&target));
         assert_eq!(LocalMetadataPreservePolicy::None, outcome.metadata_preservation());
+        restore_directory_permissions(fixture.path());
     }
 }
 
@@ -208,6 +230,7 @@ fn test_later_depth_failure_preserves_earlier_directory_permission_effect() {
         assert_eq!(0, failure.partial_stats().directories());
         assert_eq!(0, failure.partial_stats().overwritten());
         assert_eq!(0o500, mode(&target.join(empty_name)));
+        restore_directory_permissions(fixture.path());
     }
 }
 
@@ -239,4 +262,5 @@ fn test_rooted_permission_failure_keeps_metadata_effect_indeterminate() {
     assert_eq!(0, failure.partial_stats().directories());
     assert_eq!(0, failure.partial_stats().overwritten());
     assert_eq!(0o700, mode(&target));
+    restore_directory_permissions(fixture.path());
 }
