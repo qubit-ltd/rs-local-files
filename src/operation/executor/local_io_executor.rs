@@ -23,6 +23,7 @@ use super::super::internal::permits::DiskPermit;
 use super::super::internal::permits::DiskPermitPool;
 use super::super::internal::permits::Permit;
 use super::super::internal::permits::PermitPool;
+use super::super::internal::worker::CleanupCompletionEnqueueError;
 use super::super::internal::worker::CleanupEnqueueError;
 use super::super::internal::worker::WorkerQueue;
 use super::executor_inner::ExecutorInner;
@@ -203,6 +204,24 @@ impl LocalIoExecutor {
         self.inner
             .queue
             .push_cleanup(job, permit, self.inner.config.max_open_handles)
+    }
+
+    /// Enqueues cleanup whose completion callback runs after its permit is
+    /// returned to the cleanup pool.
+    ///
+    /// # Parameters
+    /// - `job` — cleanup action to run on the worker.
+    /// - `permit` — reserved cleanup queue capacity.
+    /// - `completion` — notification run after the permit is released.
+    pub(crate) fn enqueue_cleanup_with_completion(
+        &self,
+        job: Box<dyn FnOnce() + Send + 'static>,
+        permit: Permit,
+        completion: Box<dyn FnOnce() + Send + 'static>,
+    ) -> Result<(), CleanupCompletionEnqueueError> {
+        self.inner
+            .queue
+            .push_cleanup_with_completion(job, permit, completion, self.inner.config.max_open_handles)
     }
 }
 /// Runs the spawn workers behavior while preserving the operation lifecycle

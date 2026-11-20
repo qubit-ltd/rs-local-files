@@ -57,8 +57,19 @@ impl AsyncLocalDirectoryWalker {
     }
 
     /// Returns the next bounded batch, or `None` after EOF and confirmed close.
+    /// If an iterator error follows paths already collected for a batch, those
+    /// paths are returned first and the error is returned by the next call.
     pub async fn next_batch(&mut self) -> crate::LocalResult<Option<Vec<PathBuf>>> {
-        let resource = self.resource.as_deref().expect("walker resource retained until close");
+        if self.state.is_closed() {
+            return Ok(None);
+        }
+        let Some(resource) = self.resource.as_deref() else {
+            return match self.state.poll_closed_without_resource() {
+                Poll::Ready(Ok(())) => Ok(None),
+                Poll::Ready(Err(error)) => Err(map_walk_error(error)),
+                Poll::Pending => unreachable!("a released walker has completed closure"),
+            };
+        };
         let result = {
             let state = &mut self.state;
             std::future::poll_fn(move |cx| state.poll_batch(resource, cx)).await
@@ -89,9 +100,19 @@ impl AsyncLocalDirectoryWalker {
     }
 
     /// Returns a close observer that survives dropping this walker handle.
+    ///
+    /// An observer created after close confirmation completes immediately and
+    /// does not retain the worker resource. An observer created before close
+    /// confirmation retains that resource and continues observing the worker
+    /// after this walker is dropped. Release such an observer's resource
+    /// reference before waiting for operation settlement.
     pub fn close_observer(&self) -> LocalWalkCloseObserver {
-        LocalWalkCloseObserver {
-            resource: self.resource.as_ref().expect("walker resource retained").clone(),
+        if self.state.is_closed() {
+            LocalWalkCloseObserver::closed()
+        } else if let Some(resource) = &self.resource {
+            LocalWalkCloseObserver::observing(resource.clone())
+        } else {
+            LocalWalkCloseObserver::closed()
         }
     }
 }

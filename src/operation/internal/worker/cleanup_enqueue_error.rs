@@ -10,3 +10,9 @@ use super::super::permits::Permit;
 
 /// Rejected cleanup task and the permit returned with it.
 pub(crate) type CleanupEnqueueError = (Box<dyn FnOnce() + Send + 'static>, Permit);
+/// Rejected cleanup job, permit, and its completion callback.
+pub(crate) type CleanupCompletionEnqueueError = (
+    Box<dyn FnOnce() + Send + 'static>,
+    Permit,
+    Box<dyn FnOnce() + Send + 'static>,
+);

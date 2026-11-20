@@ -899,6 +899,10 @@ fn test_staged_async_writer_cleanup_failure_can_be_retried() {
 struct FakeWalkState {
     batches: VecDeque<Option<Vec<PathBuf>>>,
     calls: usize,
+    request_ids: Vec<u64>,
+    hold_next_batch: bool,
+    held_request_id: Option<u64>,
+    batch_released: bool,
     stopped: bool,
     closed: bool,
     allow_close: bool,
@@ -927,18 +931,46 @@ impl FakeWalkWorker {
             wake.wake();
         }
     }
+
+    fn hold_next_batch(&self) {
+        self.0.lock().unwrap().hold_next_batch = true;
+    }
+
+    fn release_batch(&self) {
+        let wake = {
+            let mut state = self.0.lock().unwrap();
+            state.batch_released = true;
+            state.wake.take()
+        };
+        if let Some(wake) = wake {
+            wake.wake();
+        }
+    }
 }
 
 impl LocalWalkDriver for FakeWalkWorker {
     fn poll_batch(
         &self,
-        _cx: &mut Context<'_>,
-        _request_id: u64,
+        cx: &mut Context<'_>,
+        request_id: u64,
         _max_entries: usize,
         _max_bytes: usize,
     ) -> Poll<io::Result<Option<Vec<PathBuf>>>> {
         let mut state = self.0.lock().unwrap();
         state.calls += 1;
+        state.request_ids.push(request_id);
+        if state.hold_next_batch {
+            state.hold_next_batch = false;
+            state.held_request_id = Some(request_id);
+        }
+        if state.held_request_id == Some(request_id) && !state.batch_released {
+            state.wake = Some(cx.waker().clone());
+            return Poll::Pending;
+        }
+        if state.held_request_id == Some(request_id) {
+            state.held_request_id = None;
+            state.batch_released = false;
+        }
         if state.stopped {
             return Poll::Ready(Ok(None));
         }
@@ -959,6 +991,24 @@ impl LocalWalkDriver for FakeWalkWorker {
             Poll::Pending
         }
     }
+}
+
+#[test]
+fn test_walker_cancelled_batch_future_reuses_request_id() {
+    let worker = Arc::new(FakeWalkWorker::with_batches([Some(vec![PathBuf::from("entry")])]));
+    worker.hold_next_batch();
+    let mut walker = AsyncLocalDirectoryWalker::new(walk_resource(Arc::clone(&worker))).unwrap();
+    let mut first = Box::pin(walker.next_batch());
+    assert!(matches!(poll(|cx| first.as_mut().poll(cx)), Poll::Pending));
+    drop(first);
+    worker.release_batch();
+    assert!(matches!(
+        poll(|cx| Box::pin(walker.next_batch()).as_mut().poll(cx)),
+        Poll::Ready(Ok(Some(entries))) if entries == [PathBuf::from("entry")]
+    ));
+    let state = worker.0.lock().unwrap();
+    assert_eq!(state.request_ids.len(), 2);
+    assert_eq!(state.request_ids[0], state.request_ids[1]);
 }
 
 fn walk_resource(worker: Arc<FakeWalkWorker>) -> ResourceRef<LocalWalkResource> {
@@ -2269,4 +2319,108 @@ fn test_walker_enforces_batch_limits_and_drop_confirms_worker_close() {
     );
     assert!(error.to_string().contains("256 KiB path budget"));
     assert!(worker.0.lock().unwrap().stopped);
+}
+
+#[test]
+fn test_walker_terminal_batch_and_close_observer_are_repeatable() {
+    let worker = Arc::new(FakeWalkWorker::with_batches([None]));
+    let mut walker = AsyncLocalDirectoryWalker::new(walk_resource(Arc::clone(&worker))).unwrap();
+    assert!(matches!(
+        poll(|cx| Box::pin(walker.next_batch()).as_mut().poll(cx)),
+        Poll::Ready(Ok(None))
+    ));
+    assert!(matches!(
+        poll(|cx| Box::pin(walker.next_batch()).as_mut().poll(cx)),
+        Poll::Ready(Ok(None))
+    ));
+    let observer = walker.close_observer();
+    assert!(matches!(
+        poll(|cx| Box::pin(observer.wait_closed()).as_mut().poll(cx)),
+        Poll::Ready(Ok(()))
+    ));
+    assert!(matches!(
+        poll(|cx| Box::pin(walker.close()).as_mut().poll(cx)),
+        Poll::Ready(Ok(()))
+    ));
+    assert!(matches!(
+        poll(|cx| Box::pin(walker.close()).as_mut().poll(cx)),
+        Poll::Ready(Ok(()))
+    ));
+
+    let worker = Arc::new(FakeWalkWorker::with_batches([Some(vec![PathBuf::from("entry")])]));
+    let mut walker = AsyncLocalDirectoryWalker::new(walk_resource(worker)).unwrap();
+    assert!(matches!(
+        poll(|cx| Box::pin(walker.close()).as_mut().poll(cx)),
+        Poll::Ready(Ok(()))
+    ));
+    assert!(matches!(
+        poll(|cx| Box::pin(walker.next_batch()).as_mut().poll(cx)),
+        Poll::Ready(Ok(None))
+    ));
+    let observer = walker.close_observer();
+    assert!(matches!(
+        poll(|cx| Box::pin(observer.wait_closed()).as_mut().poll(cx)),
+        Poll::Ready(Ok(()))
+    ));
+    assert!(matches!(
+        poll(|cx| Box::pin(walker.close()).as_mut().poll(cx)),
+        Poll::Ready(Ok(()))
+    ));
+}
+
+#[test]
+fn test_settled_walker_can_reopen_immediately() {
+    use qubit_local_files::LocalFileSystem;
+    use qubit_local_files::operation::LocalExecutionConfig;
+    use qubit_local_files::operation::LocalIoExecutor;
+    use qubit_local_files::options::LocalListOptions;
+    use qubit_operation::ManagerOptions;
+    use qubit_operation::OperationManager;
+    use qubit_operation::OperationOutcome;
+
+    let directory = tempfile::tempdir().unwrap();
+    std::fs::write(directory.path().join("entry"), b"x").unwrap();
+    let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+    let executor = LocalIoExecutor::new(
+        manager.clone(),
+        LocalExecutionConfig {
+            max_open_handles: 1,
+            ..LocalExecutionConfig::default()
+        },
+    )
+    .unwrap();
+    let filesystem = LocalFileSystem::host().unwrap().into_async(executor).unwrap();
+    let mut first_open = filesystem
+        .submit_open_walker(
+            &manager,
+            Default::default(),
+            directory.path().to_path_buf(),
+            LocalListOptions::default(),
+        )
+        .unwrap();
+    let mut first = match first_open.wait_outcome().unwrap() {
+        OperationOutcome::Succeeded(walker) => walker,
+        _ => panic!("first walker should open"),
+    };
+    while poll_worker(|cx| Box::pin(first.next_batch()).as_mut().poll(cx))
+        .unwrap()
+        .is_some()
+    {}
+    drop(first);
+    first_open.wait_settlement().unwrap();
+
+    let mut second_open = filesystem
+        .submit_open_walker(
+            &manager,
+            Default::default(),
+            directory.path().to_path_buf(),
+            LocalListOptions::default(),
+        )
+        .unwrap();
+    let second = match second_open.wait_outcome().unwrap() {
+        OperationOutcome::Succeeded(walker) => walker,
+        _ => panic!("second walker should open after settlement"),
+    };
+    drop(second);
+    second_open.wait_settlement().unwrap();
 }

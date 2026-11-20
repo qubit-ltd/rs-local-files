@@ -11,5 +11,6 @@
 mod cleanup_enqueue_error;
 mod worker_queue;
 
+pub(crate) use cleanup_enqueue_error::CleanupCompletionEnqueueError;
 pub(crate) use cleanup_enqueue_error::CleanupEnqueueError;
 pub(crate) use worker_queue::WorkerQueue;

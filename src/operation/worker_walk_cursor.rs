@@ -14,4 +14,6 @@ pub(super) struct WorkerWalkCursor {
     pub(super) walker: Option<crate::LocalDirectoryWalker>,
     /// Entry that did not fit in the previous batch's byte budget.
     pub(super) pending_entry: Option<PathBuf>,
+    /// Iterator error deferred until a successful prefix is delivered.
+    pub(super) pending_error: Option<std::io::Error>,
 }

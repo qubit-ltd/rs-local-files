@@ -37,5 +37,13 @@ pub(super) struct WorkerWalkInner {
     /// Budget retained while returned path batches remain alive.
     pub(super) _buffer_budget: Arc<Mutex<super::super::internal::permits::Permit>>,
     /// Budget retained while the native directory handle is open.
-    pub(super) _handle_budget: Arc<super::super::internal::permits::Permit>,
+    pub(super) _handle_budget: Mutex<Option<Arc<super::super::internal::permits::Permit>>>,
+}
+
+impl WorkerWalkInner {
+    /// Releases the native handle reservation exactly once after iterator
+    /// close.
+    pub(super) fn release_handle_budget(&self) {
+        self._handle_budget.lock().unwrap_or_else(|e| e.into_inner()).take();
+    }
 }

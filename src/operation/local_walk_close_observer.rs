@@ -27,15 +27,33 @@ use super::map_walk_error;
 /// }
 /// ```
 pub struct LocalWalkCloseObserver {
-    /// Worker resource whose close acknowledgement this observer polls.
-    pub(super) resource: ResourceRef<LocalWalkResource>,
+    /// Worker resource while close is pending; absent after confirmation.
+    pub(super) resource: Option<ResourceRef<LocalWalkResource>>,
 }
 
 impl LocalWalkCloseObserver {
+    /// Creates an observer while worker close is still pending.
+    ///
+    /// # Parameters
+    /// - `resource` — worker resource whose close confirmation is pending.
+    pub(super) fn observing(resource: ResourceRef<LocalWalkResource>) -> Self {
+        Self {
+            resource: Some(resource),
+        }
+    }
+
+    /// Creates an observer for an already confirmed close.
+    pub(super) fn closed() -> Self {
+        Self { resource: None }
+    }
+
     /// Waits for the serial worker's native handle close acknowledgement.
     pub async fn wait_closed(&self) -> crate::LocalResult<()> {
-        std::future::poll_fn(|cx| self.resource.poll_closed(cx))
-            .await
-            .map_err(map_walk_error)
+        match &self.resource {
+            Some(resource) => std::future::poll_fn(|cx| resource.poll_closed(cx))
+                .await
+                .map_err(map_walk_error),
+            None => Ok(()),
+        }
     }
 }

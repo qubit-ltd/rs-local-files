@@ -12,6 +12,7 @@ use std::sync::Condvar;
 use std::sync::Mutex;
 
 use super::super::permits::Permit;
+use super::CleanupCompletionEnqueueError;
 use super::CleanupEnqueueError;
 // Stores bounded queue contents and the worker's fair scheduling state.
 mod queue_state;
@@ -96,13 +97,36 @@ impl WorkerQueue {
         permit: Permit,
         limit: usize,
     ) -> Result<(), CleanupEnqueueError> {
+        self.push_cleanup_with_completion(job, permit, Box::new(|| {}), limit)
+            .map_err(|(job, permit, _completion)| (job, permit))
+    }
+
+    /// Enqueues cleanup work and runs `completion` only after its permit has
+    /// been returned to the cleanup pool.
+    ///
+    /// # Parameters
+    /// - `job` — cleanup task to execute.
+    /// - `permit` — capacity reserved for that cleanup task.
+    /// - `completion` — callback invoked after the permit is released.
+    /// - `limit` — maximum number of cleanup tasks allowed in the queue.
+    pub(crate) fn push_cleanup_with_completion(
+        &self,
+        job: Box<dyn FnOnce() + Send + 'static>,
+        permit: Permit,
+        completion: Box<dyn FnOnce() + Send + 'static>,
+        limit: usize,
+    ) -> Result<(), CleanupCompletionEnqueueError> {
         let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         if state.stopping || state.cleanup.len() >= limit {
-            return Err((job, permit));
+            return Err((job, permit, completion));
         }
         let wrapped = Box::new(move || {
-            let _permit = permit;
-            job();
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(job));
+            drop(permit);
+            match result {
+                Ok(()) => completion(),
+                Err(payload) => std::panic::resume_unwind(payload),
+            }
         });
         state.cleanup.push_back(wrapped);
         self.wake.notify_one();
@@ -209,6 +233,61 @@ mod tests {
         cleanup_job();
         drop(permit);
         cleanup_rx.recv_timeout(Duration::from_secs(1)).unwrap();
+        assert_eq!(permits.used(), 0);
+    }
+
+    #[test]
+    fn test_cleanup_completion_runs_after_its_permit_is_returned() {
+        let queue = WorkerQueue::default();
+        let permits = PermitPool::new(1);
+        let permit = permits.try_acquire(1).unwrap();
+        let (tx, rx) = mpsc::channel();
+        let completion = Box::new(move || tx.send(()).unwrap());
+        assert!(
+            queue
+                .push_cleanup_with_completion(Box::new(|| {}), permit, completion, 1)
+                .is_ok()
+        );
+        queue.stop();
+        queue.run();
+        rx.recv_timeout(Duration::from_secs(1)).unwrap();
+        assert_eq!(permits.used(), 0);
+    }
+
+    #[test]
+    fn test_cleanup_completion_does_not_confirm_a_panicking_job() {
+        let queue = WorkerQueue::default();
+        let permits = PermitPool::new(1);
+        let permit = permits.try_acquire(1).unwrap();
+        let (tx, rx) = mpsc::channel();
+        let completion = Box::new(move || tx.send(()).unwrap());
+        assert!(
+            queue
+                .push_cleanup_with_completion(Box::new(|| panic!("cleanup did not finish")), permit, completion, 1,)
+                .is_ok()
+        );
+        queue.stop();
+        queue.run();
+        assert!(rx.try_recv().is_err());
+        assert_eq!(permits.used(), 0);
+    }
+
+    #[test]
+    fn test_rejected_cleanup_completion_preserves_job_and_permit() {
+        let queue = WorkerQueue::default();
+        queue.stop();
+        let permits = PermitPool::new(1);
+        let permit = permits.try_acquire(1).unwrap();
+        let (tx, rx) = mpsc::channel();
+        let completion = Box::new(move || tx.send("completion").unwrap());
+        let (job, permit, completion) = queue
+            .push_cleanup_with_completion(Box::new(|| {}), permit, completion, 1)
+            .unwrap_err();
+        assert_eq!(permits.used(), 1);
+        job();
+        drop(permit);
+        completion();
+        assert_eq!(rx.recv_timeout(Duration::from_secs(1)).unwrap(), "completion");
         assert_eq!(permits.used(), 0);
     }
 
