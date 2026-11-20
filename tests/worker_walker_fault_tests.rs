@@ -51,6 +51,55 @@ fn test_recursive_worker_walker_returns_native_entry_error() {
 }
 
 #[cfg(feature = "test-support")]
+#[test]
+fn test_async_walker_preserves_native_resource_limit() {
+    use qubit_local_files::LocalFileSystem;
+    use qubit_local_files::error::LocalFileErrorKind;
+    use qubit_local_files::error::LocalResourceKind;
+    use qubit_local_files::operation::LocalExecutionConfig;
+    use qubit_local_files::operation::LocalIoExecutor;
+    use qubit_local_files::options::LocalListOptions;
+    use qubit_operation::ManagerOptions;
+    use qubit_operation::OperationManager;
+    use qubit_operation::OperationOutcome;
+
+    let directory = tempfile::tempdir().unwrap();
+    std::fs::write(directory.path().join("entry-a"), b"").unwrap();
+    std::fs::write(directory.path().join("entry-b"), b"").unwrap();
+    let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+    let executor = LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).unwrap();
+    let filesystem = LocalFileSystem::host().unwrap().into_async(executor).unwrap();
+    let mut opening = filesystem
+        .submit_open_walker(
+            &manager,
+            Default::default(),
+            directory.path().to_path_buf(),
+            LocalListOptions::default().with_max_entries(1),
+        )
+        .unwrap();
+    let mut walker = match opening.wait_outcome().unwrap() {
+        OperationOutcome::Succeeded(walker) => walker,
+        _ => panic!("walker open failed"),
+    };
+
+    let first = poll_worker(|cx| Box::pin(walker.next_batch()).as_mut().poll(cx))
+        .unwrap()
+        .expect("the first entry batch should be delivered");
+    assert_eq!(first.len(), 1);
+
+    let error = poll_worker(|cx| Box::pin(walker.next_batch()).as_mut().poll(cx)).unwrap_err();
+    assert_eq!(error.kind(), LocalFileErrorKind::ResourceLimit);
+    assert_eq!(error.path(), Some(directory.path()));
+    let limit = error.resource_limit_error().expect("native budget facts should be retained");
+    assert_eq!(limit.resource(), LocalResourceKind::Entry);
+    assert_eq!(limit.limit(), 1);
+    assert_eq!(limit.remaining(), 0);
+    assert_eq!(limit.requested(), 1);
+    drop(walker);
+    opening.wait_settlement().unwrap();
+}
+
+#[cfg(feature = "test-support")]
 fn poll_worker<F, T>(mut poll: F) -> T
 where
     F: FnMut(&mut std::task::Context<'_>) -> std::task::Poll<T>,

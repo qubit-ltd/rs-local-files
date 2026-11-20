@@ -409,6 +409,16 @@ fn execute_stream_command_at(
 ///
 /// * `error` - Error returned by a directory worker or close observer.
 pub(super) fn map_walk_error(error: io::Error) -> crate::LocalFileError {
+    if error
+        .get_ref()
+        .is_some_and(|source| source.is::<crate::LocalFileError>())
+    {
+        return *error
+            .into_inner()
+            .expect("LocalFileError source was checked above")
+            .downcast::<crate::LocalFileError>()
+            .expect("LocalFileError source type was checked above");
+    }
     if let Some(limit) = error
         .get_ref()
         .and_then(|source| source.downcast_ref::<WalkerResourceLimit>())
