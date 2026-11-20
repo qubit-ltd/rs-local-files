@@ -2424,3 +2424,85 @@ fn test_settled_walker_can_reopen_immediately() {
     drop(second);
     second_open.wait_settlement().unwrap();
 }
+
+#[test]
+fn test_settled_walker_reuses_full_byte_budget_after_all_close_paths() {
+    use qubit_local_files::LocalFileSystem;
+    use qubit_local_files::operation::LocalExecutionConfig;
+    use qubit_local_files::operation::LocalIoExecutor;
+    use qubit_local_files::operation::stream::LOCAL_WALK_BATCH_BYTES;
+    use qubit_local_files::options::LocalListOptions;
+    use qubit_operation::ManagerOptions;
+    use qubit_operation::OperationManager;
+    use qubit_operation::OperationOutcome;
+
+    let directory = tempfile::tempdir().unwrap();
+    std::fs::write(directory.path().join("entry"), b"x").unwrap();
+    let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+    let executor = LocalIoExecutor::new(
+        manager.clone(),
+        LocalExecutionConfig {
+            max_open_handles: 1,
+            max_owned_bytes: LOCAL_WALK_BATCH_BYTES,
+            ..LocalExecutionConfig::default()
+        },
+    )
+    .unwrap();
+    let filesystem = LocalFileSystem::host().unwrap().into_async(executor).unwrap();
+
+    for close_path in ["explicit", "eof", "cancelled_batch"] {
+        let mut opening = filesystem
+            .submit_open_walker(
+                &manager,
+                Default::default(),
+                directory.path().to_path_buf(),
+                LocalListOptions::default(),
+            )
+            .unwrap();
+        let mut walker = match opening.wait_outcome().unwrap() {
+            OperationOutcome::Succeeded(walker) => walker,
+            _ => panic!("walker should open with exactly one batch of byte capacity"),
+        };
+
+        match close_path {
+            "explicit" => {
+                let observer = walker.close_observer();
+                poll_worker(|cx| Box::pin(walker.close()).as_mut().poll(cx)).unwrap();
+                drop(observer);
+            }
+            "eof" => {
+                while poll_worker(|cx| Box::pin(walker.next_batch()).as_mut().poll(cx))
+                    .unwrap()
+                    .is_some()
+                {}
+            }
+            "cancelled_batch" => {
+                let mut pending = Box::pin(walker.next_batch());
+                assert!(poll(|cx| pending.as_mut().poll(cx)).is_pending());
+                drop(pending);
+                let observer = walker.close_observer();
+                poll_worker(|cx| Box::pin(walker.close()).as_mut().poll(cx)).unwrap();
+                drop(observer);
+            }
+            _ => unreachable!(),
+        }
+        drop(walker);
+        opening.wait_settlement().unwrap();
+
+        let mut reopened = filesystem
+            .submit_open_walker(
+                &manager,
+                Default::default(),
+                directory.path().to_path_buf(),
+                LocalListOptions::default(),
+            )
+            .expect("the first submission after settlement should reserve the full byte quota");
+        let mut reopened_walker = match reopened.wait_outcome().unwrap() {
+            OperationOutcome::Succeeded(walker) => walker,
+            _ => panic!("the walker should reopen after {close_path} cleanup"),
+        };
+        poll_worker(|cx| Box::pin(reopened_walker.close()).as_mut().poll(cx)).unwrap();
+        drop(reopened_walker);
+        reopened.wait_settlement().unwrap();
+    }
+}

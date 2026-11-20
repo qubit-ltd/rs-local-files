@@ -53,6 +53,8 @@ pub trait LocalWalkDriver: Send + Sync + 'static {
     ///
     /// # Parameters
     ///
-    /// * `cx` - Task context to wake when native closure is confirmed.
+    /// * `cx` - Task context to wake when native closure is confirmed. Drivers
+    ///   must retain and notify every independent active waiter, including
+    ///   observers and callers of `close`, when the shared result is published.
     fn poll_closed(&self, cx: &mut Context<'_>) -> Poll<io::Result<()>>;
 }

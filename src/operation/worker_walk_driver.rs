@@ -23,6 +23,7 @@ use super::LocalWalkResource;
 use super::WorkerCleanup;
 use super::worker_walk_command::WorkerWalkCommand;
 use super::worker_walk_cursor::WorkerWalkCursor;
+use super::worker_walk_inner::WorkerWalkCloseState;
 use super::worker_walk_inner::WorkerWalkInner;
 
 /// Collects one batch, preserving an iterator error that follows valid paths.
@@ -126,9 +127,7 @@ impl WorkerWalkDriver {
             }),
             commands: Mutex::new(HashMap::new()),
             stop_requested: AtomicBool::new(false),
-            closed: AtomicBool::new(false),
-            close_error: Mutex::new(None),
-            close_waker: Mutex::new(None),
+            close_state: Mutex::new(WorkerWalkCloseState::Waiting(Vec::new())),
             cleanup_permit: Mutex::new(Some(cleanup_permit)),
             _buffer_budget: buffer_budget,
             _handle_budget: Mutex::new(Some(handle_budget)),
@@ -169,6 +168,9 @@ impl LocalWalkDriver for WorkerWalkDriver {
         let mut schedule = false;
         {
             let mut commands = self.0.commands.lock().unwrap_or_else(|e| e.into_inner());
+            if self.0.stop_requested.load(Ordering::Acquire) {
+                return Poll::Ready(Ok(None));
+            }
             if let Some(command) = commands.get_mut(&request_id) {
                 if let Some(result) = command.result.take() {
                     commands.remove(&request_id);
@@ -250,28 +252,35 @@ impl LocalWalkDriver for WorkerWalkDriver {
         if self.0.stop_requested.swap(true, Ordering::AcqRel) {
             return;
         }
+        let abandoned_commands = {
+            let mut commands = self.0.commands.lock().unwrap_or_else(|e| e.into_inner());
+            std::mem::take(&mut *commands)
+        };
+        drop(abandoned_commands);
         let inner = Arc::clone(&self.0);
         let close_inner = Arc::clone(&inner);
         let job: Box<dyn FnOnce() + Send> = Box::new(move || {
-            {
-                let mut cursor = close_inner.walker.lock().unwrap_or_else(|e| e.into_inner());
-                cursor.walker.take();
-                cursor.pending_entry.take();
-                cursor.pending_error.take();
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                {
+                    let mut cursor = close_inner.walker.lock().unwrap_or_else(|e| e.into_inner());
+                    cursor.walker.take();
+                    cursor.pending_entry.take();
+                    cursor.pending_error.take();
+                }
+                close_inner.release_handle_budget();
+                let mut buffer_budget = close_inner._buffer_budget.lock().unwrap_or_else(|e| e.into_inner());
+                let reserved_bytes = buffer_budget.amount();
+                buffer_budget.shrink(reserved_bytes);
+            }));
+            if result.is_err() {
+                close_inner.publish_close(Err(io::Error::other(
+                    "Unconfirmed: local walker cleanup task panicked",
+                )));
             }
-            close_inner.release_handle_budget();
         });
         let complete_inner = Arc::clone(&inner);
         let completion: Box<dyn FnOnce() + Send> = Box::new(move || {
-            complete_inner.closed.store(true, Ordering::Release);
-            if let Some(waker) = complete_inner
-                .close_waker
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .take()
-            {
-                let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| waker.wake()));
-            }
+            complete_inner.publish_close(Ok(()));
         });
         let cleanup_permit = self.0.cleanup_permit.lock().unwrap_or_else(|e| e.into_inner()).take();
         if let Some(permit) = cleanup_permit {
@@ -297,12 +306,17 @@ impl LocalWalkDriver for WorkerWalkDriver {
                 }
             }
             if !queued {
-                *self.0.close_error.lock().unwrap_or_else(|e| e.into_inner()) = Some((
-                    io::ErrorKind::WouldBlock,
-                    "reserved local walker cleanup queue is unavailable".to_owned(),
-                ));
                 *self.0.cleanup_permit.lock().unwrap_or_else(|e| e.into_inner()) = permit;
+                self.0.publish_close(Err(io::Error::new(
+                    io::ErrorKind::WouldBlock,
+                    "reserved local walker cleanup queue is unavailable",
+                )));
             }
+        } else {
+            self.0.publish_close(Err(io::Error::new(
+                io::ErrorKind::WouldBlock,
+                "reserved local walker cleanup capacity is unavailable",
+            )));
         }
     }
 
@@ -312,18 +326,7 @@ impl LocalWalkDriver for WorkerWalkDriver {
     ///
     /// * `cx` - Task context to wake when native closure completes.
     fn poll_closed(&self, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
-        if let Some((kind, message)) = self.0.close_error.lock().unwrap_or_else(|e| e.into_inner()).clone() {
-            return Poll::Ready(Err(io::Error::new(kind, message)));
-        }
-        if self.0.closed.load(Ordering::Acquire) {
-            return Poll::Ready(Ok(()));
-        }
-        *self.0.close_waker.lock().unwrap_or_else(|e| e.into_inner()) = Some(cx.waker().clone());
-        if self.0.closed.load(Ordering::Acquire) {
-            Poll::Ready(Ok(()))
-        } else {
-            Poll::Pending
-        }
+        self.0.poll_closed(cx.waker())
     }
 }
 
@@ -339,6 +342,7 @@ mod tests {
     use std::task::Poll;
     use std::task::Wake;
     use std::task::Waker;
+    use std::sync::atomic::AtomicUsize;
 
     use qubit_operation::ManagerOptions;
     use qubit_operation::OperationManager;
@@ -346,6 +350,7 @@ mod tests {
 
     use super::LocalWalkDriver;
     use super::WorkerWalkCursor;
+    use super::WorkerWalkCloseState;
     use super::WorkerWalkDriver;
     use super::WorkerWalkInner;
     use super::collect_walk_batch;
@@ -380,9 +385,7 @@ mod tests {
             }),
             commands: Mutex::new(HashMap::new()),
             stop_requested: AtomicBool::new(false),
-            closed: AtomicBool::new(false),
-            close_error: Mutex::new(None),
-            close_waker: Mutex::new(None),
+            close_state: Mutex::new(WorkerWalkCloseState::Waiting(Vec::new())),
             cleanup_permit: Mutex::new(Some(cleanup_permit)),
             _buffer_budget: buffer_budget,
             _handle_budget: Mutex::new(Some(handle_budget)),
@@ -506,6 +509,113 @@ mod tests {
         );
         drop(held);
         assert!(executor.reserve_handle().is_some());
+    }
+
+    #[test]
+    fn test_close_wakes_all_waiters() {
+        struct CountWake(AtomicUsize, std::sync::mpsc::Sender<()>);
+        impl Wake for CountWake {
+            fn wake(self: Arc<Self>) {
+                self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                let _ = self.1.send(());
+            }
+            fn wake_by_ref(self: &Arc<Self>) {
+                self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                let _ = self.1.send(());
+            }
+        }
+
+        let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+        let executor = LocalIoExecutor::new(manager, LocalExecutionConfig::default()).unwrap();
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        executor.enqueue_task(Box::new(move || release_rx.recv().unwrap())).unwrap();
+
+        let directory = tempfile::tempdir().unwrap();
+        let driver = direct_driver(&directory, executor);
+        let (notified_tx, notified_rx) = std::sync::mpsc::channel();
+        let first = Arc::new(CountWake(AtomicUsize::new(0), notified_tx.clone()));
+        let second = Arc::new(CountWake(AtomicUsize::new(0), notified_tx));
+        let first_waker = Waker::from(Arc::clone(&first));
+        let second_waker = Waker::from(Arc::clone(&second));
+        let mut first_context = Context::from_waker(&first_waker);
+        let mut second_context = Context::from_waker(&second_waker);
+
+        assert!(driver.poll_closed(&mut first_context).is_pending());
+        assert!(driver.poll_closed(&mut second_context).is_pending());
+        driver.request_stop();
+        release_tx.send(()).unwrap();
+        notified_rx.recv_timeout(std::time::Duration::from_secs(5)).unwrap();
+        notified_rx.recv_timeout(std::time::Duration::from_secs(5)).unwrap();
+        assert!(first.0.load(std::sync::atomic::Ordering::SeqCst) > 0, "first waiter is notified");
+        assert!(second.0.load(std::sync::atomic::Ordering::SeqCst) > 0, "second waiter is notified");
+        assert!(matches!(driver.poll_closed(&mut first_context), Poll::Ready(Ok(()))));
+        assert!(matches!(driver.poll_closed(&mut second_context), Poll::Ready(Ok(()))));
+    }
+
+    #[test]
+    fn test_close_releases_byte_budget_before_notifying_waiters() {
+        struct GateWake {
+            notified: std::sync::mpsc::SyncSender<()>,
+            resume: Mutex<std::sync::mpsc::Receiver<()>>,
+        }
+        impl Wake for GateWake {
+            fn wake(self: Arc<Self>) {
+                self.notified.send(()).unwrap();
+                self.resume.lock().unwrap().recv().unwrap();
+            }
+            fn wake_by_ref(self: &Arc<Self>) {
+                self.notified.send(()).unwrap();
+                self.resume.lock().unwrap().recv().unwrap();
+            }
+        }
+
+        let byte_pool = PermitPool::new(crate::operation::stream::LOCAL_WALK_BATCH_BYTES);
+        let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+        let executor = LocalIoExecutor::new(manager, LocalExecutionConfig::default()).unwrap();
+        let directory = tempfile::tempdir().unwrap();
+        let driver = direct_driver(&directory, executor);
+        *driver.0._buffer_budget.lock().unwrap() =
+            byte_pool.try_acquire(crate::operation::stream::LOCAL_WALK_BATCH_BYTES).unwrap();
+
+        let (notified_tx, notified_rx) = std::sync::mpsc::sync_channel(1);
+        let (resume_tx, resume_rx) = std::sync::mpsc::sync_channel(1);
+        let waker = Waker::from(Arc::new(GateWake {
+            notified: notified_tx,
+            resume: Mutex::new(resume_rx),
+        }));
+        let mut context = Context::from_waker(&waker);
+        assert!(driver.poll_closed(&mut context).is_pending());
+        driver.request_stop();
+
+        notified_rx.recv_timeout(std::time::Duration::from_secs(5)).unwrap();
+        let available = byte_pool.try_acquire(crate::operation::stream::LOCAL_WALK_BATCH_BYTES);
+        resume_tx.send(()).unwrap();
+        assert!(available.is_some(), "close notification follows byte permit release");
+        drop(available);
+        assert!(matches!(driver.poll_closed(&mut context), Poll::Ready(Ok(()))));
+    }
+
+    #[test]
+    fn test_close_discards_undelivered_batches() {
+        let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+        let executor = LocalIoExecutor::new(manager, LocalExecutionConfig::default()).unwrap();
+        let directory = tempfile::tempdir().unwrap();
+        let driver = direct_driver(&directory, executor);
+        driver.0.commands.lock().unwrap().insert(
+            7,
+            super::WorkerWalkCommand {
+                result: Some(Ok(Some(vec![PathBuf::from("not-delivered")]))),
+                waker: None,
+            },
+        );
+
+        driver.request_stop();
+        let mut context = Context::from_waker(Waker::noop());
+        assert!(matches!(
+            driver.poll_batch(&mut context, 7, 1, 1024),
+            Poll::Ready(Ok(None))
+        ));
+        block_on(poll_closed(&driver)).unwrap();
     }
 
     fn block_on<F: std::future::Future>(future: F) -> F::Output {
@@ -699,8 +809,7 @@ mod tests {
 
             poison_test_mutex(&driver.0.commands);
             poison_test_mutex(&driver.0.walker);
-            poison_test_mutex(&driver.0.close_error);
-            poison_test_mutex(&driver.0.close_waker);
+            poison_test_mutex(&driver.0.close_state);
             poison_test_mutex(&driver.0.cleanup_permit);
         }
         let byte_limit = PathBuf::from("first").as_os_str().as_encoded_bytes().len();
@@ -806,7 +915,7 @@ mod tests {
         {
             use crate::operation::poison_test_mutex;
 
-            poison_test_mutex(&driver.0.close_error);
+            poison_test_mutex(&driver.0.close_state);
             poison_test_mutex(&driver.0.cleanup_permit);
         }
 
@@ -844,12 +953,10 @@ mod tests {
         let manager = OperationManager::new(ManagerOptions::default()).unwrap();
         let executor = LocalIoExecutor::new(manager, LocalExecutionConfig::default()).unwrap();
         let driver = direct_driver(&directory, executor);
-        driver
-            .0
-            .close_error
-            .lock()
-            .unwrap()
-            .replace((io::ErrorKind::WouldBlock, "cleanup unavailable".into()));
+        driver.0.publish_close(Err(io::Error::new(
+            io::ErrorKind::WouldBlock,
+            "cleanup unavailable",
+        )));
         let error = block_on(poll_closed(&driver)).unwrap_err();
         assert_eq!(error.kind(), io::ErrorKind::WouldBlock);
         assert_eq!(error.to_string(), "cleanup unavailable");
