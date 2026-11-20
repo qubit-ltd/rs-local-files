@@ -95,7 +95,12 @@ commit 不产生发布或修改事件。`settle()` 等待已接纳字节送达 n
 暂存其类型化结果供之后的 `commit()` 取回。分别保留提交和关闭错误；两者都失败时同时报告。写入
 失败后仍须关闭 writer；若关闭也失败，应同时报告写入和关闭诊断。close 缓存的提交失败仍保留原始类型化错误和发布状态，但因 writer 已进入终态而不可重试；writer 仍打开时直接观察到的可重试失败仍可重试。关闭失败时也要保留成功的 `LocalWriteOutcome`。等待 open operation settlement 前先释放 writer 引用，并将恢复 handle 与关闭结果一起交给调用方。
 
-检查结构化关闭原因时，先读取 `io::Error::get_ref()`，再沿其中错误的 `source()` 链查找。
+查找关闭错误中的结构化 `LocalFileError` 时，应先通过每一层
+`io::Error` 的 `get_ref()` 检查其直接载荷，再跟随 `Error::source()`。
+`io::Error` 可能直接返回载荷的来源；若只遍历 `source()`，就会跳过载荷本身。
+对每层嵌套的 `io::Error` 都执行此检查。公开的 `LocalFileError` 可识别
+`Abort` 清理失败，可通过 `operation()` 确认；应在诊断结果中保留原始 `io::Error`。重复调用
+`close()` 会保留同一结构化清理错误。
 写入和关闭同时失败时，关闭错误仍是主原因，写入诊断作为附加上下文保留。
 
 ```rust,no_run

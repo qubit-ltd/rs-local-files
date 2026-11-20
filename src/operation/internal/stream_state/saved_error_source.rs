@@ -79,3 +79,34 @@ impl Error for SavedErrorSource {
         Some(self.primary.as_ref())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::error::Error;
+    use std::io;
+    use std::sync::Arc;
+
+    use super::SavedErrorSource;
+
+    #[test]
+    fn test_saved_error_source_keeps_primary_error_in_chain_and_diagnostics() {
+        let primary = Arc::new(io::Error::other("primary failure"));
+        let saved = SavedErrorSource {
+            primary: Arc::clone(&primary),
+            context: Some("write did not complete".to_owned()),
+            secondary: Some(Arc::new(io::Error::other("earlier failure"))),
+        };
+
+        assert_eq!(
+            saved.source().unwrap().downcast_ref::<io::Error>().unwrap().to_string(),
+            primary.to_string()
+        );
+        assert_eq!(
+            saved.to_string(),
+            "primary failure (write did not complete); earlier write failed: earlier failure"
+        );
+        let debug = format!("{saved:?}");
+        assert!(debug.contains("primary failure"));
+        assert!(debug.contains("earlier failure"));
+    }
+}

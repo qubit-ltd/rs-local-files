@@ -118,10 +118,15 @@ close errors when both occur. Drop the writer reference before waiting for
 open-operation settlement and pass its recovery handles to the caller with
 the close result.
 
-To inspect a structured close cause, first inspect `io::Error::get_ref()` and
-then follow the contained error's `source()` chain. When both writing and
-closing fail, the close failure remains the primary cause and the write
-diagnostic is retained as additional context.
+To find a structured `LocalFileError` in a close error, inspect each
+`io::Error`'s direct payload with `get_ref()` before following
+`Error::source()`. An `io::Error` can expose its payload's source directly,
+which would skip the payload if you only traversed `source()`. Continue this
+check at every nested `io::Error`; the public `LocalFileError` identifies an
+`Abort` cleanup failure. Inspect its `operation()` to confirm `Abort`, and keep the original
+`io::Error` in your diagnostic result. Repeated `close()` calls retain the same
+structured cleanup failure. When writing and closing both fail, close remains primary and the
+write diagnostic is additional context.
 
 ```rust,no_run
 # #[cfg(feature = "async")]

@@ -53,8 +53,12 @@ mod local_stream_request;
 #[path = "local_stream_resource.rs"]
 mod local_stream_resource;
 pub use local_stream_resource::LocalStreamResource;
+#[path = "native_stream_writer.rs"]
+mod native_stream_writer;
 #[path = "worker_stream_inner.rs"]
 mod worker_stream_inner;
+#[path = "worker_stream_queued_request.rs"]
+mod worker_stream_queued_request;
 use worker_stream_inner::WorkerStreamInner;
 #[path = "worker_command.rs"]
 mod worker_stream_command;
@@ -148,7 +152,7 @@ fn fail_stream_queue(inner: &WorkerStreamInner, error: io::Error) {
     let requests = {
         let mut queue = inner.queue.lock().unwrap_or_else(|e| e.into_inner());
         inner.active.store(false, Ordering::Release);
-        queue.drain(..).map(|request| request.id).collect::<Vec<_>>()
+        queue.drain(..).map(|queued| queued.request.id).collect::<Vec<_>>()
     };
     for id in requests {
         let waker = {
@@ -185,7 +189,7 @@ fn drain_stream_commands(inner: Arc<WorkerStreamInner>) {
         };
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             let mut native = inner.native.lock().unwrap_or_else(|e| e.into_inner());
-            execute_stream_command(&mut native, &request.command)
+            execute_stream_command_at(&mut native, &request.request.command, request.write_offset)
         }))
         .unwrap_or_else(|_| Err(io::Error::other("Unconfirmed: local stream worker panicked")));
         if let Ok(completion) = &result {
@@ -250,7 +254,7 @@ fn drain_stream_commands(inner: Arc<WorkerStreamInner>) {
         }
         let waker = {
             let mut state = inner.state.lock().unwrap_or_else(|e| e.into_inner());
-            let Some(slot) = state.commands.get_mut(&request.id) else {
+            let Some(slot) = state.commands.get_mut(&request.request.id) else {
                 continue;
             };
             slot.result = Some(result);
@@ -296,9 +300,25 @@ fn record_stream_fact(
 ///
 /// * `native` - Optional native reader or writer retained by the worker.
 /// * `command` - Stable operation request to execute.
+#[cfg(test)]
 fn execute_stream_command(
     native: &mut Option<LocalNativeStream>,
     command: &LocalStreamCommand,
+) -> io::Result<LocalStreamCompletion> {
+    execute_stream_command_at(native, command, 0)
+}
+
+/// Executes one command, borrowing the remaining write payload when applicable.
+///
+/// # Parameters
+///
+/// * `native` - Native stream retained by this serial worker.
+/// * `command` - Owned request command to execute.
+/// * `write_offset` - Number of payload bytes already written.
+fn execute_stream_command_at(
+    native: &mut Option<LocalNativeStream>,
+    command: &LocalStreamCommand,
+    write_offset: usize,
 ) -> io::Result<LocalStreamCompletion> {
     if matches!(command, LocalStreamCommand::Commit) {
         let Some(LocalNativeStream::Writer(writer)) = native.take() else {
@@ -340,7 +360,10 @@ fn execute_stream_command(
             Ok(LocalStreamCompletion::Read(bytes))
         }
         (LocalNativeStream::Writer(writer), LocalStreamCommand::Write { bytes }) => {
-            let count = qubit_io::Output::write(writer.as_mut(), bytes)?;
+            let remaining = bytes
+                .get(write_offset..)
+                .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "native write offset exceeds payload"))?;
+            let count = qubit_io::Output::write(writer.as_mut(), remaining)?;
             #[cfg(feature = "test-support")]
             crate::test_support::hit_test_gate("rlf9-writer-after-stage-write");
             Ok(LocalStreamCompletion::Written(count))
@@ -610,12 +633,19 @@ mod tests {
                     },
                 )]),
             }),
-            queue: Mutex::new(VecDeque::from([super::LocalStreamRequest {
-                id: 41,
-                command: LocalStreamCommand::Write {
-                    bytes: std::sync::Arc::from(&b"append through worker"[..]),
+            queue: Mutex::new(VecDeque::from([
+                super::worker_stream_queued_request::WorkerStreamQueuedRequest {
+                    request: super::LocalStreamRequest {
+                        id: 41,
+                        command: LocalStreamCommand::Write {
+                            bytes: std::sync::Arc::from(&b"append through worker"[..]),
+                        },
+                    },
+                    write_offset: 0,
                 },
-            }])),
+            ])),
+            native_write_ids: Mutex::new(HashMap::new()),
+            next_internal_request_id: std::sync::atomic::AtomicU64::new(1 << 63),
             active: std::sync::atomic::AtomicBool::new(true),
             cleanup_permit: Mutex::new(Some(executor.reserve_cleanup().unwrap())),
             _buffer_budget: std::sync::Arc::new(Mutex::new(executor.reserve_bytes(0).unwrap())),
@@ -690,15 +720,23 @@ mod tests {
             native: Mutex::new(None),
             state: Mutex::new(WorkerStreamState { commands }),
             queue: Mutex::new(VecDeque::from([
-                super::LocalStreamRequest {
-                    id: 41,
-                    command: LocalStreamCommand::Close,
+                super::worker_stream_queued_request::WorkerStreamQueuedRequest {
+                    request: super::LocalStreamRequest {
+                        id: 41,
+                        command: LocalStreamCommand::Close,
+                    },
+                    write_offset: 0,
                 },
-                super::LocalStreamRequest {
-                    id: 42,
-                    command: LocalStreamCommand::Abort,
+                super::worker_stream_queued_request::WorkerStreamQueuedRequest {
+                    request: super::LocalStreamRequest {
+                        id: 42,
+                        command: LocalStreamCommand::Abort,
+                    },
+                    write_offset: 0,
                 },
             ])),
+            native_write_ids: Mutex::new(HashMap::new()),
+            next_internal_request_id: std::sync::atomic::AtomicU64::new(1 << 63),
             active: std::sync::atomic::AtomicBool::new(true),
             cleanup_permit: Mutex::new(Some(executor.reserve_cleanup().unwrap())),
             _buffer_budget: std::sync::Arc::new(Mutex::new(executor.reserve_bytes(0).unwrap())),

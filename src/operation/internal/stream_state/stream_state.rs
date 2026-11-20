@@ -37,7 +37,9 @@ pub(crate) struct StreamState {
     /// Outstanding native read request, if one has been issued.
     read_request: Option<LocalStreamRequest>,
     /// Bytes returned by the worker but not yet copied to a caller buffer.
-    read_buffer: VecDeque<u8>,
+    read_buffer: Vec<u8>,
+    /// Number of bytes at the start of `read_buffer` already delivered.
+    read_offset: usize,
     /// Whether the worker has confirmed end-of-file with a sentinel read.
     eof: bool,
     /// FIFO of writes awaiting native completion, with per-request progress.
@@ -76,7 +78,8 @@ impl StreamState {
             next_id: 1,
             next_seek_owner_id: 1,
             read_request: None,
-            read_buffer: VecDeque::new(),
+            read_buffer: Vec::new(),
+            read_offset: 0,
             eof: false,
             writes: VecDeque::new(),
             queued_write_bytes: 0,
@@ -155,10 +158,13 @@ impl StreamState {
         if let Some((_, Err(error))) = self.seek_result.take() {
             return Poll::Ready(Err(error));
         }
-        if !self.read_buffer.is_empty() {
-            let count = output.len().min(self.read_buffer.len());
-            for slot in &mut output[..count] {
-                *slot = self.read_buffer.pop_front().expect("count bounded by buffer length");
+        if self.read_offset < self.read_buffer.len() {
+            let count = output.len().min(self.read_buffer.len() - self.read_offset);
+            output[..count].copy_from_slice(&self.read_buffer[self.read_offset..self.read_offset + count]);
+            self.read_offset += count;
+            if self.read_offset == self.read_buffer.len() {
+                self.read_buffer = Vec::new();
+                self.read_offset = 0;
             }
             return Poll::Ready(Ok(count));
         }
@@ -177,14 +183,10 @@ impl StreamState {
                 self.read_request = None;
                 match result {
                     Ok(LocalStreamCompletion::Read(bytes)) => {
-                        if bytes.len() > LOCAL_STREAM_BUFFER_SIZE {
-                            let error =
-                                io::Error::new(io::ErrorKind::InvalidData, "stream worker exceeded read buffer limit");
+                        if let Err(error) = self.accept_read(bytes) {
                             self.write_error = Some(SavedError::capture(error));
                             return Poll::Ready(Err(self.write_error.as_ref().expect("error stored").make()));
                         }
-                        self.eof = bytes.is_empty();
-                        self.read_buffer.extend(bytes);
                         if self.read_buffer.is_empty() {
                             Poll::Ready(Ok(0))
                         } else {
@@ -283,7 +285,9 @@ impl StreamState {
                 LocalStreamCommand::Write { bytes } => bytes.len(),
                 _ => unreachable!("write queue only contains write commands"),
             };
-            match resource.poll_command(cx, &request) {
+            let native_write = resource.poll_native_write(cx, &request, offset);
+            let is_native = native_write.is_some();
+            match native_write.unwrap_or_else(|| resource.poll_command(cx, &request)) {
                 Poll::Pending => return Poll::Pending,
                 Poll::Ready(Err(error)) => {
                     let actual = self.written_bytes;
@@ -307,10 +311,13 @@ impl StreamState {
                         return Poll::Ready(());
                     }
                     self.written_bytes = self.written_bytes.saturating_add(count as u64);
-                    self.queued_write_bytes = self.queued_write_bytes.saturating_sub(count);
                     if offset + count == expected {
                         self.writes.pop_front();
+                        self.queued_write_bytes = self.queued_write_bytes.saturating_sub(expected);
+                    } else if is_native {
+                        self.writes.front_mut().expect("partial write remains queued").offset += count;
                     } else {
+                        self.queued_write_bytes = self.queued_write_bytes.saturating_sub(count);
                         let rest = match &request.command {
                             LocalStreamCommand::Write { bytes } => Arc::from(&bytes[offset + count..]),
                             _ => unreachable!(),
@@ -465,7 +472,8 @@ impl StreamState {
         if self.seek_request.is_none() {
             let adjusted = match position {
                 SeekFrom::Current(offset) => {
-                    let buffered = i64::try_from(self.read_buffer.len()).unwrap_or(i64::MAX);
+                    let buffered =
+                        i64::try_from(self.read_buffer.len().saturating_sub(self.read_offset)).unwrap_or(i64::MAX);
                     match offset.checked_sub(buffered) {
                         Some(value) => SeekFrom::Current(value),
                         None => {
@@ -516,7 +524,8 @@ impl StreamState {
             Poll::Pending => Poll::Pending,
             Poll::Ready(Ok(LocalStreamCompletion::Seeked(position))) => {
                 self.seek_request = None;
-                self.read_buffer.clear();
+                self.read_buffer = Vec::new();
+                self.read_offset = 0;
                 self.eof = false;
                 self.seek_result = Some((owner_id, Ok(position)));
                 Poll::Ready(())
@@ -565,13 +574,10 @@ impl StreamState {
             Poll::Pending => Poll::Pending,
             Poll::Ready(Ok(LocalStreamCompletion::Read(bytes))) => {
                 self.read_request = None;
-                if bytes.len() > LOCAL_STREAM_BUFFER_SIZE {
-                    let error = io::Error::new(io::ErrorKind::InvalidData, "stream worker exceeded read buffer limit");
+                if let Err(error) = self.accept_read(bytes) {
                     self.write_error = Some(SavedError::capture(error));
                     return Poll::Ready(Err(self.write_error.as_ref().expect("error stored").make()));
                 }
-                self.eof = bytes.is_empty();
-                self.read_buffer.extend(bytes);
                 Poll::Ready(Ok(()))
             }
             Poll::Ready(Ok(LocalStreamCompletion::Unconfirmed { operation, detail })) => {
@@ -724,6 +730,25 @@ impl StreamState {
         }
     }
 
+    /// Takes ownership of one worker completion after validating its
+    /// allocation.
+    ///
+    /// # Parameters
+    ///
+    /// * `bytes` - Completed read allocation returned by the stream worker.
+    fn accept_read(&mut self, bytes: Vec<u8>) -> io::Result<()> {
+        if bytes.len() > LOCAL_STREAM_BUFFER_SIZE || bytes.capacity() > LOCAL_STREAM_BUFFER_SIZE {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "stream worker exceeded read buffer limit",
+            ));
+        }
+        self.eof = bytes.is_empty();
+        self.read_offset = 0;
+        self.read_buffer = bytes;
+        Ok(())
+    }
+
     /// Returns the retained close result after the worker has completed the
     /// close request.
     ///
@@ -769,8 +794,290 @@ impl StreamState {
 #[cfg(test)]
 mod tests {
     use std::io;
+    use std::sync::Mutex;
+    use std::task::Context;
+    use std::task::Poll;
 
+    use super::super::super::LocalStreamCommand;
+    use super::super::super::LocalStreamCompletion;
+    use super::super::super::LocalStreamDriver;
+    use super::super::super::LocalStreamRequest;
+    use super::super::super::LocalStreamResource;
+    use super::super::super::native_stream_writer::NativeStreamWriter;
+    use super::Direction;
     use super::StreamState;
+
+    struct ReadOnce {
+        bytes: Mutex<Option<Vec<u8>>>,
+        calls: std::sync::Arc<Mutex<usize>>,
+        close_requests: std::sync::Arc<Mutex<Vec<u64>>>,
+    }
+
+    impl LocalStreamDriver for ReadOnce {
+        fn poll_command(
+            &self,
+            _: &mut Context<'_>,
+            request: &LocalStreamRequest,
+        ) -> Poll<io::Result<LocalStreamCompletion>> {
+            if matches!(request.command, LocalStreamCommand::Read { .. }) {
+                *self.calls.lock().unwrap() += 1;
+                Poll::Ready(Ok(LocalStreamCompletion::Read(
+                    self.bytes.lock().unwrap().take().unwrap_or_default(),
+                )))
+            } else {
+                Poll::Ready(Err(io::Error::other("unexpected command")))
+            }
+        }
+
+        fn request_close(&self, request_id: u64) {
+            self.close_requests.lock().unwrap().push(request_id);
+        }
+    }
+
+    #[test]
+    fn test_read_buffer_uses_completion_allocation_until_drained() {
+        let bytes = b"completion allocation".to_vec();
+        let allocation = bytes.as_ptr();
+        let calls = std::sync::Arc::new(Mutex::new(0));
+        let close_requests = std::sync::Arc::new(Mutex::new(Vec::new()));
+        let resource = LocalStreamResource::new(ReadOnce {
+            bytes: Mutex::new(Some(bytes)),
+            calls: std::sync::Arc::clone(&calls),
+            close_requests: std::sync::Arc::clone(&close_requests),
+        });
+        let mut state = StreamState::new(Direction::Read);
+        let mut cx = Context::from_waker(std::task::Waker::noop());
+        let mut output = [0; 3];
+
+        assert!(matches!(
+            state.poll_read(&resource, &mut cx, &mut output),
+            Poll::Ready(Ok(3))
+        ));
+        assert_eq!(&output, b"com");
+        assert_eq!(state.read_buffer.as_ptr(), allocation);
+        assert_eq!(state.read_offset, 3);
+        assert_eq!(*calls.lock().unwrap(), 1);
+
+        let mut rest = [0; 32];
+        assert!(matches!(
+            state.poll_read(&resource, &mut cx, &mut rest),
+            Poll::Ready(Ok(18))
+        ));
+        assert_eq!(&rest[..18], b"pletion allocation");
+        assert_eq!(state.read_buffer.capacity(), 0);
+        assert!(matches!(
+            state.poll_read(&resource, &mut cx, &mut rest),
+            Poll::Ready(Ok(0))
+        ));
+        assert_eq!(*calls.lock().unwrap(), 2);
+        resource.request_close(17);
+        assert_eq!(*close_requests.lock().unwrap(), [17]);
+    }
+
+    struct ControlledNativeWriter {
+        calls: std::sync::Arc<Mutex<Vec<(u64, usize, usize)>>>,
+        attempts: Mutex<std::collections::HashMap<usize, usize>>,
+        written: std::sync::Arc<Mutex<Vec<u8>>>,
+        close_requests: std::sync::Arc<Mutex<Vec<u64>>>,
+    }
+
+    impl LocalStreamDriver for ControlledNativeWriter {
+        fn poll_command(
+            &self,
+            _: &mut Context<'_>,
+            request: &LocalStreamRequest,
+        ) -> Poll<io::Result<LocalStreamCompletion>> {
+            if matches!(request.command, LocalStreamCommand::Flush) {
+                Poll::Ready(Ok(LocalStreamCompletion::Flushed))
+            } else {
+                Poll::Ready(Err(io::Error::other("unexpected fallback command")))
+            }
+        }
+        fn request_close(&self, request_id: u64) {
+            self.close_requests.lock().unwrap().push(request_id);
+        }
+    }
+
+    impl NativeStreamWriter for ControlledNativeWriter {
+        fn poll_native_write(
+            &self,
+            _: &mut Context<'_>,
+            request: &LocalStreamRequest,
+            offset: usize,
+        ) -> Poll<io::Result<LocalStreamCompletion>> {
+            let LocalStreamCommand::Write { bytes } = &request.command else {
+                panic!("expected write")
+            };
+            self.calls
+                .lock()
+                .unwrap()
+                .push((request.id, offset, bytes.as_ptr() as usize));
+            let attempt = {
+                let mut attempts = self.attempts.lock().unwrap();
+                let current = attempts.entry(offset).or_default();
+                *current += 1;
+                *current
+            };
+            if attempt == 1 {
+                return Poll::Pending;
+            }
+            let count = match offset {
+                0 => 1,
+                1 => 2,
+                3 => 1,
+                4 => bytes.len() - 4,
+                _ => panic!("unexpected write offset {offset}"),
+            };
+            self.written
+                .lock()
+                .unwrap()
+                .extend_from_slice(&bytes[offset..offset + count]);
+            Poll::Ready(Ok(LocalStreamCompletion::Written(count)))
+        }
+    }
+
+    #[test]
+    fn test_native_short_writes_keep_payload_and_quota_until_drained() {
+        let driver = ControlledNativeWriter {
+            calls: std::sync::Arc::new(Mutex::new(Vec::new())),
+            attempts: Mutex::new(std::collections::HashMap::new()),
+            written: std::sync::Arc::new(Mutex::new(Vec::new())),
+            close_requests: std::sync::Arc::new(Mutex::new(Vec::new())),
+        };
+        let calls = std::sync::Arc::clone(&driver.calls);
+        let written = std::sync::Arc::clone(&driver.written);
+        let close_requests = std::sync::Arc::clone(&driver.close_requests);
+        let resource = LocalStreamResource::new_native(driver);
+        let mut state = StreamState::new(Direction::Write);
+        let mut cx = Context::from_waker(std::task::Waker::noop());
+        let payload = vec![b'z'; super::super::super::LOCAL_STREAM_BUFFER_SIZE];
+        assert!(
+            matches!(state.poll_write(&resource, &mut cx, &payload), Poll::Ready(Ok(count)) if count == payload.len())
+        );
+
+        assert!(state.poll_flush(&resource, &mut cx).is_pending());
+        assert!(state.poll_flush(&resource, &mut cx).is_pending());
+        assert_eq!(state.queued_write_bytes, payload.len());
+        assert!(state.poll_write(&resource, &mut cx, b"blocked").is_pending());
+        loop {
+            if let Poll::Ready(result) = state.poll_flush(&resource, &mut cx) {
+                result.unwrap();
+                break;
+            }
+        }
+
+        let calls = calls.lock().unwrap();
+        assert_eq!(calls.len(), 8);
+        assert_eq!(
+            calls.iter().map(|call| call.1).collect::<Vec<_>>(),
+            [0, 0, 1, 1, 3, 3, 4, 4]
+        );
+        assert!(calls.chunks_exact(2).all(|pair| pair[0].0 == pair[1].0));
+        assert!(calls.iter().all(|call| call.2 == calls[0].2));
+        assert_eq!(written.lock().unwrap().as_slice(), payload.as_slice());
+        assert_eq!(state.queued_write_bytes, 0);
+        resource.request_close(23);
+        assert_eq!(*close_requests.lock().unwrap(), [23]);
+    }
+
+    struct FailingNativeWriter {
+        zero_progress: bool,
+        attempts: Mutex<std::collections::HashMap<usize, usize>>,
+        events: std::sync::Arc<Mutex<Vec<&'static str>>>,
+    }
+
+    impl LocalStreamDriver for FailingNativeWriter {
+        fn poll_command(
+            &self,
+            _: &mut Context<'_>,
+            request: &LocalStreamRequest,
+        ) -> Poll<io::Result<LocalStreamCompletion>> {
+            if matches!(request.command, LocalStreamCommand::Close) {
+                self.events.lock().unwrap().push("close");
+                Poll::Ready(Ok(LocalStreamCompletion::Closed))
+            } else {
+                Poll::Ready(Err(io::Error::other("unexpected command")))
+            }
+        }
+        fn request_close(&self, _: u64) {
+            self.events.lock().unwrap().push("request_close");
+        }
+    }
+
+    impl NativeStreamWriter for FailingNativeWriter {
+        fn poll_native_write(
+            &self,
+            _: &mut Context<'_>,
+            _request: &LocalStreamRequest,
+            offset: usize,
+        ) -> Poll<io::Result<LocalStreamCompletion>> {
+            let attempt = {
+                let mut attempts = self.attempts.lock().unwrap();
+                let current = attempts.entry(offset).or_default();
+                *current += 1;
+                *current
+            };
+            if attempt == 1 {
+                self.events.lock().unwrap().push("write_pending");
+                return Poll::Pending;
+            }
+            if self.zero_progress {
+                self.events.lock().unwrap().push("write_zero");
+                return Poll::Ready(Ok(LocalStreamCompletion::Written(0)));
+            }
+            if offset == 0 {
+                self.events.lock().unwrap().push("write_progress");
+                return Poll::Ready(Ok(LocalStreamCompletion::Written(1)));
+            }
+            self.events.lock().unwrap().push("write_error");
+            Poll::Ready(Err(io::Error::other("controlled native failure")))
+        }
+    }
+
+    #[test]
+    fn test_native_short_write_failure_and_zero_progress_precede_close() {
+        for zero_progress in [false, true] {
+            let events = std::sync::Arc::new(Mutex::new(Vec::new()));
+            let resource = LocalStreamResource::new_native(FailingNativeWriter {
+                zero_progress,
+                attempts: Mutex::new(std::collections::HashMap::new()),
+                events: std::sync::Arc::clone(&events),
+            });
+            let mut state = StreamState::new(Direction::Write);
+            let mut cx = Context::from_waker(std::task::Waker::noop());
+            assert!(matches!(
+                state.poll_write(&resource, &mut cx, b"payload"),
+                Poll::Ready(Ok(7))
+            ));
+
+            let result = loop {
+                if let Poll::Ready(result) = state.poll_close(&resource, &mut cx) {
+                    break result;
+                }
+            };
+            let error = result.unwrap_err();
+            if zero_progress {
+                assert_eq!(error.kind(), io::ErrorKind::WriteZero);
+                assert_eq!(state.written_bytes, 0);
+                assert_eq!(*events.lock().unwrap(), ["write_pending", "write_zero", "close"]);
+            } else {
+                assert!(error.to_string().contains("1 bytes written before failure"));
+                assert_eq!(state.written_bytes, 1);
+                assert_eq!(
+                    *events.lock().unwrap(),
+                    [
+                        "write_pending",
+                        "write_progress",
+                        "write_pending",
+                        "write_error",
+                        "close"
+                    ]
+                );
+            }
+            resource.request_close(31);
+            assert_eq!(events.lock().unwrap().last(), Some(&"request_close"));
+        }
+    }
 
     #[test]
     fn test_closed_stream_errors_are_broken_pipe() {

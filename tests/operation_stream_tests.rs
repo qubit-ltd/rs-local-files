@@ -50,6 +50,7 @@ struct FakeState {
     bytes: Vec<u8>,
     position: usize,
     writes: Vec<u8>,
+    write_payloads: Vec<Vec<u8>>,
     hold_next: bool,
     held: Vec<u64>,
     wake: Option<Waker>,
@@ -99,6 +100,10 @@ impl FakeWorker {
 
     fn writes(&self) -> Vec<u8> {
         self.0.lock().unwrap().writes.clone()
+    }
+
+    fn write_payloads(&self) -> Vec<Vec<u8>> {
+        self.0.lock().unwrap().write_payloads.clone()
     }
 
     fn commit_calls(&self) -> usize {
@@ -209,6 +214,7 @@ impl LocalStreamDriver for FakeWorker {
                 Ok(LocalStreamCompletion::Read(bytes))
             }
             LocalStreamCommand::Write { bytes } => {
+                state.write_payloads.push(bytes.to_vec());
                 if state.fail_after_write == Some(state.write_calls) {
                     return Poll::Ready(Err(io::Error::other("worker lost after partial write")));
                 }
@@ -1759,6 +1765,20 @@ fn test_settle_rejects_and_latches_over_limit_read_completion() {
 }
 
 #[test]
+fn test_read_rejects_completion_with_over_limit_capacity() {
+    let worker = Arc::new(FakeWorker::default());
+    let mut allocation = Vec::with_capacity(LOCAL_STREAM_BUFFER_SIZE + 1);
+    allocation.extend_from_slice(b"valid length");
+    worker.overread_next(allocation);
+    let mut reader = reader(&worker);
+    let mut output = [0; 1];
+    assert!(matches!(
+        poll(|cx| Pin::new(&mut reader).poll_read(cx, &mut output)),
+        Poll::Ready(Err(error)) if error.kind() == io::ErrorKind::InvalidData
+    ));
+}
+
+#[test]
 fn test_close_rejects_over_limit_read_completion_before_release() {
     let worker = Arc::new(FakeWorker::default());
     worker.hold_next();
@@ -2077,6 +2097,7 @@ fn test_partial_write_failure_latches_actual_count_and_driver_panic_is_unconfirm
     };
     assert!(error.to_string().contains("2 bytes written before failure"));
     assert_eq!(worker.writes(), b"ab");
+    assert_eq!(worker.write_payloads(), [b"abcdef".to_vec(), b"cdef".to_vec()]);
 
     let error = poll_worker(|cx| Box::pin(writer.commit()).as_mut().poll(cx))
         .expect_err("commit must surface the failed write during settlement");

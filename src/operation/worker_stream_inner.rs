@@ -12,7 +12,7 @@ use std::sync::Mutex;
 use std::sync::atomic::AtomicBool;
 
 use super::LocalNativeStream;
-use super::LocalStreamRequest;
+use super::worker_stream_queued_request::WorkerStreamQueuedRequest;
 use super::worker_stream_state::WorkerStreamState;
 
 /// Shared executor, native handle, and budgets for one stream worker.
@@ -24,7 +24,11 @@ pub(super) struct WorkerStreamInner {
     /// Results exposed to polling resource handles.
     pub(super) state: Mutex<WorkerStreamState>,
     /// FIFO commands waiting for native execution.
-    pub(super) queue: Mutex<VecDeque<LocalStreamRequest>>,
+    pub(super) queue: Mutex<VecDeque<WorkerStreamQueuedRequest>>,
+    /// Maps each parent write and payload offset to one worker request ID.
+    pub(super) native_write_ids: Mutex<std::collections::HashMap<(u64, usize), u64>>,
+    /// Next ID reserved for an internal native write attempt.
+    pub(super) next_internal_request_id: std::sync::atomic::AtomicU64,
     /// Whether a drain task currently owns the queue.
     pub(super) active: AtomicBool,
     /// Reserved capacity for worker-side cleanup.

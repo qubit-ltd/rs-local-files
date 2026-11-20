@@ -222,8 +222,36 @@ impl AsyncLocalFileWriter {
     /// first poll marks the writer as closing. Subsequent non-empty writes,
     /// flushes, and not-yet-started commits fail immediately, and the mark
     /// remains if this future is dropped. Errors returned by this method keep
-    /// their original payload; inspect `io::Error::get_ref()` and then follow
-    /// the contained error's `source()` chain to find structured causes.
+    /// their original payload. To find a structured [`crate::LocalFileError`],
+    /// inspect each `io::Error`'s direct payload with `get_ref()` before
+    /// following `Error::source()`: an `io::Error` may expose the payload's
+    /// source directly, skipping the payload itself.
+    ///
+    /// ```
+    /// use std::error::Error;
+    /// use std::io;
+    ///
+    /// fn local_file_error(error: &io::Error) -> Option<&qubit_local_files::LocalFileError> {
+    ///     let mut pending: Vec<&(dyn Error + 'static)> = Vec::new();
+    ///     if let Some(payload) = error.get_ref() {
+    ///         pending.push(payload);
+    ///     }
+    ///     while let Some(cause) = pending.pop() {
+    ///         if let Some(file_error) = cause.downcast_ref() {
+    ///             return Some(file_error);
+    ///         }
+    ///         if let Some(io_error) = cause.downcast_ref::<io::Error>() {
+    ///             if let Some(payload) = io_error.get_ref() {
+    ///                 pending.push(payload);
+    ///             }
+    ///         }
+    ///         if let Some(source) = cause.source() {
+    ///             pending.push(source);
+    ///         }
+    ///     }
+    ///     None
+    /// }
+    /// ```
     pub async fn close(&mut self) -> io::Result<()> {
         self.close_started = true;
         if self.request.is_some() || (self.started && !self.terminal) {

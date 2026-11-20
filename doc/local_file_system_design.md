@@ -1702,10 +1702,14 @@ writes, flushes, and not-yet-started commits fail immediately; dropping the
 close future does not reopen the writer, and polling `close()` again resumes
 the same close operation. Creating but never polling the future has no effect,
 and zero-length writes retain their existing behavior. To inspect a structured
-close cause, callers first inspect `io::Error::get_ref()` and then follow the
-contained error's `source()` chain. If writing and closing both fail, the close
-failure remains primary while the write error remains additional diagnostic
-context.
+close cause, inspect each `io::Error`'s direct payload through `get_ref()`
+before following `Error::source()`: an `io::Error` may expose the payload's
+source directly and thereby skip the payload. Repeat this check for nested
+`io::Error` values. The original close error remains available for diagnostics,
+and repeated `close()` calls preserve the same structured cleanup error,
+including an `Abort` error whose `operation()` identifies the cleanup action;
+retain the original `io::Error` for diagnostics. If writing and closing both fail, the close failure
+remains primary while the write error remains additional diagnostic context.
 
 ```rust,no_run
 # #[cfg(feature = "async")]
