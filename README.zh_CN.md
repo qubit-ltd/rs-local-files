@@ -42,6 +42,7 @@ durable 同步。向量 I/O 仍由各文件类型的固有 `read_vectored` 或 `
 通过 writer 写入清单并提交，然后读回已经发布的内容。
 
 ```rust
+fn main() -> Result<(), Box<dyn std::error::Error>> {
 use qubit_io::{Output, Streams};
 
 use qubit_local_files::LocalFileSystem;
@@ -65,7 +66,8 @@ Streams::copy_input_to_output(&mut filesystem.open_reader(&path)?, &mut bytes)?;
 let content = String::from_utf8(bytes)?;
 assert_eq!(content, r#"{"version":1}"#);
 work.cleanup()?;
-# Ok::<(), Box<dyn std::error::Error>>(())
+Ok(())
+}
 ```
 
 ## 与运行时无关的异步访问

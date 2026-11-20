@@ -64,6 +64,102 @@ fn lock_documentation_consumer() -> MutexGuard<'static, ()> {
         .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
+#[test]
+fn test_readme_quick_start_runs_as_a_consumer() {
+    let _guard = lock_documentation_consumer();
+    let crate_path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .canonicalize()
+        .expect("the tested crate path is canonicalized");
+    let workspace = tempdir().expect("consumer workspace is created");
+    let target = workspace.path().join("target");
+    for (index, (language, readme)) in [
+        ("English", include_str!("../README.md")),
+        ("中文", include_str!("../README.zh_CN.md")),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let dependencies = readme
+            .split_once("```toml")
+            .and_then(|(_, rest)| rest.split_once("```"))
+            .map(|(manifest, _)| manifest.trim())
+            .expect("README installation dependencies are fenced TOML");
+        let dependency_line = dependencies
+            .lines()
+            .find(|line| line.trim_start().starts_with("qubit-local-files ="))
+            .expect("README dependencies contain qubit-local-files");
+        let dependency_path = cargo_manifest_path(&crate_path.to_string_lossy());
+        let dependencies = dependencies.replace(
+            dependency_line,
+            &format!("qubit-local-files = {{ path = \"{dependency_path}\" }}"),
+        );
+        let section = readme
+            .split_once("## ")
+            .and_then(|(_, rest)| rest.split_once("```rust"))
+            .and_then(|(_, rest)| rest.split_once("```"))
+            .map(|(code, _)| code.trim())
+            .expect("README quick start is a fenced Rust example");
+        assert!(
+            section.starts_with("fn main() -> Result"),
+            "{language} quick start has a visible main"
+        );
+
+        let project = workspace.path().join(format!("readme-consumer-{index}"));
+        fs::create_dir_all(project.join("src")).expect("consumer source directory is created");
+        fs::write(
+            project.join("Cargo.toml"),
+            format!("[package]\nname = \"documentation-consumer\"\nversion = \"0.1.0\"\nedition = \"2024\"\n\n{dependencies}"),
+        )
+        .expect("consumer manifest is written");
+        fs::write(project.join("src/main.rs"), section).expect("README source is written verbatim");
+        let lock_status = Command::new("cargo")
+            .arg("generate-lockfile")
+            .arg("--offline")
+            .arg("--manifest-path")
+            .arg(project.join("Cargo.toml"))
+            .current_dir(&project)
+            .env_remove("CARGO_ENCODED_RUSTFLAGS")
+            .env_remove("RUSTFLAGS")
+            .env_remove("CARGO_BUILD_TARGET")
+            .output()
+            .expect("offline consumer lock generation starts");
+        assert!(
+            lock_status.status.success(),
+            "{language} README lock generation failed with {}\nstdout:\n{}\nstderr:\n{}",
+            lock_status.status,
+            String::from_utf8_lossy(&lock_status.stdout),
+            String::from_utf8_lossy(&lock_status.stderr)
+        );
+        let consumer_lock =
+            fs::read_to_string(project.join("Cargo.lock")).expect("consumer lock is generated");
+        let status = Command::new("cargo")
+            .arg("run")
+            .arg("--frozen")
+            .arg("--manifest-path")
+            .arg(project.join("Cargo.toml"))
+            .current_dir(&project)
+            .env("CARGO_TARGET_DIR", &target)
+            .env_remove("CARGO_ENCODED_RUSTFLAGS")
+            .env_remove("RUSTFLAGS")
+            .env_remove("CARGO_BUILD_TARGET")
+            .output()
+            .expect("consumer cargo process starts");
+        assert!(
+            status.status.success(),
+            "{language} README consumer failed with {}\nstdout:\n{}\nstderr:\n{}\nLock diagnostic:\n{}",
+            status.status,
+            String::from_utf8_lossy(&status.stdout),
+            String::from_utf8_lossy(&status.stderr),
+            diagnose_consumer_lock_update(&project)
+        );
+        assert_eq!(
+            fs::read_to_string(project.join("Cargo.lock")).expect("consumer lock remains readable"),
+            consumer_lock,
+            "{language} consumer must not change the reviewed dependency graph"
+        );
+    }
+}
+
 fn cargo_manifest_path(path: &str) -> String {
     let path = path
         .strip_prefix(r"\\?\UNC\")
