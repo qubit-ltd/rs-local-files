@@ -36,11 +36,21 @@ pub(super) struct WorkerStreamInner {
     /// Budget retained while buffered stream data is in use.
     pub(super) _buffer_budget: Arc<Mutex<super::super::internal::permits::Permit>>,
     /// Budget retained while the native stream handle is open.
-    pub(super) _handle_budget: Arc<super::super::internal::permits::Permit>,
+    pub(super) _handle_budget: Mutex<Option<Arc<super::super::internal::permits::Permit>>>,
     /// Optional effect observer updated after each successful append write.
     pub(super) observer: Option<super::super::LocalFactObserver>,
     /// Total bytes confirmed written through this worker.
     pub(super) written_bytes: std::sync::atomic::AtomicU64,
     /// Whether successful writes publish append-specific facts.
     pub(super) append_mode: bool,
+}
+
+impl WorkerStreamInner {
+    /// Returns the native handle reservation after confirmed stream closure.
+    pub(super) fn release_handle_budget(&self) {
+        self._handle_budget
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .take();
+    }
 }

@@ -766,11 +766,20 @@ fn test_staged_async_writer_cleanup_failure_can_be_retried() {
     use qubit_operation::OperationManager;
     use qubit_operation::OperationOutcome;
 
+    let _gate_lock = TEST_STAGE_WRITE_GATE.lock().unwrap();
+
     let directory = tempfile::tempdir().unwrap();
     let target = directory.path().join("staged-abort.txt");
     let manager = OperationManager::new(ManagerOptions::default()).unwrap();
-    let executor = LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).unwrap();
-    let filesystem = LocalFileSystem::host().unwrap().into_async(executor).unwrap();
+    let executor = LocalIoExecutor::new(
+        manager.clone(),
+        LocalExecutionConfig {
+            max_open_handles: 1,
+            ..LocalExecutionConfig::default()
+        },
+    )
+    .unwrap();
+    let filesystem = LocalFileSystem::host().unwrap().into_async(executor.clone()).unwrap();
     let (mut opening, _) = filesystem
         .submit_open_writer(
             &manager,
@@ -812,8 +821,37 @@ fn test_staged_async_writer_cleanup_failure_can_be_retried() {
         .first()
         .expect("settlement retains failed staged cleanup")
         .clone();
+    let probe = directory.path().join("handle-probe.txt");
+    let rejected = match filesystem.submit_open_writer(
+        &manager,
+        Default::default(),
+        probe.clone(),
+        LocalWriteOptions::new(LocalWriteMode::CreateOrReplace),
+    ) {
+        Err(error) => error,
+        Ok(_) => panic!("failed native cleanup must retain its handle reservation"),
+    };
+    assert_eq!(
+        rejected.rejection(),
+        qubit_local_files::operation::LocalSubmitRejection::CapacityExceeded
+    );
     drop(fault);
     recovery.try_retry().unwrap().wait().unwrap();
+    let (mut probe_open, _) = filesystem
+        .submit_open_writer(
+            &manager,
+            Default::default(),
+            probe,
+            LocalWriteOptions::new(LocalWriteMode::CreateOrReplace),
+        )
+        .expect("successful native cleanup recovery must return its handle reservation");
+    let mut probe_writer = match probe_open.wait_outcome().unwrap() {
+        OperationOutcome::Succeeded(writer) => writer,
+        _ => panic!("probe writer failed to open after cleanup recovery"),
+    };
+    poll_worker(|cx| Box::pin(probe_writer.close()).as_mut().poll(cx)).unwrap();
+    drop(probe_writer);
+    probe_open.wait_settlement().unwrap();
     assert!(!target.exists());
     assert_eq!(
         std::fs::read_dir(directory.path()).unwrap().count(),
@@ -1215,7 +1253,7 @@ fn test_real_worker_stream_preserves_large_write_order_through_flush_and_commit(
 }
 
 #[test]
-fn test_dropped_real_worker_writer_releases_single_handle_for_reopen() {
+fn test_terminal_real_worker_writer_releases_single_handle_for_reopen() {
     use qubit_local_files::LocalFileSystem;
     use qubit_local_files::operation::LocalExecutionConfig;
     use qubit_local_files::operation::LocalIoExecutor;
@@ -1224,6 +1262,9 @@ fn test_dropped_real_worker_writer_releases_single_handle_for_reopen() {
     use qubit_operation::ManagerOptions;
     use qubit_operation::OperationManager;
     use qubit_operation::OperationOutcome;
+
+    #[cfg(feature = "test-support")]
+    let _gate_lock = TEST_STAGE_WRITE_GATE.lock().unwrap();
 
     let directory = tempfile::tempdir().unwrap();
     let output = directory.path().join("single-handle.txt");
@@ -1250,10 +1291,7 @@ fn test_dropped_real_worker_writer_releases_single_handle_for_reopen() {
         OperationOutcome::Succeeded(writer) => writer,
         _ => panic!("initial worker writer failed to open"),
     };
-    assert_eq!(
-        poll_worker(|cx| Pin::new(&mut abandoned).poll_write(cx, b"discarded")).unwrap(),
-        9
-    );
+    poll_worker(|cx| Box::pin(abandoned.close()).as_mut().poll(cx)).unwrap();
     drop(abandoned);
     abandoned_open.wait_settlement().unwrap();
     assert!(
@@ -1261,24 +1299,14 @@ fn test_dropped_real_worker_writer_releases_single_handle_for_reopen() {
         "dropping an uncommitted writer must abort its publication"
     );
 
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
-    let (mut replacement_open, _) = loop {
-        match filesystem.submit_open_writer(
+    let (mut replacement_open, _) = filesystem
+        .submit_open_writer(
             &manager,
             Default::default(),
             output.clone(),
             LocalWriteOptions::new(LocalWriteMode::CreateOrReplace),
-        ) {
-            Ok(open) => break open,
-            Err(error)
-                if error.rejection() == qubit_local_files::operation::LocalSubmitRejection::CapacityExceeded
-                    && std::time::Instant::now() < deadline =>
-            {
-                std::thread::sleep(std::time::Duration::from_millis(1));
-            }
-            Err(error) => panic!("worker writer did not release its handle for reopen: {error}"),
-        }
-    };
+        )
+        .expect("settled worker writer must release its handle for reopen");
     let mut replacement = match replacement_open.wait_outcome().unwrap() {
         OperationOutcome::Succeeded(writer) => writer,
         _ => panic!("worker writer did not reopen after abort cleanup"),

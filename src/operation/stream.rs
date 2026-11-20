@@ -192,6 +192,14 @@ fn drain_stream_commands(inner: Arc<WorkerStreamInner>) {
             execute_stream_command_at(&mut native, &request.request.command, request.write_offset)
         }))
         .unwrap_or_else(|_| Err(io::Error::other("Unconfirmed: local stream worker panicked")));
+        if matches!(
+            request.request.command,
+            LocalStreamCommand::Close | LocalStreamCommand::Abort
+        ) && matches!(&result, Ok(LocalStreamCompletion::Closed))
+            && inner.native.lock().unwrap_or_else(|e| e.into_inner()).is_none()
+        {
+            inner.release_handle_budget();
+        }
         if let Ok(completion) = &result {
             match completion {
                 LocalStreamCompletion::Written(bytes) => {
@@ -649,7 +657,7 @@ mod tests {
             active: std::sync::atomic::AtomicBool::new(true),
             cleanup_permit: Mutex::new(Some(executor.reserve_cleanup().unwrap())),
             _buffer_budget: std::sync::Arc::new(Mutex::new(executor.reserve_bytes(0).unwrap())),
-            _handle_budget: std::sync::Arc::new(executor.reserve_handle().unwrap()),
+            _handle_budget: Mutex::new(Some(std::sync::Arc::new(executor.reserve_handle().unwrap()))),
             observer: Some(observer.clone()),
             written_bytes: std::sync::atomic::AtomicU64::new(0),
             append_mode: true,
@@ -740,7 +748,7 @@ mod tests {
             active: std::sync::atomic::AtomicBool::new(true),
             cleanup_permit: Mutex::new(Some(executor.reserve_cleanup().unwrap())),
             _buffer_budget: std::sync::Arc::new(Mutex::new(executor.reserve_bytes(0).unwrap())),
-            _handle_budget: std::sync::Arc::new(executor.reserve_handle().unwrap()),
+            _handle_budget: Mutex::new(Some(std::sync::Arc::new(executor.reserve_handle().unwrap()))),
             observer: None,
             written_bytes: std::sync::atomic::AtomicU64::new(0),
             append_mode: false,

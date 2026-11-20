@@ -691,6 +691,7 @@ impl StreamState {
             Poll::Pending => Poll::Pending,
             Poll::Ready(Ok(LocalStreamCompletion::Closed)) => {
                 self.close_request = None;
+                self.discard_read_buffer();
                 self.closed = true;
                 if let Some(error) = &self.write_error {
                     self.close_error = Some(error.clone());
@@ -699,6 +700,7 @@ impl StreamState {
             }
             Poll::Ready(Ok(LocalStreamCompletion::Unconfirmed { operation, detail })) => {
                 self.close_request = None;
+                self.discard_read_buffer();
                 self.closed = true;
                 self.close_error = Some(SavedError::capture(io::Error::other(format!(
                     "Unconfirmed {operation}: {detail}"
@@ -707,6 +709,7 @@ impl StreamState {
             }
             Poll::Ready(Ok(_)) => {
                 self.close_request = None;
+                self.discard_read_buffer();
                 self.closed = true;
                 self.close_error = Some(SavedError::capture(io::Error::new(
                     io::ErrorKind::InvalidData,
@@ -716,6 +719,7 @@ impl StreamState {
             }
             Poll::Ready(Err(error)) => {
                 self.close_request = None;
+                self.discard_read_buffer();
                 self.closed = true;
                 let saved = if self.direction == Direction::Write
                     && let Some(write_error) = &self.write_error
@@ -728,6 +732,12 @@ impl StreamState {
                 self.completed_close()
             }
         }
+    }
+
+    /// Drops read bytes once the stream can no longer deliver them.
+    fn discard_read_buffer(&mut self) {
+        self.read_buffer = Vec::new();
+        self.read_offset = 0;
     }
 
     /// Takes ownership of one worker completion after validating its
@@ -745,7 +755,7 @@ impl StreamState {
         }
         self.eof = bytes.is_empty();
         self.read_offset = 0;
-        self.read_buffer = bytes;
+        self.read_buffer = if self.eof { Vec::new() } else { bytes };
         Ok(())
     }
 
@@ -872,6 +882,73 @@ mod tests {
         assert_eq!(*calls.lock().unwrap(), 2);
         resource.request_close(17);
         assert_eq!(*close_requests.lock().unwrap(), [17]);
+    }
+
+    #[test]
+    fn test_empty_read_releases_completion_capacity() {
+        let mut bytes = Vec::with_capacity(super::LOCAL_STREAM_BUFFER_SIZE);
+        bytes.clear();
+        assert_eq!(bytes.capacity(), super::LOCAL_STREAM_BUFFER_SIZE);
+        let mut state = StreamState::new(Direction::Read);
+
+        state.accept_read(bytes).unwrap();
+
+        assert!(state.eof);
+        assert_eq!(state.read_offset, 0);
+        assert_eq!(state.read_buffer.capacity(), 0);
+    }
+
+    #[test]
+    fn test_reader_close_releases_unread_buffer() {
+        struct CloseAfterRead {
+            completion: Mutex<Option<io::Result<LocalStreamCompletion>>>,
+        }
+
+        impl LocalStreamDriver for CloseAfterRead {
+            fn poll_command(
+                &self,
+                _: &mut Context<'_>,
+                request: &LocalStreamRequest,
+            ) -> Poll<io::Result<LocalStreamCompletion>> {
+                if matches!(request.command, LocalStreamCommand::Read { .. }) {
+                    Poll::Ready(Ok(LocalStreamCompletion::Read(b"buffered bytes".to_vec())))
+                } else {
+                    Poll::Ready(self.completion.lock().unwrap().take().unwrap())
+                }
+            }
+
+            fn request_close(&self, _: u64) {}
+        }
+
+        for completion in [
+            Ok(LocalStreamCompletion::Closed),
+            Err(io::Error::other("close failed")),
+            Ok(LocalStreamCompletion::Unconfirmed {
+                operation: "close",
+                detail: "owner retained".to_owned(),
+            }),
+        ] {
+            let resource = LocalStreamResource::new(CloseAfterRead {
+                completion: Mutex::new(Some(completion)),
+            });
+            let mut state = StreamState::new(Direction::Read);
+            let mut cx = Context::from_waker(std::task::Waker::noop());
+            let mut prefix = [0; 3];
+
+            assert!(matches!(
+                state.poll_read(&resource, &mut cx, &mut prefix),
+                Poll::Ready(Ok(3))
+            ));
+            assert_eq!(state.read_offset, 3);
+            assert!(state.read_buffer.capacity() > 0);
+
+            let first = state.poll_close(&resource, &mut cx);
+            assert!(matches!(first, Poll::Ready(_)));
+            assert_eq!(state.read_buffer.capacity(), 0);
+            assert_eq!(state.read_offset, 0);
+            assert!(matches!(state.poll_close(&resource, &mut cx), Poll::Ready(_)));
+            assert_eq!(state.read_buffer.capacity(), 0);
+        }
     }
 
     struct ControlledNativeWriter {

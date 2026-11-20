@@ -77,7 +77,7 @@ impl WorkerStreamDriver {
             active: AtomicBool::new(false),
             cleanup_permit: Mutex::new(Some(cleanup_permit)),
             _buffer_budget: buffer_budget,
-            _handle_budget: handle_budget,
+            _handle_budget: Mutex::new(Some(handle_budget)),
             observer,
             written_bytes: std::sync::atomic::AtomicU64::new(0),
             append_mode,
@@ -349,6 +349,7 @@ mod tests {
     use std::collections::VecDeque;
     use std::io;
     use std::sync::Arc;
+    use std::sync::Condvar;
     use std::sync::Mutex;
     use std::sync::atomic::AtomicBool;
     use std::sync::mpsc;
@@ -360,6 +361,8 @@ mod tests {
 
     use super::super::LocalNativeStream;
     use super::super::native_stream_writer::NativeStreamWriter;
+    use super::super::worker_stream_command::WorkerCommand;
+    use super::super::worker_stream_queued_request::WorkerStreamQueuedRequest;
     use super::LocalStreamCommand;
     use super::LocalStreamDriver;
     use super::LocalStreamRequest;
@@ -368,6 +371,112 @@ mod tests {
     use super::WorkerStreamState;
     use crate::LocalExecutionConfig;
     use crate::LocalIoExecutor;
+
+    #[test]
+    fn test_terminal_stream_result_returns_handle_before_drain_exits() {
+        struct HoldDrainAfterPublish {
+            published: mpsc::Sender<()>,
+            released: Arc<(Mutex<bool>, Condvar)>,
+        }
+
+        impl HoldDrainAfterPublish {
+            fn wait(&self) {
+                let (released, changed) = &*self.released;
+                let guard = released.lock().unwrap();
+                let _ = changed
+                    .wait_timeout_while(guard, std::time::Duration::from_secs(5), |released| !*released)
+                    .unwrap();
+            }
+        }
+
+        impl std::task::Wake for HoldDrainAfterPublish {
+            fn wake(self: Arc<Self>) {
+                let _ = self.published.send(());
+                self.wait();
+            }
+
+            fn wake_by_ref(self: &Arc<Self>) {
+                let _ = self.published.send(());
+                self.wait();
+            }
+        }
+
+        let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+        let executor = LocalIoExecutor::new(
+            manager,
+            LocalExecutionConfig {
+                max_open_handles: 1,
+                ..LocalExecutionConfig::default()
+            },
+        )
+        .unwrap();
+        let handle_budget = Arc::new(executor.reserve_handle().unwrap());
+        let (published_tx, published_rx) = mpsc::channel();
+        let released = Arc::new((Mutex::new(false), Condvar::new()));
+        let wake = Arc::new(HoldDrainAfterPublish {
+            published: published_tx,
+            released: Arc::clone(&released),
+        });
+        let request = super::LocalStreamRequest {
+            id: 91,
+            command: LocalStreamCommand::Close,
+        };
+        let inner = Arc::new(WorkerStreamInner {
+            executor: executor.clone(),
+            native: Mutex::new(None),
+            state: Mutex::new(WorkerStreamState {
+                commands: HashMap::from([(
+                    request.id,
+                    WorkerCommand {
+                        result: None,
+                        waker: Some(Waker::from(wake)),
+                    },
+                )]),
+            }),
+            queue: Mutex::new(VecDeque::from([WorkerStreamQueuedRequest {
+                request,
+                write_offset: 0,
+            }])),
+            native_write_ids: Mutex::new(HashMap::new()),
+            next_internal_request_id: std::sync::atomic::AtomicU64::new(1 << 63),
+            active: AtomicBool::new(true),
+            cleanup_permit: Mutex::new(None),
+            _buffer_budget: Arc::new(Mutex::new(executor.reserve_bytes(0).unwrap())),
+            _handle_budget: Mutex::new(Some(handle_budget)),
+            observer: None,
+            written_bytes: std::sync::atomic::AtomicU64::new(0),
+            append_mode: false,
+        });
+        #[cfg(panic = "unwind")]
+        crate::operation::poison_test_mutex(&inner._handle_budget);
+        let drain_inner = Arc::clone(&inner);
+        let drain = std::thread::spawn(move || super::super::drain_stream_commands(drain_inner));
+
+        let published = published_rx.recv_timeout(std::time::Duration::from_secs(2));
+        let available_while_drain_is_held = executor.reserve_handle().is_some();
+        {
+            let (released, changed) = &*released;
+            *released.lock().unwrap() = true;
+            changed.notify_all();
+        }
+        drain.join().unwrap();
+
+        assert!(
+            published.is_ok(),
+            "terminal result should be published and wake its waiter"
+        );
+        assert!(
+            available_while_drain_is_held,
+            "confirmed close should return its handle before the drain exits"
+        );
+        assert!(
+            inner
+                ._handle_budget
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .is_none()
+        );
+    }
 
     #[test]
     fn test_resource_id_registration_recovers_a_poisoned_lock() {
@@ -404,7 +513,7 @@ mod tests {
             active: AtomicBool::new(false),
             cleanup_permit: Mutex::new(Some(executor.reserve_cleanup().unwrap())),
             _buffer_budget: Arc::new(Mutex::new(executor.reserve_bytes(0).unwrap())),
-            _handle_budget: Arc::new(executor.reserve_handle().unwrap()),
+            _handle_budget: Mutex::new(Some(Arc::new(executor.reserve_handle().unwrap()))),
             observer: Some(observer),
             written_bytes: std::sync::atomic::AtomicU64::new(5),
             append_mode: true,
@@ -432,7 +541,7 @@ mod tests {
             active: AtomicBool::new(true),
             cleanup_permit: Mutex::new(Some(executor.reserve_cleanup().unwrap())),
             _buffer_budget: Arc::new(Mutex::new(executor.reserve_bytes(0).unwrap())),
-            _handle_budget: Arc::new(executor.reserve_handle().unwrap()),
+            _handle_budget: Mutex::new(Some(Arc::new(executor.reserve_handle().unwrap()))),
             observer: None,
             written_bytes: std::sync::atomic::AtomicU64::new(0),
             append_mode: false,
@@ -510,7 +619,7 @@ mod tests {
             active: AtomicBool::new(false),
             cleanup_permit: Mutex::new(Some(cleanup_permit)),
             _buffer_budget: buffer_budget,
-            _handle_budget: handle_budget,
+            _handle_budget: Mutex::new(Some(handle_budget)),
             observer: None,
             written_bytes: std::sync::atomic::AtomicU64::new(0),
             append_mode: false,
@@ -572,7 +681,7 @@ mod tests {
             active: AtomicBool::new(false),
             cleanup_permit: Mutex::new(Some(cleanup_permit)),
             _buffer_budget: buffer_budget,
-            _handle_budget: handle_budget,
+            _handle_budget: Mutex::new(Some(handle_budget)),
             observer: None,
             written_bytes: std::sync::atomic::AtomicU64::new(0),
             append_mode: false,
@@ -664,7 +773,7 @@ mod tests {
             active: AtomicBool::new(false),
             cleanup_permit: Mutex::new(None),
             _buffer_budget: Arc::new(Mutex::new(executor.reserve_bytes(0).unwrap())),
-            _handle_budget: Arc::new(executor.reserve_handle().unwrap()),
+            _handle_budget: Mutex::new(Some(Arc::new(executor.reserve_handle().unwrap()))),
             observer: None,
             written_bytes: std::sync::atomic::AtomicU64::new(0),
             append_mode: false,
@@ -750,7 +859,7 @@ mod tests {
             active: AtomicBool::new(false),
             cleanup_permit: Mutex::new(Some(cleanup_permit)),
             _buffer_budget: buffer_budget,
-            _handle_budget: handle_budget,
+            _handle_budget: Mutex::new(Some(handle_budget)),
             observer: None,
             written_bytes: std::sync::atomic::AtomicU64::new(0),
             append_mode: false,
@@ -782,7 +891,7 @@ mod tests {
             active: AtomicBool::new(false),
             cleanup_permit: Mutex::new(Some(executor.reserve_cleanup().expect("cleanup permit"))),
             _buffer_budget: Arc::new(Mutex::new(executor.reserve_bytes(0).expect("buffer permit"))),
-            _handle_budget: Arc::new(executor.reserve_handle().expect("handle permit")),
+            _handle_budget: Mutex::new(Some(Arc::new(executor.reserve_handle().expect("handle permit")))),
             observer: None,
             written_bytes: std::sync::atomic::AtomicU64::new(0),
             append_mode: false,
@@ -853,7 +962,7 @@ mod tests {
             active: std::sync::atomic::AtomicBool::new(false),
             cleanup_permit: Mutex::new(None),
             _buffer_budget: buffer_budget,
-            _handle_budget: handle_budget,
+            _handle_budget: Mutex::new(Some(handle_budget)),
             observer: None,
             written_bytes: std::sync::atomic::AtomicU64::new(0),
             append_mode: false,
