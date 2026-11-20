@@ -1261,14 +1261,24 @@ fn test_dropped_real_worker_writer_releases_single_handle_for_reopen() {
         "dropping an uncommitted writer must abort its publication"
     );
 
-    let (mut replacement_open, _) = filesystem
-        .submit_open_writer(
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+    let (mut replacement_open, _) = loop {
+        match filesystem.submit_open_writer(
             &manager,
             Default::default(),
             output.clone(),
             LocalWriteOptions::new(LocalWriteMode::CreateOrReplace),
-        )
-        .unwrap();
+        ) {
+            Ok(open) => break open,
+            Err(error)
+                if error.rejection() == qubit_local_files::operation::LocalSubmitRejection::CapacityExceeded
+                    && std::time::Instant::now() < deadline =>
+            {
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            }
+            Err(error) => panic!("worker writer did not release its handle for reopen: {error}"),
+        }
+    };
     let mut replacement = match replacement_open.wait_outcome().unwrap() {
         OperationOutcome::Succeeded(writer) => writer,
         _ => panic!("worker writer did not reopen after abort cleanup"),
