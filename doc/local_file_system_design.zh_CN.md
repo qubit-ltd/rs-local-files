@@ -1821,6 +1821,15 @@ authority。已接纳请求持有自己的输入和提交时 options，之后修
 及清理 owner。取消或停止操作不代表已经开始的原生调用会被中断；清理尚未确认时，恢复 owner
 仍可继续提供核查与重试入口。
 
+异步目录 walker 持有原生 iterator、一份有界批次字节 reservation 和一份 cleanup reservation。每个
+`next_batch()` 请求都有稳定标识：取消这次等待不会取消已接纳的 worker 请求；若批次先收集到成功路径，再遇到
+iterator 错误，会先返回成功前缀，再交付后发错误。显式关闭、自然 EOF 和丢弃未完成 walker 共用同一停止流程。
+停止时丢弃缓冲条目、延迟错误及尚未交付的 worker 结果；迟到完成不能重新发布这些结果。成功清理会先销毁
+iterator，归还 handle、批次字节和 cleanup reservation，再发布终态关闭结果。`close()` 和 observer 的所有
+活跃等待方共享该结果；通知在状态锁外逐一执行。清理任务被拒绝或 panic 时，关闭保持未确认，保留原生 owner
+及其字节 reservation，并向每个等待方返回相同错误。关闭确认后，即使发布结果的 worker 回调尚在返回，批次字节
+reservation 也已可复用。已经返回的路径批次仍由调用方持有，公开类型继续是 `Vec<PathBuf>`。
+
 `AsyncLocalFileWriter` 保留同步 writer 的 staged/append 区别。Staged 字节在 commit 前不会
 发布；append 字节在 worker 确认每次写入时即已发布。Commit 先等待已接纳字节完成，再入队一个
 稳定 worker 请求。第一次 poll 会先建立屏障，再开始排空；从这时起新的 write 和 flush 会被拒绝。

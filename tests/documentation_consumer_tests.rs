@@ -34,6 +34,10 @@ const INSPECT_START: &str = "// BEGIN executable inspection cleanup helper";
 const INSPECT_END: &str = "// END executable inspection cleanup helper";
 const INTRO_DEPS_START: &str = "# BEGIN guide introductory dependencies";
 const INTRO_DEPS_END: &str = "# END guide introductory dependencies";
+const ASYNC_WALKER_DEPS_START: &str = "# BEGIN async walker consumer dependencies";
+const ASYNC_WALKER_DEPS_END: &str = "# END async walker consumer dependencies";
+const ASYNC_WALKER_START: &str = "// BEGIN executable async walker example";
+const ASYNC_WALKER_END: &str = "// END executable async walker example";
 const TREE_SYNC_START: &str = "// BEGIN executable tree sync example";
 const TREE_SYNC_END: &str = "// END executable tree sync example";
 const EXPORT_START: &str = "// BEGIN executable export example";
@@ -47,6 +51,7 @@ const SENTINEL: &str = "QUBIT_LOCAL_FILES_DOCUMENTATION_CONSUMER_SENTINEL";
 // Both consumers have the same package identity and use this reviewed graph.
 const CONSUMER_LOCK: &str = include_str!("fixtures/documentation_consumer/Cargo.lock");
 const INTRO_CONSUMER_LOCK: &str = include_str!("fixtures/documentation_consumer/introductory.Cargo.lock");
+const ASYNC_WALKER_CONSUMER_LOCK: &str = include_str!("fixtures/documentation_consumer/async-walker.Cargo.lock");
 
 // These tests invoke nested Cargo builds. Keeping them in one process-wide
 // critical section avoids competing consumer builds and their temporary output
@@ -600,6 +605,72 @@ fn test_documented_tree_sync_compiles_with_introductory_dependencies() {
                 String::from_utf8_lossy(&status.stderr)
             );
         }
+    }
+}
+
+#[test]
+fn test_documented_async_walker_compiles_as_a_consumer() {
+    let _guard = lock_documentation_consumer();
+    let crate_path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .canonicalize()
+        .expect("the tested crate path is canonicalized");
+    let workspace = tempdir().expect("consumer workspace is created");
+    let target = workspace.path().join("target");
+    let parent_lock = fs::read_to_string(crate_path.join("Cargo.lock")).expect("the tested crate has a lockfile");
+    let consumer_lock = consumer_lock::lock_with_parent_sources(ASYNC_WALKER_CONSUMER_LOCK, &parent_lock);
+
+    for (index, (language, guide)) in GUIDES.into_iter().enumerate() {
+        let dependencies = extract_marked(guide, ASYNC_WALKER_DEPS_START, ASYNC_WALKER_DEPS_END, language);
+        let dependency_line = dependencies
+            .lines()
+            .find(|line| line.trim_start().starts_with("qubit-local-files ="))
+            .expect("async walker dependencies contain qubit-local-files");
+        let dependency_path = cargo_manifest_path(&crate_path.to_string_lossy());
+        let dependencies = dependencies.replace(
+            dependency_line,
+            &local_files_path_dependency(dependency_line, &dependency_path),
+        );
+        let code = extract_marked(guide, ASYNC_WALKER_START, ASYNC_WALKER_END, language);
+        let project = workspace.path().join(format!("async-walker-consumer-{index}"));
+        fs::create_dir_all(project.join("src")).expect("consumer source directory is created");
+        fs::write(
+            project.join("Cargo.toml"),
+            format!(
+                "[package]\nname = \"documentation-consumer\"\nversion = \"0.1.0\"\nedition = \"2024\"\n\n{dependencies}"
+            ),
+        )
+        .expect("consumer manifest is written");
+        fs::write(project.join("Cargo.lock"), &consumer_lock).expect("reviewed consumer lock is written");
+        let source = format!(
+            "async fn example() -> Result<(), Box<dyn std::error::Error>> {{\n{code}\nOk(())\n}}\nfn main() {{}}\n"
+        );
+        fs::write(project.join("src/main.rs"), source).expect("consumer source is written");
+
+        let status = Command::new("cargo")
+            .arg("check")
+            .arg("--frozen")
+            .arg("--manifest-path")
+            .arg(project.join("Cargo.toml"))
+            .current_dir(&project)
+            .env("CARGO_TARGET_DIR", &target)
+            .env_remove("CARGO_ENCODED_RUSTFLAGS")
+            .env_remove("RUSTFLAGS")
+            .env_remove("CARGO_BUILD_TARGET")
+            .output()
+            .expect("consumer cargo process starts");
+        if !status.status.success() {
+            panic!(
+                "{language} async walker consumer failed with {}\nstdout:\n{}\nstderr:\n{}",
+                status.status,
+                String::from_utf8_lossy(&status.stdout),
+                String::from_utf8_lossy(&status.stderr)
+            );
+        }
+        assert_eq!(
+            fs::read_to_string(project.join("Cargo.lock")).expect("consumer lock remains readable"),
+            consumer_lock,
+            "{language} async walker consumer must not change the reviewed dependency graph"
+        );
     }
 }
 

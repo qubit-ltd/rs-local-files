@@ -33,6 +33,16 @@ qubit-local-files = { version = "0.6.0", features = ["async"] }
 qubit-operation = "^0.3"
 ```
 
+```toml
+# BEGIN async walker consumer dependencies
+[dependencies]
+qubit-local-files = { version = "0.6.0", features = ["async"] }
+qubit-io = "0.19"
+tempfile = "3.27"
+qubit-operation = "^0.3"
+# END async walker consumer dependencies
+```
+
 ## 与运行时无关的异步操作
 
 `LocalIoExecutor` 会启动有界本地 worker 组，不要求 Tokio、futures 或其他运行时。操作
@@ -43,6 +53,7 @@ qubit-operation = "^0.3"
 ```rust,no_run
 # #[cfg(feature = "async")]
 # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+// BEGIN executable async walker example
 use std::path::PathBuf;
 use qubit_local_files::{
     AsyncLocalFileSystem, LocalExecutionConfig, LocalIoExecutor,
@@ -67,6 +78,56 @@ let mut reader = match opening.wait_outcome().await? {
 reader.close().await?;
 drop(reader);
 let settlement = opening.wait_settlement().await;
+assert_eq!(settlement.recovery_count, 0);
+// END executable async walker example
+# Ok(())
+# }
+```
+
+### 异步遍历目录
+
+`next_batch()` 返回拥有型路径批次。即使先前批次已经返回，也要处理后续批次错误；提前停止时调用
+`close()`。关闭前创建的 observer 会继续持有 worker 资源，因此等待打开操作 settlement 前应先释放它。
+
+```rust,no_run
+# #[cfg(feature = "async")]
+# async fn example() -> Result<(), Box<dyn std::error::Error>> {
+use std::path::PathBuf;
+use qubit_local_files::{AsyncLocalFileSystem, LocalExecutionConfig, LocalIoExecutor};
+use qubit_local_files::options::LocalListOptions;
+use qubit_operation::{ManagerOptions, OperationManager, OperationOptions, OperationOutcome};
+
+let manager = OperationManager::new(ManagerOptions::default())?;
+let executor = LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default())?;
+let filesystem = AsyncLocalFileSystem::host(executor).await?;
+let mut opening = filesystem.submit_open_walker(
+    &manager,
+    OperationOptions::default(),
+    PathBuf::from("."),
+    LocalListOptions::default(),
+)?.into_async();
+let mut walker = match opening.wait_outcome().await? {
+    OperationOutcome::Succeeded(walker) => walker,
+    OperationOutcome::Failed(error) => return Err(error.into()),
+    OperationOutcome::Stopped(_) => return Err(std::io::Error::other("walker open stopped").into()),
+};
+let observer = walker.close_observer();
+let walk_result: qubit_local_files::LocalResult<()> = async {
+    while let Some(batch) = walker.next_batch().await? {
+        for path in batch {
+            println!("{}", path.display());
+        }
+    }
+    Ok(())
+}.await;
+let close_result = walker.close().await;
+let observer_result = observer.wait_closed().await;
+drop(observer);
+drop(walker);
+let settlement = opening.wait_settlement().await;
+walk_result?;
+close_result?;
+observer_result?;
 assert_eq!(settlement.recovery_count, 0);
 # Ok(())
 # }

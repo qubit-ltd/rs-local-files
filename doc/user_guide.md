@@ -36,6 +36,16 @@ qubit-local-files = { version = "0.6.0", features = ["async"] }
 qubit-operation = "^0.3"
 ```
 
+```toml
+# BEGIN async walker consumer dependencies
+[dependencies]
+qubit-local-files = { version = "0.6.0", features = ["async"] }
+qubit-io = "0.19"
+tempfile = "3.27"
+qubit-operation = "^0.3"
+# END async walker consumer dependencies
+```
+
 ## Runtime-independent asynchronous operations
 
 `LocalIoExecutor` starts a bounded local worker group; it does not require
@@ -48,6 +58,7 @@ because the scope still owns the resource until its last user releases it.
 ```rust,no_run
 # #[cfg(feature = "async")]
 # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+// BEGIN executable async walker example
 use std::path::PathBuf;
 use qubit_local_files::{
     AsyncLocalFileSystem, LocalExecutionConfig, LocalIoExecutor,
@@ -72,6 +83,58 @@ let mut reader = match opening.wait_outcome().await? {
 reader.close().await?;
 drop(reader);
 let settlement = opening.wait_settlement().await;
+assert_eq!(settlement.recovery_count, 0);
+// END executable async walker example
+# Ok(())
+# }
+```
+
+### Walking directories asynchronously
+
+`next_batch()` returns owned path batches. Handle a later batch error even when
+earlier batches were already returned, or stop early with `close()`. An observer
+created before close keeps the worker resource alive, so release it before
+waiting for the opening operation to settle.
+
+```rust,no_run
+# #[cfg(feature = "async")]
+# async fn example() -> Result<(), Box<dyn std::error::Error>> {
+use std::path::PathBuf;
+use qubit_local_files::{AsyncLocalFileSystem, LocalExecutionConfig, LocalIoExecutor};
+use qubit_local_files::options::LocalListOptions;
+use qubit_operation::{ManagerOptions, OperationManager, OperationOptions, OperationOutcome};
+
+let manager = OperationManager::new(ManagerOptions::default())?;
+let executor = LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default())?;
+let filesystem = AsyncLocalFileSystem::host(executor).await?;
+let mut opening = filesystem.submit_open_walker(
+    &manager,
+    OperationOptions::default(),
+    PathBuf::from("."),
+    LocalListOptions::default(),
+)?.into_async();
+let mut walker = match opening.wait_outcome().await? {
+    OperationOutcome::Succeeded(walker) => walker,
+    OperationOutcome::Failed(error) => return Err(error.into()),
+    OperationOutcome::Stopped(_) => return Err(std::io::Error::other("walker open stopped").into()),
+};
+let observer = walker.close_observer();
+let walk_result: qubit_local_files::LocalResult<()> = async {
+    while let Some(batch) = walker.next_batch().await? {
+        for path in batch {
+            println!("{}", path.display());
+        }
+    }
+    Ok(())
+}.await;
+let close_result = walker.close().await;
+let observer_result = observer.wait_closed().await;
+drop(observer);
+drop(walker);
+let settlement = opening.wait_settlement().await;
+walk_result?;
+close_result?;
+observer_result?;
 assert_eq!(settlement.recovery_count, 0);
 # Ok(())
 # }

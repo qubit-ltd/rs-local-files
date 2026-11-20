@@ -1666,6 +1666,23 @@ stopped or cancelled operation does not imply that an already-started native
 call was interrupted, and recovery owners remain available when cleanup is
 unconfirmed.
 
+An asynchronous directory walker holds its native iterator, one shared bounded
+batch-byte reservation, and a cleanup reservation. Each `next_batch()` request
+has a stable identifier: cancelling that wait does not cancel an accepted
+worker request, and a successful prefix is returned before a later iterator
+error. Explicit close, natural EOF, and dropping an unfinished walker converge
+on the same stop path. Stop discards buffered entries, deferred errors, and
+undelivered worker results; late worker completions cannot republish them.
+Successful cleanup drops the iterator and releases handle, batch-byte, and
+cleanup reservations before publishing the terminal close result. The result
+is shared by all active `close()` and observer waiters, which are notified
+outside the state lock. A rejected or panicking cleanup remains unconfirmed,
+retains the native owner and its byte reservation, and reports the same error
+to each waiter. A confirmed close makes the batch-byte reservation reusable
+even while the worker callback that published that result is returning. Path
+batches already returned remain owned by the caller and keep their public
+`Vec<PathBuf>` representation.
+
 `AsyncLocalFileWriter` preserves the synchronous staged/append distinction.
 Staged bytes remain unpublished until commit; append bytes become published
 when the worker confirms each write. Commit first settles accepted bytes and
