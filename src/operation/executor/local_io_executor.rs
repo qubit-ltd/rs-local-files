@@ -30,6 +30,21 @@ use super::executor_inner::ExecutorInner;
 use super::local_cleanup_executor::LocalCleanupExecutor;
 use super::worker_owner::WorkerOwner;
 /// Bounded local I/O worker group associated with an application manager.
+///
+/// # Example
+///
+/// Create an executor with explicit manager ownership and wait for a draining
+/// shutdown before dropping it.
+///
+/// ```no_run
+/// use qubit_local_files::operation::{LocalExecutionConfig, LocalIoExecutor};
+/// use qubit_operation::{ManagerOptions, OperationManager, ShutdownMode};
+///
+/// let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+/// let executor = LocalIoExecutor::new(manager, LocalExecutionConfig::default()).unwrap();
+/// executor.request_shutdown(ShutdownMode::Drain).wait().unwrap();
+/// drop(executor);
+/// ```
 #[derive(Clone)]
 pub struct LocalIoExecutor {
     /// Stores the inner associated with this value.

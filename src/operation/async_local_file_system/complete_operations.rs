@@ -53,6 +53,7 @@ use crate::error::LocalFileOperation;
 use crate::error::LocalReadLimitError;
 use crate::error::LocalResourceKind;
 use crate::error::LocalResourceLimitError;
+use crate::options::LocalMetadataPreservePolicy;
 use crate::options::LocalReadAllOptions;
 use crate::options::LocalReadOptions;
 use crate::outcome::LocalCopyFailure;
@@ -221,12 +222,10 @@ impl AsyncLocalFileSystem {
     /// Submits a bounded prefix read and reports whether EOF was observed.
     ///
     /// The result contains at most `request.max_bytes` bytes. The worker may
-    /// read one additional byte to distinguish a complete prefix from a
-    /// truncated one. `complete` is true only when EOF was observed within
-    /// the requested prefix (including an empty file with a zero-byte limit).
-    /// If the shared byte pool cannot retain the requested bytes plus the
-    /// extra EOF-check byte, the operation fails with a resource-limit error
-    /// rather than returning a truncated successful prefix.
+    /// probe one additional byte on the stack to distinguish a complete prefix
+    /// from a truncated one; that probe is not retained or charged to the byte
+    /// pool. `complete` is true only when EOF was observed within the requested
+    /// prefix (including an empty file with a zero-byte limit).
     /// The operation's `max_owned_bytes` limit must be nonzero and no greater
     /// than the executor limit; the read is also subject to the shared executor
     /// byte pool. Other per-operation limits further restrict, rather than
@@ -265,7 +264,6 @@ impl AsyncLocalFileSystem {
                 initial_owned_bytes: 0,
             },
             move |request, _scope, _observer, budget, maximum| {
-                let requested = request.max_bytes.saturating_add(1);
                 let reader_result = match before_native_call(_scope, || {
                     filesystem.open_reader_with_options(&execution_path, &request.read)
                 }) {
@@ -281,39 +279,21 @@ impl AsyncLocalFileSystem {
                 }
                 let mut bytes = Vec::new();
                 let mut buffer = [0_u8; 8192];
-                let target = requested;
-                while bytes.len() < target {
-                    let capacity_remaining = maximum.saturating_sub(bytes.capacity());
-                    if capacity_remaining == 0 {
+                let mut complete = true;
+                loop {
+                    if let Some(stopped) = stop_outcome(_scope) {
+                        shrink_to_zero(&budget);
+                        return stopped;
+                    }
+                    if bytes.len() == request.max_bytes {
                         let mut sentinel = [0_u8; 1];
                         match reader.read(&mut sentinel) {
-                            Ok(0) => {
-                                if let Some(stopped) = stop_outcome(_scope) {
-                                    shrink_to_zero(&budget);
-                                    return stopped;
-                                }
+                            Ok(0) => break,
+                            Ok(_) => {
+                                complete = false;
                                 break;
                             }
-                            Ok(_) => {
-                                if let Some(stopped) = stop_outcome(_scope) {
-                                    shrink_to_zero(&budget);
-                                    return stopped;
-                                }
-                                shrink_to_zero(&budget);
-                                return OperationOutcome::Failed(LocalFileError::from_resource_limit(
-                                    LocalFileOperation::Read,
-                                    Some(execution_path.clone()),
-                                    LocalResourceLimitError::new(
-                                        LocalResourceKind::OwnedBytes,
-                                        maximum,
-                                        capacity_remaining,
-                                        1,
-                                    ),
-                                ));
-                            }
-                            Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {
-                                continue;
-                            }
+                            Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
                             Err(error) => {
                                 shrink_to_zero(&budget);
                                 return OperationOutcome::Failed(LocalFileError::from_io(
@@ -325,19 +305,15 @@ impl AsyncLocalFileSystem {
                             }
                         }
                     }
-                    let count = (target - bytes.len()).min(buffer.len()).min(capacity_remaining);
-                    if let Err(error) = reserve_capacity(&mut bytes, count, &budget, maximum, &execution_path) {
-                        shrink_to_zero(&budget);
-                        return OperationOutcome::Failed(error);
-                    }
+                    let count = (request.max_bytes - bytes.len()).min(buffer.len());
                     match reader.read(&mut buffer[..count]) {
                         Ok(0) => break,
                         Ok(read) => {
-                            bytes.extend_from_slice(&buffer[..read]);
-                            if let Some(stopped) = stop_outcome(_scope) {
+                            if let Err(error) = reserve_capacity(&mut bytes, read, &budget, maximum, &execution_path) {
                                 shrink_to_zero(&budget);
-                                return stopped;
+                                return OperationOutcome::Failed(error);
                             }
+                            bytes.extend_from_slice(&buffer[..read]);
                         }
                         Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
                         Err(error) => {
@@ -351,8 +327,6 @@ impl AsyncLocalFileSystem {
                         }
                     }
                 }
-                let complete = bytes.len() <= request.max_bytes;
-                bytes.truncate(request.max_bytes);
                 OperationOutcome::Succeeded(LocalReadPrefix { bytes, complete })
             },
         )
@@ -426,14 +400,18 @@ impl AsyncLocalFileSystem {
                 let mut bytes = Vec::new();
                 let mut buffer = [0_u8; 8192];
                 while bytes.len() < target {
-                    let count = (target - bytes.len()).min(buffer.len());
-                    if let Err(error) = reserve_capacity(&mut bytes, count, &budget, maximum, &execution_path) {
+                    if let Some(stopped) = stop_outcome(_scope) {
                         shrink_to_zero(&budget);
-                        return OperationOutcome::Failed(error);
+                        return stopped;
                     }
+                    let count = (target - bytes.len()).min(buffer.len());
                     match reader.read(&mut buffer[..count]) {
                         Ok(0) => break,
                         Ok(read) => {
+                            if let Err(error) = reserve_capacity(&mut bytes, read, &budget, maximum, &execution_path) {
+                                shrink_to_zero(&budget);
+                                return OperationOutcome::Failed(error);
+                            }
                             bytes.extend_from_slice(&buffer[..read]);
                             if let Some(stopped) = stop_outcome(_scope) {
                                 shrink_to_zero(&budget);
@@ -496,6 +474,16 @@ impl AsyncLocalFileSystem {
     }
     /// Submits a complete copy while retaining its structured partial failure.
     ///
+    /// Admission reserves `2 + max_open_directories.unwrap_or(1)` native
+    /// handles in one request, using saturating addition. The default is three
+    /// handles, including for an ordinary file copy. A per-operation handle
+    /// limit below that value or an executor whose shared handle pool currently
+    /// has fewer available slots rejects submission with
+    /// [`LocalSubmitRejection::CapacityExceeded`]. The rejected request remains
+    /// available from the returned error. Increase the configured limit when
+    /// it is too small; when other operations hold the shared slots, wait for
+    /// them to release those handles and retry.
+    ///
     /// # Parameters
     /// - `manager` — operation manager that owns the admission scope.
     /// - `operation` — operation options used for admission and cancellation.
@@ -544,10 +532,15 @@ impl AsyncLocalFileSystem {
                     Ok(outcome) => {
                         let stats = outcome.stats();
                         let published = stats.files() > 0 || stats.directories() > 0 || stats.bytes() > 0;
+                        let metadata_only =
+                            !published && outcome.metadata_preservation() == LocalMetadataPreservePolicy::Permissions;
                         record_local_effect(
                             scope,
                             &observer,
-                            stats.files().saturating_add(stats.directories()),
+                            stats
+                                .files()
+                                .saturating_add(stats.directories())
+                                .max(u64::from(metadata_only)),
                             stats.bytes(),
                             if published {
                                 LocalPublicationState::Published
@@ -560,7 +553,9 @@ impl AsyncLocalFileSystem {
                                 LocalDurabilityState::Unknown
                             },
                             EffectFact::Known,
-                            if published {
+                            if metadata_only {
+                                "local copy applied destination directory metadata"
+                            } else if published {
                                 "local copy published destination"
                             } else {
                                 "local copy skipped without publication"
@@ -1104,12 +1099,12 @@ fn read_complete_cancellable(
             }
         }
         let remaining = (maximum - bytes.len() as u64).min(buffer.len() as u64) as usize;
-        if let Err(error) = reserve_capacity(&mut bytes, remaining, budget, allocation_limit, path) {
-            return OperationOutcome::Failed(error);
-        }
         match observed.read(&mut buffer[..remaining]) {
             Ok(0) => break,
             Ok(read) => {
+                if let Err(error) = reserve_capacity(&mut bytes, read, budget, allocation_limit, path) {
+                    return OperationOutcome::Failed(error);
+                }
                 bytes.extend_from_slice(&buffer[..read]);
                 #[cfg(test)]
                 pause_read_all_test_gate(path);

@@ -89,6 +89,16 @@ assert_eq!(settlement.recovery_count, 0);
 # }
 ```
 
+### Copy handle admission
+
+`submit_copy` reserves `2 + max_open_directories.unwrap_or(1)` handles in one
+admission request. The default is three handles, including for an ordinary
+file copy. If submission returns `CapacityExceeded`, check both the operation's
+`max_open_handles` limit and the executor's configured `max_open_handles`. A
+limit below the formula needs a larger configuration. If both limits are large
+enough, other active operations may currently hold the shared slots; wait for
+them to finish and retry. The rejected request is returned intact by the error.
+
 ### Walking directories asynchronously
 
 `next_batch()` returns owned path batches. Handle a later batch error even when

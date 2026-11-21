@@ -22,8 +22,11 @@ use qubit_local_files::operation::complete::LocalDeleteRequest;
 use qubit_local_files::operation::complete::LocalReadAtRequest;
 use qubit_local_files::operation::complete::LocalReadPrefixRequest;
 use qubit_local_files::operation::complete::LocalRenameRequest;
+use qubit_local_files::options::LocalCopyConflictPolicy;
 use qubit_local_files::options::LocalCopyOptions;
+use qubit_local_files::options::LocalCopyTypeConflictPolicy;
 use qubit_local_files::options::LocalDeleteOptions;
+use qubit_local_files::options::LocalMetadataPreservePolicy;
 use qubit_local_files::options::LocalReadAllOptions;
 use qubit_local_files::options::LocalRenameOptions;
 use qubit_operation::ManagerOptions;
@@ -479,6 +482,154 @@ fn test_prefix_bound_larger_than_executor_budget_only_charges_retained_capacity(
 }
 
 #[test]
+fn test_reads_reserve_only_bytes_that_are_actually_retained() {
+    use qubit_operation::OperationOutcome;
+
+    let directory = tempfile::tempdir().unwrap();
+    let held_path = directory.path().join("held");
+    let short_path = directory.path().join("short");
+    std::fs::write(&held_path, b"four").unwrap();
+    std::fs::write(&short_path, b"xy").unwrap();
+    let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+    let executor = LocalIoExecutor::new(
+        manager.clone(),
+        LocalExecutionConfig {
+            max_owned_bytes: 8,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let filesystem = block_on(AsyncLocalFileSystem::host(executor)).unwrap();
+    let mut held = filesystem
+        .submit_read_all(
+            &manager,
+            Default::default(),
+            LocalReadRequest {
+                path: held_path,
+                read: LocalReadAllOptions::new().with_max_bytes(4),
+            },
+            Default::default(),
+        )
+        .unwrap()
+        .0;
+    assert!(matches!(held.wait_outcome().unwrap(), OperationOutcome::Succeeded(bytes) if bytes == b"four"));
+
+    let mut read_all = filesystem
+        .submit_read_all(
+            &manager,
+            Default::default(),
+            LocalReadRequest {
+                path: short_path.clone(),
+                read: LocalReadAllOptions::new().with_max_bytes(2),
+            },
+            Default::default(),
+        )
+        .unwrap()
+        .0;
+    assert!(matches!(read_all.wait_outcome().unwrap(), OperationOutcome::Succeeded(bytes) if bytes == b"xy"));
+    drop(read_all);
+
+    let mut read_text = filesystem
+        .submit_read_text(
+            &manager,
+            Default::default(),
+            LocalReadRequest {
+                path: short_path.clone(),
+                read: LocalReadAllOptions::new().with_max_bytes(2),
+            },
+            Default::default(),
+        )
+        .unwrap()
+        .0;
+    assert!(matches!(read_text.wait_outcome().unwrap(), OperationOutcome::Succeeded(text) if text == "xy"));
+    drop(read_text);
+
+    let mut observed = filesystem
+        .submit_read_all_with_observer(
+            &manager,
+            Default::default(),
+            LocalReadRequest {
+                path: short_path.clone(),
+                read: LocalReadAllOptions::new().with_max_bytes(2),
+            },
+            Default::default(),
+        )
+        .unwrap()
+        .0;
+    assert!(matches!(observed.wait_outcome().unwrap(), OperationOutcome::Succeeded(bytes) if bytes == b"xy"));
+    drop(observed);
+
+    let mut prefix = filesystem
+        .submit_read_prefix(
+            &manager,
+            Default::default(),
+            LocalReadPrefixRequest {
+                path: short_path.clone(),
+                read: Default::default(),
+                max_bytes: 2,
+            },
+            Default::default(),
+        )
+        .unwrap()
+        .0;
+    assert!(
+        matches!(prefix.wait_outcome().unwrap(), OperationOutcome::Succeeded(value) if value.bytes == b"xy" && value.complete)
+    );
+    drop(prefix);
+
+    let mut read_at = filesystem
+        .submit_read_at(
+            &manager,
+            Default::default(),
+            LocalReadAtRequest {
+                path: short_path,
+                read: Default::default(),
+                offset: SeekFrom::Start(0),
+                max_bytes: 2,
+            },
+            Default::default(),
+        )
+        .unwrap()
+        .0;
+    assert!(matches!(read_at.wait_outcome().unwrap(), OperationOutcome::Succeeded(bytes) if bytes == b"xy"));
+    drop(read_at);
+    drop(held);
+}
+
+#[test]
+fn test_prefix_probe_does_not_consume_owned_byte_capacity() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("payload");
+    std::fs::write(&path, b"abc").unwrap();
+    let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+    let executor = LocalIoExecutor::new(
+        manager.clone(),
+        LocalExecutionConfig {
+            max_owned_bytes: 1,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let filesystem = block_on(AsyncLocalFileSystem::host(executor)).unwrap();
+    let mut operation = filesystem
+        .submit_read_prefix(
+            &manager,
+            Default::default(),
+            LocalReadPrefixRequest {
+                path,
+                read: Default::default(),
+                max_bytes: 1,
+            },
+            Default::default(),
+        )
+        .unwrap()
+        .0;
+    assert!(matches!(operation.wait_outcome().unwrap(),
+        qubit_operation::OperationOutcome::Succeeded(prefix)
+            if prefix.bytes == b"a" && !prefix.complete));
+}
+
+#[test]
 fn test_complete_read_rejections_return_the_original_request_for_invalid_limits() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("payload");
@@ -814,9 +965,8 @@ fn test_complete_operation_edge_results_and_failures() {
     assert!(matches!(read_at.wait_outcome().unwrap(),
         qubit_operation::OperationOutcome::Succeeded(bytes) if bytes.is_empty()));
 
-    // Prefix reads probe one byte past the requested prefix. This
-    // deterministically exercises the executor byte-budget failure while
-    // retaining no partial output.
+    // The prefix probe is held in a stack byte and is not part of the result
+    // budget, so one retained byte still succeeds with a truncated prefix.
     let prefix_path = directory.path().join("prefix-budget");
     std::fs::write(&prefix_path, b"ab").unwrap();
     let mut prefix = filesystem
@@ -836,12 +986,8 @@ fn test_complete_operation_edge_results_and_failures() {
         .unwrap()
         .0;
     assert!(matches!(prefix.wait_outcome().unwrap(),
-        qubit_operation::OperationOutcome::Failed(error)
-            if error.kind() == qubit_local_files::error::LocalFileErrorKind::ResourceLimit
-                && error.path() == Some(prefix_path.as_path())
-                && error.resource_limit_error().is_some_and(|limit|
-                    limit.resource() == qubit_local_files::error::LocalResourceKind::OwnedBytes
-                        && (limit.limit(), limit.remaining(), limit.requested()) == (1, 0, 1))));
+        qubit_operation::OperationOutcome::Succeeded(value)
+            if value.bytes == b"a" && !value.complete));
 
     // Creating an already existing directory succeeds with created=false.
     let existing = directory.path().join("existing");
@@ -995,6 +1141,110 @@ fn test_rooted_complete_mutations_bind_relative_paths_to_captured_root() {
         qubit_operation::OperationOutcome::Succeeded(result) if result.outcome.deleted()
     ));
     assert!(!root.join("renamed").exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn test_async_copy_records_permission_only_directory_modification() {
+    use std::os::unix::fs::PermissionsExt;
+
+    fn mode(path: &Path) -> u32 {
+        std::fs::metadata(path).unwrap().permissions().mode() & 0o777
+    }
+
+    for rooted in [false, true] {
+        let scratch = tempfile::tempdir().unwrap();
+        let root = scratch.path().join("root");
+        let source = root.join("source");
+        let target = root.join("target");
+        std::fs::create_dir_all(&source).unwrap();
+        std::fs::create_dir_all(&target).unwrap();
+        std::fs::write(source.join("leaf"), b"source").unwrap();
+        std::fs::write(target.join("leaf"), b"existing").unwrap();
+        std::fs::set_permissions(&source, std::fs::Permissions::from_mode(0o500)).unwrap();
+        std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+        let executor = LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).unwrap();
+        let filesystem = if rooted {
+            block_on(AsyncLocalFileSystem::rooted(executor, root.clone())).unwrap()
+        } else {
+            block_on(AsyncLocalFileSystem::host(executor)).unwrap()
+        };
+        let request_path = |path: &Path, relative: &str| {
+            if rooted {
+                PathBuf::from(relative)
+            } else {
+                path.to_path_buf()
+            }
+        };
+        let options = LocalCopyOptions::new()
+            .with_tree_source()
+            .with_conflict(LocalCopyConflictPolicy::Skip)
+            .with_type_conflict(LocalCopyTypeConflictPolicy::Skip)
+            .with_metadata_preservation(LocalMetadataPreservePolicy::Permissions);
+        let (mut copy, facts) = filesystem
+            .submit_copy(
+                &manager,
+                Default::default(),
+                LocalCopyRequest {
+                    source: request_path(&source, "source"),
+                    destination: request_path(&target, "target"),
+                    options,
+                },
+                Default::default(),
+            )
+            .unwrap();
+        let result = match copy.wait_outcome().unwrap() {
+            qubit_operation::OperationOutcome::Succeeded(result) => result,
+            other => panic!("directory metadata copy should succeed: {other:?}"),
+        };
+        assert_eq!(0, result.outcome.stats().files());
+        assert_eq!(0, result.outcome.stats().directories());
+        assert_eq!(0, result.outcome.stats().bytes());
+        assert_eq!(b"existing", std::fs::read(target.join("leaf")).unwrap().as_slice());
+        assert_eq!(0o500, mode(&target));
+        let snapshot = facts.snapshot();
+        assert!(snapshot.modified_count >= 1);
+        assert_eq!(0, snapshot.modified_bytes);
+        assert_eq!(
+            qubit_local_files::LocalPublicationState::NotPublished,
+            snapshot.publication
+        );
+
+        let no_metadata_target = root.join("target-without-metadata");
+        std::fs::create_dir(&no_metadata_target).unwrap();
+        std::fs::write(no_metadata_target.join("leaf"), b"existing").unwrap();
+        std::fs::set_permissions(&no_metadata_target, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let (mut skipped, skipped_facts) = filesystem
+            .submit_copy(
+                &manager,
+                Default::default(),
+                LocalCopyRequest {
+                    source: request_path(&source, "source"),
+                    destination: request_path(&no_metadata_target, "target-without-metadata"),
+                    options: LocalCopyOptions::new()
+                        .with_tree_source()
+                        .with_conflict(LocalCopyConflictPolicy::Skip)
+                        .with_type_conflict(LocalCopyTypeConflictPolicy::Skip),
+                },
+                Default::default(),
+            )
+            .unwrap();
+        assert!(matches!(
+            skipped.wait_outcome().unwrap(),
+            qubit_operation::OperationOutcome::Succeeded(_)
+        ));
+        let snapshot = skipped_facts.snapshot();
+        assert_eq!(0, snapshot.modified_count);
+        assert_eq!(
+            qubit_local_files::LocalPublicationState::NotPublished,
+            snapshot.publication
+        );
+        assert_eq!(0o700, mode(&no_metadata_target));
+        std::fs::set_permissions(&no_metadata_target, std::fs::Permissions::from_mode(0o700)).unwrap();
+        std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o700)).unwrap();
+        std::fs::set_permissions(&source, std::fs::Permissions::from_mode(0o700)).unwrap();
+    }
 }
 
 #[test]

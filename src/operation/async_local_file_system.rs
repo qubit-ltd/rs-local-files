@@ -25,6 +25,37 @@ use super::LocalIoExecutor;
 mod publish;
 /// Asynchronous facade retaining its synchronous filesystem authority and
 /// executor.
+///
+/// # Example
+///
+/// Bind an application manager to a bounded local executor, then use the
+/// facade to submit an operation.
+///
+/// ```no_run
+/// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+/// use std::path::PathBuf;
+/// use qubit_local_files::{AsyncLocalFileSystem, LocalExecutionConfig, LocalIoExecutor, LocalReadRequest};
+/// use qubit_local_files::operation::LocalOperationOptions;
+/// use qubit_operation::{ManagerOptions, OperationManager, OperationOptions, OperationOutcome};
+///
+/// let manager = OperationManager::new(ManagerOptions::default())?;
+/// let executor = LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default())?;
+/// let filesystem = AsyncLocalFileSystem::host(executor).await?;
+/// let (mut operation, observer) = filesystem.submit_read_all_with_observer(
+///     &manager,
+///     OperationOptions::default(),
+///     LocalReadRequest { path: PathBuf::from("input.txt"), read: Default::default() },
+///     LocalOperationOptions::default(),
+/// )?;
+/// match operation.wait_outcome()? {
+///     OperationOutcome::Succeeded(bytes) => println!("read {} bytes", bytes.len()),
+///     OperationOutcome::Failed(error) => return Err(error.into()),
+///     other => return Err(format!("read did not succeed: {other:?}").into()),
+/// }
+/// let _facts = observer.snapshot();
+/// # Ok(())
+/// # }
+/// ```
 #[derive(Clone)]
 pub struct AsyncLocalFileSystem {
     /// Stores the filesystem associated with this value.
@@ -500,14 +531,15 @@ impl AsyncLocalFileSystem {
         }
     }
     /// Submits a complete file read and returns its independent local fact
-    /// observer.
+    /// observer alongside the operation handle. The bytes are delivered by
+    /// the operation outcome; the observer reports operation facts and does
+    /// not contain or replace that result. Use [`Self::submit_read_all`] when
+    /// the read should check cooperative cancellation between read blocks.
     ///
     /// # Parameters
     /// - `manager` — operation manager that owns the admission scope.
-    /// - `qubit_operation` — input value used by this operation.
     /// - `operation` — operation options used for admission and cancellation.
     /// - `request` — owned input retained if submission is rejected.
-    /// - `super` — input value used by this operation.
     /// - `limits` — per-operation resource ceilings.
     pub fn submit_read_all_with_observer(
         &self,

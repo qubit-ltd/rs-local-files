@@ -84,6 +84,13 @@ assert_eq!(settlement.recovery_count, 0);
 # }
 ```
 
+### 复制操作的句柄接纳
+
+`submit_copy` 会一次性预留 `2 + max_open_directories.unwrap_or(1)` 个句柄。默认需要三个，
+普通文件复制也一样。若提交返回 `CapacityExceeded`，检查操作的 `max_open_handles` 上限和
+executor 配置的 `max_open_handles`。上限低于公式时应增大配置；若两者都足够，可能是其他活跃
+操作暂时占用了共享句柄，待其结束后重试。拒绝错误会原样保留请求，可从错误中取回。
+
 ### 异步遍历目录
 
 `next_batch()` 返回拥有型路径批次。即使先前批次已经返回，也要处理后续批次错误；提前停止时调用
