@@ -49,6 +49,7 @@ use crate::LocalFileError;
 use crate::LocalFileErrorKind;
 use crate::LocalFileMetadata;
 use crate::LocalPublicationState;
+use crate::error::LocalFileEffectState;
 use crate::error::LocalFileOperation;
 use crate::error::LocalReadLimitError;
 use crate::error::LocalResourceKind;
@@ -123,10 +124,7 @@ impl AsyncLocalFileSystem {
                 initial_owned_bytes: 0,
             },
             move |request, scope, _observer, budget, maximum| {
-                let read_limit = request
-                    .read
-                    .max_bytes()
-                    .map_or(maximum as u64, |limit| limit.min(maximum as u64));
+                let read_limit = effective_read_limit(&request.read, maximum);
                 match read_complete_cancellable(
                     &filesystem,
                     &execution_path,
@@ -183,10 +181,7 @@ impl AsyncLocalFileSystem {
                 initial_owned_bytes: 0,
             },
             move |request, scope, _observer, budget, maximum| {
-                let read_limit = request
-                    .read
-                    .max_bytes()
-                    .map_or(maximum as u64, |limit| limit.min(maximum as u64));
+                let read_limit = effective_read_limit(&request.read, maximum);
                 match read_complete_cancellable(
                     &filesystem,
                     &execution_path,
@@ -196,13 +191,9 @@ impl AsyncLocalFileSystem {
                     &budget,
                     maximum,
                 ) {
-                    OperationOutcome::Succeeded(bytes) => match String::from_utf8(bytes) {
+                    OperationOutcome::Succeeded(bytes) => match decode_complete_text(bytes, &execution_path) {
                         Ok(text) => OperationOutcome::Succeeded(text),
-                        Err(source) => OperationOutcome::Failed(LocalFileError::from_utf8(
-                            LocalFileOperation::Read,
-                            Some(execution_path.clone()),
-                            source,
-                        )),
+                        Err(error) => OperationOutcome::Failed(error),
                     },
                     OperationOutcome::Failed(error) => {
                         shrink_to_zero(&budget);
@@ -327,7 +318,7 @@ impl AsyncLocalFileSystem {
                         }
                     }
                 }
-                OperationOutcome::Succeeded(LocalReadPrefix { bytes, complete })
+                finish_prefix_read(_scope, bytes, complete, &budget, &execution_path)
             },
         )
     }
@@ -834,15 +825,16 @@ impl AsyncLocalFileSystem {
                         })
                     }
                     Err(error) => {
+                        let (modified_count, publication, fact, message) = deletion_effect_facts(error.effect_state());
                         record_local_effect(
                             scope,
                             &observer,
+                            modified_count,
                             0,
-                            0,
-                            LocalPublicationState::Unknown,
+                            publication,
                             LocalDurabilityState::Unknown,
-                            EffectFact::Unknown,
-                            "local deletion failed; partial recursive deletion count is unavailable",
+                            fact,
+                            message,
                         );
                         OperationOutcome::Failed(error)
                     }
@@ -1139,6 +1131,51 @@ fn read_complete_cancellable(
     OperationOutcome::Succeeded(bytes)
 }
 
+/// Selects the smaller explicit and executor owned-byte limit.
+///
+/// # Parameters
+/// - `options` — read options carrying an optional complete-read ceiling.
+/// - `maximum` — executor or operation owned-byte ceiling.
+fn effective_read_limit(options: &LocalReadAllOptions, maximum: usize) -> u64 {
+    options
+        .max_bytes()
+        .map_or(maximum as u64, |limit| limit.min(maximum as u64))
+}
+
+/// Decodes complete-read bytes while retaining invalid data and path context.
+///
+/// # Parameters
+/// - `bytes` — owned bytes returned by the complete read.
+/// - `path` — path used to attribute an invalid UTF-8 error.
+fn decode_complete_text(bytes: Vec<u8>, path: &Path) -> Result<String, LocalFileError> {
+    String::from_utf8(bytes)
+        .map_err(|source| LocalFileError::from_utf8(LocalFileOperation::Read, Some(path.to_path_buf()), source))
+}
+
+/// Rechecks cancellation immediately before delivering a prefix result.
+///
+/// # Parameters
+/// - `scope` — operation scope carrying cooperative stop state.
+/// - `bytes` — retained output discarded if cancellation was requested.
+/// - `complete` — whether the prefix read observed EOF.
+/// - `budget` — owned-byte permit for the retained output.
+/// - `_path` — request path used by the deterministic test gate.
+fn finish_prefix_read(
+    scope: &OperationScope,
+    bytes: Vec<u8>,
+    complete: bool,
+    budget: &Arc<Mutex<Permit>>,
+    _path: &Path,
+) -> OperationOutcome<LocalReadPrefix, LocalFileError> {
+    #[cfg(test)]
+    pause_read_all_test_gate(_path);
+    if let Some(stopped) = stop_outcome(scope) {
+        shrink_to_zero(budget);
+        return stopped;
+    }
+    OperationOutcome::Succeeded(LocalReadPrefix { bytes, complete })
+}
+
 /// Selects and merges the reader options used by a complete read.
 ///
 /// # Parameters
@@ -1258,6 +1295,41 @@ fn shrink_to_zero(permit: &Arc<Mutex<Permit>>) {
     permit.shrink(amount);
 }
 
+/// Maps native deletion-effect evidence to the conservative async snapshot.
+///
+/// # Parameters
+/// - `state` — effect evidence reported by the synchronous deletion backend.
+fn deletion_effect_facts(
+    state: Option<LocalFileEffectState>,
+) -> (u64, LocalPublicationState, EffectFact, &'static str) {
+    match state {
+        Some(LocalFileEffectState::Unchanged) => (
+            0,
+            LocalPublicationState::NotPublished,
+            EffectFact::Known,
+            "local deletion failed before changing the namespace",
+        ),
+        Some(LocalFileEffectState::PartiallyApplied) => (
+            1,
+            LocalPublicationState::Unknown,
+            EffectFact::Known,
+            "local deletion partially changed the namespace; exact deletion count is unavailable",
+        ),
+        Some(LocalFileEffectState::Applied) => (
+            1,
+            LocalPublicationState::Published,
+            EffectFact::Known,
+            "local deletion changed the namespace before a later failure",
+        ),
+        Some(LocalFileEffectState::Indeterminate) | None => (
+            0,
+            LocalPublicationState::Unknown,
+            EffectFact::Unknown,
+            "local deletion failed; namespace effects are unknown",
+        ),
+    }
+}
+
 /// Runs the reserve capacity behavior while preserving the operation lifecycle
 /// invariants.
 /// # Parameters
@@ -1347,6 +1419,7 @@ mod stop_gate_tests {
     use std::sync::atomic::Ordering;
     use std::sync::mpsc;
 
+    use qubit_operation::EffectFact;
     use qubit_operation::ManagerOptions;
     use qubit_operation::OperationManager;
     use qubit_operation::OperationOutcome;
@@ -1356,7 +1429,62 @@ mod stop_gate_tests {
     use super::READ_ALL_TEST_GATE_LOCK;
     use super::ReadAllTestGateGuard;
     use super::before_native_call;
+    use super::decode_complete_text;
+    use super::deletion_effect_facts;
+    use super::effective_read_limit;
     use super::effective_read_options;
+
+    #[test]
+    fn test_delete_effect_mapping_distinguishes_no_change_and_completed_change() {
+        use crate::LocalPublicationState;
+        use crate::error::LocalFileEffectState;
+
+        assert_eq!(
+            (
+                0,
+                LocalPublicationState::NotPublished,
+                EffectFact::Known,
+                "local deletion failed before changing the namespace"
+            ),
+            deletion_effect_facts(Some(LocalFileEffectState::Unchanged)),
+        );
+        assert_eq!(
+            (
+                1,
+                LocalPublicationState::Published,
+                EffectFact::Known,
+                "local deletion changed the namespace before a later failure"
+            ),
+            deletion_effect_facts(Some(LocalFileEffectState::Applied)),
+        );
+    }
+
+    #[test]
+    fn test_delete_effect_mapping_preserves_partial_and_unknown_evidence() {
+        use crate::LocalPublicationState;
+        use crate::error::LocalFileEffectState;
+
+        assert_eq!(
+            (
+                1,
+                LocalPublicationState::Unknown,
+                EffectFact::Known,
+                "local deletion partially changed the namespace; exact deletion count is unavailable"
+            ),
+            deletion_effect_facts(Some(LocalFileEffectState::PartiallyApplied)),
+        );
+        let unknown = (
+            0,
+            LocalPublicationState::Unknown,
+            EffectFact::Unknown,
+            "local deletion failed; namespace effects are unknown",
+        );
+        assert_eq!(
+            unknown,
+            deletion_effect_facts(Some(LocalFileEffectState::Indeterminate))
+        );
+        assert_eq!(unknown, deletion_effect_facts(None));
+    }
 
     fn block_on<F: std::future::Future>(future: F) -> F::Output {
         use std::sync::Arc;
@@ -1469,6 +1597,74 @@ mod stop_gate_tests {
     }
 
     #[test]
+    fn test_effective_complete_read_limit_inherits_and_tightens_executor_ceiling() {
+        use crate::options::LocalReadAllOptions;
+
+        assert_eq!(8, effective_read_limit(&LocalReadAllOptions::new(), 8));
+        assert_eq!(
+            4,
+            effective_read_limit(&LocalReadAllOptions::new().with_max_bytes(4), 8)
+        );
+        assert_eq!(
+            8,
+            effective_read_limit(&LocalReadAllOptions::new().with_max_bytes(12), 8)
+        );
+    }
+
+    #[test]
+    fn test_complete_text_decoder_preserves_success_and_invalid_utf8_path() {
+        use crate::error::LocalFileErrorKind;
+
+        let path = Path::new("invalid-text");
+        assert_eq!("valid", decode_complete_text(b"valid".to_vec(), path).unwrap());
+        let error = decode_complete_text(vec![0xff], path).expect_err("invalid UTF-8 must retain a typed error");
+        assert_eq!(LocalFileErrorKind::InvalidEncoding, error.kind());
+        assert_eq!(Some(path), error.path());
+    }
+
+    #[test]
+    fn test_read_all_and_text_success_cover_explicit_complete_read_limits() {
+        use crate::LocalReadRequest;
+        use crate::operation::AsyncLocalFileSystem;
+        use crate::operation::LocalExecutionConfig;
+        use crate::operation::LocalIoExecutor;
+        use crate::options::LocalReadAllOptions;
+
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("bounded-text");
+        std::fs::write(&path, b"abc").unwrap();
+        let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+        let executor = LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).unwrap();
+        let filesystem = block_on(AsyncLocalFileSystem::host(executor)).unwrap();
+
+        let (mut bytes, _) = filesystem
+            .submit_read_all(
+                &manager,
+                Default::default(),
+                LocalReadRequest {
+                    path: path.clone(),
+                    read: LocalReadAllOptions::new().with_max_bytes(3),
+                },
+                Default::default(),
+            )
+            .unwrap();
+        assert!(matches!(bytes.wait_outcome().unwrap(), OperationOutcome::Succeeded(value) if value == b"abc"));
+
+        let (mut text, _) = filesystem
+            .submit_read_text(
+                &manager,
+                Default::default(),
+                LocalReadRequest {
+                    path,
+                    read: LocalReadAllOptions::new().with_max_bytes(3),
+                },
+                Default::default(),
+            )
+            .unwrap();
+        assert!(matches!(text.wait_outcome().unwrap(), OperationOutcome::Succeeded(value) if value == "abc"));
+    }
+
+    #[test]
     fn test_stopped_complete_read_releases_owned_bytes_before_outcome_is_taken() {
         use std::sync::mpsc;
 
@@ -1541,6 +1737,81 @@ mod stop_gate_tests {
             probe.try_take_outcome().unwrap(),
             Some(OperationOutcome::Succeeded(bytes)) if bytes.len() == READ_SIZE
         ));
+    }
+
+    #[test]
+    fn test_prefix_read_rechecks_stop_after_eof_and_truncation_probe() {
+        use crate::operation::AsyncLocalFileSystem;
+        use crate::operation::LocalExecutionConfig;
+        use crate::operation::LocalIoExecutor;
+        use crate::operation::LocalOperationOptions;
+        use crate::operation::complete::LocalReadPrefixRequest;
+        use crate::options::LocalReadOptions;
+
+        let _gate_lock = READ_ALL_TEST_GATE_LOCK
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        for (label, max_bytes) in [("eof", 8), ("truncated", 2)] {
+            let directory = tempfile::tempdir().unwrap();
+            let path = directory.path().join(label);
+            std::fs::write(&path, b"ab").unwrap();
+            let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+            let executor = LocalIoExecutor::new(
+                manager.clone(),
+                LocalExecutionConfig {
+                    max_owned_bytes: 2,
+                    ..LocalExecutionConfig::default()
+                },
+            )
+            .unwrap();
+            let filesystem = block_on(AsyncLocalFileSystem::host(executor)).unwrap();
+            let (entered_tx, entered_rx) = mpsc::channel();
+            let (release_tx, release_rx) = mpsc::channel();
+            let _gate = ReadAllTestGateGuard::install(path.clone(), entered_tx, release_rx);
+            let (mut stopped, _) = filesystem
+                .submit_read_prefix(
+                    &manager,
+                    Default::default(),
+                    LocalReadPrefixRequest {
+                        path: path.clone(),
+                        read: LocalReadOptions::default(),
+                        max_bytes,
+                    },
+                    LocalOperationOptions {
+                        max_owned_bytes: Some(2),
+                        ..Default::default()
+                    },
+                )
+                .unwrap();
+            entered_rx
+                .recv_timeout(std::time::Duration::from_secs(5))
+                .expect("prefix read reaches the pre-delivery gate");
+            let _ = stopped.request_stop(StopReason::UserCancelled);
+            release_tx.send(()).unwrap();
+            stopped.wait_settlement().unwrap();
+            assert!(
+                matches!(stopped.try_take_outcome().unwrap(), Some(OperationOutcome::Stopped(report)) if report.reason == StopReason::UserCancelled)
+            );
+
+            let (mut probe, _) = filesystem
+                .submit_read_prefix(
+                    &manager,
+                    Default::default(),
+                    LocalReadPrefixRequest {
+                        path,
+                        read: LocalReadOptions::default(),
+                        max_bytes: 2,
+                    },
+                    LocalOperationOptions {
+                        max_owned_bytes: Some(2),
+                        ..Default::default()
+                    },
+                )
+                .unwrap();
+            assert!(
+                matches!(probe.wait_outcome().unwrap(), OperationOutcome::Succeeded(value) if value.bytes == b"ab")
+            );
+        }
     }
 
     #[test]

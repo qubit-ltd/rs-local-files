@@ -110,6 +110,37 @@ fn test_complete_read_reports_limit_error_without_returning_truncated_success() 
 }
 
 #[test]
+fn test_complete_text_read_succeeds_with_explicit_and_inherited_limits() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("text");
+    std::fs::write(&path, b"valid text").unwrap();
+    let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+    let filesystem = facade(&manager);
+
+    for read in [
+        LocalReadAllOptions::new().with_max_bytes(10),
+        LocalReadAllOptions::new(),
+    ] {
+        let mut operation = filesystem
+            .submit_read_text(
+                &manager,
+                Default::default(),
+                LocalReadRequest {
+                    path: path.clone(),
+                    read,
+                },
+                Default::default(),
+            )
+            .unwrap()
+            .0;
+        assert!(matches!(
+            operation.wait_outcome().unwrap(),
+            qubit_operation::OperationOutcome::Succeeded(text) if text == "valid text"
+        ));
+    }
+}
+
+#[test]
 fn test_read_text_preserves_utf8_conversion_error() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("invalid-utf8");
@@ -989,6 +1020,23 @@ fn test_complete_operation_edge_results_and_failures() {
         qubit_operation::OperationOutcome::Succeeded(value)
             if value.bytes == b"a" && !value.complete));
 
+    let mut empty_prefix = filesystem
+        .submit_read_prefix(
+            &manager,
+            Default::default(),
+            LocalReadPrefixRequest {
+                path: prefix_path,
+                read: Default::default(),
+                max_bytes: 0,
+            },
+            Default::default(),
+        )
+        .unwrap()
+        .0;
+    assert!(matches!(empty_prefix.wait_outcome().unwrap(),
+        qubit_operation::OperationOutcome::Succeeded(value)
+            if value.bytes.is_empty() && !value.complete));
+
     // Creating an already existing directory succeeds with created=false.
     let existing = directory.path().join("existing");
     std::fs::create_dir(&existing).unwrap();
@@ -1253,7 +1301,7 @@ fn test_delete_reports_missing_file_and_directory_errors() {
     let manager = OperationManager::new(ManagerOptions::default()).unwrap();
     let filesystem = facade(&manager);
 
-    let mut missing_file = filesystem
+    let (mut missing_file, missing_file_facts) = filesystem
         .submit_delete(
             &manager,
             Default::default(),
@@ -1264,13 +1312,91 @@ fn test_delete_reports_missing_file_and_directory_errors() {
             },
             Default::default(),
         )
-        .unwrap()
-        .0;
-    assert!(matches!(
-        missing_file.wait_outcome().unwrap(),
-        qubit_operation::OperationOutcome::Failed(error)
-            if error.kind() == qubit_local_files::error::LocalFileErrorKind::NotFound
-    ));
+        .unwrap();
+    let missing_error = match missing_file.wait_outcome().unwrap() {
+        qubit_operation::OperationOutcome::Failed(error) => error,
+        other => panic!("missing deletion must fail: {other:?}"),
+    };
+    assert_eq!(
+        qubit_local_files::error::LocalFileErrorKind::NotFound,
+        missing_error.kind()
+    );
+    assert_eq!(None, missing_error.effect_state());
+    let missing_snapshot = missing_file_facts.snapshot();
+    assert_eq!(0, missing_snapshot.modified_count);
+    assert_eq!(
+        qubit_local_files::LocalPublicationState::Unknown,
+        missing_snapshot.publication
+    );
+    assert!(missing_snapshot.range_unknown);
+
+    let refused_tree = directory.path().join("refused-delete");
+    std::fs::create_dir(&refused_tree).unwrap();
+    std::fs::write(refused_tree.join("payload"), b"data").unwrap();
+    let (mut refused_delete, refused_facts) = filesystem
+        .submit_delete(
+            &manager,
+            Default::default(),
+            LocalDeleteRequest {
+                path: refused_tree.clone(),
+                options: LocalDeleteOptions::new().with_recursive().with_max_entries(0),
+                directory: true,
+            },
+            Default::default(),
+        )
+        .unwrap();
+    let refused_error = match refused_delete.wait_outcome().unwrap() {
+        qubit_operation::OperationOutcome::Failed(error) => error,
+        other => panic!("zero-entry budget must reject deletion: {other:?}"),
+    };
+    assert_eq!(
+        Some(qubit_local_files::error::LocalFileEffectState::Unchanged),
+        refused_error.effect_state()
+    );
+    let refused_snapshot = refused_facts.snapshot();
+    assert_eq!(0, refused_snapshot.modified_count);
+    assert_eq!(
+        qubit_local_files::LocalPublicationState::NotPublished,
+        refused_snapshot.publication
+    );
+    assert!(!refused_snapshot.range_unknown);
+    assert_eq!(b"data", std::fs::read(refused_tree.join("payload")).unwrap().as_slice());
+
+    let partial_tree = directory.path().join("partial-delete");
+    std::fs::create_dir(&partial_tree).unwrap();
+    for name in ["first", "second"] {
+        std::fs::create_dir(partial_tree.join(name)).unwrap();
+        std::fs::write(partial_tree.join(name).join("payload"), b"data").unwrap();
+    }
+    let (mut partial_delete, partial_facts) = filesystem
+        .submit_delete(
+            &manager,
+            Default::default(),
+            LocalDeleteRequest {
+                path: partial_tree.clone(),
+                options: LocalDeleteOptions::new().with_recursive().with_max_entries(4),
+                directory: true,
+            },
+            Default::default(),
+        )
+        .unwrap();
+    let partial_error = match partial_delete.wait_outcome().unwrap() {
+        qubit_operation::OperationOutcome::Failed(error) => error,
+        other => panic!("budgeted recursive deletion must fail after a partial effect: {other:?}"),
+    };
+    assert_eq!(
+        Some(qubit_local_files::error::LocalFileEffectState::PartiallyApplied),
+        partial_error.effect_state()
+    );
+    let partial_snapshot = partial_facts.snapshot();
+    assert_eq!(1, partial_snapshot.modified_count);
+    assert_eq!(
+        qubit_local_files::LocalPublicationState::Unknown,
+        partial_snapshot.publication
+    );
+    assert!(partial_snapshot.range_unknown);
+    assert!(partial_tree.exists());
+    assert_eq!(1, std::fs::read_dir(&partial_tree).unwrap().count());
 
     let mut missing_directory = filesystem
         .submit_delete(

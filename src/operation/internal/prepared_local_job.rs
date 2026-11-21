@@ -485,6 +485,15 @@ where
             };
             Self::wake_all(wakers);
             if let Some(reason) = stop_before_start {
+                // Drop captured resources before returning their shared byte
+                // reservation. Keep cleanup outside the result port lock.
+                drop(task);
+                drop(request);
+                if let Some(permit) = this._owned_permit.lock().unwrap_or_else(|e| e.into_inner()).take() {
+                    let mut permit = permit.lock().unwrap_or_else(|e| e.into_inner());
+                    let amount = permit.amount();
+                    permit.shrink(amount);
+                }
                 let outcome = OperationOutcome::Stopped(qubit_operation::StopReport {
                     reason,
                     accepted_at: None,
@@ -1297,7 +1306,10 @@ mod lifecycle_tests {
             Some(qubit_operation::ChildOutcomeKind::Stopped),
             snapshot.outcome.map(|outcome| outcome.kind)
         );
-        assert_eq!(19, executor_for_assertions.inner.byte_slots.used());
+        assert_eq!(0, executor_for_assertions.inner.byte_slots.used());
+        let replacement = executor_for_assertions
+            .reserve_bytes(19)
+            .expect("stopped queued work returns its byte reservation before settlement");
 
         let mut cx = Context::from_waker(Waker::noop());
         assert!(matches!(OperationControl::poll_outcome(&*job, &mut cx), Poll::Ready(_)));
@@ -1309,6 +1321,7 @@ mod lifecycle_tests {
             PreparedExternalOperation::poll_take_outcome(&*job, &mut cx),
             Poll::Ready(OperationOutcome::Stopped(_))
         ));
+        drop(replacement);
         assert_eq!(0, executor_for_assertions.inner.byte_slots.used());
     }
 }

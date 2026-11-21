@@ -338,9 +338,22 @@ mod tests {
         assert_eq!(*resource.native.lock().expect("native lock"), Some(9));
 
         // A failed abort keeps the managed owner available for a later recovery
-        // attempt. Model a transient native failure clearing, then retry it.
+        // attempt. Wait for the completed worker to release its queue permit,
+        // then transfer that capacity to the returned resource before retrying.
         let mut resource = resource;
         resource.abort = abort_ok;
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        let permit = loop {
+            if let Some(permit) = executor.reserve_cleanup() {
+                break permit;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "cleanup worker retained the retry permit"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        };
+        *resource.cleanup_permit.lock().expect("cleanup permit lock") = Some(permit);
         assert!(matches!(
             block_on(cleanup.cleanup(resource, cleanup_context())),
             CleanupOutcome::Released

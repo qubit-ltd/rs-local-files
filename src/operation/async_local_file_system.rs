@@ -26,7 +26,7 @@ mod publish;
 /// Asynchronous facade retaining its synchronous filesystem authority and
 /// executor.
 ///
-/// # Example
+/// # Examples
 ///
 /// Bind an application manager to a bounded local executor, then use the
 /// facade to submit an operation.
@@ -47,7 +47,8 @@ mod publish;
 ///     LocalReadRequest { path: PathBuf::from("input.txt"), read: Default::default() },
 ///     LocalOperationOptions::default(),
 /// )?;
-/// match operation.wait_outcome()? {
+/// let mut operation = operation.into_async();
+/// match operation.wait_outcome().await? {
 ///     OperationOutcome::Succeeded(bytes) => println!("read {} bytes", bytes.len()),
 ///     OperationOutcome::Failed(error) => return Err(error.into()),
 ///     other => return Err(format!("read did not succeed: {other:?}").into()),

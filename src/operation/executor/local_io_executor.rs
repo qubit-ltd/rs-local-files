@@ -31,7 +31,7 @@ use super::local_cleanup_executor::LocalCleanupExecutor;
 use super::worker_owner::WorkerOwner;
 /// Bounded local I/O worker group associated with an application manager.
 ///
-/// # Example
+/// # Examples
 ///
 /// Create an executor with explicit manager ownership and wait for a draining
 /// shutdown before dropping it.
