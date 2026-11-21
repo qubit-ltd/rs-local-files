@@ -76,6 +76,7 @@ mod tests {
         let state = Arc::new(LocalAbortCleanupState {
             owner: Mutex::new(None),
             result: Mutex::new(None),
+            pending_result: Mutex::new(None),
             waker: Mutex::new(None),
         });
         (LocalAbortCleanupWait(Arc::clone(&state)), state)

@@ -38,6 +38,26 @@ fn clear_waker(state: &CleanupState) {
     safe_drop_waker(waker);
 }
 
+/// Publishes a completed native cleanup after its queue permit is returned.
+///
+/// # Parameters
+///
+/// * `state` — worker result and waiter state shared with the cleanup future.
+fn publish_cleanup_result(state: &CleanupState) {
+    if let Some(result) = state
+        .pending_result
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .take()
+    {
+        *state.result.lock().unwrap_or_else(|e| e.into_inner()) = Some(result);
+    }
+    let waker = state.waker.lock().unwrap_or_else(|e| e.into_inner()).take();
+    if let Some(waker) = waker {
+        safe_wake(waker);
+    }
+}
+
 /// Wakes a task without allowing a hostile waker panic to unwind the worker.
 ///
 /// # Parameters
@@ -168,6 +188,10 @@ mod tests {
     struct DropPanics;
     struct ThreadWake(std::thread::Thread);
     struct CountingWake(Arc<std::sync::atomic::AtomicUsize>);
+    struct BlockingWake {
+        entered: std::sync::mpsc::Sender<()>,
+        release: Mutex<std::sync::mpsc::Receiver<()>>,
+    }
     impl std::task::Wake for ThreadWake {
         fn wake(self: Arc<Self>) {
             self.0.unpark();
@@ -182,6 +206,16 @@ mod tests {
         }
         fn wake_by_ref(self: &Arc<Self>) {
             self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        }
+    }
+    impl std::task::Wake for BlockingWake {
+        fn wake(self: Arc<Self>) {
+            let _ = self.entered.send(());
+            let _ = self.release.lock().expect("wake release lock").recv();
+        }
+        fn wake_by_ref(self: &Arc<Self>) {
+            let _ = self.entered.send(());
+            let _ = self.release.lock().expect("wake release lock").recv();
         }
     }
     impl std::task::Wake for DropPanics {
@@ -373,6 +407,60 @@ mod tests {
         assert_eq!(0, std::fs::read_dir(parent.path()).expect("temp parent").count());
     }
 
+    #[test]
+    fn test_cleanup_result_is_published_after_its_permit_is_returned() {
+        let parent = tempfile::tempdir().expect("temp parent");
+        let manager = OperationManager::new(ManagerOptions::default()).expect("manager");
+        let executor = LocalIoExecutor::new(
+            manager.clone(),
+            LocalExecutionConfig {
+                worker_count: 1,
+                max_open_handles: 1,
+                ..LocalExecutionConfig::default()
+            },
+        )
+        .expect("executor");
+        let cleanup = Arc::new(LocalCleanup {
+            executor: executor.clone(),
+        });
+        let (started_tx, started_rx) = std::sync::mpsc::channel();
+        let (gate_release_tx, gate_release_rx) = std::sync::mpsc::channel();
+        assert!(executor
+            .inner
+            .queue
+            .push(
+                Box::new(move || {
+                    started_tx.send(()).expect("test receiver remains open");
+                    gate_release_rx.recv().expect("test releases worker gate");
+                }),
+                false,
+                1,
+            )
+            .is_ok());
+        started_rx.recv().expect("worker reaches the gate");
+        let owner = test_owner(&manager, &executor, parent.path());
+        let context = CleanupContext::new(qubit_operation::ContextOptions::default()).expect("cleanup context");
+        let mut future = Box::pin(cleanup.cleanup(owner, context));
+        let (entered_tx, entered_rx) = std::sync::mpsc::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        let waker = Waker::from(Arc::new(BlockingWake {
+            entered: entered_tx,
+            release: Mutex::new(release_rx),
+        }));
+        let mut context = Context::from_waker(&waker);
+
+        assert!(matches!(future.as_mut().poll(&mut context), Poll::Pending));
+        gate_release_tx.send(()).expect("release worker gate");
+        entered_rx.recv().expect("worker starts publishing cleanup result");
+        assert!(matches!(future.as_mut().poll(&mut context), Poll::Ready(CleanupOutcome::Released)));
+        let permit_available_before_wake_returns = executor.reserve_cleanup().is_some();
+        release_tx.send(()).expect("release blocked worker wake");
+        assert!(
+            permit_available_before_wake_returns,
+            "cleanup result became visible before its permit was returned"
+        );
+    }
+
     fn cleanup_error() -> crate::LocalFileError {
         crate::LocalFileError::from_io(
             LocalFileOperation::Cleanup,
@@ -390,6 +478,7 @@ mod tests {
         let owner = test_owner(&manager, &executor, parent.path());
         let state = Arc::new(CleanupState {
             result: Mutex::new(None),
+            pending_result: Mutex::new(None),
             waker: Mutex::new(None),
             owner: Mutex::new(Some(owner)),
         });
@@ -438,6 +527,7 @@ mod tests {
     fn test_cleanup_wait_observes_completion_during_waker_registration() {
         let state = Arc::new(CleanupState {
             result: Mutex::new(None),
+            pending_result: Mutex::new(None),
             waker: Mutex::new(None),
             owner: Mutex::new(None),
         });
@@ -460,6 +550,7 @@ mod tests {
     fn test_cleanup_wait_returns_published_result_before_cloning_waker() {
         let state = Arc::new(CleanupState {
             result: Mutex::new(Some(None)),
+            pending_result: Mutex::new(None),
             waker: Mutex::new(None),
             owner: Mutex::new(None),
         });
@@ -482,6 +573,7 @@ mod tests {
     fn test_cleanup_wait_rechecks_result_after_waker_clone_panics() {
         let state = Arc::new(CleanupState {
             result: Mutex::new(None),
+            pending_result: Mutex::new(None),
             waker: Mutex::new(None),
             owner: Mutex::new(None),
         });
@@ -508,6 +600,7 @@ mod tests {
     fn test_cleanup_wait_recovers_poisoned_result_lock_after_waker_clone_panics() {
         let state = Arc::new(CleanupState {
             result: Mutex::new(None),
+            pending_result: Mutex::new(None),
             waker: Mutex::new(None),
             owner: Mutex::new(None),
         });
@@ -538,6 +631,7 @@ mod tests {
     fn test_cleanup_wait_recovers_poisoned_waker_lock_while_pending() {
         let state = Arc::new(CleanupState {
             result: Mutex::new(None),
+            pending_result: Mutex::new(None),
             waker: Mutex::new(None),
             owner: Mutex::new(None),
         });
@@ -592,6 +686,7 @@ mod tests {
     fn test_cleanup_wait_replaces_and_safely_drops_the_previous_waker() {
         let state = Arc::new(CleanupState {
             result: Mutex::new(None),
+            pending_result: Mutex::new(None),
             waker: Mutex::new(Some(Waker::from(Arc::new(DropPanics)))),
             owner: Mutex::new(None),
         });
@@ -613,6 +708,7 @@ mod tests {
     fn test_cleanup_wait_replaces_waker_on_repeated_pending_poll() {
         let state = Arc::new(CleanupState {
             result: Mutex::new(None),
+            pending_result: Mutex::new(None),
             waker: Mutex::new(None),
             owner: Mutex::new(None),
         });

@@ -10,6 +10,7 @@ use std::sync::Arc;
 
 use super::super::internal::permits::Permit;
 use super::super::internal::permits::PermitPool;
+use super::super::internal::worker::CleanupCompletionEnqueueError;
 use super::super::internal::worker::CleanupEnqueueError;
 use super::super::internal::worker::WorkerQueue;
 use super::worker_owner::WorkerOwner;
@@ -43,13 +44,32 @@ impl LocalCleanupExecutor {
     /// - `permit` — Capacity reserved for this cleanup operation.
     ///
     /// # Returns
-    /// `Ok(())` when queued, or the enqueue error when the worker queue
-    /// stopped.
+    /// `Ok(())` when queued, or the enqueue error when the worker queue stopped.
+    #[allow(dead_code)]
     pub(crate) fn enqueue_cleanup(
         &self,
         job: Box<dyn FnOnce() + Send + 'static>,
         permit: Permit,
     ) -> Result<(), CleanupEnqueueError> {
         self.queue.push_cleanup(job, permit, self.cleanup_capacity)
+    }
+
+    /// Enqueues cleanup work whose completion runs after its permit is returned.
+    ///
+    /// # Parameters
+    /// - `job` — Cleanup operation to run on a local worker.
+    /// - `permit` — Capacity reserved for this cleanup operation.
+    /// - `completion` — Callback used to publish the completed cleanup result.
+    ///
+    /// # Returns
+    /// `Ok(())` when queued, or the job, permit, and callback when rejected.
+    pub(crate) fn enqueue_cleanup_with_completion(
+        &self,
+        job: Box<dyn FnOnce() + Send + 'static>,
+        permit: Permit,
+        completion: Box<dyn FnOnce() + Send + 'static>,
+    ) -> Result<(), CleanupCompletionEnqueueError> {
+        self.queue
+            .push_cleanup_with_completion(job, permit, completion, self.cleanup_capacity)
     }
 }

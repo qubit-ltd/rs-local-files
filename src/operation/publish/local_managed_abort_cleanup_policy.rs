@@ -55,6 +55,7 @@ impl<W: Send + 'static> AsyncCleanup<LocalManagedAbortResource<W>> for LocalMana
         let state = Arc::new(LocalAbortCleanupState {
             owner: Mutex::new(Some(resource)),
             result: Mutex::new(None),
+            pending_result: Mutex::new(None),
             waker: Mutex::new(None),
         });
         let worker_state = Arc::clone(&state);
@@ -97,18 +98,14 @@ impl<W: Send + 'static> AsyncCleanup<LocalManagedAbortResource<W>> for LocalMana
                     CleanupOutcome::Failed { failure, resource }
                 }
             };
-            *worker_state.result.lock().unwrap_or_else(|error| error.into_inner()) = Some(outcome);
-            if let Some(waker) = worker_state
-                .waker
+            *worker_state
+                .pending_result
                 .lock()
-                .unwrap_or_else(|error| error.into_inner())
-                .take()
-                && let Err(payload) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| waker.wake()))
-            {
-                std::mem::forget(payload);
-            }
+                .unwrap_or_else(|error| error.into_inner()) = Some(outcome);
         });
-        if self.executor.enqueue_cleanup(job, permit).is_err() {
+        let completion_state = Arc::clone(&state);
+        let completion = Box::new(move || publish_abort_result(&completion_state));
+        if self.executor.enqueue_cleanup_with_completion(job, permit, completion).is_err() {
             let resource = state
                 .owner
                 .lock()
@@ -121,6 +118,28 @@ impl<W: Send + 'static> AsyncCleanup<LocalManagedAbortResource<W>> for LocalMana
             });
         }
         Box::pin(LocalAbortCleanupWait(state))
+    }
+}
+
+/// Publishes an abort result after the cleanup worker returns its capacity.
+///
+/// # Parameters
+///
+/// * `state` — result and waiter state shared with the cleanup future.
+fn publish_abort_result<W: Send + 'static>(state: &LocalAbortCleanupState<W>) {
+    if let Some(result) = state
+        .pending_result
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .take()
+    {
+        *state.result.lock().unwrap_or_else(|error| error.into_inner()) = Some(result);
+    }
+    let waker = state.waker.lock().unwrap_or_else(|error| error.into_inner()).take();
+    if let Some(waker) = waker
+        && let Err(payload) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| waker.wake()))
+    {
+        std::mem::forget(payload);
     }
 }
 
@@ -301,20 +320,10 @@ mod tests {
         assert_eq!(resource.native.lock().expect("native lock").take(), Some(9));
         #[cfg(panic = "unwind")]
         crate::operation::poison_test_mutex(&resource.native);
-
         assert!(matches!(
             block_on(cleanup.cleanup(resource, cleanup_context())),
             CleanupOutcome::Released
         ));
-        // The worker publishes its result before its queue slot is dropped.
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
-        while executor.reserve_cleanup().is_none() {
-            assert!(
-                std::time::Instant::now() < deadline,
-                "worker retained the cleanup permit"
-            );
-            std::thread::sleep(std::time::Duration::from_millis(1));
-        }
     }
 
     #[test]
@@ -338,22 +347,10 @@ mod tests {
         assert_eq!(*resource.native.lock().expect("native lock"), Some(9));
 
         // A failed abort keeps the managed owner available for a later recovery
-        // attempt. Wait for the completed worker to release its queue permit,
-        // then transfer that capacity to the returned resource before retrying.
+        // attempt. The published failure guarantees the worker already returned
+        // its permit, so recovery can retry through the cleanup policy directly.
         let mut resource = resource;
         resource.abort = abort_ok;
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
-        let permit = loop {
-            if let Some(permit) = executor.reserve_cleanup() {
-                break permit;
-            }
-            assert!(
-                std::time::Instant::now() < deadline,
-                "cleanup worker retained the retry permit"
-            );
-            std::thread::sleep(std::time::Duration::from_millis(1));
-        };
-        *resource.cleanup_permit.lock().expect("cleanup permit lock") = Some(permit);
         assert!(matches!(
             block_on(cleanup.cleanup(resource, cleanup_context())),
             CleanupOutcome::Released
@@ -416,6 +413,10 @@ mod tests {
 
         release_tx.send(()).expect("worker is waiting for release");
         assert!(matches!(block_on(future), CleanupOutcome::Released));
+        assert!(
+            executor.reserve_cleanup().is_some(),
+            "published abort result must follow cleanup permit return"
+        );
     }
 
     #[test]
