@@ -51,6 +51,8 @@ use crate::LocalFileMetadata;
 use crate::LocalPublicationState;
 use crate::error::LocalFileOperation;
 use crate::error::LocalReadLimitError;
+use crate::error::LocalResourceKind;
+use crate::error::LocalResourceLimitError;
 use crate::options::LocalReadAllOptions;
 use crate::outcome::LocalCopyFailure;
 use crate::outcome::LocalCopyFailureState;
@@ -259,11 +261,10 @@ impl AsyncLocalFileSystem {
                                     return stopped;
                                 }
                                 shrink_to_zero(&budget);
-                                return OperationOutcome::Failed(LocalFileError::from_io(
+                                return OperationOutcome::Failed(LocalFileError::from_resource_limit(
                                     LocalFileOperation::Read,
                                     Some(execution_path.clone()),
-                                    None,
-                                    std::io::Error::other("executor owned-byte limit exceeded"),
+                                    LocalResourceLimitError::new(LocalResourceKind::OwnedBytes, maximum, maximum, 1),
                                 ));
                             }
                             Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {
@@ -281,14 +282,9 @@ impl AsyncLocalFileSystem {
                         }
                     }
                     let count = (target - bytes.len()).min(buffer.len()).min(capacity_remaining);
-                    if let Err(error) = reserve_capacity(&mut bytes, count, &budget, maximum) {
+                    if let Err(error) = reserve_capacity(&mut bytes, count, &budget, maximum, &execution_path) {
                         shrink_to_zero(&budget);
-                        return OperationOutcome::Failed(LocalFileError::from_io(
-                            LocalFileOperation::Read,
-                            Some(execution_path.clone()),
-                            None,
-                            error,
-                        ));
+                        return OperationOutcome::Failed(error);
                     }
                     match reader.read(&mut buffer[..count]) {
                         Ok(0) => break,
@@ -387,14 +383,9 @@ impl AsyncLocalFileSystem {
                 let mut buffer = [0_u8; 8192];
                 while bytes.len() < target {
                     let count = (target - bytes.len()).min(buffer.len());
-                    if let Err(error) = reserve_capacity(&mut bytes, count, &budget, maximum) {
+                    if let Err(error) = reserve_capacity(&mut bytes, count, &budget, maximum, &execution_path) {
                         shrink_to_zero(&budget);
-                        return OperationOutcome::Failed(LocalFileError::from_io(
-                            LocalFileOperation::Read,
-                            Some(execution_path.clone()),
-                            None,
-                            error,
-                        ));
+                        return OperationOutcome::Failed(error);
                     }
                     match reader.read(&mut buffer[..count]) {
                         Ok(0) => break,
@@ -1068,13 +1059,8 @@ fn read_complete_cancellable(
             }
         }
         let remaining = (maximum - bytes.len() as u64).min(buffer.len() as u64) as usize;
-        if let Err(error) = reserve_capacity(&mut bytes, remaining, budget, allocation_limit) {
-            return OperationOutcome::Failed(LocalFileError::from_io(
-                LocalFileOperation::Read,
-                Some(path.to_path_buf()),
-                None,
-                error,
-            ));
+        if let Err(error) = reserve_capacity(&mut bytes, remaining, budget, allocation_limit, path) {
+            return OperationOutcome::Failed(error);
         }
         match observed.read(&mut buffer[..remaining]) {
             Ok(0) => break,
@@ -1203,21 +1189,47 @@ fn reserve_capacity(
     additional: usize,
     permit: &Arc<Mutex<Permit>>,
     maximum: usize,
-) -> std::io::Result<()> {
+    path: &Path,
+) -> Result<(), LocalFileError> {
     let old_capacity = output.capacity();
-    let requested = output
-        .len()
-        .checked_add(additional)
-        .ok_or_else(|| std::io::Error::other("read capacity overflow"))?;
+    let requested = output.len().checked_add(additional).ok_or_else(|| {
+        LocalFileError::from_io(
+            LocalFileOperation::Read,
+            Some(path.to_path_buf()),
+            None,
+            std::io::Error::other("read capacity overflow"),
+        )
+    })?;
     let target = requested.max(old_capacity);
     let delta = target - old_capacity;
     let mut lease = permit.lock().unwrap_or_else(|e| e.into_inner());
-    if target > maximum || !lease.grow(delta) {
-        return Err(std::io::Error::other("executor owned-byte limit exceeded"));
+    if target > maximum {
+        return Err(LocalFileError::from_resource_limit(
+            LocalFileOperation::Read,
+            Some(path.to_path_buf()),
+            LocalResourceLimitError::new(
+                LocalResourceKind::OwnedBytes,
+                maximum,
+                maximum.saturating_sub(old_capacity),
+                delta,
+            ),
+        ));
+    }
+    if let Err((limit, remaining, requested)) = lease.try_grow(delta) {
+        return Err(LocalFileError::from_resource_limit(
+            LocalFileOperation::Read,
+            Some(path.to_path_buf()),
+            LocalResourceLimitError::new(LocalResourceKind::OwnedBytes, limit, remaining, requested),
+        ));
     }
     if let Err(error) = output.try_reserve_exact(additional) {
         lease.shrink(delta);
-        return Err(error.into());
+        return Err(LocalFileError::from_io(
+            LocalFileOperation::Read,
+            Some(path.to_path_buf()),
+            None,
+            error.into(),
+        ));
     }
     let actual = output.capacity().saturating_sub(old_capacity);
     if actual < delta {
@@ -1225,8 +1237,15 @@ fn reserve_capacity(
     } else if actual > delta && !lease.grow(actual - delta) {
         let amount = lease.amount();
         lease.shrink(amount);
-        return Err(std::io::Error::other(
-            "allocator capacity exceeds executor owned-byte limit",
+        return Err(LocalFileError::from_resource_limit(
+            LocalFileOperation::Read,
+            Some(path.to_path_buf()),
+            LocalResourceLimitError::new(
+                LocalResourceKind::OwnedBytes,
+                maximum,
+                maximum.saturating_sub(old_capacity),
+                actual - delta,
+            ),
         ));
     }
     Ok(())
@@ -1288,10 +1307,11 @@ mod stop_gate_tests {
         #[cfg(panic = "unwind")]
         crate::operation::poison_test_mutex(&permit);
 
-        let error = super::reserve_capacity(&mut bytes, usize::MAX, &permit, 8).expect_err("length overflow");
-        assert_eq!(error.to_string(), "read capacity overflow");
+        let path = std::path::Path::new("overflow");
+        let error = super::reserve_capacity(&mut bytes, usize::MAX, &permit, 8, path).expect_err("length overflow");
+        assert!(error.to_string().contains("read capacity overflow"));
         assert_eq!(pool.used(), 1);
-        super::reserve_capacity(&mut bytes, 1, &permit, 8).expect("grow within byte budget");
+        super::reserve_capacity(&mut bytes, 1, &permit, 8, path).expect("grow within byte budget");
         assert_eq!(pool.used(), bytes.capacity());
         assert_eq!(bytes, [1]);
         super::shrink_to_zero(&permit);

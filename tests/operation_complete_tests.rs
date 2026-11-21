@@ -279,10 +279,22 @@ fn test_invalid_text_keeps_its_owned_byte_permit_until_the_outcome_is_taken() {
         )
         .unwrap()
         .0;
-    assert!(matches!(
-        blocked.wait_outcome().unwrap(),
-        qubit_operation::OperationOutcome::Failed(_)
-    ));
+    match blocked.wait_outcome().unwrap() {
+        qubit_operation::OperationOutcome::Failed(error) => {
+            let limit = error.resource_limit_error().expect("shared byte-pool facts");
+            assert_eq!(
+                error.kind(),
+                qubit_local_files::error::LocalFileErrorKind::ResourceLimit
+            );
+            assert_eq!(error.path(), Some(valid.as_path()));
+            assert_eq!(
+                limit.resource(),
+                qubit_local_files::error::LocalResourceKind::OwnedBytes
+            );
+            assert_eq!((limit.limit(), limit.remaining(), limit.requested()), (4, 0, 4));
+        }
+        other => panic!("shared byte-pool exhaustion must reject the read: {other:?}"),
+    }
 
     assert!(matches!(text.wait_outcome().unwrap(),
         qubit_operation::OperationOutcome::Failed(error)
@@ -724,7 +736,10 @@ fn test_complete_operation_edge_results_and_failures() {
         .0;
     assert!(matches!(prefix.wait_outcome().unwrap(),
         qubit_operation::OperationOutcome::Failed(error)
-            if error.kind() == qubit_local_files::error::LocalFileErrorKind::Io));
+            if error.kind() == qubit_local_files::error::LocalFileErrorKind::ResourceLimit
+                && error.resource_limit_error().is_some_and(|limit|
+                    limit.resource() == qubit_local_files::error::LocalResourceKind::OwnedBytes
+                        && limit.limit() == 1)));
 
     // Creating an already existing directory succeeds with created=false.
     let existing = directory.path().join("existing");

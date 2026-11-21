@@ -50,9 +50,12 @@ impl LocalWalkCloseObserver {
     /// Waits for the serial worker's native handle close acknowledgement.
     pub async fn wait_closed(&self) -> crate::LocalResult<()> {
         match &self.resource {
-            Some(resource) => std::future::poll_fn(|cx| resource.poll_closed(cx))
-                .await
-                .map_err(map_walk_error),
+            Some(resource) => {
+                let mut registration = resource.close_registration();
+                std::future::poll_fn(|cx| resource.poll_closed(cx, registration.as_mut()))
+                    .await
+                    .map_err(map_walk_error)
+            }
             None => Ok(()),
         }
     }

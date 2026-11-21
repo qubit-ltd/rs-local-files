@@ -38,6 +38,8 @@ const ASYNC_WALKER_DEPS_START: &str = "# BEGIN async walker consumer dependencie
 const ASYNC_WALKER_DEPS_END: &str = "# END async walker consumer dependencies";
 const ASYNC_WALKER_START: &str = "// BEGIN executable async walker example";
 const ASYNC_WALKER_END: &str = "// END executable async walker example";
+const ASYNC_WALKER_FAILURE_START: &str = "// BEGIN executable async walker recovery example";
+const ASYNC_WALKER_FAILURE_END: &str = "// END executable async walker recovery example";
 const TREE_SYNC_START: &str = "// BEGIN executable tree sync example";
 const TREE_SYNC_END: &str = "// END executable tree sync example";
 const EXPORT_START: &str = "// BEGIN executable export example";
@@ -765,6 +767,98 @@ fn test_documented_async_walker_compiles_as_a_consumer() {
             fs::read_to_string(project.join("Cargo.lock")).expect("consumer lock remains readable"),
             consumer_lock,
             "{language} async walker consumer must not change the reviewed dependency graph"
+        );
+    }
+}
+
+#[test]
+fn test_documented_async_walker_preserves_dual_failures_and_recovery() {
+    let _guard = lock_documentation_consumer();
+    let crate_path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .canonicalize()
+        .expect("the tested crate path is canonicalized");
+    let workspace = tempdir().expect("consumer workspace is created");
+    let target = workspace.path().join("target");
+    let parent_lock = fs::read_to_string(crate_path.join("Cargo.lock")).expect("the tested crate has a lockfile");
+    let consumer_lock = consumer_lock::lock_with_parent_sources(ASYNC_WALKER_CONSUMER_LOCK, &parent_lock);
+
+    for (index, (language, guide)) in GUIDES.into_iter().enumerate() {
+        let dependencies = extract_marked(guide, ASYNC_WALKER_DEPS_START, ASYNC_WALKER_DEPS_END, language);
+        let dependency_line = dependencies
+            .lines()
+            .find(|line| line.trim_start().starts_with("qubit-local-files ="))
+            .expect("async walker dependencies contain qubit-local-files");
+        let dependency_path = cargo_manifest_path(&crate_path.to_string_lossy());
+        let dependencies = dependencies.replace(
+            dependency_line,
+            &local_files_path_dependency(dependency_line, &dependency_path),
+        );
+        let dependencies = dependencies.replace("features = [\"async\"]", "features = [\"async\", \"test-support\"]");
+        let directory = workspace.path().join(format!("walker-fixture-{index}"));
+        fs::create_dir_all(&directory).expect("walker fixture directory is created");
+        fs::write(directory.join("entry"), b"entry").expect("walker fixture entry is written");
+
+        let code = extract_marked(guide, ASYNC_WALKER_FAILURE_START, ASYNC_WALKER_FAILURE_END, language)
+            .replace(
+                "PathBuf::from(\".\")",
+                &format!("PathBuf::from({:?})", directory.to_string_lossy()),
+            )
+            .replace(
+                "let walk_result:",
+                "let walk_fault = qubit_local_files::test_support::install_test_fault_shared(\"walker-entry\").unwrap();\nlet walk_result:",
+            )
+            .replace(
+                "let close_result = walker.close().await;",
+                "drop(walk_fault);\nlet close_fault = qubit_local_files::test_support::install_test_fault_shared(\"walker-cleanup-panic\").unwrap();\nlet close_result = walker.close().await;\ndrop(close_fault);",
+            );
+        assert!(
+            code.contains("settlement.recoveries.to_vec()"),
+            "{language} walker example returns retained recovery handles"
+        );
+
+        let project = workspace.path().join(format!("async-walker-failure-consumer-{index}"));
+        fs::create_dir_all(project.join("src")).expect("consumer source directory is created");
+        fs::write(
+            project.join("Cargo.toml"),
+            format!(
+                "[package]\nname = \"documentation-consumer\"\nversion = \"0.1.0\"\nedition = \"2024\"\n\n{dependencies}"
+            ),
+        )
+        .expect("consumer manifest is written");
+        fs::write(project.join("Cargo.lock"), &consumer_lock).expect("reviewed consumer lock is written");
+
+        let mut source = String::from(
+            "use std::future::Future;\nuse std::sync::Arc;\nuse std::task::{Context, Poll, Wake, Waker};\n\nasync fn example() -> Result<(Vec<String>, Vec<qubit_operation::RecoveryHandle>), Box<dyn std::error::Error>> {\n",
+        );
+        source.push_str(&code);
+        source.push_str(
+            "\n}\nstruct ThreadWake(std::thread::Thread);\nimpl Wake for ThreadWake {\n    fn wake(self: Arc<Self>) { self.0.unpark(); }\n    fn wake_by_ref(self: &Arc<Self>) { self.0.unpark(); }\n}\nfn block_on<T>(future: impl Future<Output = T>) -> T {\n    let mut future = Box::pin(future);\n    let waker = Waker::from(Arc::new(ThreadWake(std::thread::current())));\n    let mut context = Context::from_waker(&waker);\n    loop {\n        match future.as_mut().poll(&mut context) {\n            Poll::Ready(value) => return value,\n            Poll::Pending => std::thread::park(),\n        }\n    }\n}\nfn main() {\n    let (diagnostics, recoveries) = block_on(example()).expect(\"the documented flow returns diagnostics\");\n    assert_eq!(diagnostics.len(), 3, \"traversal, close, and observer errors remain visible\");\n    assert!(diagnostics[0].contains(\"injected walker directory entry failure\"), \"{diagnostics:?}\");\n    assert!(diagnostics[1].contains(\"Unconfirmed: local walker cleanup task panicked\"), \"{diagnostics:?}\");\n    assert_eq!(diagnostics[1], diagnostics[2], \"the observer sees the same close result\");\n    assert_eq!(recoveries.len(), 1, \"settlement retains the failed walker owner\");\n}\n",
+        );
+        fs::write(project.join("src/main.rs"), source).expect("consumer source is written");
+
+        let status = Command::new("cargo")
+            .arg("run")
+            .arg("--frozen")
+            .arg("--manifest-path")
+            .arg(project.join("Cargo.toml"))
+            .current_dir(&project)
+            .env("CARGO_TARGET_DIR", &target)
+            .env_remove("CARGO_ENCODED_RUSTFLAGS")
+            .env_remove("RUSTFLAGS")
+            .env_remove("CARGO_BUILD_TARGET")
+            .output()
+            .expect("consumer cargo process starts");
+        assert!(
+            status.status.success(),
+            "{language} dual-failure consumer failed with {}\nstdout:\n{}\nstderr:\n{}",
+            status.status,
+            String::from_utf8_lossy(&status.stdout),
+            String::from_utf8_lossy(&status.stderr)
+        );
+        assert_eq!(
+            fs::read_to_string(project.join("Cargo.lock")).expect("consumer lock remains readable"),
+            consumer_lock,
+            "{language} async walker failure consumer must not change the reviewed dependency graph"
         );
     }
 }

@@ -53,6 +53,8 @@ pub enum LocalResourceKind {
     AclEntries,
     /// ACL bytes read from a security descriptor.
     AclBytes,
+    /// Bytes retained by an asynchronous complete-read result.
+    OwnedBytes,
 }
 
 impl fmt::Display for LocalResourceKind {
@@ -83,6 +85,7 @@ impl fmt::Display for LocalResourceKind {
             Self::ResolvedPathBytes => formatter.write_str("resolved path bytes"),
             Self::AclEntries => formatter.write_str("ACL entries"),
             Self::AclBytes => formatter.write_str("ACL bytes"),
+            Self::OwnedBytes => formatter.write_str("owned bytes"),
         }
     }
 }

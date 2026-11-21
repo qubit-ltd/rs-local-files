@@ -70,9 +70,10 @@ impl AsyncLocalDirectoryWalker {
                 Poll::Pending => unreachable!("a released walker has completed closure"),
             };
         };
+        let mut registration = resource.close_registration();
         let result = {
             let state = &mut self.state;
-            std::future::poll_fn(move |cx| state.poll_batch(resource, cx)).await
+            std::future::poll_fn(move |cx| state.poll_batch(resource, cx, &mut registration)).await
         };
         if result.as_ref().is_ok_and(Option::is_none) && self.state.is_closed() {
             self.resource.take();
@@ -81,6 +82,11 @@ impl AsyncLocalDirectoryWalker {
     }
 
     /// Stops traversal and waits for the worker to confirm handle closure.
+    ///
+    /// If worker cleanup fails, this result preserves that close failure.
+    /// Operation settlement may retain a recovery handle for the worker owner;
+    /// keep that handle through retry or operator handoff. Retrying cannot
+    /// restart an executor whose worker has stopped.
     pub async fn close(&mut self) -> crate::LocalResult<()> {
         let Some(resource) = self.resource.as_deref() else {
             return match self.state.poll_closed_without_resource() {
@@ -88,10 +94,11 @@ impl AsyncLocalDirectoryWalker {
                 Poll::Pending => unreachable!("a released walker has completed closure"),
             };
         };
+        let mut registration = resource.close_registration();
         self.state.request_stop(resource);
         let result = {
             let state = &mut self.state;
-            std::future::poll_fn(move |cx| state.poll_close(resource, cx)).await
+            std::future::poll_fn(move |cx| state.poll_close(resource, cx, &mut registration)).await
         };
         if self.state.is_closed() {
             self.resource.take();

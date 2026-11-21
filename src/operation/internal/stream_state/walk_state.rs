@@ -14,6 +14,7 @@ use std::task::Poll;
 use super::super::LOCAL_WALK_BATCH_BYTES;
 use super::super::LOCAL_WALK_BATCH_ENTRIES;
 use super::super::LocalWalkResource;
+use super::super::close_wait_registration::CloseWaitRegistration;
 use super::SavedError;
 use super::resource_limit;
 
@@ -47,9 +48,10 @@ impl WalkState {
         &mut self,
         resource: &LocalWalkResource,
         cx: &mut Context<'_>,
+        registration: &mut Option<CloseWaitRegistration>,
     ) -> Poll<io::Result<Option<Vec<PathBuf>>>> {
         if self.stop_requested {
-            return match self.poll_close(resource, cx) {
+            return match self.poll_close(resource, cx, registration) {
                 Poll::Pending => Poll::Pending,
                 Poll::Ready(Err(error)) => Poll::Ready(Err(error)),
                 Poll::Ready(Ok(())) => Poll::Ready(Ok(None)),
@@ -68,7 +70,7 @@ impl WalkState {
             Poll::Ready(Ok(None)) => {
                 self.pending_request = None;
                 self.request_stop(resource);
-                match self.poll_close(resource, cx) {
+                match self.poll_close(resource, cx, registration) {
                     Poll::Pending => Poll::Pending,
                     Poll::Ready(Err(error)) => Poll::Ready(Err(error)),
                     Poll::Ready(Ok(())) => Poll::Ready(Ok(None)),
@@ -125,12 +127,13 @@ impl WalkState {
         &mut self,
         resource: &LocalWalkResource,
         cx: &mut Context<'_>,
+        registration: &mut Option<CloseWaitRegistration>,
     ) -> Poll<io::Result<()>> {
         if self.closed {
             return self.poll_closed_without_resource();
         }
         self.request_stop(resource);
-        match resource.poll_closed(cx) {
+        match resource.poll_closed(cx, registration.as_mut()) {
             Poll::Pending => Poll::Pending,
             Poll::Ready(result) => {
                 self.closed = result.is_ok();

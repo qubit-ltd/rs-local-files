@@ -118,7 +118,8 @@ impl WorkerWalkDriver {
             .reserve_cleanup()
             .ok_or_else(|| io::Error::new(io::ErrorKind::WouldBlock, "local cleanup capacity is full"))?;
         let cleanup = WorkerCleanup::<LocalWalkResource>::policy();
-        let resource = LocalWalkResource::new(Self(Arc::new(WorkerWalkInner {
+        let close_state = Arc::new(Mutex::new(WorkerWalkCloseState::default()));
+        let driver = Self(Arc::new(WorkerWalkInner {
             executor,
             walker: Mutex::new(WorkerWalkCursor {
                 walker: Some(walker),
@@ -127,11 +128,12 @@ impl WorkerWalkDriver {
             }),
             commands: Mutex::new(HashMap::new()),
             stop_requested: AtomicBool::new(false),
-            close_state: Mutex::new(WorkerWalkCloseState::default()),
+            close_state: Arc::clone(&close_state),
             cleanup_permit: Mutex::new(Some(cleanup_permit)),
             _buffer_budget: buffer_budget,
             _handle_budget: Mutex::new(Some(handle_budget)),
-        })));
+        }));
+        let resource = LocalWalkResource::new_native(driver, close_state);
         let resources = scope
             .resource_scope(qubit_operation::ResourceScopeOptions { capacity: 1 })
             .map_err(io::Error::other)?;
@@ -261,6 +263,10 @@ impl LocalWalkDriver for WorkerWalkDriver {
         let close_inner = Arc::clone(&inner);
         let job: Box<dyn FnOnce() + Send> = Box::new(move || {
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                #[cfg(feature = "test-support")]
+                if crate::local::take_test_support("walker-cleanup-panic") {
+                    panic!("injected walker cleanup task panic");
+                }
                 {
                     let mut cursor = close_inner.walker.lock().unwrap_or_else(|e| e.into_inner());
                     cursor.walker.take();
@@ -385,7 +391,7 @@ mod tests {
             }),
             commands: Mutex::new(HashMap::new()),
             stop_requested: AtomicBool::new(false),
-            close_state: Mutex::new(WorkerWalkCloseState::default()),
+            close_state: Arc::new(Mutex::new(WorkerWalkCloseState::default())),
             cleanup_permit: Mutex::new(Some(cleanup_permit)),
             _buffer_budget: buffer_budget,
             _handle_budget: Mutex::new(Some(handle_budget)),
@@ -940,7 +946,7 @@ mod tests {
             .expect("run operation");
         assert!(matches!(outcome, OperationOutcome::Succeeded(())));
         port.request_stop();
-        block_on(std::future::poll_fn(|cx| port.poll_closed(cx))).expect("first walker closes");
+        block_on(std::future::poll_fn(|cx| port.poll_closed(cx, None))).expect("first walker closes");
     }
 
     #[test]

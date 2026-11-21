@@ -60,6 +60,8 @@ mod worker_stream_inner;
 #[path = "worker_stream_queued_request.rs"]
 mod worker_stream_queued_request;
 use worker_stream_inner::WorkerStreamInner;
+#[path = "close_wait_registration.rs"]
+mod close_wait_registration;
 #[path = "worker_command.rs"]
 mod worker_stream_command;
 #[path = "worker_stream_state.rs"]

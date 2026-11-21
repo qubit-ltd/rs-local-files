@@ -29,7 +29,7 @@ pub(super) struct WorkerWalkInner {
     /// Signals that no new directory entries should be read.
     pub(super) stop_requested: AtomicBool,
     /// Close result and all tasks waiting for its publication.
-    pub(super) close_state: Mutex<WorkerWalkCloseState>,
+    pub(super) close_state: Arc<Mutex<WorkerWalkCloseState>>,
     /// Reserved capacity for worker-side cleanup.
     pub(super) cleanup_permit: Mutex<Option<super::super::internal::permits::Permit>>,
     /// Reservation for one bounded path batch until walker closure.
@@ -44,7 +44,10 @@ impl WorkerWalkInner {
     /// # Parameters
     /// - `waker` — task to notify when close reaches a terminal state.
     pub(super) fn poll_closed(&self, waker: &Waker) -> Poll<io::Result<()>> {
-        self.close_state.lock().unwrap_or_else(|e| e.into_inner()).poll(waker)
+        self.close_state
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .poll_legacy(waker)
     }
 
     /// Publishes one terminal result, then notifies every waiter outside the

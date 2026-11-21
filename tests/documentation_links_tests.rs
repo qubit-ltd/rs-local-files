@@ -244,12 +244,14 @@ fn heading_anchors(source: &str) -> Vec<String> {
             continue;
         }
 
-        let visible = without_inline_code(line);
-        let visible = without_html_comments(&visible, &mut html_comment);
+        let uncommented = without_html_comments(line, &mut html_comment);
+        let visible = without_inline_code(&uncommented);
         let visible_next = lines.get(index + 1).map(|next| without_inline_code(next));
-        let title = atx_title(&visible).or_else(|| {
-            if visible_next.as_deref().is_some_and(|next| setext_level(next).is_some()) && !visible.trim().is_empty() {
-                Some(visible.trim())
+        let title = atx_title(&uncommented).or_else(|| {
+            if visible_next.as_deref().is_some_and(|next| setext_level(next).is_some())
+                && !uncommented.trim().is_empty()
+            {
+                Some(uncommented.trim())
             } else {
                 None
             }
@@ -388,5 +390,31 @@ fn test_scanner_fixtures_cover_relative_missing_anchor_and_url_links() {
             (1, "anchors.md#comment-fake-id-2".into()),
             (1, "anchors.md#comment-fake-heading".into()),
         ]
+    );
+}
+
+#[test]
+fn test_heading_slug_keeps_inline_code_text_without_registering_inline_html() {
+    let directory = tempfile::tempdir().expect("create markdown fixture directory");
+    let source_path = directory.path().join("anchors.md");
+    std::fs::write(
+        &source_path,
+        "# `LocalFileSystem` guide\nInline `<a id=\"fake-code-anchor\">`\n",
+    )
+    .expect("write markdown fixture");
+
+    assert!(
+        missing_anchors(
+            &source_path,
+            "[correct](anchors.md#localfilesystem-guide) [wrong](anchors.md#-guide) [fake](anchors.md#fake-code-anchor)"
+        )
+        .contains(&(1, "anchors.md#-guide".into()))
+    );
+    assert_eq!(
+        missing_anchors(
+            &source_path,
+            "[correct](anchors.md#localfilesystem-guide) [fake](anchors.md#fake-code-anchor)"
+        ),
+        vec![(1, "anchors.md#fake-code-anchor".into())]
     );
 }

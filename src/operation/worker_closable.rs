@@ -80,7 +80,7 @@ impl WorkerClosable for LocalWalkResource {
     ///
     /// * `cx` - Task context used by the worker driver for wakeups.
     fn poll_cleanup(&self, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
-        self.poll_closed(cx)
+        self.poll_closed(cx, None)
     }
     /// Returns the resource identity recorded when the scope adopted the port.
     fn resource_id(&self) -> Arc<Mutex<Option<qubit_operation::ResourceId>>> {

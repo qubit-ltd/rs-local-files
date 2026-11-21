@@ -29,19 +29,31 @@ impl Permit {
     /// # Parameters
     /// - `amount` — additional units requested from the shared pool.
     pub(crate) fn grow(&mut self, amount: usize) -> bool {
+        self.try_grow(amount).is_ok()
+    }
+
+    /// Grows the reservation and returns the pool facts observed on rejection.
+    ///
+    /// # Parameters
+    /// - `amount` — additional units requested from the shared pool.
+    ///
+    /// # Returns
+    /// `Ok(())` when acquired, otherwise the pool limit, available amount, and
+    /// request.
+    pub(crate) fn try_grow(&mut self, amount: usize) -> Result<(), (usize, usize, usize)> {
         if amount == 0 {
-            return true;
+            return Ok(());
         }
         let Some(next_amount) = self.amount.checked_add(amount) else {
-            return false;
+            return Err((self.state.limit, 0, amount));
         };
         let mut current = self.state.used.load(Ordering::Acquire);
         loop {
             let Some(next_used) = current.checked_add(amount) else {
-                return false;
+                return Err((self.state.limit, self.state.limit.saturating_sub(current), amount));
             };
             if next_used > self.state.limit {
-                return false;
+                return Err((self.state.limit, self.state.limit.saturating_sub(current), amount));
             }
             match self
                 .state
@@ -50,7 +62,7 @@ impl Permit {
             {
                 Ok(_) => {
                     self.amount = next_amount;
-                    return true;
+                    return Ok(());
                 }
                 Err(actual) => current = actual,
             }
