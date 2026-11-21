@@ -104,40 +104,15 @@ qubit-local-files = { version = "0.6", features = ["digest"] }
 sha2 = "0.11"
 ```
 
-```rust,no_run
-# fn main() -> Result<(), Box<dyn std::error::Error>> {
-# #[cfg(feature = "digest")] {
-use qubit_io::Output;
-use qubit_local_files::{LocalFileSystem, options::{LocalWriteMode, LocalWriteOptions, LocalWritePrecondition}};
-use qubit_local_files::policy::LocalSymlinkPolicy;
-use sha2::{Digest, Sha256};
-
-let mut filesystem = LocalFileSystem::host()?;
-filesystem.set_symlink_policy(LocalSymlinkPolicy::Reject)?;
-let old_digest = Sha256::digest(b"A"); // digest the bytes read from the existing file
-let mut writer = filesystem.open_conditional_writer::<Sha256>(
-    std::path::Path::new("document.txt"),
-    LocalWritePrecondition::Content(old_digest),
-    &LocalWriteOptions::new(LocalWriteMode::CreateOrReplace),
-)?;
-writer.write_fully(b"B")?;
-let saved = writer.commit()?; // inspect saved.digest(), cleanup_errors(), retained_files()
-# let _ = saved;
-# }
-# Ok(())
-# }
-```
-
 A successful commit returns the digest of installed B; cleanup problems are
 reported in `cleanup_errors()` and `retained_files()` without changing the
 success result. On failure, use the error's `publication()` state and retained
 recovery files to decide what to inspect or recover; recovery files can be
 incomplete or unavailable if recovery itself fails. An uncommitted writer is
 cancelled on `abort()` or Drop and does not publish B. See
-the [conditional-write guide](doc/user_guide.md#conditional-write) for complete
-success and recovery flows and platform limits. The visible `cfg` wrapper in
-the example is for this crate's doctest; an application only enables `digest`
-on the dependency and does not need a matching application feature.
+the [conditional-write guide](doc/user_guide.md#conditional-write) for the
+complete A-to-B example, successful publication and recovery flows, and
+platform limits.
 
 ## Why This Project Exists
 

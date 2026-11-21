@@ -2371,6 +2371,86 @@ fn test_walker_terminal_batch_and_close_observer_are_repeatable() {
 }
 
 #[test]
+fn test_cancelled_native_walker_close_wait_releases_waker() {
+    use std::sync::atomic::AtomicUsize;
+    use std::sync::atomic::Ordering;
+    use std::task::Wake;
+
+    use qubit_local_files::LocalFileSystem;
+    use qubit_local_files::operation::LocalExecutionConfig;
+    use qubit_local_files::operation::LocalIoExecutor;
+    use qubit_local_files::options::LocalListOptions;
+    use qubit_operation::OperationOutcome;
+
+    struct CountWake(AtomicUsize);
+    impl Wake for CountWake {
+        fn wake(self: Arc<Self>) {
+            self.0.fetch_add(1, Ordering::SeqCst);
+        }
+        fn wake_by_ref(self: &Arc<Self>) {
+            self.0.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+
+    let directory = tempfile::tempdir().unwrap();
+    std::fs::write(directory.path().join("entry"), b"x").unwrap();
+    let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+    let executor = LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).unwrap();
+    let filesystem = LocalFileSystem::host().unwrap().into_async(executor).unwrap();
+    let mut opening = filesystem
+        .submit_open_walker(
+            &manager,
+            Default::default(),
+            directory.path().to_path_buf(),
+            LocalListOptions::default(),
+        )
+        .unwrap();
+    let mut walker = match opening.wait_outcome().unwrap() {
+        OperationOutcome::Succeeded(walker) => walker,
+        _ => panic!("native walker failed to open"),
+    };
+    let observer = walker.close_observer();
+
+    let first_target = Arc::new(CountWake(AtomicUsize::new(0)));
+    let first_weak = Arc::downgrade(&first_target);
+    let first_waker = Waker::from(Arc::clone(&first_target));
+    let mut first_wait = Box::pin(observer.wait_closed());
+    let mut first_context = Context::from_waker(&first_waker);
+    assert!(first_wait.as_mut().poll(&mut first_context).is_pending());
+    drop(first_wait);
+    drop(first_waker);
+    drop(first_target);
+    assert!(
+        first_weak.upgrade().is_none(),
+        "cancelled wait must release its registered waker"
+    );
+
+    let second_target = Arc::new(CountWake(AtomicUsize::new(0)));
+    let second_waker = Waker::from(Arc::clone(&second_target));
+    let mut second_wait = Box::pin(observer.wait_closed());
+    let mut second_context = Context::from_waker(&second_waker);
+    assert!(second_wait.as_mut().poll(&mut second_context).is_pending());
+
+    let mut close = Box::pin(walker.close());
+    poll_worker(|cx| close.as_mut().poll(cx)).unwrap();
+    assert!(
+        second_target.0.load(Ordering::SeqCst) > 0,
+        "close must wake the remaining waiter"
+    );
+    assert!(matches!(
+        second_wait.as_mut().poll(&mut second_context),
+        Poll::Ready(Ok(()))
+    ));
+
+    drop(close);
+    drop(second_wait);
+    drop(second_waker);
+    drop(observer);
+    drop(walker);
+    opening.wait_settlement().unwrap();
+}
+
+#[test]
 fn test_settled_walker_can_reopen_immediately() {
     use qubit_local_files::LocalFileSystem;
     use qubit_local_files::operation::LocalExecutionConfig;

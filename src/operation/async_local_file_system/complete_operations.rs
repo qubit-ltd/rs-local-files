@@ -54,10 +54,17 @@ use crate::error::LocalReadLimitError;
 use crate::error::LocalResourceKind;
 use crate::error::LocalResourceLimitError;
 use crate::options::LocalReadAllOptions;
+use crate::options::LocalReadOptions;
 use crate::outcome::LocalCopyFailure;
 use crate::outcome::LocalCopyFailureState;
 use crate::outcome::LocalRenameFailure;
 use crate::outcome::LocalRenameFailureState;
+
+#[cfg(test)]
+static READ_ALL_TEST_GATE: Mutex<Option<(std::sync::mpsc::Sender<()>, std::sync::mpsc::Receiver<()>)>> =
+    Mutex::new(None);
+#[cfg(test)]
+static READ_ALL_TEST_GATE_LOCK: Mutex<()> = Mutex::new(());
 
 impl AsyncLocalFileSystem {
     /// Submits a finite complete read with per-block cooperative cancellation.
@@ -97,7 +104,7 @@ impl AsyncLocalFileSystem {
                     .read
                     .max_bytes()
                     .map_or(maximum as u64, |limit| limit.min(maximum as u64));
-                read_complete_cancellable(
+                match read_complete_cancellable(
                     &filesystem,
                     &execution_path,
                     &request.read,
@@ -105,7 +112,17 @@ impl AsyncLocalFileSystem {
                     scope,
                     &budget,
                     maximum,
-                )
+                ) {
+                    OperationOutcome::Failed(error) => {
+                        shrink_to_zero(&budget);
+                        OperationOutcome::Failed(error)
+                    }
+                    OperationOutcome::Stopped(stop) => {
+                        shrink_to_zero(&budget);
+                        OperationOutcome::Stopped(stop)
+                    }
+                    outcome => outcome,
+                }
             },
         )
     }
@@ -264,7 +281,12 @@ impl AsyncLocalFileSystem {
                                 return OperationOutcome::Failed(LocalFileError::from_resource_limit(
                                     LocalFileOperation::Read,
                                     Some(execution_path.clone()),
-                                    LocalResourceLimitError::new(LocalResourceKind::OwnedBytes, maximum, maximum, 1),
+                                    LocalResourceLimitError::new(
+                                        LocalResourceKind::OwnedBytes,
+                                        maximum,
+                                        capacity_remaining,
+                                        1,
+                                    ),
                                 ));
                             }
                             Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {
@@ -999,16 +1021,8 @@ fn read_complete_cancellable(
     if let Some(stopped) = stop_outcome(scope) {
         return stopped;
     }
-    let reader_result = match before_native_call(scope, || match (options.read_options(), options.symlink_policy()) {
-        (None, None) => filesystem.open_reader(path),
-        (read_options, policy) => {
-            let mut read_options = read_options.copied().unwrap_or_default();
-            if let Some(policy) = policy {
-                read_options = read_options.with_symlink_policy(policy);
-            }
-            filesystem.open_reader_with_options(path, &read_options)
-        }
-    }) {
+    let read_options = effective_read_options(filesystem, options);
+    let reader_result = match before_native_call(scope, || filesystem.open_reader_with_options(path, &read_options)) {
         Ok(result) => result,
         Err(stop) => return OperationOutcome::Stopped(stop),
     };
@@ -1066,6 +1080,8 @@ fn read_complete_cancellable(
             Ok(0) => break,
             Ok(read) => {
                 bytes.extend_from_slice(&buffer[..read]);
+                #[cfg(test)]
+                pause_read_all_test_gate();
                 if let Some(stopped) = stop_outcome(scope) {
                     return stopped;
                 }
@@ -1095,6 +1111,34 @@ fn read_complete_cancellable(
         return stopped;
     }
     OperationOutcome::Succeeded(bytes)
+}
+
+/// Selects and merges the reader options used by a complete read.
+///
+/// # Parameters
+/// - `filesystem` — supplies the instance-level reader defaults.
+/// - `options` — supplies complete-read replacements and outer policy.
+fn effective_read_options(filesystem: &crate::LocalFileSystem, options: &LocalReadAllOptions) -> LocalReadOptions {
+    let mut read_options = options
+        .read_options()
+        .copied()
+        .unwrap_or(*filesystem.default_read_options());
+    if let Some(policy) = options.symlink_policy() {
+        read_options = read_options.with_symlink_policy(policy);
+    }
+    read_options
+}
+
+#[cfg(test)]
+fn pause_read_all_test_gate() {
+    let gate = READ_ALL_TEST_GATE
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .take();
+    if let Some((entered, release)) = gate {
+        let _ = entered.send(());
+        let _ = release.recv();
+    }
 }
 /// Runs the stop outcome behavior while preserving the operation lifecycle
 /// invariants.
@@ -1263,7 +1307,37 @@ mod stop_gate_tests {
     use qubit_operation::OperationOutcome;
     use qubit_operation::StopReason;
 
+    use super::READ_ALL_TEST_GATE;
+    use super::READ_ALL_TEST_GATE_LOCK;
     use super::before_native_call;
+    use super::effective_read_options;
+
+    fn block_on<F: std::future::Future>(future: F) -> F::Output {
+        use std::sync::Arc;
+        use std::task::Context;
+        use std::task::Wake;
+        use std::task::Waker;
+
+        struct ThreadWake(std::thread::Thread);
+        impl Wake for ThreadWake {
+            fn wake(self: Arc<Self>) {
+                self.0.unpark();
+            }
+            fn wake_by_ref(self: &Arc<Self>) {
+                self.0.unpark();
+            }
+        }
+
+        let waker = Waker::from(Arc::new(ThreadWake(std::thread::current())));
+        let mut context = Context::from_waker(&waker);
+        let mut future = std::pin::pin!(future);
+        loop {
+            if let std::task::Poll::Ready(value) = future.as_mut().poll(&mut context) {
+                return value;
+            }
+            std::thread::park_timeout(std::time::Duration::from_secs(10));
+        }
+    }
     /// Runs the test stopped scope skips the first native call behavior while
     /// preserving the operation lifecycle invariants.
     #[test]
@@ -1295,6 +1369,223 @@ mod stop_gate_tests {
             OperationOutcome::Stopped(report) if report.reason == StopReason::UserCancelled
         ));
         assert_eq!(native_calls.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn test_complete_read_options_inherit_defaults_and_apply_outer_policy() {
+        use std::time::Duration;
+
+        use crate::LocalFileSystem;
+        use crate::options::LocalReadAllOptions;
+        use crate::options::LocalReadOptions;
+        use crate::policy::LocalSymlinkPolicy;
+
+        let mut filesystem = LocalFileSystem::host().unwrap();
+        filesystem
+            .set_default_read_options(
+                LocalReadOptions::new()
+                    .with_open_retry_timeout(Duration::from_millis(25))
+                    .with_symlink_policy(LocalSymlinkPolicy::FollowWithinScope),
+            )
+            .unwrap();
+
+        let inherited = effective_read_options(
+            &filesystem,
+            &LocalReadAllOptions::new().with_symlink_policy(LocalSymlinkPolicy::Reject),
+        );
+        assert_eq!(inherited.open_retry_timeout(), Some(Duration::from_millis(25)));
+        assert_eq!(inherited.symlink_policy(), Some(LocalSymlinkPolicy::Reject));
+
+        let replaced = effective_read_options(
+            &filesystem,
+            &LocalReadAllOptions::new()
+                .with_read_options(LocalReadOptions::new())
+                .with_symlink_policy(LocalSymlinkPolicy::Reject),
+        );
+        assert_eq!(replaced.open_retry_timeout(), None);
+        assert_eq!(replaced.symlink_policy(), Some(LocalSymlinkPolicy::Reject));
+    }
+
+    #[test]
+    fn test_stopped_complete_read_releases_owned_bytes_before_outcome_is_taken() {
+        use std::sync::mpsc;
+
+        use qubit_operation::OperationOutcome;
+
+        use crate::LocalReadRequest;
+        use crate::operation::AsyncLocalFileSystem;
+        use crate::operation::LocalExecutionConfig;
+        use crate::operation::LocalIoExecutor;
+        use crate::options::LocalReadAllOptions;
+
+        let _gate_lock = READ_ALL_TEST_GATE_LOCK
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        const READ_SIZE: usize = 128 * 1024;
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("cancel-after-read");
+        std::fs::write(&path, vec![1; READ_SIZE]).unwrap();
+        let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+        let executor = LocalIoExecutor::new(
+            manager.clone(),
+            LocalExecutionConfig {
+                max_owned_bytes: READ_SIZE,
+                ..LocalExecutionConfig::default()
+            },
+        )
+        .unwrap();
+        let filesystem = block_on(AsyncLocalFileSystem::host(executor)).unwrap();
+
+        let (entered_tx, entered_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        *READ_ALL_TEST_GATE.lock().unwrap() = Some((entered_tx, release_rx));
+        let mut stopped = filesystem
+            .submit_read_all(
+                &manager,
+                Default::default(),
+                LocalReadRequest {
+                    path: path.clone(),
+                    read: LocalReadAllOptions::new(),
+                },
+                Default::default(),
+            )
+            .unwrap()
+            .0;
+        entered_rx
+            .recv_timeout(std::time::Duration::from_secs(10))
+            .expect("read-all must reach the gate after allocating and reading a block");
+        let _ = stopped.request_stop(StopReason::UserCancelled);
+        release_tx.send(()).unwrap();
+        stopped.wait_settlement().unwrap();
+
+        let mut probe = filesystem
+            .submit_read_all(
+                &manager,
+                Default::default(),
+                LocalReadRequest {
+                    path,
+                    read: LocalReadAllOptions::new(),
+                },
+                Default::default(),
+            )
+            .unwrap()
+            .0;
+        probe.wait_settlement().unwrap();
+        assert!(matches!(
+            stopped.try_take_outcome().unwrap(),
+            Some(OperationOutcome::Stopped(_))
+        ));
+        assert!(matches!(
+            probe.try_take_outcome().unwrap(),
+            Some(OperationOutcome::Succeeded(bytes)) if bytes.len() == READ_SIZE
+        ));
+    }
+
+    #[test]
+    fn test_read_all_failure_releases_owned_bytes_before_outcome_is_taken() {
+        use std::io::SeekFrom;
+        use std::sync::mpsc;
+
+        use qubit_operation::OperationOutcome;
+
+        use crate::LocalReadRequest;
+        use crate::operation::AsyncLocalFileSystem;
+        use crate::operation::LocalExecutionConfig;
+        use crate::operation::LocalIoExecutor;
+        use crate::operation::complete::LocalReadAtRequest;
+        use crate::options::LocalReadAllOptions;
+
+        let _gate_lock = READ_ALL_TEST_GATE_LOCK
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        const HALF_POOL: usize = 64 * 1024;
+        let directory = tempfile::tempdir().unwrap();
+        let occupied_path = directory.path().join("occupied");
+        let full_path = directory.path().join("full");
+        let probe_path = directory.path().join("probe");
+        std::fs::write(&occupied_path, vec![1; HALF_POOL]).unwrap();
+        std::fs::write(&full_path, vec![2; HALF_POOL * 2]).unwrap();
+        std::fs::write(&probe_path, vec![3; HALF_POOL / 2]).unwrap();
+
+        let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+        let executor = LocalIoExecutor::new(
+            manager.clone(),
+            LocalExecutionConfig {
+                max_owned_bytes: HALF_POOL * 2,
+                ..LocalExecutionConfig::default()
+            },
+        )
+        .unwrap();
+        let filesystem = block_on(AsyncLocalFileSystem::host(executor)).unwrap();
+
+        let occupied = filesystem
+            .submit_read_at(
+                &manager,
+                Default::default(),
+                LocalReadAtRequest {
+                    path: occupied_path,
+                    read: Default::default(),
+                    offset: SeekFrom::Start(0),
+                    max_bytes: HALF_POOL,
+                },
+                Default::default(),
+            )
+            .unwrap()
+            .0;
+        occupied.wait_settlement().unwrap();
+
+        let (entered_tx, entered_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        *READ_ALL_TEST_GATE.lock().unwrap() = Some((entered_tx, release_rx));
+        let mut failed = filesystem
+            .submit_read_all(
+                &manager,
+                Default::default(),
+                LocalReadRequest {
+                    path: full_path,
+                    read: LocalReadAllOptions::new(),
+                },
+                Default::default(),
+            )
+            .unwrap()
+            .0;
+        entered_rx
+            .recv_timeout(std::time::Duration::from_secs(10))
+            .expect("read-all must reach the gate after allocating and reading one block");
+        release_tx.send(()).unwrap();
+        failed.wait_settlement().unwrap();
+
+        let mut probe = filesystem
+            .submit_read_all(
+                &manager,
+                Default::default(),
+                LocalReadRequest {
+                    path: probe_path,
+                    read: LocalReadAllOptions::new(),
+                },
+                crate::LocalOperationOptions {
+                    max_owned_bytes: Some(HALF_POOL / 2),
+                    ..Default::default()
+                },
+            )
+            .unwrap()
+            .0;
+        probe.wait_settlement().unwrap();
+        let probe_outcome = probe.try_take_outcome().unwrap();
+        assert!(
+            matches!(
+                &probe_outcome,
+                Some(OperationOutcome::Succeeded(bytes)) if bytes.len() == HALF_POOL / 2
+            ),
+            "probe outcome: {probe_outcome:?}"
+        );
+        assert!(matches!(
+            failed.try_take_outcome().unwrap(),
+            Some(OperationOutcome::Failed(error))
+                if error.resource_limit_error().is_some_and(|limit|
+                    limit.resource() == crate::error::LocalResourceKind::OwnedBytes)
+        ));
+        drop(occupied);
     }
 
     #[test]

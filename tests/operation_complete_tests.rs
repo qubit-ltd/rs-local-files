@@ -129,6 +129,68 @@ fn test_read_text_preserves_utf8_conversion_error() {
         qubit_operation::OperationOutcome::Failed(error) if error.kind() == qubit_local_files::error::LocalFileErrorKind::InvalidEncoding));
 }
 
+#[cfg(unix)]
+#[test]
+fn test_complete_reads_apply_outer_symlink_policy_to_inherited_defaults() {
+    use std::os::unix::fs::symlink;
+    use std::time::Duration;
+
+    use qubit_local_files::LocalFileSystem;
+    use qubit_local_files::operation::LocalExecutionConfig;
+    use qubit_local_files::operation::LocalIoExecutor;
+    use qubit_local_files::options::LocalReadOptions;
+    use qubit_local_files::policy::LocalSymlinkPolicy as Policy;
+    use qubit_operation::OperationOutcome;
+
+    let directory = tempfile::tempdir().unwrap();
+    let target = directory.path().join("target");
+    let link = directory.path().join("link");
+    std::fs::write(&target, b"payload").unwrap();
+    symlink(&target, &link).unwrap();
+
+    let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+    let executor = LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).unwrap();
+    let mut local = LocalFileSystem::host().unwrap();
+    local
+        .set_default_read_options(
+            LocalReadOptions::new()
+                .with_open_retry_timeout(Duration::from_millis(25))
+                .with_symlink_policy(Policy::FollowWithinScope),
+        )
+        .unwrap();
+    let filesystem = local.into_async(executor).unwrap();
+
+    let mut read_all = filesystem
+        .submit_read_all(
+            &manager,
+            Default::default(),
+            LocalReadRequest {
+                path: link.clone(),
+                read: qubit_local_files::options::LocalReadAllOptions::new().with_symlink_policy(Policy::Reject),
+            },
+            Default::default(),
+        )
+        .unwrap()
+        .0;
+    assert!(matches!(read_all.wait_outcome().unwrap(),
+        OperationOutcome::Failed(error) if error.kind() == qubit_local_files::error::LocalFileErrorKind::Unsupported));
+
+    let mut read_text = filesystem
+        .submit_read_text(
+            &manager,
+            Default::default(),
+            LocalReadRequest {
+                path: link,
+                read: qubit_local_files::options::LocalReadAllOptions::new().with_symlink_policy(Policy::Reject),
+            },
+            Default::default(),
+        )
+        .unwrap()
+        .0;
+    assert!(matches!(read_text.wait_outcome().unwrap(),
+        OperationOutcome::Failed(error) if error.kind() == qubit_local_files::error::LocalFileErrorKind::Unsupported));
+}
+
 #[test]
 fn test_complete_reads_cover_success_and_native_open_failures() {
     let directory = tempfile::tempdir().unwrap();
@@ -723,7 +785,7 @@ fn test_complete_operation_edge_results_and_failures() {
             &manager,
             Default::default(),
             LocalReadPrefixRequest {
-                path: prefix_path,
+                path: prefix_path.clone(),
                 read: Default::default(),
                 max_bytes: 1,
             },
@@ -737,9 +799,10 @@ fn test_complete_operation_edge_results_and_failures() {
     assert!(matches!(prefix.wait_outcome().unwrap(),
         qubit_operation::OperationOutcome::Failed(error)
             if error.kind() == qubit_local_files::error::LocalFileErrorKind::ResourceLimit
+                && error.path() == Some(prefix_path.as_path())
                 && error.resource_limit_error().is_some_and(|limit|
                     limit.resource() == qubit_local_files::error::LocalResourceKind::OwnedBytes
-                        && limit.limit() == 1)));
+                        && (limit.limit(), limit.remaining(), limit.requested()) == (1, 0, 1))));
 
     // Creating an already existing directory succeeds with created=false.
     let existing = directory.path().join("existing");
