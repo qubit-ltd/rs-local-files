@@ -44,12 +44,7 @@ fn clear_waker(state: &CleanupState) {
 ///
 /// * `state` — worker result and waiter state shared with the cleanup future.
 fn publish_cleanup_result(state: &CleanupState) {
-    if let Some(result) = state
-        .pending_result
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .take()
-    {
+    if let Some(result) = state.pending_result.lock().unwrap_or_else(|e| e.into_inner()).take() {
         *state.result.lock().unwrap_or_else(|e| e.into_inner()) = Some(result);
     }
     let waker = state.waker.lock().unwrap_or_else(|e| e.into_inner()).take();
@@ -172,6 +167,7 @@ mod tests {
     use super::LocalCleanup;
     #[cfg(feature = "test-support")]
     use super::cleanup_resource;
+    use super::publish_cleanup_result;
     use super::safe_wake;
     use crate::LocalFileOperation;
     use crate::LocalFileSystem;
@@ -425,18 +421,20 @@ mod tests {
         });
         let (started_tx, started_rx) = std::sync::mpsc::channel();
         let (gate_release_tx, gate_release_rx) = std::sync::mpsc::channel();
-        assert!(executor
-            .inner
-            .queue
-            .push(
-                Box::new(move || {
-                    started_tx.send(()).expect("test receiver remains open");
-                    gate_release_rx.recv().expect("test releases worker gate");
-                }),
-                false,
-                1,
-            )
-            .is_ok());
+        assert!(
+            executor
+                .inner
+                .queue
+                .push(
+                    Box::new(move || {
+                        started_tx.send(()).expect("test receiver remains open");
+                        gate_release_rx.recv().expect("test releases worker gate");
+                    }),
+                    false,
+                    1,
+                )
+                .is_ok()
+        );
         started_rx.recv().expect("worker reaches the gate");
         let owner = test_owner(&manager, &executor, parent.path());
         let context = CleanupContext::new(qubit_operation::ContextOptions::default()).expect("cleanup context");
@@ -452,13 +450,57 @@ mod tests {
         assert!(matches!(future.as_mut().poll(&mut context), Poll::Pending));
         gate_release_tx.send(()).expect("release worker gate");
         entered_rx.recv().expect("worker starts publishing cleanup result");
-        assert!(matches!(future.as_mut().poll(&mut context), Poll::Ready(CleanupOutcome::Released)));
+        assert!(matches!(
+            future.as_mut().poll(&mut context),
+            Poll::Ready(CleanupOutcome::Released)
+        ));
         let permit_available_before_wake_returns = executor.reserve_cleanup().is_some();
         release_tx.send(()).expect("release blocked worker wake");
         assert!(
             permit_available_before_wake_returns,
             "cleanup result became visible before its permit was returned"
         );
+    }
+
+    #[test]
+    fn test_cleanup_completion_recovers_poisoned_publication_locks() {
+        let state = CleanupState {
+            result: Mutex::new(None),
+            pending_result: Mutex::new(None),
+            waker: Mutex::new(None),
+            owner: Mutex::new(None),
+        };
+        #[cfg(panic = "unwind")]
+        {
+            crate::operation::poison_test_mutex(&state.pending_result);
+            crate::operation::poison_test_mutex(&state.result);
+            crate::operation::poison_test_mutex(&state.waker);
+        }
+        *state
+            .pending_result
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(None);
+        let wake_count = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let waker = Waker::from(Arc::new(CountingWake(Arc::clone(&wake_count))));
+        *state.waker.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(waker);
+
+        publish_cleanup_result(&state);
+
+        assert!(
+            state
+                .result
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .is_some()
+        );
+        assert!(
+            state
+                .waker
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .is_none()
+        );
+        assert_eq!(1, wake_count.load(std::sync::atomic::Ordering::SeqCst));
     }
 
     fn cleanup_error() -> crate::LocalFileError {

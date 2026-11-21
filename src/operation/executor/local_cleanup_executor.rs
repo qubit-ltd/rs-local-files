@@ -44,7 +44,8 @@ impl LocalCleanupExecutor {
     /// - `permit` — Capacity reserved for this cleanup operation.
     ///
     /// # Returns
-    /// `Ok(())` when queued, or the enqueue error when the worker queue stopped.
+    /// `Ok(())` when queued, or the enqueue error when the worker queue
+    /// stopped.
     #[allow(dead_code)]
     pub(crate) fn enqueue_cleanup(
         &self,
@@ -54,7 +55,8 @@ impl LocalCleanupExecutor {
         self.queue.push_cleanup(job, permit, self.cleanup_capacity)
     }
 
-    /// Enqueues cleanup work whose completion runs after its permit is returned.
+    /// Enqueues cleanup work whose completion runs after its permit is
+    /// returned.
     ///
     /// # Parameters
     /// - `job` — Cleanup operation to run on a local worker.

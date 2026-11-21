@@ -71,7 +71,9 @@ impl AsyncCleanup<LocalTempResource> for LocalCleanup {
         });
         let completion_state = Arc::clone(&state);
         let completion = Box::new(move || publish_cleanup_result(&completion_state));
-        if let Err((_job, _permit, _completion)) = self.executor.enqueue_cleanup_with_completion(job, permit, completion) {
+        if let Err((_job, _permit, _completion)) =
+            self.executor.enqueue_cleanup_with_completion(job, permit, completion)
+        {
             let resource = state
                 .owner
                 .lock()

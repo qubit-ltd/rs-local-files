@@ -105,7 +105,11 @@ impl<W: Send + 'static> AsyncCleanup<LocalManagedAbortResource<W>> for LocalMana
         });
         let completion_state = Arc::clone(&state);
         let completion = Box::new(move || publish_abort_result(&completion_state));
-        if self.executor.enqueue_cleanup_with_completion(job, permit, completion).is_err() {
+        if self
+            .executor
+            .enqueue_cleanup_with_completion(job, permit, completion)
+            .is_err()
+        {
             let resource = state
                 .owner
                 .lock()
@@ -126,6 +130,9 @@ impl<W: Send + 'static> AsyncCleanup<LocalManagedAbortResource<W>> for LocalMana
 /// # Parameters
 ///
 /// * `state` — result and waiter state shared with the cleanup future.
+///
+/// # Type Parameters
+/// * `W` — native writer type retained by the cleanup state.
 fn publish_abort_result<W: Send + 'static>(state: &LocalAbortCleanupState<W>) {
     if let Some(result) = state
         .pending_result
@@ -161,8 +168,10 @@ mod tests {
     use qubit_operation::OperationOptions;
     use qubit_operation::OperationOutcome;
 
+    use super::super::LocalAbortCleanupState;
     use super::super::LocalManagedAbortResource;
     use super::LocalManagedAbortCleanup;
+    use super::publish_abort_result;
     use crate::LocalExecutionConfig;
     use crate::LocalFileError;
     use crate::LocalFileErrorKind;
@@ -449,6 +458,46 @@ mod tests {
             future.as_mut().poll(&mut normal_context),
             Poll::Ready(CleanupOutcome::Released)
         ));
+    }
+
+    #[test]
+    fn test_abort_completion_recovers_poisoned_publication_locks() {
+        let state = LocalAbortCleanupState::<AbortGate> {
+            owner: std::sync::Mutex::new(None),
+            result: std::sync::Mutex::new(None),
+            pending_result: std::sync::Mutex::new(None),
+            waker: std::sync::Mutex::new(None),
+        };
+        #[cfg(panic = "unwind")]
+        {
+            crate::operation::poison_test_mutex(&state.pending_result);
+            crate::operation::poison_test_mutex(&state.result);
+            crate::operation::poison_test_mutex(&state.waker);
+        }
+        *state
+            .pending_result
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(CleanupOutcome::Released);
+        let waker = Waker::from(Arc::new(ThreadWake(std::thread::current())));
+        *state.waker.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(waker);
+
+        publish_abort_result(&state);
+
+        assert!(matches!(
+            state
+                .result
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .as_ref(),
+            Some(CleanupOutcome::Released)
+        ));
+        assert!(
+            state
+                .waker
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .is_none()
+        );
     }
 
     #[test]

@@ -608,10 +608,7 @@ impl AsyncLocalFileSystem {
             _ => request.path.clone(),
         };
         let execution_options = request.read.with_max_bytes(read_limit);
-        let memory_limit_dominates = !request
-            .read
-            .max_bytes()
-            .is_some_and(|limit| limit <= byte_limit as u64);
+        let memory_limit_dominates = !request.read.max_bytes().is_some_and(|limit| limit <= byte_limit as u64);
         let Some(slot) = self.executor.reserve_slot() else {
             return Err(super::LocalSubmitError::new(
                 request,
@@ -688,8 +685,7 @@ impl AsyncLocalFileSystem {
                                 limit,
                             ),
                             None => match error.read_limit_error() {
-                                Some(read_limit) if memory_limit_dominates =>
-                                {
+                                Some(read_limit) if memory_limit_dominates => {
                                     let observed = read_limit.observed();
                                     let requested = usize::try_from(observed).unwrap_or(usize::MAX);
                                     let facts = crate::error::LocalResourceLimitError::new(
@@ -925,9 +921,7 @@ mod tests {
         }
     }
 
-    fn filesystem_with_blocked_worker(
-        byte_budget: usize,
-    ) -> (OperationManager, AsyncLocalFileSystem, WorkerQueueGate) {
+    fn filesystem_with_blocked_worker(byte_budget: usize) -> (OperationManager, AsyncLocalFileSystem, WorkerQueueGate) {
         use std::sync::mpsc::sync_channel;
         use std::time::Duration;
 
@@ -978,6 +972,23 @@ mod tests {
         ));
     }
 
+    fn assert_open_budgets_returned(filesystem: &AsyncLocalFileSystem) {
+        let inner = &filesystem.executor.inner;
+        assert_eq!(inner.byte_slots.used(), 0, "cancelled open must return byte capacity");
+        assert_eq!(
+            inner.handle_slots.used(),
+            0,
+            "cancelled open must return handle capacity"
+        );
+        assert_eq!(inner.fact_slots.used(), 0, "cancelled open must return fact capacity");
+        assert_eq!(inner.queue_slots.used(), 0, "cancelled open must return queue capacity");
+        assert_eq!(
+            inner.waiter_slots.used(),
+            0,
+            "cancelled open must return waiter capacity"
+        );
+    }
+
     #[test]
     fn test_queued_cancelled_reader_reuses_open_budget_before_taking_outcome() {
         use qubit_operation::OperationOutcome;
@@ -1004,6 +1015,7 @@ mod tests {
         );
         drop(gate);
         cancelled.wait_settlement().unwrap();
+        assert_open_budgets_returned(&filesystem);
 
         let mut replacement = filesystem
             .submit_open_reader(
@@ -1012,9 +1024,7 @@ mod tests {
                 replacement_path,
                 crate::LocalReadOptions::default(),
             )
-            .expect(
-                "the first post-cancellation submission should reuse the byte and handle budgets",
-            );
+            .expect("the first post-cancellation submission should reuse the byte and handle budgets");
         assert_cancelled_open_outcome(&mut cancelled, StopReason::Timeout);
         let mut reader = match replacement.wait_outcome().unwrap() {
             OperationOutcome::Succeeded(reader) => reader,
@@ -1049,6 +1059,7 @@ mod tests {
         );
         drop(gate);
         cancelled.wait_settlement().unwrap();
+        assert_open_budgets_returned(&filesystem);
 
         let (mut replacement, _) = filesystem
             .submit_open_writer(
@@ -1057,9 +1068,7 @@ mod tests {
                 replacement_path,
                 crate::LocalWriteOptions::default(),
             )
-            .expect(
-                "the first post-cancellation submission should reuse the byte and handle budgets",
-            );
+            .expect("the first post-cancellation submission should reuse the byte and handle budgets");
         assert_cancelled_open_outcome(&mut cancelled, StopReason::Timeout);
         assert!(
             !cancelled_path.exists(),
@@ -1082,8 +1091,7 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         std::fs::create_dir(directory.path().join("queued-walker")).unwrap();
         std::fs::create_dir(directory.path().join("replacement-walker")).unwrap();
-        let (manager, filesystem, gate) =
-            filesystem_with_blocked_worker(super::super::stream::LOCAL_WALK_BATCH_BYTES);
+        let (manager, filesystem, gate) = filesystem_with_blocked_worker(super::super::stream::LOCAL_WALK_BATCH_BYTES);
         let mut cancelled = filesystem
             .submit_open_walker(
                 &manager,
@@ -1098,6 +1106,7 @@ mod tests {
         );
         drop(gate);
         cancelled.wait_settlement().unwrap();
+        assert_open_budgets_returned(&filesystem);
 
         let mut replacement = filesystem
             .submit_open_walker(
@@ -1106,9 +1115,7 @@ mod tests {
                 directory.path().join("replacement-walker"),
                 crate::LocalListOptions::default(),
             )
-            .expect(
-                "the first post-cancellation submission should reuse the byte and handle budgets",
-            );
+            .expect("the first post-cancellation submission should reuse the byte and handle budgets");
         assert_cancelled_open_outcome(&mut cancelled, StopReason::Timeout);
         let mut walker = match replacement.wait_outcome().unwrap() {
             OperationOutcome::Succeeded(walker) => walker,

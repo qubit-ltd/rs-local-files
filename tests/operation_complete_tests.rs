@@ -135,7 +135,10 @@ fn test_async_complete_reads_preserve_the_dominant_limit_source() {
                 qubit_operation::OperationOutcome::Failed(error) => {
                     let limit = error.resource_limit_error().expect("owned-byte limit facts");
                     assert_eq!(error.path(), Some(path.as_path()));
-                    assert_eq!(limit.resource(), qubit_local_files::error::LocalResourceKind::OwnedBytes);
+                    assert_eq!(
+                        limit.resource(),
+                        qubit_local_files::error::LocalResourceKind::OwnedBytes
+                    );
                     assert_eq!((limit.limit(), limit.remaining(), limit.requested()), (4, 4, 5));
                     assert_eq!(limit.observed(), Some(5));
                     assert!(error.read_limit_error().is_none());
@@ -163,7 +166,10 @@ fn test_async_complete_reads_preserve_the_dominant_limit_source() {
         .submit_read_text(
             &manager,
             Default::default(),
-            LocalReadRequest { path: path.clone(), read: Default::default() },
+            LocalReadRequest {
+                path: path.clone(),
+                read: Default::default(),
+            },
             memory_limit,
         )
         .unwrap()
@@ -214,12 +220,17 @@ fn test_async_complete_reads_preserve_the_dominant_limit_source() {
                 path,
                 read: LocalReadAllOptions::new().with_max_bytes(4),
             },
-            qubit_local_files::LocalOperationOptions { max_owned_bytes: Some(4), ..Default::default() },
+            qubit_local_files::LocalOperationOptions {
+                max_owned_bytes: Some(4),
+                ..Default::default()
+            },
         )
         .unwrap()
         .0;
-    assert!(matches!(equal.wait_outcome().unwrap(), qubit_operation::OperationOutcome::Failed(error)
-        if error.read_limit_error().is_some() && error.resource_limit_error().is_none()));
+    assert!(
+        matches!(equal.wait_outcome().unwrap(), qubit_operation::OperationOutcome::Failed(error)
+        if error.read_limit_error().is_some() && error.resource_limit_error().is_none())
+    );
 }
 
 #[test]
