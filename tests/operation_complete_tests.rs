@@ -110,6 +110,119 @@ fn test_complete_read_reports_limit_error_without_returning_truncated_success() 
 }
 
 #[test]
+fn test_async_complete_reads_preserve_the_dominant_limit_source() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("payload");
+    std::fs::write(&path, b"12345").unwrap();
+    let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+    let executor = LocalIoExecutor::new(
+        manager.clone(),
+        LocalExecutionConfig {
+            max_owned_bytes: 8,
+            ..LocalExecutionConfig::default()
+        },
+    )
+    .unwrap();
+    let filesystem = block_on(AsyncLocalFileSystem::host(executor)).unwrap();
+    let memory_limit = qubit_local_files::LocalOperationOptions {
+        max_owned_bytes: Some(4),
+        ..Default::default()
+    };
+
+    macro_rules! assert_owned_bytes_limit {
+        ($operation:expr) => {{
+            match $operation.wait_outcome().unwrap() {
+                qubit_operation::OperationOutcome::Failed(error) => {
+                    let limit = error.resource_limit_error().expect("owned-byte limit facts");
+                    assert_eq!(error.path(), Some(path.as_path()));
+                    assert_eq!(limit.resource(), qubit_local_files::error::LocalResourceKind::OwnedBytes);
+                    assert_eq!((limit.limit(), limit.remaining(), limit.requested()), (4, 4, 5));
+                    assert_eq!(limit.observed(), Some(5));
+                    assert!(error.read_limit_error().is_none());
+                }
+                other => panic!("memory limit must fail as OwnedBytes: {other:?}"),
+            }
+        }};
+    }
+
+    let mut all = filesystem
+        .submit_read_all(
+            &manager,
+            Default::default(),
+            LocalReadRequest {
+                path: path.clone(),
+                read: LocalReadAllOptions::new().with_max_bytes(8),
+            },
+            memory_limit,
+        )
+        .unwrap()
+        .0;
+    assert_owned_bytes_limit!(all);
+
+    let mut text = filesystem
+        .submit_read_text(
+            &manager,
+            Default::default(),
+            LocalReadRequest { path: path.clone(), read: Default::default() },
+            memory_limit,
+        )
+        .unwrap()
+        .0;
+    assert_owned_bytes_limit!(text);
+
+    let mut observed = filesystem
+        .submit_read_all_with_observer(
+            &manager,
+            Default::default(),
+            LocalReadRequest {
+                path: path.clone(),
+                read: LocalReadAllOptions::new().with_max_bytes(8),
+            },
+            memory_limit,
+        )
+        .unwrap()
+        .0;
+    assert_owned_bytes_limit!(observed);
+
+    let mut explicit = filesystem
+        .submit_read_all(
+            &manager,
+            Default::default(),
+            LocalReadRequest {
+                path: path.clone(),
+                read: LocalReadAllOptions::new().with_max_bytes(4),
+            },
+            Default::default(),
+        )
+        .unwrap()
+        .0;
+    match explicit.wait_outcome().unwrap() {
+        qubit_operation::OperationOutcome::Failed(error) => {
+            assert_eq!(error.path(), Some(path.as_path()));
+            let limit = error.read_limit_error().expect("explicit content limit");
+            assert_eq!((limit.limit(), limit.observed()), (4, 5));
+            assert!(error.resource_limit_error().is_none());
+        }
+        other => panic!("explicit content limit must fail as read-limit: {other:?}"),
+    }
+
+    let mut equal = filesystem
+        .submit_read_all(
+            &manager,
+            Default::default(),
+            LocalReadRequest {
+                path,
+                read: LocalReadAllOptions::new().with_max_bytes(4),
+            },
+            qubit_local_files::LocalOperationOptions { max_owned_bytes: Some(4), ..Default::default() },
+        )
+        .unwrap()
+        .0;
+    assert!(matches!(equal.wait_outcome().unwrap(), qubit_operation::OperationOutcome::Failed(error)
+        if error.read_limit_error().is_some() && error.resource_limit_error().is_none()));
+}
+
+#[test]
 fn test_complete_text_read_succeeds_with_explicit_and_inherited_limits() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("text");

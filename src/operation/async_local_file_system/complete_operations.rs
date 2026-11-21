@@ -92,6 +92,11 @@ impl Drop for ReadAllTestGateGuard {
 
 impl AsyncLocalFileSystem {
     /// Submits a finite complete read with per-block cooperative cancellation.
+    /// An explicit read ceiling produces `read_limit_error()` when it is the
+    /// effective boundary. Executor, per-operation, and shared byte-pool
+    /// limits produce `resource_limit_error()` with resource `OwnedBytes`;
+    /// callers checking the latter should use `resource_limit_error()` rather
+    /// than `read_limit_error()`.
     ///
     /// # Parameters
     /// - `manager` — operation manager that owns the admission scope.
@@ -149,6 +154,11 @@ impl AsyncLocalFileSystem {
     }
     /// Submits a complete UTF-8 read using the same allocation accounting as
     /// read-all.
+    /// An explicit read ceiling produces `read_limit_error()` when it is the
+    /// effective boundary. Executor, per-operation, and shared byte-pool
+    /// limits produce `resource_limit_error()` with resource `OwnedBytes`;
+    /// callers checking the latter should use `resource_limit_error()` rather
+    /// than `read_limit_error()`.
     ///
     /// # Parameters
     /// - `manager` — operation manager that owns the admission scope.
@@ -1028,7 +1038,7 @@ fn read_complete_cancellable(
     filesystem: &crate::LocalFileSystem,
     path: &Path,
     options: &LocalReadAllOptions,
-    maximum: u64,
+    read_limit: EffectiveReadLimit,
     scope: &OperationScope,
     budget: &Arc<Mutex<Permit>>,
     allocation_limit: usize,
@@ -1054,11 +1064,12 @@ fn read_complete_cancellable(
     };
     let before = observed.observation().clone();
     let observed_len = before.metadata().len();
-    if observed_len > maximum {
-        return OperationOutcome::Failed(LocalFileError::from_read_limit(
-            LocalFileOperation::Read,
-            Some(path.to_path_buf()),
-            LocalReadLimitError::new(maximum, observed_len),
+    if observed_len > read_limit.bytes {
+        return OperationOutcome::Failed(read_limit.error(
+            path,
+            observed_len,
+            0,
+            allocation_limit,
         ));
     }
 
@@ -1068,15 +1079,16 @@ fn read_complete_cancellable(
         if let Some(stopped) = stop_outcome(scope) {
             return stopped;
         }
-        if bytes.len() as u64 == maximum {
+        if bytes.len() as u64 == read_limit.bytes {
             let mut sentinel = [0_u8; 1];
             match observed.read(&mut sentinel) {
                 Ok(0) => break,
                 Ok(_) => {
-                    return OperationOutcome::Failed(LocalFileError::from_read_limit(
-                        LocalFileOperation::Read,
-                        Some(path.to_path_buf()),
-                        LocalReadLimitError::new(maximum, maximum.saturating_add(1)),
+                    return OperationOutcome::Failed(read_limit.error(
+                        path,
+                        read_limit.bytes.saturating_add(1),
+                        bytes.capacity(),
+                        allocation_limit,
                     ));
                 }
                 Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
@@ -1090,7 +1102,7 @@ fn read_complete_cancellable(
                 }
             }
         }
-        let remaining = (maximum - bytes.len() as u64).min(buffer.len() as u64) as usize;
+        let remaining = (read_limit.bytes - bytes.len() as u64).min(buffer.len() as u64) as usize;
         match observed.read(&mut buffer[..remaining]) {
             Ok(0) => break,
             Ok(read) => {
@@ -1131,15 +1143,47 @@ fn read_complete_cancellable(
     OperationOutcome::Succeeded(bytes)
 }
 
-/// Selects the smaller explicit and executor owned-byte limit.
+/// Selects the smaller explicit and executor owned-byte limit and keeps its origin.
 ///
 /// # Parameters
 /// - `options` — read options carrying an optional complete-read ceiling.
 /// - `maximum` — executor or operation owned-byte ceiling.
-fn effective_read_limit(options: &LocalReadAllOptions, maximum: usize) -> u64 {
-    options
-        .max_bytes()
-        .map_or(maximum as u64, |limit| limit.min(maximum as u64))
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct EffectiveReadLimit {
+    bytes: u64,
+    explicit: bool,
+}
+
+impl EffectiveReadLimit {
+    fn error(self, path: &Path, observed: u64, capacity: usize, allocation_limit: usize) -> LocalFileError {
+        if self.explicit {
+            return LocalFileError::from_read_limit(
+                LocalFileOperation::Read,
+                Some(path.to_path_buf()),
+                LocalReadLimitError::new(self.bytes, observed),
+            );
+        }
+        let requested = usize::try_from(observed).unwrap_or(usize::MAX);
+        let resource = LocalResourceLimitError::new(
+            LocalResourceKind::OwnedBytes,
+            allocation_limit,
+            allocation_limit.saturating_sub(capacity),
+            requested.saturating_sub(capacity),
+        );
+        let resource = if observed > usize::MAX as u64 {
+            resource.with_overflow()
+        } else {
+            resource.with_observed(requested)
+        };
+        LocalFileError::from_resource_limit(LocalFileOperation::Read, Some(path.to_path_buf()), resource)
+    }
+}
+
+fn effective_read_limit(options: &LocalReadAllOptions, maximum: usize) -> EffectiveReadLimit {
+    match options.max_bytes() {
+        Some(limit) if limit <= maximum as u64 => EffectiveReadLimit { bytes: limit, explicit: true },
+        _ => EffectiveReadLimit { bytes: maximum as u64, explicit: false },
+    }
 }
 
 /// Decodes complete-read bytes while retaining invalid data and path context.
@@ -1433,6 +1477,7 @@ mod stop_gate_tests {
     use super::deletion_effect_facts;
     use super::effective_read_limit;
     use super::effective_read_options;
+    use super::EffectiveReadLimit;
 
     #[test]
     fn test_delete_effect_mapping_distinguishes_no_change_and_completed_change() {
@@ -1600,14 +1645,21 @@ mod stop_gate_tests {
     fn test_effective_complete_read_limit_inherits_and_tightens_executor_ceiling() {
         use crate::options::LocalReadAllOptions;
 
-        assert_eq!(8, effective_read_limit(&LocalReadAllOptions::new(), 8));
         assert_eq!(
-            4,
+            EffectiveReadLimit { bytes: 8, explicit: false },
+            effective_read_limit(&LocalReadAllOptions::new(), 8)
+        );
+        assert_eq!(
+            EffectiveReadLimit { bytes: 4, explicit: true },
             effective_read_limit(&LocalReadAllOptions::new().with_max_bytes(4), 8)
         );
         assert_eq!(
-            8,
+            EffectiveReadLimit { bytes: 8, explicit: false },
             effective_read_limit(&LocalReadAllOptions::new().with_max_bytes(12), 8)
+        );
+        assert_eq!(
+            EffectiveReadLimit { bytes: 8, explicit: true },
+            effective_read_limit(&LocalReadAllOptions::new().with_max_bytes(8), 8)
         );
     }
 

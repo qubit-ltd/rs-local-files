@@ -534,7 +534,9 @@ impl AsyncLocalFileSystem {
     /// Submits a complete file read and returns its independent local fact
     /// observer alongside the operation handle. The bytes are delivered by
     /// the operation outcome; the observer reports operation facts and does
-    /// not contain or replace that result. Use [`Self::submit_read_all`] when
+    /// not contain or replace that result. Memory ceilings are reported as
+    /// `OwnedBytes` resource limits; explicit read ceilings retain read-limit
+    /// diagnostics. Use [`Self::submit_read_all`] when
     /// the read should check cooperative cancellation between read blocks.
     ///
     /// # Parameters
@@ -606,6 +608,10 @@ impl AsyncLocalFileSystem {
             _ => request.path.clone(),
         };
         let execution_options = request.read.with_max_bytes(read_limit);
+        let memory_limit_dominates = !request
+            .read
+            .max_bytes()
+            .is_some_and(|limit| limit <= byte_limit as u64);
         let Some(slot) = self.executor.reserve_slot() else {
             return Err(super::LocalSubmitError::new(
                 request,
@@ -681,7 +687,30 @@ impl AsyncLocalFileSystem {
                                 Some(execution_path.clone()),
                                 limit,
                             ),
-                            None => error,
+                            None => match error.read_limit_error() {
+                                Some(read_limit) if memory_limit_dominates =>
+                                {
+                                    let observed = read_limit.observed();
+                                    let requested = usize::try_from(observed).unwrap_or(usize::MAX);
+                                    let facts = crate::error::LocalResourceLimitError::new(
+                                        crate::error::LocalResourceKind::OwnedBytes,
+                                        byte_limit,
+                                        byte_limit,
+                                        requested,
+                                    );
+                                    let facts = if observed > usize::MAX as u64 {
+                                        facts.with_overflow()
+                                    } else {
+                                        facts.with_observed(requested)
+                                    };
+                                    crate::error::LocalFileError::from_resource_limit(
+                                        crate::error::LocalFileOperation::Read,
+                                        error.path().map(std::path::Path::to_path_buf),
+                                        facts,
+                                    )
+                                }
+                                _ => error,
+                            },
                         };
                         qubit_operation::OperationOutcome::Failed(structured)
                     }
