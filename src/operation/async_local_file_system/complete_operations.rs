@@ -61,10 +61,32 @@ use crate::outcome::LocalRenameFailure;
 use crate::outcome::LocalRenameFailureState;
 
 #[cfg(test)]
-static READ_ALL_TEST_GATE: Mutex<Option<(std::sync::mpsc::Sender<()>, std::sync::mpsc::Receiver<()>)>> =
-    Mutex::new(None);
+type ReadAllTestGate = (PathBuf, std::sync::mpsc::Sender<()>, std::sync::mpsc::Receiver<()>);
+#[cfg(test)]
+static READ_ALL_TEST_GATE: Mutex<Option<ReadAllTestGate>> = Mutex::new(None);
 #[cfg(test)]
 static READ_ALL_TEST_GATE_LOCK: Mutex<()> = Mutex::new(());
+
+#[cfg(test)]
+struct ReadAllTestGateGuard(PathBuf);
+
+#[cfg(test)]
+impl ReadAllTestGateGuard {
+    fn install(path: PathBuf, entered: std::sync::mpsc::Sender<()>, release: std::sync::mpsc::Receiver<()>) -> Self {
+        *READ_ALL_TEST_GATE.lock().unwrap_or_else(|error| error.into_inner()) = Some((path.clone(), entered, release));
+        Self(path)
+    }
+}
+
+#[cfg(test)]
+impl Drop for ReadAllTestGateGuard {
+    fn drop(&mut self) {
+        let mut gate = READ_ALL_TEST_GATE.lock().unwrap_or_else(|error| error.into_inner());
+        if gate.as_ref().is_some_and(|(path, _, _)| path == &self.0) {
+            gate.take();
+        }
+    }
+}
 
 impl AsyncLocalFileSystem {
     /// Submits a finite complete read with per-block cooperative cancellation.
@@ -521,19 +543,28 @@ impl AsyncLocalFileSystem {
                 match filesystem.copy_with_options(&source, &destination, &options) {
                     Ok(outcome) => {
                         let stats = outcome.stats();
+                        let published = stats.files() > 0 || stats.directories() > 0 || stats.bytes() > 0;
                         record_local_effect(
                             scope,
                             &observer,
                             stats.files().saturating_add(stats.directories()),
                             stats.bytes(),
-                            LocalPublicationState::Published,
+                            if published {
+                                LocalPublicationState::Published
+                            } else {
+                                LocalPublicationState::NotPublished
+                            },
                             if outcome.durable() {
                                 LocalDurabilityState::Durable
                             } else {
                                 LocalDurabilityState::Unknown
                             },
                             EffectFact::Known,
-                            "local copy published destination",
+                            if published {
+                                "local copy published destination"
+                            } else {
+                                "local copy skipped without publication"
+                            },
                         );
                         OperationOutcome::Succeeded(LocalCopyOperationResult {
                             source: request.source,
@@ -1081,7 +1112,7 @@ fn read_complete_cancellable(
             Ok(read) => {
                 bytes.extend_from_slice(&buffer[..read]);
                 #[cfg(test)]
-                pause_read_all_test_gate();
+                pause_read_all_test_gate(path);
                 if let Some(stopped) = stop_outcome(scope) {
                     return stopped;
                 }
@@ -1130,12 +1161,16 @@ fn effective_read_options(filesystem: &crate::LocalFileSystem, options: &LocalRe
 }
 
 #[cfg(test)]
-fn pause_read_all_test_gate() {
-    let gate = READ_ALL_TEST_GATE
-        .lock()
-        .unwrap_or_else(|error| error.into_inner())
-        .take();
-    if let Some((entered, release)) = gate {
+fn pause_read_all_test_gate(path: &Path) {
+    let gate = {
+        let mut registered = READ_ALL_TEST_GATE.lock().unwrap_or_else(|error| error.into_inner());
+        if registered.as_ref().is_some_and(|(target, _, _)| target == path) {
+            registered.take()
+        } else {
+            None
+        }
+    };
+    if let Some((_, entered, release)) = gate {
         let _ = entered.send(());
         let _ = release.recv();
     }
@@ -1147,13 +1182,17 @@ fn pause_read_all_test_gate() {
 /// - `E` — type used by this operation.
 /// # Parameters
 /// - `scope` — supplies data or policy for this operation.
+// An explicit branch keeps stop paths visible to LLVM function coverage, which
+// otherwise reports the executed `Option::map` closure as an uncovered function.
+#[allow(clippy::manual_map)]
 fn stop_outcome<T, E>(scope: &OperationScope) -> Option<OperationOutcome<T, E>> {
-    scope.context().stop_reason().map(|reason| {
-        OperationOutcome::Stopped(StopReport {
+    match scope.context().stop_reason() {
+        Some(reason) => Some(OperationOutcome::Stopped(StopReport {
             reason,
             accepted_at: None,
-        })
-    })
+        })),
+        None => None,
+    }
 }
 /// Runs the before native call behavior while preserving the operation
 /// lifecycle invariants.
@@ -1216,7 +1255,10 @@ fn record_local_effect(
 /// # Parameters
 /// - `permit` — supplies data or policy for this operation.
 fn shrink_to_zero(permit: &Arc<Mutex<Permit>>) {
-    let mut permit = permit.lock().unwrap_or_else(|e| e.into_inner());
+    let mut permit = match permit.lock() {
+        Ok(permit) => permit,
+        Err(poisoned) => poisoned.into_inner(),
+    };
     let amount = permit.amount();
     permit.shrink(amount);
 }
@@ -1236,17 +1278,23 @@ fn reserve_capacity(
     path: &Path,
 ) -> Result<(), LocalFileError> {
     let old_capacity = output.capacity();
-    let requested = output.len().checked_add(additional).ok_or_else(|| {
-        LocalFileError::from_io(
-            LocalFileOperation::Read,
-            Some(path.to_path_buf()),
-            None,
-            std::io::Error::other("read capacity overflow"),
-        )
-    })?;
+    let requested = match output.len().checked_add(additional) {
+        Some(requested) => requested,
+        None => {
+            return Err(LocalFileError::from_io(
+                LocalFileOperation::Read,
+                Some(path.to_path_buf()),
+                None,
+                std::io::Error::other("read capacity overflow"),
+            ));
+        }
+    };
     let target = requested.max(old_capacity);
     let delta = target - old_capacity;
-    let mut lease = permit.lock().unwrap_or_else(|e| e.into_inner());
+    let mut lease = match permit.lock() {
+        Ok(lease) => lease,
+        Err(poisoned) => poisoned.into_inner(),
+    };
     if target > maximum {
         return Err(LocalFileError::from_resource_limit(
             LocalFileOperation::Read,
@@ -1297,6 +1345,8 @@ fn reserve_capacity(
 
 #[cfg(test)]
 mod stop_gate_tests {
+    use std::path::Path;
+    use std::path::PathBuf;
     use std::sync::Arc;
     use std::sync::atomic::AtomicUsize;
     use std::sync::atomic::Ordering;
@@ -1309,6 +1359,7 @@ mod stop_gate_tests {
 
     use super::READ_ALL_TEST_GATE;
     use super::READ_ALL_TEST_GATE_LOCK;
+    use super::ReadAllTestGateGuard;
     use super::before_native_call;
     use super::effective_read_options;
 
@@ -1355,6 +1406,22 @@ mod stop_gate_tests {
                     super::stop_outcome::<(), ()>(&scope),
                     Some(OperationOutcome::Stopped(report)) if report.reason == StopReason::UserCancelled
                 ));
+                assert!(super::stop_outcome::<Vec<u8>, super::LocalFileError>(&scope).is_some());
+                assert!(super::stop_outcome::<super::LocalReadPrefix, super::LocalFileError>(&scope).is_some());
+                assert!(
+                    super::stop_outcome::<super::LocalCopyOperationResult, super::LocalCopyFailure>(&scope).is_some()
+                );
+                assert!(
+                    super::stop_outcome::<super::LocalDeleteOperationResult, super::LocalFileError>(&scope).is_some()
+                );
+                assert!(
+                    super::stop_outcome::<super::LocalRenameOperationResult, super::LocalRenameFailure>(&scope)
+                        .is_some()
+                );
+                assert!(
+                    super::stop_outcome::<super::LocalCreateDirectoryOperationResult, super::LocalFileError>(&scope)
+                        .is_some()
+                );
                 let result = before_native_call(&scope, || native_calls_for_task.fetch_add(1, Ordering::SeqCst));
                 Ok::<_, ()>(result.map_err(|stop| stop.reason))
             })
@@ -1438,7 +1505,7 @@ mod stop_gate_tests {
 
         let (entered_tx, entered_rx) = mpsc::channel();
         let (release_tx, release_rx) = mpsc::channel();
-        *READ_ALL_TEST_GATE.lock().unwrap() = Some((entered_tx, release_rx));
+        let _gate = ReadAllTestGateGuard::install(path.clone(), entered_tx, release_rx);
         let mut stopped = filesystem
             .submit_read_all(
                 &manager,
@@ -1536,7 +1603,7 @@ mod stop_gate_tests {
 
         let (entered_tx, entered_rx) = mpsc::channel();
         let (release_tx, release_rx) = mpsc::channel();
-        *READ_ALL_TEST_GATE.lock().unwrap() = Some((entered_tx, release_rx));
+        let _gate = ReadAllTestGateGuard::install(full_path.clone(), entered_tx, release_rx);
         let mut failed = filesystem
             .submit_read_all(
                 &manager,
@@ -1589,6 +1656,51 @@ mod stop_gate_tests {
     }
 
     #[test]
+    fn test_read_all_gate_ignores_unrelated_paths() {
+        let _gate_lock = READ_ALL_TEST_GATE_LOCK
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let target = PathBuf::from("target-read");
+        let (entered_tx, _entered_rx) = mpsc::channel();
+        let (_release_tx, release_rx) = mpsc::channel();
+        let _guard = ReadAllTestGateGuard::install(target.clone(), entered_tx, release_rx);
+
+        super::pause_read_all_test_gate(Path::new("unrelated-read"));
+        assert!(
+            READ_ALL_TEST_GATE
+                .lock()
+                .unwrap_or_else(|error| error.into_inner())
+                .as_ref()
+                .is_some_and(|(path, _, _)| path == &target)
+        );
+    }
+
+    #[cfg(panic = "unwind")]
+    #[test]
+    fn test_gate_helpers_recover_a_poisoned_registry() {
+        let _gate_lock = READ_ALL_TEST_GATE_LOCK
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let poison = std::panic::catch_unwind(|| {
+            let _registry = READ_ALL_TEST_GATE.lock().unwrap();
+            panic!("poison the test-only gate registry");
+        });
+        assert!(poison.is_err());
+
+        let (entered_tx, _entered_rx) = mpsc::channel();
+        let (_release_tx, release_rx) = mpsc::channel();
+        let guard = ReadAllTestGateGuard::install(PathBuf::from("registered"), entered_tx, release_rx);
+        super::pause_read_all_test_gate(Path::new("unrelated"));
+        drop(guard);
+        assert!(
+            READ_ALL_TEST_GATE
+                .lock()
+                .unwrap_or_else(|error| error.into_inner())
+                .is_none()
+        );
+    }
+
+    #[test]
     fn test_read_buffer_reservation_recovers_poisoned_permit_and_checks_overflow() {
         let pool = crate::operation::internal::permits::PermitPool::new(8);
         let mut bytes = vec![1];
@@ -1607,5 +1719,141 @@ mod stop_gate_tests {
         assert_eq!(bytes, [1]);
         super::shrink_to_zero(&permit);
         assert_eq!(pool.used(), 0);
+    }
+}
+
+#[cfg(test)]
+mod operation_submission_tests {
+    use qubit_operation::ManagerOptions;
+    use qubit_operation::OperationManager;
+    use qubit_operation::OperationOutcome;
+
+    use super::AsyncLocalFileSystem;
+    use crate::LocalFileSystem;
+    use crate::LocalOperationOptions;
+    use crate::LocalReadRequest;
+    use crate::operation::LocalExecutionConfig;
+    use crate::operation::LocalIoExecutor;
+    use crate::operation::complete::LocalCopyRequest;
+    use crate::operation::complete::LocalCreateDirectoryRequest;
+    use crate::operation::complete::LocalDeleteRequest;
+    use crate::operation::complete::LocalReadPrefixRequest;
+    use crate::operation::complete::LocalRenameRequest;
+    use crate::options::LocalCopyOptions;
+    use crate::options::LocalDeleteOptions;
+    use crate::options::LocalReadAllOptions;
+    use crate::options::LocalReadOptions;
+    use crate::options::LocalRenameOptions;
+
+    #[test]
+    fn test_complete_operation_submitters_run_from_the_library_test_target() {
+        let directory = tempfile::tempdir().unwrap();
+        let source = directory.path().join("source.txt");
+        let copied = directory.path().join("copied.txt");
+        let renamed = directory.path().join("renamed.txt");
+        let created = directory.path().join("created");
+        std::fs::write(&source, b"coverage payload").unwrap();
+
+        let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+        let executor = LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).unwrap();
+        let filesystem = AsyncLocalFileSystem::new(LocalFileSystem::host().unwrap(), executor, None);
+
+        let (mut text, _) = filesystem
+            .submit_read_text(
+                &manager,
+                Default::default(),
+                LocalReadRequest {
+                    path: source.clone(),
+                    read: LocalReadAllOptions::default(),
+                },
+                LocalOperationOptions::default(),
+            )
+            .unwrap();
+        assert!(
+            matches!(text.wait_outcome().unwrap(), OperationOutcome::Succeeded(value) if value == "coverage payload")
+        );
+
+        let (mut prefix, _) = filesystem
+            .submit_read_prefix(
+                &manager,
+                Default::default(),
+                LocalReadPrefixRequest {
+                    path: source.clone(),
+                    read: LocalReadOptions::default(),
+                    max_bytes: 8,
+                },
+                LocalOperationOptions::default(),
+            )
+            .unwrap();
+        assert!(
+            matches!(prefix.wait_outcome().unwrap(), OperationOutcome::Succeeded(value) if value.bytes == b"coverage")
+        );
+
+        let (mut metadata, _) = filesystem
+            .submit_metadata(
+                &manager,
+                Default::default(),
+                source.clone(),
+                LocalOperationOptions::default(),
+            )
+            .unwrap();
+        assert!(matches!(metadata.wait_outcome().unwrap(), OperationOutcome::Succeeded(value) if value.len() == 16));
+
+        let (mut copy, _) = filesystem
+            .submit_copy(
+                &manager,
+                Default::default(),
+                LocalCopyRequest {
+                    source: source.clone(),
+                    destination: copied.clone(),
+                    options: LocalCopyOptions::default(),
+                },
+                LocalOperationOptions::default(),
+            )
+            .unwrap();
+        assert!(matches!(copy.wait_outcome().unwrap(), OperationOutcome::Succeeded(_)));
+
+        let (mut rename, _) = filesystem
+            .submit_rename(
+                &manager,
+                Default::default(),
+                LocalRenameRequest {
+                    source: copied.clone(),
+                    destination: renamed.clone(),
+                    options: LocalRenameOptions::default(),
+                },
+                LocalOperationOptions::default(),
+            )
+            .unwrap();
+        assert!(matches!(rename.wait_outcome().unwrap(), OperationOutcome::Succeeded(_)));
+
+        let (mut create, _) = filesystem
+            .submit_create_directory(
+                &manager,
+                Default::default(),
+                LocalCreateDirectoryRequest {
+                    path: created.clone(),
+                    options: Default::default(),
+                },
+                LocalOperationOptions::default(),
+            )
+            .unwrap();
+        assert!(matches!(create.wait_outcome().unwrap(), OperationOutcome::Succeeded(_)));
+
+        let (mut delete, _) = filesystem
+            .submit_delete(
+                &manager,
+                Default::default(),
+                LocalDeleteRequest {
+                    path: renamed.clone(),
+                    options: LocalDeleteOptions::default(),
+                    directory: false,
+                },
+                LocalOperationOptions::default(),
+            )
+            .unwrap();
+        assert!(matches!(delete.wait_outcome().unwrap(), OperationOutcome::Succeeded(_)));
+        assert!(created.is_dir());
+        assert!(!renamed.exists());
     }
 }

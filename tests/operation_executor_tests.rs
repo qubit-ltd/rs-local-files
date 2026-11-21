@@ -186,6 +186,75 @@ fn test_oversized_owned_read_limit_is_rejected_with_original_request() {
 }
 
 #[test]
+fn test_observed_complete_read_keeps_owned_byte_limit_details() {
+    let directory = tempfile::tempdir().unwrap();
+    let held_path = directory.path().join("held");
+    let path = directory.path().join("rejected");
+    std::fs::write(&held_path, b"held").unwrap();
+    std::fs::write(&path, b"read after release").unwrap();
+    let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+    let executor = LocalIoExecutor::new(
+        manager.clone(),
+        LocalExecutionConfig {
+            max_owned_bytes: 64 * 1024,
+            ..LocalExecutionConfig::default()
+        },
+    )
+    .unwrap();
+    let filesystem = block_on(AsyncLocalFileSystem::host(executor)).unwrap();
+    let mut held_opening = filesystem
+        .submit_open_reader(&manager, Default::default(), held_path, LocalReadOptions::default())
+        .unwrap();
+    let mut held_reader = match held_opening.wait_outcome().unwrap() {
+        qubit_operation::OperationOutcome::Succeeded(reader) => reader,
+        _ => panic!("reader should retain the shared byte buffer"),
+    };
+    let (mut operation, _) = filesystem
+        .submit_read_all_with_observer(
+            &manager,
+            Default::default(),
+            LocalReadRequest {
+                path: path.clone(),
+                read: Default::default(),
+            },
+            Default::default(),
+        )
+        .unwrap();
+    match operation.wait_outcome().unwrap() {
+        qubit_operation::OperationOutcome::Failed(error) => {
+            assert_eq!(error.path(), Some(path.as_path()));
+            assert!(
+                error.resource_limit_error().is_some_and(|limit| limit.resource()
+                    == qubit_local_files::error::LocalResourceKind::OwnedBytes
+                    && limit.limit() == 64 * 1024
+                    && limit.remaining() < limit.requested()
+                    && limit.requested() > 0),
+                "{error:?}"
+            );
+        }
+        outcome => panic!("expected structured capacity error, got {outcome:?}"),
+    }
+    block_on(held_reader.close()).unwrap();
+    drop(held_reader);
+    held_opening.wait_settlement().unwrap();
+    let (mut retry, _) = filesystem
+        .submit_read_all_with_observer(
+            &manager,
+            Default::default(),
+            LocalReadRequest {
+                path,
+                read: Default::default(),
+            },
+            Default::default(),
+        )
+        .unwrap();
+    assert!(matches!(
+        retry.wait_outcome().unwrap(),
+        qubit_operation::OperationOutcome::Succeeded(bytes) if bytes == b"read after release"
+    ));
+}
+
+#[test]
 fn test_read_submission_returns_request_when_fact_observer_capacity_is_exhausted() {
     let directory = tempfile::tempdir().unwrap();
     let first_path = directory.path().join("first");

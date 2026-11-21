@@ -750,6 +750,45 @@ fn test_copy_rename_create_and_delete_retain_structured_results_and_facts() {
 }
 
 #[test]
+fn test_copy_facts_only_report_actual_publication() {
+    let directory = tempfile::tempdir().unwrap();
+    let source = directory.path().join("source");
+    let destination = directory.path().join("destination");
+    std::fs::write(&source, b"original").unwrap();
+    std::fs::write(&destination, b"keep").unwrap();
+    let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+    let filesystem = facade(&manager);
+
+    let (mut copy, facts) = filesystem
+        .submit_copy(
+            &manager,
+            Default::default(),
+            LocalCopyRequest {
+                source,
+                destination: destination.clone(),
+                options: LocalCopyOptions::new()
+                    .with_conflict(qubit_local_files::options::LocalCopyConflictPolicy::Skip),
+            },
+            Default::default(),
+        )
+        .unwrap();
+    assert!(matches!(
+        copy.wait_outcome().unwrap(),
+        qubit_operation::OperationOutcome::Succeeded(result)
+            if result.outcome.stats().skipped() == 1
+                && result.outcome.stats().files() == 0
+    ));
+    let snapshot = facts.snapshot();
+    assert_eq!(
+        snapshot.publication,
+        qubit_local_files::operation::LocalPublicationState::NotPublished
+    );
+    assert_eq!(snapshot.modified_count, 0);
+    assert_eq!(snapshot.modified_bytes, 0);
+    assert_eq!(std::fs::read(destination).unwrap(), b"keep");
+}
+
+#[test]
 fn test_complete_operation_edge_results_and_failures() {
     let directory = tempfile::tempdir().unwrap();
     let manager = OperationManager::new(ManagerOptions::default()).unwrap();

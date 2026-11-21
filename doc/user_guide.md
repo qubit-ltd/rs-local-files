@@ -96,6 +96,17 @@ earlier batches were already returned, or stop early with `close()`. An observer
 created before close keeps the worker resource alive, so release it before
 waiting for the opening operation to settle.
 
+Each submitted walker reserves its full `max_open_directories` allowance from
+the executor's shared ordinary handle pool. When the option is omitted, the
+reservation and walker limit are both one; temporary path-resolution handles,
+the captured root authority, and the cleanup reservation have separate
+lifecycle rules. Concurrent walkers compete for this same pool, and close
+returns the reservation. Set an explicit positive limit when nested traversal
+must keep multiple directory readers open, and size `max_open_handles` to cover
+that full reservation plus other active operations. A zero limit remains an
+invalid walker option; a request that cannot reserve its full allowance is
+rejected with `CapacityExceeded`.
+
 If cleanup reports a retained walker owner, settlement carries a recovery handle.
 Keep it until cleanup succeeds or ownership is handed to an operator. A walker
 cleanup slot is reserved when the native walker is admitted, so ordinary queue

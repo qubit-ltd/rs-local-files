@@ -80,13 +80,17 @@ impl AsyncLocalFileSystem {
     }
     /// Submits a bounded, worker-backed directory traversal.
     ///
+    /// The ordinary executor handle pool reserves one enumeration reader by
+    /// default, or the complete explicit `max_open_directories` value. A zero
+    /// or unavailable reservation is rejected with `CapacityExceeded`; the
+    /// reservation is returned when the walker closes. Temporary resolution
+    /// handles and cleanup handles follow their separate existing budgets.
+    ///
     /// # Parameters
     /// - `manager` — operation manager that owns the admission scope.
-    /// - `qubit_operation` — input value used by this operation.
     /// - `operation` — operation options used for admission and cancellation.
     /// - `path` — path resolved under the captured filesystem authority.
     /// - `options` — operation policy applied to the local filesystem request.
-    /// - `crate` — input value used by this operation.
     pub fn submit_open_walker(
         &self,
         manager: &qubit_operation::OperationManager,
@@ -129,6 +133,7 @@ impl AsyncLocalFileSystem {
             ));
         }
         let execution_path = bind_host_path(&self.host_base, &path);
+        let directory_readers = options.max_open_directories().unwrap_or(1);
         let Some(slot) = self.executor.reserve_slot() else {
             return Err(super::LocalSubmitError::new(
                 path,
@@ -141,7 +146,7 @@ impl AsyncLocalFileSystem {
                 super::LocalSubmitRejection::CapacityExceeded,
             ));
         };
-        let Some(handle) = self.executor.reserve_handle() else {
+        let Some(handle) = self.executor.reserve_handles(directory_readers) else {
             return Err(super::LocalSubmitError::new(
                 path,
                 super::LocalSubmitRejection::CapacityExceeded,
@@ -168,8 +173,13 @@ impl AsyncLocalFileSystem {
             Arc::clone(&budget),
             Arc::clone(&handle),
             observer.clone(),
-            move |_, scope| match filesystem.list_with_options(&execution_path, &options) {
-                Err(error) => OperationOutcome::Failed(error),
+            move |_, scope| match filesystem
+                .list_with_options(&execution_path, &options.with_max_open_directories(directory_readers))
+            {
+                Err(error) => {
+                    shrink_byte_budget(&worker_budget);
+                    OperationOutcome::Failed(error)
+                }
                 Ok(walker) => {
                     let resource =
                         super::stream::WorkerWalkDriver::managed(scope, executor, walker, worker_budget, worker_handle);
@@ -298,7 +308,10 @@ impl AsyncLocalFileSystem {
             move |_, scope| {
                 let opened = filesystem.open_reader_with_options(&execution_path, &options);
                 match opened {
-                    Err(error) => OperationOutcome::Failed(error),
+                    Err(error) => {
+                        shrink_byte_budget(&worker_budget);
+                        OperationOutcome::Failed(error)
+                    }
                     Ok(reader) => {
                         let resource = super::stream::WorkerStreamDriver::managed(
                             scope,
@@ -441,7 +454,10 @@ impl AsyncLocalFileSystem {
             Arc::clone(&handle),
             observer.clone(),
             move |_, scope| match filesystem.open_writer_with_options(&execution_path, &options) {
-                Err(error) => OperationOutcome::Failed(error),
+                Err(error) => {
+                    shrink_byte_budget(&worker_budget);
+                    OperationOutcome::Failed(error)
+                }
                 Ok(writer) => {
                     let resource = super::stream::WorkerStreamDriver::managed(
                         scope,
@@ -570,11 +586,12 @@ impl AsyncLocalFileSystem {
             ));
         };
         let byte_permit = Arc::new(Mutex::new(byte_permit));
-        if limits.max_open_handles == Some(0)
-            || limits
-                .max_open_handles
-                .is_some_and(|limit| limit > self.executor.inner.config.max_open_handles)
-        {
+        let capacity_error = Arc::new(Mutex::new(None));
+        let invalid_handle_limit = match limits.max_open_handles {
+            Some(limit) => limit == 0 || limit > self.executor.inner.config.max_open_handles,
+            None => false,
+        };
+        if invalid_handle_limit {
             return Err(super::LocalSubmitError::new(
                 request,
                 super::LocalSubmitRejection::CapacityExceeded,
@@ -596,6 +613,7 @@ impl AsyncLocalFileSystem {
         let observer = super::LocalFactObserver::with_permit(Arc::clone(&fact_permit));
         let filesystem = self.filesystem.clone();
         let budget_for_task = Arc::clone(&byte_permit);
+        let error_for_task = Arc::clone(&capacity_error);
         let job = super::internal::prepared_local_job::PreparedLocalJob::new(
             Arc::clone(&self.executor.inner),
             request,
@@ -607,15 +625,32 @@ impl AsyncLocalFileSystem {
                 let read = filesystem.read_all_with_options_and_reserver(
                     &execution_path,
                     &execution_options,
-                    |output, additional| reserve_vec_capacity(output, additional, &budget_for_task, byte_limit),
+                    |output, additional| {
+                        reserve_vec_capacity(output, additional, &budget_for_task, byte_limit, &error_for_task)
+                    },
                 );
                 match read {
                     Ok(value) => qubit_operation::OperationOutcome::Succeeded(value),
                     Err(error) => {
-                        let mut permit = budget_for_task.lock().unwrap_or_else(|e| e.into_inner());
+                        let mut permit = match budget_for_task.lock() {
+                            Ok(permit) => permit,
+                            Err(poisoned) => poisoned.into_inner(),
+                        };
                         let amount = permit.amount();
                         permit.shrink(amount);
-                        qubit_operation::OperationOutcome::Failed(error)
+                        let recorded_limit = match capacity_error.lock() {
+                            Ok(mut capacity_error) => capacity_error.take(),
+                            Err(poisoned) => poisoned.into_inner().take(),
+                        };
+                        let structured = match recorded_limit {
+                            Some(limit) => crate::error::LocalFileError::from_resource_limit(
+                                crate::error::LocalFileOperation::Read,
+                                Some(execution_path.clone()),
+                                limit,
+                            ),
+                            None => error,
+                        };
+                        qubit_operation::OperationOutcome::Failed(structured)
                     }
                 }
             },
@@ -653,6 +688,18 @@ fn bind_host_path(base: &Option<PathBuf>, path: &PathBuf) -> PathBuf {
         _ => path.clone(),
     }
 }
+/// Releases all executor-owned bytes after a native open fails.
+///
+/// # Parameters
+/// - `permit` — shared reservation retained by the pending operation.
+fn shrink_byte_budget(permit: &Arc<Mutex<super::internal::permits::Permit>>) {
+    let mut permit = match permit.lock() {
+        Ok(permit) => permit,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    let amount = permit.amount();
+    permit.shrink(amount);
+}
 /// Runs the reserve vec capacity behavior while preserving the operation
 /// lifecycle invariants.
 /// # Parameters
@@ -665,16 +712,37 @@ fn reserve_vec_capacity(
     additional: usize,
     permit: &Arc<Mutex<super::internal::permits::Permit>>,
     maximum: usize,
+    capacity_error: &Arc<Mutex<Option<crate::error::LocalResourceLimitError>>>,
 ) -> std::io::Result<()> {
     let old_capacity = output.capacity();
-    let requested_capacity = output
-        .len()
-        .checked_add(additional)
-        .ok_or_else(|| std::io::Error::other("read capacity overflow"))?;
+    let requested_capacity = match output.len().checked_add(additional) {
+        Some(requested_capacity) => requested_capacity,
+        None => return Err(std::io::Error::other("read capacity overflow")),
+    };
     let target_capacity = requested_capacity.max(old_capacity);
     let delta = target_capacity - old_capacity;
-    let mut lease = permit.lock().unwrap_or_else(|e| e.into_inner());
-    if target_capacity > maximum || !lease.grow(delta) {
+    let mut lease = match permit.lock() {
+        Ok(lease) => lease,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    if target_capacity > maximum {
+        *capacity_error.lock().unwrap_or_else(|error| error.into_inner()) =
+            Some(crate::error::LocalResourceLimitError::new(
+                crate::error::LocalResourceKind::OwnedBytes,
+                maximum,
+                maximum.saturating_sub(old_capacity),
+                delta,
+            ));
+        return Err(std::io::Error::other("executor owned-byte limit exceeded"));
+    }
+    if let Err((limit, remaining, requested)) = lease.try_grow(delta) {
+        *capacity_error.lock().unwrap_or_else(|error| error.into_inner()) =
+            Some(crate::error::LocalResourceLimitError::new(
+                crate::error::LocalResourceKind::OwnedBytes,
+                limit,
+                remaining,
+                requested,
+            ));
         return Err(std::io::Error::other("executor owned-byte limit exceeded"));
     }
     if let Err(error) = output.try_reserve_exact(additional) {
@@ -820,21 +888,22 @@ mod tests {
         )
         .unwrap();
         let permit = Arc::new(Mutex::new(executor.reserve_bytes(0).unwrap()));
+        let capacity_error = Arc::new(Mutex::new(None));
         let mut output = Vec::new();
 
-        reserve_vec_capacity(&mut output, 4, &permit, 16).unwrap();
+        reserve_vec_capacity(&mut output, 4, &permit, 16, &capacity_error).unwrap();
         output.extend_from_slice(b"four");
         let first_capacity = output.capacity();
         assert_eq!(executor.inner.byte_slots.used(), first_capacity);
 
-        reserve_vec_capacity(&mut output, 12, &permit, 16).unwrap();
+        reserve_vec_capacity(&mut output, 12, &permit, 16, &capacity_error).unwrap();
         assert!(output.capacity() > first_capacity);
         assert_eq!(executor.inner.byte_slots.used(), output.capacity());
         output.extend_from_slice(b"twelve bytes");
         let reserved = executor.inner.byte_slots.used();
         let capacity = output.capacity();
 
-        assert!(reserve_vec_capacity(&mut output, 1, &permit, 16).is_err());
+        assert!(reserve_vec_capacity(&mut output, 1, &permit, 16, &capacity_error).is_err());
         assert_eq!(output.capacity(), capacity);
         assert_eq!(executor.inner.byte_slots.used(), reserved);
         drop(permit);
@@ -1022,10 +1091,12 @@ mod tests {
         #[cfg(panic = "unwind")]
         crate::operation::poison_test_mutex(&permit);
 
-        let error = super::reserve_vec_capacity(&mut bytes, usize::MAX, &permit, 8).expect_err("length overflow");
+        let capacity_error = Arc::new(std::sync::Mutex::new(None));
+        let error = super::reserve_vec_capacity(&mut bytes, usize::MAX, &permit, 8, &capacity_error)
+            .expect_err("length overflow");
         assert_eq!(error.to_string(), "read capacity overflow");
         assert_eq!(pool.used(), 1);
-        super::reserve_vec_capacity(&mut bytes, 1, &permit, 8).expect("grow within byte budget");
+        super::reserve_vec_capacity(&mut bytes, 1, &permit, 8, &capacity_error).expect("grow within byte budget");
         assert_eq!(pool.used(), bytes.capacity());
         assert_eq!(bytes, [1]);
         drop(permit);

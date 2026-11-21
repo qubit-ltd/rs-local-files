@@ -411,6 +411,7 @@ fn test_native_append_commit_preserves_bytes_after_later_write_failure() {
     let manager = OperationManager::new(ManagerOptions::default()).unwrap();
     let executor = LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).unwrap();
     let filesystem = LocalFileSystem::host().unwrap().into_async(executor).unwrap();
+
     let (mut opening, observer) = filesystem
         .submit_open_writer(
             &manager,
@@ -2505,6 +2506,277 @@ fn test_settled_walker_can_reopen_immediately() {
     };
     drop(second);
     second_open.wait_settlement().unwrap();
+}
+
+#[test]
+fn test_recursive_walkers_share_executor_handle_capacity() {
+    use qubit_local_files::LocalFileSystem;
+    use qubit_local_files::operation::LocalExecutionConfig;
+    use qubit_local_files::operation::LocalIoExecutor;
+    use qubit_local_files::options::LocalListOptions;
+    use qubit_operation::ManagerOptions;
+    use qubit_operation::OperationManager;
+    use qubit_operation::OperationOutcome;
+
+    let directory = tempfile::tempdir().unwrap();
+    std::fs::create_dir(directory.path().join("nested")).unwrap();
+    std::fs::write(directory.path().join("nested/leaf"), b"x").unwrap();
+    let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+    let executor = LocalIoExecutor::new(
+        manager.clone(),
+        LocalExecutionConfig {
+            max_open_handles: 3,
+            ..LocalExecutionConfig::default()
+        },
+    )
+    .unwrap();
+    let filesystem = LocalFileSystem::host().unwrap().into_async(executor).unwrap();
+
+    assert!(
+        filesystem
+            .submit_open_walker(
+                &manager,
+                Default::default(),
+                directory.path().to_path_buf(),
+                LocalListOptions::new().with_max_open_directories(4),
+            )
+            .is_err()
+    );
+    let mut zero_limit = filesystem
+        .submit_open_walker(
+            &manager,
+            Default::default(),
+            directory.path().to_path_buf(),
+            LocalListOptions::new().with_max_open_directories(0),
+        )
+        .unwrap();
+    assert!(matches!(
+        zero_limit.wait_outcome().unwrap(),
+        OperationOutcome::Failed(error)
+            if error.kind() == qubit_local_files::error::LocalFileErrorKind::InvalidOptions
+    ));
+    zero_limit.wait_settlement().unwrap();
+
+    let mut first = filesystem
+        .submit_open_walker(
+            &manager,
+            Default::default(),
+            directory.path().to_path_buf(),
+            LocalListOptions::new().with_max_open_directories(2),
+        )
+        .unwrap();
+    let mut first_walker = match first.wait_outcome().unwrap() {
+        OperationOutcome::Succeeded(walker) => walker,
+        _ => panic!("first walker should open"),
+    };
+    assert!(
+        filesystem
+            .submit_open_walker(
+                &manager,
+                Default::default(),
+                directory.path().to_path_buf(),
+                LocalListOptions::new().with_max_open_directories(2),
+            )
+            .is_err()
+    );
+    let mut second = filesystem
+        .submit_open_walker(
+            &manager,
+            Default::default(),
+            directory.path().to_path_buf(),
+            LocalListOptions::new().with_max_open_directories(1),
+        )
+        .unwrap();
+    let second_walker = match second.wait_outcome().unwrap() {
+        OperationOutcome::Succeeded(walker) => walker,
+        _ => panic!("one remaining handle should admit the second walker"),
+    };
+    drop(second_walker);
+    second.wait_settlement().unwrap();
+
+    poll_worker(|cx| Box::pin(first_walker.close()).as_mut().poll(cx)).unwrap();
+    drop(first_walker);
+    first.wait_settlement().unwrap();
+    let mut reopened = filesystem
+        .submit_open_walker(
+            &manager,
+            Default::default(),
+            directory.path().to_path_buf(),
+            LocalListOptions::new().with_max_open_directories(2),
+        )
+        .expect("confirmed close returns both reserved handles");
+    let walker = match reopened.wait_outcome().unwrap() {
+        OperationOutcome::Succeeded(walker) => walker,
+        _ => panic!("walker should open after reservation is released"),
+    };
+    drop(walker);
+    reopened.wait_settlement().unwrap();
+
+    let mut reopen = filesystem
+        .submit_open_walker(
+            &manager,
+            Default::default(),
+            directory.path().to_path_buf(),
+            LocalListOptions::new()
+                .with_recursive()
+                .with_max_open_directories(1)
+                .with_reopen_policy(qubit_local_files::options::LocalDirectoryReopenPolicy::Reopen),
+        )
+        .unwrap();
+    let mut reopen_walker = match reopen.wait_outcome().unwrap() {
+        OperationOutcome::Succeeded(walker) => walker,
+        _ => panic!("single-reader reopen walker should open"),
+    };
+    let mut reached_leaf = false;
+    while let Some(batch) = poll_worker(|cx| Box::pin(reopen_walker.next_batch()).as_mut().poll(cx)).unwrap() {
+        reached_leaf |= batch.iter().any(|path| path.ends_with("nested/leaf"));
+    }
+    assert!(reached_leaf, "single-reader Reopen must reach nested entries");
+    drop(reopen_walker);
+    reopen.wait_settlement().unwrap();
+
+    let mut fail = filesystem
+        .submit_open_walker(
+            &manager,
+            Default::default(),
+            directory.path().to_path_buf(),
+            LocalListOptions::new()
+                .with_recursive()
+                .with_max_open_directories(1)
+                .with_reopen_policy(qubit_local_files::options::LocalDirectoryReopenPolicy::Fail),
+        )
+        .unwrap();
+    let mut fail_walker = match fail.wait_outcome().unwrap() {
+        OperationOutcome::Succeeded(walker) => walker,
+        _ => panic!("single-reader Fail walker should open"),
+    };
+    let mut saw_limit = false;
+    loop {
+        match poll_worker(|cx| Box::pin(fail_walker.next_batch()).as_mut().poll(cx)) {
+            Ok(Some(_)) => {}
+            Ok(None) => break,
+            Err(error) => {
+                saw_limit = error.resource_limit_error().is_some_and(|limit| {
+                    limit.resource() == qubit_local_files::error::LocalResourceKind::OpenDirectory
+                });
+                break;
+            }
+        }
+    }
+    assert!(saw_limit, "single-reader Fail must return a structured directory limit");
+    drop(fail_walker);
+    fail.wait_settlement().unwrap();
+}
+
+#[test]
+fn test_failed_stream_opens_release_byte_reservations_before_outcome() {
+    use qubit_local_files::LocalFileSystem;
+    use qubit_local_files::operation::LocalExecutionConfig;
+    use qubit_local_files::operation::LocalIoExecutor;
+    use qubit_local_files::options::LocalListOptions;
+    use qubit_local_files::options::LocalReadOptions;
+    use qubit_local_files::options::LocalWriteOptions;
+    use qubit_operation::ManagerOptions;
+    use qubit_operation::OperationManager;
+    use qubit_operation::OperationOutcome;
+
+    let directory = tempfile::tempdir().unwrap();
+    let good_file = directory.path().join("good");
+    std::fs::write(&good_file, b"ok").unwrap();
+    let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+    let executor = LocalIoExecutor::new(
+        manager.clone(),
+        LocalExecutionConfig {
+            max_owned_bytes: 256 * 1024,
+            ..LocalExecutionConfig::default()
+        },
+    )
+    .unwrap();
+    let filesystem = LocalFileSystem::host().unwrap().into_async(executor).unwrap();
+
+    let mut failed_reader = filesystem
+        .submit_open_reader(
+            &manager,
+            Default::default(),
+            directory.path().join("missing"),
+            LocalReadOptions::default(),
+        )
+        .unwrap();
+    failed_reader.wait_settlement().unwrap();
+    let mut reader_opening = filesystem
+        .submit_open_reader(&manager, Default::default(), good_file, LocalReadOptions::default())
+        .expect("failed native reader open releases its byte reservation");
+    let mut reader = match reader_opening.wait_outcome().unwrap() {
+        OperationOutcome::Succeeded(reader) => reader,
+        _ => panic!("valid reader should open"),
+    };
+    poll_worker(|cx| Box::pin(reader.close()).as_mut().poll(cx)).unwrap();
+    drop(reader);
+    reader_opening.wait_settlement().unwrap();
+    assert!(matches!(
+        failed_reader.try_take_outcome().unwrap(),
+        Some(OperationOutcome::Failed(_))
+    ));
+
+    let mut failed_writer = filesystem
+        .submit_open_writer(
+            &manager,
+            Default::default(),
+            directory.path().join("absent").join("writer"),
+            LocalWriteOptions::default(),
+        )
+        .unwrap()
+        .0;
+    failed_writer.wait_settlement().unwrap();
+    let mut writer_opening = filesystem
+        .submit_open_writer(
+            &manager,
+            Default::default(),
+            directory.path().join("writer"),
+            LocalWriteOptions::default(),
+        )
+        .expect("failed native writer open releases its byte reservation")
+        .0;
+    let mut writer = match writer_opening.wait_outcome().unwrap() {
+        OperationOutcome::Succeeded(writer) => writer,
+        _ => panic!("valid writer should open"),
+    };
+    poll_worker(|cx| Box::pin(writer.close()).as_mut().poll(cx)).unwrap();
+    drop(writer);
+    writer_opening.wait_settlement().unwrap();
+    assert!(matches!(
+        failed_writer.try_take_outcome().unwrap(),
+        Some(OperationOutcome::Failed(_))
+    ));
+
+    let mut failed_walker = filesystem
+        .submit_open_walker(
+            &manager,
+            Default::default(),
+            directory.path().join("not-a-directory"),
+            LocalListOptions::default(),
+        )
+        .unwrap();
+    failed_walker.wait_settlement().unwrap();
+    let mut walker_opening = filesystem
+        .submit_open_walker(
+            &manager,
+            Default::default(),
+            directory.path().to_path_buf(),
+            LocalListOptions::default(),
+        )
+        .expect("failed native walker open releases its byte reservation");
+    let mut walker = match walker_opening.wait_outcome().unwrap() {
+        OperationOutcome::Succeeded(walker) => walker,
+        _ => panic!("valid walker should open"),
+    };
+    poll_worker(|cx| Box::pin(walker.close()).as_mut().poll(cx)).unwrap();
+    drop(walker);
+    walker_opening.wait_settlement().unwrap();
+    assert!(matches!(
+        failed_walker.try_take_outcome().unwrap(),
+        Some(OperationOutcome::Failed(_))
+    ));
 }
 
 #[test]

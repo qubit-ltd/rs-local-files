@@ -142,6 +142,13 @@ impl LocalIoExecutor {
     pub(crate) fn reserve_handle(&self) -> Option<Permit> {
         self.inner.handle_slots.try_acquire(1)
     }
+    /// Atomically reserves ordinary handles for a multi-reader operation.
+    ///
+    /// # Parameters
+    /// - `amount` — number of handles to reserve as one indivisible request.
+    pub(crate) fn reserve_handles(&self, amount: usize) -> Option<Permit> {
+        self.inner.handle_slots.try_acquire(amount)
+    }
     /// Runs the reserve disk behavior while preserving the operation lifecycle
     /// invariants.
     /// # Parameters

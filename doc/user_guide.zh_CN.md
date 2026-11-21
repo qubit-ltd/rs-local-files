@@ -89,6 +89,13 @@ assert_eq!(settlement.recovery_count, 0);
 `next_batch()` 返回拥有型路径批次。即使先前批次已经返回，也要处理后续批次错误；提前停止时调用
 `close()`。关闭前创建的 observer 会继续持有 worker 资源，因此等待打开操作 settlement 前应先释放它。
 
+每次提交 walker 时，都会从 executor 共享的普通句柄池一次性预留完整的
+`max_open_directories` 数量。未设置时，预留数量和 walker 上限均为一；临时路径解析句柄、捕获的根
+authority 与 cleanup reservation 使用各自的生命周期。并发 walker 会竞争同一资源池，关闭后归还整份
+预留。若嵌套遍历需要同时保留多个目录 reader，应显式设置正数上限，并确保
+`max_open_handles` 足以容纳这份完整预留及其他活跃操作。零仍是无效 walker 选项；共享池不能满足
+完整预留时，以 `CapacityExceeded` 拒绝请求。
+
 如果清理报告保留了 walker owner，settlement 会携带 recovery handle。清理成功或完成运维交接前应
 一直保留它。原生 walker 接纳时已预留清理队列槽位，普通队列饱和不会占用该槽位；worker 已停止或
 清理任务 panic 属于该 executor 的终止故障，`try_retry()` 无法恢复已停止的 worker。

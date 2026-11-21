@@ -1821,7 +1821,12 @@ authority。已接纳请求持有自己的输入和提交时 options，之后修
 及清理 owner。取消或停止操作不代表已经开始的原生调用会被中断；清理尚未确认时，恢复 owner
 仍可继续提供核查与重试入口。
 
-异步目录 walker 持有原生 iterator、一份有界批次字节 reservation 和一份 cleanup reservation。每个
+异步目录 walker 持有原生 iterator、一份有界批次字节 reservation、一份用于活跃枚举 reader 的
+executor 普通句柄池 reservation 和一份 cleanup reservation。reader reservation 按有效
+`max_open_directories` 上限原子申请整份：缺省为一，显式正数则按该数值预留。零仍是无效 walker
+选项；请求超过 executor 总容量或共享池无法满足完整预留时，以 `CapacityExceeded` 拒绝。相同有效
+上限会传给原生 walker。关闭确认后整份预留归还，即使实际活跃 reader 少于预留数。临时路径解析句柄、
+捕获的根 authority 与 cleanup 容量仍分别核算。每个
 `next_batch()` 请求都有稳定标识：取消这次等待不会取消已接纳的 worker 请求；若批次先收集到成功路径，再遇到
 iterator 错误，会先返回成功前缀，再交付后发错误。显式关闭、自然 EOF 和丢弃未完成 walker 共用同一停止流程。
 停止时丢弃缓冲条目、延迟错误及尚未交付的 worker 结果；迟到完成不能重新发布这些结果。成功清理会先销毁

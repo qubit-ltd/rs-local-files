@@ -1667,7 +1667,16 @@ call was interrupted, and recovery owners remain available when cleanup is
 unconfirmed.
 
 An asynchronous directory walker holds its native iterator, one shared bounded
-batch-byte reservation, and a cleanup reservation. Each `next_batch()` request
+batch-byte reservation, a reservation from the executor's ordinary handle pool
+for its active enumeration readers, and a cleanup reservation. The reader
+reservation is acquired atomically for the full effective
+`max_open_directories` limit: one when omitted, or the explicit positive
+limit. Zero remains an invalid walker option; requests above executor capacity
+or competing for unavailable shared capacity are rejected with
+`CapacityExceeded`. The same effective limit is passed to the native walker.
+The whole reader reservation returns after confirmed close, even when fewer
+readers were active. Temporary resolution handles, captured root authority,
+and cleanup capacity remain separately accounted. Each `next_batch()` request
 has a stable identifier: cancelling that wait does not cancel an accepted
 worker request, and a successful prefix is returned before a later iterator
 error. Explicit close, natural EOF, and dropping an unfinished walker converge
