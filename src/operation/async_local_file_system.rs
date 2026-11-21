@@ -808,9 +808,23 @@ fn reserve_vec_capacity(
         return Err(std::io::Error::other(error));
     }
     let actual_delta = output.capacity().saturating_sub(old_capacity);
-    if actual_delta < delta {
-        lease.shrink(delta - actual_delta);
-    } else if actual_delta > delta && !lease.grow(actual_delta - delta) {
+    reconcile_vec_capacity(&mut lease, delta, actual_delta)
+}
+
+/// Reconciles a byte permit with the capacity returned by an allocator.
+///
+/// # Parameters
+/// - `lease` — byte permit to reconcile.
+/// - `requested_delta` — capacity initially reserved before allocation.
+/// - `actual_delta` — capacity reported after allocation.
+fn reconcile_vec_capacity(
+    lease: &mut super::internal::permits::Permit,
+    requested_delta: usize,
+    actual_delta: usize,
+) -> std::io::Result<()> {
+    if actual_delta < requested_delta {
+        lease.shrink(requested_delta - actual_delta);
+    } else if actual_delta > requested_delta && !lease.grow(actual_delta - requested_delta) {
         let reserved = lease.amount();
         lease.shrink(reserved);
         return Err(std::io::Error::other(
@@ -1181,6 +1195,34 @@ mod tests {
         assert_eq!(executor.inner.byte_slots.used(), reserved);
         drop(permit);
         assert_eq!(executor.inner.byte_slots.used(), 0);
+    }
+
+    #[test]
+    fn test_read_buffer_capacity_reconciliation_handles_synthetic_over_allocation() {
+        let pool = crate::operation::internal::permits::PermitPool::new(7);
+        let mut permit = pool.try_acquire(4).expect("requested capacity");
+
+        super::reconcile_vec_capacity(&mut permit, 4, 7).expect("allocator over-allocation");
+        assert_eq!(permit.amount(), 7);
+        assert_eq!(pool.used(), 7);
+
+        drop(permit);
+        assert_eq!(pool.used(), 0);
+    }
+
+    #[test]
+    fn test_read_buffer_capacity_reconciliation_refunds_when_over_allocation_exceeds_limit() {
+        let pool = crate::operation::internal::permits::PermitPool::new(6);
+        let mut permit = pool.try_acquire(4).expect("requested capacity");
+
+        let error =
+            super::reconcile_vec_capacity(&mut permit, 4, 7).expect_err("unaffordable allocator over-allocation");
+        assert_eq!(
+            error.to_string(),
+            "allocator capacity exceeds executor owned-byte limit"
+        );
+        assert_eq!(permit.amount(), 0);
+        assert_eq!(pool.used(), 0);
     }
 
     #[test]
