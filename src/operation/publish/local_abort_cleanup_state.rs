@@ -23,6 +23,8 @@ pub(in crate::operation) struct LocalAbortCleanupState<W: Send + 'static> {
     pub(in crate::operation) owner: Mutex<Option<LocalManagedAbortResource<W>>>,
     /// Cleanup result returned to the operation scope.
     pub(in crate::operation) result: Mutex<Option<CleanupOutcome<LocalManagedAbortResource<W>>>>,
+    /// Worker result awaiting release of its cleanup queue permit.
+    pub(in crate::operation) pending_result: Mutex<Option<CleanupOutcome<LocalManagedAbortResource<W>>>>,
     /// Task to wake after the worker publishes the cleanup result.
     pub(in crate::operation) waker: Mutex<Option<Waker>>,
 }

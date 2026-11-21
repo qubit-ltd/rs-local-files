@@ -19,6 +19,8 @@ pub(super) struct CleanupState {
     /// Worker result; the outer option distinguishes “not finished” from
     /// finish.
     pub(super) result: Mutex<Option<Option<(crate::LocalFileError, LocalTempResource)>>>,
+    /// Worker result awaiting release of its cleanup queue permit.
+    pub(super) pending_result: Mutex<Option<Option<(crate::LocalFileError, LocalTempResource)>>>,
     /// Most recently registered task waker, if the future is being polled.
     pub(super) waker: Mutex<Option<Waker>>,
     /// Resource not yet taken by the cleanup worker.

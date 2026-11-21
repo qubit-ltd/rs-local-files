@@ -18,7 +18,7 @@ use super::CleanupState;
 use super::CleanupWait;
 use super::cleanup_failure;
 use super::cleanup_resource;
-use super::safe_wake;
+use super::publish_cleanup_result;
 use crate::operation::executor::LocalIoExecutor;
 use crate::operation::temp::LocalTempResource;
 
@@ -57,6 +57,7 @@ impl AsyncCleanup<LocalTempResource> for LocalCleanup {
         };
         let state = Arc::new(CleanupState {
             result: Mutex::new(None),
+            pending_result: Mutex::new(None),
             waker: Mutex::new(None),
             owner: Mutex::new(Some(resource)),
         });
@@ -66,13 +67,11 @@ impl AsyncCleanup<LocalTempResource> for LocalCleanup {
                 return;
             };
             let result = cleanup_resource(resource);
-            *worker_state.result.lock().unwrap_or_else(|e| e.into_inner()) = Some(result);
-            let waker = worker_state.waker.lock().unwrap_or_else(|e| e.into_inner()).take();
-            if let Some(waker) = waker {
-                safe_wake(waker);
-            }
+            *worker_state.pending_result.lock().unwrap_or_else(|e| e.into_inner()) = Some(result);
         });
-        if let Err((_job, _permit)) = self.executor.enqueue_cleanup(job, permit) {
+        let completion_state = Arc::clone(&state);
+        let completion = Box::new(move || publish_cleanup_result(&completion_state));
+        if let Err((_job, _permit, _completion)) = self.executor.enqueue_cleanup_with_completion(job, permit, completion) {
             let resource = state
                 .owner
                 .lock()
