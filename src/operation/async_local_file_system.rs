@@ -915,6 +915,210 @@ mod tests {
     use crate::operation::LocalExecutionConfig;
     use crate::operation::LocalIoExecutor;
 
+    struct WorkerQueueGate(Option<std::sync::mpsc::SyncSender<()>>);
+
+    impl Drop for WorkerQueueGate {
+        fn drop(&mut self) {
+            if let Some(release) = self.0.take() {
+                let _ = release.send(());
+            }
+        }
+    }
+
+    fn filesystem_with_blocked_worker(
+        byte_budget: usize,
+    ) -> (OperationManager, AsyncLocalFileSystem, WorkerQueueGate) {
+        use std::sync::mpsc::sync_channel;
+        use std::time::Duration;
+
+        let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+        let executor = LocalIoExecutor::new(
+            manager.clone(),
+            LocalExecutionConfig {
+                worker_count: 1,
+                queue_capacity: 1,
+                waiter_capacity: 1,
+                max_owned_bytes: byte_budget,
+                max_open_handles: 1,
+                max_fact_records: 1,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let filesystem = block_on(AsyncLocalFileSystem::host(executor.clone())).unwrap();
+        let (entered_tx, entered_rx) = sync_channel(1);
+        let (release_tx, release_rx) = sync_channel(1);
+        assert!(
+            executor
+                .inner
+                .queue
+                .push(
+                    Box::new(move || {
+                        entered_tx.send(()).unwrap();
+                        let _ = release_rx.recv();
+                    }),
+                    false,
+                    2,
+                )
+                .is_ok()
+        );
+        entered_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        (manager, filesystem, WorkerQueueGate(Some(release_tx)))
+    }
+
+    fn assert_cancelled_open_outcome<T: Send + 'static>(
+        operation: &mut crate::operation::LocalOperation<T>,
+        reason: qubit_operation::StopReason,
+    ) {
+        use qubit_operation::OperationOutcome;
+
+        assert!(matches!(
+            operation.try_take_outcome().unwrap(),
+            Some(OperationOutcome::Stopped(report)) if report.reason == reason
+        ));
+    }
+
+    #[test]
+    fn test_queued_cancelled_reader_reuses_open_budget_before_taking_outcome() {
+        use qubit_operation::OperationOutcome;
+        use qubit_operation::StopReason;
+
+        let directory = tempfile::tempdir().unwrap();
+        let queued_path = directory.path().join("queued-reader");
+        let replacement_path = directory.path().join("replacement-reader");
+        std::fs::write(&queued_path, b"queued").unwrap();
+        std::fs::write(&replacement_path, b"replacement").unwrap();
+        let (manager, filesystem, gate) =
+            filesystem_with_blocked_worker(super::super::stream::LOCAL_STREAM_BUFFER_SIZE);
+        let mut cancelled = filesystem
+            .submit_open_reader(
+                &manager,
+                Default::default(),
+                queued_path,
+                crate::LocalReadOptions::default(),
+            )
+            .unwrap();
+        assert_eq!(
+            cancelled.request_stop(StopReason::Timeout),
+            qubit_operation::StopRequestStatus::Accepted
+        );
+        drop(gate);
+        cancelled.wait_settlement().unwrap();
+
+        let mut replacement = filesystem
+            .submit_open_reader(
+                &manager,
+                Default::default(),
+                replacement_path,
+                crate::LocalReadOptions::default(),
+            )
+            .expect(
+                "the first post-cancellation submission should reuse the byte and handle budgets",
+            );
+        assert_cancelled_open_outcome(&mut cancelled, StopReason::Timeout);
+        let mut reader = match replacement.wait_outcome().unwrap() {
+            OperationOutcome::Succeeded(reader) => reader,
+            _ => panic!("replacement reader should open"),
+        };
+        block_on(reader.close()).unwrap();
+        drop(reader);
+        replacement.wait_settlement().unwrap();
+    }
+
+    #[test]
+    fn test_queued_cancelled_writer_reuses_open_budget_without_writing_target() {
+        use qubit_operation::OperationOutcome;
+        use qubit_operation::StopReason;
+
+        let directory = tempfile::tempdir().unwrap();
+        let cancelled_path = directory.path().join("cancelled-writer");
+        let replacement_path = directory.path().join("replacement-writer");
+        let (manager, filesystem, gate) =
+            filesystem_with_blocked_worker(super::super::stream::LOCAL_STREAM_BUFFER_SIZE);
+        let (mut cancelled, _) = filesystem
+            .submit_open_writer(
+                &manager,
+                Default::default(),
+                cancelled_path.clone(),
+                crate::LocalWriteOptions::default(),
+            )
+            .unwrap();
+        assert_eq!(
+            cancelled.request_stop(StopReason::Timeout),
+            qubit_operation::StopRequestStatus::Accepted
+        );
+        drop(gate);
+        cancelled.wait_settlement().unwrap();
+
+        let (mut replacement, _) = filesystem
+            .submit_open_writer(
+                &manager,
+                Default::default(),
+                replacement_path,
+                crate::LocalWriteOptions::default(),
+            )
+            .expect(
+                "the first post-cancellation submission should reuse the byte and handle budgets",
+            );
+        assert_cancelled_open_outcome(&mut cancelled, StopReason::Timeout);
+        assert!(
+            !cancelled_path.exists(),
+            "a cancelled queued writer must not create its target"
+        );
+        let mut writer = match replacement.wait_outcome().unwrap() {
+            OperationOutcome::Succeeded(writer) => writer,
+            _ => panic!("replacement writer should open"),
+        };
+        block_on(writer.close()).unwrap();
+        drop(writer);
+        replacement.wait_settlement().unwrap();
+    }
+
+    #[test]
+    fn test_queued_cancelled_walker_reuses_open_budget_before_taking_outcome() {
+        use qubit_operation::OperationOutcome;
+        use qubit_operation::StopReason;
+
+        let directory = tempfile::tempdir().unwrap();
+        std::fs::create_dir(directory.path().join("queued-walker")).unwrap();
+        std::fs::create_dir(directory.path().join("replacement-walker")).unwrap();
+        let (manager, filesystem, gate) =
+            filesystem_with_blocked_worker(super::super::stream::LOCAL_WALK_BATCH_BYTES);
+        let mut cancelled = filesystem
+            .submit_open_walker(
+                &manager,
+                Default::default(),
+                directory.path().join("queued-walker"),
+                crate::LocalListOptions::default(),
+            )
+            .unwrap();
+        assert_eq!(
+            cancelled.request_stop(StopReason::Timeout),
+            qubit_operation::StopRequestStatus::Accepted
+        );
+        drop(gate);
+        cancelled.wait_settlement().unwrap();
+
+        let mut replacement = filesystem
+            .submit_open_walker(
+                &manager,
+                Default::default(),
+                directory.path().join("replacement-walker"),
+                crate::LocalListOptions::default(),
+            )
+            .expect(
+                "the first post-cancellation submission should reuse the byte and handle budgets",
+            );
+        assert_cancelled_open_outcome(&mut cancelled, StopReason::Timeout);
+        let mut walker = match replacement.wait_outcome().unwrap() {
+            OperationOutcome::Succeeded(walker) => walker,
+            _ => panic!("replacement walker should open"),
+        };
+        block_on(walker.close()).unwrap();
+        drop(walker);
+        replacement.wait_settlement().unwrap();
+    }
+
     fn block_on<F: std::future::Future>(future: F) -> F::Output {
         struct ThreadWake(std::thread::Thread);
         impl Wake for ThreadWake {
