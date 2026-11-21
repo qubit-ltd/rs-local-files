@@ -1683,6 +1683,14 @@ even while the worker callback that published that result is returning. Path
 batches already returned remain owned by the caller and keep their public
 `Vec<PathBuf>` representation.
 
+The cleanup reservation is acquired before the walker is published, so a
+transient full ordinary queue cannot consume the walker's reserved cleanup
+slot. Executor shutdown is different: the worker queue rejects cleanup
+permanently, while settlement retains the owner in a recovery handle. Retrying
+that handle cannot restart a stopped executor; callers must keep the owner for
+operator handling. Internal panic injection verifies this retained-owner path,
+but does not establish a user-triggerable transient cleanup rejection.
+
 `AsyncLocalFileWriter` preserves the synchronous staged/append distinction.
 Staged bytes remain unpublished until commit; append bytes become published
 when the worker confirms each write. Commit first settles accepted bytes and

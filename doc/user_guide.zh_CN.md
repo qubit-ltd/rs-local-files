@@ -89,9 +89,14 @@ assert_eq!(settlement.recovery_count, 0);
 `next_batch()` 返回拥有型路径批次。即使先前批次已经返回，也要处理后续批次错误；提前停止时调用
 `close()`。关闭前创建的 observer 会继续持有 worker 资源，因此等待打开操作 settlement 前应先释放它。
 
+如果清理报告保留了 walker owner，settlement 会携带 recovery handle。清理成功或完成运维交接前应
+一直保留它。原生 walker 接纳时已预留清理队列槽位，普通队列饱和不会占用该槽位；worker 已停止或
+清理任务 panic 属于该 executor 的终止故障，`try_retry()` 无法恢复已停止的 worker。
+
 ```rust,no_run
 # #[cfg(feature = "async")]
-# async fn example() -> Result<(), Box<dyn std::error::Error>> {
+# async fn example() -> Result<(Vec<String>, Vec<qubit_operation::RecoveryHandle>), Box<dyn std::error::Error>> {
+// BEGIN executable async walker recovery example
 use std::path::PathBuf;
 use qubit_local_files::{AsyncLocalFileSystem, LocalExecutionConfig, LocalIoExecutor};
 use qubit_local_files::options::LocalListOptions;
@@ -126,13 +131,22 @@ let observer_result = observer.wait_closed().await;
 drop(observer);
 drop(walker);
 let settlement = opening.wait_settlement().await;
-walk_result?;
-close_result?;
-observer_result?;
-assert_eq!(settlement.recovery_count, 0);
-# Ok(())
+let diagnostics = [walk_result, close_result, observer_result]
+    .into_iter()
+    .filter_map(Result::err)
+    .map(|error| error.to_string())
+    .collect::<Vec<_>>();
+for diagnostic in &diagnostics {
+    eprintln!("walker 操作诊断：{diagnostic}");
+}
+Ok((diagnostics, settlement.recoveries.to_vec()))
+// END executable async walker recovery example
 # }
 ```
+
+不要在尝试关闭 walker 前传播遍历错误；应分别记录遍历和关闭诊断，并等待 settlement。如果
+settlement 报告了保留的 recovery，应将这些 handle 与诊断一起交给负责重试或运维交接的组件；
+丢弃 handle 会放弃这份恢复所有权。
 
 Outcome 报告操作的类型化结果；settlement 报告 executor 是否已释放输入、完成资源清理，
 或保留了可恢复 owner。丢弃操作 handle 不会取消已接纳任务。Rooted 临时资源默认不能导出
@@ -141,9 +155,10 @@ Outcome 报告操作的类型化结果；settlement 报告 executor 是否已释
 清理报告保留资源时，应继续保留恢复 handle。同步 writer 使用 `commit()` 发布或使用
 `abort()` 放弃。异步 `AsyncLocalFileWriter` 使用 `commit()` 发布 staged 内容，并用
 `close()` 结束句柄：第一次 poll commit 前关闭 staged writer 会清理暂存文件；commit 开始后，
-即使已接纳写入仍在排空，close 也会继续完成该提交。Append 字节在写入被接纳时发布；空 append
-commit 不产生发布或修改事件。`settle()` 等待已接纳字节送达 native writer；`flush_async()` 不会
-发布 staged 内容。
+即使已接纳写入仍在排空，close 也会继续完成该提交。接纳 append 写入仅表示字节已复制到 writer
+持有的队列；worker 确认 native 写入成功后才记录为已发布。空 append commit 不产生发布或修改事件。
+`settle()` 等待所有已接纳字节送达 native writer，并报告 worker 错误；`flush_async()` 不会发布
+staged 内容，也不保证数据已持久化。
 
 第一次 poll `close()` 时 writer 进入 closing 状态。此后尚未开始的非空 write、flush 和 commit
 都会立即失败，即使 close future 随后被丢弃也不恢复接纳。再次 poll `close()` 会继续同一关闭流程。

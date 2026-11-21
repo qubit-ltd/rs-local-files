@@ -1830,6 +1830,11 @@ iterator，归还 handle、批次字节和 cleanup reservation，再发布终态
 及其字节 reservation，并向每个等待方返回相同错误。关闭确认后，即使发布结果的 worker 回调尚在返回，批次字节
 reservation 也已可复用。已经返回的路径批次仍由调用方持有，公开类型继续是 `Vec<PathBuf>`。
 
+walker 发布前会先预留 cleanup reservation，因此普通队列暂时已满不会占用它的清理槽位。executor
+关闭则不同：worker queue 会永久拒绝清理，settlement 会通过 recovery handle 保留 owner。重试该
+handle 不能重启已停止的 executor；调用方须保留 owner 交给运维处理。内部 panic 注入验证了保留
+owner 的路径，但不能证明用户可触发暂态清理拒绝。
+
 `AsyncLocalFileWriter` 保留同步 writer 的 staged/append 区别。Staged 字节在 commit 前不会
 发布；append 字节在 worker 确认每次写入时即已发布。Commit 先等待已接纳字节完成，再入队一个
 稳定 worker 请求。第一次 poll 会先建立屏障，再开始排空；从这时起新的 write 和 flush 会被拒绝。

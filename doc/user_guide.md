@@ -96,9 +96,17 @@ earlier batches were already returned, or stop early with `close()`. An observer
 created before close keeps the worker resource alive, so release it before
 waiting for the opening operation to settle.
 
+If cleanup reports a retained walker owner, settlement carries a recovery handle.
+Keep it until cleanup succeeds or ownership is handed to an operator. A walker
+cleanup slot is reserved when the native walker is admitted, so ordinary queue
+saturation cannot consume that slot; a stopped worker or cleanup panic is a
+terminal failure for that executor, and `try_retry()` cannot restore a worker
+that has stopped.
+
 ```rust,no_run
 # #[cfg(feature = "async")]
-# async fn example() -> Result<(), Box<dyn std::error::Error>> {
+# async fn example() -> Result<(Vec<String>, Vec<qubit_operation::RecoveryHandle>), Box<dyn std::error::Error>> {
+// BEGIN executable async walker recovery example
 use std::path::PathBuf;
 use qubit_local_files::{AsyncLocalFileSystem, LocalExecutionConfig, LocalIoExecutor};
 use qubit_local_files::options::LocalListOptions;
@@ -133,13 +141,24 @@ let observer_result = observer.wait_closed().await;
 drop(observer);
 drop(walker);
 let settlement = opening.wait_settlement().await;
-walk_result?;
-close_result?;
-observer_result?;
-assert_eq!(settlement.recovery_count, 0);
-# Ok(())
+let diagnostics = [walk_result, close_result, observer_result]
+    .into_iter()
+    .filter_map(Result::err)
+    .map(|error| error.to_string())
+    .collect::<Vec<_>>();
+for diagnostic in &diagnostics {
+    eprintln!("walker operation diagnostic: {diagnostic}");
+}
+Ok((diagnostics, settlement.recoveries.to_vec()))
+// END executable async walker recovery example
 # }
 ```
+
+Do not propagate the walk error before attempting close and waiting for
+settlement. Record the walk and close diagnostics independently. If settlement
+reports retained recoveries, move those handles together with the diagnostics
+to the component responsible for retry or operator handoff; dropping them
+relinquishes that recovery ownership.
 
 An outcome reports the operation's typed result; settlement reports whether
 the executor released its inputs and completed resource cleanup or retained a
@@ -153,10 +172,12 @@ synchronous writer, call `commit()` to publish or `abort()` to discard. The
 asynchronous `AsyncLocalFileWriter` uses `commit()` to publish staged content
 and `close()` to end the handle: closing a staged writer before the first
 commit poll aborts its temporary file; after commit starts, close completes
-that commit even while accepted writes are still settling. Append writes are
-published as accepted, and an empty append commit creates no publication or
-modification event. `settle()` waits for accepted writes to reach the native
-writer; `flush_async()` does not publish staged content.
+that commit even while accepted writes are still settling. Accepting an append
+write means its bytes were copied into the writer-owned queue; publication is
+recorded only after the worker confirms the native write. An empty append
+commit creates no publication or modification event. `settle()` waits for all
+accepted writes to reach the native writer and reports worker errors;
+`flush_async()` does not publish staged content or promise durable storage.
 
 The first poll of `close()` marks the writer as closing. From then on, new
 non-empty writes, flushes, and commits that had not already started fail
