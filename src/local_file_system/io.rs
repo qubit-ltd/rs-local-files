@@ -7,6 +7,8 @@
 // =============================================================================
 //! Stateful Host or Rooted local filesystem service.
 
+use std::path::PathBuf;
+
 use super::HostLocalFileSystem;
 use super::LocalFileError;
 use super::LocalFileErrorKind;
@@ -32,6 +34,32 @@ use crate::path::LocalNamespacePath;
 use crate::test_support::TestFaultPoint;
 
 impl LocalFileSystem {
+    /// Opens a reader and returns the diagnostic coordinates from its single
+    /// path binding.
+    ///
+    /// The returned path and PWD belong to the same resolution used to open
+    /// the reader, so later read failures do not need to resolve the request
+    /// again.
+    pub(crate) fn open_reader_with_context(
+        &self,
+        path: &Path,
+        options: &LocalReadOptions,
+    ) -> LocalResult<(LocalFileReader, PathBuf, Option<PathBuf>)> {
+        let symlink_policy = self.read_symlink_policy(options, None);
+        validate_scope_symlink_policy(self.scope(), symlink_policy, LocalFileOperation::OpenReader, Some(path))?;
+        let resolver = self.resolver_for(path, LocalFileOperation::OpenReader)?;
+        let resolved = resolve_operation_path(&resolver, path, LocalFileOperation::OpenReader)?;
+        let diagnostic_path = resolved.namespace_absolute().to_path_buf();
+        let current_directory = resolver.current_directory().map(Path::to_path_buf);
+        let reader = self.open_resolved_reader(
+            &resolved,
+            options,
+            LocalFileOperation::OpenReader,
+            resolver.current_directory(),
+        )?;
+        Ok((reader, diagnostic_path, current_directory))
+    }
+
     /// Opens a reader using this instance's default reader options.
     ///
     /// Returns the owned reader or error described by
@@ -72,16 +100,7 @@ impl LocalFileSystem {
     /// Returns path-resolution, policy, type, timeout, or native opening
     /// errors.
     pub fn open_reader_with_options(&self, path: &Path, options: &LocalReadOptions) -> LocalResult<LocalFileReader> {
-        let symlink_policy = self.read_symlink_policy(options, None);
-        validate_scope_symlink_policy(self.scope(), symlink_policy, LocalFileOperation::OpenReader, Some(path))?;
-        let resolver = self.resolver_for(path, LocalFileOperation::OpenReader)?;
-        let resolved = resolve_operation_path(&resolver, path, LocalFileOperation::OpenReader)?;
-        self.open_resolved_reader(
-            &resolved,
-            options,
-            LocalFileOperation::OpenReader,
-            resolver.current_directory(),
-        )
+        self.open_reader_with_context(path, options).map(|(reader, _, _)| reader)
     }
 
     /// Opens a writer using this instance's default writer options.
