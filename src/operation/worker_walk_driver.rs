@@ -25,6 +25,7 @@ use super::worker_walk_close_state::WorkerWalkCloseState;
 use super::worker_walk_command::WorkerWalkCommand;
 use super::worker_walk_cursor::WorkerWalkCursor;
 use super::worker_walk_inner::WorkerWalkInner;
+use super::worker_walk_inner::dispose_panic_payload;
 
 #[cfg(test)]
 fn pause_walk_batch_transfer_test_gate(inner: &WorkerWalkInner, request_id: u64, batch_len: usize) {
@@ -415,11 +416,8 @@ impl LocalWalkDriver for WorkerWalkDriver {
 ///
 /// * `waker` - Optional waiter to destroy outside the command lock.
 fn drop_walk_waker(waker: Option<std::task::Waker>) {
-    let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| drop(waker))).err();
-    if let Some(payload) = panic
-        && let Err(payload) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| drop(payload)))
-    {
-        std::mem::forget(payload);
+    if let Err(payload) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| drop(waker))) {
+        dispose_panic_payload(payload);
     }
 }
 
@@ -908,6 +906,50 @@ mod tests {
         assert!(probe.clones.load(Ordering::Relaxed) >= 3);
         assert!(probe.drops.load(Ordering::Relaxed) >= 2);
         assert_eq!(0, probe.locked_callbacks.load(Ordering::Relaxed));
+    }
+
+    #[test]
+    #[cfg(panic = "unwind")]
+    fn test_compatibility_close_poll_preserves_terminal_result_when_waker_drop_panics() {
+        for (result, is_error) in [
+            (Ok(()), false),
+            (
+                Err(io::Error::new(
+                    io::ErrorKind::PermissionDenied,
+                    "original close failure",
+                )),
+                true,
+            ),
+        ] {
+            let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+            let executor = LocalIoExecutor::new(manager, LocalExecutionConfig::default()).unwrap();
+            let directory = tempfile::tempdir().unwrap();
+            let driver = direct_driver(&directory, executor);
+            let probe = Arc::new(PanicDropWakerProbe {
+                drops: AtomicUsize::new(0),
+                panic_on_drop: AtomicBool::new(true),
+            });
+            let waker = panic_drop_waker(Arc::clone(&probe));
+            let mut context = Context::from_waker(&waker);
+            driver.0.publish_close(result);
+
+            let polled = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                driver.poll_closed(&mut context)
+            }));
+            assert!(
+                polled.is_ok(),
+                "compatibility poll must preserve published close result"
+            );
+            match polled.unwrap() {
+                Poll::Ready(Ok(())) if !is_error => {}
+                Poll::Ready(Err(error)) if is_error => {
+                    assert_eq!(io::ErrorKind::PermissionDenied, error.kind());
+                    assert_eq!("original close failure", error.to_string());
+                }
+                result => panic!("unexpected compatibility close result: {result:?}"),
+            }
+            assert_eq!(1, probe.drops.load(Ordering::SeqCst));
+        }
     }
 
     #[test]
