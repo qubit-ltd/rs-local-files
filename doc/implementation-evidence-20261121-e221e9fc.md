@@ -71,3 +71,20 @@ Conclusion: supported-runtime evidence still does not show that production
 allocation can exceed the requested capacity. Keep the current capacity
 settlement policy and diagnostics; revisit only if a supported runtime or
 downstream allocator supplies a reproducible reachability case.
+
+## RLF-053 round 4 reachability check (2026-11-22)
+
+- Runtime: Linux `6.8.0-147-generic`, `x86_64-unknown-linux-gnu`.
+- Toolchain: `rustc 1.94.0 (4a4ef493e 2026-03-02)`, LLVM `21.1.8`.
+- Allocator: process default global allocator; this crate declares no custom
+  global allocator.
+- Command: `rustc -o /tmp/rlf053-round4-vec-capacity-probe - <<'RS' ... RS`,
+  followed by `/tmp/rlf053-round4-vec-capacity-probe`. The probe called
+  `try_reserve_exact` for the same 19 requests listed above. Every reported
+  capacity equaled its requested size.
+- `xcrun` and `wine` are unavailable. Installed Apple and Windows GNU Rust
+  targets cannot provide runtime allocator evidence on this Linux host.
+
+Conclusion: no supported runtime in this round demonstrated allocator
+over-allocation. Keep the existing production capacity settlement policy;
+synthetic accounting tests remain useful but do not establish reachability.

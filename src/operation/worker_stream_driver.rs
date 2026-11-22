@@ -159,36 +159,50 @@ impl LocalStreamDriver for WorkerStreamDriver {
         cx: &mut Context<'_>,
         request: &LocalStreamRequest,
     ) -> Poll<io::Result<LocalStreamCompletion>> {
+        let mut registered_waker = Some(cx.waker().clone());
+        let mut replaced_waker = None;
+        let mut completed_slot = None;
+        let mut ready_result = None;
         let schedule = {
             let mut state = self.0.state.lock().unwrap_or_else(|e| e.into_inner());
             match state.commands.get_mut(&request.id) {
                 Some(slot) => {
                     if let Some(result) = slot.result.take() {
-                        state.commands.remove(&request.id);
-                        return Poll::Ready(result);
+                        ready_result = Some(result);
+                        completed_slot = state.commands.remove(&request.id);
+                        false
+                    } else {
+                        replaced_waker = slot.waker.replace(registered_waker.take().expect("waker is available"));
+                        false
                     }
-                    slot.waker = Some(cx.waker().clone());
-                    false
                 }
                 None => {
                     state.commands.insert(
                         request.id,
                         WorkerCommand {
                             result: None,
-                            waker: Some(cx.waker().clone()),
+                            waker: registered_waker.take(),
                         },
                     );
                     true
                 }
             }
         };
+        drop(registered_waker);
+        drop(replaced_waker);
+        drop(completed_slot);
+        if let Some(result) = ready_result {
+            return Poll::Ready(result);
+        }
         if schedule && let Err(error) = self.schedule(request) {
-            self.0
+            let removed = self
+                .0
                 .state
                 .lock()
                 .unwrap_or_else(|e| e.into_inner())
                 .commands
                 .remove(&request.id);
+            drop(removed);
             return Poll::Ready(Err(error));
         }
         Poll::Pending
@@ -297,41 +311,55 @@ impl NativeStreamWriter for WorkerStreamDriver {
             id: child_id,
             command: request.command.clone(),
         };
+        let mut registered_waker = Some(cx.waker().clone());
+        let mut replaced_waker = None;
+        let mut completed_slot = None;
+        let mut ready_result = None;
         let schedule = {
             let mut state = self.0.state.lock().unwrap_or_else(|e| e.into_inner());
             match state.commands.get_mut(&child_id) {
                 Some(slot) => {
                     if let Some(result) = slot.result.take() {
-                        state.commands.remove(&child_id);
-                        self.0
-                            .native_write_ids
-                            .lock()
-                            .unwrap_or_else(|e| e.into_inner())
-                            .remove(&(request.id, offset));
-                        return Poll::Ready(result);
+                        ready_result = Some(result);
+                        completed_slot = state.commands.remove(&child_id);
+                        false
+                    } else {
+                        replaced_waker = slot.waker.replace(registered_waker.take().expect("waker is available"));
+                        false
                     }
-                    slot.waker = Some(cx.waker().clone());
-                    false
                 }
                 None => {
                     state.commands.insert(
                         child_id,
                         WorkerCommand {
                             result: None,
-                            waker: Some(cx.waker().clone()),
+                            waker: registered_waker.take(),
                         },
                     );
                     true
                 }
             }
         };
-        if schedule && let Err(error) = self.schedule_with_offset(&child, offset) {
+        drop(registered_waker);
+        drop(replaced_waker);
+        drop(completed_slot);
+        if let Some(result) = ready_result {
             self.0
+                .native_write_ids
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .remove(&(request.id, offset));
+            return Poll::Ready(result);
+        }
+        if schedule && let Err(error) = self.schedule_with_offset(&child, offset) {
+            let removed = self
+                .0
                 .state
                 .lock()
                 .unwrap_or_else(|e| e.into_inner())
                 .commands
                 .remove(&child_id);
+            drop(removed);
             self.0
                 .native_write_ids
                 .lock()
@@ -352,8 +380,13 @@ mod tests {
     use std::sync::Condvar;
     use std::sync::Mutex;
     use std::sync::atomic::AtomicBool;
+    use std::sync::atomic::AtomicUsize;
+    use std::sync::atomic::Ordering;
     use std::sync::mpsc;
     use std::task::Context;
+    use std::task::Poll;
+    use std::task::RawWaker;
+    use std::task::RawWakerVTable;
     use std::task::Waker;
 
     use qubit_operation::ManagerOptions;
@@ -371,6 +404,67 @@ mod tests {
     use super::WorkerStreamState;
     use crate::LocalExecutionConfig;
     use crate::LocalIoExecutor;
+
+    struct CommandWakerProbe {
+        inner: Arc<WorkerStreamInner>,
+        clones: AtomicUsize,
+        drops: AtomicUsize,
+        locked_callbacks: AtomicUsize,
+    }
+
+    fn record_command_waker_callback(probe: &CommandWakerProbe) {
+        if probe.inner.state.try_lock().is_err() || probe.inner.native_write_ids.try_lock().is_err() {
+            probe.locked_callbacks.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
+    unsafe fn command_waker_clone(data: *const ()) -> RawWaker {
+        // SAFETY: each raw waker owns one Arc reference; this callback preserves it.
+        let probe = std::mem::ManuallyDrop::new(unsafe { Arc::<CommandWakerProbe>::from_raw(data.cast()) });
+        probe.clones.fetch_add(1, Ordering::Relaxed);
+        record_command_waker_callback(&probe);
+        RawWaker::new(Arc::into_raw(Arc::clone(&probe)).cast(), &COMMAND_WAKER_VTABLE)
+    }
+
+    unsafe fn command_waker_wake(data: *const ()) {
+        // SAFETY: wake consumes the Arc reference owned by this raw waker.
+        let probe = unsafe { Arc::<CommandWakerProbe>::from_raw(data.cast()) };
+        record_command_waker_callback(&probe);
+    }
+
+    unsafe fn command_waker_wake_by_ref(data: *const ()) {
+        // SAFETY: ManuallyDrop preserves the Arc reference owned by this waker.
+        let probe = std::mem::ManuallyDrop::new(unsafe { Arc::<CommandWakerProbe>::from_raw(data.cast()) });
+        record_command_waker_callback(&probe);
+    }
+
+    unsafe fn command_waker_drop(data: *const ()) {
+        // SAFETY: drop consumes the Arc reference owned by this raw waker.
+        let probe = unsafe { Arc::<CommandWakerProbe>::from_raw(data.cast()) };
+        probe.drops.fetch_add(1, Ordering::Relaxed);
+        record_command_waker_callback(&probe);
+    }
+
+    static COMMAND_WAKER_VTABLE: RawWakerVTable = RawWakerVTable::new(
+        command_waker_clone,
+        command_waker_wake,
+        command_waker_wake_by_ref,
+        command_waker_drop,
+    );
+
+    fn command_waker(probe: Arc<CommandWakerProbe>) -> Waker {
+        // SAFETY: the callback vtable maintains one Arc reference per raw waker.
+        unsafe { Waker::from_raw(RawWaker::new(Arc::into_raw(probe).cast(), &COMMAND_WAKER_VTABLE)) }
+    }
+
+    fn command_waker_probe(inner: Arc<WorkerStreamInner>) -> Arc<CommandWakerProbe> {
+        Arc::new(CommandWakerProbe {
+            inner,
+            clones: AtomicUsize::new(0),
+            drops: AtomicUsize::new(0),
+            locked_callbacks: AtomicUsize::new(0),
+        })
+    }
 
     #[test]
     fn test_terminal_stream_result_returns_handle_before_drain_exits() {
@@ -573,6 +667,190 @@ mod tests {
             unreachable!()
         };
         assert_eq!(bytes.as_ptr(), original.as_ptr());
+    }
+
+    #[test]
+    fn test_stream_command_waker_callbacks_run_outside_command_locks() {
+        let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+        let executor = LocalIoExecutor::new(manager, LocalExecutionConfig::default()).unwrap();
+        let driver = WorkerStreamDriver(Arc::new(WorkerStreamInner {
+            executor: executor.clone(),
+            native: Mutex::new(None),
+            state: Mutex::new(WorkerStreamState {
+                commands: HashMap::new(),
+            }),
+            queue: Mutex::new(VecDeque::new()),
+            native_write_ids: Mutex::new(HashMap::new()),
+            next_internal_request_id: std::sync::atomic::AtomicU64::new(1 << 63),
+            active: AtomicBool::new(true),
+            cleanup_permit: Mutex::new(Some(executor.reserve_cleanup().unwrap())),
+            _buffer_budget: Arc::new(Mutex::new(executor.reserve_bytes(0).unwrap())),
+            _handle_budget: Mutex::new(Some(Arc::new(executor.reserve_handle().unwrap()))),
+            observer: None,
+            written_bytes: std::sync::atomic::AtomicU64::new(0),
+            append_mode: false,
+        }));
+        let probe = command_waker_probe(Arc::clone(&driver.0));
+        let old_probe = command_waker_probe(Arc::clone(&driver.0));
+        let request = LocalStreamRequest {
+            id: 101,
+            command: LocalStreamCommand::Flush,
+        };
+        driver.0.state.lock().unwrap().commands.insert(
+            request.id,
+            WorkerCommand {
+                result: None,
+                waker: Some(command_waker(Arc::clone(&old_probe))),
+            },
+        );
+        let waker = command_waker(Arc::clone(&probe));
+        let mut context = Context::from_waker(&waker);
+        assert!(driver.poll_command(&mut context, &request).is_pending());
+        assert_eq!(probe.clones.load(Ordering::Relaxed), 1);
+        assert_eq!(old_probe.drops.load(Ordering::Relaxed), 1);
+
+        let ready_probe = command_waker_probe(Arc::clone(&driver.0));
+        driver.0.state.lock().unwrap().commands.insert(
+            102,
+            WorkerCommand {
+                result: Some(Ok(super::super::LocalStreamCompletion::Flushed)),
+                waker: Some(command_waker(Arc::clone(&ready_probe))),
+            },
+        );
+        let ready = LocalStreamRequest {
+            id: 102,
+            command: LocalStreamCommand::Flush,
+        };
+        assert!(matches!(driver.poll_command(&mut context, &ready), Poll::Ready(Ok(_))));
+        assert_eq!(ready_probe.drops.load(Ordering::Relaxed), 1);
+
+        let write = LocalStreamRequest {
+            id: 103,
+            command: LocalStreamCommand::Write {
+                bytes: Arc::from(&b"payload"[..]),
+            },
+        };
+        assert!(NativeStreamWriter::poll_native_write(&driver, &mut context, &write, 2).is_pending());
+        let child_id = driver.0.native_write_ids.lock().unwrap()[&(write.id, 2)];
+        assert!(NativeStreamWriter::poll_native_write(&driver, &mut context, &write, 2).is_pending());
+        driver
+            .0
+            .state
+            .lock()
+            .unwrap()
+            .commands
+            .get_mut(&child_id)
+            .unwrap()
+            .result = Some(Ok(super::super::LocalStreamCompletion::Written(5)));
+        assert!(matches!(
+            NativeStreamWriter::poll_native_write(&driver, &mut context, &write, 2),
+            Poll::Ready(Ok(super::super::LocalStreamCompletion::Written(5)))
+        ));
+        assert!(!driver.0.native_write_ids.lock().unwrap().contains_key(&(write.id, 2)));
+        assert_eq!(0, probe.locked_callbacks.load(Ordering::Relaxed));
+
+        let abandoned_commands = {
+            let mut state = driver.0.state.lock().unwrap();
+            std::mem::take(&mut state.commands)
+        };
+        drop(abandoned_commands);
+        drop(waker);
+        drop(probe);
+        drop(old_probe);
+        drop(ready_probe);
+        let shutdown = executor
+            .request_shutdown(qubit_operation::ShutdownMode::Drain)
+            .wait()
+            .unwrap();
+        assert_eq!(shutdown.snapshot.active_operations, 0);
+        drop(driver);
+    }
+
+    #[cfg(panic = "unwind")]
+    #[test]
+    fn test_native_write_queue_failure_cleans_child_after_poisoned_locks() {
+        let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+        let executor = LocalIoExecutor::new(
+            manager,
+            LocalExecutionConfig {
+                worker_count: 1,
+                queue_capacity: 1,
+                waiter_capacity: 1,
+                ..LocalExecutionConfig::default()
+            },
+        )
+        .unwrap();
+        let (started_tx, started_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        executor
+            .enqueue_task(move || {
+                started_tx.send(()).unwrap();
+                release_rx.recv().unwrap();
+            })
+            .unwrap();
+        started_rx.recv().unwrap();
+        executor.enqueue_task(|| {}).unwrap();
+        executor.enqueue_task(|| {}).unwrap();
+
+        let driver = WorkerStreamDriver(Arc::new(WorkerStreamInner {
+            executor: executor.clone(),
+            native: Mutex::new(None),
+            state: Mutex::new(WorkerStreamState {
+                commands: HashMap::new(),
+            }),
+            queue: Mutex::new(VecDeque::new()),
+            native_write_ids: Mutex::new(HashMap::new()),
+            next_internal_request_id: std::sync::atomic::AtomicU64::new(1 << 63),
+            active: AtomicBool::new(false),
+            cleanup_permit: Mutex::new(Some(executor.reserve_cleanup().unwrap())),
+            _buffer_budget: Arc::new(Mutex::new(executor.reserve_bytes(0).unwrap())),
+            _handle_budget: Mutex::new(Some(Arc::new(executor.reserve_handle().unwrap()))),
+            observer: None,
+            written_bytes: std::sync::atomic::AtomicU64::new(0),
+            append_mode: false,
+        }));
+        crate::operation::poison_test_mutex(&driver.0.state);
+        crate::operation::poison_test_mutex(&driver.0.native_write_ids);
+
+        let request = LocalStreamRequest {
+            id: 303,
+            command: LocalStreamCommand::Write {
+                bytes: Arc::from(&b"payload"[..]),
+            },
+        };
+        let mut context = Context::from_waker(Waker::noop());
+        assert!(matches!(
+            NativeStreamWriter::poll_native_write(&driver, &mut context, &request, 2),
+            Poll::Ready(Err(error)) if error.kind() == io::ErrorKind::WouldBlock
+        ));
+        assert!(driver.0.queue.lock().unwrap().is_empty());
+        assert!(
+            driver
+                .0
+                .native_write_ids
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .is_empty(),
+            "failed native-write scheduling must remove its parent-to-child mapping"
+        );
+        assert!(
+            driver
+                .0
+                .state
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .commands
+                .is_empty(),
+            "failed child commands must be removed after releasing the state lock"
+        );
+
+        release_tx.send(()).unwrap();
+        let shutdown = executor
+            .request_shutdown(qubit_operation::ShutdownMode::Drain)
+            .wait()
+            .unwrap();
+        assert_eq!(shutdown.snapshot.active_operations, 0);
+        drop(driver);
     }
 
     #[test]
