@@ -27,7 +27,7 @@ use super::worker_walk_cursor::WorkerWalkCursor;
 use super::worker_walk_inner::WorkerWalkInner;
 
 #[cfg(test)]
-fn pause_walk_batch_transfer_test_gate(inner: &WorkerWalkInner, request_id: u64) {
+fn pause_walk_batch_transfer_test_gate(inner: &WorkerWalkInner, request_id: u64, batch_len: usize) {
     let gate = {
         let mut gate = inner
             .batch_transfer_test_gate
@@ -40,8 +40,12 @@ fn pause_walk_batch_transfer_test_gate(inner: &WorkerWalkInner, request_id: u64)
         }
     };
     if let Some((_, entered, resume)) = gate {
-        entered.send(()).expect("batch transfer observer remains connected");
-        resume.recv().expect("batch transfer test resumes worker");
+        entered
+            .send(batch_len)
+            .expect("batch transfer observer remains connected");
+        resume
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .expect("batch transfer test resumes worker");
     }
 }
 
@@ -258,7 +262,13 @@ impl LocalWalkDriver for WorkerWalkDriver {
                 }))
                 .unwrap_or_else(|_| Err(io::Error::other("Unconfirmed: local walker worker panicked")));
                 #[cfg(test)]
-                pause_walk_batch_transfer_test_gate(&inner, request_id);
+                pause_walk_batch_transfer_test_gate(
+                    &inner,
+                    request_id,
+                    result
+                        .as_ref()
+                        .map_or(0, |batch| batch.as_ref().map_or(0, Vec::len)),
+                );
                 let wake = {
                     let mut commands = inner.commands.lock().unwrap_or_else(|e| e.into_inner());
                     if inner.stop_requested.load(Ordering::Acquire) {
@@ -1010,6 +1020,7 @@ mod tests {
         .unwrap();
         let directory = tempfile::tempdir().unwrap();
         std::fs::write(directory.path().join("real-entry"), b"x").unwrap();
+        std::fs::write(directory.path().join("second-entry"), b"y").unwrap();
         let driver = direct_driver(&directory, executor);
         let unrelated_driver = direct_driver(&directory, driver.0.executor.clone());
         let byte_pool = Arc::new(PermitPool::new(crate::operation::stream::LOCAL_WALK_BATCH_BYTES));
@@ -1024,8 +1035,11 @@ mod tests {
         *driver.0.cleanup_cursor_test_probe.lock().unwrap() = Some(cleanup_probe_tx);
         let mut context = Context::from_waker(Waker::noop());
 
-        assert!(driver.poll_batch(&mut context, 74, 8, 1024).is_pending());
-        assert!(block_on(poll_batch(&driver, 74, 8, 1024)).is_ok());
+        assert!(driver.poll_batch(&mut context, 74, 1, 1024).is_pending());
+        let preconsumed = block_on(poll_batch(&driver, 74, 1, 1024))
+            .expect("different request can read its batch")
+            .expect("directory has an entry for the earlier request");
+        assert_eq!(preconsumed.len(), 1);
         assert_eq!(
             Some(73),
             driver
@@ -1052,9 +1066,13 @@ mod tests {
         );
 
         assert!(driver.poll_batch(&mut context, 73, 8, 1024).is_pending());
-        entered_rx
+        let generated_batch_len = entered_rx
             .recv_timeout(Duration::from_secs(5))
             .expect("worker generated a real batch");
+        assert!(
+            generated_batch_len > 0,
+            "target request must hold a nonempty generated batch"
+        );
 
         driver.request_stop();
         assert!(
@@ -1064,24 +1082,20 @@ mod tests {
             "in-flight batch still owns the cursor lock"
         );
         let reserved_while_transfer_is_paused = byte_pool.used();
-        let close_completed_while_transfer_is_paused = {
-            let deadline = std::time::Instant::now() + Duration::from_millis(200);
-            loop {
-                if driver.poll_closed(&mut context).is_ready() {
-                    break true;
-                }
-                if std::time::Instant::now() >= deadline {
-                    break false;
-                }
-                std::thread::yield_now();
-            }
-        };
+        let close_completed_while_transfer_is_paused = driver.poll_closed(&mut context).is_ready();
+        let budget_reused_while_transfer_is_paused = byte_pool
+            .try_acquire(crate::operation::stream::LOCAL_WALK_BATCH_BYTES)
+            .is_some();
         resume_tx.send(()).unwrap();
         block_on(poll_closed(&driver)).unwrap();
 
         assert!(
             !close_completed_while_transfer_is_paused,
             "close cannot publish while a generated batch is still owned by the worker"
+        );
+        assert!(
+            !budget_reused_while_transfer_is_paused,
+            "close cannot refund the walker reservation before generated batch ownership is resolved"
         );
         assert_eq!(
             reserved_while_transfer_is_paused,
