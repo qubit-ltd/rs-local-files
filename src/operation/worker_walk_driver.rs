@@ -347,6 +347,8 @@ mod tests {
     use std::sync::atomic::Ordering;
     use std::task::Context;
     use std::task::Poll;
+    use std::task::RawWaker;
+    use std::task::RawWakerVTable;
     use std::task::Wake;
     use std::task::Waker;
 
@@ -615,6 +617,90 @@ mod tests {
             "waiters are woken after unlocking close state"
         );
         assert!(matches!(driver.poll_closed(&mut checking_context), Poll::Ready(Ok(()))));
+    }
+
+    struct ClosePollCallbackProbe {
+        state: Arc<Mutex<WorkerWalkCloseState>>,
+        clones: AtomicUsize,
+        drops: AtomicUsize,
+        locked_callbacks: AtomicUsize,
+    }
+
+    fn record_close_poll_callback(probe: &ClosePollCallbackProbe) {
+        if probe.state.try_lock().is_err() {
+            probe.locked_callbacks.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
+    unsafe fn close_poll_callback_clone(data: *const ()) -> RawWaker {
+        // SAFETY: each raw waker owns one Arc reference, and ManuallyDrop keeps
+        // the original reference alive while this callback creates its clone.
+        let probe = std::mem::ManuallyDrop::new(unsafe { Arc::<ClosePollCallbackProbe>::from_raw(data.cast()) });
+        probe.clones.fetch_add(1, Ordering::Relaxed);
+        record_close_poll_callback(&probe);
+        RawWaker::new(Arc::into_raw(Arc::clone(&probe)).cast(), &CLOSE_POLL_CALLBACK_VTABLE)
+    }
+
+    unsafe fn close_poll_callback_wake(data: *const ()) {
+        // SAFETY: wake consumes the Arc reference owned by this raw waker.
+        let probe = unsafe { Arc::<ClosePollCallbackProbe>::from_raw(data.cast()) };
+        record_close_poll_callback(&probe);
+    }
+
+    unsafe fn close_poll_callback_wake_by_ref(data: *const ()) {
+        // SAFETY: ManuallyDrop preserves the Arc reference owned by this waker.
+        let probe = std::mem::ManuallyDrop::new(unsafe { Arc::<ClosePollCallbackProbe>::from_raw(data.cast()) });
+        record_close_poll_callback(&probe);
+    }
+
+    unsafe fn close_poll_callback_drop(data: *const ()) {
+        // SAFETY: drop consumes the Arc reference owned by this raw waker.
+        let probe = unsafe { Arc::<ClosePollCallbackProbe>::from_raw(data.cast()) };
+        probe.drops.fetch_add(1, Ordering::Relaxed);
+        record_close_poll_callback(&probe);
+    }
+
+    static CLOSE_POLL_CALLBACK_VTABLE: RawWakerVTable = RawWakerVTable::new(
+        close_poll_callback_clone,
+        close_poll_callback_wake,
+        close_poll_callback_wake_by_ref,
+        close_poll_callback_drop,
+    );
+
+    fn close_poll_callback_waker(probe: Arc<ClosePollCallbackProbe>) -> Waker {
+        // SAFETY: the callback vtable maintains one Arc reference per raw waker.
+        unsafe { Waker::from_raw(RawWaker::new(Arc::into_raw(probe).cast(), &CLOSE_POLL_CALLBACK_VTABLE)) }
+    }
+
+    #[test]
+    fn test_compatibility_close_poll_clones_and_drops_wakers_outside_lock() {
+        let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+        let executor = LocalIoExecutor::new(manager, LocalExecutionConfig::default()).unwrap();
+        let directory = tempfile::tempdir().unwrap();
+        let driver = direct_driver(&directory, executor);
+        let probe = Arc::new(ClosePollCallbackProbe {
+            state: Arc::clone(&driver.0.close_state),
+            clones: AtomicUsize::new(0),
+            drops: AtomicUsize::new(0),
+            locked_callbacks: AtomicUsize::new(0),
+        });
+        let waker = close_poll_callback_waker(Arc::clone(&probe));
+        {
+            let _guard = driver.0.close_state.lock().unwrap();
+            drop(waker.clone());
+        }
+        assert!(probe.locked_callbacks.load(Ordering::Relaxed) >= 2);
+        probe.locked_callbacks.store(0, Ordering::Relaxed);
+
+        let mut context = Context::from_waker(&waker);
+        assert!(driver.poll_closed(&mut context).is_pending());
+        assert!(driver.poll_closed(&mut context).is_pending());
+        driver.0.publish_close(Ok(()));
+        assert!(matches!(driver.poll_closed(&mut context), Poll::Ready(Ok(()))));
+
+        assert!(probe.clones.load(Ordering::Relaxed) >= 3);
+        assert!(probe.drops.load(Ordering::Relaxed) >= 2);
+        assert_eq!(0, probe.locked_callbacks.load(Ordering::Relaxed));
     }
 
     #[test]

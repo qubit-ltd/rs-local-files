@@ -103,8 +103,10 @@ outcome 单独交付。有界事实记录槽会一直保留到最后一个 obser
 
 提交后先消费 `wait_outcome()`，分别处理 `Succeeded(bytes)`、`Failed(error)` 和 `Stopped(report)`。
 检查结构化的读取上限或内存上限字段，再决定提高配置还是拒绝输入。需要读取事实时再消费 observer，
-随后释放它并等待 settlement；持有 observer 或其他操作资源时不要等待 settlement。若提交被拒绝，
-`LocalSubmitError` 会保留原始请求供调用方取回。
+通过 `observer.snapshot()` 查询事实。等待 settlement 时可以继续持有 observer，因为 settlement 不依赖
+该事实记录槽。完成观察后释放 observer；只有最后一个 observer 副本释放后，该槽才会归还。如果需要
+重用该槽，应在提交下一项操作前释放 observer。操作返回的其他资源仍可能需要先关闭或释放，settlement
+才能完成。若提交被拒绝，`LocalSubmitError` 会保留原始请求供调用方取回。
 
 ### 复制操作的句柄接纳
 

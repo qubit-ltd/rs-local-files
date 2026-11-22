@@ -372,7 +372,7 @@ impl AsyncLocalFileSystem {
                 let mut complete = true;
                 loop {
                     if let Some(stopped) = stop_outcome(_scope) {
-                        shrink_to_zero(&budget);
+                        discard_buffer_and_refund(bytes, &budget);
                         return stopped;
                     }
                     if bytes.len() == request.max_bytes {
@@ -385,7 +385,7 @@ impl AsyncLocalFileSystem {
                             }
                             Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
                             Err(error) => {
-                                shrink_to_zero(&budget);
+                                discard_buffer_and_refund(bytes, &budget);
                                 return OperationOutcome::Failed(LocalFileError::from_io(
                                     LocalFileOperation::Read,
                                     Some(diagnostic_path.clone()),
@@ -400,7 +400,7 @@ impl AsyncLocalFileSystem {
                         Ok(0) => break,
                         Ok(read) => {
                             if let Err(error) = reserve_capacity(&mut bytes, read, &budget, maximum, &diagnostic_path) {
-                                shrink_to_zero(&budget);
+                                discard_buffer_and_refund(bytes, &budget);
                                 return OperationOutcome::Failed(attach_current_directory(
                                     error,
                                     current_directory.as_deref(),
@@ -410,7 +410,7 @@ impl AsyncLocalFileSystem {
                         }
                         Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
                         Err(error) => {
-                            shrink_to_zero(&budget);
+                            discard_buffer_and_refund(bytes, &budget);
                             return OperationOutcome::Failed(LocalFileError::from_io(
                                 LocalFileOperation::Read,
                                 Some(diagnostic_path.clone()),
@@ -496,7 +496,7 @@ impl AsyncLocalFileSystem {
                 let mut buffer = [0_u8; 8192];
                 while bytes.len() < target {
                     if let Some(stopped) = stop_outcome(_scope) {
-                        shrink_to_zero(&budget);
+                        discard_buffer_and_refund(bytes, &budget);
                         return stopped;
                     }
                     let count = (target - bytes.len()).min(buffer.len());
@@ -504,7 +504,7 @@ impl AsyncLocalFileSystem {
                         Ok(0) => break,
                         Ok(read) => {
                             if let Err(error) = reserve_capacity(&mut bytes, read, &budget, maximum, &diagnostic_path) {
-                                shrink_to_zero(&budget);
+                                discard_buffer_and_refund(bytes, &budget);
                                 return OperationOutcome::Failed(attach_current_directory(
                                     error,
                                     current_directory.as_deref(),
@@ -512,13 +512,13 @@ impl AsyncLocalFileSystem {
                             }
                             bytes.extend_from_slice(&buffer[..read]);
                             if let Some(stopped) = stop_outcome(_scope) {
-                                shrink_to_zero(&budget);
+                                discard_buffer_and_refund(bytes, &budget);
                                 return stopped;
                             }
                         }
                         Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
                         Err(error) => {
-                            shrink_to_zero(&budget);
+                            discard_buffer_and_refund(bytes, &budget);
                             return OperationOutcome::Failed(LocalFileError::from_io(
                                 LocalFileOperation::Read,
                                 Some(diagnostic_path.clone()),
@@ -531,8 +531,7 @@ impl AsyncLocalFileSystem {
                 #[cfg(test)]
                 read_at_success_tests::pause_read_at_success_test_gate(&diagnostic_path);
                 if let Some(stopped) = stop_outcome(_scope) {
-                    drop(bytes);
-                    shrink_to_zero(&budget);
+                    discard_buffer_and_refund(bytes, &budget);
                     return stopped;
                 }
                 OperationOutcome::Succeeded(bytes)
@@ -1400,7 +1399,7 @@ fn finish_prefix_read(
     #[cfg(test)]
     pause_read_all_test_gate(_path);
     if let Some(stopped) = stop_outcome(scope) {
-        shrink_to_zero(budget);
+        discard_buffer_and_refund(bytes, budget);
         return stopped;
     }
     OperationOutcome::Succeeded(LocalReadPrefix { bytes, complete })
@@ -1526,6 +1525,19 @@ fn shrink_to_zero(permit: &Arc<Mutex<Permit>>) {
     permit.shrink(amount);
 }
 
+/// Destroys an unreturned output before releasing its shared byte permit.
+///
+/// # Type Parameters
+/// - `T` — owned value that is discarded before the permit is refunded.
+///
+/// # Parameters
+/// - `buffer` — output whose allocation is no longer retained by the operation.
+/// - `permit` — shared byte reservation covering that allocation.
+fn discard_buffer_and_refund<T>(buffer: T, permit: &Arc<Mutex<Permit>>) {
+    drop(buffer);
+    shrink_to_zero(permit);
+}
+
 /// Maps native deletion-effect evidence to the conservative async snapshot.
 ///
 /// # Parameters
@@ -1638,8 +1650,6 @@ fn reserve_capacity(
     if actual < delta {
         lease.shrink(delta - actual);
     } else if actual > delta && !lease.grow(actual - delta) {
-        let amount = lease.amount();
-        lease.shrink(amount);
         return Err(LocalFileError::from_resource_limit(
             LocalFileOperation::Read,
             Some(path.to_path_buf()),
@@ -2340,6 +2350,29 @@ mod stop_gate_tests {
         assert_eq!(bytes, [1]);
         super::shrink_to_zero(&permit);
         assert_eq!(pool.used(), 0);
+    }
+
+    #[test]
+    fn test_discarded_read_buffer_keeps_its_budget_until_drop() {
+        use crate::operation::internal::permits::PermitPool;
+
+        struct DropProbe(Arc<PermitPool>);
+
+        impl Drop for DropProbe {
+            fn drop(&mut self) {
+                assert_eq!(self.0.used(), 1, "the buffer's permit remains held during drop");
+            }
+        }
+
+        let pool = Arc::new(PermitPool::new(1));
+        let permit = Arc::new(std::sync::Mutex::new(pool.try_acquire(1).expect("initial permit")));
+        super::discard_buffer_and_refund(DropProbe(Arc::clone(&pool)), &permit);
+
+        assert_eq!(pool.used(), 0, "the permit is refunded after buffer destruction");
+        assert!(
+            pool.try_acquire(1).is_some(),
+            "another operation can reuse the refunded byte"
+        );
     }
 }
 

@@ -49,3 +49,25 @@ equaled their requested sizes. Windows, macOS, and custom allocator runtime
 probes remain unavailable in this environment, so this result still does not
 establish production reachability of allocator over-allocation. No production
 capacity policy change is warranted by the available evidence.
+
+## RLF-053 implementation-plan execution (2026-11-22)
+
+- Runtime: Linux `6.8.0-147-generic`, `x86_64-unknown-linux-gnu`.
+- Toolchain: locked Rust `1.94.0 (4a4ef493e 2026-03-02)`, LLVM `21.1.8`.
+- Allocator: process default global allocator; this crate declares no custom
+  global allocator.
+- Command: `cargo test --locked --features async --lib capacity` — 24 passed,
+  0 failed. The synthetic over-allocation reconciliation tests pass, including
+  the case where actual capacity crosses a per-operation ceiling while the
+  shared pool can account for it; these tests do not establish runtime
+  reachability.
+- The earlier Linux probe in this document measured 19 `try_reserve_exact`
+  requests and observed exact requested capacities. The current environment
+  has Apple and Windows GNU Rust targets installed, but it cannot run either
+  target; `xcrun` and `wine` are unavailable. No macOS, Windows, or custom
+  allocator runtime evidence was obtained.
+
+Conclusion: supported-runtime evidence still does not show that production
+allocation can exceed the requested capacity. Keep the current capacity
+settlement policy and diagnostics; revisit only if a supported runtime or
+downstream allocator supplies a reproducible reachability case.

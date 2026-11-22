@@ -118,10 +118,14 @@ memory-ceiling failures otherwise report an `OwnedBytes` resource limit.
 After submission, consume `wait_outcome()` and branch on `Succeeded(bytes)`,
 `Failed(error)`, or `Stopped(report)`. Inspect structured read-limit or memory
 limit fields before deciding whether to raise a configured ceiling or reject
-the input. Then consume the observer if facts are needed, drop it, and wait for
-settlement; do not wait for settlement while retaining the observer or other
-operation-owned resources. A rejected submission returns the original request
-in `LocalSubmitError`.
+the input. If facts are needed, inspect them with `observer.snapshot()`. The
+observer may remain alive while waiting for settlement because settlement does
+not depend on its fact-record slot. Drop the observer when finished; its slot
+returns only after the last observer clone is dropped, so release it before
+submitting another operation when the slot must be reused. Other resources
+returned by the operation may still need to be closed or released before
+settlement can complete. A rejected submission returns the original request in
+`LocalSubmitError`.
 
 ### Copy handle admission
 
