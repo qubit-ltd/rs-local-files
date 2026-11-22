@@ -64,3 +64,40 @@ impl Drop for CloseWaitRegistration {
         drop(removed_waker);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::panic::catch_unwind;
+    use std::sync::Arc;
+    use std::sync::Mutex;
+    use std::task::Poll;
+    use std::task::Waker;
+
+    use super::CloseWaitRegistration;
+    use super::WorkerWalkCloseState;
+
+    #[test]
+    fn test_close_registration_recovers_poisoned_state_for_new_poll_and_drop() {
+        let state = Arc::new(Mutex::new(WorkerWalkCloseState::default()));
+        let poisoned = Arc::clone(&state);
+        let _ = catch_unwind(move || {
+            let _guard = poisoned.lock().unwrap();
+            panic!("poison the close state for recovery coverage");
+        });
+
+        let mut registration = CloseWaitRegistration::new(Arc::clone(&state));
+        assert!(matches!(registration.poll(Waker::noop()), Poll::Pending));
+        let waiter_count = match state.lock() {
+            Ok(_) => panic!("the state should remain poisoned"),
+            Err(poisoned) => poisoned.into_inner().waiters.len(),
+        };
+        assert_eq!(1, waiter_count);
+
+        drop(registration);
+        let waiters_empty = match state.lock() {
+            Ok(_) => panic!("the state should remain poisoned"),
+            Err(poisoned) => poisoned.into_inner().waiters.is_empty(),
+        };
+        assert!(waiters_empty);
+    }
+}

@@ -672,38 +672,51 @@ impl AsyncLocalFileSystem {
                             Ok(permit) => permit,
                             Err(poisoned) => poisoned.into_inner(),
                         };
-                        let amount = permit.amount();
-                        permit.shrink(amount);
+                        let retained_capacity = permit.amount();
+                        permit.shrink(retained_capacity);
+                        let error_path = error.path().map(std::path::Path::to_path_buf);
+                        let error_current_directory = error.current_directory().map(std::path::Path::to_path_buf);
                         let recorded_limit = match capacity_error.lock() {
                             Ok(mut capacity_error) => capacity_error.take(),
                             Err(poisoned) => poisoned.into_inner().take(),
                         };
                         let structured = match recorded_limit {
-                            Some(limit) => crate::error::LocalFileError::from_resource_limit(
-                                crate::error::LocalFileOperation::Read,
-                                Some(execution_path.clone()),
-                                limit,
-                            ),
+                            Some(limit) => {
+                                let error = crate::error::LocalFileError::from_resource_limit(
+                                    crate::error::LocalFileOperation::Read,
+                                    error_path.or_else(|| Some(execution_path.clone())),
+                                    limit,
+                                );
+                                match error_current_directory.clone() {
+                                    Some(current_directory) => error.with_current_directory(current_directory),
+                                    None => error,
+                                }
+                            }
                             None => match error.read_limit_error() {
                                 Some(read_limit) if memory_limit_dominates => {
                                     let observed = read_limit.observed();
-                                    let requested = usize::try_from(observed).unwrap_or(usize::MAX);
+                                    let observed_capacity = usize::try_from(observed).unwrap_or(usize::MAX);
+                                    let requested = observed_capacity.saturating_sub(retained_capacity);
                                     let facts = crate::error::LocalResourceLimitError::new(
                                         crate::error::LocalResourceKind::OwnedBytes,
                                         byte_limit,
-                                        byte_limit,
+                                        byte_limit.saturating_sub(retained_capacity),
                                         requested,
                                     );
                                     let facts = if observed > usize::MAX as u64 {
                                         facts.with_overflow()
                                     } else {
-                                        facts.with_observed(requested)
+                                        facts.with_observed(observed_capacity)
                                     };
-                                    crate::error::LocalFileError::from_resource_limit(
+                                    let error = crate::error::LocalFileError::from_resource_limit(
                                         crate::error::LocalFileOperation::Read,
-                                        error.path().map(std::path::Path::to_path_buf),
+                                        error_path,
                                         facts,
-                                    )
+                                    );
+                                    match error_current_directory.clone() {
+                                        Some(current_directory) => error.with_current_directory(current_directory),
+                                        None => error,
+                                    }
                                 }
                                 _ => error,
                             },

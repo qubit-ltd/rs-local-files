@@ -8,6 +8,69 @@
 //! Stateful Host or Rooted local filesystem service.
 
 use std::path::Path;
+#[cfg(all(test, feature = "async"))]
+mod read_preflight_tests {
+    use std::path::Path;
+    use std::path::PathBuf;
+
+    type ReadPreflightTestGate = (PathBuf, std::sync::mpsc::Sender<()>, std::sync::mpsc::Receiver<()>);
+    static READ_PREFLIGHT_TEST_GATE: std::sync::Mutex<Option<ReadPreflightTestGate>> = std::sync::Mutex::new(None);
+
+    pub(super) fn install_read_preflight_test_gate(
+        path: PathBuf,
+        entered: std::sync::mpsc::Sender<()>,
+        release: std::sync::mpsc::Receiver<()>,
+    ) {
+        *READ_PREFLIGHT_TEST_GATE
+            .lock()
+            .unwrap_or_else(|error| error.into_inner()) = Some((path, entered, release));
+    }
+
+    pub(super) fn pause_read_after_preflight(path: &Path) {
+        let gate = {
+            let mut registered = READ_PREFLIGHT_TEST_GATE
+                .lock()
+                .unwrap_or_else(|error| error.into_inner());
+            if registered.as_ref().is_some_and(|(target, _, _)| target == path) {
+                registered.take()
+            } else {
+                None
+            }
+        };
+        if let Some((_, entered, release)) = gate {
+            let _ = entered.send(());
+            let _ = release.recv();
+        }
+    }
+
+    #[cfg(test)]
+    #[test]
+    fn test_read_preflight_gate_recovers_poisoned_registration_lock() {
+        use std::panic::catch_unwind;
+        use std::sync::mpsc;
+
+        let poisoned = catch_unwind(|| {
+            let _guard = READ_PREFLIGHT_TEST_GATE.lock().unwrap();
+            panic!("poison the test gate registration lock");
+        });
+        assert!(poisoned.is_err());
+
+        let path = PathBuf::from("test-gate-path");
+        let (entered_tx, entered_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        release_tx.send(()).unwrap();
+        install_read_preflight_test_gate(path.clone(), entered_tx, release_rx);
+        pause_read_after_preflight(&path);
+
+        entered_rx.recv().unwrap();
+        assert!(
+            READ_PREFLIGHT_TEST_GATE
+                .lock()
+                .unwrap_or_else(|error| error.into_inner())
+                .is_none()
+        );
+    }
+}
 
 use qubit_io::ByteInput;
 use qubit_io::Input;
@@ -396,6 +459,8 @@ impl LocalFileSystem {
                 resolver.current_directory(),
             ));
         }
+        #[cfg(all(test, feature = "async"))]
+        read_preflight_tests::pause_read_after_preflight(path);
         #[cfg(test)]
         crate::observation::snapshot::run_read_hook();
         let bytes = crate::observation::reader::collect_limited_with_reserver(&mut reader, maximum, reserve).map_err(
@@ -509,6 +574,165 @@ mod tests {
     use crate::error::LocalFileErrorKind;
     use crate::error::LocalFileErrorSource;
     use crate::error::LocalFileOperation;
+
+    #[test]
+    fn test_read_text_with_options_decodes_complete_utf8_content() {
+        use crate::options::LocalReadAllOptions;
+
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("text");
+        std::fs::write(&path, "complete text").unwrap();
+        let filesystem = LocalFileSystem::host().unwrap();
+
+        assert_eq!(
+            "complete text",
+            filesystem
+                .read_text_with_options(&path, &LocalReadAllOptions::new())
+                .unwrap()
+        );
+        assert_eq!(b"complete text".as_slice(), filesystem.read_all(&path).unwrap());
+        assert_eq!("complete text", filesystem.read_text(&path).unwrap());
+    }
+
+    #[test]
+    fn test_read_text_with_options_preserves_invalid_encoding_context() {
+        use crate::error::LocalFileErrorKind;
+        use crate::options::LocalReadAllOptions;
+
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("invalid-utf8");
+        std::fs::write(&path, [0xff]).unwrap();
+        let filesystem = LocalFileSystem::host().unwrap();
+
+        let error = filesystem
+            .read_text_with_options(&path, &LocalReadAllOptions::new())
+            .expect_err("invalid UTF-8 should be rejected");
+
+        assert_eq!(LocalFileErrorKind::InvalidEncoding, error.kind());
+        assert_eq!(LocalFileOperation::Read, error.operation());
+        assert_eq!(Some(path.as_path()), error.path());
+    }
+
+    #[test]
+    fn test_read_consistent_with_options_returns_same_handle_observations() {
+        use crate::options::LocalSnapshotOptions;
+
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("snapshot");
+        std::fs::write(&path, b"snapshot content").unwrap();
+        let filesystem = LocalFileSystem::host().unwrap();
+
+        let snapshot = filesystem
+            .read_consistent_with_options(&path, &LocalSnapshotOptions::builder(64).build())
+            .unwrap();
+
+        assert_eq!(b"snapshot content", snapshot.bytes());
+        assert_eq!(snapshot.bytes().len() as u64, snapshot.before().metadata().len());
+        assert_eq!(snapshot.before().metadata().len(), snapshot.after().metadata().len());
+    }
+
+    #[cfg(feature = "async")]
+    #[test]
+    fn test_observer_read_growth_reports_only_unavailable_bytes_and_refunds_before_delivery() {
+        use std::sync::mpsc;
+
+        use qubit_operation::ManagerOptions;
+        use qubit_operation::OperationManager;
+        use qubit_operation::OperationOutcome;
+
+        use crate::LocalReadRequest;
+        use crate::operation::AsyncLocalFileSystem;
+        use crate::operation::LocalIoExecutor;
+        use crate::options::LocalReadAllOptions;
+
+        fn block_on<F: std::future::Future>(future: F) -> F::Output {
+            use std::sync::Arc;
+            use std::task::Context;
+            use std::task::Poll;
+            use std::task::Wake;
+            use std::task::Waker;
+            struct ThreadWake(std::thread::Thread);
+            impl Wake for ThreadWake {
+                fn wake(self: Arc<Self>) {
+                    self.0.unpark();
+                }
+                fn wake_by_ref(self: &Arc<Self>) {
+                    self.0.unpark();
+                }
+            }
+            let waker = Waker::from(Arc::new(ThreadWake(std::thread::current())));
+            let mut context = Context::from_waker(&waker);
+            let mut future = std::pin::pin!(future);
+            loop {
+                match future.as_mut().poll(&mut context) {
+                    Poll::Ready(value) => return value,
+                    Poll::Pending => std::thread::park(),
+                }
+            }
+        }
+
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("growing");
+        std::fs::write(&path, b"four").unwrap();
+        let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+        let executor = LocalIoExecutor::new(
+            manager.clone(),
+            crate::operation::LocalExecutionConfig {
+                max_owned_bytes: 4,
+                worker_count: 2,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let filesystem = block_on(AsyncLocalFileSystem::host(executor.clone())).unwrap();
+        let (entered_tx, entered_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        super::read_preflight_tests::install_read_preflight_test_gate(path.clone(), entered_tx, release_rx);
+        let mut operation = filesystem
+            .submit_read_all_with_observer(
+                &manager,
+                Default::default(),
+                LocalReadRequest {
+                    path: path.clone(),
+                    read: LocalReadAllOptions::new().with_max_bytes(8),
+                },
+                Default::default(),
+            )
+            .unwrap()
+            .0;
+        entered_rx.recv_timeout(std::time::Duration::from_secs(5)).unwrap();
+        std::fs::write(&path, b"five!").unwrap();
+        release_tx.send(()).unwrap();
+        operation.wait_settlement().unwrap();
+        match operation.try_take_outcome().unwrap().unwrap() {
+            OperationOutcome::Failed(error) => {
+                let limit = error.resource_limit_error().expect("owned-byte resource limit");
+                assert_eq!((limit.limit(), limit.remaining(), limit.requested()), (4, 0, 1));
+                assert_eq!(limit.observed(), Some(5));
+            }
+            other => panic!("growth beyond the memory budget must fail: {other:?}"),
+        }
+        assert_eq!(
+            executor.inner.byte_slots.used(),
+            0,
+            "the failure refund precedes delivery"
+        );
+        let reusable_path = directory.path().join("reusable");
+        std::fs::write(&reusable_path, b"four").unwrap();
+        let mut reuse = filesystem
+            .submit_read_all_with_observer(
+                &manager,
+                Default::default(),
+                LocalReadRequest {
+                    path: reusable_path,
+                    read: LocalReadAllOptions::new().with_max_bytes(8),
+                },
+                Default::default(),
+            )
+            .unwrap()
+            .0;
+        assert!(matches!(reuse.wait_outcome().unwrap(), OperationOutcome::Succeeded(bytes) if bytes == b"four"));
+    }
 
     thread_local! {
         static PREFIX_RESERVE_FAILURE_AFTER: Cell<Option<usize>> = const { Cell::new(None) };

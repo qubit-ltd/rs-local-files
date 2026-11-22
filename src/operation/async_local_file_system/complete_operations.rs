@@ -90,6 +90,60 @@ impl Drop for ReadAllTestGateGuard {
     }
 }
 
+#[cfg(test)]
+mod read_at_success_tests {
+    use std::path::Path;
+    use std::path::PathBuf;
+    use std::sync::Mutex;
+
+    use super::ReadAllTestGate;
+
+    static READ_AT_SUCCESS_TEST_GATE: Mutex<Option<ReadAllTestGate>> = Mutex::new(None);
+
+    pub(super) struct ReadAtSuccessTestGateGuard(PathBuf);
+
+    impl ReadAtSuccessTestGateGuard {
+        pub(super) fn install(
+            path: PathBuf,
+            entered: std::sync::mpsc::Sender<()>,
+            release: std::sync::mpsc::Receiver<()>,
+        ) -> Self {
+            *READ_AT_SUCCESS_TEST_GATE
+                .lock()
+                .unwrap_or_else(|error| error.into_inner()) = Some((path.clone(), entered, release));
+            Self(path)
+        }
+    }
+
+    impl Drop for ReadAtSuccessTestGateGuard {
+        fn drop(&mut self) {
+            let mut gate = READ_AT_SUCCESS_TEST_GATE
+                .lock()
+                .unwrap_or_else(|error| error.into_inner());
+            if gate.as_ref().is_some_and(|(path, _, _)| path == &self.0) {
+                gate.take();
+            }
+        }
+    }
+
+    pub(super) fn pause_read_at_success_test_gate(path: &Path) {
+        let gate = {
+            let mut registered = READ_AT_SUCCESS_TEST_GATE
+                .lock()
+                .unwrap_or_else(|error| error.into_inner());
+            if registered.as_ref().is_some_and(|(target, _, _)| target == path) {
+                registered.take()
+            } else {
+                None
+            }
+        };
+        if let Some((_, entered, release)) = gate {
+            let _ = entered.send(());
+            let _ = release.recv();
+        }
+    }
+}
+
 impl AsyncLocalFileSystem {
     /// Submits a finite complete read with per-block cooperative cancellation.
     /// An explicit read ceiling produces `read_limit_error()` when it is the
@@ -430,6 +484,13 @@ impl AsyncLocalFileSystem {
                             ));
                         }
                     }
+                }
+                #[cfg(test)]
+                read_at_success_tests::pause_read_at_success_test_gate(&execution_path);
+                if let Some(stopped) = stop_outcome(_scope) {
+                    drop(bytes);
+                    shrink_to_zero(&budget);
+                    return stopped;
                 }
                 OperationOutcome::Succeeded(bytes)
             },
@@ -1272,6 +1333,7 @@ fn pause_read_all_test_gate(path: &Path) {
         let _ = release.recv();
     }
 }
+
 /// Runs the stop outcome behavior while preserving the operation lifecycle
 /// invariants.
 /// # Type Parameters
@@ -1498,6 +1560,8 @@ mod stop_gate_tests {
     use super::deletion_effect_facts;
     use super::effective_read_limit;
     use super::effective_read_options;
+    use super::read_at_success_tests::ReadAtSuccessTestGateGuard;
+    use super::read_limit_error;
 
     #[test]
     fn test_delete_effect_mapping_distinguishes_no_change_and_completed_change() {
@@ -1678,6 +1742,31 @@ mod stop_gate_tests {
             (8, true),
             effective_read_limit(&LocalReadAllOptions::new().with_max_bytes(8), 8)
         );
+    }
+
+    #[test]
+    fn test_read_limit_error_preserves_explicit_and_memory_limit_facts() {
+        use crate::error::LocalFileErrorKind;
+        use crate::error::LocalResourceKind;
+
+        let path = Path::new("/bounded/read");
+        let explicit = read_limit_error(true, 4, 5, 0, 8, path);
+        assert_eq!(LocalFileErrorKind::ResourceLimit, explicit.kind());
+        assert_eq!(Some(path), explicit.path());
+        assert_eq!(
+            Some((4, 5)),
+            explicit
+                .read_limit_error()
+                .map(|limit| (limit.limit(), limit.observed()))
+        );
+
+        let memory = read_limit_error(false, 4, 5, 4, 4, path);
+        assert_eq!(LocalFileErrorKind::ResourceLimit, memory.kind());
+        assert_eq!(Some(path), memory.path());
+        let facts = memory.resource_limit_error().expect("memory limit must be structured");
+        assert_eq!(LocalResourceKind::OwnedBytes, facts.resource());
+        assert_eq!((4, 0, 1), (facts.limit(), facts.remaining(), facts.requested()));
+        assert_eq!(Some(5), facts.observed());
     }
 
     #[test]
@@ -1879,6 +1968,86 @@ mod stop_gate_tests {
                 .unwrap();
             assert!(
                 matches!(probe.wait_outcome().unwrap(), OperationOutcome::Succeeded(value) if value.bytes == b"ab")
+            );
+        }
+    }
+
+    #[test]
+    fn test_read_at_rechecks_stop_before_delivering_eof_and_zero_length_success() {
+        use std::io::SeekFrom;
+        use std::sync::mpsc;
+
+        use qubit_operation::OperationOutcome;
+        use qubit_operation::StopReason;
+
+        use crate::operation::AsyncLocalFileSystem;
+        use crate::operation::LocalExecutionConfig;
+        use crate::operation::LocalIoExecutor;
+        use crate::operation::complete::LocalReadAtRequest;
+
+        let _gate_lock = READ_ALL_TEST_GATE_LOCK
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        for (name, payload, max_bytes) in [("eof", b"ab".as_slice(), 8), ("zero", b"ab".as_slice(), 0)] {
+            let directory = tempfile::tempdir().unwrap();
+            let path = directory.path().join(name);
+            let probe_path = directory.path().join("probe");
+            std::fs::write(&path, payload).unwrap();
+            std::fs::write(&probe_path, b"ok").unwrap();
+            let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+            let executor = LocalIoExecutor::new(
+                manager.clone(),
+                LocalExecutionConfig {
+                    max_owned_bytes: 2,
+                    worker_count: 2,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+            let filesystem = block_on(AsyncLocalFileSystem::host(executor)).unwrap();
+            let (entered_tx, entered_rx) = mpsc::channel();
+            let (release_tx, release_rx) = mpsc::channel();
+            let _gate = ReadAtSuccessTestGateGuard::install(path.clone(), entered_tx, release_rx);
+            let (mut stopped, _) = filesystem
+                .submit_read_at(
+                    &manager,
+                    Default::default(),
+                    LocalReadAtRequest {
+                        path: path.clone(),
+                        read: Default::default(),
+                        offset: SeekFrom::Start(0),
+                        max_bytes,
+                    },
+                    Default::default(),
+                )
+                .unwrap();
+            entered_rx
+                .recv_timeout(std::time::Duration::from_secs(5))
+                .expect("read-at reaches its success gate");
+            assert_eq!(
+                stopped.request_stop(StopReason::UserCancelled),
+                qubit_operation::StopRequestStatus::Accepted
+            );
+            release_tx.send(()).unwrap();
+            stopped.wait_settlement().unwrap();
+
+            let mut probe = filesystem
+                .submit_read_at(
+                    &manager,
+                    Default::default(),
+                    LocalReadAtRequest {
+                        path: probe_path,
+                        read: Default::default(),
+                        offset: SeekFrom::Start(0),
+                        max_bytes: 2,
+                    },
+                    Default::default(),
+                )
+                .unwrap()
+                .0;
+            assert!(matches!(probe.wait_outcome().unwrap(), OperationOutcome::Succeeded(bytes) if bytes == b"ok"));
+            assert!(
+                matches!(stopped.try_take_outcome().unwrap(), Some(OperationOutcome::Stopped(report)) if report.reason == StopReason::UserCancelled)
             );
         }
     }

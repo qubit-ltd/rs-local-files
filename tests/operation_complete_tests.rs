@@ -234,6 +234,89 @@ fn test_async_complete_reads_preserve_the_dominant_limit_source() {
 }
 
 #[test]
+fn test_rooted_observer_read_limits_keep_bound_path_and_pwd_context() {
+    let directory = tempfile::tempdir().unwrap();
+    let root = directory.path().join("root");
+    std::fs::create_dir(&root).unwrap();
+    std::fs::write(root.join("preflight"), b"12345").unwrap();
+    std::fs::write(root.join("held"), b"four").unwrap();
+    std::fs::write(root.join("shared"), b"x").unwrap();
+    let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+    let executor = LocalIoExecutor::new(
+        manager.clone(),
+        LocalExecutionConfig {
+            max_owned_bytes: 4,
+            worker_count: 2,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let filesystem = block_on(AsyncLocalFileSystem::rooted(executor, root)).unwrap();
+    let memory_limit = qubit_local_files::LocalOperationOptions {
+        max_owned_bytes: Some(4),
+        ..Default::default()
+    };
+
+    let mut preflight = filesystem
+        .submit_read_all_with_observer(
+            &manager,
+            Default::default(),
+            LocalReadRequest {
+                path: PathBuf::from("preflight"),
+                read: LocalReadAllOptions::new().with_max_bytes(8),
+            },
+            memory_limit,
+        )
+        .unwrap()
+        .0;
+    match preflight.wait_outcome().unwrap() {
+        qubit_operation::OperationOutcome::Failed(error) => {
+            assert_eq!(error.path(), Some(Path::new("/preflight")));
+            assert_eq!(error.current_directory(), Some(Path::new("/")));
+            assert_eq!(format!("{:?}", error.operation()), "Read");
+            let limit = error.resource_limit_error().unwrap();
+            assert_eq!((limit.limit(), limit.remaining(), limit.requested()), (4, 4, 5));
+        }
+        other => panic!("initial length over the memory limit must fail: {other:?}"),
+    }
+
+    let held = filesystem
+        .submit_read_all_with_observer(
+            &manager,
+            Default::default(),
+            LocalReadRequest {
+                path: PathBuf::from("held"),
+                read: LocalReadAllOptions::new().with_max_bytes(8),
+            },
+            memory_limit,
+        )
+        .unwrap()
+        .0;
+    held.wait_settlement().unwrap();
+    let mut shared = filesystem
+        .submit_read_all_with_observer(
+            &manager,
+            Default::default(),
+            LocalReadRequest {
+                path: PathBuf::from("shared"),
+                read: LocalReadAllOptions::new().with_max_bytes(8),
+            },
+            memory_limit,
+        )
+        .unwrap()
+        .0;
+    match shared.wait_outcome().unwrap() {
+        qubit_operation::OperationOutcome::Failed(error) => {
+            assert_eq!(error.path(), Some(Path::new("/shared")));
+            assert_eq!(error.current_directory(), Some(Path::new("/")));
+            assert_eq!(format!("{:?}", error.operation()), "Read");
+            assert!(error.resource_limit_error().is_some());
+        }
+        other => panic!("the occupied shared pool must reject the read: {other:?}"),
+    }
+}
+
+#[test]
 fn test_complete_text_read_succeeds_with_explicit_and_inherited_limits() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("text");
