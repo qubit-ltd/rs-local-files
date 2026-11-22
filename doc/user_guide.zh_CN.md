@@ -98,8 +98,11 @@ outcome 单独交付。有界事实记录槽会一直保留到最后一个 obser
 应用需要限制内容大小时，可在请求中设置 `LocalReadAllOptions::with_max_bytes`。这个显式读取上限
 与 `LocalExecutionConfig::max_owned_bytes` 的 executor 总内存上限，以及
 `LocalOperationOptions::max_owned_bytes` 的单操作内存上限各自独立。已接纳的读取还会竞争 executor
-共享字节池。显式内容上限与内存上限的有效值相同时，错误优先报告显式内容上限；其他内存额度
-失败会报告资源为 `OwnedBytes` 的资源限制。
+共享字节池。这些字节上限用于计量已接纳操作持有的读取缓冲；应用收到结果后继续保留的字节不计入其中。
+已完成结果仍留在操作结果槽时，其缓冲继续占用该操作的预算。成功调用 `wait_outcome()` 或
+`try_take_outcome()` 会将结果交给调用方并释放操作的预算引用，因此即使应用仍持有返回的字节，executor
+也可以重用这部分额度。应用若要保留多个结果，应另外限制这些结果的总字节数。显式内容上限与内存上限
+的有效值相同时，错误优先报告显式内容上限；其他内存额度失败会报告资源为 `OwnedBytes` 的资源限制。
 
 提交后先消费 `wait_outcome()`，分别处理 `Succeeded(bytes)`、`Failed(error)` 和 `Stopped(report)`。
 检查结构化的读取上限或内存上限字段，再决定提高配置还是拒绝输入。需要读取事实时再消费 observer，

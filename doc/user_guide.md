@@ -111,9 +111,17 @@ needs a content-size ceiling. This explicit read limit is separate from
 `LocalExecutionConfig::max_owned_bytes` and
 `LocalOperationOptions::max_owned_bytes`, which cap executor-wide and
 per-operation owned memory. Accepted reads also compete for the executor's
-shared byte pool. If an explicit content limit and a memory ceiling have the
-same effective value, the explicit content-limit diagnostic takes precedence;
-memory-ceiling failures otherwise report an `OwnedBytes` resource limit.
+shared byte pool. These byte ceilings account for read buffers retained by
+accepted operations; they do not limit the total bytes an application keeps
+after receiving results. While a completed result remains in an operation's
+result slot, its buffer remains charged to that operation's budget. A
+successful `wait_outcome()` or `try_take_outcome()` transfers the result and
+releases the operation's budget reference, so the executor can reuse that
+capacity even while the application still holds the returned bytes. Applications
+that retain multiple results should impose a separate bound on their combined
+size. If an explicit content limit and a memory ceiling have the same effective
+value, the explicit content-limit diagnostic takes precedence; memory-ceiling
+failures otherwise report an `OwnedBytes` resource limit.
 
 After submission, consume `wait_outcome()` and branch on `Succeeded(bytes)`,
 `Failed(error)`, or `Stopped(report)`. Inspect structured read-limit or memory
