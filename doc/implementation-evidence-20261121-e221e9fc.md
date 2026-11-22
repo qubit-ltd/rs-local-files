@@ -88,3 +88,19 @@ downstream allocator supplies a reproducible reachability case.
 Conclusion: no supported runtime in this round demonstrated allocator
 over-allocation. Keep the existing production capacity settlement policy;
 synthetic accounting tests remain useful but do not establish reachability.
+
+## RLF-053 round 7 environment check (2026-11-22)
+
+- `rustup target list --installed` includes `x86_64-apple-darwin` and
+  `x86_64-pc-windows-gnu`, but these are cross-compilation targets, not
+  runnable runtimes on this Linux host.
+- `command -v xcrun` and `command -v wine` found no executable, so a macOS SDK
+  and Windows runtime are unavailable for allocator probes.
+- The crate has no production `#[global_allocator]`; the only allocator
+  implementation found by the repository search is the sampling allocator in
+  `benches/local_files.rs`, which is not linked into the library or its tests.
+
+No different supported runtime or downstream custom allocator was available
+for this round. The Linux default-allocator probe and synthetic accounting
+tests above remain the applicable evidence; no production policy change is
+indicated.

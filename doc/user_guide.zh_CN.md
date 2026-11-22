@@ -96,8 +96,8 @@ outcome 单独交付。有界事实记录槽会一直保留到最后一个 obser
 或操作返回的其他资源可能继续占用 worker 资源；等待对应 settlement 前应先关闭或释放它们。
 
 应用需要限制内容大小时，可在请求中设置 `LocalReadAllOptions::with_max_bytes`。这个显式读取上限
-与 `LocalExecutionConfig::max_owned_bytes` 的 executor 总内存上限，以及
-`LocalOperationOptions::max_owned_bytes` 的单操作内存上限各自独立。已接纳的读取还会竞争 executor
+与 `LocalExecutionConfig::max_owned_bytes` 的执行器共享字节预算，以及
+`LocalOperationOptions::max_owned_bytes` 的单操作字节预算各自独立。已接纳的读取还会竞争执行器
 共享字节池。这些字节上限用于计量已接纳操作持有的读取缓冲；应用收到结果后继续保留的字节不计入其中。
 已完成结果仍留在操作结果槽时，其缓冲继续占用该操作的预算。成功调用 `wait_outcome()` 或
 `try_take_outcome()` 会将结果交给调用方并释放操作的预算引用，因此即使应用仍持有返回的字节，executor
