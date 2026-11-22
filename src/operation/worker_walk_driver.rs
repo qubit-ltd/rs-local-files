@@ -1116,8 +1116,32 @@ mod tests {
 
     #[test]
     fn test_close_regression_rejects_empty_generated_batch_negative_control() {
-        let result = std::panic::catch_unwind(|| assert_nonempty_generated_batch(0));
-        assert!(result.is_err(), "the regression must reject an empty generated batch");
+        use std::sync::mpsc;
+        use std::time::Duration;
+
+        let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+        let executor = LocalIoExecutor::new(manager, LocalExecutionConfig::default()).unwrap();
+        let directory = tempfile::tempdir().unwrap();
+        let driver = direct_driver(&directory, executor);
+        let (entered_tx, entered_rx) = mpsc::sync_channel(1);
+        let (resume_tx, resume_rx) = mpsc::sync_channel(1);
+        *driver.0.batch_transfer_test_gate.lock().unwrap() = Some((91, entered_tx, resume_rx));
+        let mut context = Context::from_waker(Waker::noop());
+
+        assert!(driver.poll_batch(&mut context, 91, 8, 1024).is_pending());
+        let generated_batch_len = entered_rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("empty directory batch reaches the transfer gate");
+        let result = std::panic::catch_unwind(|| assert_nonempty_generated_batch(generated_batch_len));
+        driver.request_stop();
+        resume_tx.send(()).expect("worker remains paused until resumed");
+        block_on(poll_closed(&driver)).expect("negative-control walker closes");
+
+        assert_eq!(generated_batch_len, 0, "empty fixture must generate an empty batch");
+        assert!(
+            result.is_err(),
+            "the regression must reject an empty generated batch"
+        );
     }
 
     #[cfg(panic = "unwind")]
