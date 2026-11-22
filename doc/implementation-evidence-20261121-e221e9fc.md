@@ -17,4 +17,24 @@ The byte-permit reconciliation was factored into a small internal helper so the 
 
 The production path still measures `Vec::capacity()` after `try_reserve_exact`; future platform or allocator evidence can determine whether further policy changes are needed.
 
+## Follow-up verification (2026-11-22)
+
+The Linux probe was rerun with the locked Rust 1.94.0 toolchain on
+`x86_64-unknown-linux-gnu`. For each listed request from 1 through 65,537
+bytes, `try_reserve_exact` again returned exactly the requested capacity. The
+synthetic reconciliation tests now also cover actual capacity below and equal
+to the requested amount, plus an actual capacity of seven bytes crossing a
+synthetic four-byte per-operation ceiling while the seven-byte shared pool can
+still account for it. A separate existing test covers the same over-allocation
+when the shared pool cannot fund it and verifies full refund. These synthetic
+cases characterize accounting only; they do not establish allocator
+reachability or change the production policy.
+
+The host has the Apple target libraries installed, but the follow-up Apple
+probe could not be linked: `xcrun`/the macOS SDK is absent and the available GNU
+linker rejects Apple's `-arch` and deployment-target flags. Windows and custom
+allocator runtime probes were unavailable. Therefore the only supported
+runtime evidence remains Linux with its default allocator; no cross-platform
+reachability conclusion is claimed.
+
 References: [Rust `Vec::try_reserve_exact`](https://doc.rust-lang.org/alloc/vec/struct.Vec.html#method.try_reserve_exact), [Rust `RawVec` source](https://doc.rust-lang.org/src/alloc/raw_vec/mod.rs.html).

@@ -146,11 +146,20 @@ mod read_at_success_tests {
 
 impl AsyncLocalFileSystem {
     /// Submits a finite complete read with per-block cooperative cancellation.
-    /// An explicit read ceiling produces `read_limit_error()` when it is the
-    /// effective boundary. Executor, per-operation, and shared byte-pool
-    /// limits produce `resource_limit_error()` with resource `OwnedBytes`;
-    /// callers checking the latter should use `resource_limit_error()` rather
-    /// than `read_limit_error()`.
+    /// The returned `LocalFactObserver` reports facts separately from the
+    /// bytes delivered in the operation outcome. The read uses one opened
+    /// reader and compares observations before and after reading to detect
+    /// changes; this is a consistency check, not an atomic snapshot guarantee.
+    ///
+    /// An explicit content ceiling produces `read_limit_error()` when it is
+    /// the effective boundary. Executor and per-operation memory ceilings,
+    /// and contention for the shared byte pool, produce
+    /// `resource_limit_error()` with resource `OwnedBytes`. If an explicit
+    /// content limit and a memory limit have the same value, the explicit
+    /// content diagnostic takes precedence. Use this method for cooperative
+    /// cancellation between read blocks; use
+    /// [`super::AsyncLocalFileSystem::submit_read_all_with_observer`] for the
+    /// ordinary full-read behavior without those cancellation checkpoints.
     ///
     /// # Parameters
     /// - `manager` — operation manager that owns the admission scope.
@@ -207,7 +216,18 @@ impl AsyncLocalFileSystem {
         )
     }
     /// Submits a complete UTF-8 read using the same allocation accounting as
-    /// read-all.
+    /// [`Self::submit_read_all`].
+    ///
+    /// The operation returns a `LocalFactObserver` alongside its handle. The
+    /// text is delivered by the operation outcome; the observer reports
+    /// operation facts and does not contain or replace the result. Use this
+    /// method when the result must be validated as UTF-8; use
+    /// [`Self::submit_read_all`] when the caller needs bytes or cooperative
+    /// cancellation between read blocks. Both methods check the explicit
+    /// content limit before an `OwnedBytes` memory limit when both boundaries
+    /// are reached at the same value. Executor and per-operation memory limits
+    /// further constrain the shared byte pool, whose capacity may be in use by
+    /// concurrent operations.
     /// An explicit read ceiling produces `read_limit_error()` when it is the
     /// effective boundary. Executor, per-operation, and shared byte-pool
     /// limits produce `resource_limit_error()` with resource `OwnedBytes`;
@@ -1085,17 +1105,31 @@ fn bind_host_path(base: &Option<PathBuf>, path: &PathBuf) -> PathBuf {
         _ => path.clone(),
     }
 }
-/// Runs the read complete cancellable behavior while preserving the operation
-/// lifecycle invariants.
+/// Reads a complete file through one observed reader with cooperative stop
+/// checks between blocks.
+///
+/// It validates the pre-read length against the effective content ceiling,
+/// reserves every retained buffer growth against both the per-operation limit
+/// and shared byte permit, then compares before/after observations to detect
+/// changes during the read. These observations detect changes but do not make
+/// the read an atomic snapshot. A failure or stop returns partial-buffer
+/// capacity to the operation settlement path; a successful buffer retains its
+/// permit until the result is delivered. `path` is also the diagnostic path
+/// attached to read and limit errors.
+///
+/// # Returns
+/// The complete bytes, or a typed failed/stopped outcome. Explicit content
+/// limits remain read-limit errors; memory-budget failures are `OwnedBytes`
+/// resource-limit errors.
+///
 /// # Parameters
-/// - `filesystem` — supplies data or policy for this operation.
-/// - `path` — supplies data or policy for this operation.
-/// - `options` — supplies data or policy for this operation.
-/// - `read_limit` — effective byte boundary and whether content options
-///   supplied it.
-/// - `scope` — supplies data or policy for this operation.
-/// - `budget` — supplies data or policy for this operation.
-/// - `allocation_limit` — supplies data or policy for this operation.
+/// - `filesystem` — authority used to open the file.
+/// - `path` — resolved path used for opening and diagnostics.
+/// - `options` — reader options, including symlink and content-limit policy.
+/// - `read_limit` — effective byte boundary and whether content options set it.
+/// - `scope` — operation scope checked at stop checkpoints.
+/// - `budget` — shared permit owning retained output capacity.
+/// - `allocation_limit` — this operation's maximum owned-byte capacity.
 fn read_complete_cancellable(
     filesystem: &crate::LocalFileSystem,
     path: &Path,
@@ -1457,13 +1491,26 @@ fn deletion_effect_facts(
     }
 }
 
-/// Runs the reserve capacity behavior while preserving the operation lifecycle
-/// invariants.
+/// Reserves and reconciles capacity before appending bytes to a complete-read
+/// buffer.
+///
+/// The permit is grown before allocation so concurrent operations cannot
+/// overcommit shared capacity. Allocation failure returns the reservation;
+/// allocator over-allocation is charged to the same permit, and an unaffordable
+/// excess is fully refunded before the read fails. The caller discards the
+/// output on failure, which releases its allocation.
+///
+/// # Errors
+/// Returns an `OwnedBytes` resource-limit error when the per-operation or
+/// shared-pool budget is exceeded, or an I/O error when capacity arithmetic or
+/// allocation fails.
+///
 /// # Parameters
-/// - `output` — supplies data or policy for this operation.
-/// - `additional` — supplies data or policy for this operation.
-/// - `permit` — supplies data or policy for this operation.
-/// - `maximum` — supplies data or policy for this operation.
+/// - `output` — read buffer whose capacity is to be extended.
+/// - `additional` — number of bytes about to be appended.
+/// - `permit` — shared byte permit owning retained capacity.
+/// - `maximum` — per-operation maximum retained capacity.
+/// - `path` — path attached to structured resource and I/O errors.
 fn reserve_capacity(
     output: &mut Vec<u8>,
     additional: usize,

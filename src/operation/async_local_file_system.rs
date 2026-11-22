@@ -41,7 +41,7 @@ mod publish;
 /// let manager = OperationManager::new(ManagerOptions::default())?;
 /// let executor = LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default())?;
 /// let filesystem = AsyncLocalFileSystem::host(executor).await?;
-/// let (mut operation, observer) = filesystem.submit_read_all_with_observer(
+/// let (mut operation, observer) = filesystem.submit_read_all(
 ///     &manager,
 ///     OperationOptions::default(),
 ///     LocalReadRequest { path: PathBuf::from("input.txt"), read: Default::default() },
@@ -531,13 +531,20 @@ impl AsyncLocalFileSystem {
             }
         }
     }
-    /// Submits a complete file read and returns its independent local fact
-    /// observer alongside the operation handle. The bytes are delivered by
-    /// the operation outcome; the observer reports operation facts and does
-    /// not contain or replace that result. Memory ceilings are reported as
-    /// `OwnedBytes` resource limits; explicit read ceilings retain read-limit
-    /// diagnostics. Use [`Self::submit_read_all`] when
-    /// the read should check cooperative cancellation between read blocks.
+    /// Submits a complete file read using the ordinary full-read execution
+    /// path and returns its independent local fact observer with the operation
+    /// handle. The bytes are delivered by the operation outcome; the observer
+    /// reports operation facts and does not contain or replace that result.
+    /// This method does not add per-block cooperative cancellation checks; use
+    /// [`Self::submit_read_all`] when the read should check for a stop between
+    /// read blocks.
+    ///
+    /// An explicit content limit produces a read-limit diagnostic when it is
+    /// the effective boundary. Executor, per-operation, and shared-pool
+    /// contention produce `OwnedBytes` resource-limit diagnostics. When an
+    /// explicit content limit and a memory limit have the same value, the
+    /// explicit content diagnostic takes precedence. The operation retains its
+    /// byte permit until its result is consumed or dropped.
     ///
     /// # Parameters
     /// - `manager` — operation manager that owns the admission scope.
@@ -771,13 +778,27 @@ fn shrink_byte_budget(permit: &Arc<Mutex<super::internal::permits::Permit>>) {
     let amount = permit.amount();
     permit.shrink(amount);
 }
-/// Runs the reserve vec capacity behavior while preserving the operation
-/// lifecycle invariants.
+/// Reserves the requested growth before allocation and reconciles the permit
+/// with the resulting vector capacity.
+///
+/// The permit owns the buffer's retained capacity until the operation settles.
+/// If allocation fails, the requested growth is returned immediately. If the
+/// allocator reports more capacity than requested, the extra amount must also
+/// fit the executor's shared byte pool; otherwise the permit is fully refunded
+/// and the caller discards the output buffer. `maximum` bounds the requested
+/// capacity for this operation.
+///
+/// # Errors
+/// Returns an I/O error when arithmetic overflows, a configured capacity limit
+/// is reached, or allocation fails. Resource-limit details are recorded in
+/// `capacity_error` for the operation's error conversion.
+///
 /// # Parameters
-/// - `output` — supplies data or policy for this operation.
-/// - `additional` — supplies data or policy for this operation.
-/// - `permit` — supplies data or policy for this operation.
-/// - `maximum` — supplies data or policy for this operation.
+/// - `output` — read buffer whose capacity is to be extended.
+/// - `additional` — number of new bytes the read will append.
+/// - `permit` — shared executor byte budget that owns the resulting capacity.
+/// - `maximum` — largest capacity requested by this individual operation.
+/// - `capacity_error` — slot for structured resource-limit facts on rejection.
 fn reserve_vec_capacity(
     output: &mut Vec<u8>,
     additional: usize,
@@ -826,9 +847,14 @@ fn reserve_vec_capacity(
 
 /// Reconciles a byte permit with the capacity returned by an allocator.
 ///
+/// A smaller actual capacity refunds the unused reservation; a larger capacity
+/// charges the excess to the shared pool. If that charge fails, the permit is
+/// fully refunded so the caller can discard the allocation without retaining
+/// an unaccounted budget claim.
+///
 /// # Parameters
-/// - `lease` — byte permit to reconcile.
-/// - `requested_delta` — capacity initially reserved before allocation.
+/// - `lease` — byte permit that owns the buffer capacity.
+/// - `requested_delta` — capacity reserved before asking the allocator.
 /// - `actual_delta` — capacity reported after allocation.
 fn reconcile_vec_capacity(
     lease: &mut super::internal::permits::Permit,
@@ -1221,6 +1247,34 @@ mod tests {
 
         drop(permit);
         assert_eq!(pool.used(), 0);
+    }
+
+    #[test]
+    fn test_read_buffer_capacity_reconciliation_synthetic_boundaries() {
+        let underfilled_pool = crate::operation::internal::permits::PermitPool::new(4);
+        let mut underfilled = underfilled_pool.try_acquire(4).expect("requested capacity");
+        super::reconcile_vec_capacity(&mut underfilled, 4, 2).expect("allocator under-allocation");
+        assert_eq!(underfilled.amount(), 2);
+        assert_eq!(underfilled_pool.used(), 2);
+
+        let exact_pool = crate::operation::internal::permits::PermitPool::new(4);
+        let mut exact = exact_pool.try_acquire(4).expect("requested capacity");
+        super::reconcile_vec_capacity(&mut exact, 4, 4).expect("exact allocation");
+        assert_eq!(exact.amount(), 4);
+        assert_eq!(exact_pool.used(), 4);
+
+        // This synthetic result crosses a per-operation ceiling of four while
+        // the shared pool can still account for all seven bytes. The supported
+        // Linux allocator probe does not reach this case, so this test records
+        // accounting behavior without changing production policy.
+        let operation_limit = 4;
+        let shared_pool = crate::operation::internal::permits::PermitPool::new(7);
+        let mut over_operation_limit = shared_pool.try_acquire(4).expect("requested capacity");
+        super::reconcile_vec_capacity(&mut over_operation_limit, 4, 7)
+            .expect("shared pool can account for synthetic over-allocation");
+        assert!(7 > operation_limit);
+        assert_eq!(over_operation_limit.amount(), 7);
+        assert_eq!(shared_pool.used(), 7);
     }
 
     #[test]
