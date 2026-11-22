@@ -72,6 +72,7 @@ mod worker_walk_close_state;
 mod worker_walk_driver;
 #[path = "worker_walk_inner.rs"]
 mod worker_walk_inner;
+pub(super) use worker_walk_inner::dispose_panic_payload;
 pub(crate) use worker_walk_driver::WorkerWalkDriver;
 #[path = "worker_stream_driver.rs"]
 mod worker_stream_driver;

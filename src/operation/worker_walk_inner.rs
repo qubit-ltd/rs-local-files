@@ -23,7 +23,7 @@ use super::worker_walk_cursor::WorkerWalkCursor;
 ///
 /// A payload whose destructor also panics is intentionally forgotten after
 /// catching that second panic, matching the walker's existing drop boundary.
-pub(super) fn dispose_panic_payload(payload: Box<dyn Any + Send>) {
+pub(crate) fn dispose_panic_payload(payload: Box<dyn Any + Send>) {
     if let Err(payload) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| drop(payload))) {
         std::mem::forget(payload);
     }
@@ -97,7 +97,11 @@ impl WorkerWalkInner {
             return;
         };
         for waker in waiters {
-            let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| waker.wake()));
+            if let Err(payload) =
+                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| waker.wake()))
+            {
+                dispose_panic_payload(payload);
+            }
         }
     }
 

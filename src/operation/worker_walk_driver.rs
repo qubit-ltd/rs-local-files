@@ -824,6 +824,55 @@ mod tests {
         assert!(matches!(driver.poll_closed(&mut checking_context), Poll::Ready(Ok(()))));
     }
 
+    #[cfg(panic = "unwind")]
+    #[test]
+    fn test_close_broadcast_continues_after_panicking_wake_payload_drop() {
+        struct PanicOnDrop;
+        impl Drop for PanicOnDrop {
+            fn drop(&mut self) {
+                panic!("panic payload destructor panicked");
+            }
+        }
+        struct WakePanics;
+        impl Wake for WakePanics {
+            fn wake(self: Arc<Self>) {
+                std::panic::panic_any(PanicOnDrop);
+            }
+        }
+        struct CountWake(AtomicUsize);
+        impl Wake for CountWake {
+            fn wake(self: Arc<Self>) {
+                self.0.fetch_add(1, Ordering::SeqCst);
+            }
+            fn wake_by_ref(self: &Arc<Self>) {
+                self.0.fetch_add(1, Ordering::SeqCst);
+            }
+        }
+
+        let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+        let executor = LocalIoExecutor::new(manager, LocalExecutionConfig::default()).unwrap();
+        let directory = tempfile::tempdir().unwrap();
+        let driver = direct_driver(&directory, executor);
+        let panicking_waker = Waker::from(Arc::new(WakePanics));
+        let first = Arc::new(CountWake(AtomicUsize::new(0)));
+        let second = Arc::new(CountWake(AtomicUsize::new(0)));
+        let first_waker = Waker::from(Arc::clone(&first));
+        let second_waker = Waker::from(Arc::clone(&second));
+        let mut contexts = [
+            Context::from_waker(&panicking_waker),
+            Context::from_waker(&first_waker),
+            Context::from_waker(&second_waker),
+        ];
+        for context in &mut contexts {
+            assert!(driver.poll_closed(context).is_pending());
+        }
+
+        driver.0.publish_close(Ok(()));
+
+        assert_eq!(1, first.0.load(Ordering::SeqCst));
+        assert_eq!(1, second.0.load(Ordering::SeqCst));
+    }
+
     struct ClosePollCallbackProbe {
         state: Arc<Mutex<WorkerWalkCloseState>>,
         clones: AtomicUsize,

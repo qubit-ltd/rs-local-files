@@ -14,6 +14,7 @@ use std::sync::Mutex;
 use super::super::permits::Permit;
 use super::CleanupCompletionEnqueueError;
 use super::CleanupEnqueueError;
+use crate::operation::stream::dispose_panic_payload;
 // Stores bounded queue contents and the worker's fair scheduling state.
 mod queue_state;
 
@@ -166,7 +167,9 @@ impl WorkerQueue {
                 }
             };
             if let Some(job) = job {
-                let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(job));
+                if let Err(payload) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(job)) {
+                    dispose_panic_payload(payload);
+                }
             }
         }
     }
@@ -276,6 +279,39 @@ mod tests {
         queue.run();
         assert!(rx.try_recv().is_err());
         assert_eq!(permits.used(), 0);
+    }
+
+    #[cfg(panic = "unwind")]
+    #[test]
+    fn test_worker_continues_after_panicking_task_payload_drop() {
+        struct PanicOnDrop;
+        impl Drop for PanicOnDrop {
+            fn drop(&mut self) {
+                panic!("task panic payload destructor panicked");
+            }
+        }
+
+        let queue = std::sync::Arc::new(WorkerQueue::default());
+        let panicking_queue = std::sync::Arc::clone(&queue);
+        assert!(
+            panicking_queue
+                .push(Box::new(|| std::panic::panic_any(PanicOnDrop)), false, 2)
+                .is_ok()
+        );
+        let (completed_tx, completed_rx) = mpsc::channel();
+        assert!(queue
+            .push(Box::new(move || completed_tx.send(()).unwrap()), false, 2)
+            .is_ok());
+
+        let worker_queue = std::sync::Arc::clone(&queue);
+        let worker = std::thread::spawn(move || worker_queue.run());
+        completed_rx
+            .recv_timeout(Duration::from_secs(2))
+            .expect("the worker completes the task after the panicking task");
+        queue.stop();
+        worker
+            .join()
+            .expect("the worker remains alive to drain work");
     }
 
     #[test]
