@@ -1042,6 +1042,17 @@ mod tests {
         );
     }
 
+    fn wait_for_queued_worker_job(filesystem: &AsyncLocalFileSystem) {
+        use std::time::Duration;
+        use std::time::Instant;
+
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while filesystem.executor.inner.queue.ordinary_len() == 0 || filesystem.executor.inner.queue_slots.used() == 0 {
+            assert!(Instant::now() < deadline, "local worker job was not queued");
+            std::thread::yield_now();
+        }
+    }
+
     #[test]
     fn test_queued_cancelled_reader_reuses_open_budget_before_taking_outcome() {
         use qubit_operation::OperationOutcome;
@@ -1062,10 +1073,12 @@ mod tests {
                 crate::LocalReadOptions::default(),
             )
             .unwrap();
+        wait_for_queued_worker_job(&filesystem);
         assert_eq!(
             cancelled.request_stop(StopReason::Timeout),
             qubit_operation::StopRequestStatus::Accepted
         );
+        std::thread::sleep(std::time::Duration::from_millis(100));
         drop(gate);
         cancelled.wait_settlement().unwrap();
         assert_open_budgets_returned(&filesystem);
@@ -1106,10 +1119,12 @@ mod tests {
                 crate::LocalWriteOptions::default(),
             )
             .unwrap();
+        wait_for_queued_worker_job(&filesystem);
         assert_eq!(
             cancelled.request_stop(StopReason::Timeout),
             qubit_operation::StopRequestStatus::Accepted
         );
+        std::thread::sleep(std::time::Duration::from_millis(100));
         drop(gate);
         cancelled.wait_settlement().unwrap();
         assert_open_budgets_returned(&filesystem);
@@ -1153,10 +1168,12 @@ mod tests {
                 crate::LocalListOptions::default(),
             )
             .unwrap();
+        wait_for_queued_worker_job(&filesystem);
         assert_eq!(
             cancelled.request_stop(StopReason::Timeout),
             qubit_operation::StopRequestStatus::Accepted
         );
+        std::thread::sleep(std::time::Duration::from_millis(100));
         drop(gate);
         cancelled.wait_settlement().unwrap();
         assert_open_budgets_returned(&filesystem);

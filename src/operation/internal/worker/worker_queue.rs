@@ -44,6 +44,12 @@ impl Default for WorkerQueue {
 }
 
 impl WorkerQueue {
+    /// Returns the number of ordinary jobs waiting for a worker.
+    #[cfg(test)]
+    pub(crate) fn ordinary_len(&self) -> usize {
+        self.state.lock().unwrap_or_else(|e| e.into_inner()).ordinary.len()
+    }
+
     /// Enqueues ordinary or cleanup work up to the selected queue limit.
     ///
     /// # Parameters
