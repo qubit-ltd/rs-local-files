@@ -90,7 +90,10 @@ assert_eq!(settlement.recovery_count, 0);
 检查是否应停止，并在读取前后通过同一个 reader 观察文件变化。观察只能用于发现变化，不能
 提供原子快照：两次观察之间仍可能发生修改，也无法保证检测到所有变化。若希望保留普通完整读取
 行为，请使用 `submit_read_all_with_observer`；它同样返回独立的 `LocalFactObserver`，但不会逐块
-检查停止。两种入口的 observer 都只报告操作事实，实际字节仍由 operation outcome 单独交付。
+检查停止。两种入口都通过 `LocalFactObserver::snapshot()` 读取操作事实，实际字节仍由 operation
+outcome 单独交付。有界事实记录槽会一直保留到最后一个 observer 副本释放，并在最后一个副本丢弃后
+归还。操作 settlement 独立于该额度发布，因此保留 observer 时仍可观察 settlement。walker observer
+或操作返回的其他资源可能继续占用 worker 资源；等待对应 settlement 前应先关闭或释放它们。
 
 应用需要限制内容大小时，可在请求中设置 `LocalReadAllOptions::with_max_bytes`。这个显式读取上限
 与 `LocalExecutionConfig::max_owned_bytes` 的 executor 总内存上限，以及

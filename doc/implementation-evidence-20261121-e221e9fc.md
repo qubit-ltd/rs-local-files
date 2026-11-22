@@ -38,3 +38,14 @@ runtime evidence remains Linux with its default allocator; no cross-platform
 reachability conclusion is claimed.
 
 References: [Rust `Vec::try_reserve_exact`](https://doc.rust-lang.org/alloc/vec/struct.Vec.html#method.try_reserve_exact), [Rust `RawVec` source](https://doc.rust-lang.org/src/alloc/raw_vec/mod.rs.html).
+
+## RLF-053 implementation-round check (2026-11-22)
+
+The probe was rerun with `rustc 1.94.0 (4a4ef493e 2026-03-02)` on
+`x86_64-unknown-linux-gnu`, using the process default global allocator. The
+command compiled and ran a standalone `Vec<u8>` program that called
+`try_reserve_exact` for each request listed above. All 19 observed capacities
+equaled their requested sizes. Windows, macOS, and custom allocator runtime
+probes remain unavailable in this environment, so this result still does not
+establish production reachability of allocator over-allocation. No production
+capacity policy change is warranted by the available evidence.

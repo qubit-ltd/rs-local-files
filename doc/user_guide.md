@@ -97,9 +97,14 @@ before and after reading to detect changes. These observations do not provide
 an atomic snapshot: concurrent changes can still occur between observations or
 escape detection. Use `submit_read_all_with_observer` when the ordinary
 complete-read behavior is desired; it returns the same kind of independent
-`LocalFactObserver` without the per-block stop checks. In either case, the
-observer reports facts, while the bytes are delivered separately through the
-operation outcome.
+`LocalFactObserver` without the per-block stop checks. In either case, read
+facts with `LocalFactObserver::snapshot()`; bytes are delivered separately
+through the operation outcome. The bounded fact-record slot remains reserved
+while any observer clone is alive and returns when the last clone is dropped.
+Settlement is published independently, so it can be observed while an observer
+is retained. A walker observer or another resource returned by an operation can
+still retain worker resources; close or release those resources before waiting
+for their settlement.
 
 Set `LocalReadAllOptions::with_max_bytes` on the request when the application
 needs a content-size ceiling. This explicit read limit is separate from
