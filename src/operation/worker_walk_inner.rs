@@ -18,6 +18,10 @@ use super::worker_walk_close_state::WorkerWalkCloseState;
 use super::worker_walk_command::WorkerWalkCommand;
 use super::worker_walk_cursor::WorkerWalkCursor;
 
+/// Test-only pause point bound to a request on one walker driver.
+#[cfg(test)]
+pub(super) type WalkBatchTransferTestGate = (u64, std::sync::mpsc::SyncSender<()>, std::sync::mpsc::Receiver<()>);
+
 /// Shared executor, iterator, and close state for one directory worker.
 pub(super) struct WorkerWalkInner {
     /// Executor that serializes directory operations and cleanup.
@@ -36,6 +40,12 @@ pub(super) struct WorkerWalkInner {
     pub(super) _buffer_budget: Arc<Mutex<super::super::internal::permits::Permit>>,
     /// Budget retained while the native directory handle is open.
     pub(super) _handle_budget: Mutex<Option<Arc<super::super::internal::permits::Permit>>>,
+    /// Per-driver batch transfer gate used by deterministic worker tests.
+    #[cfg(test)]
+    pub(super) batch_transfer_test_gate: Mutex<Option<WalkBatchTransferTestGate>>,
+    /// Per-driver event emitted immediately before cleanup acquires the cursor.
+    #[cfg(test)]
+    pub(super) cleanup_cursor_test_probe: Mutex<Option<std::sync::mpsc::SyncSender<bool>>>,
 }
 
 impl WorkerWalkInner {

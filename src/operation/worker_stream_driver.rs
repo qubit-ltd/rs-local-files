@@ -409,10 +409,12 @@ mod tests {
         inner: Arc<WorkerStreamInner>,
         clones: AtomicUsize,
         drops: AtomicUsize,
+        callbacks: AtomicUsize,
         locked_callbacks: AtomicUsize,
     }
 
     fn record_command_waker_callback(probe: &CommandWakerProbe) {
+        probe.callbacks.fetch_add(1, Ordering::Relaxed);
         if probe.inner.state.try_lock().is_err() || probe.inner.native_write_ids.try_lock().is_err() {
             probe.locked_callbacks.fetch_add(1, Ordering::Relaxed);
         }
@@ -462,6 +464,7 @@ mod tests {
             inner,
             clones: AtomicUsize::new(0),
             drops: AtomicUsize::new(0),
+            callbacks: AtomicUsize::new(0),
             locked_callbacks: AtomicUsize::new(0),
         })
     }
@@ -708,6 +711,7 @@ mod tests {
         assert!(driver.poll_command(&mut context, &request).is_pending());
         assert_eq!(probe.clones.load(Ordering::Relaxed), 1);
         assert_eq!(old_probe.drops.load(Ordering::Relaxed), 1);
+        assert_eq!(0, old_probe.locked_callbacks.load(Ordering::Relaxed));
 
         let ready_probe = command_waker_probe(Arc::clone(&driver.0));
         driver.0.state.lock().unwrap().commands.insert(
@@ -723,6 +727,7 @@ mod tests {
         };
         assert!(matches!(driver.poll_command(&mut context, &ready), Poll::Ready(Ok(_))));
         assert_eq!(ready_probe.drops.load(Ordering::Relaxed), 1);
+        assert_eq!(0, ready_probe.locked_callbacks.load(Ordering::Relaxed));
 
         let write = LocalStreamRequest {
             id: 103,
@@ -902,17 +907,24 @@ mod tests {
             written_bytes: std::sync::atomic::AtomicU64::new(0),
             append_mode: false,
         }));
-        #[cfg(panic = "unwind")]
-        crate::operation::poison_test_mutex(&driver.0.state);
-        #[cfg(panic = "unwind")]
-        crate::operation::poison_test_mutex(&driver.0.queue);
+        let probe = command_waker_probe(Arc::clone(&driver.0));
+        let waker = command_waker(Arc::clone(&probe));
         let request = LocalStreamRequest {
             id: 1,
             command: LocalStreamCommand::Read { max_bytes: 1 },
         };
-        let mut cx = Context::from_waker(Waker::noop());
+        let mut cx = Context::from_waker(&waker);
         let result = driver.poll_command(&mut cx, &request);
         release_tx.send(()).unwrap();
+        assert!(driver.0.state.lock().unwrap().commands.is_empty());
+        assert!(driver.0.queue.lock().unwrap().is_empty());
+        assert!(
+            probe.callbacks.load(Ordering::Relaxed) >= 2,
+            "the rejected waiter callback is observed"
+        );
+        assert_eq!(0, probe.locked_callbacks.load(Ordering::Relaxed));
+        drop(waker);
+        assert_eq!(0, probe.locked_callbacks.load(Ordering::Relaxed));
         assert!(matches!(result, std::task::Poll::Ready(Err(ref error)) if error.kind() == io::ErrorKind::WouldBlock));
     }
 

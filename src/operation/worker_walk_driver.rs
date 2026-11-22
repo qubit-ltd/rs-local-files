@@ -27,16 +27,19 @@ use super::worker_walk_cursor::WorkerWalkCursor;
 use super::worker_walk_inner::WorkerWalkInner;
 
 #[cfg(test)]
-static WALK_BATCH_TRANSFER_TEST_GATE: Mutex<Option<(std::sync::mpsc::SyncSender<()>, std::sync::mpsc::Receiver<()>)>> =
-    Mutex::new(None);
-
-#[cfg(test)]
-fn pause_walk_batch_transfer_test_gate() {
-    let gate = WALK_BATCH_TRANSFER_TEST_GATE
-        .lock()
-        .unwrap_or_else(|error| error.into_inner())
-        .take();
-    if let Some((entered, resume)) = gate {
+fn pause_walk_batch_transfer_test_gate(inner: &WorkerWalkInner, request_id: u64) {
+    let gate = {
+        let mut gate = inner
+            .batch_transfer_test_gate
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        if gate.as_ref().is_some_and(|(target, _, _)| *target == request_id) {
+            gate.take()
+        } else {
+            None
+        }
+    };
+    if let Some((_, entered, resume)) = gate {
         entered.send(()).expect("batch transfer observer remains connected");
         resume.recv().expect("batch transfer test resumes worker");
     }
@@ -148,6 +151,10 @@ impl WorkerWalkDriver {
             cleanup_permit: Mutex::new(Some(cleanup_permit)),
             _buffer_budget: buffer_budget,
             _handle_budget: Mutex::new(Some(handle_budget)),
+            #[cfg(test)]
+            batch_transfer_test_gate: Mutex::new(None),
+            #[cfg(test)]
+            cleanup_cursor_test_probe: Mutex::new(None),
         }));
         let resource = LocalWalkResource::new_native(driver, close_state);
         let resources = scope
@@ -251,7 +258,7 @@ impl LocalWalkDriver for WorkerWalkDriver {
                 }))
                 .unwrap_or_else(|_| Err(io::Error::other("Unconfirmed: local walker worker panicked")));
                 #[cfg(test)]
-                pause_walk_batch_transfer_test_gate();
+                pause_walk_batch_transfer_test_gate(&inner, request_id);
                 let wake = {
                     let mut commands = inner.commands.lock().unwrap_or_else(|e| e.into_inner());
                     if inner.stop_requested.load(Ordering::Acquire) {
@@ -296,7 +303,7 @@ impl LocalWalkDriver for WorkerWalkDriver {
             }
             std::mem::take(&mut *commands)
         };
-        drop(abandoned_commands);
+        drop_abandoned_walk_commands(abandoned_commands);
         let inner = Arc::clone(&self.0);
         let close_inner = Arc::clone(&inner);
         let job: Box<dyn FnOnce() + Send> = Box::new(move || {
@@ -306,6 +313,16 @@ impl LocalWalkDriver for WorkerWalkDriver {
                     panic!("injected walker cleanup task panic");
                 }
                 {
+                    #[cfg(test)]
+                    if let Some(probe) = close_inner
+                        .cleanup_cursor_test_probe
+                        .lock()
+                        .unwrap_or_else(|error| error.into_inner())
+                        .take()
+                    {
+                        let cursor_was_locked = close_inner.walker.try_lock().is_err();
+                        let _ = probe.send(cursor_was_locked);
+                    }
                     let mut cursor = close_inner.walker.lock().unwrap_or_else(|e| e.into_inner());
                     cursor.walker.take();
                     cursor.pending_entry.take();
@@ -369,6 +386,29 @@ impl LocalWalkDriver for WorkerWalkDriver {
     /// * `cx` - Task context to wake when native closure completes.
     fn poll_closed(&self, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
         self.0.poll_closed(cx.waker())
+    }
+}
+
+/// Drops command results before independently isolating each user waker's
+/// destructor, so one panic cannot prevent the reserved cleanup task enqueue.
+///
+/// # Parameters
+/// - `commands` — command results and waiters abandoned by a stop request.
+fn drop_abandoned_walk_commands(commands: HashMap<u64, WorkerWalkCommand>) {
+    let (results, wakers): (Vec<_>, Vec<_>) = commands
+        .into_values()
+        .map(|command| (command.result, command.waker))
+        .unzip();
+    drop(results);
+    for waker in wakers.into_iter().flatten() {
+        let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| drop(waker))).err();
+        if let Some(payload) = panic {
+            // A panic payload is user-defined too. If its destructor panics,
+            // leak that payload rather than interrupting the cleanup path.
+            if let Err(payload) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| drop(payload))) {
+                std::mem::forget(payload);
+            }
+        }
     }
 }
 
@@ -467,6 +507,44 @@ mod tests {
         })
     }
 
+    struct PanicDropWakerProbe {
+        drops: AtomicUsize,
+        panic_on_drop: AtomicBool,
+    }
+
+    unsafe fn panic_drop_waker_clone(data: *const ()) -> RawWaker {
+        let probe = std::mem::ManuallyDrop::new(unsafe { Arc::<PanicDropWakerProbe>::from_raw(data.cast()) });
+        RawWaker::new(Arc::into_raw(Arc::clone(&probe)).cast(), &PANIC_DROP_WAKER_VTABLE)
+    }
+
+    unsafe fn panic_drop_waker_wake(data: *const ()) {
+        unsafe { drop(Arc::<PanicDropWakerProbe>::from_raw(data.cast())) };
+    }
+
+    unsafe fn panic_drop_waker_wake_by_ref(data: *const ()) {
+        let _probe = std::mem::ManuallyDrop::new(unsafe { Arc::<PanicDropWakerProbe>::from_raw(data.cast()) });
+    }
+
+    unsafe fn panic_drop_waker_drop(data: *const ()) {
+        let probe = unsafe { Arc::<PanicDropWakerProbe>::from_raw(data.cast()) };
+        probe.drops.fetch_add(1, Ordering::SeqCst);
+        if probe.panic_on_drop.swap(false, Ordering::SeqCst) {
+            panic!("injected waiter destructor panic");
+        }
+    }
+
+    static PANIC_DROP_WAKER_VTABLE: RawWakerVTable = RawWakerVTable::new(
+        panic_drop_waker_clone,
+        panic_drop_waker_wake,
+        panic_drop_waker_wake_by_ref,
+        panic_drop_waker_drop,
+    );
+
+    fn panic_drop_waker(probe: Arc<PanicDropWakerProbe>) -> Waker {
+        // SAFETY: the callback vtable maintains one Arc reference per raw waker.
+        unsafe { Waker::from_raw(RawWaker::new(Arc::into_raw(probe).cast(), &PANIC_DROP_WAKER_VTABLE)) }
+    }
+
     fn direct_driver(directory: &tempfile::TempDir, executor: LocalIoExecutor) -> WorkerWalkDriver {
         let handle_budget = Arc::new(PermitPool::new(1).try_acquire(1).unwrap());
         direct_driver_with_handle_budget(directory, executor, handle_budget)
@@ -496,6 +574,8 @@ mod tests {
             cleanup_permit: Mutex::new(Some(cleanup_permit)),
             _buffer_budget: buffer_budget,
             _handle_budget: Mutex::new(Some(handle_budget)),
+            batch_transfer_test_gate: Mutex::new(None),
+            cleanup_cursor_test_probe: Mutex::new(None),
         }))
     }
 
@@ -889,6 +969,7 @@ mod tests {
         assert!(driver.poll_batch(&mut context, 88, 1, 1024).is_pending());
         assert_eq!(probe.clones.load(Ordering::Relaxed), 1);
         assert_eq!(old_probe.drops.load(Ordering::Relaxed), 1);
+        assert_eq!(0, old_probe.locked_callbacks.load(Ordering::Relaxed));
 
         let ready_probe = batch_waker_probe(Arc::clone(&driver.0));
         driver.0.commands.lock().unwrap().insert(
@@ -903,6 +984,7 @@ mod tests {
             Poll::Ready(Ok(Some(entries))) if entries == [PathBuf::from("ready")]
         ));
         assert_eq!(ready_probe.drops.load(Ordering::Relaxed), 1);
+        assert_eq!(0, ready_probe.locked_callbacks.load(Ordering::Relaxed));
         assert_eq!(0, probe.locked_callbacks.load(Ordering::Relaxed));
 
         drop(waker);
@@ -929,6 +1011,7 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         std::fs::write(directory.path().join("real-entry"), b"x").unwrap();
         let driver = direct_driver(&directory, executor);
+        let unrelated_driver = direct_driver(&directory, driver.0.executor.clone());
         let byte_pool = Arc::new(PermitPool::new(crate::operation::stream::LOCAL_WALK_BATCH_BYTES));
         *driver.0._buffer_budget.lock().unwrap() = byte_pool
             .try_acquire(crate::operation::stream::LOCAL_WALK_BATCH_BYTES)
@@ -936,14 +1019,50 @@ mod tests {
 
         let (entered_tx, entered_rx) = mpsc::sync_channel(1);
         let (resume_tx, resume_rx) = mpsc::sync_channel(1);
-        *super::WALK_BATCH_TRANSFER_TEST_GATE.lock().unwrap() = Some((entered_tx, resume_rx));
+        *driver.0.batch_transfer_test_gate.lock().unwrap() = Some((73, entered_tx, resume_rx));
+        let (cleanup_probe_tx, cleanup_probe_rx) = mpsc::sync_channel(1);
+        *driver.0.cleanup_cursor_test_probe.lock().unwrap() = Some(cleanup_probe_tx);
         let mut context = Context::from_waker(Waker::noop());
+
+        assert!(driver.poll_batch(&mut context, 74, 8, 1024).is_pending());
+        assert!(block_on(poll_batch(&driver, 74, 8, 1024)).is_ok());
+        assert_eq!(
+            Some(73),
+            driver
+                .0
+                .batch_transfer_test_gate
+                .lock()
+                .unwrap()
+                .as_ref()
+                .map(|(request_id, _, _)| *request_id),
+            "another request on the same driver must not consume the gate"
+        );
+        assert!(unrelated_driver.poll_batch(&mut context, 73, 8, 1024).is_pending());
+        assert!(block_on(poll_batch(&unrelated_driver, 73, 8, 1024)).is_ok());
+        assert_eq!(
+            Some(73),
+            driver
+                .0
+                .batch_transfer_test_gate
+                .lock()
+                .unwrap()
+                .as_ref()
+                .map(|(request_id, _, _)| *request_id),
+            "another driver must not consume this driver's gate"
+        );
+
         assert!(driver.poll_batch(&mut context, 73, 8, 1024).is_pending());
         entered_rx
             .recv_timeout(Duration::from_secs(5))
             .expect("worker generated a real batch");
 
         driver.request_stop();
+        assert!(
+            cleanup_probe_rx
+                .recv_timeout(Duration::from_secs(5))
+                .expect("cleanup reaches cursor lock acquisition"),
+            "in-flight batch still owns the cursor lock"
+        );
         let reserved_while_transfer_is_paused = byte_pool.used();
         let close_completed_while_transfer_is_paused = {
             let deadline = std::time::Instant::now() + Duration::from_millis(200);
@@ -978,6 +1097,57 @@ mod tests {
             driver.poll_batch(&mut context, 73, 8, 1024),
             Poll::Ready(Ok(None))
         ));
+    }
+
+    #[cfg(panic = "unwind")]
+    #[test]
+    fn test_stop_isolates_each_abandoned_waker_destructor_panic() {
+        let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+        let executor = LocalIoExecutor::new(manager, LocalExecutionConfig::default()).unwrap();
+        let directory = tempfile::tempdir().unwrap();
+        let driver = direct_driver(&directory, executor);
+        let byte_pool = Arc::new(PermitPool::new(crate::operation::stream::LOCAL_WALK_BATCH_BYTES));
+        *driver.0._buffer_budget.lock().unwrap() = byte_pool
+            .try_acquire(crate::operation::stream::LOCAL_WALK_BATCH_BYTES)
+            .unwrap();
+
+        let panicking = Arc::new(PanicDropWakerProbe {
+            drops: AtomicUsize::new(0),
+            panic_on_drop: AtomicBool::new(true),
+        });
+        let ordinary = Arc::new(PanicDropWakerProbe {
+            drops: AtomicUsize::new(0),
+            panic_on_drop: AtomicBool::new(false),
+        });
+        driver.0.commands.lock().unwrap().insert(
+            21,
+            super::WorkerWalkCommand {
+                result: Some(Ok(Some(vec![PathBuf::from("abandoned-result")]))),
+                waker: Some(panic_drop_waker(Arc::clone(&panicking))),
+            },
+        );
+        driver.0.commands.lock().unwrap().insert(
+            22,
+            super::WorkerWalkCommand {
+                result: None,
+                waker: Some(panic_drop_waker(Arc::clone(&ordinary))),
+            },
+        );
+
+        driver.request_stop();
+        block_on(poll_closed(&driver)).expect("cleanup is scheduled after the waker panic");
+        driver.request_stop();
+        assert_eq!(1, panicking.drops.load(Ordering::SeqCst));
+        assert_eq!(1, ordinary.drops.load(Ordering::SeqCst));
+        assert!(driver.0.walker.lock().unwrap().walker.is_none());
+        assert!(driver.0._handle_budget.lock().unwrap().is_none());
+        assert!(
+            byte_pool
+                .try_acquire(crate::operation::stream::LOCAL_WALK_BATCH_BYTES)
+                .is_some()
+        );
+        let mut context = Context::from_waker(Waker::noop());
+        assert!(matches!(driver.poll_closed(&mut context), Poll::Ready(Ok(()))));
     }
 
     fn block_on<F: std::future::Future>(future: F) -> F::Output {
@@ -1265,6 +1435,28 @@ mod tests {
         assert!(commands.is_empty());
         assert!(driver.0.walker.lock().expect("walker lock").walker.is_some());
         assert!(driver.0.cleanup_permit.lock().expect("permit lock").is_some());
+    }
+
+    #[test]
+    fn test_stopped_worker_drops_rejected_batch_waker_outside_command_lock() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let manager = OperationManager::new(ManagerOptions::default()).expect("manager");
+        let executor = LocalIoExecutor::new(manager, LocalExecutionConfig::default()).expect("executor");
+        let driver = direct_driver(&directory, executor.clone());
+        let probe = batch_waker_probe(Arc::clone(&driver.0));
+        let waker = batch_waker(Arc::clone(&probe));
+        let mut context = Context::from_waker(&waker);
+        executor.inner.queue.stop();
+
+        let Poll::Ready(Err(error)) = driver.poll_batch(&mut context, 1, 1, 1024) else {
+            panic!("a stopped worker queue rejects traversal");
+        };
+        assert_eq!(io::ErrorKind::WouldBlock, error.kind());
+        assert!(driver.0.commands.lock().unwrap().is_empty());
+        assert_eq!(1, probe.drops.load(Ordering::Relaxed));
+        assert_eq!(0, probe.locked_callbacks.load(Ordering::Relaxed));
+        drop(waker);
+        assert_eq!(0, probe.locked_callbacks.load(Ordering::Relaxed));
     }
 
     #[test]
