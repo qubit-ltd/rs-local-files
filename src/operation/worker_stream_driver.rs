@@ -61,12 +61,9 @@ impl WorkerStreamDriver {
         observer: Option<super::super::LocalFactObserver>,
         append_mode: bool,
     ) -> io::Result<ResourceRef<LocalStreamResource>> {
-        let cleanup_permit = executor.reserve_cleanup().ok_or_else(|| {
-            io::Error::new(
-                io::ErrorKind::WouldBlock,
-                "local stream cleanup capacity is full",
-            )
-        })?;
+        let cleanup_permit = executor
+            .reserve_cleanup()
+            .ok_or_else(|| io::Error::new(io::ErrorKind::WouldBlock, "local stream cleanup capacity is full"))?;
         let cleanup = WorkerCleanup::<LocalStreamResource>::policy();
         let resource = LocalStreamResource::new_native(Self(Arc::new(WorkerStreamInner {
             executor,
@@ -96,9 +93,7 @@ impl WorkerStreamDriver {
             Err(error) => {
                 let (reason, resource, _) = error.into_parts();
                 WorkerCleanup::<LocalStreamResource>::dispose(resource);
-                Err(io::Error::other(format!(
-                    "failed to register local stream: {reason:?}"
-                )))
+                Err(io::Error::other(format!("failed to register local stream: {reason:?}")))
             }
         }
     }
@@ -118,11 +113,7 @@ impl WorkerStreamDriver {
     ///
     /// * `request` - Owned request to append to the serial worker queue.
     /// * `write_offset` - Number of bytes already written from its payload.
-    fn schedule_with_offset(
-        &self,
-        request: &LocalStreamRequest,
-        write_offset: usize,
-    ) -> io::Result<()> {
+    fn schedule_with_offset(&self, request: &LocalStreamRequest, write_offset: usize) -> io::Result<()> {
         let should_start = {
             let mut queue = self.0.queue.lock().unwrap_or_else(|e| e.into_inner());
             queue.push_back(WorkerStreamQueuedRequest {
@@ -132,10 +123,7 @@ impl WorkerStreamDriver {
             !self.0.active.swap(true, Ordering::AcqRel)
         };
         if should_start {
-            let terminal = matches!(
-                request.command,
-                LocalStreamCommand::Close | LocalStreamCommand::Abort
-            );
+            let terminal = matches!(request.command, LocalStreamCommand::Close | LocalStreamCommand::Abort);
             if let Err(error) = start_stream_drain(Arc::clone(&self.0), terminal) {
                 fail_stream_queue(&self.0, io::Error::new(error.kind(), error.to_string()));
                 return Err(error);
@@ -156,30 +144,7 @@ impl WorkerStreamDriver {
 /// * `resource_id` - Mutex containing the worker resource id.
 /// * `id` - Operation resource id to record.
 fn set_stream_resource_id<T: Copy>(resource_id: &Mutex<Option<T>>, id: T) {
-    *resource_id
-        .lock()
-        .unwrap_or_else(|error| error.into_inner()) = Some(id);
-}
-
-/// Drops a waker while containing panics from user supplied wake data.
-fn drop_stream_waker(waker: Option<std::task::Waker>) {
-    if let Some(waker) = waker {
-        let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| drop(waker))).err();
-        if let Some(payload) = panic
-            && let Err(payload) =
-                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| drop(payload)))
-        {
-            std::mem::forget(payload);
-        }
-    }
-}
-
-/// Disposes a removed command without allowing its waker destructor to disrupt result delivery.
-fn drop_stream_command(command: Option<WorkerCommand>) {
-    if let Some(WorkerCommand { result, waker }) = command {
-        drop(result);
-        drop_stream_waker(waker);
-    }
+    *resource_id.lock().unwrap_or_else(|error| error.into_inner()) = Some(id);
 }
 
 /// Drops a waker while containing panics from user supplied wake data.
@@ -236,9 +201,7 @@ impl LocalStreamDriver for WorkerStreamDriver {
                         completed_slot = state.commands.remove(&request.id);
                         false
                     } else {
-                        replaced_waker = slot
-                            .waker
-                            .replace(registered_waker.take().expect("waker is available"));
+                        replaced_waker = slot.waker.replace(registered_waker.take().expect("waker is available"));
                         false
                     }
                 }
@@ -278,15 +241,9 @@ impl LocalStreamDriver for WorkerStreamDriver {
     fn write_facts(&self) -> Option<(crate::LocalWriteFailureState, u64)> {
         let snapshot = self.0.observer.as_ref()?.snapshot();
         let state = match snapshot.publication {
-            super::super::LocalPublicationState::NotPublished => {
-                crate::LocalWriteFailureState::NotPublished
-            }
-            super::super::LocalPublicationState::Published => {
-                crate::LocalWriteFailureState::Published
-            }
-            super::super::LocalPublicationState::Unknown => {
-                crate::LocalWriteFailureState::Indeterminate
-            }
+            super::super::LocalPublicationState::NotPublished => crate::LocalWriteFailureState::NotPublished,
+            super::super::LocalPublicationState::Published => crate::LocalWriteFailureState::Published,
+            super::super::LocalPublicationState::Unknown => crate::LocalWriteFailureState::Indeterminate,
         };
         Some((
             state,
@@ -337,10 +294,7 @@ impl LocalStreamDriver for WorkerStreamDriver {
                     return;
                 };
                 slot.result = Some(Err(last_error.unwrap_or_else(|| {
-                    io::Error::new(
-                        io::ErrorKind::WouldBlock,
-                        "local stream cleanup scheduling failed",
-                    )
+                    io::Error::new(io::ErrorKind::WouldBlock, "local stream cleanup scheduling failed")
                 })));
                 slot.waker.take()
             };
@@ -366,17 +320,9 @@ impl NativeStreamWriter for WorkerStreamDriver {
         offset: usize,
     ) -> Poll<io::Result<LocalStreamCompletion>> {
         let child_id = {
-            let mut ids = self
-                .0
-                .native_write_ids
-                .lock()
-                .unwrap_or_else(|e| e.into_inner());
-            *ids.entry((request.id, offset)).or_insert_with(|| {
-                self.0
-                    .next_internal_request_id
-                    .fetch_add(1, Ordering::Relaxed)
-                    .max(1)
-            })
+            let mut ids = self.0.native_write_ids.lock().unwrap_or_else(|e| e.into_inner());
+            *ids.entry((request.id, offset))
+                .or_insert_with(|| self.0.next_internal_request_id.fetch_add(1, Ordering::Relaxed).max(1))
         };
         let LocalStreamCommand::Write { bytes } = &request.command else {
             return Poll::Ready(Err(io::Error::new(
@@ -407,9 +353,7 @@ impl NativeStreamWriter for WorkerStreamDriver {
                         completed_slot = state.commands.remove(&child_id);
                         false
                     } else {
-                        replaced_waker = slot
-                            .waker
-                            .replace(registered_waker.take().expect("waker is available"));
+                        replaced_waker = slot.waker.replace(registered_waker.take().expect("waker is available"));
                         false
                     }
                 }
@@ -503,22 +447,17 @@ mod tests {
 
     fn record_command_waker_callback(probe: &CommandWakerProbe) {
         probe.callbacks.fetch_add(1, Ordering::Relaxed);
-        if probe.inner.state.try_lock().is_err() || probe.inner.native_write_ids.try_lock().is_err()
-        {
+        if probe.inner.state.try_lock().is_err() || probe.inner.native_write_ids.try_lock().is_err() {
             probe.locked_callbacks.fetch_add(1, Ordering::Relaxed);
         }
     }
 
     unsafe fn command_waker_clone(data: *const ()) -> RawWaker {
         // SAFETY: each raw waker owns one Arc reference; this callback preserves it.
-        let probe =
-            std::mem::ManuallyDrop::new(unsafe { Arc::<CommandWakerProbe>::from_raw(data.cast()) });
+        let probe = std::mem::ManuallyDrop::new(unsafe { Arc::<CommandWakerProbe>::from_raw(data.cast()) });
         probe.clones.fetch_add(1, Ordering::Relaxed);
         record_command_waker_callback(&probe);
-        RawWaker::new(
-            Arc::into_raw(Arc::clone(&probe)).cast(),
-            &COMMAND_WAKER_VTABLE,
-        )
+        RawWaker::new(Arc::into_raw(Arc::clone(&probe)).cast(), &COMMAND_WAKER_VTABLE)
     }
 
     unsafe fn command_waker_wake(data: *const ()) {
@@ -529,8 +468,7 @@ mod tests {
 
     unsafe fn command_waker_wake_by_ref(data: *const ()) {
         // SAFETY: ManuallyDrop preserves the Arc reference owned by this waker.
-        let probe =
-            std::mem::ManuallyDrop::new(unsafe { Arc::<CommandWakerProbe>::from_raw(data.cast()) });
+        let probe = std::mem::ManuallyDrop::new(unsafe { Arc::<CommandWakerProbe>::from_raw(data.cast()) });
         record_command_waker_callback(&probe);
     }
 
@@ -550,12 +488,7 @@ mod tests {
 
     fn command_waker(probe: Arc<CommandWakerProbe>) -> Waker {
         // SAFETY: the callback vtable maintains one Arc reference per raw waker.
-        unsafe {
-            Waker::from_raw(RawWaker::new(
-                Arc::into_raw(probe).cast(),
-                &COMMAND_WAKER_VTABLE,
-            ))
-        }
+        unsafe { Waker::from_raw(RawWaker::new(Arc::into_raw(probe).cast(), &COMMAND_WAKER_VTABLE)) }
     }
 
     fn command_waker_probe(inner: Arc<WorkerStreamInner>) -> Arc<CommandWakerProbe> {
@@ -580,9 +513,7 @@ mod tests {
                 let (released, changed) = &*self.released;
                 let guard = released.lock().unwrap();
                 let _ = changed
-                    .wait_timeout_while(guard, std::time::Duration::from_secs(5), |released| {
-                        !*released
-                    })
+                    .wait_timeout_while(guard, std::time::Duration::from_secs(5), |released| !*released)
                     .unwrap();
             }
         }
@@ -686,12 +617,7 @@ mod tests {
         assert!(lock.is_err());
 
         super::set_stream_resource_id(&resource_id, 23);
-        assert_eq!(
-            *resource_id
-                .lock()
-                .unwrap_or_else(|error| error.into_inner()),
-            Some(23)
-        );
+        assert_eq!(*resource_id.lock().unwrap_or_else(|error| error.into_inner()), Some(23));
     }
 
     #[test]
@@ -831,10 +757,7 @@ mod tests {
             id: 102,
             command: LocalStreamCommand::Flush,
         };
-        assert!(matches!(
-            driver.poll_command(&mut context, &ready),
-            Poll::Ready(Ok(_))
-        ));
+        assert!(matches!(driver.poll_command(&mut context, &ready), Poll::Ready(Ok(_))));
         assert_eq!(ready_probe.drops.load(Ordering::Relaxed), 1);
         assert_eq!(0, ready_probe.locked_callbacks.load(Ordering::Relaxed));
 
@@ -844,13 +767,9 @@ mod tests {
                 bytes: Arc::from(&b"payload"[..]),
             },
         };
-        assert!(
-            NativeStreamWriter::poll_native_write(&driver, &mut context, &write, 2).is_pending()
-        );
+        assert!(NativeStreamWriter::poll_native_write(&driver, &mut context, &write, 2).is_pending());
         let child_id = driver.0.native_write_ids.lock().unwrap()[&(write.id, 2)];
-        assert!(
-            NativeStreamWriter::poll_native_write(&driver, &mut context, &write, 2).is_pending()
-        );
+        assert!(NativeStreamWriter::poll_native_write(&driver, &mut context, &write, 2).is_pending());
         driver
             .0
             .state
@@ -864,14 +783,7 @@ mod tests {
             NativeStreamWriter::poll_native_write(&driver, &mut context, &write, 2),
             Poll::Ready(Ok(super::super::LocalStreamCompletion::Written(5)))
         ));
-        assert!(
-            !driver
-                .0
-                .native_write_ids
-                .lock()
-                .unwrap()
-                .contains_key(&(write.id, 2))
-        );
+        assert!(!driver.0.native_write_ids.lock().unwrap().contains_key(&(write.id, 2)));
         assert_eq!(0, probe.locked_callbacks.load(Ordering::Relaxed));
 
         let abandoned_commands = {
@@ -1208,9 +1120,7 @@ mod tests {
         assert_eq!(0, probe.locked_callbacks.load(Ordering::Relaxed));
         drop(waker);
         assert_eq!(0, probe.locked_callbacks.load(Ordering::Relaxed));
-        assert!(
-            matches!(result, std::task::Poll::Ready(Err(ref error)) if error.kind() == io::ErrorKind::WouldBlock)
-        );
+        assert!(matches!(result, std::task::Poll::Ready(Err(ref error)) if error.kind() == io::ErrorKind::WouldBlock));
     }
 
     #[test]
@@ -1281,10 +1191,7 @@ mod tests {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .is_none();
         release_tx.send(()).unwrap();
-        assert!(
-            used_cleanup_lane,
-            "terminal close uses its reserved cleanup slot"
-        );
+        assert!(used_cleanup_lane, "terminal close uses its reserved cleanup slot");
 
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
         loop {
@@ -1293,10 +1200,7 @@ mod tests {
                 std::task::Poll::Ready(Err(error)) => panic!("terminal close failed: {error}"),
                 std::task::Poll::Ready(Ok(other)) => panic!("unexpected completion: {other:?}"),
                 std::task::Poll::Pending => {
-                    assert!(
-                        std::time::Instant::now() < deadline,
-                        "terminal close did not finish"
-                    );
+                    assert!(std::time::Instant::now() < deadline, "terminal close did not finish");
                     std::thread::sleep(std::time::Duration::from_millis(1));
                 }
             }
@@ -1362,10 +1266,7 @@ mod tests {
 
         LocalStreamDriver::request_close(&driver, 17);
         let state = driver.0.state.lock().unwrap();
-        let result = state
-            .commands
-            .get(&17)
-            .and_then(|command| command.result.as_ref());
+        let result = state.commands.get(&17).and_then(|command| command.result.as_ref());
         release_tx.send(()).unwrap();
         assert!(matches!(result, Some(Err(error)) if error.kind() == io::ErrorKind::WouldBlock));
         drop(held_cleanup);
@@ -1402,12 +1303,7 @@ mod tests {
                     false,
                 );
                 result_tx
-                    .send(
-                        result
-                            .err()
-                            .expect("cleanup capacity must reject stream")
-                            .kind(),
-                    )
+                    .send(result.err().expect("cleanup capacity must reject stream").kind())
                     .unwrap();
                 Ok::<_, ()>(())
             })
@@ -1465,11 +1361,10 @@ mod tests {
     #[test]
     fn test_stopped_worker_returns_close_error_and_retains_native_stream() {
         let manager = OperationManager::new(ManagerOptions::default()).expect("manager");
-        let executor =
-            LocalIoExecutor::new(manager, LocalExecutionConfig::default()).expect("executor");
+        let executor = LocalIoExecutor::new(manager, LocalExecutionConfig::default()).expect("executor");
         let fixture = tempfile::NamedTempFile::new().expect("temporary file");
-        let native = crate::LocalFileReader::from_file(fixture.reopen().expect("reopen fixture"))
-            .expect("native reader");
+        let native =
+            crate::LocalFileReader::from_file(fixture.reopen().expect("reopen fixture")).expect("native reader");
         let driver = WorkerStreamDriver(Arc::new(WorkerStreamInner {
             native: Mutex::new(Some(LocalNativeStream::Reader(native))),
             state: Mutex::new(WorkerStreamState {
@@ -1480,12 +1375,8 @@ mod tests {
             next_internal_request_id: std::sync::atomic::AtomicU64::new(1 << 63),
             active: AtomicBool::new(false),
             cleanup_permit: Mutex::new(Some(executor.reserve_cleanup().expect("cleanup permit"))),
-            _buffer_budget: Arc::new(Mutex::new(
-                executor.reserve_bytes(0).expect("buffer permit"),
-            )),
-            _handle_budget: Mutex::new(Some(Arc::new(
-                executor.reserve_handle().expect("handle permit"),
-            ))),
+            _buffer_budget: Arc::new(Mutex::new(executor.reserve_bytes(0).expect("buffer permit"))),
+            _handle_budget: Mutex::new(Some(Arc::new(executor.reserve_handle().expect("handle permit")))),
             observer: None,
             written_bytes: std::sync::atomic::AtomicU64::new(0),
             append_mode: false,
@@ -1568,11 +1459,7 @@ mod tests {
         release_tx.send(()).unwrap();
 
         let result_kind = {
-            let state = driver
-                .0
-                .state
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let state = driver.0.state.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
             match state
                 .commands
                 .get(&11)
