@@ -51,10 +51,7 @@ fn pause_walk_batch_transfer_test_gate(inner: &WorkerWalkInner, request_id: u64,
 
 #[cfg(test)]
 fn assert_nonempty_generated_batch(batch_len: usize) {
-    assert!(
-        batch_len > 0,
-        "target request must hold a nonempty generated batch"
-    );
+    assert!(batch_len > 0, "target request must hold a nonempty generated batch");
 }
 
 /// Collects one batch, preserving an iterator error that follows valid paths.
@@ -273,9 +270,7 @@ impl LocalWalkDriver for WorkerWalkDriver {
                 pause_walk_batch_transfer_test_gate(
                     &inner,
                     request_id,
-                    result
-                        .as_ref()
-                        .map_or(0, |batch| batch.as_ref().map_or(0, Vec::len)),
+                    result.as_ref().map_or(0, |batch| batch.as_ref().map_or(0, Vec::len)),
                 );
                 let wake = {
                     let mut commands = inner.commands.lock().unwrap_or_else(|e| e.into_inner());
@@ -1122,10 +1117,7 @@ mod tests {
     #[test]
     fn test_close_regression_rejects_empty_generated_batch_negative_control() {
         let result = std::panic::catch_unwind(|| assert_nonempty_generated_batch(0));
-        assert!(
-            result.is_err(),
-            "the regression must reject an empty generated batch"
-        );
+        assert!(result.is_err(), "the regression must reject an empty generated batch");
     }
 
     #[cfg(panic = "unwind")]
