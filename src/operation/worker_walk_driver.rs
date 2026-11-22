@@ -49,6 +49,14 @@ fn pause_walk_batch_transfer_test_gate(inner: &WorkerWalkInner, request_id: u64,
     }
 }
 
+#[cfg(test)]
+fn assert_nonempty_generated_batch(batch_len: usize) {
+    assert!(
+        batch_len > 0,
+        "target request must hold a nonempty generated batch"
+    );
+}
+
 /// Collects one batch, preserving an iterator error that follows valid paths.
 ///
 /// # Parameters
@@ -449,6 +457,7 @@ mod tests {
     use super::WorkerWalkCursor;
     use super::WorkerWalkDriver;
     use super::WorkerWalkInner;
+    use super::assert_nonempty_generated_batch;
     use super::collect_walk_batch;
     use crate::LocalListOptions;
     use crate::operation::AsyncLocalFileSystem;
@@ -1069,10 +1078,7 @@ mod tests {
         let generated_batch_len = entered_rx
             .recv_timeout(Duration::from_secs(5))
             .expect("worker generated a real batch");
-        assert!(
-            generated_batch_len > 0,
-            "target request must hold a nonempty generated batch"
-        );
+        assert_nonempty_generated_batch(generated_batch_len);
 
         driver.request_stop();
         assert!(
@@ -1111,6 +1117,15 @@ mod tests {
             driver.poll_batch(&mut context, 73, 8, 1024),
             Poll::Ready(Ok(None))
         ));
+    }
+
+    #[test]
+    fn test_close_regression_rejects_empty_generated_batch_negative_control() {
+        let result = std::panic::catch_unwind(|| assert_nonempty_generated_batch(0));
+        assert!(
+            result.is_err(),
+            "the regression must reject an empty generated batch"
+        );
     }
 
     #[cfg(panic = "unwind")]
