@@ -77,9 +77,7 @@ impl WorkerWalkCloseState {
             Ok(()) => Ok(()),
             Err(error) => Err((error.kind(), error.to_string())),
         });
-        let mut waiters = std::mem::take(&mut self.waiters)
-            .into_values()
-            .collect::<Vec<_>>();
+        let mut waiters = std::mem::take(&mut self.waiters).into_values().collect::<Vec<_>>();
         waiters.append(&mut self.legacy_waiters);
         Some(waiters)
     }

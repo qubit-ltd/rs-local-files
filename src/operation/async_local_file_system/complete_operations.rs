@@ -41,6 +41,10 @@ use super::super::complete::LocalRenameOperationResult;
 use super::super::complete::LocalRenameRequest;
 use super::super::internal::permits::Permit;
 use super::super::internal::prepared_local_job::PreparedLocalJob;
+#[path = "complete_read.rs"]
+mod complete_read;
+use complete_read::CompleteRead;
+
 use super::AsyncLocalFileSystem;
 use super::OwnedSubmission;
 use crate::LocalDurabilityState;
@@ -278,10 +282,12 @@ impl AsyncLocalFileSystem {
                     &budget,
                     maximum,
                 ) {
-                    OperationOutcome::Succeeded(read) => match decode_complete_text(read.bytes, &read.path, read.current_directory.as_deref()) {
-                        Ok(text) => OperationOutcome::Succeeded(text),
-                        Err(error) => OperationOutcome::Failed(error),
-                    },
+                    OperationOutcome::Succeeded(read) => {
+                        match decode_complete_text(read.bytes, &read.path, read.current_directory.as_deref()) {
+                            Ok(text) => OperationOutcome::Succeeded(text),
+                            Err(error) => OperationOutcome::Failed(error),
+                        }
+                    }
                     OperationOutcome::Failed(error) => {
                         shrink_to_zero(&budget);
                         OperationOutcome::Failed(error)
@@ -1233,7 +1239,7 @@ fn read_complete_cancellable(
                 return OperationOutcome::Failed(LocalFileError::from_io(
                     LocalFileOperation::Read,
                     Some(path.to_path_buf()),
-                    None,
+                    current_directory.clone(),
                     error,
                 ));
             }
@@ -1253,13 +1259,11 @@ fn read_complete_cancellable(
     if let Some(stopped) = stop_outcome(scope) {
         return stopped;
     }
-    OperationOutcome::Succeeded(CompleteRead { bytes, path, current_directory })
-}
-
-struct CompleteRead {
-    bytes: Vec<u8>,
-    path: PathBuf,
-    current_directory: Option<PathBuf>,
+    OperationOutcome::Succeeded(CompleteRead {
+        bytes,
+        path,
+        current_directory,
+    })
 }
 
 /// Selects the effective read ceiling and whether an explicit content ceiling
@@ -1300,11 +1304,14 @@ fn read_limit_error(
     current_directory: Option<&Path>,
 ) -> LocalFileError {
     if explicit {
-        return attach_current_directory(LocalFileError::from_read_limit(
-            LocalFileOperation::Read,
-            Some(path.to_path_buf()),
-            LocalReadLimitError::new(limit, observed),
-        ), current_directory);
+        return attach_current_directory(
+            LocalFileError::from_read_limit(
+                LocalFileOperation::Read,
+                Some(path.to_path_buf()),
+                LocalReadLimitError::new(limit, observed),
+            ),
+            current_directory,
+        );
     }
     let requested = usize::try_from(observed).unwrap_or(usize::MAX);
     let resource = LocalResourceLimitError::new(
@@ -1324,6 +1331,14 @@ fn read_limit_error(
     )
 }
 
+/// Adds the operation's captured PWD to a diagnostic error.
+///
+/// # Parameters
+/// - `error` — typed error constructed from the bound operation.
+/// - `current_directory` — PWD snapshot captured with the path binding.
+///
+/// # Returns
+/// The same error with its current-directory context attached when available.
 fn attach_current_directory(error: LocalFileError, current_directory: Option<&Path>) -> LocalFileError {
     match current_directory {
         Some(path) => error.with_current_directory(path.to_path_buf()),
@@ -1336,10 +1351,17 @@ fn attach_current_directory(error: LocalFileError, current_directory: Option<&Pa
 /// # Parameters
 /// - `bytes` — owned bytes returned by the complete read.
 /// - `path` — path used to attribute an invalid UTF-8 error.
-fn decode_complete_text(bytes: Vec<u8>, path: &Path, current_directory: Option<&Path>) -> Result<String, LocalFileError> {
-    String::from_utf8(bytes).map_err(|source| attach_current_directory(
-        LocalFileError::from_utf8(LocalFileOperation::Read, Some(path.to_path_buf()), source), current_directory,
-    ))
+fn decode_complete_text(
+    bytes: Vec<u8>,
+    path: &Path,
+    current_directory: Option<&Path>,
+) -> Result<String, LocalFileError> {
+    String::from_utf8(bytes).map_err(|source| {
+        attach_current_directory(
+            LocalFileError::from_utf8(LocalFileOperation::Read, Some(path.to_path_buf()), source),
+            current_directory,
+        )
+    })
 }
 
 /// Rechecks cancellation immediately before delivering a prefix result.

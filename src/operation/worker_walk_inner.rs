@@ -76,9 +76,6 @@ impl WorkerWalkInner {
     /// Releases the native handle reservation exactly once after iterator
     /// close.
     pub(super) fn release_handle_budget(&self) {
-        self._handle_budget
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .take();
+        self._handle_budget.lock().unwrap_or_else(|e| e.into_inner()).take();
     }
 }

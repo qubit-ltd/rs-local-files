@@ -14,6 +14,7 @@ use std::path::PathBuf;
 
 use qubit_local_files::LocalExecutionConfig;
 use qubit_local_files::LocalReadRequest;
+use qubit_local_files::error::LocalFileErrorSource;
 use qubit_local_files::operation::AsyncLocalFileSystem;
 use qubit_local_files::operation::LocalIoExecutor;
 use qubit_local_files::operation::complete::LocalCopyRequest;
@@ -22,7 +23,6 @@ use qubit_local_files::operation::complete::LocalDeleteRequest;
 use qubit_local_files::operation::complete::LocalReadAtRequest;
 use qubit_local_files::operation::complete::LocalReadPrefixRequest;
 use qubit_local_files::operation::complete::LocalRenameRequest;
-use qubit_local_files::error::LocalFileErrorSource;
 use qubit_local_files::options::LocalCopyConflictPolicy;
 use qubit_local_files::options::LocalCopyOptions;
 use qubit_local_files::options::LocalCopyTypeConflictPolicy;
@@ -377,7 +377,10 @@ fn test_rooted_complete_read_errors_keep_virtual_path_and_pwd() {
             assert_eq!(error.path(), Some(Path::new("/limited")));
             assert_eq!(error.current_directory(), Some(Path::new("/")));
             let limit = error.resource_limit_error().expect("owned-byte limit facts");
-            assert_eq!(limit.resource(), qubit_local_files::error::LocalResourceKind::OwnedBytes);
+            assert_eq!(
+                limit.resource(),
+                qubit_local_files::error::LocalResourceKind::OwnedBytes
+            );
             assert_eq!((limit.limit(), limit.remaining(), limit.requested()), (4, 4, 5));
             assert_eq!(limit.observed(), Some(5));
             assert!(error.read_limit_error().is_none());
@@ -401,7 +404,10 @@ fn test_rooted_complete_read_errors_keep_virtual_path_and_pwd() {
         qubit_operation::OperationOutcome::Failed(error) => {
             assert_eq!(error.path(), Some(Path::new("/invalid")));
             assert_eq!(error.current_directory(), Some(Path::new("/")));
-            assert!(matches!(error.into_source(), Some(LocalFileErrorSource::InvalidEncoding(_))));
+            assert!(matches!(
+                error.into_source(),
+                Some(LocalFileErrorSource::InvalidEncoding(_))
+            ));
         }
         other => panic!("invalid UTF-8 must fail: {other:?}"),
     }

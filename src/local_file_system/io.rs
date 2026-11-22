@@ -40,6 +40,14 @@ impl LocalFileSystem {
     /// The returned path and PWD belong to the same resolution used to open
     /// the reader, so later read failures do not need to resolve the request
     /// again.
+    ///
+    /// # Parameters
+    /// - `path` — requested namespace path to resolve and open.
+    /// - `options` — complete reader and symlink policy.
+    ///
+    /// # Returns
+    /// The opened reader, its virtual absolute path, and the PWD captured while
+    /// binding the request.
     pub(crate) fn open_reader_with_context(
         &self,
         path: &Path,
@@ -100,7 +108,8 @@ impl LocalFileSystem {
     /// Returns path-resolution, policy, type, timeout, or native opening
     /// errors.
     pub fn open_reader_with_options(&self, path: &Path, options: &LocalReadOptions) -> LocalResult<LocalFileReader> {
-        self.open_reader_with_context(path, options).map(|(reader, _, _)| reader)
+        self.open_reader_with_context(path, options)
+            .map(|(reader, _, _)| reader)
     }
 
     /// Opens a writer using this instance's default writer options.
