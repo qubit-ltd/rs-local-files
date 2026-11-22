@@ -816,7 +816,9 @@ mod tests {
             unsafe { drop(Arc::<PanicOnDrop>::from_raw(data.cast())) };
         }
         unsafe fn wake_by_ref(_: *const ()) {}
-        unsafe fn drop_waker(_: *const ()) {
+        unsafe fn drop_waker(data: *const ()) {
+            // SAFETY: each raw waker owns one Arc reference; release it before panicking.
+            unsafe { drop(Arc::<PanicOnDrop>::from_raw(data.cast())) };
             panic!("waker destructor panic");
         }
         static VTABLE: RawWakerVTable = RawWakerVTable::new(clone, wake, wake_by_ref, drop_waker);
@@ -873,7 +875,9 @@ mod tests {
             unsafe { drop(Arc::<PanicOnDrop>::from_raw(data.cast())) };
         }
         unsafe fn wake_by_ref(_: *const ()) {}
-        unsafe fn drop_waker(_: *const ()) {
+        unsafe fn drop_waker(data: *const ()) {
+            // SAFETY: each raw waker owns one Arc reference; release it before panicking.
+            unsafe { drop(Arc::<PanicOnDrop>::from_raw(data.cast())) };
             panic!("waker destructor panic");
         }
         static VTABLE: RawWakerVTable = RawWakerVTable::new(clone, wake, wake_by_ref, drop_waker);
@@ -958,7 +962,8 @@ mod tests {
             }
         }
         assert_eq!(std::fs::read(&path).unwrap(), b"once");
-        std::mem::forget(hostile);
+        let original_waker_drop = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| drop(hostile)));
+        assert!(original_waker_drop.is_err(), "test waker drop remains panic-prone");
     }
 
     #[cfg(panic = "unwind")]
