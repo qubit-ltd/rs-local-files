@@ -704,14 +704,6 @@ mod tests {
         std::fs::write(&path, b"five!").unwrap();
         release_tx.send(()).unwrap();
         operation.wait_settlement().unwrap();
-        match operation.try_take_outcome().unwrap().unwrap() {
-            OperationOutcome::Failed(error) => {
-                let limit = error.resource_limit_error().expect("owned-byte resource limit");
-                assert_eq!((limit.limit(), limit.remaining(), limit.requested()), (4, 0, 1));
-                assert_eq!(limit.observed(), Some(5));
-            }
-            other => panic!("growth beyond the memory budget must fail: {other:?}"),
-        }
         assert_eq!(
             executor.inner.byte_slots.used(),
             0,
@@ -732,6 +724,14 @@ mod tests {
             .unwrap()
             .0;
         assert!(matches!(reuse.wait_outcome().unwrap(), OperationOutcome::Succeeded(bytes) if bytes == b"four"));
+        match operation.try_take_outcome().unwrap().unwrap() {
+            OperationOutcome::Failed(error) => {
+                let limit = error.resource_limit_error().expect("owned-byte resource limit");
+                assert_eq!((limit.limit(), limit.remaining(), limit.requested()), (4, 0, 1));
+                assert_eq!(limit.observed(), Some(5));
+            }
+            other => panic!("growth beyond the memory budget must fail: {other:?}"),
+        }
     }
 
     thread_local! {
