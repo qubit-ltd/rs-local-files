@@ -1666,6 +1666,20 @@ stopped or cancelled operation does not imply that an already-started native
 call was interrupted, and recovery owners remain available when cleanup is
 unconfirmed.
 
+Complete reads return a `LocalFactObserver` independently of their byte result.
+`submit_read_all` checks cooperative stop between read blocks and uses the same
+reader for before/after observations that detect changes; these observations
+cannot guarantee an atomic snapshot. `submit_read_all_with_observer` retains
+ordinary complete-read behavior and does not add those per-block stop checks.
+Both paths deliver bytes through the operation outcome. `LocalReadAllOptions::with_max_bytes`
+sets the explicit content ceiling; executor and per-operation
+`max_owned_bytes` values and the shared byte pool independently constrain owned
+memory. Concurrent accepted reads compete for that pool. When the explicit
+content ceiling equals a memory ceiling, its read-limit diagnostic takes
+precedence; other memory failures identify `OwnedBytes`. Consumers must inspect
+the outcome and observer separately, release operation-owned resources, then
+wait for settlement.
+
 An asynchronous directory walker holds its native iterator, one shared bounded
 batch-byte reservation, a reservation from the executor's ordinary handle pool
 for its active enumeration readers, and a cleanup reservation. The reader
