@@ -22,6 +22,7 @@ use qubit_local_files::operation::complete::LocalDeleteRequest;
 use qubit_local_files::operation::complete::LocalReadAtRequest;
 use qubit_local_files::operation::complete::LocalReadPrefixRequest;
 use qubit_local_files::operation::complete::LocalRenameRequest;
+use qubit_local_files::error::LocalFileErrorSource;
 use qubit_local_files::options::LocalCopyConflictPolicy;
 use qubit_local_files::options::LocalCopyOptions;
 use qubit_local_files::options::LocalCopyTypeConflictPolicy;
@@ -313,6 +314,96 @@ fn test_rooted_observer_read_limits_keep_bound_path_and_pwd_context() {
             assert!(error.resource_limit_error().is_some());
         }
         other => panic!("the occupied shared pool must reject the read: {other:?}"),
+    }
+}
+
+#[test]
+fn test_rooted_complete_read_errors_keep_virtual_path_and_pwd() {
+    let directory = tempfile::tempdir().unwrap();
+    let root = directory.path().join("root");
+    std::fs::create_dir(&root).unwrap();
+    std::fs::write(root.join("limited"), b"12345").unwrap();
+    std::fs::write(root.join("invalid"), [0xff]).unwrap();
+    let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+    let executor = LocalIoExecutor::new(
+        manager.clone(),
+        LocalExecutionConfig {
+            max_owned_bytes: 8,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let filesystem = block_on(AsyncLocalFileSystem::rooted(executor, root)).unwrap();
+
+    let mut limited = filesystem
+        .submit_read_all(
+            &manager,
+            Default::default(),
+            LocalReadRequest {
+                path: PathBuf::from("limited"),
+                read: LocalReadAllOptions::new().with_max_bytes(4),
+            },
+            Default::default(),
+        )
+        .unwrap()
+        .0;
+    match limited.wait_outcome().unwrap() {
+        qubit_operation::OperationOutcome::Failed(error) => {
+            assert_eq!(error.path(), Some(Path::new("/limited")));
+            assert_eq!(error.current_directory(), Some(Path::new("/")));
+            let limit = error.read_limit_error().unwrap();
+            assert_eq!((limit.limit(), limit.observed()), (4, 5));
+        }
+        other => panic!("explicit limit must fail: {other:?}"),
+    }
+
+    let mut memory_limited = filesystem
+        .submit_read_all(
+            &manager,
+            Default::default(),
+            LocalReadRequest {
+                path: PathBuf::from("limited"),
+                read: Default::default(),
+            },
+            qubit_local_files::LocalOperationOptions {
+                max_owned_bytes: Some(4),
+                ..Default::default()
+            },
+        )
+        .unwrap()
+        .0;
+    match memory_limited.wait_outcome().unwrap() {
+        qubit_operation::OperationOutcome::Failed(error) => {
+            assert_eq!(error.path(), Some(Path::new("/limited")));
+            assert_eq!(error.current_directory(), Some(Path::new("/")));
+            let limit = error.resource_limit_error().expect("owned-byte limit facts");
+            assert_eq!(limit.resource(), qubit_local_files::error::LocalResourceKind::OwnedBytes);
+            assert_eq!((limit.limit(), limit.remaining(), limit.requested()), (4, 4, 5));
+            assert_eq!(limit.observed(), Some(5));
+            assert!(error.read_limit_error().is_none());
+        }
+        other => panic!("owned-byte limit must fail: {other:?}"),
+    }
+
+    let mut invalid = filesystem
+        .submit_read_text(
+            &manager,
+            Default::default(),
+            LocalReadRequest {
+                path: PathBuf::from("invalid"),
+                read: Default::default(),
+            },
+            Default::default(),
+        )
+        .unwrap()
+        .0;
+    match invalid.wait_outcome().unwrap() {
+        qubit_operation::OperationOutcome::Failed(error) => {
+            assert_eq!(error.path(), Some(Path::new("/invalid")));
+            assert_eq!(error.current_directory(), Some(Path::new("/")));
+            assert!(matches!(error.into_source(), Some(LocalFileErrorSource::InvalidEncoding(_))));
+        }
+        other => panic!("invalid UTF-8 must fail: {other:?}"),
     }
 }
 

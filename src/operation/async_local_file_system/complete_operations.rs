@@ -201,7 +201,10 @@ impl AsyncLocalFileSystem {
                         shrink_to_zero(&budget);
                         OperationOutcome::Stopped(stop)
                     }
-                    outcome => outcome,
+                    OperationOutcome::Succeeded(read) => OperationOutcome::Succeeded(read.bytes),
+                    OperationOutcome::ChildFailed(summary) => OperationOutcome::ChildFailed(summary),
+                    OperationOutcome::Panicked(summary) => OperationOutcome::Panicked(summary),
+                    OperationOutcome::ExecutionFailed(failure) => OperationOutcome::ExecutionFailed(failure),
                 }
             },
         )
@@ -255,7 +258,7 @@ impl AsyncLocalFileSystem {
                     &budget,
                     maximum,
                 ) {
-                    OperationOutcome::Succeeded(bytes) => match decode_complete_text(bytes, &execution_path) {
+                    OperationOutcome::Succeeded(read) => match decode_complete_text(read.bytes, &read.path, read.current_directory.as_deref()) {
                         Ok(text) => OperationOutcome::Succeeded(text),
                         Err(error) => OperationOutcome::Failed(error),
                     },
@@ -1085,17 +1088,18 @@ fn bind_host_path(base: &Option<PathBuf>, path: &PathBuf) -> PathBuf {
         _ => path.clone(),
     }
 }
-/// Runs the read complete cancellable behavior while preserving the operation
-/// lifecycle invariants.
+/// Opens one reader binding, checks cancellation between blocks, and observes
+/// the same handle before and after reading. Read errors retain the bound
+/// namespace path and PWD; the caller owns cleanup of the byte budget.
+///
 /// # Parameters
-/// - `filesystem` — supplies data or policy for this operation.
-/// - `path` — supplies data or policy for this operation.
-/// - `options` — supplies data or policy for this operation.
-/// - `read_limit` — effective byte boundary and whether content options
-///   supplied it.
-/// - `scope` — supplies data or policy for this operation.
-/// - `budget` — supplies data or policy for this operation.
-/// - `allocation_limit` — supplies data or policy for this operation.
+/// - `filesystem`: namespace and reader policy for this operation.
+/// - `path`: original path to bind once.
+/// - `options`: complete-read and reader options.
+/// - `read_limit`: effective byte boundary and whether content options supplied it.
+/// - `scope`: cancellation state.
+/// - `budget`: owned-byte permit charged for retained output.
+/// - `allocation_limit`: per-operation owned-byte ceiling.
 fn read_complete_cancellable(
     filesystem: &crate::LocalFileSystem,
     path: &Path,
@@ -1104,7 +1108,7 @@ fn read_complete_cancellable(
     scope: &OperationScope,
     budget: &Arc<Mutex<Permit>>,
     allocation_limit: usize,
-) -> OperationOutcome<Vec<u8>, LocalFileError> {
+) -> OperationOutcome<CompleteRead, LocalFileError> {
     use crate::observation::LocalObservationRequirement;
     use crate::observation::reader::LocalObservedReader;
 
@@ -1114,16 +1118,16 @@ fn read_complete_cancellable(
         return stopped;
     }
     let read_options = effective_read_options(filesystem, options);
-    let reader_result = match before_native_call(scope, || filesystem.open_reader_with_options(path, &read_options)) {
+    let reader_result = match before_native_call(scope, || filesystem.open_reader_with_context(path, &read_options)) {
         Ok(result) => result,
         Err(stop) => return OperationOutcome::Stopped(stop),
     };
-    let reader = match reader_result {
-        Ok(reader) => reader,
+    let (reader, path, current_directory) = match reader_result {
+        Ok(binding) => binding,
         Err(error) => return OperationOutcome::Failed(error),
     };
     let mut observed = match LocalObservedReader::from_reader(reader, LocalObservationRequirement::Required) {
-        Ok(reader) => reader.bind_error_context(path.to_path_buf(), None),
+        Ok(reader) => reader.bind_error_context(path.clone(), current_directory.clone()),
         Err(error) => return OperationOutcome::Failed(error),
     };
     let before = observed.observation().clone();
@@ -1135,7 +1139,8 @@ fn read_complete_cancellable(
             observed_len,
             0,
             allocation_limit,
-            path,
+            &path,
+            current_directory.as_deref(),
         ));
     }
 
@@ -1156,15 +1161,16 @@ fn read_complete_cancellable(
                         read_limit.saturating_add(1),
                         bytes.capacity(),
                         allocation_limit,
-                        path,
+                        &path,
+                        current_directory.as_deref(),
                     ));
                 }
                 Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
                 Err(error) => {
                     return OperationOutcome::Failed(LocalFileError::from_io(
                         LocalFileOperation::Read,
-                        Some(path.to_path_buf()),
-                        None,
+                        Some(path.clone()),
+                        current_directory.clone(),
                         error,
                     ));
                 }
@@ -1174,12 +1180,12 @@ fn read_complete_cancellable(
         match observed.read(&mut buffer[..remaining]) {
             Ok(0) => break,
             Ok(read) => {
-                if let Err(error) = reserve_capacity(&mut bytes, read, budget, allocation_limit, path) {
-                    return OperationOutcome::Failed(error);
+                if let Err(error) = reserve_capacity(&mut bytes, read, budget, allocation_limit, &path) {
+                    return OperationOutcome::Failed(attach_current_directory(error, current_directory.as_deref()));
                 }
                 bytes.extend_from_slice(&buffer[..read]);
                 #[cfg(test)]
-                pause_read_all_test_gate(path);
+                pause_read_all_test_gate(&path);
                 if let Some(stopped) = stop_outcome(scope) {
                     return stopped;
                 }
@@ -1200,15 +1206,22 @@ fn read_complete_cancellable(
         Err(error) => return OperationOutcome::Failed(error),
     };
     if !crate::observation::snapshot::observations_match(&before, &after, bytes.len() as u64) {
-        return OperationOutcome::Failed(
+        return OperationOutcome::Failed(attach_current_directory(
             LocalFileError::new(LocalFileErrorKind::ChangedDuringRead, LocalFileOperation::Read)
                 .with_path(path.to_path_buf()),
-        );
+            current_directory.as_deref(),
+        ));
     }
     if let Some(stopped) = stop_outcome(scope) {
         return stopped;
     }
-    OperationOutcome::Succeeded(bytes)
+    OperationOutcome::Succeeded(CompleteRead { bytes, path, current_directory })
+}
+
+struct CompleteRead {
+    bytes: Vec<u8>,
+    path: PathBuf,
+    current_directory: Option<PathBuf>,
 }
 
 /// Selects the effective read ceiling and whether an explicit content ceiling
@@ -1234,6 +1247,7 @@ fn effective_read_limit(options: &LocalReadAllOptions, maximum: usize) -> (u64, 
 /// - `capacity` — already reserved buffer capacity when the boundary was found.
 /// - `allocation_limit` — per-operation owned-byte ceiling.
 /// - `path` — path associated with the read.
+/// - `current_directory` — PWD snapshot used to bind a relative path.
 ///
 /// # Returns
 /// A typed read-limit error for explicit ceilings or an `OwnedBytes` resource
@@ -1245,13 +1259,14 @@ fn read_limit_error(
     capacity: usize,
     allocation_limit: usize,
     path: &Path,
+    current_directory: Option<&Path>,
 ) -> LocalFileError {
     if explicit {
-        return LocalFileError::from_read_limit(
+        return attach_current_directory(LocalFileError::from_read_limit(
             LocalFileOperation::Read,
             Some(path.to_path_buf()),
             LocalReadLimitError::new(limit, observed),
-        );
+        ), current_directory);
     }
     let requested = usize::try_from(observed).unwrap_or(usize::MAX);
     let resource = LocalResourceLimitError::new(
@@ -1265,7 +1280,17 @@ fn read_limit_error(
     } else {
         resource.with_observed(requested)
     };
-    LocalFileError::from_resource_limit(LocalFileOperation::Read, Some(path.to_path_buf()), resource)
+    attach_current_directory(
+        LocalFileError::from_resource_limit(LocalFileOperation::Read, Some(path.to_path_buf()), resource),
+        current_directory,
+    )
+}
+
+fn attach_current_directory(error: LocalFileError, current_directory: Option<&Path>) -> LocalFileError {
+    match current_directory {
+        Some(path) => error.with_current_directory(path.to_path_buf()),
+        None => error,
+    }
 }
 
 /// Decodes complete-read bytes while retaining invalid data and path context.
@@ -1273,9 +1298,10 @@ fn read_limit_error(
 /// # Parameters
 /// - `bytes` — owned bytes returned by the complete read.
 /// - `path` — path used to attribute an invalid UTF-8 error.
-fn decode_complete_text(bytes: Vec<u8>, path: &Path) -> Result<String, LocalFileError> {
-    String::from_utf8(bytes)
-        .map_err(|source| LocalFileError::from_utf8(LocalFileOperation::Read, Some(path.to_path_buf()), source))
+fn decode_complete_text(bytes: Vec<u8>, path: &Path, current_directory: Option<&Path>) -> Result<String, LocalFileError> {
+    String::from_utf8(bytes).map_err(|source| attach_current_directory(
+        LocalFileError::from_utf8(LocalFileOperation::Read, Some(path.to_path_buf()), source), current_directory,
+    ))
 }
 
 /// Rechecks cancellation immediately before delivering a prefix result.
@@ -1457,13 +1483,18 @@ fn deletion_effect_facts(
     }
 }
 
-/// Runs the reserve capacity behavior while preserving the operation lifecycle
-/// invariants.
+/// Reserves output capacity only after the corresponding bytes are read and
+/// charges the actual vector capacity increase to the shared permit. On an
+/// allocation failure, it returns the acquired permit amount before reporting
+/// the error; the caller attaches the operation's PWD context.
 /// # Parameters
-/// - `output` — supplies data or policy for this operation.
-/// - `additional` — supplies data or policy for this operation.
-/// - `permit` — supplies data or policy for this operation.
-/// - `maximum` — supplies data or policy for this operation.
+/// - `output` — buffer whose retained capacity is being increased.
+/// - `additional` — number of newly read bytes to retain.
+/// - `permit` — shared owned-byte budget for the operation.
+/// - `maximum` — per-operation owned-byte ceiling.
+/// - `path` — bound namespace path to attach to reservation errors.
+/// # Errors
+/// Returns a structured owned-byte limit error or allocation I/O error.
 fn reserve_capacity(
     output: &mut Vec<u8>,
     additional: usize,
@@ -1750,7 +1781,7 @@ mod stop_gate_tests {
         use crate::error::LocalResourceKind;
 
         let path = Path::new("/bounded/read");
-        let explicit = read_limit_error(true, 4, 5, 0, 8, path);
+        let explicit = read_limit_error(true, 4, 5, 0, 8, path, None);
         assert_eq!(LocalFileErrorKind::ResourceLimit, explicit.kind());
         assert_eq!(Some(path), explicit.path());
         assert_eq!(
@@ -1760,7 +1791,7 @@ mod stop_gate_tests {
                 .map(|limit| (limit.limit(), limit.observed()))
         );
 
-        let memory = read_limit_error(false, 4, 5, 4, 4, path);
+        let memory = read_limit_error(false, 4, 5, 4, 4, path, None);
         assert_eq!(LocalFileErrorKind::ResourceLimit, memory.kind());
         assert_eq!(Some(path), memory.path());
         let facts = memory.resource_limit_error().expect("memory limit must be structured");
@@ -1774,8 +1805,8 @@ mod stop_gate_tests {
         use crate::error::LocalFileErrorKind;
 
         let path = Path::new("invalid-text");
-        assert_eq!("valid", decode_complete_text(b"valid".to_vec(), path).unwrap());
-        let error = decode_complete_text(vec![0xff], path).expect_err("invalid UTF-8 must retain a typed error");
+        assert_eq!("valid", decode_complete_text(b"valid".to_vec(), path, None).unwrap());
+        let error = decode_complete_text(vec![0xff], path, None).expect_err("invalid UTF-8 must retain a typed error");
         assert_eq!(LocalFileErrorKind::InvalidEncoding, error.kind());
         assert_eq!(Some(path), error.path());
     }
