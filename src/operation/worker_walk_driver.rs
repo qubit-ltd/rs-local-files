@@ -1138,10 +1138,7 @@ mod tests {
         block_on(poll_closed(&driver)).expect("negative-control walker closes");
 
         assert_eq!(generated_batch_len, 0, "empty fixture must generate an empty batch");
-        assert!(
-            result.is_err(),
-            "the regression must reject an empty generated batch"
-        );
+        assert!(result.is_err(), "the regression must reject an empty generated batch");
     }
 
     #[cfg(panic = "unwind")]

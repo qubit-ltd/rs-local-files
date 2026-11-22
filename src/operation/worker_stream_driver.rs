@@ -148,6 +148,10 @@ fn set_stream_resource_id<T: Copy>(resource_id: &Mutex<Option<T>>, id: T) {
 }
 
 /// Drops a waker while containing panics from user supplied wake data.
+///
+/// # Parameters
+///
+/// * `waker` - Waker to destroy outside the stream state lock.
 fn drop_stream_waker(waker: Option<std::task::Waker>) {
     if let Some(waker) = waker {
         let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| drop(waker))).err();
@@ -161,6 +165,10 @@ fn drop_stream_waker(waker: Option<std::task::Waker>) {
 
 /// Disposes a removed command without allowing its waker destructor to disrupt
 /// result delivery.
+///
+/// # Parameters
+///
+/// * `command` - Command slot removed from the stream state.
 fn drop_stream_command(command: Option<WorkerCommand>) {
     if let Some(WorkerCommand { result, waker }) = command {
         drop(result);
