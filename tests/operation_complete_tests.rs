@@ -414,6 +414,90 @@ fn test_rooted_complete_read_errors_keep_virtual_path_and_pwd() {
 }
 
 #[test]
+fn test_rooted_prefix_and_position_read_budget_errors_keep_virtual_path_and_pwd() {
+    let directory = tempfile::tempdir().unwrap();
+    let root = directory.path().join("root");
+    std::fs::create_dir(&root).unwrap();
+    std::fs::write(root.join("held"), b"four").unwrap();
+    std::fs::write(root.join("prefix"), b"x").unwrap();
+    std::fs::write(root.join("position"), b"y").unwrap();
+    let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+    let executor = LocalIoExecutor::new(
+        manager.clone(),
+        LocalExecutionConfig {
+            max_owned_bytes: 4,
+            worker_count: 3,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let filesystem = block_on(AsyncLocalFileSystem::rooted(executor, root)).unwrap();
+    let held = filesystem
+        .submit_read_all(
+            &manager,
+            Default::default(),
+            LocalReadRequest {
+                path: PathBuf::from("held"),
+                read: Default::default(),
+            },
+            Default::default(),
+        )
+        .unwrap()
+        .0;
+    held.wait_settlement().unwrap();
+
+    let mut prefix = filesystem
+        .submit_read_prefix(
+            &manager,
+            Default::default(),
+            LocalReadPrefixRequest {
+                path: PathBuf::from("prefix"),
+                read: Default::default(),
+                max_bytes: 1,
+            },
+            Default::default(),
+        )
+        .unwrap()
+        .0;
+    let mut read_at = filesystem
+        .submit_read_at(
+            &manager,
+            Default::default(),
+            LocalReadAtRequest {
+                path: PathBuf::from("position"),
+                read: Default::default(),
+                offset: SeekFrom::Start(0),
+                max_bytes: 1,
+            },
+            Default::default(),
+        )
+        .unwrap()
+        .0;
+    match prefix.wait_outcome().unwrap() {
+        qubit_operation::OperationOutcome::Failed(error) => {
+            assert_eq!(error.path(), Some(Path::new("/prefix")));
+            assert_eq!(error.current_directory(), Some(Path::new("/")));
+            assert_eq!(
+                error.resource_limit_error().unwrap().resource(),
+                qubit_local_files::error::LocalResourceKind::OwnedBytes
+            );
+        }
+        other => panic!("the held result must exhaust shared capacity: {other:?}"),
+    }
+    match read_at.wait_outcome().unwrap() {
+        qubit_operation::OperationOutcome::Failed(error) => {
+            assert_eq!(error.path(), Some(Path::new("/position")));
+            assert_eq!(error.current_directory(), Some(Path::new("/")));
+            assert_eq!(
+                error.resource_limit_error().unwrap().resource(),
+                qubit_local_files::error::LocalResourceKind::OwnedBytes
+            );
+        }
+        other => panic!("the held result must exhaust shared capacity: {other:?}"),
+    }
+}
+
+#[test]
 fn test_complete_text_read_succeeds_with_explicit_and_inherited_limits() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("text");

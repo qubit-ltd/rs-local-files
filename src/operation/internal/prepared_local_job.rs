@@ -475,7 +475,11 @@ where
             this._slot.lock().unwrap_or_else(|e| e.into_inner()).take();
             let (stop_before_start, wakers) = {
                 let mut port = this.port.lock().unwrap_or_else(|e| e.into_inner());
+                let scope_stop = scope_guard.context().stop_reason();
                 let stop = if let Some(reason) = port.stop {
+                    Some(reason)
+                } else if let Some(reason) = scope_stop {
+                    port.stop = Some(reason);
                     Some(reason)
                 } else {
                     port.phase = ExecutionPhase::Running;
@@ -1261,8 +1265,10 @@ mod lifecycle_tests {
                 job.poison_lifecycle_locks();
                 PreparedExternalOperation::bind(&*job, scope.id()).expect("bind job identity");
                 *observed_job.lock().unwrap_or_else(|error| error.into_inner()) = Some(Arc::clone(&job));
-                OperationControl::request_stop(&*job, StopReason::UserCancelled);
-                OperationControl::request_stop(&*job, StopReason::Timeout);
+                // Cancellation may already be accepted by the operation
+                // scope while forwarding it to this local control is queued.
+                assert!(scope.context().request_stop(StopReason::UserCancelled));
+                assert!(!scope.context().request_stop(StopReason::Timeout));
                 PreparedExternalOperation::activate(job, scope).expect("activation queues the stopped job");
 
                 // Parent completion does not imply that its queued child has
@@ -1290,7 +1296,7 @@ mod lifecycle_tests {
             .expect("parent operation");
         assert!(matches!(
             parent.wait_outcome().expect("parent outcome"),
-            OperationOutcome::Succeeded(())
+            OperationOutcome::Stopped(_)
         ));
 
         let job = observed

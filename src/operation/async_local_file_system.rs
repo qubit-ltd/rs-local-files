@@ -1078,7 +1078,6 @@ mod tests {
             cancelled.request_stop(StopReason::Timeout),
             qubit_operation::StopRequestStatus::Accepted
         );
-        std::thread::sleep(std::time::Duration::from_millis(100));
         drop(gate);
         cancelled.wait_settlement().unwrap();
         assert_open_budgets_returned(&filesystem);
@@ -1124,7 +1123,6 @@ mod tests {
             cancelled.request_stop(StopReason::Timeout),
             qubit_operation::StopRequestStatus::Accepted
         );
-        std::thread::sleep(std::time::Duration::from_millis(100));
         drop(gate);
         cancelled.wait_settlement().unwrap();
         assert_open_budgets_returned(&filesystem);
@@ -1173,7 +1171,6 @@ mod tests {
             cancelled.request_stop(StopReason::Timeout),
             qubit_operation::StopRequestStatus::Accepted
         );
-        std::thread::sleep(std::time::Duration::from_millis(100));
         drop(gate);
         cancelled.wait_settlement().unwrap();
         assert_open_budgets_returned(&filesystem);

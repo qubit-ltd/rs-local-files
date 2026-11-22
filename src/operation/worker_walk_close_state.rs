@@ -89,6 +89,9 @@ mod tests {
     use std::sync::Mutex;
     use std::sync::atomic::AtomicUsize;
     use std::sync::atomic::Ordering;
+    use std::task::Poll;
+    use std::task::RawWaker;
+    use std::task::RawWakerVTable;
     use std::task::Wake;
     use std::task::Waker;
 
@@ -214,5 +217,109 @@ mod tests {
         drop(terminal_waker);
         drop(terminal_wake);
         assert_eq!(unlocked_drops.load(Ordering::Relaxed), 1);
+    }
+
+    struct CallbackProbe {
+        state: Arc<Mutex<WorkerWalkCloseState>>,
+        clones: AtomicUsize,
+        drops: AtomicUsize,
+        locked_callbacks: AtomicUsize,
+    }
+
+    fn record_callback(probe: &CallbackProbe) {
+        if probe.state.try_lock().is_err() {
+            probe.locked_callbacks.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
+    unsafe fn callback_clone(data: *const ()) -> RawWaker {
+        // SAFETY: this callback receives one strong reference previously
+        // produced by `Arc::into_raw`; ManuallyDrop keeps that reference owned
+        // by the original RawWaker while the clone creates a second one.
+        let probe = std::mem::ManuallyDrop::new(unsafe { Arc::<CallbackProbe>::from_raw(data.cast()) });
+        probe.clones.fetch_add(1, Ordering::Relaxed);
+        record_callback(&probe);
+        RawWaker::new(Arc::into_raw(Arc::clone(&probe)).cast(), &CALLBACK_VTABLE)
+    }
+
+    unsafe fn callback_wake(data: *const ()) {
+        // SAFETY: wake consumes the single strong reference owned by this
+        // RawWaker, matching the `Arc::into_raw` used to create it.
+        let probe = unsafe { Arc::<CallbackProbe>::from_raw(data.cast()) };
+        record_callback(&probe);
+    }
+
+    unsafe fn callback_wake_by_ref(data: *const ()) {
+        // SAFETY: the RawWaker remains alive, so its strong reference must be
+        // reconstructed without consuming it.
+        let probe = std::mem::ManuallyDrop::new(unsafe { Arc::<CallbackProbe>::from_raw(data.cast()) });
+        record_callback(&probe);
+    }
+
+    unsafe fn callback_drop(data: *const ()) {
+        // SAFETY: drop consumes exactly the strong reference owned by this
+        // RawWaker, matching the `Arc::into_raw` used to create it.
+        let probe = unsafe { Arc::<CallbackProbe>::from_raw(data.cast()) };
+        probe.drops.fetch_add(1, Ordering::Relaxed);
+        record_callback(&probe);
+    }
+
+    static CALLBACK_VTABLE: RawWakerVTable =
+        RawWakerVTable::new(callback_clone, callback_wake, callback_wake_by_ref, callback_drop);
+
+    fn callback_waker(probe: Arc<CallbackProbe>) -> Waker {
+        // The raw pointer owns one Arc strong reference; clone/drop callbacks
+        // respectively create and release exactly one reference per Waker.
+        // SAFETY: the vtable implements the RawWaker Arc ownership contract.
+        unsafe { Waker::from_raw(RawWaker::new(Arc::into_raw(probe).cast(), &CALLBACK_VTABLE)) }
+    }
+
+    #[test]
+    fn test_waker_clone_and_drop_callbacks_run_outside_close_state_lock() {
+        let state = Arc::new(Mutex::new(WorkerWalkCloseState::default()));
+        let probe = Arc::new(CallbackProbe {
+            state: Arc::clone(&state),
+            clones: AtomicUsize::new(0),
+            drops: AtomicUsize::new(0),
+            locked_callbacks: AtomicUsize::new(0),
+        });
+        let waker = callback_waker(Arc::clone(&probe));
+        // Negative control: the callback probe must detect both clone and
+        // drop if a future implementation performs either while holding the
+        // close-state mutex.
+        {
+            let _guard = state.lock().unwrap();
+            drop(waker.clone());
+        }
+        assert!(probe.locked_callbacks.load(Ordering::Relaxed) >= 2);
+        probe.locked_callbacks.store(0, Ordering::Relaxed);
+        let mut registration = CloseWaitRegistration::new(Arc::clone(&state));
+        assert!(registration.poll(&waker).is_pending());
+        assert!(registration.poll(Waker::noop()).is_pending());
+        drop(registration);
+
+        let legacy_waker = waker.clone();
+        let (result, duplicate) = state.lock().unwrap().poll_legacy(legacy_waker);
+        assert!(result.is_pending());
+        drop(duplicate);
+        let legacy_waker = waker.clone();
+        let (result, duplicate) = state.lock().unwrap().poll_legacy(legacy_waker);
+        assert!(result.is_pending());
+        drop(duplicate);
+
+        let waiters = state.lock().unwrap().publish(Ok(()));
+        drop(waiters);
+        let mut terminal_registration = CloseWaitRegistration::new(Arc::clone(&state));
+        assert!(terminal_registration.poll(&waker).is_ready());
+        drop(terminal_registration);
+        let legacy_waker = waker.clone();
+        let (result, terminal_waker) = state.lock().unwrap().poll_legacy(legacy_waker);
+        assert!(matches!(result, Poll::Ready(Ok(()))));
+        drop(terminal_waker);
+        drop(waker);
+
+        assert!(probe.clones.load(Ordering::Relaxed) >= 2);
+        assert!(probe.drops.load(Ordering::Relaxed) >= 2);
+        assert_eq!(0, probe.locked_callbacks.load(Ordering::Relaxed));
     }
 }

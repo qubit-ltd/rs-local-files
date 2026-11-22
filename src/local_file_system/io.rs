@@ -7,8 +7,6 @@
 // =============================================================================
 //! Stateful Host or Rooted local filesystem service.
 
-use std::path::PathBuf;
-
 use super::HostLocalFileSystem;
 use super::LocalFileError;
 use super::LocalFileErrorKind;
@@ -45,27 +43,29 @@ impl LocalFileSystem {
     /// - `path` — requested namespace path to resolve and open.
     /// - `options` — complete reader and symlink policy.
     ///
-    /// # Returns
-    /// The opened reader, its virtual absolute path, and the PWD captured while
-    /// binding the request.
-    pub(crate) fn open_reader_with_context(
+    /// # Type Parameters
+    /// - `T` — result produced from the reader and borrowed diagnostic context.
+    ///
+    /// `build` receives borrowed diagnostic coordinates from the same path
+    /// binding, allowing ordinary callers to avoid allocating owned copies.
+    pub(crate) fn open_reader_with_context<T>(
         &self,
         path: &Path,
         options: &LocalReadOptions,
-    ) -> LocalResult<(LocalFileReader, PathBuf, Option<PathBuf>)> {
+        build: impl FnOnce(LocalFileReader, &Path, Option<&Path>) -> T,
+    ) -> LocalResult<T> {
         let symlink_policy = self.read_symlink_policy(options, None);
         validate_scope_symlink_policy(self.scope(), symlink_policy, LocalFileOperation::OpenReader, Some(path))?;
         let resolver = self.resolver_for(path, LocalFileOperation::OpenReader)?;
         let resolved = resolve_operation_path(&resolver, path, LocalFileOperation::OpenReader)?;
-        let diagnostic_path = resolved.namespace_absolute().to_path_buf();
-        let current_directory = resolver.current_directory().map(Path::to_path_buf);
+        let diagnostic_path = resolved.namespace_absolute();
         let reader = self.open_resolved_reader(
             &resolved,
             options,
             LocalFileOperation::OpenReader,
             resolver.current_directory(),
         )?;
-        Ok((reader, diagnostic_path, current_directory))
+        Ok(build(reader, diagnostic_path, resolver.current_directory()))
     }
 
     /// Opens a reader using this instance's default reader options.
@@ -108,8 +108,7 @@ impl LocalFileSystem {
     /// Returns path-resolution, policy, type, timeout, or native opening
     /// errors.
     pub fn open_reader_with_options(&self, path: &Path, options: &LocalReadOptions) -> LocalResult<LocalFileReader> {
-        self.open_reader_with_context(path, options)
-            .map(|(reader, _, _)| reader)
+        self.open_reader_with_context(path, options, |reader, _, _| reader)
     }
 
     /// Opens a writer using this instance's default writer options.

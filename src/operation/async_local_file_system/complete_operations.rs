@@ -229,8 +229,12 @@ impl AsyncLocalFileSystem {
     /// text is delivered by the operation outcome; the observer reports
     /// operation facts and does not contain or replace the result. Use this
     /// method when the result must be validated as UTF-8; use
-    /// [`Self::submit_read_all`] when the caller needs bytes or cooperative
-    /// cancellation between read blocks. Both methods check the explicit
+    /// [`Self::submit_read_all`] when the caller needs bytes. Both methods
+    /// check for a stop between read blocks and observe the same opened reader
+    /// before and after reading to detect changes. These observations do not
+    /// provide an atomic snapshot. This method validates UTF-8 after the read
+    /// completes, while `submit_read_all` returns the original bytes. Both
+    /// methods check the explicit
     /// content limit before an `OwnedBytes` memory limit when both boundaries
     /// are reached at the same value. Executor and per-operation memory limits
     /// further constrain the shared byte pool, whose capacity may be in use by
@@ -349,13 +353,15 @@ impl AsyncLocalFileSystem {
             },
             move |request, _scope, _observer, budget, maximum| {
                 let reader_result = match before_native_call(_scope, || {
-                    filesystem.open_reader_with_options(&execution_path, &request.read)
+                    filesystem.open_reader_with_context(&execution_path, &request.read, |reader, path, pwd| {
+                        (reader, path.to_path_buf(), pwd.map(Path::to_path_buf))
+                    })
                 }) {
                     Ok(result) => result,
                     Err(stop) => return OperationOutcome::Stopped(stop),
                 };
-                let mut reader = match reader_result {
-                    Ok(reader) => reader,
+                let (mut reader, diagnostic_path, current_directory) = match reader_result {
+                    Ok(binding) => binding,
                     Err(error) => return OperationOutcome::Failed(error),
                 };
                 if let Some(stopped) = stop_outcome(_scope) {
@@ -382,8 +388,8 @@ impl AsyncLocalFileSystem {
                                 shrink_to_zero(&budget);
                                 return OperationOutcome::Failed(LocalFileError::from_io(
                                     LocalFileOperation::Read,
-                                    Some(execution_path.clone()),
-                                    None,
+                                    Some(diagnostic_path.clone()),
+                                    current_directory.clone(),
                                     error,
                                 ));
                             }
@@ -393,9 +399,12 @@ impl AsyncLocalFileSystem {
                     match reader.read(&mut buffer[..count]) {
                         Ok(0) => break,
                         Ok(read) => {
-                            if let Err(error) = reserve_capacity(&mut bytes, read, &budget, maximum, &execution_path) {
+                            if let Err(error) = reserve_capacity(&mut bytes, read, &budget, maximum, &diagnostic_path) {
                                 shrink_to_zero(&budget);
-                                return OperationOutcome::Failed(error);
+                                return OperationOutcome::Failed(attach_current_directory(
+                                    error,
+                                    current_directory.as_deref(),
+                                ));
                             }
                             bytes.extend_from_slice(&buffer[..read]);
                         }
@@ -404,14 +413,14 @@ impl AsyncLocalFileSystem {
                             shrink_to_zero(&budget);
                             return OperationOutcome::Failed(LocalFileError::from_io(
                                 LocalFileOperation::Read,
-                                Some(execution_path.clone()),
-                                None,
+                                Some(diagnostic_path.clone()),
+                                current_directory.clone(),
                                 error,
                             ));
                         }
                     }
                 }
-                finish_prefix_read(_scope, bytes, complete, &budget, &execution_path)
+                finish_prefix_read(_scope, bytes, complete, &budget, &diagnostic_path)
             },
         )
     }
@@ -460,13 +469,15 @@ impl AsyncLocalFileSystem {
             },
             move |request, _scope, _observer, budget, maximum| {
                 let reader_result = match before_native_call(_scope, || {
-                    filesystem.open_reader_with_options(&execution_path, &request.read)
+                    filesystem.open_reader_with_context(&execution_path, &request.read, |reader, path, pwd| {
+                        (reader, path.to_path_buf(), pwd.map(Path::to_path_buf))
+                    })
                 }) {
                     Ok(result) => result,
                     Err(stop) => return OperationOutcome::Stopped(stop),
                 };
-                let mut reader = match reader_result {
-                    Ok(reader) => reader,
+                let (mut reader, diagnostic_path, current_directory) = match reader_result {
+                    Ok(binding) => binding,
                     Err(error) => return OperationOutcome::Failed(error),
                 };
                 if let Some(stopped) = stop_outcome(_scope) {
@@ -475,8 +486,8 @@ impl AsyncLocalFileSystem {
                 if let Err(error) = reader.seek(request.offset) {
                     return OperationOutcome::Failed(LocalFileError::from_io(
                         LocalFileOperation::Read,
-                        Some(execution_path.clone()),
-                        None,
+                        Some(diagnostic_path.clone()),
+                        current_directory.clone(),
                         error,
                     ));
                 }
@@ -492,9 +503,12 @@ impl AsyncLocalFileSystem {
                     match reader.read(&mut buffer[..count]) {
                         Ok(0) => break,
                         Ok(read) => {
-                            if let Err(error) = reserve_capacity(&mut bytes, read, &budget, maximum, &execution_path) {
+                            if let Err(error) = reserve_capacity(&mut bytes, read, &budget, maximum, &diagnostic_path) {
                                 shrink_to_zero(&budget);
-                                return OperationOutcome::Failed(error);
+                                return OperationOutcome::Failed(attach_current_directory(
+                                    error,
+                                    current_directory.as_deref(),
+                                ));
                             }
                             bytes.extend_from_slice(&buffer[..read]);
                             if let Some(stopped) = stop_outcome(_scope) {
@@ -507,15 +521,15 @@ impl AsyncLocalFileSystem {
                             shrink_to_zero(&budget);
                             return OperationOutcome::Failed(LocalFileError::from_io(
                                 LocalFileOperation::Read,
-                                Some(execution_path.clone()),
-                                None,
+                                Some(diagnostic_path.clone()),
+                                current_directory.clone(),
                                 error,
                             ));
                         }
                     }
                 }
                 #[cfg(test)]
-                read_at_success_tests::pause_read_at_success_test_gate(&execution_path);
+                read_at_success_tests::pause_read_at_success_test_gate(&diagnostic_path);
                 if let Some(stopped) = stop_outcome(_scope) {
                     drop(bytes);
                     shrink_to_zero(&budget);
@@ -1157,7 +1171,11 @@ fn read_complete_cancellable(
         return stopped;
     }
     let read_options = effective_read_options(filesystem, options);
-    let reader_result = match before_native_call(scope, || filesystem.open_reader_with_context(path, &read_options)) {
+    let reader_result = match before_native_call(scope, || {
+        filesystem.open_reader_with_context(path, &read_options, |reader, path, current_directory| {
+            (reader, path.to_path_buf(), current_directory.map(Path::to_path_buf))
+        })
+    }) {
         Ok(result) => result,
         Err(stop) => return OperationOutcome::Stopped(stop),
     };
