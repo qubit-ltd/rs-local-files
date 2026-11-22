@@ -89,6 +89,35 @@ assert_eq!(settlement.recovery_count, 0);
 # }
 ```
 
+### Choosing a complete-read entry point
+
+Use `submit_read_all` when a finite read should respond cooperatively to a stop
+request. It checks for stop between read blocks and observes the same reader
+before and after reading to detect changes. These observations do not provide
+an atomic snapshot: concurrent changes can still occur between observations or
+escape detection. Use `submit_read_all_with_observer` when the ordinary
+complete-read behavior is desired; it returns the same kind of independent
+`LocalFactObserver` without the per-block stop checks. In either case, the
+observer reports facts, while the bytes are delivered separately through the
+operation outcome.
+
+Set `LocalReadAllOptions::with_max_bytes` on the request when the application
+needs a content-size ceiling. This explicit read limit is separate from
+`LocalExecutionConfig::max_owned_bytes` and
+`LocalOperationOptions::max_owned_bytes`, which cap executor-wide and
+per-operation owned memory. Accepted reads also compete for the executor's
+shared byte pool. If an explicit content limit and a memory ceiling have the
+same effective value, the explicit content-limit diagnostic takes precedence;
+memory-ceiling failures otherwise report an `OwnedBytes` resource limit.
+
+After submission, consume `wait_outcome()` and branch on `Succeeded(bytes)`,
+`Failed(error)`, or `Stopped(report)`. Inspect structured read-limit or memory
+limit fields before deciding whether to raise a configured ceiling or reject
+the input. Then consume the observer if facts are needed, drop it, and wait for
+settlement; do not wait for settlement while retaining the observer or other
+operation-owned resources. A rejected submission returns the original request
+in `LocalSubmitError`.
+
 ### Copy handle admission
 
 `submit_copy` reserves `2 + max_open_directories.unwrap_or(1)` handles in one

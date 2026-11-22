@@ -1821,6 +1821,14 @@ authority。已接纳请求持有自己的输入和提交时 options，之后修
 及清理 owner。取消或停止操作不代表已经开始的原生调用会被中断；清理尚未确认时，恢复 owner
 仍可继续提供核查与重试入口。
 
+完整读取会独立返回 `LocalFactObserver` 和字节结果。`submit_read_all` 在每个读取块之间
+检查协作停止请求，并通过同一个 reader 在读取前后观察变化；这无法保证原子快照。
+`submit_read_all_with_observer` 保留普通完整读取的执行方式，不增加逐块停止检查。两种路径都通过
+operation outcome 交付字节。`LocalReadAllOptions::with_max_bytes` 设置显式内容上限；executor 和
+单操作的 `max_owned_bytes` 以及共享字节池分别限制自有内存，已接纳的并发读取会竞争该池。显式内容
+上限与内存上限相等时，优先报告读取上限诊断；其他内存额度失败会标明资源为 `OwnedBytes`。调用方
+应分别检查 outcome 与 observer，释放操作持有的资源后再等待 settlement。
+
 异步目录 walker 持有原生 iterator、一份有界批次字节 reservation、一份用于活跃枚举 reader 的
 executor 普通句柄池 reservation 和一份 cleanup reservation。reader reservation 按有效
 `max_open_directories` 上限原子申请整份：缺省为一，显式正数则按该数值预留。零仍是无效 walker

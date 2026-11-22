@@ -84,6 +84,25 @@ assert_eq!(settlement.recovery_count, 0);
 # }
 ```
 
+### 如何选择完整读取入口
+
+若有限长度的读取需要协作响应停止请求，请使用 `submit_read_all`。它会在每个读取块之间
+检查是否应停止，并在读取前后通过同一个 reader 观察文件变化。观察只能用于发现变化，不能
+提供原子快照：两次观察之间仍可能发生修改，也无法保证检测到所有变化。若希望保留普通完整读取
+行为，请使用 `submit_read_all_with_observer`；它同样返回独立的 `LocalFactObserver`，但不会逐块
+检查停止。两种入口的 observer 都只报告操作事实，实际字节仍由 operation outcome 单独交付。
+
+应用需要限制内容大小时，可在请求中设置 `LocalReadAllOptions::with_max_bytes`。这个显式读取上限
+与 `LocalExecutionConfig::max_owned_bytes` 的 executor 总内存上限，以及
+`LocalOperationOptions::max_owned_bytes` 的单操作内存上限各自独立。已接纳的读取还会竞争 executor
+共享字节池。显式内容上限与内存上限的有效值相同时，错误优先报告显式内容上限；其他内存额度
+失败会报告资源为 `OwnedBytes` 的资源限制。
+
+提交后先消费 `wait_outcome()`，分别处理 `Succeeded(bytes)`、`Failed(error)` 和 `Stopped(report)`。
+检查结构化的读取上限或内存上限字段，再决定提高配置还是拒绝输入。需要读取事实时再消费 observer，
+随后释放它并等待 settlement；持有 observer 或其他操作资源时不要等待 settlement。若提交被拒绝，
+`LocalSubmitError` 会保留原始请求供调用方取回。
+
 ### 复制操作的句柄接纳
 
 `submit_copy` 会一次性预留 `2 + max_open_directories.unwrap_or(1)` 个句柄。默认需要三个，
