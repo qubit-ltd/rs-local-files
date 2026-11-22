@@ -40,13 +40,14 @@ impl CloseWaitRegistration {
     /// # Parameters
     /// - `waker` — current task waker to notify when close is published.
     pub(super) fn poll(&mut self, waker: &Waker) -> Poll<io::Result<()>> {
-        let (result, replaced_waker) = {
+        let registered_waker = waker.clone();
+        let (result, unused_waker) = {
             self.state
                 .lock()
                 .unwrap_or_else(|error| error.into_inner())
-                .poll(self.id, waker)
+                .poll(self.id, registered_waker)
         };
-        drop(replaced_waker);
+        drop(unused_waker);
         result
     }
 }

@@ -29,17 +29,23 @@ impl WorkerWalkCloseState {
     ///
     /// # Parameters
     /// - `waker` — task to notify when close reaches a terminal state.
-    pub(super) fn poll_legacy(&mut self, waker: &Waker) -> Poll<io::Result<()>> {
+    pub(super) fn poll_legacy(&mut self, waker: Waker) -> (Poll<io::Result<()>>, Option<Waker>) {
         if let Some(result) = &self.terminal {
-            return match result {
+            let result = match result {
                 Ok(()) => Poll::Ready(Ok(())),
                 Err((kind, message)) => Poll::Ready(Err(io::Error::new(*kind, message.clone()))),
             };
+            return (result, Some(waker));
         }
-        if !self.legacy_waiters.iter().any(|registered| registered.will_wake(waker)) {
-            self.legacy_waiters.push(waker.clone());
+        if self
+            .legacy_waiters
+            .iter()
+            .any(|registered| registered.will_wake(&waker))
+        {
+            return (Poll::Pending, Some(waker));
         }
-        Poll::Pending
+        self.legacy_waiters.push(waker);
+        (Poll::Pending, None)
     }
 
     /// Polls a registered waiter and updates only that waiter's waker.
@@ -47,15 +53,15 @@ impl WorkerWalkCloseState {
     /// # Parameters
     /// - `id` — unique identity of this waiting future.
     /// - `waker` — current task waker.
-    pub(super) fn poll(&mut self, id: u64, waker: &Waker) -> (Poll<io::Result<()>>, Option<Waker>) {
+    pub(super) fn poll(&mut self, id: u64, waker: Waker) -> (Poll<io::Result<()>>, Option<Waker>) {
         if let Some(result) = &self.terminal {
             let result = match result {
                 Ok(()) => Poll::Ready(Ok(())),
                 Err((kind, message)) => Poll::Ready(Err(io::Error::new(*kind, message.clone()))),
             };
-            return (result, None);
+            return (result, Some(waker));
         }
-        let replaced = self.waiters.insert(id, waker.clone());
+        let replaced = self.waiters.insert(id, waker);
         (Poll::Pending, replaced)
     }
 
@@ -71,7 +77,9 @@ impl WorkerWalkCloseState {
             Ok(()) => Ok(()),
             Err(error) => Err((error.kind(), error.to_string())),
         });
-        let mut waiters = std::mem::take(&mut self.waiters).into_values().collect::<Vec<_>>();
+        let mut waiters = std::mem::take(&mut self.waiters)
+            .into_values()
+            .collect::<Vec<_>>();
         waiters.append(&mut self.legacy_waiters);
         Some(waiters)
     }
@@ -190,5 +198,23 @@ mod tests {
         drop(canceled);
         drop(registration);
         assert_eq!(unlocked_drops.load(Ordering::Relaxed), 2);
+    }
+
+    #[test]
+    fn test_terminal_poll_drops_unused_waker_outside_close_lock() {
+        let state = Arc::new(Mutex::new(WorkerWalkCloseState::default()));
+        state.lock().unwrap().publish(Ok(()));
+        let unlocked_drops = Arc::new(AtomicUsize::new(0));
+        let terminal_wake = Arc::new(LockCheckingWake {
+            state: Arc::clone(&state),
+            unlocked_drops: Arc::clone(&unlocked_drops),
+        });
+        let terminal_waker = Waker::from(Arc::clone(&terminal_wake));
+        let mut registration = CloseWaitRegistration::new(Arc::clone(&state));
+
+        assert!(registration.poll(&terminal_waker).is_ready());
+        drop(terminal_waker);
+        drop(terminal_wake);
+        assert_eq!(unlocked_drops.load(Ordering::Relaxed), 1);
     }
 }

@@ -44,10 +44,14 @@ impl WorkerWalkInner {
     /// # Parameters
     /// - `waker` — task to notify when close reaches a terminal state.
     pub(super) fn poll_closed(&self, waker: &Waker) -> Poll<io::Result<()>> {
-        self.close_state
+        let registered_waker = waker.clone();
+        let (result, unused_waker) = self
+            .close_state
             .lock()
             .unwrap_or_else(|e| e.into_inner())
-            .poll_legacy(waker)
+            .poll_legacy(registered_waker);
+        drop(unused_waker);
+        result
     }
 
     /// Publishes one terminal result, then notifies every waiter outside the
@@ -72,6 +76,9 @@ impl WorkerWalkInner {
     /// Releases the native handle reservation exactly once after iterator
     /// close.
     pub(super) fn release_handle_budget(&self) {
-        self._handle_budget.lock().unwrap_or_else(|e| e.into_inner()).take();
+        self._handle_budget
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .take();
     }
 }
