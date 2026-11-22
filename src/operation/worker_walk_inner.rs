@@ -21,15 +21,25 @@ use super::worker_walk_cursor::WorkerWalkCursor;
 
 /// Disposes of a panic payload without allowing its destructor to unwind.
 ///
-/// A payload whose destructor also panics is intentionally forgotten after
-/// catching that second panic, matching the walker's existing drop boundary.
+/// If disposal panics, the resulting payload is also dropped under a panic
+/// boundary; a further panicking payload is intentionally forgotten.
+///
+/// # Parameters
+///
+/// - `payload`: The panic payload to dispose of safely.
 pub(crate) fn dispose_panic_payload(payload: Box<dyn Any + Send>) {
-    if let Err(payload) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| drop(payload))) {
+    if let Err(payload) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| drop(payload)))
+        && let Err(payload) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| drop(payload)))
+    {
         std::mem::forget(payload);
     }
 }
 
 /// Drops a close waiter outside its state lock and contains destructor panic.
+///
+/// # Parameters
+///
+/// - `waker`: The optional close waiter waker to drop safely.
 pub(super) fn drop_close_waiter(waker: Option<Waker>) {
     if let Err(payload) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| drop(waker))) {
         dispose_panic_payload(payload);
@@ -97,9 +107,7 @@ impl WorkerWalkInner {
             return;
         };
         for waker in waiters {
-            if let Err(payload) =
-                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| waker.wake()))
-            {
+            if let Err(payload) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| waker.wake())) {
                 dispose_panic_payload(payload);
             }
         }

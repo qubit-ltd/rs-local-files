@@ -86,8 +86,7 @@ mod tests {
     }
 
     unsafe fn panic_drop_clone(data: *const ()) -> std::task::RawWaker {
-        let probe =
-            std::mem::ManuallyDrop::new(unsafe { Arc::<PanicDropProbe>::from_raw(data.cast()) });
+        let probe = std::mem::ManuallyDrop::new(unsafe { Arc::<PanicDropProbe>::from_raw(data.cast()) });
         std::task::RawWaker::new(Arc::into_raw(Arc::clone(&probe)).cast(), &PANIC_DROP_VTABLE)
     }
 
@@ -96,8 +95,7 @@ mod tests {
     }
 
     unsafe fn panic_drop_wake_by_ref(data: *const ()) {
-        let _probe =
-            std::mem::ManuallyDrop::new(unsafe { Arc::<PanicDropProbe>::from_raw(data.cast()) });
+        let _probe = std::mem::ManuallyDrop::new(unsafe { Arc::<PanicDropProbe>::from_raw(data.cast()) });
     }
 
     unsafe fn panic_drop_drop(data: *const ()) {
@@ -176,9 +174,7 @@ mod tests {
             let waker = panic_drop_waker(Arc::clone(&probe));
             let mut registration = CloseWaitRegistration::new(Arc::clone(&state));
 
-            let polled = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                registration.poll(&waker)
-            }));
+            let polled = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| registration.poll(&waker)));
             assert!(
                 polled.is_ok(),
                 "unused waker destructor must not replace terminal result"
@@ -205,17 +201,12 @@ mod tests {
         let canceled_probe = panic_drop_probe();
         let canceled_waker = panic_drop_waker(Arc::clone(&canceled_probe));
         assert!(canceled.poll(&canceled_waker).is_pending());
-        assert!(
-            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| drop(canceled_waker)))
-                .is_err()
-        );
+        assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| drop(canceled_waker))).is_err());
         canceled_probe.panic_on_drop.store(true, Ordering::SeqCst);
 
         let replacement_probe = panic_drop_probe();
         let replacement_waker = panic_drop_waker(Arc::clone(&replacement_probe));
-        let replaced = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            canceled.poll(&replacement_waker)
-        }));
+        let replaced = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| canceled.poll(&replacement_waker)));
         assert!(replaced.is_ok());
         assert!(replaced.unwrap().is_pending());
         assert_eq!(
@@ -223,18 +214,12 @@ mod tests {
             canceled_probe.drops.load(Ordering::SeqCst),
             "replaced registration waker was disposed"
         );
-        assert!(
-            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| drop(replacement_waker)))
-                .is_err()
-        );
-        replacement_probe
-            .panic_on_drop
-            .store(true, Ordering::SeqCst);
+        assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| drop(replacement_waker))).is_err());
+        replacement_probe.panic_on_drop.store(true, Ordering::SeqCst);
 
         let mut other = CloseWaitRegistration::new(Arc::clone(&state));
         assert!(other.poll(Waker::noop()).is_pending());
-        let canceled_drop =
-            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| drop(canceled)));
+        let canceled_drop = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| drop(canceled)));
         assert!(
             canceled_drop.is_ok(),
             "cancellation must contain the removed waker destructor panic"

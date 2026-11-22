@@ -982,9 +982,7 @@ mod tests {
             let mut context = Context::from_waker(&waker);
             driver.0.publish_close(result);
 
-            let polled = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                driver.poll_closed(&mut context)
-            }));
+            let polled = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| driver.poll_closed(&mut context)));
             assert!(
                 polled.is_ok(),
                 "compatibility poll must preserve published close result"

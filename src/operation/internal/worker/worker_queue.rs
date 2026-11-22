@@ -166,10 +166,10 @@ impl WorkerQueue {
                     state.ordinary.pop_front()
                 }
             };
-            if let Some(job) = job {
-                if let Err(payload) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(job)) {
-                    dispose_panic_payload(payload);
-                }
+            if let Some(job) = job
+                && let Err(payload) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(job))
+            {
+                dispose_panic_payload(payload);
             }
         }
     }
@@ -299,9 +299,11 @@ mod tests {
                 .is_ok()
         );
         let (completed_tx, completed_rx) = mpsc::channel();
-        assert!(queue
-            .push(Box::new(move || completed_tx.send(()).unwrap()), false, 2)
-            .is_ok());
+        assert!(
+            queue
+                .push(Box::new(move || completed_tx.send(()).unwrap()), false, 2)
+                .is_ok()
+        );
 
         let worker_queue = std::sync::Arc::clone(&queue);
         let worker = std::thread::spawn(move || worker_queue.run());
@@ -309,9 +311,7 @@ mod tests {
             .recv_timeout(Duration::from_secs(2))
             .expect("the worker completes the task after the panicking task");
         queue.stop();
-        worker
-            .join()
-            .expect("the worker remains alive to drain work");
+        worker.join().expect("the worker remains alive to drain work");
     }
 
     #[test]
