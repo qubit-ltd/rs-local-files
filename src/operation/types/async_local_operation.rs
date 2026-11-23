@@ -107,7 +107,8 @@ impl<T: Send + 'static, E: Send + 'static> AsyncLocalOperation<T, E> {
     /// before returning the outcome. The caller owns the returned value and
     /// must close any resource it contains. An
     /// [`OutcomeError`](qubit_operation::OutcomeError) reports failure to take
-    /// the result slot; an operation failure is returned as `Ok(Outcome::Failed(E))`.
+    /// the result slot; an operation failure is returned as
+    /// `Ok(Outcome::Failed(E))`.
     pub async fn wait_outcome(
         &mut self,
     ) -> Result<qubit_operation::OperationOutcome<T, E>, qubit_operation::OutcomeError> {

@@ -165,6 +165,7 @@ impl WorkerWalkDriver {
             batch_transfer_test_gate: Mutex::new(None),
             #[cfg(test)]
             panic_next_batch: std::sync::atomic::AtomicBool::new(false),
+            #[cfg(test)]
             cleanup_cursor_test_probe: Mutex::new(None),
         }));
         let resource = LocalWalkResource::new_native(driver, close_state);
@@ -757,7 +758,10 @@ mod tests {
         let unrelated = direct_driver(&unrelated_directory, executor.clone());
         assert_eq!(None, poll_batch_bounded(&unrelated, 110, 8, 1024).unwrap().unwrap());
         assert!(driver.0.panic_next_batch.load(Ordering::SeqCst));
-        assert_eq!(0, super::super::WALKER_WORKER_PANIC_PAYLOAD_DROPS.load(Ordering::SeqCst));
+        assert_eq!(
+            0,
+            super::super::WALKER_WORKER_PANIC_PAYLOAD_DROPS.load(Ordering::SeqCst)
+        );
         stop_driver(&unrelated);
 
         let error = poll_batch_bounded(&driver, 111, 8, 1024)

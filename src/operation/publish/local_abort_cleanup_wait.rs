@@ -45,19 +45,8 @@ impl<W: Send + 'static> Future for LocalAbortCleanupWait<W> {
             // The worker may have published while cloning the hostile waker.
             // Recheck before returning Pending, and release this waiter's old
             // registration when no further notification is needed.
-            if let Some(result) = self
-                .0
-                .result
-                .lock()
-                .unwrap_or_else(|error| error.into_inner())
-                .take()
-            {
-                let old_waker = self
-                    .0
-                    .waker
-                    .lock()
-                    .unwrap_or_else(|error| error.into_inner())
-                    .take();
+            if let Some(result) = self.0.result.lock().unwrap_or_else(|error| error.into_inner()).take() {
+                let old_waker = self.0.waker.lock().unwrap_or_else(|error| error.into_inner()).take();
                 super::super::temp::safe_drop_waker(old_waker);
                 return Poll::Ready(result);
             }
@@ -241,12 +230,8 @@ mod tests {
     static PANIC_CLONE_VTABLE: std::task::RawWakerVTable =
         std::task::RawWakerVTable::new(panic_on_clone, no_op, no_op, no_op);
 
-    static PUBLISH_PANIC_VTABLE: std::task::RawWakerVTable = std::task::RawWakerVTable::new(
-        publish_then_panic_on_clone,
-        no_op,
-        no_op,
-        drop_arc,
-    );
+    static PUBLISH_PANIC_VTABLE: std::task::RawWakerVTable =
+        std::task::RawWakerVTable::new(publish_then_panic_on_clone, no_op, no_op, drop_arc);
 
     #[test]
     fn test_abort_wait_stays_pending_when_waker_clone_panics() {
@@ -275,9 +260,7 @@ mod tests {
         let data = Arc::into_raw(Arc::clone(&state)).cast_mut().cast::<()>();
         // SAFETY: the clone callback publishes through this Arc and panics;
         // drop releases the initial Arc reference exactly once.
-        let hostile = unsafe {
-            Waker::from_raw(std::task::RawWaker::new(data.cast_const(), &PUBLISH_PANIC_VTABLE))
-        };
+        let hostile = unsafe { Waker::from_raw(std::task::RawWaker::new(data.cast_const(), &PUBLISH_PANIC_VTABLE)) };
         let mut context = Context::from_waker(&hostile);
 
         assert!(matches!(

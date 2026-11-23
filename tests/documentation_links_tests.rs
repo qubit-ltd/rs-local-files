@@ -415,7 +415,9 @@ fn test_reader_document_relative_links_exist() {
             missing.push(format!("{document}:{line}: missing anchor {target}"));
         }
         for (line, target) in missing_package_links(&root, &source_path, &source, &package_files) {
-            missing.push(format!("{document}:{line}: linked file is absent from package: {target}"));
+            missing.push(format!(
+                "{document}:{line}: linked file is absent from package: {target}"
+            ));
         }
     }
     assert!(

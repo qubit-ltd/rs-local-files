@@ -516,3 +516,32 @@ impl Drop for LocalTempRecovery {
         let _ = self.cleanup();
     }
 }
+
+#[cfg(all(test, feature = "async"))]
+mod tests {
+    use std::fs::File;
+
+    use super::LocalTempRecovery;
+    use crate::policy::LocalSymlinkPolicy;
+    use crate::temp::LocalTempFile;
+
+    #[test]
+    fn test_recovery_rearms_drop_cleanup_when_live_file_is_returned() {
+        let root = tempfile::tempdir().expect("temporary root");
+        let sandbox = root.path().join("sandbox");
+        std::fs::create_dir(&sandbox).expect("create private sandbox");
+        let path = sandbox.join("retained.tmp");
+        let file = File::create(&path).expect("create retained file");
+        let mut live = LocalTempFile::host(path.clone(), sandbox.clone(), file, LocalSymlinkPolicy::Reject)
+            .expect("capture the live file identity");
+        live.disarm_cleanup_on_drop();
+
+        let mut recovery = LocalTempRecovery::from_file(live);
+        recovery.arm_cleanup_on_drop();
+        let returned = recovery.into_file().expect("recovery retains the live file");
+        drop(returned);
+
+        assert!(!path.exists(), "returned live owner removes its retained file");
+        assert!(!sandbox.exists(), "returned live owner removes its private sandbox");
+    }
+}

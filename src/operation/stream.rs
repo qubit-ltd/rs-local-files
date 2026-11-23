@@ -107,9 +107,11 @@ pub(super) use worker_walk_inner::dispose_panic_payload;
 
 /// Clones a caller waker while retaining any panic payload for the poller's
 /// existing failure boundary.
-pub(super) fn clone_poll_waker(
-    waker: &std::task::Waker,
-) -> Result<std::task::Waker, Box<dyn std::any::Any + Send>> {
+///
+/// # Parameters
+///
+/// * `waker` - The caller's task waker to clone.
+pub(super) fn clone_poll_waker(waker: &std::task::Waker) -> Result<std::task::Waker, Box<dyn std::any::Any + Send>> {
     std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| waker.clone()))
 }
 
@@ -119,8 +121,7 @@ pub(super) fn panic_clone_waker() -> std::task::Waker {
         panic!("injected task waker clone panic");
     }
     unsafe fn no_op(_: *const ()) {}
-    static VTABLE: std::task::RawWakerVTable =
-        std::task::RawWakerVTable::new(panic_clone, no_op, no_op, no_op);
+    static VTABLE: std::task::RawWakerVTable = std::task::RawWakerVTable::new(panic_clone, no_op, no_op, no_op);
     // SAFETY: the vtable never dereferences the null data pointer.
     unsafe { std::task::Waker::from_raw(std::task::RawWaker::new(std::ptr::null(), &VTABLE)) }
 }
@@ -903,17 +904,29 @@ mod tests {
         super::STREAM_WORKER_PANIC_PAYLOAD_DROPS.store(0, Ordering::SeqCst);
         inner.panic_next_command.store(true, Ordering::SeqCst);
 
-        // A separate worker can finish a command without consuming this worker's injection.
+        // A separate worker can finish a command without consuming this worker's
+        // injection.
         let unrelated = std::sync::Arc::new(WorkerStreamInner {
             executor: executor.clone(),
             native: Mutex::new(None),
             state: Mutex::new(WorkerStreamState {
-                commands: HashMap::from([(51, WorkerCommand { result: None, waker: None })]),
+                commands: HashMap::from([(
+                    51,
+                    WorkerCommand {
+                        result: None,
+                        waker: None,
+                    },
+                )]),
             }),
-            queue: Mutex::new(VecDeque::from([super::worker_stream_queued_request::WorkerStreamQueuedRequest {
-                request: super::LocalStreamRequest { id: 51, command: LocalStreamCommand::Close },
-                write_offset: 0,
-            }])),
+            queue: Mutex::new(VecDeque::from([
+                super::worker_stream_queued_request::WorkerStreamQueuedRequest {
+                    request: super::LocalStreamRequest {
+                        id: 51,
+                        command: LocalStreamCommand::Close,
+                    },
+                    write_offset: 0,
+                },
+            ])),
             native_write_ids: Mutex::new(HashMap::new()),
             next_internal_request_id: std::sync::atomic::AtomicU64::new(1 << 63),
             active: std::sync::atomic::AtomicBool::new(true),
@@ -927,7 +940,10 @@ mod tests {
             panic_next_command: super::AtomicBool::new(false),
         });
         drain_stream_commands(std::sync::Arc::clone(&unrelated));
-        assert!(matches!(unrelated.state.lock().unwrap().commands[&51].result, Some(Ok(LocalStreamCompletion::Closed))));
+        assert!(matches!(
+            unrelated.state.lock().unwrap().commands[&51].result,
+            Some(Ok(LocalStreamCompletion::Closed))
+        ));
         assert!(inner.panic_next_command.load(Ordering::SeqCst));
         assert_eq!(0, super::STREAM_WORKER_PANIC_PAYLOAD_DROPS.load(Ordering::SeqCst));
 
