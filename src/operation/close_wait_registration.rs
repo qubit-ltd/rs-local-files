@@ -41,24 +41,14 @@ impl CloseWaitRegistration {
     /// # Parameters
     /// - `waker` — current task waker to notify when close is published.
     pub(super) fn poll(&mut self, waker: &Waker) -> Poll<io::Result<()>> {
-        let result = {
-            self.state
-                .lock()
-                .unwrap_or_else(|error| error.into_inner())
-                .result()
-        };
+        let result = { self.state.lock().unwrap_or_else(|error| error.into_inner()).result() };
         if let Some(result) = result {
             return Poll::Ready(result);
         }
         let registered_waker = match super::clone_poll_waker(waker) {
             Ok(waker) => waker,
             Err(payload) => {
-                let result = {
-                    self.state
-                        .lock()
-                        .unwrap_or_else(|error| error.into_inner())
-                        .result()
-                };
+                let result = { self.state.lock().unwrap_or_else(|error| error.into_inner()).result() };
                 if let Some(result) = result {
                     super::dispose_panic_payload(payload);
                     return Poll::Ready(result);

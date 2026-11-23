@@ -407,10 +407,12 @@ fn test_packaged_documentation_links() {
     let mut missing = Vec::new();
     for document in DOCUMENTS {
         let source_path = root.join(document);
-        let source = std::fs::read_to_string(&source_path)
-            .unwrap_or_else(|error| panic!("cannot read {document}: {error}"));
+        let source =
+            std::fs::read_to_string(&source_path).unwrap_or_else(|error| panic!("cannot read {document}: {error}"));
         for (line, target) in missing_package_links(&root, &source_path, &source, &package_files) {
-            missing.push(format!("{document}:{line}: linked file is absent from package: {target}"));
+            missing.push(format!(
+                "{document}:{line}: linked file is absent from package: {target}"
+            ));
         }
     }
     assert!(

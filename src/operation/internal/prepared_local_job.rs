@@ -95,7 +95,8 @@ where
     /// # Type Parameters
     /// - `F` — type used by this operation.
     /// # Parameters
-    /// - `request` — input retained until activation transfers it to the worker.
+    /// - `request` — input retained until activation transfers it to the
+    ///   worker.
     /// - `slot` — queue or waiter capacity released when work starts.
     /// - `owned_permit` — shared memory reservation retained with the result.
     /// - `handle_permit` — native-handle reservation retained through cleanup.

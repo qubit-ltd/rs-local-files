@@ -38,13 +38,7 @@ impl<W: Send + 'static> Future for LocalAbortCleanupWait<W> {
     /// * `self` - Pending cleanup wait future.
     /// * `context` - Task context used to install the completion waker.
     fn poll(self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<Self::Output> {
-        let result = {
-            self.0
-                .result
-                .lock()
-                .unwrap_or_else(|error| error.into_inner())
-                .take()
-        };
+        let result = { self.0.result.lock().unwrap_or_else(|error| error.into_inner()).take() };
         if let Some(result) = result {
             return Poll::Ready(result);
         }
@@ -52,13 +46,7 @@ impl<W: Send + 'static> Future for LocalAbortCleanupWait<W> {
             // The worker may have published while cloning the hostile waker.
             // Recheck before returning Pending, and release this waiter's old
             // registration when no further notification is needed.
-            let result = {
-                self.0
-                    .result
-                    .lock()
-                    .unwrap_or_else(|error| error.into_inner())
-                    .take()
-            };
+            let result = { self.0.result.lock().unwrap_or_else(|error| error.into_inner()).take() };
             if let Some(result) = result {
                 let old_waker = self.0.waker.lock().unwrap_or_else(|error| error.into_inner()).take();
                 super::super::temp::safe_drop_waker(old_waker);
@@ -73,13 +61,7 @@ impl<W: Send + 'static> Future for LocalAbortCleanupWait<W> {
             .unwrap_or_else(|error| error.into_inner())
             .replace(new_waker);
         super::super::temp::safe_drop_waker(old_waker);
-        let result = {
-            self.0
-                .result
-                .lock()
-                .unwrap_or_else(|error| error.into_inner())
-                .take()
-        };
+        let result = { self.0.result.lock().unwrap_or_else(|error| error.into_inner()).take() };
         match result {
             Some(result) => Poll::Ready(result),
             None => Poll::Pending,

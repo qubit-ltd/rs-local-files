@@ -57,13 +57,7 @@ fn clear_waker(state: &CleanupState) {
 ///
 /// * `state` — worker result and waiter state shared with the cleanup future.
 fn publish_cleanup_result(state: &CleanupState) {
-    let result = {
-        state
-            .pending_result
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .take()
-    };
+    let result = { state.pending_result.lock().unwrap_or_else(|e| e.into_inner()).take() };
     if let Some(result) = result {
         *state.result.lock().unwrap_or_else(|e| e.into_inner()) = Some(result);
     }
