@@ -116,8 +116,11 @@ impl LocalIoExecutor {
     /// The request closes this group's admission and drains or cancels its
     /// accepted operations according to `mode`. It does not shut down the
     /// application manager; callers may continue submitting through other
-    /// manager views. Drop the executor after observing shutdown completion to
-    /// stop and join its local workers.
+    /// manager views, including direct temporary-resource and staging entry
+    /// points supplied with an external manager view. Cleanup for retained
+    /// resources uses a separate cleanup queue and can continue after group
+    /// admission closes. Drop the executor after observing shutdown completion
+    /// to stop and join its local workers.
     ///
     /// # Parameters
     ///

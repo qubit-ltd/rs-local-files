@@ -23,7 +23,7 @@ use super::CleanupWait;
 use super::cleanup_failure;
 use super::cleanup_resource;
 use super::publish_cleanup_result;
-use crate::operation::executor::LocalIoExecutor;
+use crate::operation::executor::LocalCleanupExecutor;
 use crate::operation::temp::LocalTempResource;
 
 /// Runs native temporary-resource cleanup on the executor's reserved cleanup
@@ -33,8 +33,8 @@ use crate::operation::temp::LocalTempResource;
 /// filled the executor queue, so dropping an operation does not need to perform
 /// filesystem I/O on the caller's thread.
 pub struct LocalCleanup {
-    /// Executor that owns the dedicated cleanup worker and queue.
-    pub(in crate::operation) executor: LocalIoExecutor,
+    /// Cleanup-only handle that owns the dedicated cleanup worker and queue.
+    pub(in crate::operation) executor: LocalCleanupExecutor,
     /// One-shot panic injection attached to this cleanup policy instance.
     #[cfg(test)]
     pub(super) panic_after_owner_take: Mutex<Option<SyncSender<CleanupPanicObservation>>>,
@@ -49,7 +49,7 @@ impl LocalCleanup {
     /// # Parameters
     ///
     /// * `executor` — executor that owns the cleanup worker and queue.
-    pub(crate) fn new(executor: LocalIoExecutor) -> Self {
+    pub(crate) fn new(executor: LocalCleanupExecutor) -> Self {
         Self {
             executor,
             #[cfg(test)]

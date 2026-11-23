@@ -62,6 +62,11 @@ pub type LocalStageOperation = AsyncOperationHandle<LocalReadLease, LocalStageFa
 /// * `operation` — cancellation and resource options for this stage.
 /// * `bytes` — payload transferred to the accepted operation.
 /// * `stage` — payload, disk, privacy, and export limits.
+///
+/// Admission follows the supplied manager view. When it is an external view
+/// outside the executor's group, it may keep accepting stages after that
+/// group begins draining. The executor facade applies group-scoped admission
+/// and rejects new facade submissions once its group is draining.
 pub fn stage_bytes(
     filesystem: crate::LocalFileSystem,
     executor: LocalIoExecutor,
@@ -321,6 +326,11 @@ async fn seal_access(
 /// * `operation` — cancellation and resource options for this stage.
 /// * `input` — asynchronous payload source owned by the stage.
 /// * `stage` — content, disk, privacy, and export requirements.
+///
+/// Admission follows the supplied manager view. An external view outside the
+/// executor's group may continue accepting stages while the executor facade's
+/// group is draining; facade submissions are rejected once that group closes
+/// admission. Cleanup remains available for already-accepted resources.
 pub fn stage_stream<I>(
     filesystem: crate::LocalFileSystem,
     executor: LocalIoExecutor,
@@ -540,6 +550,48 @@ mod tests {
         drop(clone);
         drop(lease);
         assert_eq!(block_on(create.wait_settlement()).recovery_count, 0);
+    }
+
+    #[test]
+    fn test_repeated_exports_share_file_offset_and_hold_resource_until_last_lease() {
+        use std::io::Read;
+
+        let manager =
+            qubit_operation::OperationManager::new(qubit_operation::ManagerOptions::default()).expect("manager");
+        let executor = LocalIoExecutor::new(manager.clone(), crate::operation::LocalExecutionConfig::default())
+            .expect("local executor");
+        let mut operation = stage_bytes(
+            crate::LocalFileSystem::host().expect("filesystem"),
+            executor.clone(),
+            &manager.as_async(),
+            OperationOptions::default(),
+            b"shared cursor".to_vec(),
+            LocalStageOptions::default(),
+        )
+        .expect("stage accepted");
+        let OperationOutcome::Succeeded(lease) = block_on(operation.wait_outcome()).expect("stage outcome") else {
+            panic!("stage should produce a lease");
+        };
+        let mut first = block_on(lease.export_read_handle(&executor)).expect("first export");
+        let mut second = block_on(lease.export_read_handle(&executor)).expect("second export");
+
+        let mut prefix = [0_u8; 7];
+        first.file.read_exact(&mut prefix).expect("read first prefix");
+        assert_eq!(&prefix, b"shared ");
+        let mut suffix = Vec::new();
+        second.file.read_to_end(&mut suffix).expect("read shared suffix");
+        assert_eq!(suffix, b"cursor");
+
+        drop(lease);
+        drop(first);
+        // The second export's lease still owns the resource after the other
+        // lease clones are gone, so its file remains available until this drop.
+        let mut tail = [0_u8; 1];
+        assert_eq!(second.file.read(&mut tail).expect("read at shared EOF"), 0);
+        drop(second);
+        let settlement = block_on(operation.wait_settlement());
+        assert_eq!(settlement.recovery_count, 0);
+        assert!(settlement.cleanup_failures.is_empty());
     }
 
     #[test]

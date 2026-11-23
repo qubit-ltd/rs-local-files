@@ -425,7 +425,7 @@ mod tests {
         let parent = tempfile::tempdir().expect("temp parent");
         let manager = OperationManager::new(ManagerOptions::default()).expect("manager");
         let executor = LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).expect("executor");
-        let cleanup = Arc::new(LocalCleanup::new(executor.clone()));
+        let cleanup = Arc::new(LocalCleanup::new(executor.cleanup_executor()));
         let context = || CleanupContext::new(qubit_operation::ContextOptions::default()).expect("cleanup context");
 
         let owner = test_owner(&manager, &executor, parent.path());
@@ -467,7 +467,7 @@ mod tests {
             },
         )
         .expect("executor");
-        let cleanup = Arc::new(LocalCleanup::new(executor.clone()));
+        let cleanup = Arc::new(LocalCleanup::new(executor.cleanup_executor()));
         let (started_tx, started_rx) = std::sync::mpsc::channel();
         let (gate_release_tx, gate_release_rx) = std::sync::mpsc::channel();
         assert!(
@@ -523,7 +523,7 @@ mod tests {
             },
         )
         .expect("executor");
-        let cleanup = Arc::new(LocalCleanup::new(executor.clone()));
+        let cleanup = Arc::new(LocalCleanup::new(executor.cleanup_executor()));
         let (gate_started_tx, gate_started_rx) = std::sync::mpsc::channel();
         let (gate_release_tx, gate_release_rx) = std::sync::mpsc::channel();
         assert!(
@@ -637,7 +637,7 @@ mod tests {
                     body_executor.reserve_cleanup().expect("cleanup permit"),
                 );
                 let id_slot = Arc::clone(&owner.id);
-                let cleanup = LocalCleanup::new(body_executor.clone());
+                let cleanup = LocalCleanup::new(body_executor.cleanup_executor());
                 #[cfg(panic = "unwind")]
                 crate::operation::poison_test_mutex(&cleanup.panic_after_owner_take);
                 cleanup.inject_panic_after_owner_take(observation_tx);
@@ -807,7 +807,7 @@ mod tests {
             panic!("simulated cleanup failure remains retryable");
         };
 
-        let cleanup = Arc::new(LocalCleanup::new(executor));
+        let cleanup = Arc::new(LocalCleanup::new(executor.cleanup_executor()));
         let context = CleanupContext::new(qubit_operation::ContextOptions::default()).expect("cleanup context");
         assert!(matches!(
             block_on(cleanup.cleanup(resource, context)),
@@ -1039,7 +1039,7 @@ mod tests {
             },
         )
         .expect("executor");
-        let cleanup = Arc::new(LocalCleanup::new(executor.clone()));
+        let cleanup = Arc::new(LocalCleanup::new(executor.cleanup_executor()));
         let context = || CleanupContext::new(qubit_operation::ContextOptions::default()).expect("cleanup context");
 
         let owner = test_owner(&manager, &executor, parent.path());
@@ -1072,7 +1072,7 @@ mod tests {
         let parent = tempfile::tempdir().expect("temp parent");
         let manager = OperationManager::new(ManagerOptions::default()).expect("manager");
         let executor = LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).expect("executor");
-        let cleanup = Arc::new(LocalCleanup::new(executor.clone()));
+        let cleanup = Arc::new(LocalCleanup::new(executor.cleanup_executor()));
         let owner = test_owner(&manager, &executor, parent.path());
         let path = {
             let native = owner.native.lock().expect("native lock");
@@ -1104,7 +1104,7 @@ mod tests {
         let parent = tempfile::tempdir().expect("temp parent");
         let manager = OperationManager::new(ManagerOptions::default()).expect("manager");
         let executor = LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).expect("executor");
-        let cleanup = Arc::new(LocalCleanup::new(executor.clone()));
+        let cleanup = Arc::new(LocalCleanup::new(executor.cleanup_executor()));
         *cleanup.poison_state_locks.lock().expect("poison hook lock") = true;
         let owner = test_owner(&manager, &executor, parent.path());
 
@@ -1129,7 +1129,7 @@ mod tests {
             },
         )
         .expect("executor");
-        let cleanup = Arc::new(LocalCleanup::new(executor.clone()));
+        let cleanup = Arc::new(LocalCleanup::new(executor.cleanup_executor()));
         let context = || CleanupContext::new(qubit_operation::ContextOptions::default()).expect("cleanup context");
 
         let owner = test_owner(&manager, &executor, parent.path());
@@ -1177,7 +1177,7 @@ mod tests {
             },
         )
         .expect("executor");
-        let cleanup = Arc::new(LocalCleanup::new(executor.clone()));
+        let cleanup = Arc::new(LocalCleanup::new(executor.cleanup_executor()));
 
         let (started_tx, started_rx) = std::sync::mpsc::channel();
         let (release_tx, release_rx) = std::sync::mpsc::channel();

@@ -139,6 +139,9 @@ impl AsyncLocalFileSystem {
     /// or unavailable reservation is rejected with `CapacityExceeded`; the
     /// reservation is returned when the walker closes. Temporary resolution
     /// handles and cleanup handles follow their separate existing budgets.
+    /// The facade binds submissions to this executor's operation group, so a
+    /// draining group rejects new walker work. Already accepted work can still
+    /// finish cleanup on the executor's dedicated cleanup queue.
     ///
     /// # Parameters
     /// - `manager` — operation manager that owns the admission scope.
@@ -270,6 +273,8 @@ impl AsyncLocalFileSystem {
     }
     /// Submits a worker-backed reader open. The returned stream owns a managed
     /// worker resource and performs every native read and seek on the executor.
+    /// Admission is bound to this executor's operation group; a draining group
+    /// rejects new opens while accepted resources retain their cleanup path.
     ///
     /// # Parameters
     /// - `manager` — operation manager that owns the admission scope.
@@ -411,6 +416,8 @@ impl AsyncLocalFileSystem {
     /// Submits a worker-backed writer open. Accepted bytes are sent to the
     /// native writer on the executor; the returned observer reports the final
     /// commit fact.
+    /// Admission is bound to this executor's operation group; a draining group
+    /// rejects new opens while accepted resources retain their cleanup path.
     ///
     /// # Parameters
     /// - `manager` — operation manager that owns the admission scope.
@@ -567,6 +574,8 @@ impl AsyncLocalFileSystem {
     /// explicit content limit and a memory limit have the same value, the
     /// explicit content diagnostic takes precedence. The operation retains its
     /// byte permit until its result is consumed or dropped.
+    /// Admission is bound to this executor's operation group; a draining group
+    /// rejects new reads while accepted resources retain their cleanup path.
     ///
     /// # Parameters
     /// - `manager` — operation manager that owns the admission scope.

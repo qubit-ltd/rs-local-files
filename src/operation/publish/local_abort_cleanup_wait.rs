@@ -40,6 +40,8 @@ impl<W: Send + 'static> Future for LocalAbortCleanupWait<W> {
     fn poll(self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<Self::Output> {
         let result = { self.0.result.lock().unwrap_or_else(|error| error.into_inner()).take() };
         if let Some(result) = result {
+            let old_waker = self.0.waker.lock().unwrap_or_else(|error| error.into_inner()).take();
+            super::super::temp::safe_drop_waker(old_waker);
             return Poll::Ready(result);
         }
         let Some(new_waker) = super::super::temp::safe_clone_waker(context.waker()) else {
@@ -63,7 +65,11 @@ impl<W: Send + 'static> Future for LocalAbortCleanupWait<W> {
         super::super::temp::safe_drop_waker(old_waker);
         let result = { self.0.result.lock().unwrap_or_else(|error| error.into_inner()).take() };
         match result {
-            Some(result) => Poll::Ready(result),
+            Some(result) => {
+                let old_waker = self.0.waker.lock().unwrap_or_else(|error| error.into_inner()).take();
+                super::super::temp::safe_drop_waker(old_waker);
+                Poll::Ready(result)
+            }
             None => Poll::Pending,
         }
     }
@@ -74,6 +80,9 @@ mod tests {
     use std::future::Future;
     use std::sync::Arc;
     use std::sync::Mutex;
+    use std::sync::atomic::AtomicBool;
+    use std::sync::atomic::AtomicUsize;
+    use std::sync::atomic::Ordering;
     use std::task::Context;
     use std::task::Poll;
     use std::task::Waker;
@@ -82,6 +91,41 @@ mod tests {
 
     use super::super::LocalAbortCleanupState;
     use super::LocalAbortCleanupWait;
+
+    struct PublishOnCloneProbe {
+        state: Arc<LocalAbortCleanupState<u8>>,
+        drops: AtomicUsize,
+        locks_available: AtomicBool,
+        panic_on_drop: bool,
+    }
+
+    unsafe fn publish_abort_during_clone(data: *const ()) -> std::task::RawWaker {
+        // SAFETY: the probe remains alive through the poll and registered waker drop.
+        let probe = unsafe { &*(data.cast::<PublishOnCloneProbe>()) };
+        *probe.state.result.lock().unwrap() = Some(CleanupOutcome::Released);
+        std::task::RawWaker::new(data, &PUBLISH_ON_CLONE_VTABLE)
+    }
+
+    unsafe fn drop_publish_on_clone_waker(data: *const ()) {
+        // SAFETY: the probe remains alive until after the poll returns.
+        let probe = unsafe { &*(data.cast::<PublishOnCloneProbe>()) };
+        probe.drops.fetch_add(1, Ordering::SeqCst);
+        let result_available = probe.state.result.try_lock().is_ok();
+        let waker_available = probe.state.waker.try_lock().is_ok();
+        probe
+            .locks_available
+            .store(result_available && waker_available, Ordering::SeqCst);
+        if probe.panic_on_drop {
+            panic!("injected abort waiter waker drop panic");
+        }
+    }
+
+    static PUBLISH_ON_CLONE_VTABLE: std::task::RawWakerVTable = std::task::RawWakerVTable::new(
+        publish_abort_during_clone,
+        |_| {},
+        |_| {},
+        drop_publish_on_clone_waker,
+    );
 
     fn wait<W: Send + 'static>() -> (LocalAbortCleanupWait<W>, Arc<LocalAbortCleanupState<W>>) {
         let state = Arc::new(LocalAbortCleanupState {
@@ -271,5 +315,32 @@ mod tests {
             Poll::Ready(CleanupOutcome::Released)
         ));
         assert!(state.waker.lock().expect("registered waker lock").is_none());
+    }
+
+    #[test]
+    fn test_abort_wait_drops_clone_published_waker_outside_locks_and_contains_panic() {
+        let (mut wait, state) = wait::<u8>();
+        let probe = PublishOnCloneProbe {
+            state,
+            drops: AtomicUsize::new(0),
+            locks_available: AtomicBool::new(false),
+            panic_on_drop: true,
+        };
+        // SAFETY: the raw waker's data points to a probe kept alive until the poll returns.
+        let waker = unsafe {
+            Waker::from_raw(std::task::RawWaker::new(
+                &probe as *const _ as *const (),
+                &PUBLISH_ON_CLONE_VTABLE,
+            ))
+        };
+        let mut context = Context::from_waker(&waker);
+
+        assert!(matches!(
+            Future::poll(std::pin::Pin::new(&mut wait), &mut context),
+            Poll::Ready(CleanupOutcome::Released)
+        ));
+        assert_eq!(1, probe.drops.load(Ordering::SeqCst));
+        assert!(probe.locks_available.load(Ordering::SeqCst));
+        std::mem::forget(waker);
     }
 }
