@@ -28,6 +28,18 @@ pub(crate) use cleanup_runner::LocalCleanup;
 use cleanup_state::CleanupState;
 pub(super) use cleanup_wait::CleanupWait;
 
+/// State observed by the per-instance cleanup panic test hook.
+#[cfg(test)]
+#[derive(Debug)]
+pub(super) struct CleanupPanicObservation {
+    /// The worker has removed the owner from shared cleanup state.
+    pub(super) owner_removed: bool,
+    /// No worker result has reached the permit-release handoff.
+    pub(super) pending_result_empty: bool,
+    /// No result has been published to the cleanup future.
+    pub(super) result_empty: bool,
+}
+
 /// Removes and safely drops the task waker after the future becomes ready.
 ///
 /// # Parameters
@@ -146,6 +158,8 @@ fn cleanup_failure(
 
 #[cfg(test)]
 mod tests {
+    use std::future::Future;
+    use std::pin::Pin;
     use std::sync::Arc;
     use std::sync::Mutex;
     use std::task::Context;
@@ -284,6 +298,22 @@ mod tests {
         }
     }
 
+    fn poll_for<F: Future>(mut future: Pin<&mut F>, timeout: std::time::Duration) -> Option<F::Output> {
+        let waker = Waker::from(Arc::new(ThreadWake(std::thread::current())));
+        let mut context = Context::from_waker(&waker);
+        let deadline = std::time::Instant::now() + timeout;
+        loop {
+            if let Poll::Ready(value) = future.as_mut().poll(&mut context) {
+                return Some(value);
+            }
+            let now = std::time::Instant::now();
+            if now >= deadline {
+                return None;
+            }
+            std::thread::park_timeout(deadline.saturating_duration_since(now));
+        }
+    }
+
     fn test_owner(
         manager: &OperationManager,
         executor: &LocalIoExecutor,
@@ -372,9 +402,7 @@ mod tests {
         let parent = tempfile::tempdir().expect("temp parent");
         let manager = OperationManager::new(ManagerOptions::default()).expect("manager");
         let executor = LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).expect("executor");
-        let cleanup = Arc::new(LocalCleanup {
-            executor: executor.clone(),
-        });
+        let cleanup = Arc::new(LocalCleanup::new(executor.clone()));
         let context = || CleanupContext::new(qubit_operation::ContextOptions::default()).expect("cleanup context");
 
         let owner = test_owner(&manager, &executor, parent.path());
@@ -416,9 +444,7 @@ mod tests {
             },
         )
         .expect("executor");
-        let cleanup = Arc::new(LocalCleanup {
-            executor: executor.clone(),
-        });
+        let cleanup = Arc::new(LocalCleanup::new(executor.clone()));
         let (started_tx, started_rx) = std::sync::mpsc::channel();
         let (gate_release_tx, gate_release_rx) = std::sync::mpsc::channel();
         assert!(
@@ -459,6 +485,120 @@ mod tests {
         assert!(
             permit_available_before_wake_returns,
             "cleanup result became visible before its permit was returned"
+        );
+    }
+
+    #[test]
+    fn test_local_cleanup_panic_after_owner_take_leaves_settlement_pending_and_worker_continues() {
+        let parent = tempfile::tempdir().expect("temp parent");
+        let manager = OperationManager::new(ManagerOptions::default()).expect("manager");
+        let executor = LocalIoExecutor::new(
+            manager.clone(),
+            LocalExecutionConfig {
+                worker_count: 1,
+                max_open_handles: 1,
+                ..LocalExecutionConfig::default()
+            },
+        )
+        .expect("executor");
+
+        let (gate_started_tx, gate_started_rx) = std::sync::mpsc::channel();
+        let (gate_release_tx, gate_release_rx) = std::sync::mpsc::channel();
+        assert!(executor.inner.queue.push(
+            Box::new(move || {
+                gate_started_tx.send(()).expect("gate receiver remains open");
+                gate_release_rx
+                    .recv_timeout(std::time::Duration::from_secs(2))
+                    .expect("test releases the worker gate");
+            }),
+            false,
+            1,
+        ).is_ok());
+        gate_started_rx
+            .recv_timeout(std::time::Duration::from_secs(2))
+            .expect("worker reaches the gate");
+
+        let (observation_tx, observation_rx) = std::sync::mpsc::sync_channel(1);
+        let (body_done_tx, body_done_rx) = std::sync::mpsc::channel();
+        let parent_path = parent.path().to_path_buf();
+        let body_executor = executor.clone();
+        let mut operation = match block_on(manager.as_async().submit(OperationOptions::default(), move |scope| async move {
+            let reservation = scope.reserve_resource().expect("resource reservation");
+            let file = LocalFileSystem::host()
+                .expect("filesystem")
+                .create_temp_file_with_options(&LocalTempFileOptions::new().with_parent(&parent_path))
+                .expect("native temp file");
+            let owner = LocalTempResource::new(
+                LocalTempNative::File(file),
+                body_executor.reserve_disk(1).expect("disk permit"),
+                body_executor.reserve_handle().expect("handle permit"),
+                body_executor.reserve_cleanup().expect("cleanup permit"),
+            );
+            let id_slot = Arc::clone(&owner.id);
+            let cleanup = LocalCleanup::new(body_executor.clone());
+            cleanup.inject_panic_after_owner_take(observation_tx);
+            let reference = reservation
+                .commit_with(owner, cleanup)
+                .expect("managed temporary resource");
+            *id_slot.lock().unwrap_or_else(|error| error.into_inner()) = Some(reference.id());
+            drop(reference);
+            body_done_tx.send(()).expect("test observes body completion");
+            Ok::<(), ()>(())
+        })) {
+            Ok(operation) => operation,
+            Err(_) => panic!("operation submission succeeds"),
+        };
+        assert!(matches!(
+            block_on(operation.wait_outcome()).expect("operation outcome"),
+            OperationOutcome::Succeeded(())
+        ));
+        body_done_rx
+            .recv_timeout(std::time::Duration::from_secs(2))
+            .expect("operation dropped the resource reference");
+        assert!(
+            executor.reserve_cleanup().is_none(),
+            "queued cleanup holds the only cleanup permit"
+        );
+
+        let mut settlement = Box::pin(operation.wait_settlement());
+        assert!(poll_for(settlement.as_mut(), std::time::Duration::from_millis(25)).is_none());
+
+        let (following_tx, following_rx) = std::sync::mpsc::channel();
+        let following_executor = executor.clone();
+        assert!(executor.inner.queue.push(
+            Box::new(move || {
+                let permit = following_executor.reserve_cleanup();
+                let permit_returned = permit.is_some();
+                drop(permit);
+                following_tx
+                    .send(permit_returned)
+                    .expect("test observes following task");
+            }),
+            false,
+            1,
+        ).is_ok());
+        gate_release_tx.send(()).expect("release worker gate");
+
+        let observation = observation_rx
+            .recv_timeout(std::time::Duration::from_secs(2))
+            .expect("LocalCleanup reaches its instance-scoped panic seam");
+        assert!(observation.owner_removed);
+        assert!(observation.pending_result_empty);
+        assert!(observation.result_empty);
+        assert!(
+            following_rx
+                .recv_timeout(std::time::Duration::from_secs(2))
+                .expect("worker runs the queued task after cleanup panic"),
+            "cleanup permit is returned before the following task runs"
+        );
+        assert_eq!(
+            0,
+            std::fs::read_dir(parent.path()).expect("temp parent").count(),
+            "the taken native owner is dropped during unwind and performs its own cleanup"
+        );
+        assert!(
+            poll_for(settlement.as_mut(), std::time::Duration::from_millis(100)).is_none(),
+            "settlement remains pending because the cleanup result was not published"
         );
     }
 
@@ -556,7 +696,7 @@ mod tests {
             panic!("simulated cleanup failure remains retryable");
         };
 
-        let cleanup = Arc::new(LocalCleanup { executor });
+        let cleanup = Arc::new(LocalCleanup::new(executor));
         let context = CleanupContext::new(qubit_operation::ContextOptions::default()).expect("cleanup context");
         assert!(matches!(
             block_on(cleanup.cleanup(resource, context)),
@@ -788,9 +928,7 @@ mod tests {
             },
         )
         .expect("executor");
-        let cleanup = Arc::new(LocalCleanup {
-            executor: executor.clone(),
-        });
+        let cleanup = Arc::new(LocalCleanup::new(executor.clone()));
         let context = || CleanupContext::new(qubit_operation::ContextOptions::default()).expect("cleanup context");
 
         let owner = test_owner(&manager, &executor, parent.path());
@@ -822,9 +960,7 @@ mod tests {
         let parent = tempfile::tempdir().expect("temp parent");
         let manager = OperationManager::new(ManagerOptions::default()).expect("manager");
         let executor = LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).expect("executor");
-        let cleanup = Arc::new(LocalCleanup {
-            executor: executor.clone(),
-        });
+        let cleanup = Arc::new(LocalCleanup::new(executor.clone()));
         let owner = test_owner(&manager, &executor, parent.path());
         let path = {
             let native = owner.native.lock().expect("native lock");
@@ -862,9 +998,7 @@ mod tests {
             },
         )
         .expect("executor");
-        let cleanup = Arc::new(LocalCleanup {
-            executor: executor.clone(),
-        });
+        let cleanup = Arc::new(LocalCleanup::new(executor.clone()));
 
         let (started_tx, started_rx) = std::sync::mpsc::channel();
         let (release_tx, release_rx) = std::sync::mpsc::channel();

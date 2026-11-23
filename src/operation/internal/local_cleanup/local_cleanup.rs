@@ -8,6 +8,8 @@
 
 use std::sync::Arc;
 use std::sync::Mutex;
+#[cfg(test)]
+use std::sync::mpsc::SyncSender;
 
 use qubit_operation::AsyncCleanup;
 use qubit_operation::CleanupContext;
@@ -16,6 +18,8 @@ use qubit_operation::CleanupOutcome;
 
 use super::CleanupState;
 use super::CleanupWait;
+#[cfg(test)]
+use super::CleanupPanicObservation;
 use super::cleanup_failure;
 use super::cleanup_resource;
 use super::publish_cleanup_result;
@@ -31,6 +35,26 @@ use crate::operation::temp::LocalTempResource;
 pub struct LocalCleanup {
     /// Executor that owns the dedicated cleanup worker and queue.
     pub(in crate::operation) executor: LocalIoExecutor,
+    /// One-shot panic injection attached to this cleanup policy instance.
+    #[cfg(test)]
+    panic_after_owner_take: Mutex<Option<SyncSender<CleanupPanicObservation>>>,
+}
+
+impl LocalCleanup {
+    /// Creates a cleanup policy for the supplied executor.
+    pub(crate) fn new(executor: LocalIoExecutor) -> Self {
+        Self {
+            executor,
+            #[cfg(test)]
+            panic_after_owner_take: Mutex::new(None),
+        }
+    }
+
+    /// Arms one synthetic panic after this instance removes its owner.
+    #[cfg(test)]
+    pub(super) fn inject_panic_after_owner_take(&self, sender: SyncSender<CleanupPanicObservation>) {
+        *self.panic_after_owner_take.lock().unwrap_or_else(|error| error.into_inner()) = Some(sender);
+    }
 }
 
 impl AsyncCleanup<LocalTempResource> for LocalCleanup {
@@ -61,11 +85,31 @@ impl AsyncCleanup<LocalTempResource> for LocalCleanup {
             waker: Mutex::new(None),
             owner: Mutex::new(Some(resource)),
         });
+        #[cfg(test)]
+        let panic_after_owner_take = self
+            .panic_after_owner_take
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .take();
         let worker_state = Arc::clone(&state);
         let job = Box::new(move || {
             let Some(resource) = worker_state.owner.lock().unwrap_or_else(|e| e.into_inner()).take() else {
                 return;
             };
+            #[cfg(test)]
+            if let Some(sender) = panic_after_owner_take {
+                let observation = CleanupPanicObservation {
+                    owner_removed: worker_state.owner.lock().unwrap_or_else(|e| e.into_inner()).is_none(),
+                    pending_result_empty: worker_state
+                        .pending_result
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .is_none(),
+                    result_empty: worker_state.result.lock().unwrap_or_else(|e| e.into_inner()).is_none(),
+                };
+                let _ = sender.send(observation);
+                panic!("injected LocalCleanup panic after owner removal");
+            }
             let result = cleanup_resource(resource);
             *worker_state.pending_result.lock().unwrap_or_else(|e| e.into_inner()) = Some(result);
         });

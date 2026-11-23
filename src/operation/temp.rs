@@ -203,9 +203,7 @@ pub fn submit_temp_file(
         };
         let resource = LocalTempResource::new(LocalTempNative::File(file), disk, handle, cleanup_permit);
         let id_slot = Arc::clone(&resource.id);
-        let cleanup = LocalCleanup {
-            executor: task_executor,
-        };
+        let cleanup = LocalCleanup::new(task_executor);
         match reservation.commit_with(resource, cleanup) {
             Ok(reference) => {
                 *id_slot.lock().unwrap_or_else(|e| e.into_inner()) = Some(reference.id());
@@ -293,9 +291,7 @@ pub fn submit_temp_directory(
         };
         let resource = LocalTempResource::new(LocalTempNative::Directory(directory), disk, handle, cleanup_permit);
         let id_slot = Arc::clone(&resource.id);
-        let cleanup = LocalCleanup {
-            executor: task_executor,
-        };
+        let cleanup = LocalCleanup::new(task_executor);
         match reservation.commit_with(resource, cleanup) {
             Ok(reference) => {
                 *id_slot.lock().unwrap_or_else(|e| e.into_inner()) = Some(reference.id());
@@ -345,7 +341,7 @@ fn retain_partial(
 ) -> LocalCreateFailure {
     let owner = LocalTempResource::new(LocalTempNative::Recovery(recovery), disk, handle, cleanup_permit);
     let id_slot = Arc::clone(&owner.id);
-    let cleanup = LocalCleanup { executor };
+    let cleanup = LocalCleanup::new(executor);
     match reservation.commit_with(owner, cleanup) {
         Ok(reference) => {
             let resource_id = reference.id();
@@ -475,9 +471,7 @@ mod tests {
                 let reference = reservation
                     .commit_with(
                         owner,
-                        LocalCleanup {
-                            executor: executor.clone(),
-                        },
+                        LocalCleanup::new(executor.clone()),
                     )
                     .expect("managed temp resource");
                 *id_slot.lock().unwrap_or_else(|e| e.into_inner()) = Some(reference.id());
@@ -647,9 +641,7 @@ mod tests {
                 let reference = reservation
                     .commit_with(
                         owner,
-                        LocalCleanup {
-                            executor: executor.clone(),
-                        },
+                        LocalCleanup::new(executor.clone()),
                     )
                     .expect("managed temp resource");
                 #[cfg(panic = "unwind")]
@@ -798,9 +790,7 @@ mod tests {
                 let reference = reservation
                     .commit_with(
                         owner,
-                        LocalCleanup {
-                            executor: executor.clone(),
-                        },
+                        LocalCleanup::new(executor.clone()),
                     )
                     .expect("managed temp resource");
                 *id_slot.lock().unwrap_or_else(|e| e.into_inner()) = Some(reference.id());
@@ -856,9 +846,7 @@ mod tests {
                 let reference = reservation
                     .commit_with(
                         owner,
-                        LocalCleanup {
-                            executor: executor.clone(),
-                        },
+                        LocalCleanup::new(executor.clone()),
                     )
                     .expect("managed temp resource");
                 *id_slot.lock().unwrap_or_else(|e| e.into_inner()) = Some(reference.id());
@@ -923,9 +911,7 @@ mod tests {
                 let reference = reservation
                     .commit_with(
                         owner,
-                        LocalCleanup {
-                            executor: executor.clone(),
-                        },
+                        LocalCleanup::new(executor.clone()),
                     )
                     .expect("managed temp resource");
                 *id_slot.lock().unwrap_or_else(|e| e.into_inner()) = Some(reference.id());
@@ -1015,9 +1001,7 @@ mod tests {
                 let reference = reservation
                     .commit_with(
                         owner,
-                        LocalCleanup {
-                            executor: executor.clone(),
-                        },
+                        LocalCleanup::new(executor.clone()),
                     )
                     .expect("managed temp resource");
                 *id_slot.lock().unwrap_or_else(|e| e.into_inner()) = Some(reference.id());
@@ -1105,9 +1089,7 @@ mod tests {
                 let reference = reservation
                     .commit_with(
                         owner,
-                        LocalCleanup {
-                            executor: executor.clone(),
-                        },
+                        LocalCleanup::new(executor.clone()),
                     )
                     .expect("managed temp resource");
                 *id_slot.lock().unwrap_or_else(|e| e.into_inner()) = Some(reference.id());
@@ -1225,9 +1207,7 @@ mod tests {
                 let reference = reservation
                     .commit_with(
                         owner,
-                        LocalCleanup {
-                            executor: executor.clone(),
-                        },
+                        LocalCleanup::new(executor.clone()),
                     )
                     .expect("managed temp resource");
                 *id_slot.lock().unwrap_or_else(|e| e.into_inner()) = Some(reference.id());
