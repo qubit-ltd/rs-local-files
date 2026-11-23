@@ -2284,7 +2284,7 @@ namespace-absolute、不含 `.`/`..`，再次规范化保持不变。Host 绑定
 - Windows 暂存清理及所选 LF-10 sealed cleanup 测试已有 Windows Server 2025 NTFS 历史原生结果，revision 为
   [`251e103bd9c60bf749e60453e688cf9ac4bde6f2`](https://github.com/qubit-ltd/rs-local-files/commit/251e103bd9c60bf749e60453e688cf9ac4bde6f2)：默认与 `--all-features` 配置下各 3 项暂存测试通过；sealed cleanup 在默认配置下 7/7、在 `--all-features` 配置下 11/11。该记录不证明实施基线 `c5639417080648da263216f698893c3a6c3c7f2d` 的覆盖。T3/T4 恢复、条件打开和 LF-09 私有资源行为不在该记录范围内，详见 [Windows 暂存与清理证据](review-rlf4-windows-staging-cleanup-evidence.md)。Linux 筛选执行 0 个 Windows 测试、Windows GNU `cargo check --lib` 只能证明可编译；
 - FreeBSD 暂不支持；原生 workflow 只检查编译和少量兼容性合同，不运行完整行为套件。详见 [FreeBSD 兼容性说明](freebsd-compatibility.zh_CN.md)。
-  Android 仍配置为 compile-check；这些配置不能据以宣称 runtime guarantee；
+  Linux CI 检查 Android `armv7-linux-androideabi` 目标。具备原生 Android shell 和可写临时目录时，有限套件还会运行结构化错误与 reader I/O 测试；这些检查均不构成 Android 通用协议支持声明；
 - `cargo test --all-features`；
 - `cargo clippy --all-targets --all-features -- -D warnings`；
 - README 和用户指南示例作为编译测试。
@@ -2457,4 +2457,4 @@ Snapshot builder 从 `LocalReadOptions::new()` 开始，不继承 filesystem def
 
 RLF2-Q02 已证实并修复：通过保留父目录执行 no-follow identity 验证。Windows 暂存清理及所选 sealed cleanup 测试已有 Windows Server 2025 NTFS 历史原生结果，revision 为 [`251e103bd9c60bf749e60453e688cf9ac4bde6f2`](https://github.com/qubit-ltd/rs-local-files/commit/251e103bd9c60bf749e60453e688cf9ac4bde6f2)：两种 feature 配置下暂存各 3 项通过；sealed cleanup 在默认配置下 7/7、在 `--all-features` 配置下 11/11。该结果没有证明实施基线 `c5639417080648da263216f698893c3a6c3c7f2d` 的原生覆盖，详见 [Windows 暂存与清理证据](review-rlf4-windows-staging-cleanup-evidence.md)。RLF2-Q03/RLF3-Q01 遵循当前 Windows 枚举 fail-closed 合同：无法重新打开独立目录句柄时，枚举返回 `Unsupported`。独立历史记录称源码版本 `daa0e0282a575885c904182cc1c456ba2e28329f` 的原生 Windows 精确测试在两种 feature 配置下各执行 1 项并通过；日志未记录卷类型或相关账户权限，也未取得当前版本原生日志，因此不能外推。详见 [Windows 枚举证据](review-rlf3-windows-evidence.md)。当前合同不要求历史六次 fallback 游标测试。既有 FreeBSD 暂不支持及 Windows Rooted Content 不支持状态保持不变。
 
-RLF3-001 将同一个复制开始时间贯穿固定句柄路径验证与复制后端；源、目标解析使用复制 deadline 与 binding deadline 中较紧的期限。RLF3-002 保留本地 path dependency，并在依赖表、conditional-write checkout 和 FreeBSD 准备步骤固定相同的完整源码提交；更新基线时须同步修改三个准备入口并核对准备后的 `HEAD`。RLF3-003 为指定的三个 options 类型补充可执行类型级示例。RLF3-Q01 延续 RLF2-Q03 的当前 fail-closed 合同；历史记录称指定源码版本的两种 feature 配置均有原生 Windows 测试通过，但当前版本尚无原生证据，且卷类型和相关账户权限未知，详见 [Windows 枚举证据](review-rlf3-windows-evidence.md)。当前合同不要求历史六次 fallback 游标测试。
+RLF3-001 将同一个复制开始时间贯穿固定句柄路径验证与复制后端；源、目标解析使用复制 deadline 与 binding deadline 中较紧的期限。RLF3-002 将本地 path dependency 固定在 `.infra/ci/local-path-dependencies.tsv`；CI 检查这些 pin，准备入口 `.infra/bin/prepare-local-path-dependencies.sh` 根据该表准备同级 checkout。旧 conditional-write workflow 及其重复 pin 已在 `600c0206` 删除，不应再更新或引用该失效入口。更新基线时修改 TSV，并核对准备后 checkout 的 revision。RLF3-003 为指定的三个 options 类型补充可执行类型级示例。RLF3-Q01 延续 RLF2-Q03 的当前 fail-closed 合同；历史记录称指定源码版本的两种 feature 配置均有原生 Windows 测试通过，但当前版本尚无原生证据，且卷类型和相关账户权限未知，详见 [Windows 枚举证据](review-rlf3-windows-evidence.md)。当前合同不要求历史六次 fallback 游标测试。

@@ -811,8 +811,10 @@ Windows 不支持 Rooted `Content` 和 Host `Content` 配合 `UseStaging`。Host
 使用 `Required` writer durability 时，都会在路径解析或创建 staging 前返回
 `RequirementNotMet`。Linux 和 macOS 可尝试有效配置下的 `Required` 耐久性与 `UseStaging`，
 但仍受所选文件系统和实际运行操作约束。应用需要展示能力提示时可查询
-`LocalDirectoryHandle::conditional_support`，但仍须处理打开和提交错误。Android 仍配置为编译检查；
-FreeBSD 暂不支持。其 CI 只检查编译和少量兼容性合同，不再运行完整行为测试套件。各 API 的失败用例和观察到的原因见[FreeBSD 兼容性说明](freebsd-compatibility.zh_CN.md)。
+`LocalDirectoryHandle::conditional_support`，但仍须处理打开和提交错误。Linux CI 会交叉检查 Android
+`armv7-linux-androideabi` 目标。具备原生 Android shell 和可写临时目录时，有限套件还可运行结构化错误测试以及
+`error_tests` 和 `io_reader_contract_tests`；这些测试不声明 Android 通用运行时或协议支持。FreeBSD 暂不支持；其 CI 只检查编译和少量兼容性合同，
+不再运行完整行为测试套件。各 API 的失败用例和观察到的原因见[FreeBSD 兼容性说明](freebsd-compatibility.zh_CN.md)。
 
 当应用读取文档 A、基于它准备新内容 B，并且不能覆盖其他人后来保存的版本时，使用
 条件写入。Content 成功与竞态测试仅在 Linux 和 macOS 启用，符合当前实现的平台范围；其他 Unix 的 Content
@@ -1842,13 +1844,13 @@ Rooted metadata 等操作对不含链接的普通路径使用私有的一次顺�
 
 CI 配置了 Linux、Windows 和 macOS 运行时测试；具体修改的验证状态以实际 CI 结果为准。
 FreeBSD 暂不支持；原生 workflow 只做编译和少量合同检查，不运行完整行为套件。详细失败 API 和用例见[兼容性说明](freebsd-compatibility.zh_CN.md)。
-Android 仍配置为编译检查。暂存清理及 LF-10 sealed 清理已有 Windows Server 2025 NTFS 历史原生结果，revision 为
+Linux CI 会交叉检查 Android `armv7-linux-androideabi` 目标。具备原生 Android shell 和可写 `TMPDIR` 时，有限套件运行结构化错误测试以及
+`error_tests` 和 `io_reader_contract_tests`；这些检查不构成 Android 通用运行时或协议支持声明。暂存清理及 LF-10 sealed 清理已有 Windows Server 2025 NTFS 历史原生结果，revision 为
 [`251e103bd9c60bf749e60453e688cf9ac4bde6f2`](https://github.com/qubit-ltd/rs-local-files/commit/251e103bd9c60bf749e60453e688cf9ac4bde6f2)：默认与 `--all-features` 下各 3 项暂存测试通过；所选 sealed cleanup 测试在默认配置下 7/7、在 `--all-features` 配置下 11/11。该结果不证明实施基线 `c5639417080648da263216f698893c3a6c3c7f2d` 的覆盖；T3/T4 恢复、条件打开及 LF-09 私有资源行为不在记录范围内。详见 [Windows 暂存与清理证据](review-rlf4-windows-staging-cleanup-evidence.md)。Linux 筛选执行 0 个 Windows 测试、Windows GNU `cargo check --lib` 均不构成运行证据。
 本 crate CI 仅验证本 crate；下游 adapter 的兼容性和集成由 adapter 仓库或独立集成负责。
-同级 path dependency 的源码提交以 `.infra/ci/local-path-dependencies.tsv` 为权威清单。CI 使用
-`python3 scripts/check-ci-dependency-pins.py` 检查 conditional-write checkout 与 FreeBSD 准备步骤中的重复值；
-对应 unittest fixture 也在 Ubuntu CI job 中运行。更新基线时须同步修改清单和所有准备引用，保留准备后的仓库
-`HEAD` 断言，并在本地运行检查器。
+`.infra/ci/local-path-dependencies.tsv` 是同级 path dependency revision 的权威清单；CI 检查 pin，
+`.infra/bin/prepare-local-path-dependencies.sh` 根据该表准备同级 checkout。旧 conditional-write workflow 及其重复 pin 已在
+`600c0206` 删除，不应再更新或引用该失效入口。更新基线时修改 TSV，并核对准备后的 checkout revision。
 `capabilities()` 返回所选 authority 的 build capability 快照；Rooted 实例在打开
 authority 时缓存该快照。`scope()` 供集成层区分两种命名空间；Rooted 实例的诊断锚点通过
 `diagnostic_root()` 单独读取。Host 命名空间的 `limits()` 返回 `SizeLimit::VariesByPath`；使用

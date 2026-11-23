@@ -992,11 +992,14 @@ before path resolution or staging creation. Linux and macOS can attempt valid
 `Required` durability and `UseStaging` configurations, subject to the selected
 filesystem and runtime operation. Check `LocalDirectoryHandle::conditional_support`
 when the application needs to present a capability hint, and still handle
-open/commit errors. Android remains configured for compile checks. FreeBSD is
-temporarily unsupported; its CI job checks compilation and selected
-compatibility contracts, not the complete behavioral suite. See the [FreeBSD
-compatibility status](freebsd-compatibility.md) for failing APIs, test names,
-and observed causes.
+open/commit errors. FreeBSD is temporarily unsupported; its CI job checks
+compilation and selected compatibility contracts, not the complete behavioral
+suite. See the [FreeBSD compatibility status](freebsd-compatibility.md) for
+failing APIs, test names, and observed causes. Linux CI cross-checks Android's
+`armv7-linux-androideabi` target. With a native Android shell and writable
+`TMPDIR`, the configured limited suite runs structured-error tests and
+`error_tests` plus `io_reader_contract_tests`; it does not establish general
+Android runtime or protocol support.
 
 Use a conditional write when an application reads document A, prepares an edit B,
 and must avoid replacing a newer version written by someone else. Add the
@@ -2286,16 +2289,20 @@ CI runs Linux, Windows, and macOS behavioral tests; actual CI results establish
 validation for a particular change. FreeBSD is temporarily unsupported. Its
 native job checks compilation and selected contracts but does not run the
 complete suite; see the [compatibility report](freebsd-compatibility.md) for
-the failed native APIs and tests. Android remains configured for compile checks.
+the failed native APIs and tests. Linux CI cross-checks Android's
+`armv7-linux-androideabi` target. With a native Android shell and writable
+`TMPDIR`, its limited suite runs structured-error tests and `error_tests` plus
+`io_reader_contract_tests`; these checks do not establish general Android
+runtime or protocol support.
 LF-10 sealed cleanup and the staging cleanup tests have historical Windows Server 2025 NTFS
 results at [`251e103bd9c60bf749e60453e688cf9ac4bde6f2`](https://github.com/qubit-ltd/rs-local-files/commit/251e103bd9c60bf749e60453e688cf9ac4bde6f2): selected sealed-cleanup tests passed 7/7 in the default configuration and 11/11 with `--all-features`, and the three staging tests passed in each. Those results do not establish coverage at implementation baseline `c5639417080648da263216f698893c3a6c3c7f2d`; T3/T4 recovery, conditional-open, and LF-09 private-resource behavior remain outside that record. See the [Windows staging and cleanup evidence](review-rlf4-windows-staging-cleanup-evidence.md). Linux filters executing zero Windows tests and Windows GNU `cargo check --lib` are not runtime evidence.
 Sibling path-dependency revisions are fixed in
-`.infra/ci/local-path-dependencies.tsv`, the authoritative list. CI checks its
-repeated conditional-write checkout and FreeBSD preparation values with
-`python3 scripts/check-ci-dependency-pins.py`; the matching unittest fixtures
-run in the Ubuntu CI job. When changing a baseline, update the manifest and
-all preparation references together, retain the prepared repository `HEAD`
-assertions, and run the checker locally.
+`.infra/ci/local-path-dependencies.tsv`, the authoritative list. CI checks the
+pins, and `.infra/bin/prepare-local-path-dependencies.sh` prepares sibling
+checkouts from that table. The former conditional-write workflow and its
+separate repeated pin were removed at `600c0206`; do not update or cite that
+retired workflow. When changing a baseline, update the TSV and verify the
+prepared checkout revision.
 `capabilities()` reports the selected authority's build
 capability snapshot; a Rooted instance caches it when opening the authority.
 `scope()` lets integration code distinguish the two namespaces, and
