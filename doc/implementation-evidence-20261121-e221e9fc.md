@@ -119,3 +119,109 @@ No different supported runtime or downstream custom allocator was available
 in this implementation round. The existing Linux default-allocator probe and
 synthetic accounting tests remain the evidence. No production capacity policy
 change is justified by the available reachability evidence.
+
+## RLF-REV-008 and RLF-053 task-D evidence (2026-11-23)
+
+### RLF-REV-008: managed temporary cleanup panic reachability
+
+Environment: Linux `6.8.0-147-generic`, `x86_64-unknown-linux-gnu`, locked
+Rust `1.94.0 (4a4ef493e 2026-03-02)`. The supported platforms in
+`.infra/platform/platform.toml` are Linux, Windows, and macOS; this worker has
+no native Windows or macOS runtime. No production source or test injection
+was added for this check.
+
+Inspection of `src/operation/internal/local_cleanup/local_cleanup.rs` shows
+that the queued closure takes `CleanupState::owner`, calls
+`cleanup_resource`, then places the result in `pending_result`. The worker
+queue in `src/operation/internal/worker/worker_queue.rs` catches a job panic,
+returns the cleanup permit, and resumes unwinding; `WorkerQueue::run` catches
+that unwind and continues to the next task. The completion callback therefore
+does not run after a panic. The owner taken by the cleanup closure is not
+restored on that path, and no `pending_result` is published. This confirms the
+mechanical loss mode if the closure panics, but does not identify a production
+trigger.
+
+The cleanup closure calls only the crate's native temporary file, sealed file,
+directory, recovery, and cleanup-anchor `cleanup()` implementations. These
+perform authority/identity checks and filesystem operations that return
+structured errors; they do not invoke a caller-supplied closure. Their cleanup
+mutexes recover poison. No ordinary supported production trigger for a panic
+in these calls was established in this Linux run. Panics from internal
+invariant violations, process abort/OOM, or an unavailable downstream runtime
+cannot be excluded by source inspection alone.
+
+Commands and results:
+
+- `cargo test --locked --features async --lib local_cleanup -- --nocapture` —
+  exit 0; 14 passed. This covers local cleanup publication, result/waker
+  races, poison recovery, owner return on queue rejection, and permit timing;
+  it has no injected panic in `cleanup_resource`.
+- `cargo test --locked --features async --lib test_cleanup_completion_does_not_confirm_a_panicking_job -- --exact operation::internal::worker::worker_queue::tests::test_cleanup_completion_does_not_confirm_a_panicking_job`
+  — exit 0; 1 passed. The synthetic queue job panics; its completion callback
+  is skipped and its permit is returned. It does not exercise a managed temp
+  owner or prove that production cleanup can panic.
+- `cargo test --locked --features async,test-support --test operation_end_to_end_tests test_read_stage_cancel_late_consumer_cleanup_and_recovery_retry`
+  — exit 0; 1 passed. This injects a returned sandbox-removal error, observes
+  settlement/recovery, then retries it successfully. It validates the native
+  error exit and owner recovery, not the panic exit.
+- The same integration-test command without `test-support` exited 0 but
+  discovered 0 tests because that test target is gated on both `async` and
+  `test-support`; the command above is the executed reproduction.
+
+Conclusion: the panic behavior is reproducible at the generic queue boundary,
+but supported production reachability of that panic in managed native cleanup
+is not established. In accordance with the evidence gate, do not change the
+production path in this task. Remaining gap: native Windows/macOS runs and a
+production-realistic cleanup panic trigger are unavailable/unidentified.
+
+### RLF-053: allocator capacity reachability
+
+Environment: Linux `6.8.0-147-generic`, host and runtime target
+`x86_64-unknown-linux-gnu`, locked Rust `1.94.0 (4a4ef493e 2026-03-02)`,
+LLVM `21.1.8`. The crate/library has no `#[global_allocator]`; the only
+repository match is the sampling allocator in `benches/local_files.rs`, not
+linked into the library or these probes. The process default global allocator
+was used. `rustup target list --installed` includes
+`armv7-linux-androideabi`, `i686-unknown-linux-gnu`, `wasm32-unknown-unknown`,
+`x86_64-apple-darwin`, `x86_64-pc-windows-gnu`, and the Linux host target.
+Apple and Windows entries are cross-compilation targets only here;
+`command -v xcrun` and `command -v wine` each found no executable (exit 1).
+No dependency was installed and no custom allocator was linked.
+
+The two complete-read growth paths are
+`operation::async_local_file_system::reserve_vec_capacity` and
+`operation::async_local_file_system::complete_operations::reserve_capacity`.
+Each observes `Vec::capacity()` after `try_reserve_exact`; one reconciles
+through `reconcile_vec_capacity`, and the other adjusts/refunds the permit
+against the observed actual growth. Both check the per-operation ceiling
+before allocation and use the shared byte permit. Existing output disposal
+paths destroy the buffer before shrinking the permit. The Linux runtime probes
+below found no over-allocation, so the disputed excess-capacity policy cannot
+be established as production-reachable on a supported runtime in this round.
+
+Commands and results:
+
+- `rustc --version --verbose`; `uname -a`; `rustup target list --installed`;
+  platform/tool availability checks — exit 0 overall; outputs recorded above.
+- `rustc -o /tmp/rlf053-worker-d-vec-capacity-probe - <<'RS' ... RS` followed
+  by `/tmp/rlf053-worker-d-vec-capacity-probe` — exit 0. For each request
+  `1, 2, 3, 7, 15, 16, 17, 63, 64, 65, 255, 256, 257, 4095, 4096, 4097,
+  65535, 65536, 65537`, an initially empty `Vec<u8>` requested that capacity
+  using `try_reserve_exact`; every observed capacity equaled the request.
+- `rustc -o /tmp/rlf053-worker-d-vec-growth-probe - <<'RS' ... RS` followed
+  by `/tmp/rlf053-worker-d-vec-growth-probe` — exit 0. Each case first
+  reserved one byte and pushed one byte, then requested the listed additional
+  capacity. For all 19 requests, `actual_delta == growth_request` and
+  resulting capacity was `1 + growth_request`.
+- `cargo test --locked --features async --lib capacity` — exit 0; 26 passed.
+  The included reconciliation tests cover synthetic actual capacity below,
+  equal to, and above requested capacity, including a per-operation ceiling
+  crossed while the shared pool can cover the difference and a pool-refund
+  failure. These tests establish accounting behavior only.
+
+Conclusion: neither the initial reservation probe nor non-empty growth probe
+observed allocator excess on Linux. The available cross targets cannot supply
+Windows/macOS runtime allocator evidence; no custom allocator runtime was
+available. Keep the production accounting unchanged. A different supported
+runtime or downstream allocator returning a reproducible capacity above the
+request remains the evidence needed to reconsider it.
