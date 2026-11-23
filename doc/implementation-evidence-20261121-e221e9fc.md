@@ -194,10 +194,17 @@ The two complete-read growth paths are
 Each observes `Vec::capacity()` after `try_reserve_exact`; one reconciles
 through `reconcile_vec_capacity`, and the other adjusts/refunds the permit
 against the observed actual growth. Both check the per-operation ceiling
-before allocation and use the shared byte permit. Existing output disposal
-paths destroy the buffer before shrinking the permit. The Linux runtime probes
-below found no over-allocation, so the disputed excess-capacity policy cannot
-be established as production-reachable on a supported runtime in this round.
+before allocation and use the shared byte permit. Refund timing differs
+between the paths: if `reconcile_vec_capacity` cannot charge allocator excess,
+it immediately shrinks the observer path's permit to zero and returns an error
+while the allocated output is still owned by the read call; that caller then
+maps the error and lets the failed read output be discarded. In
+`complete_operations::reserve_capacity`, an unaffordable excess leaves the
+already reserved requested delta in the permit; its caller drops the buffer
+first and then `discard_buffer_and_refund` shrinks the permit to zero. The
+Linux runtime probes below found no over-allocation, so the disputed
+excess-capacity policy cannot be established as production-reachable on a
+supported runtime in this round.
 
 Commands and results:
 
@@ -279,3 +286,91 @@ production panic trigger, and evidence for cleanup-anchor behavior under such
 a trigger remain unavailable. Do not infer production reachability from this
 synthetic injection or change the production cleanup policy on this evidence
 alone.
+
+
+## RLF-REV-008 / RLF-053 task-D independent follow-up (2026-11-23)
+
+### RLF-REV-008: production reachability and recovery anchor scope
+
+Reviewed the `LocalCleanup::cleanup` worker job and `cleanup_resource` native
+call set on Linux `6.8.0-147-generic`, target `x86_64-unknown-linux-gnu`, with
+Rust `1.94.0 (4a4ef493e 2026-03-02)`. The only injected panic available in this
+cleanup path is behind `#[cfg(test)]` and runs after the job takes the owner,
+before it calls `cleanup_resource`. The generic worker boundary catches that
+panic, returns the queue permit, skips completion publication, and continues
+to its next queued task. The instance regression confirms empty owner,
+`pending_result`, and `result` slots at the seam; settlement remains pending;
+the following task can reserve the cleanup permit. For this direct-file
+fixture, no recovery anchor is present: unwinding drops the taken native owner,
+whose destructor removes the test file. This is synthetic behavior, not
+production panic reachability.
+
+A separate existing Host and Rooted test injects a panic in a managed directory
+native transition and verifies that the transition preserves an
+`Unconfirmed(LocalTempCleanupAnchor::Directory(...))`. Under `test-support`,
+the anchor first observes a returned sandbox-removal error and then succeeds
+on retry. That proves a recoverable anchor is supported for a transition
+panic and native cleanup error, but does not exercise a panic inside the
+`LocalCleanup` worker after it takes that owner. Source inspection found the
+cleanup implementations call native cleanup methods that report filesystem
+failures as errors and take no caller callback; no ordinary supported trigger
+for a panic inside those methods was identified. Internal invariant panics and
+platform/runtime behavior outside this Linux run cannot be ruled out.
+
+The panic regression command passed on this Linux host:
+
+- `cargo test --locked --features async --lib operation::temp::local_cleanup::tests::test_local_cleanup_panic_after_owner_take_leaves_settlement_pending_and_worker_continues -- --exact` — exit 0; 1 passed.
+- The related Host/Rooted anchor regression is present as
+  `operation::temp::tests::test_panicked_host_and_rooted_directory_transitions_retain_cleanup_authority`;
+  its anchor retry branch is gated on `test-support`, so this check records
+  source/test scope and does not claim that branch ran here.
+
+Decision: supported production reachability of a panic inside managed cleanup
+remains unestablished. Keep production cleanup unchanged; the missing evidence
+is a production-realistic cleanup panic trigger on a supported runtime and
+worker-cleanup recovery of an anchor after that panic.
+
+### RLF-053: allocator observations and refund ordering
+
+Runtime was Linux `6.8.0-147-generic`, host/target
+`x86_64-unknown-linux-gnu`; compiler `rustc 1.94.0 (4a4ef493e 2026-03-02)`,
+LLVM `21.1.8`. The probes used Rust's process default global allocator. The
+crate has no library global allocator; `benches/local_files.rs` defines a
+sampling allocator for benchmark use only. Installed Apple and Windows GNU
+targets are cross targets here; `xcrun` and `wine` are unavailable. No other
+supported runtime or downstream allocator was available, and no dependency or
+shared environment was changed.
+
+A standalone `Vec<u8>` probe called `try_reserve_exact` with each request
+`1, 2, 3, 7, 15, 16, 17, 63, 64, 65, 255, 256, 257, 4095, 4096, 4097,
+65535, 65536, 65537`. For an empty vector, all 19 resulting capacities equaled
+the request. For non-empty growth, each vector first reserved and stored one
+byte (old capacity 1), then requested the listed additional byte count; all 19
+actual capacity deltas equaled the request, and resulting capacity was
+`1 + request`. The command was `rustc -o
+/tmp/rlf053-worker-d-round2-vec-probe - <<'RS' ... RS` followed by
+`/tmp/rlf053-worker-d-round2-vec-probe`; both exited 0.
+
+Code inspection confirms both production paths charge the requested delta
+before allocation and inspect actual `Vec::capacity()` afterward. Their
+failure refund order is different: the observer path's
+`reconcile_vec_capacity` refunds its full permit immediately if the shared pool
+cannot fund allocator excess, before the read call disposes of its output. The
+complete-read `reserve_capacity` returns a structured error without refunding
+its requested delta in that branch; its caller drops the buffer and then
+`discard_buffer_and_refund` returns the permit. Allocation failure refunds the
+requested delta in both functions before returning. This corrects the broader
+prior statement that output was always destroyed before permit shrinkage.
+
+- `cargo test --locked --features async --lib capacity` — exit 0; 26 passed,
+  including synthetic under-allocation, exact allocation, unaffordable excess,
+  shared-pool accounting, and complete-read refund regressions. These tests do
+  not establish allocator reachability.
+- An initial exact-test filter used the wrong module path and discovered zero
+  tests; listing tests identified the actual `operation::temp::local_cleanup`
+  path, and the corrected exact command above executed one regression.
+
+Neither empty-vector first reservation nor non-empty growth showed excess on
+the available Linux default allocator. Windows/macOS runtime and custom
+allocator behavior remain unobserved. No actual capacity excess was measured,
+so retain the production capacity limits, accounting, and refund behavior.
