@@ -558,6 +558,7 @@ impl LocalStagedDirectory {
         if requirement == LocalFileSyncRequirement::NotRequired {
             return Ok(false);
         }
+        #[cfg(not(windows))]
         let root = self.directory().root_authority()?;
         let mut synced = true;
         let traversal = limits
@@ -578,6 +579,7 @@ impl LocalStagedDirectory {
                 item.observation().identity().cloned().ok_or_else(|| {
                     LocalFileError::new(LocalFileErrorKind::Unsupported, LocalFileOperation::Metadata)
                 })?;
+            #[cfg(not(windows))]
             let relative = crate::LocalRelativePath::new(item.relative_path()).map_err(|source| {
                 LocalFileError::from_io(
                     LocalFileOperation::ValidateName,
@@ -589,15 +591,51 @@ impl LocalStagedDirectory {
             #[cfg(unix)]
             let opened = root.open_reader(&relative, &crate::read::OpenOptions::default());
             #[cfg(windows)]
-            let opened = root.open_writer(
-                &relative,
-                &crate::write::OpenOptions::new(crate::write::Mode::OpenExistingAtStart),
-            );
+            let sync_opened = {
+                #[cfg(feature = "test-support")]
+                if crate::local::take_test_support("tree-sync-main-open-failure") {
+                    Err(super::WindowsTreeEntrySyncOpenError::Other(LocalFileError::new(
+                        LocalFileErrorKind::ChangedDuringRead,
+                        LocalFileOperation::OpenRoot,
+                    )))
+                } else {
+                    super::open_windows_tree_entry_for_sync(self, item.relative_path(), crate::LocalFileKind::File)
+                }
+                #[cfg(not(feature = "test-support"))]
+                {
+                    super::open_windows_tree_entry_for_sync(self, item.relative_path(), crate::LocalFileKind::File)
+                }
+            };
+            #[cfg(windows)]
+            let opened = match sync_opened {
+                Ok(file) => Ok(file),
+                Err(super::WindowsTreeEntrySyncOpenError::SyncAccessUnavailable(_))
+                    if requirement == LocalFileSyncRequirement::Preferred =>
+                {
+                    let current = self
+                        .directory()
+                        .observe_entry(item.relative_path())
+                        .map_err(|cause| cause.with_path(self.directory().diagnostic_path().join(item.relative_path())))?;
+                    if current.identity() != Some(&expected)
+                        || current.metadata().kind() != crate::LocalFileKind::File
+                    {
+                        return Err(
+                            LocalFileError::new(LocalFileErrorKind::ChangedDuringRead, LocalFileOperation::Metadata)
+                                .with_path(self.directory().diagnostic_path().join(item.relative_path())),
+                        );
+                    }
+                    budget.check(&self.directory().diagnostic_path().join(item.relative_path()))?;
+                    synced = false;
+                    continue;
+                }
+                Err(error) => return Err(error.into_error()),
+            };
             #[cfg(not(any(unix, windows)))]
             let opened = root.open_writer(
                 &relative,
                 &crate::write::OpenOptions::new(crate::write::Mode::OpenExistingAtStart),
             );
+            #[cfg(not(windows))]
             let opened = opened.map_err(|source| {
                 LocalFileError::from_io(
                     LocalFileOperation::Commit,
@@ -606,6 +644,8 @@ impl LocalStagedDirectory {
                     source,
                 )
             })?;
+            #[cfg(windows)]
+            let opened = opened?;
             let observation = crate::observation::query::query_observation(
                 &opened,
                 crate::observation::LocalObservationRequirement::Required,

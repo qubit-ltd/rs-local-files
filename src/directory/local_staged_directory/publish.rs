@@ -82,12 +82,6 @@ impl LocalStagedDirectory {
                 Access::Preserved,
             ));
         }
-        if let Some(policy) = options.owner_access_policy() {
-            self.owner_access_policy = Some(*policy);
-        }
-        if let (Some(policy), Some(owner)) = (options.owner_access_policy(), self.owner.as_mut()) {
-            owner.set_owner_access_policy(Some(*policy));
-        }
         if name.is_empty()
             || name == OsStr::new(".")
             || name == OsStr::new("..")
