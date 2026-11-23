@@ -25,6 +25,7 @@ use super::LocalStreamDriver;
 use super::LocalStreamRequest;
 use super::LocalStreamResource;
 use super::WorkerCleanup;
+use super::dispose_panic_payload;
 use super::fail_stream_queue;
 use super::native_stream_writer::NativeStreamWriter;
 use super::start_stream_drain;
@@ -40,6 +41,11 @@ pub(crate) struct WorkerStreamDriver(
 );
 
 impl WorkerStreamDriver {
+    #[cfg(test)]
+    pub(super) fn from_inner(inner: Arc<WorkerStreamInner>) -> Self {
+        Self(inner)
+    }
+
     /// Registers a native stream worker as an operation-managed resource.
     ///
     /// # Parameters
@@ -155,10 +161,8 @@ fn set_stream_resource_id<T: Copy>(resource_id: &Mutex<Option<T>>, id: T) {
 fn drop_stream_waker(waker: Option<std::task::Waker>) {
     if let Some(waker) = waker {
         let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| drop(waker))).err();
-        if let Some(payload) = panic
-            && let Err(payload) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| drop(payload)))
-        {
-            std::mem::forget(payload);
+        if let Some(payload) = panic {
+            dispose_panic_payload(payload);
         }
     }
 }
@@ -298,8 +302,10 @@ impl LocalStreamDriver for WorkerStreamDriver {
                 })));
                 slot.waker.take()
             };
-            if let Some(waker) = wake {
-                let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| waker.wake()));
+            if let Some(waker) = wake
+                && let Err(payload) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| waker.wake()))
+            {
+                dispose_panic_payload(payload);
             }
         }
     }

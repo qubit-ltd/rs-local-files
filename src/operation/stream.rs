@@ -168,8 +168,10 @@ fn fail_stream_queue(inner: &WorkerStreamInner, error: io::Error) {
             command.result = Some(Err(io::Error::new(error.kind(), error.to_string())));
             command.waker.take()
         };
-        if let Some(waker) = waker {
-            let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| waker.wake()));
+        if let Some(waker) = waker
+            && let Err(payload) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| waker.wake()))
+        {
+            dispose_panic_payload(payload);
         }
     }
 }
@@ -273,8 +275,10 @@ fn drain_stream_commands(inner: Arc<WorkerStreamInner>) {
             slot.result = Some(result);
             slot.waker.take()
         };
-        if let Some(waker) = waker {
-            let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| waker.wake()));
+        if let Some(waker) = waker
+            && let Err(payload) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| waker.wake()))
+        {
+            dispose_panic_payload(payload);
         }
     }
 }
@@ -475,6 +479,22 @@ mod tests {
         std::env::temp_dir().join(format!("qubit-local-stream-{label}-{}-{nonce}", std::process::id()))
     }
 
+    struct PanicOnDrop;
+
+    impl Drop for PanicOnDrop {
+        fn drop(&mut self) {
+            panic!("panic payload destructor panicked");
+        }
+    }
+
+    struct PanicPayloadWake;
+
+    impl Wake for PanicPayloadWake {
+        fn wake(self: std::sync::Arc<Self>) {
+            std::panic::panic_any(PanicOnDrop);
+        }
+    }
+
     #[test]
     fn test_reader_commands_preserve_cursor_and_reject_writer_only_operations() {
         let path = temp_path("reader");
@@ -648,13 +668,22 @@ mod tests {
             executor: executor.clone(),
             native: Mutex::new(Some(LocalNativeStream::Writer(Box::new(writer)))),
             state: Mutex::new(WorkerStreamState {
-                commands: HashMap::from([(
-                    41,
-                    WorkerCommand {
-                        result: None,
-                        waker: None,
-                    },
-                )]),
+                commands: HashMap::from([
+                    (
+                        41,
+                        WorkerCommand {
+                            result: None,
+                            waker: Some(Waker::from(std::sync::Arc::new(PanicPayloadWake))),
+                        },
+                    ),
+                    (
+                        42,
+                        WorkerCommand {
+                            result: None,
+                            waker: None,
+                        },
+                    ),
+                ]),
             }),
             queue: Mutex::new(VecDeque::from([
                 super::worker_stream_queued_request::WorkerStreamQueuedRequest {
@@ -662,6 +691,15 @@ mod tests {
                         id: 41,
                         command: LocalStreamCommand::Write {
                             bytes: std::sync::Arc::from(&b"append through worker"[..]),
+                        },
+                    },
+                    write_offset: 0,
+                },
+                super::worker_stream_queued_request::WorkerStreamQueuedRequest {
+                    request: super::LocalStreamRequest {
+                        id: 42,
+                        command: LocalStreamCommand::Write {
+                            bytes: std::sync::Arc::from(&b"!"[..]),
                         },
                     },
                     write_offset: 0,
@@ -696,23 +734,52 @@ mod tests {
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .is_empty()
         );
-        assert_eq!(inner.written_bytes.load(Ordering::Acquire), 21);
-        let result = inner
-            .state
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .commands
-            .get_mut(&41)
-            .unwrap()
-            .result
-            .take()
-            .unwrap();
-        assert!(matches!(result, Ok(LocalStreamCompletion::Written(21))));
+        assert_eq!(inner.written_bytes.load(Ordering::Acquire), 22);
+        let mut state = inner.state.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        assert!(matches!(
+            state.commands.get_mut(&41).unwrap().result.take().unwrap(),
+            Ok(LocalStreamCompletion::Written(21))
+        ));
+        assert!(matches!(
+            state.commands.get_mut(&42).unwrap().result.take().unwrap(),
+            Ok(LocalStreamCompletion::Written(1))
+        ));
+        drop(state);
+
+        let driver = super::WorkerStreamDriver::from_inner(std::sync::Arc::clone(&inner));
+        let request = super::LocalStreamRequest {
+            id: 43,
+            command: LocalStreamCommand::Write {
+                bytes: std::sync::Arc::from(&b" again"[..]),
+            },
+        };
+        let mut context = std::task::Context::from_waker(Waker::noop());
+        assert!(matches!(
+            super::LocalStreamDriver::poll_command(&driver, &mut context, &request),
+            std::task::Poll::Pending
+        ));
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        let result = loop {
+            if let std::task::Poll::Ready(result) =
+                super::LocalStreamDriver::poll_command(&driver, &mut context, &request)
+            {
+                break result;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "rescheduled stream command did not complete"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        };
+        assert!(matches!(result, Ok(LocalStreamCompletion::Written(6))));
+        assert!(!inner.active.load(Ordering::Acquire));
+
         let snapshot = observer.snapshot();
         assert_eq!(snapshot.publication, LocalPublicationState::Published);
         assert_eq!(snapshot.modified_count, 1);
-        assert_eq!(snapshot.modified_bytes, 21);
-        assert_eq!(std::fs::read(&path).unwrap(), b"append through worker");
+        assert_eq!(snapshot.modified_bytes, 28);
+        assert_eq!(inner.written_bytes.load(Ordering::Acquire), 28);
+        assert_eq!(std::fs::read(&path).unwrap(), b"append through worker! again");
         std::fs::remove_file(path).expect("remove fixture");
     }
 
@@ -727,17 +794,22 @@ mod tests {
 
         let manager = qubit_operation::OperationManager::new(qubit_operation::ManagerOptions::default()).unwrap();
         let executor = super::super::LocalIoExecutor::new(manager, crate::LocalExecutionConfig::default()).unwrap();
-        let wake = std::sync::Arc::new(CountWake(AtomicUsize::new(0)));
         let mut commands = HashMap::new();
-        for id in [41, 42] {
-            commands.insert(
-                id,
-                WorkerCommand {
-                    result: None,
-                    waker: Some(Waker::from(std::sync::Arc::clone(&wake))),
-                },
-            );
-        }
+        let wake = std::sync::Arc::new(CountWake(AtomicUsize::new(0)));
+        commands.insert(
+            41,
+            WorkerCommand {
+                result: None,
+                waker: Some(Waker::from(std::sync::Arc::new(PanicPayloadWake))),
+            },
+        );
+        commands.insert(
+            42,
+            WorkerCommand {
+                result: None,
+                waker: Some(Waker::from(std::sync::Arc::clone(&wake))),
+            },
+        );
         let inner = WorkerStreamInner {
             executor: executor.clone(),
             native: Mutex::new(None),
@@ -800,6 +872,6 @@ mod tests {
                 std::io::ErrorKind::WouldBlock
             );
         }
-        assert_eq!(wake.0.load(Ordering::Relaxed), 2);
+        assert_eq!(wake.0.load(Ordering::Relaxed), 1);
     }
 }

@@ -37,6 +37,7 @@ use task::OperationTask;
 
 use super::super::LocalFactObserver;
 use super::super::executor::ExecutorInner;
+use super::super::stream::dispose_panic_payload;
 use super::permits::Permit;
 /// Owned job prepared before manager admission. Binding and activation are
 /// one-shot.
@@ -216,12 +217,16 @@ where
             let Some(waker) = wakers[index].take() else {
                 continue;
             };
-            if !duplicate[index] {
-                let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            if !duplicate[index]
+                && let Err(payload) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                     waker.wake_by_ref();
-                }));
+                }))
+            {
+                dispose_panic_payload(payload);
             }
-            let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| drop(waker)));
+            if let Err(payload) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| drop(waker))) {
+                dispose_panic_payload(payload);
+            }
         }
     }
     /// Runs the register behavior while preserving the operation lifecycle
@@ -244,8 +249,10 @@ where
     /// # Parameters
     /// - `waker` — supplies data or policy for this operation.
     fn discard_waker(waker: Option<Waker>) {
-        if let Some(waker) = waker {
-            let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| drop(waker)));
+        if let Some(waker) = waker
+            && let Err(payload) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| drop(waker)))
+        {
+            dispose_panic_payload(payload);
         }
     }
 }
@@ -520,11 +527,14 @@ where
             this._handle_permit.lock().unwrap_or_else(|e| e.into_inner()).take();
             let outcome = match result {
                 Ok(outcome) => outcome,
-                Err(_) => OperationOutcome::ExecutionFailed(ExecutionFailure {
-                    operation_id: id,
-                    summary: DiagnosticSummary::new("local worker job panicked"),
-                    source: None,
-                }),
+                Err(payload) => {
+                    dispose_panic_payload(payload);
+                    OperationOutcome::ExecutionFailed(ExecutionFailure {
+                        operation_id: id,
+                        summary: DiagnosticSummary::new("local worker job panicked"),
+                        source: None,
+                    })
+                }
             };
             let summary = outcome_summary(id, &outcome);
             let settlement = empty_settlement(id);
@@ -722,6 +732,14 @@ mod waker_tests {
     use super::Port;
     use super::PreparedLocalJob;
 
+    struct PanicOnDrop;
+
+    impl Drop for PanicOnDrop {
+        fn drop(&mut self) {
+            panic!("panic payload destructor panicked");
+        }
+    }
+
     struct CountWake(AtomicUsize);
 
     impl Wake for CountWake {
@@ -814,11 +832,11 @@ mod waker_tests {
         struct PanicWake;
         impl Wake for PanicWake {
             fn wake(self: Arc<Self>) {
-                panic!("owned wake panic");
+                std::panic::panic_any(PanicOnDrop);
             }
 
             fn wake_by_ref(self: &Arc<Self>) {
-                panic!("wake by reference panic");
+                std::panic::panic_any(PanicOnDrop);
             }
         }
 
@@ -833,6 +851,25 @@ mod waker_tests {
         PreparedLocalJob::<(), (), ()>::wake_all(wakers);
 
         assert_eq!(1, target.0.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn test_discard_waker_contains_a_panicking_payload_destructor() {
+        struct DropPanics;
+
+        impl Drop for DropPanics {
+            fn drop(&mut self) {
+                std::panic::panic_any(PanicOnDrop);
+            }
+        }
+
+        impl Wake for DropPanics {
+            fn wake(self: Arc<Self>) {
+                panic!("discard-only waker must not be woken");
+            }
+        }
+
+        PreparedLocalJob::<(), (), ()>::discard_waker(Some(Waker::from(Arc::new(DropPanics))));
     }
 
     #[test]
@@ -1232,6 +1269,26 @@ mod lifecycle_tests {
     use crate::operation::LocalFactObserver;
     use crate::operation::LocalIoExecutor;
 
+    struct PanicOnDrop;
+
+    impl Drop for PanicOnDrop {
+        fn drop(&mut self) {
+            panic!("panic payload destructor panicked");
+        }
+    }
+
+    struct PanicPayloadWake;
+
+    impl Wake for PanicPayloadWake {
+        fn wake(self: Arc<Self>) {
+            std::panic::panic_any(PanicOnDrop);
+        }
+
+        fn wake_by_ref(self: &Arc<Self>) {
+            std::panic::panic_any(PanicOnDrop);
+        }
+    }
+
     #[test]
     fn test_stop_before_worker_start_releases_and_publishes_all_results() {
         struct Notify(std::sync::mpsc::Sender<()>);
@@ -1263,6 +1320,10 @@ mod lifecycle_tests {
                 );
                 #[cfg(panic = "unwind")]
                 job.poison_lifecycle_locks();
+                job.port
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .wakers[0] = Some(Waker::from(Arc::new(PanicPayloadWake)));
                 PreparedExternalOperation::bind(&*job, scope.id()).expect("bind job identity");
                 *observed_job.lock().unwrap_or_else(|error| error.into_inner()) = Some(Arc::clone(&job));
                 // Cancellation may already be accepted by the operation
@@ -1526,6 +1587,14 @@ mod tests {
 
     #[test]
     fn test_external_worker_failure_and_panic_become_typed_outcomes() {
+        struct PanicOnDrop;
+
+        impl Drop for PanicOnDrop {
+            fn drop(&mut self) {
+                panic!("panic payload destructor panicked");
+            }
+        }
+
         let manager = OperationManager::new(ManagerOptions::default()).unwrap();
         let executor = LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).unwrap();
 
@@ -1536,7 +1605,7 @@ mod tests {
             OperationOutcome::Failed("expected")
         ));
 
-        let panicked = prepare::<(), (), _>(&executor, |_| panic!("injected worker panic"));
+        let panicked = prepare::<(), (), _>(&executor, |_| std::panic::panic_any(PanicOnDrop));
         let mut panic_handle = manager.try_submit_external(Default::default(), panicked).unwrap();
         assert!(matches!(
             panic_handle.wait_outcome().unwrap(),
