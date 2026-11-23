@@ -31,10 +31,19 @@ use super::local_cleanup_executor::LocalCleanupExecutor;
 use super::worker_owner::WorkerOwner;
 /// Bounded local I/O worker group associated with an application manager.
 ///
+/// Accepted operations expose a typed outcome through their handle and a
+/// separate settlement report after worker cleanup. Taking an outcome releases
+/// the handle's owned-byte reservation, while native-handle reservations for
+/// returned readers, writers, and walkers remain held until those resources
+/// close. Fact observers independently retain a fact-record slot until all
+/// observer clones are dropped. A stop request through an operation handle is
+/// cooperative and does not replace outcome observation.
+///
 /// # Examples
 ///
-/// Create an executor with explicit manager ownership and wait for a draining
-/// shutdown before dropping it.
+/// Create an executor attached to an application manager and await draining
+/// shutdown. Observing executor shutdown is separate from taking individual
+/// operation outcomes and closing any resources returned by them.
 ///
 /// ```no_run
 /// use qubit_local_files::operation::{LocalExecutionConfig, LocalIoExecutor};

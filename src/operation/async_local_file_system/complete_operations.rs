@@ -217,6 +217,11 @@ impl AsyncLocalFileSystem {
     /// bytes delivered in the operation outcome. The read uses one opened
     /// reader and compares observations before and after reading to detect
     /// changes; this is a consistency check, not an atomic snapshot guarantee.
+    /// The observer retains a bounded fact-record slot until it and its clones
+    /// are dropped. Taking the outcome transfers the bytes to the caller and
+    /// releases the operation handle's memory-budget reference; it does not
+    /// wait for settlement. A stop request remains cooperative, so inspect the
+    /// outcome to learn whether the read succeeded, failed, or stopped.
     ///
     /// An explicit content ceiling produces `read_limit_error()` when it is
     /// the effective boundary. Executor and per-operation memory ceilings,

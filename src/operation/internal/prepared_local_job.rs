@@ -42,6 +42,15 @@ use super::permits::Permit;
 /// Owned job prepared before manager admission. Binding and activation are
 /// one-shot.
 ///
+/// The job publishes one typed outcome for the external handle to take, then
+/// separately publishes settlement after execution and owned cleanup finish.
+/// Publishing an outcome does not itself mean that a resource returned in the
+/// outcome has been closed. Queue, byte, native-handle, and fact-record permits
+/// follow their respective owners: resource permits remain with returned
+/// resources until close, and a fact observer retains its record slot until
+/// its last clone is dropped. Stop requests are cooperative; the resulting
+/// outcome remains the authoritative report of how execution ended.
+///
 /// # Type Parameters
 /// - `R` — owned request retained until admission resolves.
 /// - `T` — operation result delivered through the external control port.
