@@ -201,6 +201,18 @@ Outcome 报告操作的类型化结果；settlement 报告 executor 是否已释
 `settle()` 等待所有已接纳字节送达 native writer，并报告 worker 错误；`flush_async()` 不会发布
 staged 内容，也不保证数据已持久化。
 
+### 重复导出会共享文件游标
+
+sealed stage 会返回 `LocalReadLease`。可以多次调用 `export_read_handle()`；每个
+`LocalReadExport` 都包含一个克隆的原生 `File` 和一份 lease。这些文件克隆共享同一个打开文件的
+游标（文件偏移）：通过一个导出句柄读取或 seek 后，其他句柄会从更新后的位置继续，不能把它们当作
+独立 reader。每次额外导出或调用 `File::try_clone` 得到的描述符，都由应用计入自身的句柄额度。
+每个使用克隆描述符的使用者都要在整个访问期间持有自己的 lease 副本。helper 克隆描述符时，
+应同时保留 `export.file.try_clone()?` 和 `export.lease.clone()`，直到 helper 完成。
+
+只要导出句柄或 helper 仍持有 lease，就不要等待资源清理或 operation settlement。最后一次使用结束后，
+先关闭对应原生句柄并释放全部 lease；随后清理才能完成，settlement 才能报告最终结果。
+
 第一次 poll `close()` 时 writer 进入 closing 状态。此后尚未开始的非空 write、flush 和 commit
 都会立即失败，即使 close future 随后被丢弃也不恢复接纳。再次 poll `close()` 会继续同一关闭流程。
 仅创建并丢弃、从未 poll 的 close future 没有副作用；零长度写入继续保持原有行为。

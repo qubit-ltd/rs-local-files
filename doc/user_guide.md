@@ -246,6 +246,22 @@ commit creates no publication or modification event. `settle()` waits for all
 accepted writes to reach the native writer and reports worker errors;
 `flush_async()` does not publish staged content or promise durable storage.
 
+### Repeated read-handle exports share one cursor
+
+A sealed stage returns a `LocalReadLease`. You may call
+`export_read_handle()` more than once; each `LocalReadExport` carries a cloned
+native `File` and a lease. These file clones share the same open-file cursor
+(file offset), so reading or seeking through one export changes the position
+seen by the others. They are not independent readers. Count every additional
+exported or `File::try_clone` descriptor against the application's own handle
+budget. Every user that accesses a cloned descriptor must keep its own cloned
+lease alive for the entire access period. For a helper clone, keep both
+`export.file.try_clone()?` and `export.lease.clone()` until the helper finishes.
+
+Do not wait for cleanup or operation settlement while an export or helper still
+holds a lease. Close the native handles and drop all associated leases after
+their last use; cleanup can then finish and settlement can report its result.
+
 The first poll of `close()` marks the writer as closing. From then on, new
 non-empty writes, flushes, and commits that had not already started fail
 immediately, even if the close future is dropped. Polling `close()` again
