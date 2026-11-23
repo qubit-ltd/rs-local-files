@@ -62,7 +62,8 @@ impl<T> Future for AsyncReceiver<T> {
             .unwrap_or_else(|e| e.into_inner())
             .replace(new_waker);
         safe_drop_waker(old_waker);
-        if let Some(value) = self.0.value.lock().unwrap_or_else(|e| e.into_inner()).take() {
+        let value = self.0.value.lock().unwrap_or_else(|e| e.into_inner()).take();
+        if let Some(value) = value {
             let old_waker = self.0.waker.lock().unwrap_or_else(|e| e.into_inner()).take();
             safe_drop_waker(old_waker);
             Poll::Ready(value)
@@ -76,6 +77,7 @@ impl<T> Future for AsyncReceiver<T> {
 mod tests {
     use std::sync::Arc;
     use std::sync::atomic::AtomicUsize;
+    use std::sync::atomic::AtomicBool;
     use std::sync::atomic::Ordering;
     use std::task::Wake;
     use std::task::Waker;
@@ -129,6 +131,43 @@ mod tests {
     }
 
     struct DropCount(Arc<AtomicUsize>);
+
+    struct ClonePublishProbe {
+        sender: std::sync::Mutex<Option<super::super::AsyncSender<u8>>>,
+        result: Arc<super::super::AsyncResult<u8>>,
+        drops: Arc<AtomicUsize>,
+        locks_available: Arc<AtomicBool>,
+        panic_on_drop: bool,
+    }
+
+    unsafe fn publish_during_clone(data: *const ()) -> std::task::RawWaker {
+        // SAFETY: the probe outlives the test poll and all raw-waker callbacks.
+        let probe = unsafe { &*(data.cast::<ClonePublishProbe>()) };
+        let sender = probe.sender.lock().unwrap().take().expect("sender available");
+        sender.send(53).expect("result published during successful clone");
+        std::task::RawWaker::new(data, &CLONE_PUBLISH_VTABLE)
+    }
+
+    unsafe fn drop_clone_publish_waker(data: *const ()) {
+        // SAFETY: the probe outlives the registered raw waker.
+        let probe = unsafe { &*(data.cast::<ClonePublishProbe>()) };
+        probe.drops.fetch_add(1, Ordering::SeqCst);
+        let value_available = probe.result.value.try_lock().is_ok();
+        let waker_available = probe.result.waker.try_lock().is_ok();
+        probe
+            .locks_available
+            .store(value_available && waker_available, Ordering::SeqCst);
+        if probe.panic_on_drop {
+            panic!("injected registered waker drop panic");
+        }
+    }
+
+    const CLONE_PUBLISH_VTABLE: std::task::RawWakerVTable = std::task::RawWakerVTable::new(
+        publish_during_clone,
+        |_| {},
+        |_| {},
+        drop_clone_publish_waker,
+    );
 
     unsafe fn clone_counted_waker(data: *const ()) -> std::task::RawWaker {
         // SAFETY: the Arc allocation stays alive until all cloned raw wakers drop.
@@ -185,6 +224,58 @@ mod tests {
             std::pin::Pin::new(&mut receiver).poll(&mut context),
             std::task::Poll::Ready(31)
         ));
+    }
+
+    #[test]
+    fn test_receiver_drops_clone_published_waker_outside_locks() {
+        let (sender, mut receiver) = async_result::<u8>();
+        let probe = ClonePublishProbe {
+            sender: std::sync::Mutex::new(Some(sender)),
+            result: Arc::clone(&receiver.0),
+            drops: Arc::new(AtomicUsize::new(0)),
+            locks_available: Arc::new(AtomicBool::new(false)),
+            panic_on_drop: false,
+        };
+        let waker = unsafe {
+            Waker::from_raw(std::task::RawWaker::new(
+                &probe as *const _ as *const (),
+                &CLONE_PUBLISH_VTABLE,
+            ))
+        };
+        let mut context = std::task::Context::from_waker(&waker);
+        assert!(matches!(
+            std::pin::Pin::new(&mut receiver).poll(&mut context),
+            std::task::Poll::Ready(53)
+        ));
+        assert_eq!(1, probe.drops.load(Ordering::SeqCst));
+        assert!(probe.locks_available.load(Ordering::SeqCst));
+        std::mem::forget(waker);
+    }
+
+    #[test]
+    fn test_receiver_contains_panic_dropping_clone_published_waker() {
+        let (sender, mut receiver) = async_result::<u8>();
+        let probe = ClonePublishProbe {
+            sender: std::sync::Mutex::new(Some(sender)),
+            result: Arc::clone(&receiver.0),
+            drops: Arc::new(AtomicUsize::new(0)),
+            locks_available: Arc::new(AtomicBool::new(false)),
+            panic_on_drop: true,
+        };
+        let waker = unsafe {
+            Waker::from_raw(std::task::RawWaker::new(
+                &probe as *const _ as *const (),
+                &CLONE_PUBLISH_VTABLE,
+            ))
+        };
+        let mut context = std::task::Context::from_waker(&waker);
+        assert!(matches!(
+            std::pin::Pin::new(&mut receiver).poll(&mut context),
+            std::task::Poll::Ready(53)
+        ));
+        assert_eq!(1, probe.drops.load(Ordering::SeqCst));
+        assert!(probe.locks_available.load(Ordering::SeqCst));
+        std::mem::forget(waker);
     }
 
     #[test]

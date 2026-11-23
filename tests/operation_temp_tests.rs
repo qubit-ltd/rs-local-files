@@ -283,6 +283,53 @@ fn test_failed_cleanup_keeps_resource_permit_and_public_recovery_can_retry() {
     ));
 }
 
+#[test]
+fn test_resolved_temp_recovery_releases_manager_and_cleanup_workers_within_bound() {
+    use qubit_local_files::test_support::install_test_fault_shared;
+
+    let parent = tempfile::tempdir().expect("temporary parent");
+    let manager = OperationManager::new(ManagerOptions::default()).expect("manager");
+    let executor = LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).expect("executor");
+    let mut operation = submit_temp_file(
+        LocalFileSystem::host().expect("host filesystem"),
+        executor.clone(),
+        &manager.as_async(),
+        OperationOptions::default(),
+        LocalTempFileOptions::new().with_parent(parent.path()),
+    )
+    .expect("operation admitted");
+    let OperationOutcome::Succeeded(access) = block_on(operation.wait_outcome()).expect("operation outcome") else {
+        panic!("temp creation should succeed");
+    };
+    let fault = install_test_fault_shared("temp-file-sandbox-remove").expect("cleanup fault");
+    drop(access);
+
+    let settlement = block_on(operation.wait_settlement());
+    let recovery = settlement.recoveries.first().expect("cleanup failure recovery").clone();
+    assert_eq!(recovery.snapshot().phase, RecoveryPhase::Pending);
+
+    drop(fault);
+    let retry = recovery.try_retry().expect("recovery retry accepted").wait().expect("retry completed");
+    assert_eq!(retry.recovery.phase, RecoveryPhase::Resolved, "retry report: {retry:?}");
+    assert_eq!(std::fs::read_dir(parent.path()).unwrap().count(), 0);
+
+    drop(settlement);
+    drop(recovery);
+    drop(operation);
+    let async_manager = manager.as_async();
+    drop(async_manager);
+    drop(manager);
+    let (exited_tx, exited_rx) = std::sync::mpsc::sync_channel(1);
+    let worker_drop = std::thread::spawn(move || {
+        drop(executor);
+        let _ = exited_tx.send(());
+    });
+    exited_rx
+        .recv_timeout(std::time::Duration::from_secs(5))
+        .expect("last cleanup and manager owners must let workers exit within five seconds");
+    worker_drop.join().expect("executor drop thread exits");
+}
+
 struct RetryOwner {
     id: Arc<std::sync::Mutex<Option<qubit_operation::ResourceId>>>,
     live: Arc<AtomicUsize>,
