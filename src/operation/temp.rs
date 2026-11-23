@@ -15,6 +15,7 @@ use qubit_operation::OperationOptions;
 use qubit_operation::ResourceRef;
 
 use super::executor::LocalIoExecutor;
+use super::stream::dispose_panic_payload;
 #[path = "internal/local_cleanup.rs"]
 mod local_cleanup;
 pub(crate) use local_cleanup::LocalCleanup;
@@ -53,7 +54,7 @@ pub(super) fn safe_clone_waker(waker: &Waker) -> Option<Waker> {
     match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| waker.clone())) {
         Ok(clone) => Some(clone),
         Err(payload) => {
-            std::mem::forget(payload);
+            dispose_panic_payload(payload);
             None
         }
     }
@@ -66,7 +67,7 @@ pub(super) fn safe_clone_waker(waker: &Waker) -> Option<Waker> {
 /// * `waker` — optional task notification handle being replaced or cleared.
 pub(super) fn safe_drop_waker(waker: Option<Waker>) {
     if let Err(payload) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| drop(waker))) {
-        std::mem::forget(payload);
+        dispose_panic_payload(payload);
     }
 }
 
@@ -77,7 +78,7 @@ pub(super) fn safe_drop_waker(waker: Option<Waker>) {
 /// * `waker` — task notification handle taken from a pending receiver.
 fn safe_wake(waker: Waker) {
     if let Err(payload) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| waker.wake())) {
-        std::mem::forget(payload);
+        dispose_panic_payload(payload);
     }
 }
 
@@ -366,6 +367,8 @@ mod tests {
     use std::pin::Pin;
     use std::sync::Arc;
     use std::sync::Mutex;
+    use std::sync::atomic::AtomicUsize;
+    use std::sync::atomic::Ordering;
     use std::task::Context;
     use std::task::Poll;
     use std::task::RawWaker;
@@ -392,6 +395,22 @@ mod tests {
     impl Drop for PanicOnPayloadDrop {
         fn drop(&mut self) {
             panic!("injected panic payload drop panic");
+        }
+    }
+
+    struct CountedPanicPayload(Arc<AtomicUsize>);
+
+    impl Drop for CountedPanicPayload {
+        fn drop(&mut self) {
+            self.0.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+
+    struct WakeWithCountedPanicPayload(Arc<AtomicUsize>);
+
+    impl std::task::Wake for WakeWithCountedPanicPayload {
+        fn wake(self: Arc<Self>) {
+            std::panic::panic_any(CountedPanicPayload(Arc::clone(&self.0)));
         }
     }
 
@@ -460,6 +479,16 @@ mod tests {
 
         assert!(std::panic::catch_unwind(|| super::safe_wake(raw_waker(&PANIC_WAKE_VTABLE))).is_ok());
         assert!(std::panic::catch_unwind(|| super::safe_drop_waker(Some(raw_waker(&PANIC_DROP_VTABLE)))).is_ok());
+    }
+
+    #[test]
+    fn test_waker_notification_disposes_its_panic_payload() {
+        let drops = Arc::new(AtomicUsize::new(0));
+        let waker = Waker::from(Arc::new(WakeWithCountedPanicPayload(Arc::clone(&drops))));
+
+        super::safe_wake(waker);
+
+        assert_eq!(1, drops.load(Ordering::SeqCst));
     }
     use crate::LocalFileOperation;
     use crate::LocalFileSystem;

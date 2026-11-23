@@ -41,13 +41,25 @@ impl Future for CleanupWait {
     /// * `self` — pinned wait future sharing state with the cleanup worker.
     /// * `cx` — task context used to arrange a wake when cleanup completes.
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let result = self.state.result.lock().unwrap_or_else(|e| e.into_inner()).take();
+        let result = {
+            self.state
+                .result
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .take()
+        };
         if let Some(result) = result {
             clear_waker(&self.state);
             return Poll::Ready(cleanup_outcome(result));
         }
         let Some(new_waker) = safe_clone_waker(cx.waker()) else {
-            let result = self.state.result.lock().unwrap_or_else(|e| e.into_inner()).take();
+            let result = {
+                self.state
+                    .result
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .take()
+            };
             return match result {
                 Some(result) => {
                     clear_waker(&self.state);
@@ -61,7 +73,13 @@ impl Future for CleanupWait {
             waker.replace(new_waker)
         };
         safe_drop_waker(old_waker);
-        let result = self.state.result.lock().unwrap_or_else(|e| e.into_inner()).take();
+        let result = {
+            self.state
+                .result
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .take()
+        };
         if let Some(result) = result {
             clear_waker(&self.state);
             Poll::Ready(cleanup_outcome(result))
