@@ -192,7 +192,23 @@ impl LocalStreamDriver for WorkerStreamDriver {
         cx: &mut Context<'_>,
         request: &LocalStreamRequest,
     ) -> Poll<io::Result<LocalStreamCompletion>> {
-        let mut registered_waker = Some(cx.waker().clone());
+        // Deliver an already-published completion before invoking custom
+        // waker clone code.
+        let completed = {
+            let mut state = self.0.state.lock().unwrap_or_else(|e| e.into_inner());
+            let result = state.commands.get_mut(&request.id).and_then(|slot| slot.result.take());
+            let removed = result.as_ref().and_then(|_| state.commands.remove(&request.id));
+            (result, removed)
+        };
+        if let Some(result) = completed.0 {
+            drop_stream_command(completed.1);
+            return Poll::Ready(result);
+        }
+
+        let (mut registered_waker, mut clone_panic) = match super::clone_poll_waker(cx.waker()) {
+            Ok(waker) => (Some(waker), None),
+            Err(payload) => (None, Some(payload)),
+        };
         let mut replaced_waker = None;
         let mut completed_slot = None;
         let mut ready_result = None;
@@ -205,11 +221,13 @@ impl LocalStreamDriver for WorkerStreamDriver {
                         completed_slot = state.commands.remove(&request.id);
                         false
                     } else {
-                        replaced_waker = slot.waker.replace(registered_waker.take().expect("waker is available"));
+                        if let Some(waker) = registered_waker.take() {
+                            replaced_waker = slot.waker.replace(waker);
+                        }
                         false
                     }
                 }
-                None => {
+                None if registered_waker.is_some() => {
                     state.commands.insert(
                         request.id,
                         WorkerCommand {
@@ -219,13 +237,20 @@ impl LocalStreamDriver for WorkerStreamDriver {
                     );
                     true
                 }
+                None => false,
             }
         };
         drop_stream_waker(registered_waker);
         drop_stream_waker(replaced_waker);
         drop_stream_command(completed_slot);
         if let Some(result) = ready_result {
+            if let Some(payload) = clone_panic.take() {
+                dispose_panic_payload(payload);
+            }
             return Poll::Ready(result);
+        }
+        if let Some(payload) = clone_panic.take() {
+            std::panic::resume_unwind(payload);
         }
         if schedule && let Err(error) = self.schedule(request) {
             let removed = self
@@ -346,7 +371,28 @@ impl NativeStreamWriter for WorkerStreamDriver {
             id: child_id,
             command: request.command.clone(),
         };
-        let mut registered_waker = Some(cx.waker().clone());
+        // Result-first check prevents a completed offset write from being
+        // hidden by a hostile waker clone.
+        let completed = {
+            let mut state = self.0.state.lock().unwrap_or_else(|e| e.into_inner());
+            let result = state.commands.get_mut(&child_id).and_then(|slot| slot.result.take());
+            let removed = result.as_ref().and_then(|_| state.commands.remove(&child_id));
+            (result, removed)
+        };
+        if let Some(result) = completed.0 {
+            self.0
+                .native_write_ids
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .remove(&(request.id, offset));
+            drop_stream_command(completed.1);
+            return Poll::Ready(result);
+        }
+
+        let (mut registered_waker, mut clone_panic) = match super::clone_poll_waker(cx.waker()) {
+            Ok(waker) => (Some(waker), None),
+            Err(payload) => (None, Some(payload)),
+        };
         let mut replaced_waker = None;
         let mut completed_slot = None;
         let mut ready_result = None;
@@ -359,11 +405,13 @@ impl NativeStreamWriter for WorkerStreamDriver {
                         completed_slot = state.commands.remove(&child_id);
                         false
                     } else {
-                        replaced_waker = slot.waker.replace(registered_waker.take().expect("waker is available"));
+                        if let Some(waker) = registered_waker.take() {
+                            replaced_waker = slot.waker.replace(waker);
+                        }
                         false
                     }
                 }
-                None => {
+                None if registered_waker.is_some() => {
                     state.commands.insert(
                         child_id,
                         WorkerCommand {
@@ -373,6 +421,7 @@ impl NativeStreamWriter for WorkerStreamDriver {
                     );
                     true
                 }
+                None => false,
             }
         };
         if let Some(result) = ready_result {
@@ -384,7 +433,13 @@ impl NativeStreamWriter for WorkerStreamDriver {
             drop_stream_waker(registered_waker);
             drop_stream_waker(replaced_waker);
             drop_stream_command(completed_slot);
+            if let Some(payload) = clone_panic.take() {
+                dispose_panic_payload(payload);
+            }
             return Poll::Ready(result);
+        }
+        if let Some(payload) = clone_panic.take() {
+            std::panic::resume_unwind(payload);
         }
         drop_stream_waker(registered_waker);
         drop_stream_waker(replaced_waker);
@@ -755,15 +810,17 @@ mod tests {
         driver.0.state.lock().unwrap().commands.insert(
             102,
             WorkerCommand {
-                result: Some(Ok(super::super::LocalStreamCompletion::Flushed)),
+                result: Some(Ok(super::super::LocalStreamCompletion::Read(vec![1, 2, 3]))),
                 waker: Some(command_waker(Arc::clone(&ready_probe))),
             },
         );
         let ready = LocalStreamRequest {
             id: 102,
-            command: LocalStreamCommand::Flush,
+            command: LocalStreamCommand::Read { max_bytes: 3 },
         };
-        assert!(matches!(driver.poll_command(&mut context, &ready), Poll::Ready(Ok(_))));
+        let hostile_waker = super::super::panic_clone_waker();
+        let mut hostile_context = Context::from_waker(&hostile_waker);
+        assert!(matches!(driver.poll_command(&mut hostile_context, &ready), Poll::Ready(Ok(_))));
         assert_eq!(ready_probe.drops.load(Ordering::Relaxed), 1);
         assert_eq!(0, ready_probe.locked_callbacks.load(Ordering::Relaxed));
 
@@ -786,7 +843,7 @@ mod tests {
             .unwrap()
             .result = Some(Ok(super::super::LocalStreamCompletion::Written(5)));
         assert!(matches!(
-            NativeStreamWriter::poll_native_write(&driver, &mut context, &write, 2),
+            NativeStreamWriter::poll_native_write(&driver, &mut hostile_context, &write, 2),
             Poll::Ready(Ok(super::super::LocalStreamCompletion::Written(5)))
         ));
         assert!(!driver.0.native_write_ids.lock().unwrap().contains_key(&(write.id, 2)));

@@ -41,7 +41,29 @@ impl CloseWaitRegistration {
     /// # Parameters
     /// - `waker` — current task waker to notify when close is published.
     pub(super) fn poll(&mut self, waker: &Waker) -> Poll<io::Result<()>> {
-        let registered_waker = waker.clone();
+        if let Some(result) = self
+            .state
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .result()
+        {
+            return Poll::Ready(result);
+        }
+        let registered_waker = match super::clone_poll_waker(waker) {
+            Ok(waker) => waker,
+            Err(payload) => {
+                if let Some(result) = self
+                    .state
+                    .lock()
+                    .unwrap_or_else(|error| error.into_inner())
+                    .result()
+                {
+                    super::dispose_panic_payload(payload);
+                    return Poll::Ready(result);
+                }
+                std::panic::resume_unwind(payload);
+            }
+        };
         let (result, unused_waker) = {
             self.state
                 .lock()
@@ -157,7 +179,7 @@ mod tests {
 
     #[test]
     #[cfg(panic = "unwind")]
-    fn test_terminal_registration_survives_unused_waker_drop_panic() {
+    fn test_terminal_registration_does_not_clone_an_unused_waker() {
         for (result, is_error) in [
             (Ok(()), false),
             (
@@ -187,10 +209,20 @@ mod tests {
                 }
                 result => panic!("unexpected terminal registration result: {result:?}"),
             }
-            assert_eq!(1, probe.drops.load(Ordering::SeqCst));
+            assert_eq!(0, probe.drops.load(Ordering::SeqCst));
             drop(registration);
+            probe.panic_on_drop.store(false, Ordering::SeqCst);
             drop(waker);
         }
+    }
+
+    #[test]
+    fn test_terminal_result_is_ready_with_a_waker_that_panics_on_clone() {
+        let state = Arc::new(Mutex::new(WorkerWalkCloseState::default()));
+        state.lock().unwrap().publish(Ok(()));
+        let mut registration = CloseWaitRegistration::new(state);
+        let waker = super::super::panic_clone_waker();
+        assert!(matches!(registration.poll(&waker), Poll::Ready(Ok(()))));
     }
 
     #[test]

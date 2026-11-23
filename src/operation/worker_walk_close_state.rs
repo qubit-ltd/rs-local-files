@@ -25,6 +25,14 @@ pub(super) struct WorkerWalkCloseState {
 }
 
 impl WorkerWalkCloseState {
+    /// Returns a clone of the repeatable terminal close result when ready.
+    pub(super) fn result(&self) -> Option<io::Result<()>> {
+        self.terminal.as_ref().map(|result| match result {
+            Ok(()) => Ok(()),
+            Err((kind, message)) => Err(io::Error::new(*kind, message.clone())),
+        })
+    }
+
     /// Returns the close result or registers a compatibility waiter.
     ///
     /// # Parameters

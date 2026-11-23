@@ -108,6 +108,26 @@ mod worker_walk_driver;
 mod worker_walk_inner;
 pub(crate) use worker_walk_driver::WorkerWalkDriver;
 pub(super) use worker_walk_inner::dispose_panic_payload;
+
+/// Clones a caller waker while retaining any panic payload for the poller's
+/// existing failure boundary.
+pub(super) fn clone_poll_waker(
+    waker: &std::task::Waker,
+) -> Result<std::task::Waker, Box<dyn std::any::Any + Send>> {
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| waker.clone()))
+}
+
+#[cfg(test)]
+pub(super) fn panic_clone_waker() -> std::task::Waker {
+    unsafe fn panic_clone(_: *const ()) -> std::task::RawWaker {
+        panic!("injected task waker clone panic");
+    }
+    unsafe fn no_op(_: *const ()) {}
+    static VTABLE: std::task::RawWakerVTable =
+        std::task::RawWakerVTable::new(panic_clone, no_op, no_op, no_op);
+    // SAFETY: the vtable never dereferences the null data pointer.
+    unsafe { std::task::Waker::from_raw(std::task::RawWaker::new(std::ptr::null(), &VTABLE)) }
+}
 #[path = "worker_stream_driver.rs"]
 mod worker_stream_driver;
 pub(crate) use worker_stream_driver::WorkerStreamDriver;

@@ -97,14 +97,26 @@ impl LocalTempFileAccess {
         let (sender, receiver) = async_result();
         executor
             .enqueue_task(move || {
-                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let result = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                     let mut native = resource.native.lock().unwrap_or_else(|e| e.into_inner());
                     let Some(native) = native.as_mut() else {
                         return Err(LocalTempCommandError::ResourceUnavailable);
                     };
                     Ok(command(native))
-                }))
-                .unwrap_or(Err(LocalTempCommandError::Panicked));
+                })) {
+                    Ok(result) => result,
+                    Err(payload) => {
+                        // The unwind released the native owner lock. Contain a
+                        // payload whose destructor panics before publishing the
+                        // typed command error to the receiver.
+                        if let Err(payload) =
+                            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| drop(payload)))
+                        {
+                            crate::operation::stream::dispose_panic_payload(payload);
+                        }
+                        Err(LocalTempCommandError::Panicked)
+                    }
+                };
                 let _ = sender.send(result);
                 drop(resource);
             })
@@ -180,34 +192,32 @@ impl LocalTempFileAccess {
                         return;
                     }
                 };
-                let outcome = match native.take() {
-                    None => Err(LocalTempCommandError::ResourceUnavailable),
+                let (outcome, panic_payload) = match native.take() {
+                    None => (Err(LocalTempCommandError::ResourceUnavailable), None),
                     Some(owner) => match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| command(owner))) {
                         Ok(Ok((mut owner, value))) => {
                             if let Some(owner) = owner.as_mut() {
                                 arm_native_cleanup_on_drop(owner);
                             }
                             *native = owner;
-                            Ok(Ok(value))
+                            (Ok(Ok(value)), None)
                         }
                         Ok(Err((owner, error))) => {
                             let mut owner = owner;
                             arm_native_cleanup_on_drop(&mut owner);
                             *native = Some(owner);
-                            Ok(Err(error))
+                            (Ok(Err(error)), None)
                         }
                         Err(payload) => {
-                            if let Err(payload) =
-                                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| drop(payload)))
-                            {
-                                std::mem::forget(payload);
-                            }
                             *native = Some(LocalTempNative::Unconfirmed(fallback));
-                            Err(LocalTempCommandError::Panicked)
+                            (Err(LocalTempCommandError::Panicked), Some(payload))
                         }
                     },
                 };
                 drop(native);
+                if let Some(payload) = panic_payload {
+                    crate::operation::stream::dispose_panic_payload(payload);
+                }
                 let _ = sender.send(outcome);
                 drop(resource);
             })

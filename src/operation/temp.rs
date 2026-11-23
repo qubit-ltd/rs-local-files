@@ -391,6 +391,29 @@ mod tests {
     use super::LocalTempResource;
     use super::async_result;
 
+    struct PanicOnPayloadDrop;
+
+    impl Drop for PanicOnPayloadDrop {
+        fn drop(&mut self) {
+            panic!("injected panic payload drop panic");
+        }
+    }
+
+    struct TransitionPanicPayload {
+        resource: qubit_operation::ResourceRef<LocalTempResource>,
+        dropped_unlocked: Arc<std::sync::atomic::AtomicBool>,
+    }
+
+    impl Drop for TransitionPanicPayload {
+        fn drop(&mut self) {
+            self.dropped_unlocked.store(
+                self.resource.native.try_lock().is_ok(),
+                std::sync::atomic::Ordering::SeqCst,
+            );
+            panic!("injected transition panic payload drop panic");
+        }
+    }
+
     fn panic_on_clone(_: *const ()) -> RawWaker {
         std::panic::panic_any(());
     }
@@ -566,10 +589,15 @@ mod tests {
         #[cfg(panic = "unwind")]
         crate::operation::poison_test_mutex(&access.resource.native);
         let command = access
-            .enqueue_native_command(&executor, |_| -> () { panic!("injected native command panic") })
+            .enqueue_native_command(&executor, |_| -> () { std::panic::panic_any(PanicOnPayloadDrop) })
             .expect("command queued");
         assert_eq!(block_on(command), Err(LocalTempCommandError::Panicked));
         assert_eq!(std::fs::read_dir(parent.path()).unwrap().count(), 1);
+
+        let follow_up = access
+            .enqueue_native_command(&executor, |_| 17_u8)
+            .expect("worker remains available after payload drop panic");
+        assert_eq!(block_on(follow_up), Ok(17));
 
         drop(access);
         let settlement = block_on(operation.wait_settlement());
@@ -930,15 +958,22 @@ mod tests {
                     .expect("managed temp resource");
                 *id_slot.lock().unwrap_or_else(|e| e.into_inner()) = Some(reference.id());
                 let access = LocalTempFileAccess { resource: reference };
+                let payload_drop_saw_unlocked_owner = Arc::new(std::sync::atomic::AtomicBool::new(false));
+                let resource_for_payload = access.clone_resource_ref();
+                let payload_drop_result = Arc::clone(&payload_drop_saw_unlocked_owner);
                 let receiver = access
                     .enqueue_native_transition(
                         &executor,
-                        |_owner| -> Result<(Option<LocalTempNative>, ()), (LocalTempNative, ())> {
-                            panic!("injected transition panic")
+                        move |_owner| -> Result<(Option<LocalTempNative>, ()), (LocalTempNative, ())> {
+                            std::panic::panic_any(TransitionPanicPayload {
+                                resource: resource_for_payload,
+                                dropped_unlocked: payload_drop_result,
+                            })
                         },
                     )
                     .expect("command queued");
                 assert!(matches!(block_on(receiver), Err(LocalTempCommandError::Panicked)));
+                assert!(payload_drop_saw_unlocked_owner.load(std::sync::atomic::Ordering::SeqCst));
                 let retry_receiver = access
                     .enqueue_native_transition(
                         &executor,

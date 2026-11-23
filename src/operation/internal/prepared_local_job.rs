@@ -358,13 +358,26 @@ where
     /// # Parameters
     /// - `cx` — supplies data or policy for this operation.
     fn poll_outcome(&self, cx: &mut Context<'_>) -> Poll<ChildOutcomeSummary> {
-        let mut new_waker = Some(cx.waker().clone());
+        if let Some(value) = self.port.lock().unwrap_or_else(|e| e.into_inner()).summary.clone() {
+            return Poll::Ready(value);
+        }
+        let (mut new_waker, mut clone_panic) = match super::super::stream::clone_poll_waker(cx.waker()) {
+            Ok(waker) => (Some(waker), None),
+            Err(payload) => (None, Some(payload)),
+        };
         let mut port = self.port.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(value) = &port.summary {
             let value = value.clone();
             drop(port);
             Self::discard_waker(new_waker.take());
+            if let Some(payload) = clone_panic.take() {
+                dispose_panic_payload(payload);
+            }
             return Poll::Ready(value);
+        }
+        if let Some(payload) = clone_panic.take() {
+            drop(port);
+            std::panic::resume_unwind(payload);
         }
         let old = Self::register(&mut port, 1, &mut new_waker);
         drop(port);
@@ -377,7 +390,20 @@ where
     /// # Parameters
     /// - `cx` — supplies data or policy for this operation.
     fn poll_release(&self, cx: &mut Context<'_>) -> Poll<ChildRelease> {
-        let mut new_waker = Some(cx.waker().clone());
+        let ready = {
+            let port = self.port.lock().unwrap_or_else(|e| e.into_inner());
+            port.released.then(|| ChildRelease {
+                operation_id: port.id.expect("manager binds before observing control"),
+                confirmed_at: None,
+            })
+        };
+        if let Some(released) = ready {
+            return Poll::Ready(released);
+        }
+        let (mut new_waker, mut clone_panic) = match super::super::stream::clone_poll_waker(cx.waker()) {
+            Ok(waker) => (Some(waker), None),
+            Err(payload) => (None, Some(payload)),
+        };
         let mut port = self.port.lock().unwrap_or_else(|e| e.into_inner());
         if port.released {
             let released = ChildRelease {
@@ -386,7 +412,14 @@ where
             };
             drop(port);
             Self::discard_waker(new_waker.take());
+            if let Some(payload) = clone_panic.take() {
+                dispose_panic_payload(payload);
+            }
             return Poll::Ready(released);
+        }
+        if let Some(payload) = clone_panic.take() {
+            drop(port);
+            std::panic::resume_unwind(payload);
         }
         let old = Self::register(&mut port, 2, &mut new_waker);
         drop(port);
@@ -399,13 +432,26 @@ where
     /// # Parameters
     /// - `cx` — supplies data or policy for this operation.
     fn poll_settlement(&self, cx: &mut Context<'_>) -> Poll<Arc<SettlementReport>> {
-        let mut new_waker = Some(cx.waker().clone());
+        if let Some(value) = self.port.lock().unwrap_or_else(|e| e.into_inner()).settlement.clone() {
+            return Poll::Ready(value);
+        }
+        let (mut new_waker, mut clone_panic) = match super::super::stream::clone_poll_waker(cx.waker()) {
+            Ok(waker) => (Some(waker), None),
+            Err(payload) => (None, Some(payload)),
+        };
         let mut port = self.port.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(value) = &port.settlement {
             let value = Arc::clone(value);
             drop(port);
             Self::discard_waker(new_waker.take());
+            if let Some(payload) = clone_panic.take() {
+                dispose_panic_payload(payload);
+            }
             return Poll::Ready(value);
+        }
+        if let Some(payload) = clone_panic.take() {
+            drop(port);
+            std::panic::resume_unwind(payload);
         }
         let old = Self::register(&mut port, 3, &mut new_waker);
         drop(port);
@@ -593,13 +639,28 @@ where
     /// # Parameters
     /// - `cx` — supplies data or policy for this operation.
     fn poll_take_outcome(&self, cx: &mut Context<'_>) -> Poll<OperationOutcome<T, E>> {
-        let mut new_waker = Some(cx.waker().clone());
+        let ready = self.port.lock().unwrap_or_else(|e| e.into_inner()).outcome.take();
+        if let Some(value) = ready {
+            self._owned_permit.lock().unwrap_or_else(|e| e.into_inner()).take();
+            return Poll::Ready(value);
+        }
+        let (mut new_waker, mut clone_panic) = match super::super::stream::clone_poll_waker(cx.waker()) {
+            Ok(waker) => (Some(waker), None),
+            Err(payload) => (None, Some(payload)),
+        };
         let mut port = self.port.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(value) = port.outcome.take() {
             drop(port);
             self._owned_permit.lock().unwrap_or_else(|e| e.into_inner()).take();
             Self::discard_waker(new_waker.take());
+            if let Some(payload) = clone_panic.take() {
+                dispose_panic_payload(payload);
+            }
             return Poll::Ready(value);
+        }
+        if let Some(payload) = clone_panic.take() {
+            drop(port);
+            std::panic::resume_unwind(payload);
         }
         let old = Self::register(&mut port, 0, &mut new_waker);
         drop(port);
@@ -1726,6 +1787,51 @@ mod prepared_job_ownership_tests {
             LocalFactObserver::new(),
             |_| OperationOutcome::<(), ()>::Succeeded(()),
         )
+    }
+
+    #[test]
+    fn test_ready_lifecycle_polls_do_not_clone_hostile_waker() {
+        use std::task::Context;
+        use std::task::Poll;
+
+        let manager = OperationManager::new(ManagerOptions::default()).expect("manager");
+        let executor = LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).expect("executor");
+        let job = make_job(&executor);
+        let id = operation_id(&manager);
+        PreparedExternalOperation::bind(&*job, id).expect("bind identity");
+        let outcome = OperationOutcome::<(), ()>::Succeeded(());
+        {
+            let mut port = job.port.lock().unwrap();
+            port.summary = Some(super::outcome_summary(id, &outcome));
+            port.outcome = Some(outcome);
+            port.released = true;
+            port.settlement = Some(super::empty_settlement(id));
+        }
+
+        let hostile = crate::operation::stream::panic_clone_waker();
+        let mut context = Context::from_waker(&hostile);
+        assert!(matches!(
+            OperationControl::poll_outcome(&*job, &mut context),
+            Poll::Ready(summary) if summary.operation_id == id
+        ));
+        assert!(matches!(
+            OperationControl::poll_release(&*job, &mut context),
+            Poll::Ready(release) if release.operation_id == id
+        ));
+        assert!(matches!(
+            OperationControl::poll_settlement(&*job, &mut context),
+            Poll::Ready(report) if report.operation_id == id
+        ));
+        assert!(matches!(
+            PreparedExternalOperation::poll_take_outcome(&*job, &mut context),
+            Poll::Ready(OperationOutcome::Succeeded(()))
+        ));
+        drop(job);
+        let shutdown = executor
+            .request_shutdown(qubit_operation::ShutdownMode::Drain)
+            .wait()
+            .expect("executor shuts down");
+        assert_eq!(0, shutdown.snapshot.active_operations);
     }
 
     fn operation_id(manager: &OperationManager) -> qubit_operation::OperationId {

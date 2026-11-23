@@ -200,35 +200,60 @@ impl LocalWalkDriver for WorkerWalkDriver {
         max_entries: usize,
         max_bytes: usize,
     ) -> Poll<io::Result<Option<Vec<PathBuf>>>> {
+        let completed = {
+            let mut commands = self.0.commands.lock().unwrap_or_else(|e| e.into_inner());
+            let result = commands.get_mut(&request_id).and_then(|command| command.result.take());
+            let removed = result.as_ref().and_then(|_| commands.remove(&request_id));
+            (result, removed)
+        };
+        if let Some(result) = completed.0 {
+            if let Some(mut command) = completed.1 {
+                drop_walk_waker(command.waker.take());
+                drop(command);
+            }
+            return Poll::Ready(result);
+        }
+
         let mut schedule = false;
-        let unused_waker = cx.waker().clone();
+        let (mut unused_waker, mut clone_panic) = match super::clone_poll_waker(cx.waker()) {
+            Ok(waker) => (Some(waker), None),
+            Err(payload) => (None, Some(payload)),
+        };
         let mut discarded_command = None;
         let mut discarded_waker = None;
         {
             let mut commands = self.0.commands.lock().unwrap_or_else(|e| e.into_inner());
             if self.0.stop_requested.load(Ordering::Acquire) {
                 drop(commands);
-                drop_walk_waker(Some(unused_waker));
+                drop_walk_waker(unused_waker.take());
+                if let Some(payload) = clone_panic.take() {
+                    dispose_panic_payload(payload);
+                }
                 return Poll::Ready(Ok(None));
             }
             if let Some(command) = commands.get_mut(&request_id) {
                 if let Some(result) = command.result.take() {
                     discarded_command = commands.remove(&request_id);
                     drop(commands);
-                    drop_walk_waker(Some(unused_waker));
+                    drop_walk_waker(unused_waker.take());
                     if let Some(mut command) = discarded_command.take() {
                         drop_walk_waker(command.waker.take());
                         drop(command);
                     }
+                    if let Some(payload) = clone_panic.take() {
+                        dispose_panic_payload(payload);
+                    }
                     return Poll::Ready(result);
                 }
-                discarded_waker = command.waker.replace(unused_waker);
-            } else {
+                if let Some(waker) = unused_waker.take() {
+                    discarded_waker = command.waker.replace(waker);
+                }
+            } else if let Some(waker) = unused_waker.take() {
                 commands.insert(
                     request_id,
                     WorkerWalkCommand {
                         result: None,
-                        waker: Some(unused_waker),
+                        waker: Some(waker),
                     },
                 );
                 schedule = true;
@@ -236,6 +261,9 @@ impl LocalWalkDriver for WorkerWalkDriver {
         }
         drop(discarded_command);
         drop_walk_waker(discarded_waker);
+        if let Some(payload) = clone_panic.take() {
+            std::panic::resume_unwind(payload);
+        }
         if schedule {
             let inner = Arc::clone(&self.0);
             let job = move || {
@@ -1024,7 +1052,7 @@ mod tests {
 
     #[test]
     #[cfg(panic = "unwind")]
-    fn test_compatibility_close_poll_preserves_terminal_result_when_waker_drop_panics() {
+    fn test_compatibility_close_poll_delivers_ready_result_without_cloning_waker() {
         for (result, is_error) in [
             (Ok(()), false),
             (
@@ -1039,11 +1067,7 @@ mod tests {
             let executor = LocalIoExecutor::new(manager, LocalExecutionConfig::default()).unwrap();
             let directory = tempfile::tempdir().unwrap();
             let driver = direct_driver(&directory, executor);
-            let probe = Arc::new(PanicDropWakerProbe {
-                drops: AtomicUsize::new(0),
-                panic_on_drop: AtomicBool::new(true),
-            });
-            let waker = panic_drop_waker(Arc::clone(&probe));
+            let waker = super::super::panic_clone_waker();
             let mut context = Context::from_waker(&waker);
             driver.0.publish_close(result);
 
@@ -1060,7 +1084,6 @@ mod tests {
                 }
                 result => panic!("unexpected compatibility close result: {result:?}"),
             }
-            assert_eq!(1, probe.drops.load(Ordering::SeqCst));
         }
     }
 
@@ -1311,7 +1334,7 @@ mod tests {
 
     #[cfg(panic = "unwind")]
     #[test]
-    fn test_ready_batch_survives_unused_poll_waker_destructor_panic() {
+    fn test_ready_batch_is_delivered_without_cloning_hostile_poll_waker() {
         use std::sync::mpsc;
         use std::time::Duration;
 
@@ -1346,18 +1369,13 @@ mod tests {
             std::thread::yield_now();
         }
 
-        let probe = Arc::new(PanicDropWakerProbe {
-            drops: AtomicUsize::new(0),
-            panic_on_drop: AtomicBool::new(true),
-        });
-        let hostile_waker = panic_drop_waker(Arc::clone(&probe));
+        let hostile_waker = super::super::panic_clone_waker();
         let mut hostile_context = Context::from_waker(&hostile_waker);
         let batch = match driver.poll_batch(&mut hostile_context, 92, 8, 1024) {
             Poll::Ready(Ok(Some(entries))) => entries,
             other => panic!("ready batch was not delivered after waiter destructor panic: {other:?}"),
         };
         assert_eq!(batch.as_slice(), std::slice::from_ref(&expected));
-        assert_eq!(1, probe.drops.load(Ordering::SeqCst));
 
         let mut delivered = batch;
         while let Some(next) = block_on(poll_batch(&driver, 92, 8, 1024)).unwrap() {
@@ -1374,7 +1392,7 @@ mod tests {
 
     #[cfg(panic = "unwind")]
     #[test]
-    fn test_ready_iterator_error_survives_unused_poll_waker_destructor_panic() {
+    fn test_ready_iterator_error_is_delivered_without_cloning_hostile_poll_waker() {
         let manager = OperationManager::new(ManagerOptions::default()).unwrap();
         let executor = LocalIoExecutor::new(manager, LocalExecutionConfig::default()).unwrap();
         let directory = tempfile::tempdir().unwrap();
@@ -1389,11 +1407,7 @@ mod tests {
                 waker: None,
             },
         );
-        let probe = Arc::new(PanicDropWakerProbe {
-            drops: AtomicUsize::new(0),
-            panic_on_drop: AtomicBool::new(true),
-        });
-        let hostile_waker = panic_drop_waker(Arc::clone(&probe));
+        let hostile_waker = super::super::panic_clone_waker();
         let mut context = Context::from_waker(&hostile_waker);
 
         let error = match driver.poll_batch(&mut context, 93, 8, 1024) {
@@ -1402,7 +1416,6 @@ mod tests {
         };
         assert_eq!(io::ErrorKind::PermissionDenied, error.kind());
         assert_eq!("injected walk error", error.to_string());
-        assert_eq!(1, probe.drops.load(Ordering::SeqCst));
         stop_driver(&driver);
     }
 

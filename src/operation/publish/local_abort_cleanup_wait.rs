@@ -42,6 +42,25 @@ impl<W: Send + 'static> Future for LocalAbortCleanupWait<W> {
             return Poll::Ready(result);
         }
         let Some(new_waker) = super::super::temp::safe_clone_waker(context.waker()) else {
+            // The worker may have published while cloning the hostile waker.
+            // Recheck before returning Pending, and release this waiter's old
+            // registration when no further notification is needed.
+            if let Some(result) = self
+                .0
+                .result
+                .lock()
+                .unwrap_or_else(|error| error.into_inner())
+                .take()
+            {
+                let old_waker = self
+                    .0
+                    .waker
+                    .lock()
+                    .unwrap_or_else(|error| error.into_inner())
+                    .take();
+                super::super::temp::safe_drop_waker(old_waker);
+                return Poll::Ready(result);
+            }
             return Poll::Pending;
         };
         let old_waker = self
@@ -203,10 +222,31 @@ mod tests {
         std::panic::panic_any(());
     }
 
+    unsafe fn publish_then_panic_on_clone(data: *const ()) -> std::task::RawWaker {
+        // SAFETY: the raw waker owns one Arc reference and this callback
+        // temporarily increments it before accessing the shared test state.
+        unsafe { Arc::<LocalAbortCleanupState<u8>>::increment_strong_count(data.cast()) };
+        let state = unsafe { Arc::<LocalAbortCleanupState<u8>>::from_raw(data.cast()) };
+        *state.result.lock().expect("cleanup result lock") = Some(CleanupOutcome::Released);
+        std::panic::panic_any(());
+    }
+
+    unsafe fn drop_arc(data: *const ()) {
+        // SAFETY: this is the one reference owned by the raw waker.
+        drop(unsafe { Arc::<LocalAbortCleanupState<u8>>::from_raw(data.cast()) });
+    }
+
     fn no_op(_: *const ()) {}
 
     static PANIC_CLONE_VTABLE: std::task::RawWakerVTable =
         std::task::RawWakerVTable::new(panic_on_clone, no_op, no_op, no_op);
+
+    static PUBLISH_PANIC_VTABLE: std::task::RawWakerVTable = std::task::RawWakerVTable::new(
+        publish_then_panic_on_clone,
+        no_op,
+        no_op,
+        drop_arc,
+    );
 
     #[test]
     fn test_abort_wait_stays_pending_when_waker_clone_panics() {
@@ -227,5 +267,23 @@ mod tests {
             Future::poll(std::pin::Pin::new(&mut wait), &mut normal_context),
             Poll::Ready(CleanupOutcome::Released)
         ));
+    }
+
+    #[test]
+    fn test_abort_wait_rechecks_result_published_during_waker_clone_panic() {
+        let (mut wait, state) = wait::<u8>();
+        let data = Arc::into_raw(Arc::clone(&state)).cast_mut().cast::<()>();
+        // SAFETY: the clone callback publishes through this Arc and panics;
+        // drop releases the initial Arc reference exactly once.
+        let hostile = unsafe {
+            Waker::from_raw(std::task::RawWaker::new(data.cast_const(), &PUBLISH_PANIC_VTABLE))
+        };
+        let mut context = Context::from_waker(&hostile);
+
+        assert!(matches!(
+            Future::poll(std::pin::Pin::new(&mut wait), &mut context),
+            Poll::Ready(CleanupOutcome::Released)
+        ));
+        assert!(state.waker.lock().expect("registered waker lock").is_none());
     }
 }

@@ -922,7 +922,18 @@ where
         .with_reason("local worker queue is full while constructing async filesystem"));
     }
     poll_fn(|cx| {
-        let mut new_waker = Some(cx.waker().clone());
+        if let Some(value) = completion
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .value
+            .take()
+        {
+            return std::task::Poll::Ready(value);
+        }
+        let (mut new_waker, mut clone_panic) = match super::stream::clone_poll_waker(cx.waker()) {
+            Ok(waker) => (Some(waker), None),
+            Err(payload) => (None, Some(payload)),
+        };
         let mut completion = completion.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(value) = completion.value.take() {
             drop(completion);
@@ -931,7 +942,14 @@ where
             {
                 super::stream::dispose_panic_payload(payload);
             }
+            if let Some(payload) = clone_panic.take() {
+                super::stream::dispose_panic_payload(payload);
+            }
             return std::task::Poll::Ready(value);
+        }
+        if let Some(payload) = clone_panic.take() {
+            drop(completion);
+            std::panic::resume_unwind(payload);
         }
         let old_waker = if completion
             .waker
@@ -1615,7 +1633,9 @@ mod tests {
             .recv_timeout(Duration::from_secs(5))
             .expect("completion should wake the latest registered waker");
         assert!(first_wake_rx.try_recv().is_err());
-        assert!(matches!(future.as_mut().poll(&mut second_context), Poll::Ready(Ok(23))));
+        let hostile_waker = super::super::stream::panic_clone_waker();
+        let mut hostile_context = Context::from_waker(&hostile_waker);
+        assert!(matches!(future.as_mut().poll(&mut hostile_context), Poll::Ready(Ok(23))));
     }
 
     #[cfg(panic = "unwind")]
@@ -1730,10 +1750,12 @@ mod tests {
             .recv_timeout(Duration::from_secs(5))
             .expect("worker notified the current waiter");
         assert!(matches!(future.as_mut().poll(&mut second_context), Poll::Ready(Ok(31))));
-        assert!(
-            drops.load(Ordering::SeqCst) >= 4,
-            "wake and ready-path payloads were disposed"
-        );
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while drops.load(Ordering::SeqCst) < 3 {
+            assert!(std::time::Instant::now() < deadline, "worker wake payload was not disposed");
+            std::thread::yield_now();
+        }
+        assert!(drops.load(Ordering::SeqCst) >= 3, "worker wake payload was disposed");
 
         let (error_wake_tx, error_wake_rx) = mpsc::channel();
         let error_waker = make_waker(error_wake_tx, Arc::clone(&drops));
