@@ -21,11 +21,7 @@ use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
 
 #[cfg(test)]
-static PANIC_NEXT_STREAM_COMMAND: AtomicBool = AtomicBool::new(false);
-#[cfg(test)]
 static STREAM_WORKER_PANIC_PAYLOAD_DROPS: AtomicUsize = AtomicUsize::new(0);
-#[cfg(test)]
-static PANIC_NEXT_WALK_BATCH: AtomicBool = AtomicBool::new(false);
 #[cfg(test)]
 static WALKER_WORKER_PANIC_PAYLOAD_DROPS: AtomicUsize = AtomicUsize::new(0);
 
@@ -251,7 +247,7 @@ fn drain_stream_commands(inner: Arc<WorkerStreamInner>) {
         let result = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             let mut native = inner.native.lock().unwrap_or_else(|e| e.into_inner());
             #[cfg(test)]
-            if PANIC_NEXT_STREAM_COMMAND.swap(false, Ordering::SeqCst) {
+            if inner.panic_next_command.swap(false, Ordering::SeqCst) {
                 std::panic::panic_any(StreamWorkerPanicPayload);
             }
             execute_stream_command_at(&mut native, &request.request.command, request.write_offset)
@@ -777,6 +773,8 @@ mod tests {
             observer: Some(observer.clone()),
             written_bytes: std::sync::atomic::AtomicU64::new(0),
             append_mode: true,
+            #[cfg(test)]
+            panic_next_command: super::AtomicBool::new(false),
         });
 
         #[cfg(panic = "unwind")]
@@ -899,9 +897,39 @@ mod tests {
             observer: None,
             written_bytes: std::sync::atomic::AtomicU64::new(0),
             append_mode: false,
+            #[cfg(test)]
+            panic_next_command: super::AtomicBool::new(false),
         });
         super::STREAM_WORKER_PANIC_PAYLOAD_DROPS.store(0, Ordering::SeqCst);
-        super::PANIC_NEXT_STREAM_COMMAND.store(true, Ordering::SeqCst);
+        inner.panic_next_command.store(true, Ordering::SeqCst);
+
+        // A separate worker can finish a command without consuming this worker's injection.
+        let unrelated = std::sync::Arc::new(WorkerStreamInner {
+            executor: executor.clone(),
+            native: Mutex::new(None),
+            state: Mutex::new(WorkerStreamState {
+                commands: HashMap::from([(51, WorkerCommand { result: None, waker: None })]),
+            }),
+            queue: Mutex::new(VecDeque::from([super::worker_stream_queued_request::WorkerStreamQueuedRequest {
+                request: super::LocalStreamRequest { id: 51, command: LocalStreamCommand::Close },
+                write_offset: 0,
+            }])),
+            native_write_ids: Mutex::new(HashMap::new()),
+            next_internal_request_id: std::sync::atomic::AtomicU64::new(1 << 63),
+            active: std::sync::atomic::AtomicBool::new(true),
+            cleanup_permit: Mutex::new(Some(executor.reserve_cleanup().unwrap())),
+            _buffer_budget: std::sync::Arc::new(Mutex::new(executor.reserve_bytes(0).unwrap())),
+            _handle_budget: Mutex::new(Some(std::sync::Arc::new(executor.reserve_handle().unwrap()))),
+            observer: None,
+            written_bytes: std::sync::atomic::AtomicU64::new(0),
+            append_mode: false,
+            #[cfg(test)]
+            panic_next_command: super::AtomicBool::new(false),
+        });
+        drain_stream_commands(std::sync::Arc::clone(&unrelated));
+        assert!(matches!(unrelated.state.lock().unwrap().commands[&51].result, Some(Ok(LocalStreamCompletion::Closed))));
+        assert!(inner.panic_next_command.load(Ordering::SeqCst));
+        assert_eq!(0, super::STREAM_WORKER_PANIC_PAYLOAD_DROPS.load(Ordering::SeqCst));
 
         let drain = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             drain_stream_commands(std::sync::Arc::clone(&inner));
@@ -1004,6 +1032,8 @@ mod tests {
             observer: None,
             written_bytes: std::sync::atomic::AtomicU64::new(0),
             append_mode: false,
+            #[cfg(test)]
+            panic_next_command: super::AtomicBool::new(false),
         };
 
         #[cfg(panic = "unwind")]

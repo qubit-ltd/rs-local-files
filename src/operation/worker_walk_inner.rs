@@ -68,6 +68,9 @@ pub(super) struct WorkerWalkInner {
     pub(super) _buffer_budget: Arc<Mutex<super::super::internal::permits::Permit>>,
     /// Budget retained while the native directory handle is open.
     pub(super) _handle_budget: Mutex<Option<Arc<super::super::internal::permits::Permit>>>,
+    /// One-shot panic injection scoped to this worker instance.
+    #[cfg(test)]
+    pub(super) panic_next_batch: std::sync::atomic::AtomicBool,
     /// Per-driver batch transfer gate used by deterministic worker tests.
     #[cfg(test)]
     pub(super) batch_transfer_test_gate: Mutex<Option<WalkBatchTransferTestGate>>,

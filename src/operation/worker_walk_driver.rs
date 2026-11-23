@@ -164,6 +164,7 @@ impl WorkerWalkDriver {
             #[cfg(test)]
             batch_transfer_test_gate: Mutex::new(None),
             #[cfg(test)]
+            panic_next_batch: std::sync::atomic::AtomicBool::new(false),
             cleanup_cursor_test_probe: Mutex::new(None),
         }));
         let resource = LocalWalkResource::new_native(driver, close_state);
@@ -274,7 +275,7 @@ impl LocalWalkDriver for WorkerWalkDriver {
                     }
                     cursor_guard = Some(inner.walker.lock().unwrap_or_else(|e| e.into_inner()));
                     #[cfg(test)]
-                    if super::PANIC_NEXT_WALK_BATCH.swap(false, Ordering::SeqCst) {
+                    if inner.panic_next_batch.swap(false, Ordering::SeqCst) {
                         std::panic::panic_any(super::WalkerWorkerPanicPayload);
                     }
                     let cursor = &mut **cursor_guard.as_mut().expect("walker cursor guard was acquired");
@@ -641,6 +642,7 @@ mod tests {
             _buffer_budget: buffer_budget,
             _handle_budget: Mutex::new(Some(handle_budget)),
             batch_transfer_test_gate: Mutex::new(None),
+            panic_next_batch: std::sync::atomic::AtomicBool::new(false),
             cleanup_cursor_test_probe: Mutex::new(None),
         }))
     }
@@ -748,9 +750,15 @@ mod tests {
         let manager = OperationManager::new(ManagerOptions::default()).unwrap();
         let executor = LocalIoExecutor::new(manager, LocalExecutionConfig::default()).unwrap();
         let directory = tempfile::tempdir().unwrap();
-        let driver = direct_driver(&directory, executor);
+        let driver = direct_driver(&directory, executor.clone());
         super::super::WALKER_WORKER_PANIC_PAYLOAD_DROPS.store(0, Ordering::SeqCst);
-        super::super::PANIC_NEXT_WALK_BATCH.store(true, Ordering::SeqCst);
+        driver.0.panic_next_batch.store(true, Ordering::SeqCst);
+        let unrelated_directory = tempfile::tempdir().unwrap();
+        let unrelated = direct_driver(&unrelated_directory, executor.clone());
+        assert_eq!(None, poll_batch_bounded(&unrelated, 110, 8, 1024).unwrap().unwrap());
+        assert!(driver.0.panic_next_batch.load(Ordering::SeqCst));
+        assert_eq!(0, super::super::WALKER_WORKER_PANIC_PAYLOAD_DROPS.load(Ordering::SeqCst));
+        stop_driver(&unrelated);
 
         let error = poll_batch_bounded(&driver, 111, 8, 1024)
             .expect("worker panic completion is delivered")

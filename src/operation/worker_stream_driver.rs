@@ -87,6 +87,8 @@ impl WorkerStreamDriver {
             observer,
             written_bytes: std::sync::atomic::AtomicU64::new(0),
             append_mode,
+            #[cfg(test)]
+            panic_next_command: AtomicBool::new(false),
         })));
         let resources = scope
             .resource_scope(qubit_operation::ResourceScopeOptions { capacity: 1 })
@@ -636,6 +638,8 @@ mod tests {
             observer: None,
             written_bytes: std::sync::atomic::AtomicU64::new(0),
             append_mode: false,
+            #[cfg(test)]
+            panic_next_command: AtomicBool::new(false),
         });
         #[cfg(panic = "unwind")]
         crate::operation::poison_test_mutex(&inner._handle_budget);
@@ -707,6 +711,8 @@ mod tests {
             observer: Some(observer),
             written_bytes: std::sync::atomic::AtomicU64::new(5),
             append_mode: true,
+            #[cfg(test)]
+            panic_next_command: AtomicBool::new(false),
         }));
 
         assert_eq!(
@@ -735,6 +741,8 @@ mod tests {
             observer: None,
             written_bytes: std::sync::atomic::AtomicU64::new(0),
             append_mode: false,
+            #[cfg(test)]
+            panic_next_command: AtomicBool::new(false),
         }));
         let request = LocalStreamRequest {
             id: 7,
@@ -785,6 +793,8 @@ mod tests {
             observer: None,
             written_bytes: std::sync::atomic::AtomicU64::new(0),
             append_mode: false,
+            #[cfg(test)]
+            panic_next_command: AtomicBool::new(false),
         }));
         let probe = command_waker_probe(Arc::clone(&driver.0));
         let old_probe = command_waker_probe(Arc::clone(&driver.0));
@@ -916,6 +926,8 @@ mod tests {
             observer: None,
             written_bytes: std::sync::atomic::AtomicU64::new(0),
             append_mode: false,
+            #[cfg(test)]
+            panic_next_command: AtomicBool::new(false),
         }));
         let source = Waker::noop();
         let mut context = Context::from_waker(source);
@@ -971,6 +983,8 @@ mod tests {
             observer: None,
             written_bytes: std::sync::atomic::AtomicU64::new(0),
             append_mode: true,
+            #[cfg(test)]
+            panic_next_command: AtomicBool::new(false),
         }));
         let request = LocalStreamRequest {
             id: 882,
@@ -1071,6 +1085,8 @@ mod tests {
             observer: None,
             written_bytes: std::sync::atomic::AtomicU64::new(0),
             append_mode: false,
+            #[cfg(test)]
+            panic_next_command: AtomicBool::new(false),
         }));
         crate::operation::poison_test_mutex(&driver.0.state);
         crate::operation::poison_test_mutex(&driver.0.native_write_ids);
@@ -1164,6 +1180,8 @@ mod tests {
             observer: None,
             written_bytes: std::sync::atomic::AtomicU64::new(0),
             append_mode: false,
+            #[cfg(test)]
+            panic_next_command: AtomicBool::new(false),
         }));
         let probe = command_waker_probe(Arc::clone(&driver.0));
         let waker = command_waker(Arc::clone(&probe));
@@ -1233,6 +1251,8 @@ mod tests {
             observer: None,
             written_bytes: std::sync::atomic::AtomicU64::new(0),
             append_mode: false,
+            #[cfg(test)]
+            panic_next_command: AtomicBool::new(false),
         }));
         #[cfg(panic = "unwind")]
         crate::operation::poison_test_mutex(&driver.0.native);
@@ -1325,6 +1345,8 @@ mod tests {
             observer: None,
             written_bytes: std::sync::atomic::AtomicU64::new(0),
             append_mode: false,
+            #[cfg(test)]
+            panic_next_command: AtomicBool::new(false),
         }));
 
         LocalStreamDriver::request_close(&driver, 17);
@@ -1411,6 +1433,8 @@ mod tests {
             observer: None,
             written_bytes: std::sync::atomic::AtomicU64::new(0),
             append_mode: false,
+            #[cfg(test)]
+            panic_next_command: AtomicBool::new(false),
         }));
 
         LocalStreamDriver::request_close(&driver, 7);
@@ -1443,6 +1467,8 @@ mod tests {
             observer: None,
             written_bytes: std::sync::atomic::AtomicU64::new(0),
             append_mode: false,
+            #[cfg(test)]
+            panic_next_command: AtomicBool::new(false),
             executor: executor.clone(),
         }));
         executor.inner.queue.stop();
@@ -1514,6 +1540,8 @@ mod tests {
             observer: None,
             written_bytes: std::sync::atomic::AtomicU64::new(0),
             append_mode: false,
+            #[cfg(test)]
+            panic_next_command: AtomicBool::new(false),
         }));
 
         #[cfg(panic = "unwind")]
