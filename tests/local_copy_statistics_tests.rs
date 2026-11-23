@@ -102,14 +102,14 @@ fn test_copy_statistics_separate_regular_files_and_symlinks() {
         }
         .expect("filesystem should open");
         let source_path = if rooted { PathBuf::from("source") } else { source };
-        let target_path = if rooted { PathBuf::from("target") } else { fixture.path().join("target") };
+        let target_path = if rooted {
+            PathBuf::from("target")
+        } else {
+            fixture.path().join("target")
+        };
 
         let outcome = filesystem
-            .copy_with_options(
-                &source_path,
-                &target_path,
-                &LocalCopyOptions::new().with_tree_source(),
-            )
+            .copy_with_options(&source_path, &target_path, &LocalCopyOptions::new().with_tree_source())
             .expect("mixed tree should copy");
 
         assert_eq!(2, outcome.stats().files(), "rooted={rooted}");

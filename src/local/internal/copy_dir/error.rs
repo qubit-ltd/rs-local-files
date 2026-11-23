@@ -236,6 +236,10 @@ pub(super) fn record_copied_file(stats: &mut LocalCopyDirStats, bytes: u64) -> R
 
 /// Atomically records one copied symbolic-link entry in the total and its
 /// dedicated counter.
+///
+/// # Parameters
+///
+/// * `stats` - Copy statistics to update.
 pub(super) fn record_copied_symlink(stats: &mut LocalCopyDirStats) -> Result<()> {
     let files = stats.files.checked_add(1).ok_or_else(file_statistics_overflow_error)?;
     let symlinks = stats
