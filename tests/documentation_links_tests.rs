@@ -13,6 +13,8 @@ use std::path::PathBuf;
 const DOCUMENTS: &[&str] = &[
     "README.md",
     "README.zh_CN.md",
+    "doc/freebsd-compatibility.md",
+    "doc/freebsd-compatibility.zh_CN.md",
     "doc/user_guide.md",
     "doc/user_guide.zh_CN.md",
     "doc/local_file_system_design.md",
@@ -103,6 +105,65 @@ fn missing_package_links(
                 return Some((line, target));
             };
             (!package_files.iter().any(|file| file == &relative)).then_some((line, target))
+        })
+        .collect()
+}
+
+fn missing_package_anchors(
+    package_root: &Path,
+    source_path: &Path,
+    source: &str,
+    package_files: &[PathBuf],
+) -> Vec<(usize, String)> {
+    fn normalize(path: &Path) -> Option<PathBuf> {
+        let mut normalized = PathBuf::new();
+        for component in path.components() {
+            match component {
+                std::path::Component::CurDir => {}
+                std::path::Component::ParentDir => {
+                    if !normalized.pop() {
+                        return None;
+                    }
+                }
+                std::path::Component::Normal(part) => normalized.push(part),
+                std::path::Component::RootDir | std::path::Component::Prefix(_) => return None,
+            }
+        }
+        Some(normalized)
+    }
+
+    let Some(source_relative) = source_path.strip_prefix(package_root).ok() else {
+        return Vec::new();
+    };
+    let mut cache = HashMap::<PathBuf, Vec<String>>::new();
+    relative_markdown_links(source)
+        .into_iter()
+        .filter_map(|(line, target)| {
+            let (path, fragment) = target.split_once('#')?;
+            if fragment.is_empty() {
+                return None;
+            }
+            let relative = if path.is_empty() {
+                source_relative.to_path_buf()
+            } else {
+                let joined = source_relative
+                    .parent()
+                    .unwrap_or_else(|| Path::new("."))
+                    .join(path);
+                normalize(&joined)?
+            };
+            if !package_files.iter().any(|file| file == &relative) {
+                return None;
+            }
+            let anchors = cache.entry(relative.clone()).or_insert_with(|| {
+                std::fs::read_to_string(package_root.join(&relative))
+                    .map(|text| heading_anchors(&text))
+                    .unwrap_or_default()
+            });
+            match decode_fragment(fragment) {
+                Some(fragment) if anchors.contains(&fragment) => None,
+                _ => Some((line, target)),
+            }
         })
         .collect()
 }
@@ -404,14 +465,26 @@ fn test_packaged_documentation_links() {
         .filter(|line| !line.trim().is_empty())
         .map(PathBuf::from)
         .collect();
+    let package_markdown: Vec<_> = package_files
+        .iter()
+        .filter(|file| file.extension().is_some_and(|extension| extension == "md"))
+        .cloned()
+        .collect();
     let mut missing = Vec::new();
-    for document in DOCUMENTS {
-        let source_path = root.join(document);
+    for document in package_markdown {
+        let source_path = root.join(&document);
         let source =
-            std::fs::read_to_string(&source_path).unwrap_or_else(|error| panic!("cannot read {document}: {error}"));
+            std::fs::read_to_string(&source_path).unwrap_or_else(|error| panic!("cannot read {document:?}: {error}"));
         for (line, target) in missing_package_links(&root, &source_path, &source, &package_files) {
             missing.push(format!(
-                "{document}:{line}: linked file is absent from package: {target}"
+                "{}:{line}: linked file is absent from package: {target}",
+                document.display()
+            ));
+        }
+        for (line, target) in missing_package_anchors(&root, &source_path, &source, &package_files) {
+            missing.push(format!(
+                "{}:{line}: linked anchor is absent from packaged Markdown: {target}",
+                document.display()
             ));
         }
     }
@@ -441,6 +514,28 @@ fn test_package_link_scanner_detects_unshipped_targets() {
             &package_files,
         ),
         vec![(1, "doc/unshipped.md".into()), (1, "../../doc/shipped.md".into())]
+    );
+}
+
+#[test]
+fn test_package_anchor_scanner_detects_missing_shipped_anchors() {
+    let directory = tempfile::tempdir().expect("create package fixture");
+    let root = directory.path();
+    let source_path = root.join("README.md");
+    let target_path = root.join("doc/guide.md");
+    let package_files = vec![PathBuf::from("README.md"), PathBuf::from("doc/guide.md")];
+    std::fs::create_dir_all(root.join("doc")).expect("create documentation directory");
+    std::fs::write(&source_path, "# Start\n").expect("write packaged README");
+    std::fs::write(&target_path, "# Real Heading\n").expect("write packaged guide");
+
+    assert_eq!(
+        missing_package_anchors(
+            root,
+            &source_path,
+            "[ok](doc/guide.md#real-heading) [bad](doc/guide.md#missing-heading) [local](#start)",
+            &package_files,
+        ),
+        vec![(1, "doc/guide.md#missing-heading".into())]
     );
 }
 

@@ -134,9 +134,8 @@ sha2 = "0.11"
 opaque identity，不含 authority；操作前应通过同一个 parent 重新打开并验证身份。这与 digest
 条件写入恢复文件不同，后者由调用方持有且不会自动删除。Windows Rooted `Content`，以及 Host
 `Content` 配合 `UseStaging`，会在打开 writer 时返回 `Unsupported`，早于路径解析或创建 staging/parent
-副作用；Host `Content` 配合 `PreserveExisting` 和有效的 `Absent` 仍可用。精确树验证要求 expected
-路径不重复；达到有限深度上限时会报错，不会静默截断。验证按条目观测链接，不跟随目标或展开 alias
-子项。特殊条目默认允许，只有显式启用拒绝规则才会失败；未配置验证的发布不会递归扫描 stage。
+副作用；Host `Content` 配合 `PreserveExisting` 和有效的 `Absent` 仍可用。树验证只观测链接条目，不跟随目标或展开 alias
+子项。特殊条目默认允许，只有显式启用拒绝规则才会失败。
 
 默认 Host 临时资源创建若失败且残留清理也失败，`LocalFileError` 会保留 `cleanup_error()` 与可供显式重试的
 `temp_recovery()` owner；调用方不应只凭路径自行删除。
@@ -177,6 +176,13 @@ Rooted 实例的同名方法只修改该实例。
 `LocalOwnerAccessPolicy`。这些 API 不提供原子快照，也不保证不同平台的 ACL 语义完全相同。
 详见[解析与安全策略指南](doc/user_guide.zh_CN.md#有界解析与安全策略)及
 [英文版](doc/user_guide.md#bounded-resolution-and-security-policy)。
+
+默认发布 staged tree（`file_sync = NotRequired`、保留访问策略，且未配置验证或 owner policy）只检查身份并安装目录，不递归扫描内容。
+启用精确验证后，库会按条目数、深度、路径字节数、打开目录数和 deadline 遍历完整目录树；深度上限不会截断验证，
+超限即失败。观测条目与 `exact_entries` 配置的预期条目都必须路径唯一，两个集合按“路径 + 类型”比较，不受顺序影响。
+发布时将 `file_sync` 设为 `Preferred` 或 `Required` 会遍历并同步普通文件，使用选定的限制；`NotRequired` 跳过该阶段。
+`sync_tree_with_options` 则单独遍历并同步完整目录树。非空目录树应用 `LocalOwnerAccessPolicy` 时也要在修改前遍历；
+若未设置 `max_entries`，最多保留 256 个子项身份和管理句柄。显式上限会替换此默认值。
 
 Linux/macOS 以外的 Unix 目标尚未实现文件系统安全事实查询：`Optional` 不提供该字段，`Required` 返回 `RequirementNotMet`；其他独立支持的事实仍可用。
 
@@ -251,14 +257,14 @@ Host 目录复制预检可能跟随已有的最终目标链接来判断重叠。
 ## 平台范围
 
 CI 配置了 Linux、Windows 和 macOS 运行时测试；本次修改是否通过，以对应 CI 结果为准。
-Windows 暂存清理和 sealed cleanup 在历史 revision
+Linux 上的 CI 会交叉编译 Android `armv7-linux-androideabi`，不运行 Android 代码。只有具备原生 Android shell
+和可写临时目录时，才会运行独立且范围有限的 Android 原生测试套件。两类检查的配置见
+`.infra/platform/platform.toml` 和 `.github/workflows/ci.yml`。Windows 暂存清理和 sealed cleanup 在历史 revision
 [`251e103bd9c60bf749e60453e688cf9ac4bde6f2`](https://github.com/qubit-ltd/rs-local-files/commit/251e103bd9c60bf749e60453e688cf9ac4bde6f2)
 有 Windows Server 2025 NTFS 原生记录：默认及 `--all-features` 配置下各 3 项暂存测试通过；所选 sealed cleanup 测试在默认配置下为 7/7、在 `--all-features` 配置下为 11/11。该记录只覆盖此 revision 与所列测试，实施基线 `c5639417080648da263216f698893c3a6c3c7f2d` 尚无对应原生覆盖；其他条件打开和私有资源行为也不在该记录范围内。
 详见[Windows 暂存与清理证据](doc/review-rlf4-windows-staging-cleanup-evidence.md)及独立的[Windows 枚举证据](doc/review-rlf3-windows-evidence.md)。所引 run 的两个 Windows job 成功，但整个 workflow 因 coverage 门槛失败。
 本 crate CI 只验证当前 crate；adapter 兼容性由 adapter 仓库或独立集成 job 负责。FreeBSD 暂不支持：当前原生检查只覆盖编译和少量兼容性合同，
-不再运行完整行为测试套件。各 API 失败用例及原因见 [FreeBSD 兼容性说明](doc/freebsd-compatibility.zh_CN.md)。Android 配置了 Linux 主机上的
-`armv7-linux-androideabi` 编译检查；具备原生 Android shell 和可写临时目录时，CI 还可运行选定的结构化错误与 reader I/O 测试。这些检查不代表 Android
-通用协议支持。条件发布表仅表示 Host 与 Rooted 的协议支持；Android 未声明协议支持。Linux ARMv7 只做编译检查；具备原生 shell 和可写临时目录时，才运行配置的有限结构化错误及 reader I/O 套件。
+不再运行完整行为测试套件。各 API 失败用例及原因见 [FreeBSD 兼容性说明](doc/freebsd-compatibility.zh_CN.md)。Android 不在条件发布协议支持矩阵中；上述 ARMv7 编译和有限原生测试不构成 Android 通用协议支持。
 本 crate 不承诺这些目标上的运行时保证。`capabilities()` 只报告当前 build 是否实现了
 对应的完整操作协议，不会探测具体的运行时文件系统，也不声称证明底层硬件已经持久化数据；无法满足要求的原子性或耐久性时，
 会在命名空间变更前拒绝操作。条件写入支持范围取决于平台和 authority：
@@ -308,6 +314,8 @@ cargo test --all-features
 # 生成带本地运行来源信息的覆盖率报告
 ./scripts/run-coverage-with-provenance.sh
 ```
+
+`.infra` 与 `scripts` 下的命令应在源码 checkout 中运行；它们不包含在已发布的 crate 包中。
 
 wrapper 会在采集开始和结束时检查项目输入；观察到状态变化就会失败。这不是不可变构建快照，
 无法保证发现瞬时修改，也不检查外部依赖的内容。失败后应停止修改、固定输入并重新运行。共享 CI

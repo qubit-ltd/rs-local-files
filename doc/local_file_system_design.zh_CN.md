@@ -2199,9 +2199,12 @@ backend 负责原生 I/O、发布操作、经 `CopyBudget` 扣减实际字节，
 
 ### Staged tree validation
 
-`LocalStagedDirectory::publish_new()` 默认只做 identity 与发布检查，不递归扫描 stage。
-只有 `LocalTreePublishOptions` 显式携带 validation 时，发布前才完整验证目录树。
-`verify_entries()` 将观测到的条目集合与 expected 集合精确比较；expected path 必须唯一，重复路径
+默认发布选项（无 validation、`file_sync = NotRequired`、保留访问策略且不设置 owner policy）下，
+`LocalStagedDirectory::publish_new()` 只做 identity 与发布检查，不递归扫描 stage。validation 会在修改前遍历完整目录树；
+发布时请求 `Preferred` 或 `Required` 文件同步会按所选限制遍历普通文件，`NotRequired` 跳过此阶段。
+`sync_tree_with_options()` 是单独的完整树遍历。访问策略也会遍历待修改条目；精确 owner policy 默认最多保留
+256 个子项 identity 和管理句柄，显式 `max_entries` 会替换此上限。
+`verify_entries()` 将观测到的条目集合与 expected 集合精确比较，不受顺序影响；两边的路径都必须唯一，重复路径
 （即使 kind 不同）返回 `InvalidOptions`。验证按单遍遍历索引 expected set，不为遍历额外构造拥有型
 副本；索引前先计入 expected path 的原生编码字节。字节预算约束逻辑路径字节，不是进程总堆内存上限，
 不覆盖哈希桶和分配器开销。遍历与索引共同受条目数、深度、路径字节、打开目录数和 deadline 限制。
@@ -2414,7 +2417,7 @@ CI workflow 在 Linux、macOS、Windows 上运行当前 crate 的测试。`windo
 
 ## 30. 暂存目录树同步与发布
 
-`sync_tree_with_options()` 在公开入口捕获一次 `Instant`，并在文件同步、递归观察、目录同步、stage 根目录和创建它的 parent 之间共用同一个期限。内部阶段不得重启预算。期限检查采用协作式方式，无法取消已经进入执行的操作系统调用。超时会阻止后续同步操作，但不会撤销已经完成的同步。`NotRequired` 文件同步不会遍历目录树。
+`sync_tree_with_options()` 始终遍历完整 stage，并在公开入口捕获一次 `Instant`；文件同步、递归观察、目录同步、stage 根目录和创建它的 parent 共用此期限。内部阶段不得重启预算。期限检查采用协作式方式，无法取消已经进入执行的操作系统调用。超时会阻止后续同步操作，但不会撤销已经完成的同步。发布选项 `file_sync = NotRequired` 会跳过文件同步遍历；`Preferred` 和 `Required` 会按所选限制枚举普通文件。深度上限若会漏掉条目就会报错，不会部分成功；待处理路径字节预算只计算遍历保留的编码路径，不包括分配器开销。
 
 完整树同步先处理普通文件，再按目录深度从深到浅同步子目录，最后同步 stage 根目录和创建它的 parent。操作期间会复核条目和目录 identity，但遍历无法对抗并发命名空间修改，也不构成原子快照。调用方应在同步前完成内容与权限修改；之后任何内容、名称或权限变更都要求重新同步受影响部分。
 

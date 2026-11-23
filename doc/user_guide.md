@@ -246,6 +246,22 @@ commit creates no publication or modification event. `settle()` waits for all
 accepted writes to reach the native writer and reports worker errors;
 `flush_async()` does not publish staged content or promise durable storage.
 
+### Repeated read-handle exports share one cursor
+
+A sealed stage returns a `LocalReadLease`. You may call
+`export_read_handle()` more than once; each `LocalReadExport` carries a cloned
+native `File` and a lease. These file clones share the same open-file cursor
+(file offset), so reading or seeking through one export changes the position
+seen by the others. They are not independent readers. Count every additional
+exported or `File::try_clone` descriptor against the application's own handle
+budget. Every user that accesses a cloned descriptor must keep its own cloned
+lease alive for the entire access period. For a helper clone, keep both
+`export.file.try_clone()?` and `export.lease.clone()` until the helper finishes.
+
+Do not wait for cleanup or operation settlement while an export or helper still
+holds a lease. Close the native handles and drop all associated leases after
+their last use; cleanup can then finish and settlement can report its result.
+
 The first poll of `close()` marks the writer as closing. From then on, new
 non-empty writes, flushes, and commits that had not already started fail
 immediately, even if the close future is dropped. Polling `close()` again
@@ -776,16 +792,28 @@ generated name during creation is rejected rather than adopted. This does not
 remove races in later name-based operations when another actor can mutate the
 parent directory.
 
-`verify_entries()` compares the observed entries with the expected set exactly;
+`verify_entries()` compares the observed entries with the configured exact set;
 include each link entry, but do not add descendants reachable through an alias.
-Duplicate expected paths return `InvalidOptions`. A finite depth limit checks
-the complete tree and returns an error if any entry exceeds that depth; it does
-not silently truncate validation. Expected-path bytes are charged before
-indexing, and verification shares the configured entry, depth, path-byte,
-open-directory, and deadline budgets. Special entries are accepted by default
-and rejected only when that rule is enabled. Observations detect changes at
-visited entries but are not an atomic snapshot. Publishing without validation
-options performs no recursive scan.
+Both lists must have unique paths, and matching is order independent by path
+and entry kind. Duplicate paths return `InvalidOptions`. A finite depth limit
+checks the complete tree and returns an error if any entry exceeds that depth;
+it does not silently truncate validation. Expected-path bytes are charged
+before indexing, and verification shares the configured entry, depth,
+path-byte, open-directory, and deadline budgets. Special entries are accepted
+by default and rejected only when that rule is enabled. Observations detect
+changes at visited entries but are not an atomic snapshot.
+
+`publish_new()` avoids a recursive scan with its defaults: no validation,
+`file_sync = NotRequired`, preserved access, and no owner policy. Validation
+walks the complete tree. Setting `file_sync` to `Preferred` or `Required`
+walks regular files under the selected limits; `NotRequired` skips that pass.
+`sync_tree_with_options()` is a separate operation that always traverses the
+complete tree to synchronize files, directories, the stage root, and the
+creating parent. A non-empty tree access policy also traverses entries before
+changing permissions. Exact owner policy fixes at most 256 child identities
+and management handles by default; `max_entries` replaces that bound, and a
+larger value can retain more handles. Finite depth limits fail on deeper
+entries instead of truncating a scan.
 
 Migration note: when enabling exact validation, expected sets should contain
 only actual entries (including a link itself), never alias descendants. Keep
@@ -800,6 +828,11 @@ deepest to shallowest, the stage root, and the creating parent. Its deadline is
 cooperative: it checks between operations but cannot cancel a kernel call that
 is already blocked. The walk observes entries as it proceeds; it is not an
 atomic snapshot against concurrent changes.
+The supplied `LocalListOptions` bounds this complete traversal by entries,
+depth, pending path bytes, open directories, and deadline. A depth limit that
+would omit any descendant is an error, not a successful partial sync. The
+pending-path budget accounts for encoded paths retained for traversal, not
+allocator overhead.
 
 After a successful tree sync, avoid changing file contents, names, or
 permissions before publication. Any such change requires the affected files or
@@ -2119,12 +2152,16 @@ policy that requires it returns `Unsupported`. Mode bits alone are not a claim
 that extended ACLs exclude other identities; the library does not claim
 `CurrentUserOnly` access against an unverified Darwin ACL.
 
-Native Windows CI at the reviewed baseline verified the DACL transition and
-confirmed that restoring the current-user ACL does not clear
+The repository's native Windows Server 2025 NTFS evidence at revision
+[`5291d57ab1889b80559283610d0bb5f9f671d279`](https://github.com/qubit-ltd/rs-local-files/commit/5291d57ab1889b80559283610d0bb5f9f671d279)
+ran the named DACL, read-only-attribute, owner-policy, partial-mutation recovery,
+and explicit-cleanup tests under both default and `--all-features` builds. It
+verified the DACL transition and confirmed that restoring the current-user ACL does not clear
 `FILE_ATTRIBUTE_READONLY`; a file retaining that attribute may remain
-unwritable. The baseline run did not begin with the attribute already set
-before policy conversion. The added regression for that case still needs a
-native Windows run. See the [RLF5 Windows access evidence](review-rlf5-windows-access-evidence.md).
+unwritable. This is historical evidence for the named tests at that revision;
+it does not establish behavior at the current revision or cover every Windows
+scenario. See the [RLF5 Windows access evidence](review-rlf5-windows-access-evidence.md)
+for the exact test list and workflow results.
 
 ### Recover a read-only staged tree
 
@@ -2270,7 +2307,7 @@ preserves `Read` progress by returning accumulated bytes when a later buffer
 read fails.
 
 For Rooted metadata and similar operations, ordinary paths with no links use a
-private one-pass directory cursor. Paths containing a link, a missing component,
+single private resolution cursor. Paths containing a link, a missing component,
 or a native error return through the existing full resolver, preserving link
 policy and authority checks. This is an implementation detail: callers should
 rely on the same path and error contracts in either case.
