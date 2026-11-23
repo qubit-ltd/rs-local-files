@@ -830,7 +830,10 @@ mod tests {
         };
         let hostile_waker = super::super::panic_clone_waker();
         let mut hostile_context = Context::from_waker(&hostile_waker);
-        assert!(matches!(driver.poll_command(&mut hostile_context, &ready), Poll::Ready(Ok(_))));
+        assert!(matches!(
+            driver.poll_command(&mut hostile_context, &ready),
+            Poll::Ready(Ok(_))
+        ));
         assert_eq!(ready_probe.drops.load(Ordering::Relaxed), 1);
         assert_eq!(0, ready_probe.locked_callbacks.load(Ordering::Relaxed));
 

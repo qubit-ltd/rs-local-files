@@ -936,12 +936,7 @@ where
         .with_reason("local worker queue is full while constructing async filesystem"));
     }
     poll_fn(|cx| {
-        if let Some(value) = completion
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .value
-            .take()
-        {
+        if let Some(value) = completion.lock().unwrap_or_else(|e| e.into_inner()).value.take() {
             return std::task::Poll::Ready(value);
         }
         let (mut new_waker, mut clone_panic) = match super::stream::clone_poll_waker(cx.waker()) {
@@ -1595,6 +1590,50 @@ mod tests {
         assert_eq!(pool.used(), 0);
     }
 
+    #[cfg(panic = "unwind")]
+    #[test]
+    fn test_read_buffer_limit_error_recovers_poisoned_error_slot() {
+        let pool = crate::operation::internal::permits::PermitPool::new(8);
+        let permit = Arc::new(Mutex::new(pool.try_acquire(0).expect("empty initial permit")));
+        let capacity_error = Arc::new(Mutex::new(None));
+        crate::operation::poison_test_mutex(&capacity_error);
+
+        let error = super::reserve_vec_capacity(&mut Vec::new(), 4, &permit, 2, &capacity_error)
+            .expect_err("per-operation capacity limit must reject growth");
+
+        assert_eq!(error.to_string(), "executor owned-byte limit exceeded");
+        let limit = capacity_error
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .take()
+            .expect("the poisoned diagnostic slot retains the limit details");
+        assert_eq!(limit.limit(), 2);
+        assert_eq!(limit.requested(), 4);
+        assert_eq!(pool.used(), 0);
+    }
+
+    #[cfg(panic = "unwind")]
+    #[test]
+    fn test_read_buffer_pool_limit_error_recovers_poisoned_error_slot() {
+        let pool = crate::operation::internal::permits::PermitPool::new(2);
+        let permit = Arc::new(Mutex::new(pool.try_acquire(0).expect("empty initial permit")));
+        let capacity_error = Arc::new(Mutex::new(None));
+        crate::operation::poison_test_mutex(&capacity_error);
+
+        let error = super::reserve_vec_capacity(&mut Vec::new(), 4, &permit, 16, &capacity_error)
+            .expect_err("shared byte pool limit must reject growth");
+
+        assert_eq!(error.to_string(), "executor owned-byte limit exceeded");
+        let limit = capacity_error
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .take()
+            .expect("the poisoned diagnostic slot retains the limit details");
+        assert_eq!(limit.limit(), 2);
+        assert_eq!(limit.requested(), 4);
+        assert_eq!(pool.used(), 0);
+    }
+
     #[test]
     fn test_worker_constructor_replaces_pending_waker_before_completion() {
         use std::sync::mpsc;
@@ -1649,7 +1688,10 @@ mod tests {
         assert!(first_wake_rx.try_recv().is_err());
         let hostile_waker = super::super::stream::panic_clone_waker();
         let mut hostile_context = Context::from_waker(&hostile_waker);
-        assert!(matches!(future.as_mut().poll(&mut hostile_context), Poll::Ready(Ok(23))));
+        assert!(matches!(
+            future.as_mut().poll(&mut hostile_context),
+            Poll::Ready(Ok(23))
+        ));
     }
 
     #[cfg(panic = "unwind")]
@@ -1766,7 +1808,10 @@ mod tests {
         assert!(matches!(future.as_mut().poll(&mut second_context), Poll::Ready(Ok(31))));
         let deadline = std::time::Instant::now() + Duration::from_secs(5);
         while drops.load(Ordering::SeqCst) < 3 {
-            assert!(std::time::Instant::now() < deadline, "worker wake payload was not disposed");
+            assert!(
+                std::time::Instant::now() < deadline,
+                "worker wake payload was not disposed"
+            );
             std::thread::yield_now();
         }
         assert!(drops.load(Ordering::SeqCst) >= 3, "worker wake payload was disposed");

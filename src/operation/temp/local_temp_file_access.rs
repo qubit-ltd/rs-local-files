@@ -109,9 +109,7 @@ impl LocalTempFileAccess {
                         // The unwind released the native owner lock. Contain a
                         // payload whose destructor panics before publishing the
                         // typed command error to the receiver.
-                        if let Err(payload) =
-                            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| drop(payload)))
-                        {
+                        if let Err(payload) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| drop(payload))) {
                             crate::operation::stream::dispose_panic_payload(payload);
                         }
                         Err(LocalTempCommandError::Panicked)
