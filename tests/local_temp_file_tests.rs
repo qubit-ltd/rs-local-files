@@ -22,6 +22,8 @@ use std::process::Command;
 
 use qubit_io::Output;
 use qubit_local_files::LocalFileSystem;
+#[cfg(feature = "test-support")]
+use qubit_local_files::error::LocalFileEffectState;
 use qubit_local_files::error::LocalFileErrorKind;
 #[cfg(feature = "test-support")]
 use qubit_local_files::error::LocalFileOperation;
@@ -1678,12 +1680,57 @@ fn test_local_temp_file_cleanup_reports_and_retries_sandbox_failure() {
 
             let error = temporary.cleanup().expect_err("sandbox failure should be reported");
             assert_eq!(LocalFileOperation::Cleanup, error.operation());
+            assert_eq!(
+                Some(LocalFileEffectState::PartiallyApplied),
+                error.effect_state(),
+                "first cleanup removed the owned file before sandbox release failed",
+            );
             assert!(!resource.exists());
             assert!(sandbox.exists());
             assert_eq!(temporary.source_state(), LocalTempSourceState::CleanupRequired);
             temporary.cleanup().expect("sandbox cleanup should be retryable");
             assert!(!sandbox.exists());
             assert_eq!(temporary.source_state(), LocalTempSourceState::Released);
+        },
+    );
+}
+
+/// Verifies Rooted cleanup reports and retries a sandbox release failure.
+#[cfg(all(feature = "test-support", unix))]
+#[test]
+fn test_rooted_temp_file_cleanup_reports_and_retries_sandbox_failure() {
+    run_in_test_fault_process(
+        "test_rooted_temp_file_cleanup_reports_and_retries_sandbox_failure",
+        "temp-file-sandbox-remove",
+        || {
+            let parent = tempdir().expect("temporary parent should be created");
+            let filesystem = LocalFileSystem::rooted(parent.path()).expect("Rooted filesystem should open");
+            let mut temporary = filesystem
+                .create_temp_file_with_options(&LocalTempFileOptions::new().with_parent(Path::new("/")))
+                .expect("Rooted temporary file should be created");
+            let virtual_path = temporary.path().to_path_buf();
+            let resource = parent.path().join(
+                virtual_path
+                    .strip_prefix(Path::new("/"))
+                    .expect("Rooted path should be virtual absolute"),
+            );
+            let sandbox = resource
+                .parent()
+                .expect("temporary file should have a sandbox")
+                .to_path_buf();
+
+            let error = temporary.cleanup().expect_err("sandbox failure should be reported");
+            assert_eq!(LocalFileOperation::Cleanup, error.operation());
+            assert_eq!(
+                Some(LocalFileEffectState::PartiallyApplied),
+                error.effect_state(),
+                "first cleanup removed the owned file before sandbox release failed",
+            );
+            assert!(!resource.exists());
+            assert!(sandbox.exists());
+
+            temporary.cleanup().expect("sandbox cleanup should succeed on retry");
+            assert!(!sandbox.exists());
         },
     );
 }

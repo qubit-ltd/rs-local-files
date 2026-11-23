@@ -507,6 +507,7 @@ fn copy_symlink_entry(
     }
     let stats = crate::local::LocalCopyDirStats {
         files: 1,
+        symlinks: 1,
         overwritten: u64::from(existing.is_some()),
         files_durable: false,
         ..Default::default()

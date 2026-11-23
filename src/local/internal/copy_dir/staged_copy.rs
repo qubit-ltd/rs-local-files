@@ -22,6 +22,7 @@ use super::destination::remove_destination_directory_if_unchanged;
 use super::error::copy_dir_error;
 use super::error::copy_dir_error_with_staging;
 use super::error::record_copied_file;
+use super::error::record_copied_symlink;
 use super::error::record_overwritten_entry;
 use super::error::record_skipped_file;
 use super::error::with_copy_context;
@@ -292,7 +293,7 @@ pub(crate) fn copy_symlink_with_options(
         .map_err(|source| copy_dir_error(stage, src, dst, stats, source))?;
     with_copy_context(create_symlink_entry(&link_target, src, dst), stage, src, dst, stats)?;
     with_copy_context(
-        record_copied_file(stats, 0),
+        record_copied_symlink(stats),
         LocalCopyDirStage::UpdateStatistics,
         src,
         dst,

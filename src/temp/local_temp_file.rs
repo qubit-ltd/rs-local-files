@@ -436,6 +436,7 @@ impl LocalTempFile {
                 error,
             ))
         })?;
+        let mut removed_owned_resource = false;
         if self.core.state == LocalTempResourceState::Owned {
             self.remove_resource().map_err(|error| {
                 self.contextualize_error(LocalFileError::from_io(
@@ -446,15 +447,21 @@ impl LocalTempFile {
                 ))
             })?;
             self.core.state = LocalTempResourceState::SandboxPending;
+            removed_owned_resource = true;
         }
         if self.core.state == LocalTempResourceState::SandboxPending {
             self.release_sandbox().map_err(|error| {
-                self.contextualize_error(LocalFileError::from_io(
+                let error = self.contextualize_error(LocalFileError::from_io(
                     LocalFileOperation::Cleanup,
                     Some(self.cleanup_path()),
                     None,
                     error,
-                ))
+                ));
+                if removed_owned_resource {
+                    error.with_effect_state(crate::error::LocalFileEffectState::PartiallyApplied)
+                } else {
+                    error
+                }
             })?;
             self.core.state = LocalTempResourceState::Released;
         }
