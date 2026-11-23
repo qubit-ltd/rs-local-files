@@ -6,6 +6,15 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 
+//! Bounded worker executors used by asynchronous local filesystem operations.
+//!
+//! The I/O executor owns admission and shared resource pools; cleanup work has
+//! its own worker path. Operation outcomes are delivered through operation
+//! handles, while settlement reports completion of worker cleanup. Native
+//! handle permits remain attached to resources returned in outcomes until
+//! those resources close. Fact-record permits are retained by fact observers
+//! until their last clone is dropped.
+
 mod executor_inner;
 mod local_cleanup_executor;
 mod local_io_executor;

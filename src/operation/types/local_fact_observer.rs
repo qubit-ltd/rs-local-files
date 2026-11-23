@@ -10,7 +10,15 @@ use std::sync::Arc;
 use std::sync::Mutex;
 
 use super::LocalFactSnapshot;
-/// Read-only observer for the bounded local fact snapshot.
+/// Read-only observer for an operation's bounded local fact snapshot.
+///
+/// The snapshot is a copy of fixed-size effect facts and does not itself keep
+/// an operation result or native file resource alive. An observer returned by
+/// a submission retains one executor fact-record reservation for as long as
+/// any clone exists. Drop the observer (and its clones) to return that slot to
+/// the executor. This lifetime is independent of outcome delivery and
+/// settlement: reading the snapshot does not take the operation outcome, and
+/// waiting for settlement does not release an observer that is still held.
 #[derive(Clone)]
 pub struct LocalFactObserver {
     /// Stores the snapshot associated with this value.
@@ -33,8 +41,11 @@ impl std::fmt::Debug for LocalFactObserver {
 }
 
 impl LocalFactObserver {
-    /// Returns the latest fixed-size snapshot without retaining a resource
-    /// reference.
+    /// Returns a copy of the latest fixed-size fact snapshot.
+    ///
+    /// This does not take the operation outcome or retain a resource returned
+    /// in that outcome. The observer's fact-record reservation remains held
+    /// until this observer and all its clones are dropped.
     pub fn snapshot(&self) -> LocalFactSnapshot {
         *self.snapshot.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
     }

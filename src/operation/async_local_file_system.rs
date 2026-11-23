@@ -26,6 +26,16 @@ mod publish;
 /// Asynchronous facade retaining its synchronous filesystem authority and
 /// executor.
 ///
+/// Submission returns an operation handle and, for effect-reporting methods, a
+/// separate [`LocalFactObserver`](super::LocalFactObserver). The handle owns
+/// the result slot; take its outcome to receive the result and release the
+/// handle's owned-memory reference. Stop requests are cooperative and do not
+/// substitute for taking the outcome. Settlement is observed separately from
+/// the outcome. If the result contains a reader, writer, or walker, close and
+/// drop it before waiting for settlement to ensure its native-handle permit is
+/// returned. Fact observers keep their bounded record permit until every clone
+/// has been dropped.
+///
 /// # Examples
 ///
 /// Bind an application manager to a bounded local executor, then use the
@@ -41,7 +51,7 @@ mod publish;
 /// let manager = OperationManager::new(ManagerOptions::default())?;
 /// let executor = LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default())?;
 /// let filesystem = AsyncLocalFileSystem::host(executor).await?;
-/// let (mut operation, observer) = filesystem.submit_read_all(
+/// let (operation, observer) = filesystem.submit_read_all(
 ///     &manager,
 ///     OperationOptions::default(),
 ///     LocalReadRequest { path: PathBuf::from("input.txt"), read: Default::default() },
@@ -53,7 +63,11 @@ mod publish;
 ///     OperationOutcome::Failed(error) => return Err(error.into()),
 ///     other => return Err(format!("read did not succeed: {other:?}").into()),
 /// }
-/// let _facts = observer.snapshot();
+/// let facts = observer.snapshot();
+/// println!("modified {} items", facts.modified_count);
+/// drop(observer); // returns the observer's fact-record slot
+/// let settlement = operation.wait_settlement().await;
+/// println!("settled {:?}", settlement.status);
 /// # Ok(())
 /// # }
 /// ```

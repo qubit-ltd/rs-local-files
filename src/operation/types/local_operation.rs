@@ -23,17 +23,21 @@ use crate::LocalFileError;
 /// waiting for settlement. Settlement reports whether the operation and its
 /// cleanup have finished; it does not deliver or replace the outcome.
 ///
-/// Requesting stop is also separate from observing the result: a stop request
-/// can be rejected or arrive too late, so callers must still observe the
-/// outcome. Dropping this handle discards its result slot and releases its
-/// budget reference, but does not wait for operation settlement.
+/// Requesting stop is separate from observing the result: a stop request can
+/// be rejected or arrive too late, so callers must still observe the outcome.
+/// `OutcomeError` and `ObservationError` describe failures to take an outcome
+/// or observe settlement; they are distinct from an operation's `E` failure.
+/// Dropping this handle discards its result slot and releases its budget
+/// reference, but does not wait for operation settlement.
 ///
 /// # Example
 ///
 /// This example submits an operation through the public asynchronous
 /// filesystem facade, consumes its outcome synchronously, then observes
-/// settlement. For operations whose outcome owns a resource, close and drop
-/// that resource before waiting for settlement.
+/// settlement. The fact observer is a separate return value and holds a fact
+/// record slot until it and its clones are dropped. For operations whose
+/// outcome owns a resource, close and drop that resource before waiting for
+/// settlement.
 ///
 /// ```no_run
 /// #[cfg(feature = "async")]
