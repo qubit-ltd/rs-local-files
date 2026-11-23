@@ -347,7 +347,9 @@ compatibility contracts, not the complete behavioral suite. See the detailed
 Linux-hosted `armv7-linux-androideabi` compile check. Where a native Android
 shell and writable temporary directory are available, CI can also run selected
 structured-error and reader-I/O tests; those checks do not establish general
-Android protocol support. Windows staging and sealed cleanup have native
+Android protocol support. Linux ARMv7 is compile-checked, and the native Android
+suite remains limited to those configured cases when the required shell and
+writable temporary directory are available. Windows staging and sealed cleanup have native
 Windows Server 2025 NTFS results recorded at
 [`251e103bd9c60bf749e60453e688cf9ac4bde6f2`](https://github.com/qubit-ltd/rs-local-files/commit/251e103bd9c60bf749e60453e688cf9ac4bde6f2): three staging tests passed in both default and `--all-features` configurations, and selected sealed-cleanup tests passed 7/7 (default) and 11/11 (`--all-features`). This is historical coverage for that revision and those tests; native coverage at implementation baseline `c5639417080648da263216f698893c3a6c3c7f2d` is not established. Other Windows-specific conditional-open and private-resource cases also remain outside that result. See the [Windows staging and cleanup evidence](doc/review-rlf4-windows-staging-cleanup-evidence.md) and [independent Windows enumeration evidence](doc/review-rlf3-windows-evidence.md) for scope and limits. The Windows jobs passed in the cited run, while the overall workflow failed its coverage threshold. This crate's CI validates this crate only;
 adapter compatibility belongs to the adapter repository or a separate
@@ -355,13 +357,13 @@ integration job. This crate makes no runtime guarantee for those targets.
 `capabilities()` reports whether this build
 implements each complete operation protocol; it does not probe a particular
 runtime filesystem or claim that the underlying hardware has persisted data.
-Conditional-write support is operation- and authority-specific:
+Conditional-write support is operation- and authority-specific. The table reports
+protocol support only for Host and Rooted; Android has no declared protocol support.
 
 | Platform | Host | Rooted |
 | --- | --- | --- |
 | Linux / macOS | `Absent`, `Content` | `Absent`, `Content` |
 | Windows | `Absent`, `Content` with `PreserveExisting` metadata | `Absent`; `Content` unsupported |
-| Android | Compile check only; no protocol claimed | Compile check only; no protocol claimed |
 | FreeBSD 14.3 | Temporarily unsupported | Temporarily unsupported |
 
 Required atomicity or durability is rejected before namespace changes when the
