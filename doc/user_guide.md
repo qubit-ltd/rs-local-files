@@ -978,7 +978,6 @@ filesystem will accept the native operation. Conditional-write support is:
 | --- | --- | --- |
 | Linux / macOS | `Absent`, `Content` | `Absent`, `Content` |
 | Windows | `Absent`; `Content` with `PreserveExisting` metadata | `Absent`; `Content` unsupported |
-| Android | Compile-checked only; protocol support not declared | Compile-checked only; protocol support not declared |
 | FreeBSD 14.3 | Temporarily unsupported | Temporarily unsupported |
 
 Across platforms, `Append`, `Content` with `CreateNew`, and symlink-following
@@ -996,10 +995,12 @@ open/commit errors. FreeBSD is temporarily unsupported; its CI job checks
 compilation and selected compatibility contracts, not the complete behavioral
 suite. See the [FreeBSD compatibility status](freebsd-compatibility.md) for
 failing APIs, test names, and observed causes. Linux CI cross-checks Android's
-`armv7-linux-androideabi` target. With a native Android shell and writable
-`TMPDIR`, the configured limited suite runs structured-error tests and
-`error_tests` plus `io_reader_contract_tests`; it does not establish general
-Android runtime or protocol support.
+`armv7-linux-androideabi` target; this is a Linux-hosted compile check. With a
+native Android shell and writable `TMPDIR`, the configured limited suite runs
+structured-error tests and `error_tests` plus `io_reader_contract_tests`; this
+does not establish general Android runtime or protocol support. FreeBSD sibling
+checkout revisions are pinned in `.infra/ci/local-path-dependencies.tsv`; the
+Python CI regression checks both native fetch and HEAD assertion pins against it.
 
 Use a conditional write when an application reads document A, prepares an edit B,
 and must avoid replacing a newer version written by someone else. Add the
@@ -2293,7 +2294,9 @@ the failed native APIs and tests. Linux CI cross-checks Android's
 `armv7-linux-androideabi` target. With a native Android shell and writable
 `TMPDIR`, its limited suite runs structured-error tests and `error_tests` plus
 `io_reader_contract_tests`; these checks do not establish general Android
-runtime or protocol support.
+runtime or protocol support. FreeBSD checkout revisions are pinned in
+`.infra/ci/local-path-dependencies.tsv`; Python CI checks the FreeBSD fetch and
+HEAD assertion against those pins.
 LF-10 sealed cleanup and the staging cleanup tests have historical Windows Server 2025 NTFS
 results at [`251e103bd9c60bf749e60453e688cf9ac4bde6f2`](https://github.com/qubit-ltd/rs-local-files/commit/251e103bd9c60bf749e60453e688cf9ac4bde6f2): selected sealed-cleanup tests passed 7/7 in the default configuration and 11/11 with `--all-features`, and the three staging tests passed in each. Those results do not establish coverage at implementation baseline `c5639417080648da263216f698893c3a6c3c7f2d`; T3/T4 recovery, conditional-open, and LF-09 private-resource behavior remain outside that record. See the [Windows staging and cleanup evidence](review-rlf4-windows-staging-cleanup-evidence.md). Linux filters executing zero Windows tests and Windows GNU `cargo check --lib` are not runtime evidence.
 Sibling path-dependency revisions are fixed in

@@ -804,7 +804,6 @@ Host `Content` 配合 `PreserveExisting` 和有效 `Absent` 组合仍可用。
 | --- | --- | --- |
 | Linux / macOS | `Absent`、`Content` | `Absent`、`Content` |
 | Windows | `Absent`；`Content` 需使用 `PreserveExisting` 元数据策略 | `Absent`；`Content` 不支持 |
-| Android | 仅编译检查；未声明协议支持 | 仅编译检查；未声明协议支持 |
 | FreeBSD 14.3 | 暂不支持 | 暂不支持 |
 跨平台都会拒绝 `Append`、`Content` 配合 `CreateNew`，以及跟随符号链接策略等无效条件写入配置。
 Windows 不支持 Rooted `Content` 和 Host `Content` 配合 `UseStaging`。Host 与 Rooted
@@ -812,9 +811,9 @@ Windows 不支持 Rooted `Content` 和 Host `Content` 配合 `UseStaging`。Host
 `RequirementNotMet`。Linux 和 macOS 可尝试有效配置下的 `Required` 耐久性与 `UseStaging`，
 但仍受所选文件系统和实际运行操作约束。应用需要展示能力提示时可查询
 `LocalDirectoryHandle::conditional_support`，但仍须处理打开和提交错误。Linux CI 会交叉检查 Android
-`armv7-linux-androideabi` 目标。具备原生 Android shell 和可写临时目录时，有限套件还可运行结构化错误测试以及
+`armv7-linux-androideabi` 目标，这是 Linux 主机上的编译检查。具备原生 Android shell 和可写临时目录时，有限套件还可运行结构化错误测试以及
 `error_tests` 和 `io_reader_contract_tests`；这些测试不声明 Android 通用运行时或协议支持。FreeBSD 暂不支持；其 CI 只检查编译和少量兼容性合同，
-不再运行完整行为测试套件。各 API 的失败用例和观察到的原因见[FreeBSD 兼容性说明](freebsd-compatibility.zh_CN.md)。
+不再运行完整行为测试套件。各 API 的失败用例和观察到的原因见[FreeBSD 兼容性说明](freebsd-compatibility.zh_CN.md)。FreeBSD 同级 checkout revision 固定于 `.infra/ci/local-path-dependencies.tsv`；Python CI 回归会对照该表检查原生 fetch 与 HEAD 断言。
 
 当应用读取文档 A、基于它准备新内容 B，并且不能覆盖其他人后来保存的版本时，使用
 条件写入。Content 成功与竞态测试仅在 Linux 和 macOS 启用，符合当前实现的平台范围；其他 Unix 的 Content
@@ -1847,6 +1846,7 @@ FreeBSD 暂不支持；原生 workflow 只做编译和少量合同检查，不�
 Linux CI 会交叉检查 Android `armv7-linux-androideabi` 目标。具备原生 Android shell 和可写 `TMPDIR` 时，有限套件运行结构化错误测试以及
 `error_tests` 和 `io_reader_contract_tests`；这些检查不构成 Android 通用运行时或协议支持声明。暂存清理及 LF-10 sealed 清理已有 Windows Server 2025 NTFS 历史原生结果，revision 为
 [`251e103bd9c60bf749e60453e688cf9ac4bde6f2`](https://github.com/qubit-ltd/rs-local-files/commit/251e103bd9c60bf749e60453e688cf9ac4bde6f2)：默认与 `--all-features` 下各 3 项暂存测试通过；所选 sealed cleanup 测试在默认配置下 7/7、在 `--all-features` 配置下 11/11。该结果不证明实施基线 `c5639417080648da263216f698893c3a6c3c7f2d` 的覆盖；T3/T4 恢复、条件打开及 LF-09 私有资源行为不在记录范围内。详见 [Windows 暂存与清理证据](review-rlf4-windows-staging-cleanup-evidence.md)。Linux 筛选执行 0 个 Windows 测试、Windows GNU `cargo check --lib` 均不构成运行证据。
+Linux ARMv7 只做编译检查；具备原生 shell 和可写临时目录时，Android 原生套件也仅运行配置的结构化错误与 reader I/O 用例。FreeBSD checkout revision 固定于 `.infra/ci/local-path-dependencies.tsv`；Python CI 对照该表检查 FreeBSD fetch 与 HEAD 断言。
 本 crate CI 仅验证本 crate；下游 adapter 的兼容性和集成由 adapter 仓库或独立集成负责。
 `.infra/ci/local-path-dependencies.tsv` 是同级 path dependency revision 的权威清单；CI 检查 pin，
 `.infra/bin/prepare-local-path-dependencies.sh` 根据该表准备同级 checkout。旧 conditional-write workflow 及其重复 pin 已在

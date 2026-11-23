@@ -258,7 +258,7 @@ Windows 暂存清理和 sealed cleanup 在历史 revision
 本 crate CI 只验证当前 crate；adapter 兼容性由 adapter 仓库或独立集成 job 负责。FreeBSD 暂不支持：当前原生检查只覆盖编译和少量兼容性合同，
 不再运行完整行为测试套件。各 API 失败用例及原因见 [FreeBSD 兼容性说明](doc/freebsd-compatibility.zh_CN.md)。Android 配置了 Linux 主机上的
 `armv7-linux-androideabi` 编译检查；具备原生 Android shell 和可写临时目录时，CI 还可运行选定的结构化错误与 reader I/O 测试。这些检查不代表 Android
-通用协议支持。
+通用协议支持。条件发布表仅表示 Host 与 Rooted 的协议支持；Android 未声明协议支持。Linux ARMv7 只做编译检查；具备原生 shell 和可写临时目录时，才运行配置的有限结构化错误及 reader I/O 套件。
 本 crate 不承诺这些目标上的运行时保证。`capabilities()` 只报告当前 build 是否实现了
 对应的完整操作协议，不会探测具体的运行时文件系统，也不声称证明底层硬件已经持久化数据；无法满足要求的原子性或耐久性时，
 会在命名空间变更前拒绝操作。条件写入支持范围取决于平台和 authority：
@@ -267,7 +267,6 @@ Windows 暂存清理和 sealed cleanup 在历史 revision
 | --- | --- | --- |
 | Linux / macOS | `Absent`、`Content` | `Absent`、`Content` |
 | Windows | `Absent`；`Content` 需使用 `PreserveExisting` 元数据策略 | `Absent`；`Content` 不支持 |
-| Android | 仅编译检查；不声明协议支持 | 仅编译检查；不声明协议支持 |
 | FreeBSD 14.3 | 暂不支持 | 暂不支持 |
 
 所选操作协议无法满足 Required 原子性或耐久性时，会在命名空间变更前拒绝操作。
