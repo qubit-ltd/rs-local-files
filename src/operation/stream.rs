@@ -14,7 +14,41 @@
 
 use std::io;
 use std::sync::Arc;
+#[cfg(test)]
+use std::sync::atomic::AtomicBool;
+#[cfg(test)]
+use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
+
+#[cfg(test)]
+static PANIC_NEXT_STREAM_COMMAND: AtomicBool = AtomicBool::new(false);
+#[cfg(test)]
+static STREAM_WORKER_PANIC_PAYLOAD_DROPS: AtomicUsize = AtomicUsize::new(0);
+#[cfg(test)]
+static PANIC_NEXT_WALK_BATCH: AtomicBool = AtomicBool::new(false);
+#[cfg(test)]
+static WALKER_WORKER_PANIC_PAYLOAD_DROPS: AtomicUsize = AtomicUsize::new(0);
+
+#[cfg(test)]
+struct StreamWorkerPanicPayload;
+#[cfg(test)]
+struct WalkerWorkerPanicPayload;
+
+#[cfg(test)]
+impl Drop for StreamWorkerPanicPayload {
+    fn drop(&mut self) {
+        STREAM_WORKER_PANIC_PAYLOAD_DROPS.fetch_add(1, Ordering::SeqCst);
+        panic!("stream worker panic payload destructor panicked");
+    }
+}
+
+#[cfg(test)]
+impl Drop for WalkerWorkerPanicPayload {
+    fn drop(&mut self) {
+        WALKER_WORKER_PANIC_PAYLOAD_DROPS.fetch_add(1, Ordering::SeqCst);
+        panic!("walker worker panic payload destructor panicked");
+    }
+}
 
 #[path = "internal/stream_state.rs"]
 mod stream_state;
@@ -194,11 +228,20 @@ fn drain_stream_commands(inner: Arc<WorkerStreamInner>) {
                 }
             }
         };
-        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let result = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             let mut native = inner.native.lock().unwrap_or_else(|e| e.into_inner());
+            #[cfg(test)]
+            if PANIC_NEXT_STREAM_COMMAND.swap(false, Ordering::SeqCst) {
+                std::panic::panic_any(StreamWorkerPanicPayload);
+            }
             execute_stream_command_at(&mut native, &request.request.command, request.write_offset)
-        }))
-        .unwrap_or_else(|_| Err(io::Error::other("Unconfirmed: local stream worker panicked")));
+        })) {
+            Ok(result) => result,
+            Err(payload) => {
+                dispose_panic_payload(payload);
+                Err(io::Error::other("Unconfirmed: local stream worker panicked"))
+            }
+        };
         if matches!(
             request.request.command,
             LocalStreamCommand::Close | LocalStreamCommand::Abort
@@ -781,6 +824,108 @@ mod tests {
         assert_eq!(inner.written_bytes.load(Ordering::Acquire), 28);
         assert_eq!(std::fs::read(&path).unwrap(), b"append through worker! again");
         std::fs::remove_file(path).expect("remove fixture");
+    }
+
+    #[cfg(panic = "unwind")]
+    #[test]
+    fn test_stream_worker_delivers_panic_error_and_processes_later_requests() {
+        use std::time::Duration;
+
+        let manager = qubit_operation::OperationManager::new(qubit_operation::ManagerOptions::default()).unwrap();
+        let executor = super::super::LocalIoExecutor::new(manager, crate::LocalExecutionConfig::default()).unwrap();
+        let inner = std::sync::Arc::new(WorkerStreamInner {
+            executor: executor.clone(),
+            native: Mutex::new(None),
+            state: Mutex::new(WorkerStreamState {
+                commands: HashMap::from([
+                    (
+                        41,
+                        WorkerCommand {
+                            result: None,
+                            waker: None,
+                        },
+                    ),
+                    (
+                        42,
+                        WorkerCommand {
+                            result: None,
+                            waker: None,
+                        },
+                    ),
+                ]),
+            }),
+            queue: Mutex::new(VecDeque::from([
+                super::worker_stream_queued_request::WorkerStreamQueuedRequest {
+                    request: super::LocalStreamRequest {
+                        id: 41,
+                        command: LocalStreamCommand::Close,
+                    },
+                    write_offset: 0,
+                },
+                super::worker_stream_queued_request::WorkerStreamQueuedRequest {
+                    request: super::LocalStreamRequest {
+                        id: 42,
+                        command: LocalStreamCommand::Close,
+                    },
+                    write_offset: 0,
+                },
+            ])),
+            native_write_ids: Mutex::new(HashMap::new()),
+            next_internal_request_id: std::sync::atomic::AtomicU64::new(1 << 63),
+            active: std::sync::atomic::AtomicBool::new(true),
+            cleanup_permit: Mutex::new(Some(executor.reserve_cleanup().unwrap())),
+            _buffer_budget: std::sync::Arc::new(Mutex::new(executor.reserve_bytes(0).unwrap())),
+            _handle_budget: Mutex::new(Some(std::sync::Arc::new(executor.reserve_handle().unwrap()))),
+            observer: None,
+            written_bytes: std::sync::atomic::AtomicU64::new(0),
+            append_mode: false,
+        });
+        super::STREAM_WORKER_PANIC_PAYLOAD_DROPS.store(0, Ordering::SeqCst);
+        super::PANIC_NEXT_STREAM_COMMAND.store(true, Ordering::SeqCst);
+
+        let drain = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            drain_stream_commands(std::sync::Arc::clone(&inner));
+        }));
+        assert!(drain.is_ok(), "worker panic payload disposal must not unwind the drain");
+        assert_eq!(1, super::STREAM_WORKER_PANIC_PAYLOAD_DROPS.load(Ordering::SeqCst));
+        assert_eq!(
+            "Unconfirmed: local stream worker panicked",
+            inner.state.lock().unwrap().commands[&41]
+                .result
+                .as_ref()
+                .unwrap()
+                .as_ref()
+                .unwrap_err()
+                .to_string()
+        );
+        assert!(matches!(
+            inner.state.lock().unwrap().commands[&42].result,
+            Some(Ok(LocalStreamCompletion::Closed))
+        ));
+        assert!(!inner.active.load(Ordering::Acquire));
+
+        let driver = super::WorkerStreamDriver::from_inner(std::sync::Arc::clone(&inner));
+        let request = super::LocalStreamRequest {
+            id: 43,
+            command: LocalStreamCommand::Close,
+        };
+        let mut context = std::task::Context::from_waker(Waker::noop());
+        assert!(super::LocalStreamDriver::poll_command(&driver, &mut context, &request).is_pending());
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        loop {
+            if let std::task::Poll::Ready(result) =
+                super::LocalStreamDriver::poll_command(&driver, &mut context, &request)
+            {
+                assert!(matches!(result, Ok(LocalStreamCompletion::Closed)));
+                break;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "re-enqueued stream command did not complete"
+            );
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        assert!(!inner.active.load(Ordering::Acquire));
     }
 
     #[test]

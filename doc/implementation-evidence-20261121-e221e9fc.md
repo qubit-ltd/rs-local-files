@@ -104,3 +104,18 @@ No different supported runtime or downstream custom allocator was available
 for this round. The Linux default-allocator probe and synthetic accounting
 tests above remain the applicable evidence; no production policy change is
 indicated.
+
+## RLF-053 round 10 environment check (2026-11-23)
+
+- Runtime: Linux 6.8.0-147-generic, `x86_64-unknown-linux-gnu`.
+- Toolchain: Rust 1.94.0 (`4a4ef493e`, LLVM 21.1.8).
+- Installed targets include Apple and Windows GNU cross-compilation targets,
+  but this host has neither `xcrun` nor `wine`, so neither target provides a
+  runnable allocator runtime here.
+- The only `#[global_allocator]` found is the sampling allocator in
+  `benches/local_files.rs`; the crate library has no declared custom allocator.
+
+No different supported runtime or downstream custom allocator was available
+in this implementation round. The existing Linux default-allocator probe and
+synthetic accounting tests remain the evidence. No production capacity policy
+change is justified by the available reachability evidence.

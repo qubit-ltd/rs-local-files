@@ -240,11 +240,15 @@ impl LocalWalkDriver for WorkerWalkDriver {
             let inner = Arc::clone(&self.0);
             let job = move || {
                 let mut cursor_guard = None;
-                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let (result, panic_payload) = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                     if inner.stop_requested.load(Ordering::Acquire) {
                         return Ok(None);
                     }
                     cursor_guard = Some(inner.walker.lock().unwrap_or_else(|e| e.into_inner()));
+                    #[cfg(test)]
+                    if super::PANIC_NEXT_WALK_BATCH.swap(false, Ordering::SeqCst) {
+                        std::panic::panic_any(super::WalkerWorkerPanicPayload);
+                    }
                     let cursor = &mut **cursor_guard.as_mut().expect("walker cursor guard was acquired");
                     if cursor.walker.is_none() {
                         if let Some(error) = cursor.pending_error.take() {
@@ -268,8 +272,13 @@ impl LocalWalkDriver for WorkerWalkDriver {
                         walker.take();
                     }
                     result
-                }))
-                .unwrap_or_else(|_| Err(io::Error::other("Unconfirmed: local walker worker panicked")));
+                })) {
+                    Ok(result) => (result, None),
+                    Err(payload) => (
+                        Err(io::Error::other("Unconfirmed: local walker worker panicked")),
+                        Some(payload),
+                    ),
+                };
                 #[cfg(test)]
                 pause_walk_batch_transfer_test_gate(
                     &inner,
@@ -290,6 +299,9 @@ impl LocalWalkDriver for WorkerWalkDriver {
                     }
                 };
                 drop(cursor_guard);
+                if let Some(payload) = panic_payload {
+                    dispose_panic_payload(payload);
+                }
                 if let Some(waker) = wake {
                     let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| waker.wake()));
                 }
@@ -614,6 +626,26 @@ mod tests {
         std::future::poll_fn(|cx| driver.poll_batch(cx, request_id, max_entries, max_bytes)).await
     }
 
+    fn poll_batch_bounded(
+        driver: &WorkerWalkDriver,
+        request_id: u64,
+        max_entries: usize,
+        max_bytes: usize,
+    ) -> Option<io::Result<Option<Vec<PathBuf>>>> {
+        let mut future = Box::pin(poll_batch(driver, request_id, max_entries, max_bytes));
+        let mut context = Context::from_waker(Waker::noop());
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        loop {
+            if let Poll::Ready(result) = future.as_mut().poll(&mut context) {
+                return Some(result);
+            }
+            if std::time::Instant::now() >= deadline {
+                return None;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+    }
+
     async fn poll_closed(driver: &WorkerWalkDriver) -> io::Result<()> {
         std::future::poll_fn(|cx| driver.poll_closed(cx)).await
     }
@@ -680,6 +712,39 @@ mod tests {
         });
         assert!(exhausted);
         assert_eq!(continued.unwrap(), Some(vec![PathBuf::from("after")]));
+    }
+
+    #[cfg(panic = "unwind")]
+    #[test]
+    fn test_worker_batch_delivers_panic_error_then_allows_next_batch_and_close() {
+        let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+        let executor = LocalIoExecutor::new(manager, LocalExecutionConfig::default()).unwrap();
+        let directory = tempfile::tempdir().unwrap();
+        let driver = direct_driver(&directory, executor);
+        super::super::WALKER_WORKER_PANIC_PAYLOAD_DROPS.store(0, Ordering::SeqCst);
+        super::super::PANIC_NEXT_WALK_BATCH.store(true, Ordering::SeqCst);
+
+        let error = poll_batch_bounded(&driver, 111, 8, 1024)
+            .expect("worker panic completion is delivered")
+            .expect_err("worker panic is delivered to the request");
+        assert_eq!(io::ErrorKind::Other, error.kind());
+        assert_eq!("Unconfirmed: local walker worker panicked", error.to_string());
+        assert_eq!(
+            1,
+            super::super::WALKER_WORKER_PANIC_PAYLOAD_DROPS.load(Ordering::SeqCst)
+        );
+        assert!(
+            !driver.0.commands.lock().unwrap().contains_key(&111),
+            "the failed request result must be consumed rather than left pending"
+        );
+
+        assert_eq!(
+            None,
+            poll_batch_bounded(&driver, 112, 8, 1024)
+                .expect("later batch completes")
+                .unwrap()
+        );
+        stop_driver(&driver);
     }
 
     #[test]

@@ -891,14 +891,18 @@ where
     }));
     let completion_for_worker = Arc::clone(&completion);
     let scheduled = executor.enqueue_task(move || {
-        let value = std::panic::catch_unwind(std::panic::AssertUnwindSafe(task)).unwrap_or_else(|_| {
-            Err(crate::LocalFileError::from_io(
-                crate::LocalFileOperation::Configure,
-                None,
-                None,
-                std::io::Error::other("async filesystem constructor panicked"),
-            ))
-        });
+        let value = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(task)) {
+            Ok(value) => value,
+            Err(payload) => {
+                super::stream::dispose_panic_payload(payload);
+                Err(crate::LocalFileError::from_io(
+                    crate::LocalFileOperation::Configure,
+                    None,
+                    None,
+                    std::io::Error::other("async filesystem constructor panicked"),
+                ))
+            }
+        };
         let waker = {
             let mut completion = completion_for_worker.lock().unwrap_or_else(|e| e.into_inner());
             completion.value = Some(value);
@@ -1441,6 +1445,58 @@ mod tests {
             super::bind_host_path(&None, &PathBuf::from("relative")),
             PathBuf::from("relative")
         );
+    }
+
+    #[cfg(panic = "unwind")]
+    #[test]
+    fn test_constructor_worker_delivers_panicking_payload_error_and_continues() {
+        use std::future::Future;
+        use std::sync::atomic::AtomicUsize;
+        use std::sync::atomic::Ordering;
+        use std::task::Context;
+        use std::task::Waker;
+        use std::time::Duration;
+
+        struct PanicOnDrop(Arc<AtomicUsize>);
+        impl Drop for PanicOnDrop {
+            fn drop(&mut self) {
+                self.0.fetch_add(1, Ordering::SeqCst);
+                panic!("async constructor panic payload destructor panicked");
+            }
+        }
+
+        fn bounded_poll<F: Future>(future: F) -> Option<F::Output> {
+            let mut future = Box::pin(future);
+            let mut context = Context::from_waker(Waker::noop());
+            let deadline = std::time::Instant::now() + Duration::from_secs(5);
+            loop {
+                if let std::task::Poll::Ready(value) = future.as_mut().poll(&mut context) {
+                    return Some(value);
+                }
+                if std::time::Instant::now() >= deadline {
+                    return None;
+                }
+                std::thread::sleep(Duration::from_millis(1));
+            }
+        }
+
+        let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+        let executor = LocalIoExecutor::new(manager, LocalExecutionConfig::default()).unwrap();
+        let drops = Arc::new(AtomicUsize::new(0));
+        let error = bounded_poll(super::run_on_worker(&executor, {
+            let drops = Arc::clone(&drops);
+            move || -> crate::LocalResult<()> { std::panic::panic_any(PanicOnDrop(drops)) }
+        }))
+        .expect("panicking constructor completion is published")
+        .expect_err("constructor panic is delivered as an I/O error");
+        assert_eq!(crate::LocalFileErrorKind::Io, error.kind());
+        assert_eq!(crate::LocalFileOperation::Configure, error.operation());
+        assert_eq!(1, drops.load(Ordering::SeqCst));
+
+        let value = bounded_poll(super::run_on_worker(&executor, || Ok::<_, crate::LocalFileError>(29)))
+            .expect("the same executor continues after the panicking task")
+            .unwrap();
+        assert_eq!(29, value);
     }
 
     #[test]
