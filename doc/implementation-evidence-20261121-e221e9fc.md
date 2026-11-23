@@ -225,3 +225,57 @@ Windows/macOS runtime allocator evidence; no custom allocator runtime was
 available. Keep the production accounting unchanged. A different supported
 runtime or downstream allocator returning a reproducible capacity above the
 request remains the evidence needed to reconsider it.
+
+## RLF-REV-008 instance-scoped panic reproduction (2026-11-23)
+
+The earlier generic `WorkerQueue` test established permit return and worker
+continuation, but did not exercise the registered owner, `LocalCleanup` future,
+or operation settlement. This follow-up adds a `#[cfg(test)]` one-shot trigger
+stored on an individual `LocalCleanup` value. It panics at the narrow boundary
+after `CleanupState::owner` is taken and before `cleanup_resource` or
+`pending_result` publication. No production panic behavior or runtime path was
+changed; the trigger is synthetic and does not demonstrate a production cause.
+
+The reproduction registers the injected cleanup policy as an operation
+resource, queues an ordinary worker gate, then queues that operation's
+cleanup and a following ordinary task before releasing the gate. It records
+the following observations:
+
+- At the injected boundary, the shared owner slot is empty while both
+  `pending_result` and published `result` are empty.
+- The operation body completes, but the cleanup future does not resolve and
+  `wait_settlement()` remains pending for the bounded observation interval.
+- The queued ordinary task runs after the cleanup panic. In that task,
+  `reserve_cleanup()` succeeds, showing the cleanup permit was returned before
+  the following task ran. While cleanup remains queued behind the gate, the
+  only cleanup permit is unavailable.
+- No owner is returned to the operation manager and no recovery cleanup
+  anchor is present for this directly owned test file. Stack unwinding drops
+  the removed `LocalTempResource`; its native file destructor removes the
+  temporary entry and sandbox (the parent directory is empty afterward). Thus
+  this injection leaves settlement unconfirmed even though native Drop
+  cleanup happens to release this test resource.
+- The worker survives and executes the following task. The panic is caught by
+  the existing queue boundary; its cleanup completion callback is skipped, so
+  no result or wake is published to the cleanup future.
+
+Commands and results:
+
+- `cargo test --locked --features async --lib test_local_cleanup_panic_after_owner_take_leaves_settlement_pending_and_worker_continues -- --nocapture`
+  — exit 0; 1 passed, 0 failed. The expected synthetic panic was printed by
+  `qubit-local-io-0`; the test then observed all states and bounded waits above.
+- `cargo test --locked --features async --lib operation::temp::` — exit 0;
+  43 passed, 0 failed, including existing cleanup result publication,
+  permit timing, returned-owner, and poison/waker regressions.
+- `git diff --check` — exit 0.
+
+This establishes the previously missing synthetic `LocalCleanup` failure
+behavior and makes the owner-disposition/settlement consequence observable.
+It remains a test-only fault path. The supported production cleanup methods
+still expose filesystem failures as returned errors and invoke no caller
+callback; this reproduction supplies no evidence that ordinary supported
+production cleanup can panic. Native Windows/macOS runs, an identified
+production panic trigger, and evidence for cleanup-anchor behavior under such
+a trigger remain unavailable. Do not infer production reachability from this
+synthetic injection or change the production cleanup policy on this evidence
+alone.
