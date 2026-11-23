@@ -20,6 +20,7 @@ const DOCUMENTS: &[&str] = &[
     "doc/design-0.6.0.zh_CN.md",
     "doc/review-rlf3-windows-evidence.md",
     "doc/review-rlf4-windows-staging-cleanup-evidence.md",
+    "doc/review-rlf5-windows-access-evidence.md",
 ];
 
 fn relative_markdown_links(source: &str) -> Vec<(usize, String)> {
@@ -60,6 +61,80 @@ fn missing_links(base: &Path, source: &str) -> Vec<(usize, String)> {
             !path.is_empty() && !base.join(path).is_file()
         })
         .collect()
+}
+
+fn missing_package_links(
+    package_root: &Path,
+    source_path: &Path,
+    source: &str,
+    package_files: &[PathBuf],
+) -> Vec<(usize, String)> {
+    fn normalize(path: &Path) -> PathBuf {
+        let mut normalized = PathBuf::new();
+        for component in path.components() {
+            match component {
+                std::path::Component::CurDir => {}
+                std::path::Component::ParentDir => {
+                    normalized.pop();
+                }
+                std::path::Component::Normal(part) => normalized.push(part),
+                std::path::Component::RootDir | std::path::Component::Prefix(_) => return PathBuf::new(),
+            }
+        }
+        normalized
+    }
+
+    relative_markdown_links(source)
+        .into_iter()
+        .filter_map(|(line, target)| {
+            let path = target.split('#').next().unwrap_or_default();
+            if path.is_empty() {
+                return None;
+            }
+            let resolved = source_path
+                .parent()
+                .unwrap_or_else(|| Path::new("."))
+                .strip_prefix(package_root)
+                .ok()?
+                .join(path);
+            let relative = normalize(&resolved);
+            (relative.as_os_str().is_empty() || !package_files.iter().any(|file| file == &relative))
+                .then_some((line, target))
+        })
+        .collect()
+}
+
+fn package_files() -> Vec<PathBuf> {
+    fn collect_files(root: &Path, relative: &Path, output: &mut Vec<PathBuf>) {
+        let directory = root.join(relative);
+        let Ok(entries) = std::fs::read_dir(directory) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let path = relative.join(entry.file_name());
+            if entry.file_type().is_ok_and(|kind| kind.is_dir()) {
+                collect_files(root, &path, output);
+            } else {
+                output.push(path);
+            }
+        }
+    }
+
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let manifest = std::fs::read_to_string(root.join("Cargo.toml")).expect("read Cargo.toml");
+    let mut files = Vec::new();
+    for line in manifest.lines() {
+        let entry = line.trim().trim_end_matches(',').trim_matches('"');
+        let Some(path) = entry.strip_prefix('/') else {
+            continue;
+        };
+        if let Some(directory) = path.strip_suffix("/**") {
+            collect_files(&root, Path::new(directory), &mut files);
+        } else {
+            files.push(PathBuf::from(path));
+        }
+    }
+    files
 }
 
 fn heading_anchors(source: &str) -> Vec<String> {
@@ -327,6 +402,7 @@ fn missing_anchors(source_path: &Path, source: &str) -> Vec<(usize, String)> {
 #[test]
 fn test_reader_document_relative_links_exist() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let package_files = package_files();
     let mut missing = Vec::new();
     for document in DOCUMENTS {
         let source_path = root.join(document);
@@ -338,11 +414,36 @@ fn test_reader_document_relative_links_exist() {
         for (line, target) in missing_anchors(&source_path, &source) {
             missing.push(format!("{document}:{line}: missing anchor {target}"));
         }
+        for (line, target) in missing_package_links(&root, &source_path, &source, &package_files) {
+            missing.push(format!("{document}:{line}: linked file is absent from package: {target}"));
+        }
     }
     assert!(
         missing.is_empty(),
         "missing Markdown links or anchors:\n{}",
         missing.join("\n")
+    );
+}
+
+#[test]
+fn test_package_link_scanner_detects_unshipped_targets() {
+    let directory = tempfile::tempdir().expect("create package fixture");
+    let root = directory.path();
+    let source_path = root.join("guide.md");
+    let shipped = PathBuf::from("doc/shipped.md");
+    let package_files = vec![shipped.clone()];
+    std::fs::create_dir_all(root.join("doc")).expect("create doc directory");
+    std::fs::write(root.join(&shipped), "shipped").expect("create packaged document");
+    std::fs::write(root.join("doc/unshipped.md"), "not shipped").expect("create unpackaged document");
+
+    assert_eq!(
+        missing_package_links(
+            root,
+            &source_path,
+            "[shipped](doc/shipped.md) [unshipped](doc/unshipped.md)",
+            &package_files,
+        ),
+        vec![(1, "doc/unshipped.md".into())]
     );
 }
 
