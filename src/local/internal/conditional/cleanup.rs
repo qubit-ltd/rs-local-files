@@ -63,9 +63,3 @@ pub(super) fn cleanup_entries<B: ConditionalBackend>(
     errors.extend(backend.take_cleanup_errors());
     (errors, retained)
 }
-//    Copyright (c) 2025 - 2026 Haixing Hu.
-//
-//    SPDX-License-Identifier: Apache-2.0
-//
-//    Licensed under the Apache License, Version 2.0.
-// =============================================================================

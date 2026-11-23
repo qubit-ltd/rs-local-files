@@ -348,13 +348,12 @@ mod tests {
         ));
     }
 
-    /// Runs the make job behavior while preserving the operation lifecycle
-    /// invariants.
+    /// Creates a prepared job using a newly reserved executor slot.
     /// # Type Parameters
-    /// - `F` — type used by this operation.
+    /// - `F` — task invoked with the request when the job is activated.
     /// # Parameters
-    /// - `executor` — supplies data or policy for this operation.
-    /// - `task` — supplies data or policy for this operation.
+    /// - `executor` — executor that owns the reserved slot.
+    /// - `task` — closure used to build the prepared job.
     fn make_job<F>(executor: &LocalIoExecutor, task: F) -> std::sync::Arc<PreparedLocalJob<(), (), ()>>
     where
         F: FnOnce(()) -> OperationOutcome<(), ()> + Send + 'static,
@@ -362,14 +361,13 @@ mod tests {
         let slot = executor.reserve_slot().unwrap();
         make_job_with_slot(executor, slot, task)
     }
-    /// Runs the make job with slot behavior while preserving the operation
-    /// lifecycle invariants.
+    /// Creates a prepared job with a caller-reserved executor slot.
     /// # Type Parameters
-    /// - `F` — type used by this operation.
+    /// - `F` — task invoked with the request when the job is activated.
     /// # Parameters
-    /// - `executor` — supplies data or policy for this operation.
-    /// - `slot` — supplies data or policy for this operation.
-    /// - `task` — supplies data or policy for this operation.
+    /// - `executor` — executor that owns the reserved resources.
+    /// - `slot` — permit reserved for this job's queue admission.
+    /// - `task` — closure used to build the prepared job.
     fn make_job_with_slot<F>(
         executor: &LocalIoExecutor,
         slot: crate::operation::internal::permits::Permit,

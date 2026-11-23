@@ -95,15 +95,15 @@ use crate::LocalFileError;
 pub struct LocalOperation<T: Send + 'static, E: Send + 'static = LocalFileError> {
     /// Stores the inner associated with this value.
     pub(in crate::operation::types) inner: Option<qubit_operation::OperationHandle<T, E>>,
-    /// Stores the budget associated with this value.
+    /// Stores the shared byte-budget reservation held for this operation.
     pub(in crate::operation::types) budget: Option<Arc<dyn Send + Sync>>,
 }
 
 impl<T: Send + 'static, E: Send + 'static> LocalOperation<T, E> {
-    /// Runs the new behavior while preserving the operation lifecycle
-    /// invariants.
+    /// Creates an operation handle that retains its shared byte reservation.
     /// # Parameters
-    /// - `budget` — supplies data or policy for this operation.
+    /// - `inner` — underlying operation handle.
+    /// - `budget` — byte reservation retained for the operation's owned data.
     #[cfg(feature = "async")]
     pub(crate) fn new(inner: qubit_operation::OperationHandle<T, E>, budget: Arc<dyn Send + Sync>) -> Self {
         Self {

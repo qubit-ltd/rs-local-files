@@ -23,15 +23,14 @@ use super::LocalFactSnapshot;
 pub struct LocalFactObserver {
     /// Stores the snapshot associated with this value.
     snapshot: Arc<Mutex<LocalFactSnapshot>>,
-    /// Stores the  record permit associated with this value.
+    /// Stores the record permit associated with this value.
     _record_permit: Option<Arc<dyn Send + Sync>>,
 }
 
 impl std::fmt::Debug for LocalFactObserver {
-    /// Runs the fmt behavior while preserving the operation lifecycle
-    /// invariants.
+    /// Formats the current fact snapshot.
     /// # Parameters
-    /// - `formatter` — supplies data or policy for this operation.
+    /// - `formatter` — destination formatter for the debug representation.
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter
             .debug_struct("LocalFactObserver")
@@ -49,8 +48,7 @@ impl LocalFactObserver {
     pub fn snapshot(&self) -> LocalFactSnapshot {
         *self.snapshot.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
     }
-    /// Runs the new behavior while preserving the operation lifecycle
-    /// invariants.
+    /// Creates an observer with an empty snapshot and no retained permit.
     #[allow(dead_code)]
     pub(crate) fn new() -> Self {
         Self {
@@ -69,10 +67,9 @@ impl LocalFactObserver {
             _record_permit: Some(permit),
         }
     }
-    /// Runs the update behavior while preserving the operation lifecycle
-    /// invariants.
+    /// Replaces the observer's current snapshot.
     /// # Parameters
-    /// - `snapshot` — supplies data or policy for this operation.
+    /// - `snapshot` — fact snapshot to store.
     #[allow(dead_code)]
     pub(crate) fn update(&self, snapshot: LocalFactSnapshot) {
         *self.snapshot.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = snapshot;

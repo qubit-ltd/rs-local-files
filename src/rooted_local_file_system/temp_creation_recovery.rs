@@ -86,10 +86,3 @@ pub(super) fn finish(primary: LocalFileError, entries: Vec<(PathBuf, NativePriva
         Err(cleanup_error) => primary.with_cleanup_error(cleanup_error).with_temp_recovery(recovery),
     }
 }
-// =============================================================================
-//    Copyright (c) 2026 Haixing Hu.
-//
-//    SPDX-License-Identifier: Apache-2.0
-//
-//    Licensed under the Apache License, Version 2.0.
-// =============================================================================

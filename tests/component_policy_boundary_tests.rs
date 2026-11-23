@@ -98,10 +98,3 @@ fn test_component_policy_allows_an_allowed_symlink_name() {
     Streams::copy_input_to_output(&mut reader, &mut bytes).expect("linked payload should be readable");
     assert_eq!(b"symlink bytes", bytes.as_slice());
 }
-// =============================================================================
-//    Copyright (c) 2025 - 2026 Haixing Hu.
-//
-//    SPDX-License-Identifier: Apache-2.0
-//
-//    Licensed under the Apache License, Version 2.0.
-// =============================================================================

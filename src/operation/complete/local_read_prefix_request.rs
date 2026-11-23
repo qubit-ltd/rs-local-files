@@ -19,9 +19,9 @@ use crate::options::LocalReadOptions;
 /// request; filesystem default read options are not merged into them. They do
 /// not replace the executor's resource limits. One extra byte may be read to
 /// determine whether the requested prefix ended at EOF; if the shared owned
-/// byte pool cannot retain the requested prefix plus this EOF evidence, the
-/// operation reports a resource-limit error instead of returning a truncated
-/// success.
+/// byte pool cannot retain the requested prefix, the operation reports a
+/// resource-limit error instead of returning a truncated success. The extra
+/// byte used to probe for EOF is a stack buffer and is not charged to the pool.
 #[derive(Debug)]
 pub struct LocalReadPrefixRequest {
     /// Path opened under the filesystem's captured authority.
