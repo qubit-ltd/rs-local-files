@@ -33,8 +33,16 @@ mod publish;
 /// substitute for taking the outcome. Settlement is observed separately from
 /// the outcome. If the result contains a reader, writer, or walker, close and
 /// drop it before waiting for settlement to ensure its native-handle permit is
-/// returned. Fact observers keep their bounded record permit until every clone
-/// has been dropped.
+/// returned. Fact observers share one bounded record permit across the
+/// caller's value and internal clones. Dropping the caller's observer releases
+/// only that reference; the permit returns when the last holder is dropped. In
+/// the complete-read path shown below, the task's observer clone is dropped
+/// when the task returns and the prepared job releases its own clone before
+/// publishing the outcome. The complete-operation submission helper follows
+/// the same task/job ownership split. The writer-open path also gives a clone
+/// to its managed writer, which can keep the slot until that writer is closed
+/// and dropped; reader-open and walker-open jobs keep only the job clone. These
+/// lifetimes follow each entry point's actual owners.
 ///
 /// # Examples
 ///
@@ -65,7 +73,7 @@ mod publish;
 /// }
 /// let facts = observer.snapshot();
 /// println!("modified {} items", facts.modified_count);
-/// drop(observer); // returns the observer's fact-record slot
+/// drop(observer); // drops the caller's reference; the final shared owner returns the slot
 /// let settlement = operation.wait_settlement().await;
 /// println!("settled {:?}", settlement.status);
 /// # Ok(())

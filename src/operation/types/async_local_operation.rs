@@ -35,7 +35,7 @@ use crate::LocalFileError;
 /// `OutcomeError` means the result slot could not be taken, rather than an
 /// operation failure in `E`.
 ///
-/// # Example
+/// # Examples
 ///
 /// Submit a read through the public facade, take its asynchronous outcome,
 /// then observe settlement. The example compiles without requiring the input

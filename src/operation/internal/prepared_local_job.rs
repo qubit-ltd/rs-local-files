@@ -47,28 +47,33 @@ use super::permits::Permit;
 /// Publishing an outcome does not itself mean that a resource returned in the
 /// outcome has been closed. Queue, byte, native-handle, and fact-record permits
 /// follow their respective owners: resource permits remain with returned
-/// resources until close, and a fact observer retains its record slot until
-/// its last clone is dropped. Stop requests are cooperative; the resulting
-/// outcome remains the authoritative report of how execution ended.
+/// resources until close, and the job's internal fact-observer reference is
+/// dropped before the outcome is published. The fact-record slot returns only
+/// when the last observer clone is dropped. Stop requests are cooperative;
+/// the resulting outcome remains the authoritative report of how execution
+/// ended.
 ///
 /// # Type Parameters
 /// - `R` — owned request retained until admission resolves.
 /// - `T` — operation result delivered through the external control port.
 /// - `E` — operation error delivered through the external control port.
 pub(crate) struct PreparedLocalJob<R, T, E> {
-    /// Stores the executor associated with this value.
+    /// Executor state owning the admission group and shared resource limits.
     executor: Arc<ExecutorInner>,
-    /// Stores the request associated with this value.
+    /// Request retained until activation transfers it to the worker.
     request: Mutex<Option<R>>,
-    /// Stores the task associated with this value.
+    /// One-shot worker closure, consumed on activation.
     task: Mutex<Option<OperationTask<R, T, E>>>,
-    /// Stores the  slot associated with this value.
+    /// Queue or waiter permit, released when the worker starts or the job is
+    /// abandoned.
     _slot: Mutex<Option<Permit>>,
-    /// Stores the  owned permit associated with this value.
+    /// Shared owned-byte reservation retained with the result lifetime.
     _owned_permit: Mutex<Option<Arc<Mutex<Permit>>>>,
-    /// Stores the  fact observer associated with this value.
+    /// Internal observer clone, released before publishing the outcome or
+    /// when the job is abandoned.
     _fact_observer: Mutex<Option<LocalFactObserver>>,
-    /// Stores the  handle permit associated with this value.
+    /// Shared native-handle reservation, also retained by returned resources
+    /// when applicable.
     _handle_permit: Mutex<Option<Arc<Permit>>>,
     /// Stores the claimed associated with this value.
     claimed: AtomicBool,
@@ -84,17 +89,19 @@ where
     T: Send + 'static,
     E: Send + 'static,
 {
-    /// Runs the new behavior while preserving the operation lifecycle
-    /// invariants.
+    /// Prepares a one-shot worker job with the supplied request, permits, and
+    /// fact observer. The job retains these owners until their lifecycle
+    /// boundary; its internal observer is released before outcome publication.
     /// # Type Parameters
     /// - `F` — type used by this operation.
     /// # Parameters
-    /// - `request` — supplies data or policy for this operation.
-    /// - `slot` — supplies data or policy for this operation.
-    /// - `owned_permit` — supplies data or policy for this operation.
-    /// - `handle_permit` — supplies data or policy for this operation.
-    /// - `fact_observer` — supplies data or policy for this operation.
-    /// - `task` — supplies data or policy for this operation.
+    /// - `request` — input retained until activation transfers it to the worker.
+    /// - `slot` — queue or waiter capacity released when work starts.
+    /// - `owned_permit` — shared memory reservation retained with the result.
+    /// - `handle_permit` — native-handle reservation retained through cleanup.
+    /// - `fact_observer` — internal observer reference released before the
+    ///   outcome is published.
+    /// - `task` — one-shot synchronous worker closure.
     pub(crate) fn new<F>(
         executor: Arc<ExecutorInner>,
         request: R,
@@ -129,8 +136,8 @@ where
     /// - `slot` — queue or waiter reservation held until the task starts.
     /// - `owned_permit` — memory reservation retained with the result lifetime.
     /// - `handle_permit` — native-handle reservation retained through cleanup.
-    /// - `fact_observer` — local effect snapshot channel associated with the
-    ///   job.
+    /// - `fact_observer` — internal observer reference released before the
+    ///   outcome is published or when the job is abandoned.
     /// - `task` — worker closure that performs the operation.
     pub(crate) fn new_scoped<F>(
         executor: Arc<ExecutorInner>,
@@ -166,8 +173,8 @@ where
     /// - `slot` — queue or waiter reservation held until the task starts.
     /// - `owned_permit` — memory reservation retained with the result lifetime.
     /// - `handle_permit` — native-handle reservation retained through cleanup.
-    /// - `fact_observer` — local effect snapshot channel associated with the
-    ///   job.
+    /// - `fact_observer` — internal observer reference released before the
+    ///   outcome is published or when the job is abandoned.
     /// - `task` — worker closure that performs the operation.
     pub(crate) fn new_scoped_with_shared_handle_permit<F>(
         executor: Arc<ExecutorInner>,

@@ -35,8 +35,9 @@ use super::worker_owner::WorkerOwner;
 /// separate settlement report after worker cleanup. Taking an outcome releases
 /// the handle's owned-byte reservation, while native-handle reservations for
 /// returned readers, writers, and walkers remain held until those resources
-/// close. Fact observers independently retain a fact-record slot until all
-/// observer clones are dropped. A stop request through an operation handle is
+/// close. A fact-record reservation is shared by each returned observer and
+/// the operation's internal observer clones; it returns when the last clone
+/// is dropped. A stop request through an operation handle is
 /// cooperative and does not replace outcome observation.
 ///
 /// # Examples
@@ -146,48 +147,58 @@ impl LocalIoExecutor {
     pub fn config(&self) -> &LocalExecutionConfig {
         &self.inner.config
     }
-    /// Runs the reserve slot behavior while preserving the operation lifecycle
-    /// invariants.
+    /// Reserves one queue slot, falling back to one waiter slot.
+    ///
+    /// The returned permit releases that capacity when dropped. An unavailable
+    /// reservation returns `None`.
     pub(crate) fn reserve_slot(&self) -> Option<Permit> {
         self.inner
             .queue_slots
             .try_acquire(1)
             .or_else(|| self.inner.waiter_slots.try_acquire(1))
     }
-    /// Runs the reserve bytes behavior while preserving the operation lifecycle
-    /// invariants.
+    /// Reserves `amount` bytes from the executor-wide owned-memory budget.
+    ///
+    /// Dropping the returned permit releases its remaining reservation; a
+    /// caller may shrink it as owned data is released. Returns `None` when the
+    /// shared budget cannot satisfy the request.
     /// # Parameters
     /// - `amount` — supplies data or policy for this operation.
     pub(crate) fn reserve_bytes(&self, amount: usize) -> Option<Permit> {
         self.inner.byte_slots.try_acquire(amount)
     }
-    /// Runs the reserve handle behavior while preserving the operation
-    /// lifecycle invariants.
+    /// Reserves one ordinary native-handle slot until its permit is dropped.
     pub(crate) fn reserve_handle(&self) -> Option<Permit> {
         self.inner.handle_slots.try_acquire(1)
     }
-    /// Atomically reserves ordinary handles for a multi-reader operation.
+    /// Atomically reserves `amount` ordinary native-handle slots for a
+    /// multi-reader operation. The returned permit releases all remaining
+    /// slots when dropped.
     ///
     /// # Parameters
     /// - `amount` — number of handles to reserve as one indivisible request.
     pub(crate) fn reserve_handles(&self, amount: usize) -> Option<Permit> {
         self.inner.handle_slots.try_acquire(amount)
     }
-    /// Runs the reserve disk behavior while preserving the operation lifecycle
-    /// invariants.
+    /// Reserves `amount` bytes from the executor-wide disk budget.
+    ///
+    /// The returned permit releases its remaining reservation when dropped.
     /// # Parameters
     /// - `amount` — supplies data or policy for this operation.
     #[allow(dead_code)]
     pub(crate) fn reserve_disk(&self, amount: u64) -> Option<DiskPermit> {
         self.inner.disk_slots.try_acquire(amount)
     }
-    /// Runs the reserve fact behavior while preserving the operation lifecycle
-    /// invariants.
+    /// Reserves one fact-record slot for an observer and its internal clones.
+    ///
+    /// The slot returns when the last shared permit holder is dropped.
     pub(crate) fn reserve_fact(&self) -> Option<Permit> {
         self.inner.fact_slots.try_acquire(1)
     }
-    /// Runs the enqueue task behavior while preserving the operation lifecycle
-    /// invariants.
+    /// Reserves queue or waiter capacity and enqueues a one-shot task.
+    ///
+    /// The capacity permit is released immediately before the task runs; if
+    /// admission or enqueueing fails, dropping the unqueued job releases it.
     /// # Type Parameters
     /// - `F` — type used by this operation.
     /// # Parameters
