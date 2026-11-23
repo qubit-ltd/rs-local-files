@@ -1579,6 +1579,53 @@ fn test_rooted_complete_mutations_bind_relative_paths_to_captured_root() {
     assert!(!root.join("renamed").exists());
 }
 
+#[test]
+fn test_recursive_missing_ok_delete_reports_known_zero_for_host_and_rooted() {
+    for rooted in [false, true] {
+        let scratch = tempfile::tempdir().unwrap();
+        let root = scratch.path().join("root");
+        std::fs::create_dir(&root).unwrap();
+        let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+        let executor = LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).unwrap();
+        let filesystem = if rooted {
+            block_on(AsyncLocalFileSystem::rooted(executor, root.clone())).unwrap()
+        } else {
+            block_on(AsyncLocalFileSystem::host(executor)).unwrap()
+        };
+        let missing = if rooted {
+            PathBuf::from("missing-tree")
+        } else {
+            root.join("missing-tree")
+        };
+        let (mut delete, facts) = filesystem
+            .submit_delete(
+                &manager,
+                Default::default(),
+                LocalDeleteRequest {
+                    path: missing,
+                    options: LocalDeleteOptions::new().with_recursive().with_missing_ok(),
+                    directory: true,
+                },
+                Default::default(),
+            )
+            .unwrap();
+        match delete.wait_outcome().unwrap() {
+            qubit_operation::OperationOutcome::Succeeded(result) => {
+                assert!(!result.outcome.deleted());
+                assert_eq!(Some(0), result.deleted_entries);
+            }
+            other => panic!("recursive missing_ok deletion should succeed: {other:?}"),
+        }
+        let snapshot = facts.snapshot();
+        assert_eq!(0, snapshot.modified_count);
+        assert_eq!(
+            qubit_local_files::LocalPublicationState::NotPublished,
+            snapshot.publication
+        );
+        assert!(!snapshot.range_unknown);
+    }
+}
+
 #[cfg(unix)]
 #[test]
 fn test_async_copy_records_permission_only_directory_modification() {

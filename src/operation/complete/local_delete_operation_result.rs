@@ -19,7 +19,8 @@ pub struct LocalDeleteOperationResult {
     pub directory: bool,
     /// Stores the outcome associated with this value.
     pub outcome: LocalDeleteOutcome,
-    /// Exact count when known; the current recursive-delete core exposes only
-    /// whether the requested root was removed.
+    /// Exact count when known; a missing entry accepted by `missing_ok` is
+    /// reported as zero, while successful recursive deletion reports `None`
+    /// because the core exposes only whether the requested root was removed.
     pub deleted_entries: Option<u64>,
 }

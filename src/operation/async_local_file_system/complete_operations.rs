@@ -985,7 +985,7 @@ impl AsyncLocalFileSystem {
                                 LocalPublicationState::NotPublished
                             },
                             LocalDurabilityState::Unknown,
-                            if recursive_directory {
+                            if deleted && recursive_directory {
                                 EffectFact::Unknown
                             } else {
                                 EffectFact::Known
@@ -996,12 +996,12 @@ impl AsyncLocalFileSystem {
                             path: request.path,
                             directory: request.directory,
                             outcome,
-                            deleted_entries: if recursive_directory {
-                                None
-                            } else if deleted {
-                                Some(1)
-                            } else {
+                            deleted_entries: if !deleted {
                                 Some(0)
+                            } else if recursive_directory {
+                                None
+                            } else {
+                                Some(1)
                             },
                         })
                     }
