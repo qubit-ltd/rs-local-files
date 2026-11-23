@@ -41,6 +41,7 @@ pub(crate) enum DeadlineBoundary {
     HostTreeSymlinkTargetRead,
     HostTreeSymlinkDestinationRemoved,
     HostCopyChildDirectorySourceInspected,
+    HostCopyPathsResolved,
     HostCopyDirectoryDestinationInspected,
     HostCopyDirectoryDestinationReinspected,
     HostCopyDirectoryBeforeCreate,

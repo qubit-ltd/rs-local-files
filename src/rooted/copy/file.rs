@@ -133,9 +133,6 @@ pub(super) fn copy_file(
             ),
         ));
     }
-    let destination_directory_requires_removal = destination_metadata
-        .as_ref()
-        .is_some_and(|metadata| metadata.kind() == EntryKind::Directory);
     let mut destination_removed = false;
     let mut delayed_replacement = false;
     if let Some(metadata) = destination_metadata {
@@ -173,6 +170,16 @@ pub(super) fn copy_file(
                 unreachable!("a file destination cannot require create or merge")
             }
         }
+    }
+    if delayed_replacement && options.atomicity() == crate::LocalAtomicityRequirement::Required {
+        return Err(error(
+            Stage::PrepareDestination,
+            source,
+            destination,
+            statistics,
+            io::Error::new(ErrorKind::Unsupported, "required atomic replacement is unavailable for this destination"),
+        )
+        .with_local_kind(crate::LocalFileErrorKind::RequirementNotMet));
     }
     #[cfg(feature = "test-support")]
     inject_race_destination(root, destination, "rooted-copy-race-before-writer-open")
@@ -259,7 +266,7 @@ pub(super) fn copy_file(
         statistics,
         bytes,
         destination_metadata.is_some(),
-        destination_directory_requires_removal,
+        delayed_replacement,
         source,
         destination,
     ) {
@@ -416,6 +423,9 @@ pub(super) fn copy_file(
         }
     };
     completed_statistics.files_durable &= file_durable;
+    if options.preserves_permissions() {
+        completed_statistics.permissions_applied = completed_statistics.permissions_applied.saturating_add(1);
+    }
     Ok(completed_statistics)
 }
 
@@ -572,6 +582,7 @@ pub(super) fn preserve_permissions(
     destination: &Path,
     metadata: Metadata,
     options: &Options,
+    destination_created: bool,
     statistics: &mut Statistics,
 ) -> Result<(), Error> {
     if options.preserves_permissions() {
@@ -598,6 +609,10 @@ pub(super) fn preserve_permissions(
         }
         if previous_effect != CopyMetadataEffect::Indeterminate {
             statistics.metadata_effect = CopyMetadataEffect::Applied;
+        }
+        statistics.permissions_applied = statistics.permissions_applied.saturating_add(1);
+        if !destination_created {
+            statistics.directory_permissions_applied = statistics.directory_permissions_applied.saturating_add(1);
         }
     }
     Ok(())

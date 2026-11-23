@@ -110,6 +110,10 @@ impl HostLocalFileSystem {
             resolve_host_path(&bound_source, symlink_policy, false).map_err(copy_failure_unchanged)?;
         let resolved_target =
             resolve_host_path(&bound_target, symlink_policy, false).map_err(copy_failure_unchanged)?;
+        #[cfg(test)]
+        crate::tests::rooted::support::resolution_observation_tests::reach_deadline_boundary(
+            crate::tests::rooted::support::resolution_observation_tests::DeadlineBoundary::HostCopyPathsResolved,
+        );
         Self::copy_resolved_with_policy(
             &resolved_source,
             &resolved_target,
@@ -258,11 +262,7 @@ impl HostLocalFileSystem {
                 LocalCopyMethod::Recursive,
                 false,
                 false,
-                if stats.metadata_effect == crate::local::internal::CopyMetadataEffect::Applied
-                    || stats.files > 0
-                    || stats.directories > 0
-                    || stats.overwritten > 0
-                {
+                if stats.permissions_applied > 0 {
                     options.preserve_metadata()
                 } else {
                     crate::LocalMetadataPreservePolicy::None
@@ -326,10 +326,10 @@ impl HostLocalFileSystem {
             LocalCopyMethod::StagedFile,
             stats.atomic_publication(),
             durable,
-            if public_stats.files() == 0 {
-                crate::LocalMetadataPreservePolicy::None
-            } else {
+            if public_stats.permissions_applied() > 0 {
                 options.preserve_metadata()
+            } else {
+                crate::LocalMetadataPreservePolicy::None
             },
         ))
     }
@@ -534,7 +534,7 @@ fn copy_symlink_entry(
         LocalCopyMethod::StagedFile,
         false,
         durable,
-        options.preserve_metadata(),
+        crate::LocalMetadataPreservePolicy::None,
     ))
 }
 

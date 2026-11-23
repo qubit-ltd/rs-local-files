@@ -187,6 +187,38 @@ fn test_local_file_system_copy_rejects_required_directory_replacement() {
     assert_eq!(LocalFileErrorKind::RequirementNotMet, error.error().kind());
 }
 
+#[test]
+fn test_copy_reports_non_atomic_preferred_directory_replacement() {
+    for rooted in [false, true] {
+        let directory = tempdir().expect("temporary directory should be created");
+        fs::write(directory.path().join("source"), b"payload").unwrap();
+        fs::create_dir(directory.path().join("target")).unwrap();
+        fs::write(directory.path().join("target/old"), b"old").unwrap();
+        let filesystem = if rooted {
+            LocalFileSystem::rooted(directory.path())
+        } else {
+            LocalFileSystem::host()
+        }
+        .expect("filesystem should open");
+        let source = if rooted { PathBuf::from("source") } else { directory.path().join("source") };
+        let target = if rooted { PathBuf::from("target") } else { directory.path().join("target") };
+
+        let outcome = filesystem
+            .copy_with_options(
+                &source,
+                &target,
+                &LocalCopyOptions::new()
+                    .with_conflict(LocalCopyConflictPolicy::Overwrite)
+                    .with_type_conflict(LocalCopyTypeConflictPolicy::Replace)
+                    .with_atomicity(LocalAtomicityRequirement::Preferred),
+            )
+            .expect("preferred copy may use removal before installation");
+
+        assert!(!outcome.atomic());
+        assert_eq!(b"payload", fs::read(directory.path().join("target")).unwrap().as_slice());
+    }
+}
+
 /// Verifies file conflicts honor fail and overwrite policies, while type
 /// conflicts honor the default fail policy.
 #[test]

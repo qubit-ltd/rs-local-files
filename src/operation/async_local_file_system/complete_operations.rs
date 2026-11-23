@@ -58,11 +58,11 @@ use crate::error::LocalFileOperation;
 use crate::error::LocalReadLimitError;
 use crate::error::LocalResourceKind;
 use crate::error::LocalResourceLimitError;
-use crate::options::LocalMetadataPreservePolicy;
 use crate::options::LocalReadAllOptions;
 use crate::options::LocalReadOptions;
 use crate::outcome::LocalCopyFailure;
 use crate::outcome::LocalCopyFailureState;
+use crate::outcome::LocalCopyStats;
 use crate::outcome::LocalRenameFailure;
 use crate::outcome::LocalRenameFailureState;
 
@@ -704,15 +704,11 @@ impl AsyncLocalFileSystem {
                     Ok(outcome) => {
                         let stats = outcome.stats();
                         let published = stats.files() > 0 || stats.directories() > 0 || stats.bytes() > 0;
-                        let metadata_only =
-                            !published && outcome.metadata_preservation() == LocalMetadataPreservePolicy::Permissions;
+                        let metadata_only = !published && stats.directory_permissions_applied() > 0;
                         record_local_effect(
                             scope,
                             &observer,
-                            stats
-                                .files()
-                                .saturating_add(stats.directories())
-                                .max(u64::from(metadata_only)),
+                            copied_modified_count(stats),
                             stats.bytes(),
                             if published {
                                 LocalPublicationState::Published
@@ -755,7 +751,7 @@ impl AsyncLocalFileSystem {
                         record_local_effect(
                             scope,
                             &observer,
-                            stats.files().saturating_add(stats.directories()),
+                            copied_modified_count(*stats),
                             stats.bytes(),
                             publication,
                             LocalDurabilityState::Unknown,
@@ -1579,6 +1575,17 @@ fn record_local_effect(
     snapshot.durability = durability;
     snapshot.effect_record_error = effect_record_error;
     observer.update(snapshot);
+}
+
+/// Counts copied entries and confirmed permission changes on pre-existing directories.
+///
+/// Permissions on newly created directories are represented by the copied
+/// directory count; this adds only existing-directory changes.
+fn copied_modified_count(stats: LocalCopyStats) -> u64 {
+    stats
+        .files()
+        .saturating_add(stats.directories())
+        .saturating_add(stats.directory_permissions_applied())
 }
 /// Runs the shrink to zero behavior while preserving the operation lifecycle
 /// invariants.

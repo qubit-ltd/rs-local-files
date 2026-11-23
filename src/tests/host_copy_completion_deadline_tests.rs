@@ -65,6 +65,32 @@ fn test_host_copy_directory_deadline_after_source_inspection_preserves_target() 
 }
 
 #[test]
+fn test_host_copy_deadline_after_path_resolution_prevents_parent_creation() {
+    let fixture = tempfile::tempdir().expect("fixture should exist");
+    let root = fs::canonicalize(fixture.path()).expect("fixture path should resolve");
+    let source = root.join("source");
+    let target = root.join("new-parent/target");
+    fs::write(&source, b"source").unwrap();
+    let _clock = observations::DeadlineClockGuard::expire_at(DeadlineBoundary::HostCopyPathsResolved);
+
+    let failure = LocalFileSystem::host()
+        .unwrap()
+        .copy_with_options(
+            &source,
+            &target,
+            &LocalCopyOptions::new()
+                .with_create_parent()
+                .with_deadline(Duration::from_secs(60)),
+        )
+        .expect_err("expired path-resolution budget must stop before parent creation");
+
+    assert_eq!(std::io::ErrorKind::TimedOut, failure.error().io_error_kind());
+    assert_eq!(crate::LocalCopyFailureState::Unchanged, failure.state());
+    assert!(!target.parent().unwrap().exists());
+    assert!(source.exists());
+}
+
+#[test]
 fn test_host_copy_directory_deadline_after_destination_inspection_preserves_target() {
     let (_fixture, source, target) = host_copy_directory_deadline_fixture(true);
     let _clock = observations::DeadlineClockGuard::expire_at(DeadlineBoundary::HostCopyDirectoryDestinationInspected);

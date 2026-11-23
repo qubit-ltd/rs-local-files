@@ -210,6 +210,7 @@ pub(super) fn enter_copy_directory(
         src.to_path_buf(),
         dst.to_path_buf(),
         depth,
+        created,
         source_identity,
         source_metadata.permissions(),
         entries,

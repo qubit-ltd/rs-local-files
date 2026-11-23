@@ -16,6 +16,7 @@ use qubit_local_files::options::LocalCopyConflictPolicy;
 use qubit_local_files::options::LocalCopyOptions;
 use qubit_local_files::options::LocalCopyTypeConflictPolicy;
 use qubit_local_files::outcome::LocalCopyFailureState;
+use qubit_local_files::policy::LocalAtomicityRequirement;
 use qubit_local_files::test_support::install_test_fault;
 use tempfile::tempdir;
 
@@ -64,6 +65,70 @@ fn test_failure_before_tree_removal_is_unchanged() {
             .expect("target directory should remain readable")
             .count()
     );
+}
+
+#[test]
+fn test_required_atomicity_rechecks_raced_directory_destination_before_removal() {
+    let directory = tempdir().expect("temporary root should be created");
+    fs::write(directory.path().join("source"), b"source").unwrap();
+    fs::write(directory.path().join("target"), b"old target").unwrap();
+    let rooted = LocalFileSystem::rooted(directory.path()).expect("rooted filesystem should open");
+    let _fault = install_test_fault("rooted-copy-target-becomes-directory").expect("race injection installs");
+
+    let failure = rooted
+        .copy_with_options(
+            Path::new("source"),
+            Path::new("target"),
+            &LocalCopyOptions::new()
+                .with_conflict(LocalCopyConflictPolicy::Overwrite)
+                .with_type_conflict(LocalCopyTypeConflictPolicy::Replace)
+                .with_atomicity(LocalAtomicityRequirement::Required),
+        )
+        .expect_err("the backend must reject a raced non-atomic replacement");
+
+    assert_eq!(LocalFileErrorKind::RequirementNotMet, failure.error().kind());
+    assert_eq!(LocalCopyFailureState::Unchanged, failure.state());
+    assert!(directory.path().join("target").is_dir());
+    assert_eq!(0, fs::read_dir(directory.path().join("target")).unwrap().count());
+}
+
+#[test]
+fn test_required_atomicity_rechecks_actual_rooted_source_kind() {
+    let directory = tempdir().expect("temporary root should be created");
+    fs::write(directory.path().join("source"), b"source").unwrap();
+    let rooted = LocalFileSystem::rooted(directory.path()).expect("rooted filesystem should open");
+    let _fault = install_test_fault("rooted-copy-source-becomes-symlink").expect("race injection installs");
+
+    let failure = rooted
+        .copy_with_options(
+            Path::new("source"),
+            Path::new("target"),
+            &LocalCopyOptions::new()
+                .with_entry_source()
+                .with_atomicity(LocalAtomicityRequirement::Required),
+        )
+        .expect_err("the selected symlink source cannot satisfy required atomicity");
+
+    assert_eq!(LocalFileErrorKind::RequirementNotMet, failure.error().kind());
+    assert_eq!(LocalCopyFailureState::Unchanged, failure.state());
+    assert!(fs::symlink_metadata(directory.path().join("source")).unwrap().file_type().is_symlink());
+    assert!(!directory.path().join("target").exists());
+}
+
+#[test]
+fn test_rooted_copy_reports_method_for_backend_selected_source_kind() {
+    let directory = tempdir().expect("temporary root should be created");
+    fs::write(directory.path().join("source"), b"preflight file").unwrap();
+    let rooted = LocalFileSystem::rooted(directory.path()).expect("rooted filesystem should open");
+    let _fault = install_test_fault("rooted-copy-source-becomes-directory").expect("race injection installs");
+
+    let outcome = rooted
+        .copy_with_options(Path::new("source"), Path::new("target"), &LocalCopyOptions::new())
+        .expect("Auto mode should copy the actual directory source");
+
+    assert_eq!(qubit_local_files::outcome::LocalCopyMethod::Recursive, outcome.method());
+    assert_eq!(1, outcome.stats().directories());
+    assert!(directory.path().join("target").is_dir());
 }
 
 #[test]

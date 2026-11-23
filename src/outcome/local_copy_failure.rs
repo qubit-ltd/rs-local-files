@@ -158,6 +158,7 @@ impl LocalCopyFailure {
         let failure_hint = error.failure_state();
         let atomic_destination_state = error.atomic_destination_state();
         let metadata_effect = error.stats().metadata_effect;
+        let local_kind = error.local_kind();
         let (stage, failed_source, failed_target, stats, staging_path, cleanup_error, primary) = error.into_parts();
         let partial_stats = LocalCopyStats::from_internal(stats);
         let inferred_state = match atomic_destination_state {
@@ -191,7 +192,7 @@ impl LocalCopyFailure {
             .get_ref()
             .and_then(|source| source.downcast_ref::<LocalResourceLimitError>())
             .copied();
-        let error = match resource_limit {
+        let mut error = match resource_limit {
             Some(resource_limit) => LocalFileError::from_resource_limit(
                 LocalFileOperation::Copy,
                 Some(source.to_path_buf()),
@@ -208,6 +209,9 @@ impl LocalCopyFailure {
                 )
             }
         };
+        if let Some(kind) = local_kind {
+            error = error.with_kind(kind);
+        }
         let cleanup_error = cleanup_error.map(|cleanup_error| {
             let cleanup_kind = cleanup_error.kind();
             LocalFileError::from_io(

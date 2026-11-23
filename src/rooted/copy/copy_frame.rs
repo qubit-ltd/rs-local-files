@@ -25,6 +25,8 @@ pub(super) struct CopyFrame {
     pub(super) metadata: Metadata,
     /// Logical descendant depth used by the shared scheduler.
     pub(super) depth: usize,
+    /// Whether this operation created the destination directory.
+    pub(super) destination_created: bool,
     /// Owned lazy native directory reader.
     pub(super) reader: DirectoryReader,
     /// Budget capacity declared after the reader so implicit drop closes the

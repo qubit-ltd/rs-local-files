@@ -901,6 +901,34 @@ fn test_host_copy_reports_injected_destination_races() {
     }
 }
 
+#[cfg(feature = "test-support")]
+#[test]
+fn test_host_required_atomicity_rechecks_raced_directory_destination() {
+    let directory = tempdir().expect("temporary directory should be created");
+    let source = directory.path().join("source");
+    let target = directory.path().join("target");
+    fs::write(&source, b"source").unwrap();
+    fs::write(&target, b"old").unwrap();
+    let _fault = install_test_fault("copy-file-target-becomes-directory").expect("race selector installs");
+
+    let failure = LocalFileSystem::host()
+        .unwrap()
+        .copy_with_options(
+            &source,
+            &target,
+            &LocalCopyOptions::new()
+                .with_conflict(LocalCopyConflictPolicy::Overwrite)
+                .with_type_conflict(LocalCopyTypeConflictPolicy::Replace)
+                .with_atomicity(LocalAtomicityRequirement::Required),
+        )
+        .expect_err("the backend must reject a raced non-atomic replacement");
+
+    assert_eq!(LocalFileErrorKind::RequirementNotMet, failure.error().kind());
+    assert_eq!(LocalCopyFailureState::Unchanged, failure.state());
+    assert!(target.is_dir());
+    assert_eq!(0, fs::read_dir(target).unwrap().count());
+}
+
 /// Verifies host recursive-copy replacement detects reinspection and removal
 /// races before it can claim a completed tree publication.
 #[cfg(feature = "test-support")]

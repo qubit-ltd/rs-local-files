@@ -38,6 +38,12 @@ pub struct LocalCopyDirStats {
     pub files_durable: bool,
     /// Internal evidence of destination directory metadata effects.
     pub(crate) metadata_effect: CopyMetadataEffect,
+    /// Number of permission changes confirmed on destination entries.
+    pub(crate) permissions_applied: u64,
+    /// Number of confirmed permission changes on pre-existing destination directories.
+    pub(crate) directory_permissions_applied: u64,
+    /// Source kind selected by the rooted backend for the top-level request.
+    pub(crate) source_kind: Option<crate::LocalFileKind>,
 }
 
 impl Default for LocalCopyDirStats {
@@ -52,6 +58,9 @@ impl Default for LocalCopyDirStats {
             non_atomic_publication: false,
             files_durable: true,
             metadata_effect: CopyMetadataEffect::None,
+            permissions_applied: 0,
+            directory_permissions_applied: 0,
+            source_kind: None,
         }
     }
 }

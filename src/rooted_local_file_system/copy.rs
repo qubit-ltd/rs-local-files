@@ -209,6 +209,8 @@ impl RootedLocalFileSystem {
             .root
             .copy_with_durability(&source_path, &target_path, internal_options, options.durability())
             .map_err(|error| copy_failure_from_dir_error(source, target, error, directory))?;
+        let selected_source_kind = stats.source_kind.unwrap_or(source_kind);
+        let directory = selected_source_kind == crate::LocalFileKind::Directory;
         if stats.was_fully_skipped() {
             return Ok(LocalCopyOutcome::new(
                 LocalCopyStats::from_internal(stats),
@@ -236,7 +238,7 @@ impl RootedLocalFileSystem {
             target,
         )
         .map_err(|error| copy_failure_published(error, LocalCopyStats::from_internal(stats)))?;
-        let content_durable = source_kind == crate::LocalFileKind::Symlink || stats.files_durable();
+        let content_durable = selected_source_kind == crate::LocalFileKind::Symlink || stats.files_durable();
         let durable = !directory && content_durable && parent_durable;
         Ok(LocalCopyOutcome::new(
             LocalCopyStats::from_internal(stats),
@@ -247,11 +249,7 @@ impl RootedLocalFileSystem {
             },
             !directory && stats.atomic_publication(),
             durable,
-            if stats.metadata_effect == crate::local::CopyMetadataEffect::Applied
-                || stats.files > 0
-                || stats.directories > 0
-                || stats.overwritten > 0
-            {
+            if stats.permissions_applied > 0 {
                 options.preserve_metadata()
             } else {
                 crate::LocalMetadataPreservePolicy::None
@@ -286,6 +284,10 @@ fn copy_failure_from_dir_error(
     directory: bool,
 ) -> LocalCopyFailure {
     let installed_file = error.failure_state() == Some(crate::LocalCopyFailureState::Published);
+    let directory = error
+        .stats()
+        .source_kind
+        .map_or(directory, |kind| kind == crate::LocalFileKind::Directory);
     let failure = LocalCopyFailure::from_copy_dir_error(source, target, error);
     if directory && installed_file {
         failure.with_state(crate::LocalCopyFailureState::PartiallyPublished)

@@ -11,6 +11,8 @@ use std::time::Duration;
 use std::time::Instant;
 
 use crate::LocalCopyConflictPolicy;
+use crate::LocalAtomicityRequirement;
+use crate::LocalCopySourceMode;
 use crate::LocalCopyTypeConflictPolicy;
 use crate::LocalDurabilityRequirement;
 use crate::LocalSymlinkPolicy;
@@ -97,6 +99,12 @@ pub struct LocalCopyDirOptions {
 
     /// Monotonic operation-entry instant supplied by the public facade.
     started_at: Option<Instant>,
+
+    /// Original source-selection requirement retained for backend rechecks.
+    source_mode: LocalCopySourceMode,
+
+    /// Original atomicity requirement retained for backend rechecks.
+    atomicity: LocalAtomicityRequirement,
 }
 
 impl LocalCopyDirOptions {
@@ -120,6 +128,8 @@ impl LocalCopyDirOptions {
             max_open_directories: None,
             deadline: None,
             started_at: None,
+            source_mode: LocalCopySourceMode::Auto,
+            atomicity: LocalAtomicityRequirement::NotRequired,
         }
     }
 
@@ -189,6 +199,20 @@ impl LocalCopyDirOptions {
     #[inline]
     pub const fn started_at(&self) -> Option<Instant> {
         self.started_at
+    }
+
+    /// Returns the source mode that backend source selections must satisfy.
+    #[must_use]
+    #[inline]
+    pub(crate) const fn source_mode(&self) -> LocalCopySourceMode {
+        self.source_mode
+    }
+
+    /// Returns the atomicity requirement that destructive replacement must satisfy.
+    #[must_use]
+    #[inline]
+    pub(crate) const fn atomicity(&self) -> LocalAtomicityRequirement {
+        self.atomicity
     }
 
     /// Returns the destination file conflict policy.
@@ -332,6 +356,20 @@ impl LocalCopyDirOptions {
     #[inline]
     pub const fn with_started_at(mut self, value: Instant) -> Self {
         self.started_at = Some(value);
+        self
+    }
+
+    /// Retains the public source mode for backend-side source revalidation.
+    #[inline]
+    pub(crate) const fn with_source_mode(mut self, value: LocalCopySourceMode) -> Self {
+        self.source_mode = value;
+        self
+    }
+
+    /// Retains the public atomicity requirement for backend-side replacement checks.
+    #[inline]
+    pub(crate) const fn with_atomicity(mut self, value: LocalAtomicityRequirement) -> Self {
+        self.atomicity = value;
         self
     }
 
