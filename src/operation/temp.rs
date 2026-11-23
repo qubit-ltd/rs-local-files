@@ -151,6 +151,11 @@ where
 /// * `manager` — asynchronous operation manager handling admission and cleanup.
 /// * `options` — cancellation and resource options for the operation.
 /// * `temp_options` — filesystem-specific privacy and creation options.
+///
+/// Admission follows the supplied manager view. A manager view outside the
+/// executor's operation group may continue accepting temporary-file work
+/// after that group begins draining; cleanup of accepted resources can still
+/// use the executor's cleanup queue.
 pub fn submit_temp_file(
     filesystem: crate::LocalFileSystem,
     executor: LocalIoExecutor,
@@ -193,7 +198,7 @@ pub fn submit_temp_file(
                         reservation,
                         primary,
                         recovery,
-                        task_executor,
+                        task_executor.cleanup_executor(),
                         disk,
                         handle,
                         cleanup_permit,
@@ -204,7 +209,7 @@ pub fn submit_temp_file(
         };
         let resource = LocalTempResource::new(LocalTempNative::File(file), disk, handle, cleanup_permit);
         let id_slot = Arc::clone(&resource.id);
-        let cleanup = LocalCleanup::new(task_executor);
+        let cleanup = LocalCleanup::new(task_executor.cleanup_executor());
         match reservation.commit_with(resource, cleanup) {
             Ok(reference) => {
                 *id_slot.lock().unwrap_or_else(|e| e.into_inner()) = Some(reference.id());
@@ -240,6 +245,11 @@ pub fn submit_temp_file(
 /// * `manager` — asynchronous operation manager handling admission and cleanup.
 /// * `options` — cancellation and resource options for the operation.
 /// * `temp_options` — filesystem-specific privacy and creation options.
+///
+/// Admission follows the supplied manager view. A manager view outside the
+/// executor's operation group may continue accepting temporary-directory work
+/// after that group begins draining; cleanup of accepted resources can still
+/// use the executor's cleanup queue.
 pub fn submit_temp_directory(
     filesystem: crate::LocalFileSystem,
     executor: LocalIoExecutor,
@@ -281,7 +291,7 @@ pub fn submit_temp_directory(
                         reservation,
                         primary,
                         recovery,
-                        task_executor,
+                        task_executor.cleanup_executor(),
                         disk,
                         handle,
                         cleanup_permit,
@@ -292,7 +302,7 @@ pub fn submit_temp_directory(
         };
         let resource = LocalTempResource::new(LocalTempNative::Directory(directory), disk, handle, cleanup_permit);
         let id_slot = Arc::clone(&resource.id);
-        let cleanup = LocalCleanup::new(task_executor);
+        let cleanup = LocalCleanup::new(task_executor.cleanup_executor());
         match reservation.commit_with(resource, cleanup) {
             Ok(reference) => {
                 *id_slot.lock().unwrap_or_else(|e| e.into_inner()) = Some(reference.id());
@@ -335,7 +345,7 @@ fn retain_partial(
     reservation: qubit_operation::ResourceReservation,
     error: crate::LocalFileError,
     recovery: crate::LocalTempRecovery,
-    executor: LocalIoExecutor,
+    executor: super::executor::LocalCleanupExecutor,
     disk: super::internal::permits::DiskPermit,
     handle: super::internal::permits::Permit,
     cleanup_permit: super::internal::permits::Permit,
@@ -521,7 +531,7 @@ mod tests {
                 );
                 let id_slot = Arc::clone(&owner.id);
                 let reference = reservation
-                    .commit_with(owner, LocalCleanup::new(executor.clone()))
+                    .commit_with(owner, LocalCleanup::new(executor.cleanup_executor()))
                     .expect("managed temp resource");
                 *id_slot.lock().unwrap_or_else(|e| e.into_inner()) = Some(reference.id());
                 let original = LocalTempFileAccess { resource: reference };
@@ -585,6 +595,56 @@ mod tests {
         let directory_settlement = block_on(directory_operation.wait_settlement());
         assert_eq!(directory_settlement.recovery_count, 0);
         assert!(directory_settlement.cleanup_failures.is_empty());
+        assert_eq!(std::fs::read_dir(parent.path()).unwrap().count(), 0);
+    }
+
+    #[test]
+    fn test_external_manager_view_accepts_temp_resources_after_group_drain() {
+        let parent = tempfile::tempdir().expect("temp parent");
+        let manager = OperationManager::new(ManagerOptions::default()).expect("manager");
+        let executor = super::super::executor::LocalIoExecutor::new(
+            manager.clone(),
+            super::super::LocalExecutionConfig::default(),
+        )
+        .expect("executor");
+        let async_manager = manager.as_async();
+        let report = executor
+            .request_shutdown(qubit_operation::ShutdownMode::Drain)
+            .wait()
+            .expect("group drained");
+        assert_eq!(report.snapshot.active_operations, 0);
+
+        let mut file = super::submit_temp_file(
+            crate::LocalFileSystem::host().expect("filesystem"),
+            executor.clone(),
+            &async_manager,
+            Default::default(),
+            crate::options::LocalTempFileOptions::new().with_parent(parent.path()),
+        )
+        .expect("external manager view still admits file creation");
+        let file_access = match block_on(file.wait_outcome()).expect("file outcome") {
+            OperationOutcome::Succeeded(access) => access,
+            _ => panic!("expected temporary file creation"),
+        };
+        drop(file_access);
+        assert_eq!(block_on(file.wait_settlement()).recovery_count, 0);
+
+        let mut directory = super::submit_temp_directory(
+            crate::LocalFileSystem::host().expect("filesystem"),
+            executor,
+            &async_manager,
+            Default::default(),
+            crate::options::LocalTempDirectoryOptions::new().with_parent(parent.path()),
+        )
+        .expect("external manager view still admits directory creation");
+        let directory_access = match block_on(directory.wait_outcome()).expect("directory outcome") {
+            OperationOutcome::Succeeded(access) => access,
+            _ => panic!("expected temporary directory creation"),
+        };
+        drop(directory_access);
+        let settlement = block_on(directory.wait_settlement());
+        assert_eq!(settlement.recovery_count, 0);
+        assert!(settlement.cleanup_failures.is_empty());
         assert_eq!(std::fs::read_dir(parent.path()).unwrap().count(), 0);
     }
 
@@ -693,7 +753,7 @@ mod tests {
                 );
                 let id_slot = Arc::clone(&owner.id);
                 let reference = reservation
-                    .commit_with(owner, LocalCleanup::new(executor.clone()))
+                    .commit_with(owner, LocalCleanup::new(executor.cleanup_executor()))
                     .expect("managed temp resource");
                 #[cfg(panic = "unwind")]
                 crate::operation::poison_test_mutex(&id_slot);
@@ -839,7 +899,7 @@ mod tests {
                 );
                 let id_slot = Arc::clone(&owner.id);
                 let reference = reservation
-                    .commit_with(owner, LocalCleanup::new(executor.clone()))
+                    .commit_with(owner, LocalCleanup::new(executor.cleanup_executor()))
                     .expect("managed temp resource");
                 *id_slot.lock().unwrap_or_else(|e| e.into_inner()) = Some(reference.id());
                 let access = LocalTempFileAccess { resource: reference };
@@ -892,7 +952,7 @@ mod tests {
                 );
                 let id_slot = Arc::clone(&owner.id);
                 let reference = reservation
-                    .commit_with(owner, LocalCleanup::new(executor.clone()))
+                    .commit_with(owner, LocalCleanup::new(executor.cleanup_executor()))
                     .expect("managed temp resource");
                 *id_slot.lock().unwrap_or_else(|e| e.into_inner()) = Some(reference.id());
                 let access = LocalTempFileAccess { resource: reference };
@@ -954,7 +1014,7 @@ mod tests {
                 );
                 let id_slot = Arc::clone(&owner.id);
                 let reference = reservation
-                    .commit_with(owner, LocalCleanup::new(executor.clone()))
+                    .commit_with(owner, LocalCleanup::new(executor.cleanup_executor()))
                     .expect("managed temp resource");
                 *id_slot.lock().unwrap_or_else(|e| e.into_inner()) = Some(reference.id());
                 let access = LocalTempFileAccess { resource: reference };
@@ -1048,7 +1108,7 @@ mod tests {
                 );
                 let id_slot = Arc::clone(&owner.id);
                 let reference = reservation
-                    .commit_with(owner, LocalCleanup::new(executor.clone()))
+                    .commit_with(owner, LocalCleanup::new(executor.cleanup_executor()))
                     .expect("managed temp resource");
                 *id_slot.lock().unwrap_or_else(|e| e.into_inner()) = Some(reference.id());
                 let access = LocalTempFileAccess { resource: reference };
@@ -1133,7 +1193,7 @@ mod tests {
                 );
                 let id_slot = Arc::clone(&owner.id);
                 let reference = reservation
-                    .commit_with(owner, LocalCleanup::new(executor.clone()))
+                    .commit_with(owner, LocalCleanup::new(executor.cleanup_executor()))
                     .expect("managed temp resource");
                 *id_slot.lock().unwrap_or_else(|e| e.into_inner()) = Some(reference.id());
                 let access = LocalTempFileAccess { resource: reference };
@@ -1248,7 +1308,7 @@ mod tests {
                 );
                 let id_slot = Arc::clone(&owner.id);
                 let reference = reservation
-                    .commit_with(owner, LocalCleanup::new(executor.clone()))
+                    .commit_with(owner, LocalCleanup::new(executor.cleanup_executor()))
                     .expect("managed temp resource");
                 *id_slot.lock().unwrap_or_else(|e| e.into_inner()) = Some(reference.id());
                 let access = LocalTempFileAccess { resource: reference };
@@ -1370,7 +1430,15 @@ mod tests {
                         std::io::Error::other("injected partial create failure"),
                     );
                     let failure =
-                        super::retain_partial(reservation, error, recovery, executor, disk, handle, cleanup_permit);
+                        super::retain_partial(
+                            reservation,
+                            error,
+                            recovery,
+                            executor.cleanup_executor(),
+                            disk,
+                            handle,
+                            cleanup_permit,
+                        );
                     match failure {
                         LocalCreateFailure::PartialRetained { resource_id, .. } => {
                             *id.lock().expect("id lock") = Some(resource_id);
@@ -1415,7 +1483,15 @@ mod tests {
                         std::io::Error::other("injected partial create failure"),
                     );
                     let failure =
-                        super::retain_partial(reservation, error, recovery, executor, disk, handle, cleanup_permit);
+                        super::retain_partial(
+                            reservation,
+                            error,
+                            recovery,
+                            executor.cleanup_executor(),
+                            disk,
+                            handle,
+                            cleanup_permit,
+                        );
                     match failure {
                         LocalCreateFailure::PartialRetained { resource_id, .. } => {
                             *id.lock().expect("id lock") = Some(resource_id);

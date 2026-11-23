@@ -40,6 +40,8 @@ impl<W: Send + 'static> Future for LocalAbortCleanupWait<W> {
     fn poll(self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<Self::Output> {
         let result = { self.0.result.lock().unwrap_or_else(|error| error.into_inner()).take() };
         if let Some(result) = result {
+            let old_waker = self.0.waker.lock().unwrap_or_else(|error| error.into_inner()).take();
+            super::super::temp::safe_drop_waker(old_waker);
             return Poll::Ready(result);
         }
         let Some(new_waker) = super::super::temp::safe_clone_waker(context.waker()) else {
@@ -63,7 +65,11 @@ impl<W: Send + 'static> Future for LocalAbortCleanupWait<W> {
         super::super::temp::safe_drop_waker(old_waker);
         let result = { self.0.result.lock().unwrap_or_else(|error| error.into_inner()).take() };
         match result {
-            Some(result) => Poll::Ready(result),
+            Some(result) => {
+                let old_waker = self.0.waker.lock().unwrap_or_else(|error| error.into_inner()).take();
+                super::super::temp::safe_drop_waker(old_waker);
+                Poll::Ready(result)
+            }
             None => Poll::Pending,
         }
     }

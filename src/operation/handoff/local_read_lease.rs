@@ -18,7 +18,9 @@ use super::command_error;
 use super::enqueue_resource_command;
 
 /// A clonable lease. Each clone keeps the same single registered resource
-/// alive.
+/// alive. Repeated exported handles are native file clones that share the
+/// open file's cursor; callers account for each extra descriptor and keep one
+/// lease alive for every user for the full duration of access.
 #[derive(Clone)]
 pub struct LocalReadLease {
     /// Shared identity and export policy for the registered native file.

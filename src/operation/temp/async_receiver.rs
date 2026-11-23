@@ -35,17 +35,25 @@ impl<T> Future for AsyncReceiver<T> {
     /// * `self` — pinned receiver future that owns the completion cell.
     /// * `cx` — task context used to register a wakeup.
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<T> {
-        if let Some(value) = self.0.value.lock().unwrap_or_else(|e| e.into_inner()).take() {
+        let value = self.0.value.lock().unwrap_or_else(|e| e.into_inner()).take();
+        if let Some(value) = value {
+            let old_waker = self.0.waker.lock().unwrap_or_else(|e| e.into_inner()).take();
+            safe_drop_waker(old_waker);
             return Poll::Ready(value);
         }
         let Some(new_waker) = safe_clone_waker(cx.waker()) else {
-            return self
+            let value = self
                 .0
                 .value
                 .lock()
                 .unwrap_or_else(|e| e.into_inner())
-                .take()
-                .map_or(Poll::Pending, Poll::Ready);
+                .take();
+            if let Some(value) = value {
+                let old_waker = self.0.waker.lock().unwrap_or_else(|e| e.into_inner()).take();
+                safe_drop_waker(old_waker);
+                return Poll::Ready(value);
+            }
+            return Poll::Pending;
         };
         let old_waker = self
             .0
@@ -55,6 +63,8 @@ impl<T> Future for AsyncReceiver<T> {
             .replace(new_waker);
         safe_drop_waker(old_waker);
         if let Some(value) = self.0.value.lock().unwrap_or_else(|e| e.into_inner()).take() {
+            let old_waker = self.0.waker.lock().unwrap_or_else(|e| e.into_inner()).take();
+            safe_drop_waker(old_waker);
             Poll::Ready(value)
         } else {
             Poll::Pending
@@ -118,11 +128,34 @@ mod tests {
         panic!("waker drop failed");
     }
 
+    struct DropCount(Arc<AtomicUsize>);
+
+    unsafe fn clone_counted_waker(data: *const ()) -> std::task::RawWaker {
+        // SAFETY: the Arc allocation stays alive until all cloned raw wakers drop.
+        let count = unsafe { Arc::<DropCount>::from_raw(data.cast()) };
+        let cloned = Arc::clone(&count);
+        std::mem::forget(count);
+        std::task::RawWaker::new(Arc::into_raw(cloned).cast(), &COUNTED_DROP_VTABLE)
+    }
+
+    unsafe fn drop_counted_waker(data: *const ()) {
+        // SAFETY: every raw waker owns one Arc strong reference.
+        let count = unsafe { Arc::<DropCount>::from_raw(data.cast()) };
+        count.0.fetch_add(1, Ordering::SeqCst);
+    }
+
+    const COUNTED_DROP_VTABLE: std::task::RawWakerVTable = std::task::RawWakerVTable::new(
+        clone_counted_waker,
+        |_| {},
+        |_| {},
+        drop_counted_waker,
+    );
+
     const PANIC_CLONE_VTABLE: std::task::RawWakerVTable =
         std::task::RawWakerVTable::new(panic_on_clone, |_| {}, |_| {}, drop_raw_waker);
 
     const PANIC_DROP_VTABLE: std::task::RawWakerVTable =
-        std::task::RawWakerVTable::new(clone_waker_with_panicking_drop, |_| {}, panic_on_drop, |_| {});
+        std::task::RawWakerVTable::new(clone_waker_with_panicking_drop, |_| {}, |_| {}, panic_on_drop);
 
     fn panic_clone_waker() -> Waker {
         // SAFETY: the callbacks never access or drop the null data pointer.
@@ -152,6 +185,24 @@ mod tests {
             std::pin::Pin::new(&mut receiver).poll(&mut context),
             std::task::Poll::Ready(31)
         ));
+    }
+
+    #[test]
+    fn test_receiver_drops_registered_waker_when_ready_without_sender_notification() {
+        let (_sender, mut receiver) = async_result::<u8>();
+        let drops = Arc::new(AtomicUsize::new(0));
+        let raw = Arc::into_raw(Arc::new(DropCount(Arc::clone(&drops))));
+        // SAFETY: the raw waker owns the Arc reference transferred above.
+        let waker = unsafe { Waker::from_raw(std::task::RawWaker::new(raw.cast(), &COUNTED_DROP_VTABLE)) };
+        let mut context = std::task::Context::from_waker(&waker);
+        assert!(std::pin::Pin::new(&mut receiver).poll(&mut context).is_pending());
+
+        *receiver.0.value.lock().unwrap() = Some(41);
+        assert!(matches!(
+            std::pin::Pin::new(&mut receiver).poll(&mut context),
+            std::task::Poll::Ready(41)
+        ));
+        assert_eq!(1, drops.load(Ordering::SeqCst));
     }
 
     #[test]

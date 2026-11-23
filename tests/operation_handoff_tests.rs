@@ -116,6 +116,56 @@ fn slice_input(bytes: &[u8]) -> (SliceInput, Arc<AtomicUsize>) {
 }
 
 #[test]
+fn test_external_manager_view_accepts_byte_and_stream_stages_after_group_drain() {
+    let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+    let executor = LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).unwrap();
+    let report = executor
+        .request_shutdown(qubit_operation::ShutdownMode::Drain)
+        .wait()
+        .unwrap();
+    assert_eq!(report.snapshot.active_operations, 0);
+    let filesystem = LocalFileSystem::host().unwrap();
+    let async_manager = manager.as_async();
+
+    let mut bytes = stage_bytes(
+        filesystem.clone(),
+        executor.clone(),
+        &async_manager,
+        OperationOptions::default(),
+        b"after drain".to_vec(),
+        LocalStageOptions::default(),
+    )
+    .expect("external manager view accepts byte stage");
+    let lease = match block_on(bytes.wait_outcome()).unwrap() {
+        OperationOutcome::Succeeded(lease) => lease,
+        _ => panic!("byte stage should succeed"),
+    };
+    drop(lease);
+    let settlement = block_on(bytes.wait_settlement());
+    assert_eq!(settlement.recovery_count, 0);
+    assert!(settlement.cleanup_failures.is_empty());
+
+    let (input, _) = slice_input(b"stream after drain");
+    let mut stream = stage_stream(
+        filesystem,
+        executor,
+        &async_manager,
+        OperationOptions::default(),
+        input,
+        LocalStageOptions::default(),
+    )
+    .expect("external manager view accepts stream stage");
+    let lease = match block_on(stream.wait_outcome()).unwrap() {
+        OperationOutcome::Succeeded(lease) => lease,
+        _ => panic!("stream stage should succeed"),
+    };
+    drop(lease);
+    let settlement = block_on(stream.wait_settlement());
+    assert_eq!(settlement.recovery_count, 0);
+    assert!(settlement.cleanup_failures.is_empty());
+}
+
+#[test]
 fn test_stage_bytes_rejects_over_limit_and_returns_the_original_vec_before_admission() {
     let manager = OperationManager::new(ManagerOptions::default()).unwrap();
     let executor = LocalIoExecutor::new(
