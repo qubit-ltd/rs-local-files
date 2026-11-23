@@ -1895,12 +1895,18 @@ The adapter must map `CopyMode::File` to `LocalCopySourceMode::Entry`,
 `Tree` to `Tree`, and `Auto` to `Auto`. A resolved `Auto` request must overwrite
 an entry/tree mode in native defaults while preserving independent budgets.
 
-`LocalStagedDirectory::publish_new()` performs only its identity checks and
-publication checks by default; it does not recursively scan the staged tree.
-When `LocalTreePublishOptions` includes validation, the shared verifier checks
-the complete tree before mutation. `verify_entries()` compares the observed
-entry set with the supplied expected set exactly. Expected paths must be unique
-or verification returns `InvalidOptions`; path bytes are charged before the
+With default publication options (no validation, `file_sync = NotRequired`,
+preserved access, and no owner policy), `LocalStagedDirectory::publish_new()`
+performs identity and publication checks without recursively scanning the
+staged tree. Validation scans the complete tree before mutation. A requested
+`Preferred` or `Required` file sync traverses regular files under the selected
+limits; `NotRequired` skips that pass. `sync_tree_with_options()` is a separate
+full-tree traversal. Access changes also traverse affected entries; exact owner
+policy retains at most 256 child identities and management handles by default,
+with `max_entries` replacing that bound. `verify_entries()` compares the
+observed entry set with the supplied expected set exactly, independent of
+order. Both sets must have unique paths or verification returns
+`InvalidOptions`; path bytes are charged before the
 borrowed-reference index is built, and traversal/indexing share the selected
 entry, depth, byte, open-directory, and deadline limits. The byte budget counts
 logical path bytes; it is not a process-wide heap limit for hash buckets or
@@ -2293,13 +2299,17 @@ evidence.
 
 ## 30. Staged Tree Synchronization and Publication
 
-`sync_tree_with_options()` captures one `Instant` at its public entry and uses
-the resulting deadline across file synchronization, recursive observation,
+`sync_tree_with_options()` always traverses the complete stage and captures
+one `Instant` at its public entry. It uses the resulting deadline across file synchronization, recursive observation,
 directory synchronization, the stage root, and the creating parent. Internal
 stages must not restart the budget. The deadline is cooperative and cannot
 cancel an operating-system call already in progress. A timeout prevents later
-sync operations but does not undo completed synchronization. `NotRequired`
-file synchronization does not traverse the tree.
+sync operations but does not undo completed synchronization. The publication
+option `file_sync = NotRequired` skips the file-sync walk; `Preferred` and
+`Required` traverse regular files under the selected limits. A finite depth
+limit that would omit an entry is an error rather than a partial sync. Pending
+path-byte limits count encoded paths retained for traversal, not allocator
+overhead.
 
 Successful tree synchronization orders regular files first, then child
 directories deepest-first, then the stage root and creating parent. Entry and

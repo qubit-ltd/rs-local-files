@@ -630,17 +630,22 @@ fn inspect_access(root: &std::path::Path) -> Result<(), Box<dyn std::error::Erro
 
 创建 stage 时会记录新目录的 identity，并在接管前再次核对。Linux/Unix 竞态测试确认：若创建期间随机名称被替换，操作会拒绝接管替换目录。若其他参与者仍能修改父目录，后续按名称操作依然可能发生竞态。
 
-`verify_entries()` 会把观测到的条目与 expected 集合精确比较；expected 集合应包含链接条目本身，
-不要把通过 alias 可见的后代也加入集合。重复 expected path 返回 `InvalidOptions`。设置有限深度时，
+`verify_entries()` 会把观测到的条目与配置的 exact set 精确比较；两边都必须路径唯一，且按路径和条目类型
+比较，不受顺序影响。expected 集合应包含链接条目本身，不要把通过 alias 可见的后代也加入集合。重复路径返回
+`InvalidOptions`。设置有限深度时，
 验证仍覆盖整棵树；发现超出深度的条目会报错，不会静默截断。expected path 字节在建立索引前计入预算，
 验证与遍历共同受条目数、深度、路径字节、打开目录数和 deadline 限制。特殊条目默认允许，只有显式
-启用拒绝规则才会失败。观测能发现已访问条目的变化，但不构成原子快照。发布未附带验证选项时不会递归扫描。
+启用拒绝规则才会失败。观测能发现已访问条目的变化，但不构成原子快照。
+`publish_new()` 只有在默认设置下（无验证、`file_sync = NotRequired`、保留访问策略且不配置 owner policy）才不会递归扫描。
+配置验证会遍历完整树；`file_sync` 设为 `Preferred` 或 `Required` 时会按所选限制遍历普通文件，`NotRequired` 跳过此阶段。
+`sync_tree_with_options()` 会单独遍历完整目录树，同步文件、目录、stage 根目录和创建它的 parent。访问策略也会遍历待修改条目；
+精确 owner policy 默认最多固定 256 个子项身份和管理句柄，`max_entries` 会替换该上限。
 迁移时，精确 expected 集合只列实际条目（链接本身也算一个条目），不要列出通过链接 alias 才能到达的后代。
 正确使用普通文件 reader 和临时资源的代码无需调整，也不需要新增树验证选项。
 
 ### 完整树同步后再耐久发布
 
-先完成 stage 写入和最终权限设置，再执行同步。`sync_tree_with_options` 依次同步普通文件、从深到浅的子目录、stage 根目录和创建它的 parent。期限采用协作式检查：每个操作间会检查期限，但无法取消已经进入阻塞状态的内核调用。遍历会逐步观察条目，不构成抵抗并发修改的原子快照。
+先完成 stage 写入和最终权限设置，再执行同步。`sync_tree_with_options` 依次同步普通文件、从深到浅的子目录、stage 根目录和创建它的 parent。传入的 `LocalListOptions` 会限制条目数、深度、待处理路径字节、打开目录数和 deadline；深度上限若会漏掉任何后代就会失败，不会以部分同步成功返回。待处理路径预算只计算遍历队列保留的编码路径，不包括分配器开销。期限采用协作式检查：每个操作间会检查期限，但无法取消已经进入阻塞状态的内核调用。遍历会逐步观察条目，不构成抵抗并发修改的原子快照。
 
 树同步成功后，发布前不要再修改文件内容、名称或权限。任何此类修改都需要重新同步受影响的文件或目录。下面的 Unix 示例在独立临时目录中创建备份、同步整棵树，然后请求以耐久 rename 发布：
 
@@ -1667,9 +1672,12 @@ macOS 上尚未实现精确 Unix owner-access ACL 验证，因此需要该验证
 `Unsupported`。单独设置 mode bits 不表示扩展 ACL 已排除其他身份；库不声称在未经验证的 Darwin ACL
 上实现了 `CurrentUserOnly`。
 
-已审查基线的原生 Windows CI 验证了 DACL 转换，并确认恢复当前用户 ACL 不会清除
-`FILE_ATTRIBUTE_READONLY`；保留该属性的文件仍可能不可写。基线运行未覆盖在策略转换前就已设置该属性的对象；
-新增回归仍需在原生 Windows 上运行。详见 [RLF5 Windows 访问证据](review-rlf5-windows-access-evidence.md)。
+仓库记录的 Windows Server 2025 NTFS 原生测试在 revision
+[`5291d57ab1889b80559283610d0bb5f9f671d279`](https://github.com/qubit-ltd/rs-local-files/commit/5291d57ab1889b80559283610d0bb5f9f671d279)
+上验证了 DACL、只读属性、owner policy、部分修改后的 stage 恢复和显式清理；这些指定测试在默认与
+`--all-features` 两种配置下均通过。记录确认恢复当前用户 ACL 不会清除 `FILE_ATTRIBUTE_READONLY`，
+因此保留该属性的文件仍可能不可写。这是该历史 revision 的指定测试证据，不能证明当前 revision 或所有 Windows 场景。
+详见 [RLF5 Windows 访问证据](review-rlf5-windows-access-evidence.md)，其中列出测试名和 workflow 结果。
 
 ### 恢复只读暂存树
 
@@ -1826,7 +1834,7 @@ Unix 上，默认 feature 与 `test-support` 构建中的 `LocalFileReader::read
 文件描述符的原生向量读取路径。Windows 继续使用平台所需的顺序读取回退；如果后续 buffer
 读取失败，回退实现会返回已经累计读取的字节数，保持 `Read` 的进度语义。
 
-Rooted metadata 等操作对不含链接的普通路径使用私有的一次顺序目录 cursor。路径包含链接、
+Rooted metadata 等操作对不含链接的普通路径使用一个私有的解析 cursor。路径包含链接、
 缺失组件或原生错误时，会回到既有完整解析器，以保持链接策略和 authority 检查。该实现细节
 不改变调用方可依赖的路径与错误契约。
 

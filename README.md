@@ -157,18 +157,28 @@ namespace requirement through `durability`; `Required` does not mean that
 arbitrary existing tree contents were synchronized. Tree publication preserves
 legal links by default, applies only
 explicitly requested validation rules, and reports mutation separately from
-publication. A tree recovery location stores a namespace path and optional
+publication. With default publication options (`file_sync = NotRequired`, access
+preserved, and no validation or owner policy), publication checks identities
+and installs the stage without recursively scanning it. Exact validation scans the complete tree
+under its selected entry, depth, path-byte, open-directory, and deadline
+budgets; it fails rather than truncating at a finite depth. Supplied and
+observed paths must be unique, and the sets must match by path and kind
+regardless of order. `file_sync = Preferred` or `Required` walks regular files
+under the selected limits; `NotRequired` skips that pass.
+`sync_tree_with_options` is a separate full-tree synchronization traversal. A
+non-empty tree using an owner access policy is also traversed before mutation; without `max_entries`, that check
+retains at most 256 child identities and management handles, while an explicit
+limit replaces that default. A tree recovery location stores a namespace path and optional
 opaque identity, not an authority; reopen through the same parent and verify
 identity before acting. This differs from digest conditional-write recovery
 files, which remain caller-owned and are not automatically deleted. Windows
 Rooted `Content` and Host `Content` with `UseStaging` return `Unsupported` while
 opening the writer, before path resolution or staging/parent side effects; Host
-`Content` with `PreserveExisting` and valid `Absent` remain supported. Exact
-tree validation requires unique expected paths, completes within its configured
-budgets instead of truncating at finite depth, and observes links as entries
-without following or expanding aliases. Special entries are allowed unless
-explicitly rejected. Publishing without validation options does not recursively
-scan the stage.
+`Content` with `PreserveExisting` and valid `Absent` remain supported. Tree
+validation observes links as entries without following or expanding aliases.
+Special entries are allowed unless explicitly rejected. Only default
+publication settings avoid recursive scans; validation, requested file
+synchronization, and access changes traverse the entries they need to inspect.
 
 Readers and writers accept regular files only; directories and special files
 are rejected instead of being opened as byte streams.
@@ -343,13 +353,12 @@ CI runs behavioral tests on Linux, Windows, and macOS; consult the matching CI
 results for validation of a particular change. FreeBSD is temporarily
 unsupported: its current native checks cover compilation and selected
 compatibility contracts, not the complete behavioral suite. See the detailed
-[FreeBSD compatibility status](doc/freebsd-compatibility.md). Android has a
-Linux-hosted `armv7-linux-androideabi` compile check. Where a native Android
-shell and writable temporary directory are available, CI can also run selected
-structured-error and reader-I/O tests; those checks do not establish general
-Android protocol support. Linux ARMv7 is compile-checked, and the native Android
-suite remains limited to those configured cases when the required shell and
-writable temporary directory are available. Windows staging and sealed cleanup have native
+[FreeBSD compatibility status](doc/freebsd-compatibility.md). On Linux, CI
+cross-compiles Android `armv7-linux-androideabi`; this does not run Android
+code. A separate, limited Android-native suite runs only when a native shell
+and writable temporary directory are available. This split is configured in
+The distinction is configured in `.infra/platform/platform.toml` and
+`.github/workflows/ci.yml`. Windows staging and sealed cleanup have native
 Windows Server 2025 NTFS results recorded at
 [`251e103bd9c60bf749e60453e688cf9ac4bde6f2`](https://github.com/qubit-ltd/rs-local-files/commit/251e103bd9c60bf749e60453e688cf9ac4bde6f2): three staging tests passed in both default and `--all-features` configurations, and selected sealed-cleanup tests passed 7/7 (default) and 11/11 (`--all-features`). This is historical coverage for that revision and those tests; native coverage at implementation baseline `c5639417080648da263216f698893c3a6c3c7f2d` is not established. Other Windows-specific conditional-open and private-resource cases also remain outside that result. See the [Windows staging and cleanup evidence](doc/review-rlf4-windows-staging-cleanup-evidence.md) and [independent Windows enumeration evidence](doc/review-rlf3-windows-evidence.md) for scope and limits. The Windows jobs passed in the cited run, while the overall workflow failed its coverage threshold. This crate's CI validates this crate only;
 adapter compatibility belongs to the adapter repository or a separate
@@ -414,6 +423,9 @@ cargo test --all-features
 # Create a local coverage report with revision and run provenance
 ./scripts/run-coverage-with-provenance.sh
 ```
+
+Run `.infra` and `scripts` commands from a source checkout; those directories
+are not part of the published crate package.
 
 The wrapper checks project inputs at the start and end of collection and fails if
 their observed state changes. This is not an immutable build snapshot; transient
