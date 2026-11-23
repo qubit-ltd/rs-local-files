@@ -16,10 +16,10 @@ use qubit_operation::CleanupContext;
 use qubit_operation::CleanupFuture;
 use qubit_operation::CleanupOutcome;
 
-use super::CleanupState;
-use super::CleanupWait;
 #[cfg(test)]
 use super::CleanupPanicObservation;
+use super::CleanupState;
+use super::CleanupWait;
 use super::cleanup_failure;
 use super::cleanup_resource;
 use super::publish_cleanup_result;
@@ -37,23 +37,39 @@ pub struct LocalCleanup {
     pub(in crate::operation) executor: LocalIoExecutor,
     /// One-shot panic injection attached to this cleanup policy instance.
     #[cfg(test)]
-    panic_after_owner_take: Mutex<Option<SyncSender<CleanupPanicObservation>>>,
+    pub(super) panic_after_owner_take: Mutex<Option<SyncSender<CleanupPanicObservation>>>,
+    /// Poisons worker state locks once to exercise recovery paths.
+    #[cfg(test)]
+    pub(super) poison_state_locks: Mutex<bool>,
 }
 
 impl LocalCleanup {
     /// Creates a cleanup policy for the supplied executor.
+    ///
+    /// # Parameters
+    ///
+    /// * `executor` — executor that owns the cleanup worker and queue.
     pub(crate) fn new(executor: LocalIoExecutor) -> Self {
         Self {
             executor,
             #[cfg(test)]
             panic_after_owner_take: Mutex::new(None),
+            #[cfg(test)]
+            poison_state_locks: Mutex::new(false),
         }
     }
 
     /// Arms one synthetic panic after this instance removes its owner.
+    ///
+    /// # Parameters
+    ///
+    /// * `sender` — receives observations from the injected panic path.
     #[cfg(test)]
     pub(super) fn inject_panic_after_owner_take(&self, sender: SyncSender<CleanupPanicObservation>) {
-        *self.panic_after_owner_take.lock().unwrap_or_else(|error| error.into_inner()) = Some(sender);
+        *self
+            .panic_after_owner_take
+            .lock()
+            .unwrap_or_else(|error| error.into_inner()) = Some(sender);
     }
 }
 
@@ -85,6 +101,18 @@ impl AsyncCleanup<LocalTempResource> for LocalCleanup {
             waker: Mutex::new(None),
             owner: Mutex::new(Some(resource)),
         });
+        #[cfg(test)]
+        if std::mem::take(
+            &mut *self
+                .poison_state_locks
+                .lock()
+                .unwrap_or_else(|error| error.into_inner()),
+        ) {
+            crate::operation::poison_test_mutex(&state.result);
+            crate::operation::poison_test_mutex(&state.pending_result);
+            crate::operation::poison_test_mutex(&state.waker);
+            crate::operation::poison_test_mutex(&state.owner);
+        }
         #[cfg(test)]
         let panic_after_owner_take = self
             .panic_after_owner_take

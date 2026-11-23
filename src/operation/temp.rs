@@ -492,10 +492,7 @@ mod tests {
                 );
                 let id_slot = Arc::clone(&owner.id);
                 let reference = reservation
-                    .commit_with(
-                        owner,
-                        LocalCleanup::new(executor.clone()),
-                    )
+                    .commit_with(owner, LocalCleanup::new(executor.clone()))
                     .expect("managed temp resource");
                 *id_slot.lock().unwrap_or_else(|e| e.into_inner()) = Some(reference.id());
                 let original = LocalTempFileAccess { resource: reference };
@@ -667,10 +664,7 @@ mod tests {
                 );
                 let id_slot = Arc::clone(&owner.id);
                 let reference = reservation
-                    .commit_with(
-                        owner,
-                        LocalCleanup::new(executor.clone()),
-                    )
+                    .commit_with(owner, LocalCleanup::new(executor.clone()))
                     .expect("managed temp resource");
                 #[cfg(panic = "unwind")]
                 crate::operation::poison_test_mutex(&id_slot);
@@ -816,10 +810,7 @@ mod tests {
                 );
                 let id_slot = Arc::clone(&owner.id);
                 let reference = reservation
-                    .commit_with(
-                        owner,
-                        LocalCleanup::new(executor.clone()),
-                    )
+                    .commit_with(owner, LocalCleanup::new(executor.clone()))
                     .expect("managed temp resource");
                 *id_slot.lock().unwrap_or_else(|e| e.into_inner()) = Some(reference.id());
                 let access = LocalTempFileAccess { resource: reference };
@@ -872,10 +863,7 @@ mod tests {
                 );
                 let id_slot = Arc::clone(&owner.id);
                 let reference = reservation
-                    .commit_with(
-                        owner,
-                        LocalCleanup::new(executor.clone()),
-                    )
+                    .commit_with(owner, LocalCleanup::new(executor.clone()))
                     .expect("managed temp resource");
                 *id_slot.lock().unwrap_or_else(|e| e.into_inner()) = Some(reference.id());
                 let access = LocalTempFileAccess { resource: reference };
@@ -937,10 +925,7 @@ mod tests {
                 );
                 let id_slot = Arc::clone(&owner.id);
                 let reference = reservation
-                    .commit_with(
-                        owner,
-                        LocalCleanup::new(executor.clone()),
-                    )
+                    .commit_with(owner, LocalCleanup::new(executor.clone()))
                     .expect("managed temp resource");
                 *id_slot.lock().unwrap_or_else(|e| e.into_inner()) = Some(reference.id());
                 let access = LocalTempFileAccess { resource: reference };
@@ -1034,10 +1019,7 @@ mod tests {
                 );
                 let id_slot = Arc::clone(&owner.id);
                 let reference = reservation
-                    .commit_with(
-                        owner,
-                        LocalCleanup::new(executor.clone()),
-                    )
+                    .commit_with(owner, LocalCleanup::new(executor.clone()))
                     .expect("managed temp resource");
                 *id_slot.lock().unwrap_or_else(|e| e.into_inner()) = Some(reference.id());
                 let access = LocalTempFileAccess { resource: reference };
@@ -1122,10 +1104,7 @@ mod tests {
                 );
                 let id_slot = Arc::clone(&owner.id);
                 let reference = reservation
-                    .commit_with(
-                        owner,
-                        LocalCleanup::new(executor.clone()),
-                    )
+                    .commit_with(owner, LocalCleanup::new(executor.clone()))
                     .expect("managed temp resource");
                 *id_slot.lock().unwrap_or_else(|e| e.into_inner()) = Some(reference.id());
                 let access = LocalTempFileAccess { resource: reference };
@@ -1240,10 +1219,7 @@ mod tests {
                 );
                 let id_slot = Arc::clone(&owner.id);
                 let reference = reservation
-                    .commit_with(
-                        owner,
-                        LocalCleanup::new(executor.clone()),
-                    )
+                    .commit_with(owner, LocalCleanup::new(executor.clone()))
                     .expect("managed temp resource");
                 *id_slot.lock().unwrap_or_else(|e| e.into_inner()) = Some(reference.id());
                 let access = LocalTempFileAccess { resource: reference };

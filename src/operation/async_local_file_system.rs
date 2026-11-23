@@ -1816,6 +1816,16 @@ mod tests {
         }
         assert!(drops.load(Ordering::SeqCst) >= 3, "worker wake payload was disposed");
 
+        let (error_started_tx, error_started_rx) = mpsc::channel();
+        let (error_release_tx, error_release_rx) = mpsc::channel();
+        executor
+            .enqueue_task(move || {
+                error_started_tx.send(()).unwrap();
+                error_release_rx.recv().unwrap();
+            })
+            .unwrap();
+        error_started_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+
         let (error_wake_tx, error_wake_rx) = mpsc::channel();
         let error_waker = make_waker(error_wake_tx, Arc::clone(&drops));
         let mut error_context = Context::from_waker(&error_waker);
@@ -1826,6 +1836,7 @@ mod tests {
             ))
         }));
         assert!(matches!(error_future.as_mut().poll(&mut error_context), Poll::Pending));
+        error_release_tx.send(()).unwrap();
         error_wake_rx
             .recv_timeout(Duration::from_secs(5))
             .expect("worker notified the error waiter");

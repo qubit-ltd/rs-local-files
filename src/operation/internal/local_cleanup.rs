@@ -285,6 +285,28 @@ mod tests {
         Waker::from(Arc::new(ThreadWake(std::thread::current())))
     }
 
+    #[test]
+    fn test_hostile_and_thread_waker_test_helpers_cover_wake_paths() {
+        let thread_wake = Arc::new(ThreadWake(std::thread::current()));
+        std::task::Wake::wake_by_ref(&thread_wake);
+
+        let (entered_tx, entered_rx) = std::sync::mpsc::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        release_tx.send(()).expect("release is ready before the wake");
+        let blocking_wake = Arc::new(BlockingWake {
+            entered: entered_tx,
+            release: Mutex::new(release_rx),
+        });
+        std::task::Wake::wake_by_ref(&blocking_wake);
+        entered_rx.recv().expect("by-reference wake is observed");
+
+        let panic_waker = unsafe { Waker::from_raw(RawWaker::new(std::ptr::null(), &WAKE_PANIC_VTABLE)) };
+        let cloned_panic_waker = panic_waker.clone();
+        assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| cloned_panic_waker.wake_by_ref())).is_err());
+
+        safe_wake(Waker::from(Arc::new(DropPanics)));
+    }
+
     fn block_on<F: Future>(future: F) -> F::Output {
         let wake_count = Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let waker = Waker::from(Arc::new(CountingWake(Arc::clone(&wake_count))));
@@ -489,6 +511,77 @@ mod tests {
     }
 
     #[test]
+    fn test_dropping_pending_cleanup_wait_does_not_cancel_worker_cleanup() {
+        let parent = tempfile::tempdir().expect("temp parent");
+        let manager = OperationManager::new(ManagerOptions::default()).expect("manager");
+        let executor = LocalIoExecutor::new(
+            manager.clone(),
+            LocalExecutionConfig {
+                worker_count: 1,
+                ..LocalExecutionConfig::default()
+            },
+        )
+        .expect("executor");
+        let cleanup = Arc::new(LocalCleanup::new(executor.clone()));
+        let (gate_started_tx, gate_started_rx) = std::sync::mpsc::channel();
+        let (gate_release_tx, gate_release_rx) = std::sync::mpsc::channel();
+        assert!(
+            executor
+                .inner
+                .queue
+                .push(
+                    Box::new(move || {
+                        gate_started_tx.send(()).expect("gate receiver remains open");
+                        gate_release_rx.recv().expect("test releases worker gate");
+                    }),
+                    false,
+                    1,
+                )
+                .is_ok()
+        );
+        gate_started_rx.recv().expect("worker reaches the gate");
+
+        let owner = test_owner(&manager, &executor, parent.path());
+        let path = {
+            let native = owner.native.lock().expect("native lock");
+            let Some(LocalTempNative::File(file)) = native.as_ref() else {
+                panic!("test owner should contain a temporary file");
+            };
+            file.path().to_path_buf()
+        };
+        let context = CleanupContext::new(qubit_operation::ContextOptions::default()).expect("cleanup context");
+        let mut wait = Box::pin(Arc::clone(&cleanup).cleanup(owner, context));
+        let waker = plain_waker();
+        let mut task_context = Context::from_waker(&waker);
+        assert!(matches!(wait.as_mut().poll(&mut task_context), Poll::Pending));
+        drop(wait);
+
+        let (following_tx, following_rx) = std::sync::mpsc::channel();
+        assert!(
+            executor
+                .inner
+                .queue
+                .push(
+                    Box::new(move || {
+                        following_tx.send(()).expect("test observes following worker task");
+                    }),
+                    false,
+                    1,
+                )
+                .is_ok()
+        );
+        gate_release_tx.send(()).expect("release worker gate");
+        following_rx
+            .recv_timeout(std::time::Duration::from_secs(2))
+            .expect("worker continues after detached cleanup wait");
+        assert!(!path.exists(), "detaching the wait does not cancel native cleanup");
+        assert!(
+            executor.reserve_cleanup().is_some(),
+            "cleanup permit returns after completion"
+        );
+    }
+
+    #[test]
     fn test_local_cleanup_panic_after_owner_take_leaves_settlement_pending_and_worker_continues() {
         let parent = tempfile::tempdir().expect("temp parent");
         let manager = OperationManager::new(ManagerOptions::default()).expect("manager");
@@ -504,16 +597,22 @@ mod tests {
 
         let (gate_started_tx, gate_started_rx) = std::sync::mpsc::channel();
         let (gate_release_tx, gate_release_rx) = std::sync::mpsc::channel();
-        assert!(executor.inner.queue.push(
-            Box::new(move || {
-                gate_started_tx.send(()).expect("gate receiver remains open");
-                gate_release_rx
-                    .recv_timeout(std::time::Duration::from_secs(2))
-                    .expect("test releases the worker gate");
-            }),
-            false,
-            1,
-        ).is_ok());
+        assert!(
+            executor
+                .inner
+                .queue
+                .push(
+                    Box::new(move || {
+                        gate_started_tx.send(()).expect("gate receiver remains open");
+                        gate_release_rx
+                            .recv_timeout(std::time::Duration::from_secs(2))
+                            .expect("test releases the worker gate");
+                    }),
+                    false,
+                    1,
+                )
+                .is_ok()
+        );
         gate_started_rx
             .recv_timeout(std::time::Duration::from_secs(2))
             .expect("worker reaches the gate");
@@ -522,29 +621,34 @@ mod tests {
         let (body_done_tx, body_done_rx) = std::sync::mpsc::channel();
         let parent_path = parent.path().to_path_buf();
         let body_executor = executor.clone();
-        let mut operation = match block_on(manager.as_async().submit(OperationOptions::default(), move |scope| async move {
-            let reservation = scope.reserve_resource().expect("resource reservation");
-            let file = LocalFileSystem::host()
-                .expect("filesystem")
-                .create_temp_file_with_options(&LocalTempFileOptions::new().with_parent(&parent_path))
-                .expect("native temp file");
-            let owner = LocalTempResource::new(
-                LocalTempNative::File(file),
-                body_executor.reserve_disk(1).expect("disk permit"),
-                body_executor.reserve_handle().expect("handle permit"),
-                body_executor.reserve_cleanup().expect("cleanup permit"),
-            );
-            let id_slot = Arc::clone(&owner.id);
-            let cleanup = LocalCleanup::new(body_executor.clone());
-            cleanup.inject_panic_after_owner_take(observation_tx);
-            let reference = reservation
-                .commit_with(owner, cleanup)
-                .expect("managed temporary resource");
-            *id_slot.lock().unwrap_or_else(|error| error.into_inner()) = Some(reference.id());
-            drop(reference);
-            body_done_tx.send(()).expect("test observes body completion");
-            Ok::<(), ()>(())
-        })) {
+        let mut operation = match block_on(manager.as_async().submit(
+            OperationOptions::default(),
+            move |scope| async move {
+                let reservation = scope.reserve_resource().expect("resource reservation");
+                let file = LocalFileSystem::host()
+                    .expect("filesystem")
+                    .create_temp_file_with_options(&LocalTempFileOptions::new().with_parent(&parent_path))
+                    .expect("native temp file");
+                let owner = LocalTempResource::new(
+                    LocalTempNative::File(file),
+                    body_executor.reserve_disk(1).expect("disk permit"),
+                    body_executor.reserve_handle().expect("handle permit"),
+                    body_executor.reserve_cleanup().expect("cleanup permit"),
+                );
+                let id_slot = Arc::clone(&owner.id);
+                let cleanup = LocalCleanup::new(body_executor.clone());
+                #[cfg(panic = "unwind")]
+                crate::operation::poison_test_mutex(&cleanup.panic_after_owner_take);
+                cleanup.inject_panic_after_owner_take(observation_tx);
+                let reference = reservation
+                    .commit_with(owner, cleanup)
+                    .expect("managed temporary resource");
+                *id_slot.lock().unwrap_or_else(|error| error.into_inner()) = Some(reference.id());
+                drop(reference);
+                body_done_tx.send(()).expect("test observes body completion");
+                Ok::<(), ()>(())
+            },
+        )) {
             Ok(operation) => operation,
             Err(_) => panic!("operation submission succeeds"),
         };
@@ -565,18 +669,24 @@ mod tests {
 
         let (following_tx, following_rx) = std::sync::mpsc::channel();
         let following_executor = executor.clone();
-        assert!(executor.inner.queue.push(
-            Box::new(move || {
-                let permit = following_executor.reserve_cleanup();
-                let permit_returned = permit.is_some();
-                drop(permit);
-                following_tx
-                    .send(permit_returned)
-                    .expect("test observes following task");
-            }),
-            false,
-            1,
-        ).is_ok());
+        assert!(
+            executor
+                .inner
+                .queue
+                .push(
+                    Box::new(move || {
+                        let permit = following_executor.reserve_cleanup();
+                        let permit_returned = permit.is_some();
+                        drop(permit);
+                        following_tx
+                            .send(permit_returned)
+                            .expect("test observes following task");
+                    }),
+                    false,
+                    1,
+                )
+                .is_ok()
+        );
         gate_release_tx.send(()).expect("release worker gate");
 
         let observation = observation_rx
@@ -932,7 +1042,8 @@ mod tests {
         let context = || CleanupContext::new(qubit_operation::ContextOptions::default()).expect("cleanup context");
 
         let owner = test_owner(&manager, &executor, parent.path());
-        let outcome = block_on(Arc::clone(&cleanup).cleanup(owner, context()));
+        let cleanup_future = Arc::clone(&cleanup).cleanup(owner, context());
+        let outcome = block_on(cleanup_future);
         assert!(matches!(outcome, CleanupOutcome::Released));
         assert_eq!(0, std::fs::read_dir(parent.path()).unwrap().count());
 
@@ -975,7 +1086,8 @@ mod tests {
         // the caller so it can diagnose or recover the still-existing file.
         executor.inner.queue.stop();
         let context = CleanupContext::new(qubit_operation::ContextOptions::default()).expect("cleanup context");
-        let outcome = block_on(cleanup.cleanup(owner, context));
+        let cleanup_future = cleanup.cleanup(owner, context);
+        let outcome = block_on(cleanup_future);
         let CleanupOutcome::Failed { failure, resource } = outcome else {
             panic!("rejected cleanup enqueue should return the resource");
         };
@@ -984,6 +1096,72 @@ mod tests {
         assert!(resource.native.lock().expect("native lock").is_some());
         drop(resource);
         assert!(!path.exists(), "dropping the returned owner still cleans up the file");
+    }
+
+    #[test]
+    fn test_cleanup_recovers_poisoned_worker_state_locks() {
+        let parent = tempfile::tempdir().expect("temp parent");
+        let manager = OperationManager::new(ManagerOptions::default()).expect("manager");
+        let executor = LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).expect("executor");
+        let cleanup = Arc::new(LocalCleanup::new(executor.clone()));
+        *cleanup.poison_state_locks.lock().expect("poison hook lock") = true;
+        let owner = test_owner(&manager, &executor, parent.path());
+
+        let outcome = block_on(cleanup.cleanup(
+            owner,
+            CleanupContext::new(qubit_operation::ContextOptions::default()).expect("cleanup context"),
+        ));
+
+        assert!(matches!(outcome, CleanupOutcome::Released));
+        assert_eq!(0, std::fs::read_dir(parent.path()).expect("read parent").count());
+    }
+
+    #[test]
+    fn test_dropping_unpolled_cleanup_failures_releases_the_native_owner() {
+        let parent = tempfile::tempdir().expect("temp parent");
+        let manager = OperationManager::new(ManagerOptions::default()).expect("manager");
+        let executor = LocalIoExecutor::new(
+            manager.clone(),
+            LocalExecutionConfig {
+                max_open_handles: 1,
+                ..LocalExecutionConfig::default()
+            },
+        )
+        .expect("executor");
+        let cleanup = Arc::new(LocalCleanup::new(executor.clone()));
+        let context = || CleanupContext::new(qubit_operation::ContextOptions::default()).expect("cleanup context");
+
+        let owner = test_owner(&manager, &executor, parent.path());
+        let path = {
+            let native = owner.native.lock().expect("native lock");
+            let Some(LocalTempNative::File(file)) = native.as_ref() else {
+                panic!("test owner should contain a temporary file");
+            };
+            file.path().to_path_buf()
+        };
+        drop(owner.cleanup_permit.lock().expect("cleanup permit lock").take());
+        let held = executor.reserve_cleanup().expect("consume cleanup capacity");
+        drop(Arc::clone(&cleanup).cleanup(owner, context()));
+        drop(held);
+        assert!(
+            !path.exists(),
+            "dropping the unpolled capacity failure releases the owner"
+        );
+
+        let owner = test_owner(&manager, &executor, parent.path());
+        let path = {
+            let native = owner.native.lock().expect("native lock");
+            let Some(LocalTempNative::File(file)) = native.as_ref() else {
+                panic!("test owner should contain a temporary file");
+            };
+            file.path().to_path_buf()
+        };
+        executor.inner.queue.stop();
+        drop(cleanup.cleanup(owner, context()));
+        assert!(
+            !path.exists(),
+            "dropping the unpolled enqueue failure releases the owner"
+        );
     }
 
     #[test]
