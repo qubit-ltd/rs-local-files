@@ -18,10 +18,10 @@ pub struct LocalSubmitError<R> {
 }
 
 impl<R> LocalSubmitError<R> {
-    /// Runs the new behavior while preserving the operation lifecycle
-    /// invariants.
+    /// Stores a rejected request together with its admission reason.
     /// # Parameters
-    /// - `rejection` — supplies data or policy for this operation.
+    /// - `request` — original request returned to the caller.
+    /// - `rejection` — reason the operation was not admitted.
     #[allow(dead_code)]
     pub(crate) fn new(request: R, rejection: LocalSubmitRejection) -> Self {
         Self { request, rejection }
@@ -38,10 +38,9 @@ impl<R> LocalSubmitError<R> {
 }
 
 impl<R> std::fmt::Debug for LocalSubmitError<R> {
-    /// Runs the fmt behavior while preserving the operation lifecycle
-    /// invariants.
+    /// Formats this submission error without formatting the owned request.
     /// # Parameters
-    /// - `formatter` — supplies data or policy for this operation.
+    /// - `formatter` — destination formatter for the debug representation.
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter
             .debug_struct("LocalSubmitError")
@@ -51,10 +50,9 @@ impl<R> std::fmt::Debug for LocalSubmitError<R> {
 }
 
 impl<R> std::fmt::Display for LocalSubmitError<R> {
-    /// Runs the fmt behavior while preserving the operation lifecycle
-    /// invariants.
+    /// Formats the admission rejection.
     /// # Parameters
-    /// - `formatter` — supplies data or policy for this operation.
+    /// - `formatter` — destination formatter for the error message.
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(formatter, "local operation rejected: {:?}", self.rejection)
     }

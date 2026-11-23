@@ -166,7 +166,7 @@ impl LocalIoExecutor {
     /// caller may shrink it as owned data is released. Returns `None` when the
     /// shared budget cannot satisfy the request.
     /// # Parameters
-    /// - `amount` — supplies data or policy for this operation.
+    /// - `amount` — number of bytes to reserve from the executor-wide pool.
     pub(crate) fn reserve_bytes(&self, amount: usize) -> Option<Permit> {
         self.inner.byte_slots.try_acquire(amount)
     }
@@ -187,7 +187,7 @@ impl LocalIoExecutor {
     ///
     /// The returned permit releases its remaining reservation when dropped.
     /// # Parameters
-    /// - `amount` — supplies data or policy for this operation.
+    /// - `amount` — number of disk-budget bytes to reserve.
     #[allow(dead_code)]
     pub(crate) fn reserve_disk(&self, amount: u64) -> Option<DiskPermit> {
         self.inner.disk_slots.try_acquire(amount)
@@ -205,7 +205,7 @@ impl LocalIoExecutor {
     /// # Type Parameters
     /// - `F` — type used by this operation.
     /// # Parameters
-    /// - `task` — supplies data or policy for this operation.
+    /// - `task` — one-shot task to enqueue after a queue slot is reserved.
     pub(crate) fn enqueue_task<F>(&self, task: F) -> Result<(), ()>
     where
         F: FnOnce() + Send + 'static,
@@ -235,11 +235,10 @@ impl LocalIoExecutor {
     pub(crate) fn reserve_cleanup(&self) -> Option<Permit> {
         self.inner.cleanup_slots.try_acquire(1)
     }
-    /// Runs the enqueue cleanup behavior while preserving the operation
-    /// lifecycle invariants.
+    /// Enqueues a cleanup job using its reserved cleanup permit.
     /// # Parameters
-    /// - `job` — supplies data or policy for this operation.
-    /// - `permit` — supplies data or policy for this operation.
+    /// - `job` — cleanup task run by a worker.
+    /// - `permit` — cleanup capacity reserved for this task.
     #[allow(dead_code)]
     pub(crate) fn enqueue_cleanup(
         &self,
@@ -269,14 +268,13 @@ impl LocalIoExecutor {
             .push_cleanup_with_completion(job, permit, completion, self.inner.config.max_open_handles)
     }
 }
-/// Runs the spawn workers behavior while preserving the operation lifecycle
-/// invariants.
+/// Starts the configured worker threads, stopping and joining them on failure.
 /// # Type Parameters
-/// - `F` — type used by this operation.
+/// - `F` — closure that starts one worker thread.
 /// # Parameters
-/// - `queue` — supplies data or policy for this operation.
-/// - `count` — supplies data or policy for this operation.
-/// - `spawn` — supplies data or policy for this operation.
+/// - `queue` — shared queue consumed by the worker threads.
+/// - `count` — number of worker threads to start.
+/// - `spawn` — function that starts a worker at the given index.
 pub(super) fn spawn_workers<F>(queue: &Arc<WorkerQueue>, count: usize, mut spawn: F) -> io::Result<Vec<JoinHandle<()>>>
 where
     F: FnMut(usize, Arc<WorkerQueue>) -> io::Result<JoinHandle<()>>,
@@ -296,10 +294,9 @@ where
     }
     Ok(workers)
 }
-/// Runs the validate behavior while preserving the operation lifecycle
-/// invariants.
+/// Validates the executor configuration's required nonzero capacities.
 /// # Parameters
-/// - `config` — supplies data or policy for this operation.
+/// - `config` — executor configuration to validate.
 fn validate(config: &LocalExecutionConfig) -> Result<(), LocalExecutorConfigError> {
     if config.worker_count == 0 {
         return Err(LocalExecutorConfigError::ZeroWorkers);

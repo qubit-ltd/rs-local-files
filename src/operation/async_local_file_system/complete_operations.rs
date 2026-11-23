@@ -1019,21 +1019,18 @@ impl AsyncLocalFileSystem {
             },
         )
     }
-    /// Runs the submit owned behavior while preserving the operation lifecycle
-    /// invariants.
+    /// Submits an owned request with its resource requirements.
     /// # Type Parameters
-    /// - `R` — type used by this operation.
-    /// - `T` — type used by this operation.
-    /// - `E` — type used by this operation.
-    /// - `F` — type used by this operation.
+    /// - `R` — request retained until the worker task runs.
+    /// - `T` — successful result returned by the operation.
+    /// - `E` — operation error returned on failure.
+    /// - `F` — worker task that processes the request.
     /// # Parameters
-    /// - `manager` — supplies data or policy for this operation.
-    /// - `operation` — supplies data or policy for this operation.
-    /// - `request` — supplies data or policy for this operation.
-    /// - `path_is_relative` — supplies data or policy for this operation.
-    /// - `required_handles` — supplies data or policy for this operation.
-    /// - `limits` — supplies data or policy for this operation.
-    /// - `task` — supplies data or policy for this operation.
+    /// - `manager` — manager that owns the operation admission scope.
+    /// - `operation` — cancellation and admission options.
+    /// - `request` — owned input passed to the worker task.
+    /// - `requirements` — path, handle, byte, and per-operation limit requirements.
+    /// - `task` — closure that processes the request after admission.
     pub(super) fn submit_owned<R, T, E, F>(
         &self,
         manager: &OperationManager,
@@ -1069,10 +1066,7 @@ impl AsyncLocalFileSystem {
     /// - `manager` — operation manager that owns the admission scope.
     /// - `operation` — operation options used for admission and cancellation.
     /// - `request` — owned input retained if submission is rejected.
-    /// - `path_is_relative` — input value used by this operation.
-    /// - `required_handles` — input value used by this operation.
-    /// - `limits` — per-operation resource ceilings.
-    /// - `initial_owned_bytes` — input value used by this operation.
+    /// - `requirements` — path, handle, byte, and per-operation limit requirements.
     /// - `task` — owned worker closure run after admission.
     /// # Type Parameters
     /// - `R` — type carried through the operation contract.
@@ -1180,11 +1174,10 @@ impl AsyncLocalFileSystem {
         }
     }
 }
-/// Runs the bind host path behavior while preserving the operation lifecycle
-/// invariants.
+/// Joins a relative path to the captured Host base when one is available.
 /// # Parameters
-/// - `base` — supplies data or policy for this operation.
-/// - `path` — supplies data or policy for this operation.
+/// - `base` — optional captured Host base path.
+/// - `path` — path to bind to that base when it is relative.
 fn bind_host_path(base: &Option<PathBuf>, path: &PathBuf) -> PathBuf {
     match (base, path.is_relative()) {
         (Some(base), true) => base.join(path),
@@ -1501,13 +1494,12 @@ fn pause_read_all_test_gate(path: &Path) {
     }
 }
 
-/// Runs the stop outcome behavior while preserving the operation lifecycle
-/// invariants.
+/// Returns a stopped outcome when the operation scope has a stop request.
 /// # Type Parameters
-/// - `T` — type used by this operation.
-/// - `E` — type used by this operation.
+/// - `T` — successful result type.
+/// - `E` — operation error type.
 /// # Parameters
-/// - `scope` — supplies data or policy for this operation.
+/// - `scope` — operation scope whose stop state is checked.
 // An explicit branch keeps stop paths visible to LLVM function coverage, which
 // otherwise reports the executed `Option::map` closure as an uncovered function.
 #[allow(clippy::manual_map)]
@@ -1520,13 +1512,12 @@ fn stop_outcome<T, E>(scope: &OperationScope) -> Option<OperationOutcome<T, E>> 
         None => None,
     }
 }
-/// Runs the before native call behavior while preserving the operation
-/// lifecycle invariants.
+/// Checks for a stop request before invoking a native operation.
 /// # Type Parameters
-/// - `T` — type used by this operation.
+/// - `T` — value returned by the native call.
 /// # Parameters
-/// - `scope` — supplies data or policy for this operation.
-/// - `native_call` — supplies data or policy for this operation.
+/// - `scope` — operation scope whose stop state is checked.
+/// - `native_call` — native operation invoked only when no stop was requested.
 fn before_native_call<T>(scope: &OperationScope, native_call: impl FnOnce() -> T) -> Result<T, StopReport> {
     match scope.context().stop_reason() {
         Some(reason) => Err(StopReport {
@@ -1536,17 +1527,16 @@ fn before_native_call<T>(scope: &OperationScope, native_call: impl FnOnce() -> T
         None => Ok(native_call()),
     }
 }
-/// Runs the record local effect behavior while preserving the operation
-/// lifecycle invariants.
+/// Records a local effect and updates the observer's bounded fact snapshot.
 /// # Parameters
-/// - `scope` — supplies data or policy for this operation.
-/// - `observer` — supplies data or policy for this operation.
-/// - `modified_count` — supplies data or policy for this operation.
-/// - `modified_bytes` — supplies data or policy for this operation.
-/// - `publication` — supplies data or policy for this operation.
-/// - `durability` — supplies data or policy for this operation.
-/// - `fact` — supplies data or policy for this operation.
-/// - `description` — supplies data or policy for this operation.
+/// - `scope` — scope receiving the effect record.
+/// - `observer` — observer whose snapshot is updated.
+/// - `modified_count` — number of modified entries to add to the snapshot.
+/// - `modified_bytes` — number of modified bytes to add to the snapshot.
+/// - `publication` — publication state recorded in the snapshot.
+/// - `durability` — durability state recorded in the snapshot.
+/// - `fact` — effect classification recorded for the operation.
+/// - `description` — bounded diagnostic description of the effect.
 #[allow(clippy::too_many_arguments)]
 fn record_local_effect(
     scope: &OperationScope,
@@ -1587,10 +1577,9 @@ fn copied_modified_count(stats: LocalCopyStats) -> u64 {
         .saturating_add(stats.directories())
         .saturating_add(stats.directory_permissions_applied())
 }
-/// Runs the shrink to zero behavior while preserving the operation lifecycle
-/// invariants.
+/// Releases all remaining bytes in an executor permit.
 /// # Parameters
-/// - `permit` — supplies data or policy for this operation.
+/// - `permit` — shared byte permit to shrink to zero.
 fn shrink_to_zero(permit: &Arc<Mutex<Permit>>) {
     let mut permit = match permit.lock() {
         Ok(permit) => permit,

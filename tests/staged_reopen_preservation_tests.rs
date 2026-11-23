@@ -319,10 +319,3 @@ fn test_required_privacy_reopen_reports_mode_mismatch_context() {
         "reason should identify the owner check: {reason}"
     );
 }
-// =============================================================================
-//    Copyright (c) 2025 - 2026 Haixing Hu.
-//
-//    SPDX-License-Identifier: Apache-2.0
-//
-//    Licensed under the Apache License, Version 2.0.
-// =============================================================================

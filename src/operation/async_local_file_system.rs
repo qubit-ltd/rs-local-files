@@ -90,11 +90,8 @@ pub struct AsyncLocalFileSystem {
 }
 
 impl AsyncLocalFileSystem {
-    /// Runs the new behavior while preserving the operation lifecycle
-    /// invariants.
-    /// # Parameters
-    /// - `executor` — supplies data or policy for this operation.
-    /// - `host_base` — supplies data or policy for this operation.
+    /// Builds a facade from its filesystem, executor, and optional captured
+    /// Host base path.
     pub(crate) fn new(
         filesystem: crate::LocalFileSystem,
         executor: LocalIoExecutor,
@@ -278,11 +275,9 @@ impl AsyncLocalFileSystem {
     ///
     /// # Parameters
     /// - `manager` — operation manager that owns the admission scope.
-    /// - `qubit_operation` — input value used by this operation.
     /// - `operation` — operation options used for admission and cancellation.
     /// - `path` — path resolved under the captured filesystem authority.
     /// - `options` — operation policy applied to the local filesystem request.
-    /// - `crate` — input value used by this operation.
     pub fn submit_open_reader(
         &self,
         manager: &qubit_operation::OperationManager,
@@ -421,11 +416,9 @@ impl AsyncLocalFileSystem {
     ///
     /// # Parameters
     /// - `manager` — operation manager that owns the admission scope.
-    /// - `qubit_operation` — input value used by this operation.
     /// - `operation` — operation options used for admission and cancellation.
     /// - `path` — path resolved under the captured filesystem authority.
     /// - `options` — operation policy applied to the local filesystem request.
-    /// - `crate` — input value used by this operation.
     pub fn submit_open_writer(
         &self,
         manager: &qubit_operation::OperationManager,
@@ -786,11 +779,10 @@ impl AsyncLocalFileSystem {
         }
     }
 }
-/// Runs the bind host path behavior while preserving the operation lifecycle
-/// invariants.
+/// Joins a relative path to the captured Host base when one is available.
 /// # Parameters
-/// - `base` — supplies data or policy for this operation.
-/// - `path` — supplies data or policy for this operation.
+/// - `base` — optional captured Host base path.
+/// - `path` — path to bind to that base when it is relative.
 fn bind_host_path(base: &Option<PathBuf>, path: &PathBuf) -> PathBuf {
     match (base, path.is_relative()) {
         (Some(base), true) => base.join(path),
@@ -903,14 +895,13 @@ fn reconcile_vec_capacity(
     }
     Ok(())
 }
-/// Runs the run on worker behavior while preserving the operation lifecycle
-/// invariants.
+/// Runs a blocking local operation on the executor and returns its result.
 /// # Type Parameters
-/// - `T` — type used by this operation.
-/// - `F` — type used by this operation.
+/// - `T` — result returned by the worker task.
+/// - `F` — one-shot worker task.
 /// # Parameters
-/// - `executor` — supplies data or policy for this operation.
-/// - `task` — supplies data or policy for this operation.
+/// - `executor` — executor that queues and runs the task.
+/// - `task` — closure run on a worker thread.
 async fn run_on_worker<T, F>(executor: &LocalIoExecutor, task: F) -> crate::LocalResult<T>
 where
     T: Send + 'static,

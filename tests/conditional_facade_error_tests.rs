@@ -111,10 +111,3 @@ fn test_conditional_facades_share_static_errors_without_creating_resources() {
     );
     assert!(!fixture.path().join("missing-parent").exists());
 }
-// =============================================================================
-//    Copyright (c) 2025 - 2026 Haixing Hu.
-//
-//    SPDX-License-Identifier: Apache-2.0
-//
-//    Licensed under the Apache License, Version 2.0.
-// =============================================================================

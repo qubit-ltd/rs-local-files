@@ -23,10 +23,9 @@ pub enum LocalExecutorCreateError {
 }
 
 impl std::fmt::Display for LocalExecutorCreateError {
-    /// Runs the fmt behavior while preserving the operation lifecycle
-    /// invariants.
+    /// Formats this executor creation failure.
     /// # Parameters
-    /// - `formatter` — supplies data or policy for this operation.
+    /// - `formatter` — destination formatter for the error message.
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::InvalidConfig(error) => {
@@ -40,12 +39,7 @@ impl std::fmt::Display for LocalExecutorCreateError {
 }
 
 impl std::error::Error for LocalExecutorCreateError {
-    /// Runs the source behavior while preserving the operation lifecycle
-    /// invariants.
-    ///
-    /// # Parameters
-    /// - `std` — input value used by this operation.
-    /// - `error` — input value used by this operation.
+    /// Returns the worker-start I/O error, if this failure has one.
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::InvalidConfig(_) => None,

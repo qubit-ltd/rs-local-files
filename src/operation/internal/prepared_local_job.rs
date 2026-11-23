@@ -211,17 +211,15 @@ where
             }),
         })
     }
-    /// Runs the take wakers behavior while preserving the operation lifecycle
-    /// invariants.
+    /// Takes all registered wakers from the operation port.
     /// # Parameters
-    /// - `port` — supplies data or policy for this operation.
+    /// - `port` — port whose registered wakers are removed.
     fn take_wakers(port: &mut Port<T, E>) -> [Option<Waker>; 4] {
         std::mem::take(&mut port.wakers)
     }
-    /// Runs the wake all behavior while preserving the operation lifecycle
-    /// invariants.
+    /// Wakes distinct registered wakers and safely drops every registration.
     /// # Parameters
-    /// - `wakers` — supplies data or policy for this operation.
+    /// - `wakers` — wakers to invoke and then drop.
     fn wake_all(mut wakers: [Option<Waker>; 4]) {
         let mut duplicate = [false; 4];
         for index in 0..wakers.len() {
@@ -246,12 +244,11 @@ where
             }
         }
     }
-    /// Runs the register behavior while preserving the operation lifecycle
-    /// invariants.
+    /// Replaces a poll slot's waker unless it already wakes the same task.
     /// # Parameters
-    /// - `port` — supplies data or policy for this operation.
-    /// - `slot` — supplies data or policy for this operation.
-    /// - `waker` — supplies data or policy for this operation.
+    /// - `port` — port holding the poll waker slots.
+    /// - `slot` — index of the slot for this poll operation.
+    /// - `waker` — newly cloned waker, consumed when it replaces the slot.
     fn register(port: &mut Port<T, E>, slot: usize, waker: &mut Option<Waker>) -> Option<Waker> {
         if port.wakers[slot]
             .as_ref()
@@ -261,10 +258,9 @@ where
         }
         std::mem::replace(&mut port.wakers[slot], waker.take())
     }
-    /// Runs the discard waker behavior while preserving the operation lifecycle
-    /// invariants.
+    /// Drops a waker while isolating any panic from its destructor.
     /// # Parameters
-    /// - `waker` — supplies data or policy for this operation.
+    /// - `waker` — optional waker to discard.
     fn discard_waker(waker: Option<Waker>) {
         if let Some(waker) = waker
             && let Err(payload) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| drop(waker)))
@@ -280,10 +276,9 @@ impl<R: Send + 'static, T: Send + 'static, E: Send + 'static> PreparedLocalJob<R
     pub(crate) fn take_request(&self) -> Option<R> {
         self.request.lock().unwrap_or_else(|e| e.into_inner()).take()
     }
-    /// Runs the finish released behavior while preserving the operation
-    /// lifecycle invariants.
+    /// Releases retained job resources and marks the operation as finished.
     /// # Parameters
-    /// - `id` — supplies data or policy for this operation.
+    /// - `id` — operation identifier stored in the empty settlement report.
     fn finish_released(&self, id: OperationId) {
         self.task.lock().unwrap_or_else(|e| e.into_inner()).take();
         self.request.lock().unwrap_or_else(|e| e.into_inner()).take();
@@ -301,10 +296,9 @@ impl<R: Send + 'static, T: Send + 'static, E: Send + 'static> PreparedLocalJob<R
         Self::wake_all(wakers);
     }
 }
-/// Runs the empty settlement behavior while preserving the operation lifecycle
-/// invariants.
+/// Creates an empty settlement report for a job released before execution.
 /// # Parameters
-/// - `id` — supplies data or policy for this operation.
+/// - `id` — operation identifier associated with the released job.
 fn empty_settlement(id: OperationId) -> Arc<SettlementReport> {
     Arc::new(SettlementReport {
         operation_id: id,
@@ -340,10 +334,9 @@ where
     T: Send + 'static,
     E: Send + 'static,
 {
-    /// Runs the request stop behavior while preserving the operation lifecycle
-    /// invariants.
+    /// Records the first stop reason and wakes pollers waiting on job state.
     /// # Parameters
-    /// - `reason` — supplies data or policy for this operation.
+    /// - `reason` — stop reason to record if no reason has been recorded yet.
     fn request_stop(&self, reason: StopReason) {
         let wakers = {
             let mut port = self.port.lock().unwrap_or_else(|e| e.into_inner());
@@ -370,10 +363,9 @@ where
             settlement: port.settlement.clone(),
         }
     }
-    /// Runs the poll outcome behavior while preserving the operation lifecycle
-    /// invariants.
+    /// Polls for the child outcome summary and registers the current waker.
     /// # Parameters
-    /// - `cx` — supplies data or policy for this operation.
+    /// - `cx` — task context whose waker is registered while the summary is pending.
     fn poll_outcome(&self, cx: &mut Context<'_>) -> Poll<ChildOutcomeSummary> {
         if let Some(value) = self.port.lock().unwrap_or_else(|e| e.into_inner()).summary.clone() {
             return Poll::Ready(value);
@@ -402,10 +394,9 @@ where
         Self::discard_waker(new_waker);
         Poll::Pending
     }
-    /// Runs the poll release behavior while preserving the operation lifecycle
-    /// invariants.
+    /// Polls for resource release and registers the current waker if pending.
     /// # Parameters
-    /// - `cx` — supplies data or policy for this operation.
+    /// - `cx` — task context whose waker is registered until release.
     fn poll_release(&self, cx: &mut Context<'_>) -> Poll<ChildRelease> {
         let ready = {
             let port = self.port.lock().unwrap_or_else(|e| e.into_inner());
@@ -444,10 +435,9 @@ where
         Self::discard_waker(new_waker);
         Poll::Pending
     }
-    /// Runs the poll settlement behavior while preserving the operation
-    /// lifecycle invariants.
+    /// Polls for the settlement report and registers the current waker.
     /// # Parameters
-    /// - `cx` — supplies data or policy for this operation.
+    /// - `cx` — task context whose waker is registered while settlement is pending.
     fn poll_settlement(&self, cx: &mut Context<'_>) -> Poll<Arc<SettlementReport>> {
         if let Some(value) = self.port.lock().unwrap_or_else(|e| e.into_inner()).settlement.clone() {
             return Poll::Ready(value);
@@ -484,10 +474,9 @@ where
     T: Send + 'static,
     E: Send + 'static,
 {
-    /// Runs the bind behavior while preserving the operation lifecycle
-    /// invariants.
+    /// Binds this prepared job to its manager-assigned operation identifier.
     /// # Parameters
-    /// - `id` — supplies data or policy for this operation.
+    /// - `id` — operation identifier assigned by the manager.
     fn bind(&self, id: OperationId) -> Result<(), qubit_operation::ExternalBindError> {
         if self
             .claimed
@@ -500,10 +489,9 @@ where
         port.id = Some(id);
         Ok(())
     }
-    /// Runs the activate behavior while preserving the operation lifecycle
-    /// invariants.
+    /// Activates the prepared job by queueing its owned request and task.
     /// # Parameters
-    /// - `scope` — supplies data or policy for this operation.
+    /// - `scope` — admitted operation scope used by the worker task.
     fn activate(self: Arc<Self>, scope: OperationScope) -> Result<(), ExecutionFailure> {
         let id = scope.id();
         if self.activation_started.swap(true, Ordering::AcqRel) {
@@ -651,10 +639,9 @@ where
         };
         Self::wake_all(wakers);
     }
-    /// Runs the poll take outcome behavior while preserving the operation
-    /// lifecycle invariants.
+    /// Polls for and takes the operation outcome, registering the waker if pending.
     /// # Parameters
-    /// - `cx` — supplies data or policy for this operation.
+    /// - `cx` — task context whose waker is registered until an outcome is ready.
     fn poll_take_outcome(&self, cx: &mut Context<'_>) -> Poll<OperationOutcome<T, E>> {
         let ready = self.port.lock().unwrap_or_else(|e| e.into_inner()).outcome.take();
         if let Some(value) = ready {
@@ -686,14 +673,13 @@ where
         Poll::Pending
     }
 }
-/// Runs the outcome summary behavior while preserving the operation lifecycle
-/// invariants.
+/// Maps an operation outcome to its bounded child summary.
 /// # Type Parameters
-/// - `T` — type used by this operation.
-/// - `E` — type used by this operation.
+/// - `T` — successful outcome value type.
+/// - `E` — failed outcome value type.
 /// # Parameters
-/// - `id` — supplies data or policy for this operation.
-/// - `outcome` — supplies data or policy for this operation.
+/// - `id` — operation identifier included in the summary.
+/// - `outcome` — operation outcome to classify.
 fn outcome_summary<T, E>(id: OperationId, outcome: &OperationOutcome<T, E>) -> ChildOutcomeSummary {
     let (kind, text) = match outcome {
         OperationOutcome::Succeeded(_) => (ChildOutcomeKind::Succeeded, "child succeeded"),
