@@ -229,6 +229,14 @@ where
                 publication_attempt_error = Some(error);
                 post_publication_conflict = true;
             } else {
+                if absent_precondition
+                    && attempt.publication == LocalConditionalPublicationState::NotPublished
+                    && error.kind() == io::ErrorKind::AlreadyExists
+                {
+                    // This error came from the backend's absent-install
+                    // attempt; checkpoint and setup errors remain ordinary I/O.
+                    precheck_failure_reason = Some(LocalConditionalFailureReason::TargetExists);
+                }
                 if let Some(mut installed) = attempt.installed {
                     installed.set_role(LocalRecoveryFileRole::StagedCandidate);
                     entries.push(installed);
@@ -533,13 +541,6 @@ where
             let reason = precheck_failure_reason.unwrap_or_else(|| {
                 if post_publication_conflict {
                     LocalConditionalFailureReason::PostPublicationConflict
-                } else if failed_stage == LocalConditionalWriteStage::Publish
-                    && absent_precondition
-                    && source.kind() == io::ErrorKind::AlreadyExists
-                {
-                    // The native absent-install operation itself observed the
-                    // racing target; other AlreadyExists errors are ordinary I/O.
-                    LocalConditionalFailureReason::TargetExists
                 } else {
                     LocalConditionalFailureReason::Io
                 }

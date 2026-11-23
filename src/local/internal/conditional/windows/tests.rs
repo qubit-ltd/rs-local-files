@@ -537,6 +537,46 @@ fn test_conditional_windows_absent_race_never_overwrites_late_target() {
 }
 
 #[test]
+fn test_conditional_windows_candidate_name_change_keeps_recovery_copy() {
+    let directory = tempfile::tempdir().expect("fixture directory should be created");
+    let target = directory.path().join("target");
+    fs::write(&target, b"A").expect("old target should be written");
+    let mut backend = WindowsConditionalBackend::open_host(&target, &options(LocalWriteMode::CreateOrReplace))
+        .expect("Host candidate should open");
+    put(&mut backend, b"B");
+    let candidate_path = backend.candidate().namespace_path().to_path_buf();
+    let replaced_candidate_path = candidate_path.clone();
+    backend.set_hooks(ConditionalHooks::from_test(crate::test_support::TestConditionalHooks::once(
+        crate::test_support::TestConditionalPoint::AfterPrecheck,
+        move || {
+            fs::remove_file(&replaced_candidate_path)?;
+            fs::write(&replaced_candidate_path, b"replacement entry")?;
+            Ok(())
+        },
+    )));
+
+    let failure = commit_conditional::<Sha256, _>(
+        backend,
+        LocalWritePrecondition::Content(digest(b"A")),
+        options(LocalWriteMode::CreateOrReplace),
+        1,
+    )
+    .expect_err("candidate identity change must stop publication");
+
+    assert_eq!(failure.stage(), crate::error::LocalConditionalWriteStage::Publish);
+    assert_eq!(failure.reason(), crate::error::LocalConditionalFailureReason::Io);
+    assert_eq!(failure.publication(), LocalConditionalPublicationState::NotPublished);
+    assert_eq!(fs::read(&target).expect("old target should remain"), b"A");
+    assert_eq!(fs::read(&candidate_path).expect("replacement name remains untouched"), b"replacement entry");
+    let recovery = failure.candidate().expect("verified candidate copy remains recoverable");
+    assert_eq!(recovery.role(), LocalRecoveryFileRole::CandidateCopy);
+    let mut reader = recovery.open_reader().expect("recovery copy should remain readable");
+    let mut bytes = Vec::new();
+    Streams::copy_input_to_output(&mut reader, &mut bytes).expect("recovery copy should read");
+    assert_eq!(bytes, b"B");
+}
+
+#[test]
 fn test_conditional_windows_publish_checkpoint_failure_keeps_copy_and_cleans_candidate() {
     let directory = tempfile::tempdir().expect("fixture directory should be created");
     let target = directory.path().join("target");

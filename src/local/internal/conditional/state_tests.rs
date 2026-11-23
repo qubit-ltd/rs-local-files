@@ -1451,6 +1451,36 @@ mod conditional_state_tests {
     }
 
     #[test]
+    fn test_conditional_state_publish_checkpoint_already_exists_is_io() {
+        use super::super::ConditionalHooks;
+        use super::super::ConditionalPoint;
+
+        let backend = super::super::fake_backend_tests::FakeBackend::new(b"A", b"B");
+        backend.remove_target();
+        let (_lease, target_path) = backend.target_observer();
+        let backend = backend.with_hooks(ConditionalHooks::fail_once(
+            ConditionalPoint::Publish,
+            std::io::ErrorKind::AlreadyExists,
+        ));
+        let error = super::super::commit::commit_conditional::<Sha256, _>(
+            backend,
+            LocalWritePrecondition::Absent,
+            super::super::fake_backend_tests::required_options(),
+            1,
+        )
+        .expect_err("checkpoint error must stop before the native install call");
+
+        assert_eq!(error.stage(), crate::error::LocalConditionalWriteStage::Publish);
+        assert_eq!(error.reason(), crate::error::LocalConditionalFailureReason::Io);
+        assert_eq!(
+            error.publication(),
+            crate::outcome::LocalConditionalPublicationState::NotPublished
+        );
+        assert!(!target_path.exists());
+        assert_eq!(recovery_bytes(error.candidate().expect("candidate copy retained")), b"B");
+    }
+
+    #[test]
     fn test_conditional_state_absent_publish_uses_atomic_rename_and_detects_race() {
         use super::super::ConditionalHookAction;
         use super::super::ConditionalHooks;
