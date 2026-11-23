@@ -107,6 +107,7 @@ where
     let mut publication = LocalConditionalPublicationState::NotPublished;
     let mut post_publication_conflict = false;
     let mut publication_attempt_error = None;
+    let mut precheck_failure_reason = None;
     let absent_precondition = matches!(&precondition, LocalWritePrecondition::Absent);
     let mut publication_method = LocalWritePublicationMethod::AtomicRename;
     let mut durable = options.durability() != LocalDurabilityRequirement::NotRequired;
@@ -180,6 +181,7 @@ where
             &options,
             sync_requirement,
             &mut durable,
+            &mut precheck_failure_reason,
         )?;
 
         backend
@@ -528,20 +530,20 @@ where
         Ok(value) => value,
         Err((failed_stage, source)) => {
             stage = failed_stage;
-            let reason = match (failed_stage, source.kind()) {
-                (LocalConditionalWriteStage::Precheck, io::ErrorKind::AlreadyExists) => {
+            let reason = precheck_failure_reason.unwrap_or_else(|| {
+                if post_publication_conflict {
+                    LocalConditionalFailureReason::PostPublicationConflict
+                } else if failed_stage == LocalConditionalWriteStage::Publish
+                    && absent_precondition
+                    && source.kind() == io::ErrorKind::AlreadyExists
+                {
+                    // The native absent-install operation itself observed the
+                    // racing target; other AlreadyExists errors are ordinary I/O.
                     LocalConditionalFailureReason::TargetExists
+                } else {
+                    LocalConditionalFailureReason::Io
                 }
-                (LocalConditionalWriteStage::Precheck, io::ErrorKind::NotFound) => {
-                    LocalConditionalFailureReason::TargetMissing
-                }
-                (LocalConditionalWriteStage::Precheck, io::ErrorKind::InvalidData) => {
-                    LocalConditionalFailureReason::PreconditionMismatch
-                }
-                (_, io::ErrorKind::AlreadyExists) => LocalConditionalFailureReason::TargetExists,
-                (_, _) if post_publication_conflict => LocalConditionalFailureReason::PostPublicationConflict,
-                _ => LocalConditionalFailureReason::Io,
-            };
+            });
             let mut recovery: Vec<_> = backend
                 .take_recovery_entries()
                 .into_iter()
@@ -640,6 +642,7 @@ fn precheck_target<D, B>(
     options: &LocalWriteOptions,
     sync_requirement: LocalFileSyncRequirement,
     durable: &mut bool,
+    failure_reason: &mut Option<LocalConditionalFailureReason>,
 ) -> Result<(), (LocalConditionalWriteStage, io::Error)>
 where
     D: Digest,
@@ -652,13 +655,20 @@ where
     let observed = backend.open_target();
     match (precondition, observed) {
         (LocalWritePrecondition::Absent, Ok(_)) => {
+            *failure_reason = Some(LocalConditionalFailureReason::TargetExists);
             return Err((*stage, io::Error::new(io::ErrorKind::AlreadyExists, "target exists")));
         }
         (LocalWritePrecondition::Absent, Err(error)) if error.kind() == io::ErrorKind::NotFound => {}
         (LocalWritePrecondition::Absent, Err(error)) => return Err((*stage, error)),
-        (LocalWritePrecondition::Content(_), Err(error)) => return Err((*stage, error)),
+        (LocalWritePrecondition::Content(_), Err(error)) => {
+            if error.kind() == io::ErrorKind::NotFound {
+                *failure_reason = Some(LocalConditionalFailureReason::TargetMissing);
+            }
+            return Err((*stage, error));
+        }
         (LocalWritePrecondition::Content(expected), Ok(target)) => {
             if digest_entry::<D>(&target).map_err(|error| (*stage, error))? != *expected {
+                *failure_reason = Some(LocalConditionalFailureReason::PreconditionMismatch);
                 return Err((
                     *stage,
                     io::Error::new(io::ErrorKind::InvalidData, "content precondition mismatch"),
@@ -719,6 +729,8 @@ mod backend_phase_error_contract_tests {
         TargetRead,
         Metadata,
         Verify,
+        VerifyNotFound,
+        VerifyInvalidData,
         BeginPublication,
     }
 
@@ -805,11 +817,16 @@ mod backend_phase_error_contract_tests {
             self.inner.is_candidate(entry)
         }
         fn verify_entry(&self, entry: &ConditionalEntry) -> io::Result<()> {
-            if self.phase == FailurePhase::Verify {
-                Err(io::Error::new(
-                    io::ErrorKind::PermissionDenied,
-                    "model candidate verification failure",
-                ))
+            if matches!(
+                self.phase,
+                FailurePhase::Verify | FailurePhase::VerifyNotFound | FailurePhase::VerifyInvalidData
+            ) {
+                let kind = match self.phase {
+                    FailurePhase::VerifyNotFound => io::ErrorKind::NotFound,
+                    FailurePhase::VerifyInvalidData => io::ErrorKind::InvalidData,
+                    _ => io::ErrorKind::PermissionDenied,
+                };
+                Err(io::Error::new(kind, "model candidate verification failure"))
             } else {
                 self.inner.verify_entry(entry)
             }
@@ -847,6 +864,59 @@ mod backend_phase_error_contract_tests {
         }
         fn checkpoint(&mut self, point: ConditionalPoint) -> io::Result<()> {
             self.inner.checkpoint(point)
+        }
+    }
+
+    #[test]
+    fn candidate_verification_io_errors_are_not_misreported_as_target_failures() {
+        use super::super::fake_backend_tests::required_options;
+        for absent in [true, false] {
+            for phase in [FailurePhase::VerifyNotFound, FailurePhase::VerifyInvalidData] {
+                let inner = FakeBackend::new(b"old", b"candidate");
+                if absent {
+                    inner.remove_target();
+                }
+                let (_lease, target) = inner.target_observer();
+                let path = inner.candidate().namespace_path().to_path_buf();
+                let failed_candidate = ConditionalEntry::new(
+                    LocalRecoveryFileRole::StagedCandidate,
+                    path.clone(),
+                    Some(path.clone()),
+                    Box::new(FailedReadAccess { path }),
+                );
+                let backend = ModelBackend {
+                    inner,
+                    phase,
+                    failed_candidate,
+                };
+                let precondition = if absent {
+                    LocalWritePrecondition::Absent
+                } else {
+                    LocalWritePrecondition::Content(Sha256::digest(b"old"))
+                };
+                let error = commit_conditional::<Sha256, _>(
+                    backend,
+                    precondition,
+                    required_options(),
+                    9,
+                )
+                    .expect_err("candidate verification failure must propagate");
+                assert_eq!(error.stage(), LocalConditionalWriteStage::Precheck);
+                assert_eq!(error.reason(), LocalConditionalFailureReason::Io);
+                assert_eq!(
+                    error.error().io_error_kind(),
+                    if phase == FailurePhase::VerifyNotFound {
+                        io::ErrorKind::NotFound
+                    } else {
+                        io::ErrorKind::InvalidData
+                    }
+                );
+                assert_eq!(error.publication(), LocalConditionalPublicationState::NotPublished);
+                if !absent {
+                    assert_eq!(std::fs::read(target).expect("content target intact"), b"old");
+                }
+                assert!(error.candidate().is_some());
+            }
         }
     }
 
