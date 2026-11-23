@@ -15,6 +15,8 @@ use super::HostLocalFileSystem;
 use super::bind_host_path;
 use super::open_staged_writer;
 use super::resolve_host_path;
+use super::resolve_host_path_with_deadline;
+use super::check_host_path_deadline;
 use super::test_io_fault;
 use crate::LocalAtomicityRequirement;
 use crate::LocalDirectoryWalker;
@@ -215,7 +217,31 @@ impl HostLocalFileSystem {
         started_at: Instant,
     ) -> LocalResult<LocalDirectoryWalker> {
         let policy = options.symlink_policy().unwrap_or(symlink_policy);
-        let bound = resolve_host_path(path, policy, true)?;
+        let deadline = options
+            .deadline()
+            .map(|duration| {
+                started_at.checked_add(duration).ok_or_else(|| {
+                    std::io::Error::new(
+                        std::io::ErrorKind::InvalidInput,
+                        "list deadline exceeds the monotonic clock range",
+                    )
+                })
+            })
+            .transpose()
+            .map_err(|error| LocalFileError::from_io(LocalFileOperation::List, Some(path.to_path_buf()), None, error))?;
+        let bound = resolve_host_path_with_deadline(path, policy, true, deadline)?;
+        #[cfg(test)]
+        crate::tests::rooted::support::resolution_observation_tests::reach_deadline_boundary(
+            crate::tests::rooted::support::resolution_observation_tests::DeadlineBoundary::HostListPathResolved,
+        );
+        check_host_path_deadline(deadline, &bound).map_err(|_| {
+            LocalFileError::from_io(
+                LocalFileOperation::List,
+                Some(bound.clone()),
+                None,
+                std::io::Error::new(std::io::ErrorKind::TimedOut, "local list deadline exceeded"),
+            )
+        })?;
         let diagnostic = path.to_path_buf();
         LocalDirectoryWalker::open_with_diagnostic(bound, diagnostic, *options, policy, started_at)
     }

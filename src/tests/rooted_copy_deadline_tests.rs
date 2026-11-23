@@ -57,6 +57,67 @@ fn test_rooted_copy_deadline_after_source_resolution_keeps_parent_absent() {
 }
 
 #[test]
+fn test_rooted_delete_deadline_after_path_resolution_skips_initial_metadata() {
+    let fixture = tempfile::tempdir().expect("fixture should exist");
+    let target = fixture.path().join("target");
+    fs::create_dir(&target).unwrap();
+    fs::write(target.join("child"), b"keep").unwrap();
+    let filesystem = LocalFileSystem::rooted(fixture.path()).expect("rooted filesystem should open");
+    let _clock = observations::DeadlineClockGuard::expire_at(DeadlineBoundary::RootedDeletePathResolved);
+
+    let failure = filesystem
+        .delete_directory_with_options(
+            Path::new("target"),
+            &crate::LocalDeleteOptions::new().with_recursive().with_deadline(Duration::from_secs(60)),
+        )
+        .expect_err("expired deletion must stop before initial metadata inspection");
+
+    assert_eq!(ErrorKind::TimedOut, failure.io_error_kind());
+    assert_eq!(b"keep", fs::read(target.join("child")).unwrap().as_slice());
+}
+
+#[test]
+fn test_rooted_copy_parent_preflight_deadline_prevents_parent_creation() {
+    let fixture = tempfile::tempdir().expect("fixture should exist");
+    fs::write(fixture.path().join("source"), b"source").unwrap();
+    let filesystem = LocalFileSystem::rooted(fixture.path()).expect("rooted filesystem should open");
+    let _clock = observations::DeadlineClockGuard::expire_at(DeadlineBoundary::RootedCopyParentPreflightComplete);
+
+    let failure = filesystem
+        .copy_with_options(
+            Path::new("source"),
+            Path::new("new-parent/child/target"),
+            &LocalCopyOptions::new().with_create_parent().with_deadline(Duration::from_secs(60)),
+        )
+        .expect_err("deadline after parent preflight must prevent creation");
+
+    assert_eq!(ErrorKind::TimedOut, failure.error().io_error_kind());
+    assert_eq!(LocalCopyFailureState::Unchanged, failure.state());
+    assert!(!fixture.path().join("new-parent").exists());
+}
+
+#[test]
+fn test_rooted_copy_parent_creation_deadline_preserves_created_parent_as_partial() {
+    let fixture = tempfile::tempdir().expect("fixture should exist");
+    fs::write(fixture.path().join("source"), b"source").unwrap();
+    let filesystem = LocalFileSystem::rooted(fixture.path()).expect("rooted filesystem should open");
+    let _clock = observations::DeadlineClockGuard::expire_at(DeadlineBoundary::RootedCopyParentCreated);
+
+    let failure = filesystem
+        .copy_with_options(
+            Path::new("source"),
+            Path::new("new-parent/child/target"),
+            &LocalCopyOptions::new().with_create_parent().with_deadline(Duration::from_secs(60)),
+        )
+        .expect_err("deadline after one parent creation must stop before the next");
+
+    assert_eq!(ErrorKind::TimedOut, failure.error().io_error_kind());
+    assert_eq!(LocalCopyFailureState::PartiallyPublished, failure.state());
+    assert!(fixture.path().join("new-parent").is_dir());
+    assert!(!fixture.path().join("new-parent/child").exists());
+}
+
+#[test]
 fn test_copy_budget_absolute_deadline_preserves_origin_and_rejects_overflow() {
     let no_deadline = CopyBudget::new(LocalCopyDirOptions::new());
     assert_eq!(

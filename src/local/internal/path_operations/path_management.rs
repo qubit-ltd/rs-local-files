@@ -81,6 +81,52 @@ pub(crate) fn canonicalize_existing_prefix(path: &Path) -> Result<PathBuf> {
     Ok(canonical)
 }
 
+/// Canonicalizes an existing prefix while sharing the copy operation budget.
+pub(crate) fn canonicalize_existing_prefix_with_budget(
+    path: &Path,
+    budget: &crate::local::CopyBudget,
+) -> Result<PathBuf> {
+    budget.check_deadline()?;
+    if path.try_exists()? {
+        budget.check_deadline()?;
+        let canonical = fs::canonicalize(path)?;
+        budget.check_deadline()?;
+        return Ok(canonical);
+    }
+    if path.as_os_str().is_empty() {
+        budget.check_deadline()?;
+        let canonical = fs::canonicalize(path)?;
+        budget.check_deadline()?;
+        return Ok(canonical);
+    }
+    let mut missing = Vec::<OsString>::new();
+    let mut current = absolute_path(path)?;
+    budget.check_deadline()?;
+    while !current.try_exists()? {
+        budget.check_deadline()?;
+        let Some(name) = current.file_name() else {
+            return Err(Error::new(
+                ErrorKind::NotFound,
+                format!("path has no existing prefix: {}", path.display()),
+            ));
+        };
+        missing.push(name.to_os_string());
+        if !current.pop() {
+            return Err(Error::new(
+                ErrorKind::NotFound,
+                format!("path has no existing prefix: {}", path.display()),
+            ));
+        }
+    }
+    budget.check_deadline()?;
+    let mut canonical = fs::canonicalize(current)?;
+    budget.check_deadline()?;
+    for component in missing.into_iter().rev() {
+        canonical.push(component);
+    }
+    Ok(canonical)
+}
+
 /// Ensures that the directory at `path` exists.
 ///
 /// # Parameters
@@ -154,6 +200,67 @@ pub(crate) fn ensure_parent_path_with_sync_dirs(path: &Path) -> Result<Vec<PathB
 
     ensure_dir_path(parent)?;
     missing.reverse();
+    Ok(missing)
+}
+
+/// Creates missing parent components with a deadline check between native
+/// inspections and each individual directory creation. The boolean on error
+/// reports whether this call already created a parent.
+pub(crate) fn ensure_parent_path_with_budget(
+    path: &Path,
+    budget: &crate::local::CopyBudget,
+) -> std::result::Result<Vec<PathBuf>, (Error, bool)> {
+    let Some(parent) = path.parent().filter(|parent| !parent.as_os_str().is_empty()) else {
+        return Ok(Vec::new());
+    };
+    let mut missing = Vec::new();
+    let mut current = parent;
+    loop {
+        budget.check_deadline().map_err(|error| (error, false))?;
+        match fs::metadata(current) {
+            Ok(metadata) if metadata.is_dir() => break,
+            Ok(_) => {
+                return Err((
+                    Error::new(ErrorKind::AlreadyExists, "copy parent component is not a directory"),
+                    false,
+                ));
+            }
+            Err(error) if error.kind() == ErrorKind::NotFound => missing.push(current.to_path_buf()),
+            Err(error) => return Err((error, false)),
+        }
+        budget.check_deadline().map_err(|error| (error, false))?;
+        let Some(next) = current.parent().filter(|next| !next.as_os_str().is_empty()) else {
+            break;
+        };
+        current = next;
+    }
+    #[cfg(test)]
+    crate::tests::rooted::support::resolution_observation_tests::reach_deadline_boundary(
+        crate::tests::rooted::support::resolution_observation_tests::DeadlineBoundary::HostCopyParentPreflightComplete,
+    );
+    budget.check_deadline().map_err(|error| (error, false))?;
+    missing.reverse();
+    let mut created = false;
+    for directory in &missing {
+        budget.check_deadline().map_err(|error| (error, created))?;
+        match fs::create_dir(directory) {
+            Ok(()) => created = true,
+            Err(error) if error.kind() == ErrorKind::AlreadyExists => {
+                budget.check_deadline().map_err(|error| (error, created))?;
+                if !fs::metadata(directory).is_ok_and(|metadata| metadata.is_dir()) {
+                    return Err((error, created));
+                }
+            }
+            Err(error) => return Err((error, created)),
+        }
+        #[cfg(test)]
+        if created {
+            crate::tests::rooted::support::resolution_observation_tests::reach_deadline_boundary(
+                crate::tests::rooted::support::resolution_observation_tests::DeadlineBoundary::HostCopyParentCreated,
+            );
+        }
+        budget.check_deadline().map_err(|error| (error, created))?;
+    }
     Ok(missing)
 }
 

@@ -91,6 +91,111 @@ fn test_host_copy_deadline_after_path_resolution_prevents_parent_creation() {
 }
 
 #[test]
+fn test_host_copy_deadline_after_source_resolution_skips_target_resolution() {
+    let fixture = tempfile::tempdir().expect("fixture should exist");
+    let source = fixture.path().join("source");
+    let target = fixture.path().join("target");
+    fs::write(&source, b"source").unwrap();
+    let source_prefixes = source
+        .components()
+        .filter(|component| matches!(component, std::path::Component::Normal(_)))
+        .count();
+    crate::test_support::reset_host_metadata_probe_counts();
+    let _clock = observations::DeadlineClockGuard::expire_at(DeadlineBoundary::HostCopySourceResolved);
+
+    let failure = LocalFileSystem::host()
+        .unwrap()
+        .copy_with_options(&source, &target, &LocalCopyOptions::new().with_deadline(Duration::from_secs(60)))
+        .expect_err("deadline after source resolution must prevent target resolution and copy");
+
+    assert_eq!(std::io::ErrorKind::TimedOut, failure.error().io_error_kind());
+    assert_eq!(source_prefixes, crate::test_support::host_metadata_probe_counts().0);
+    assert!(!target.exists());
+}
+
+#[test]
+fn test_host_delete_deadline_after_path_resolution_skips_initial_metadata() {
+    let fixture = tempfile::tempdir().expect("fixture should exist");
+    let target = fixture.path().join("target");
+    fs::create_dir(&target).unwrap();
+    fs::write(target.join("child"), b"keep").unwrap();
+    let _clock = observations::DeadlineClockGuard::expire_at(DeadlineBoundary::HostDeletePathResolved);
+
+    let failure = LocalFileSystem::host()
+        .unwrap()
+        .delete_directory_with_options(
+            &target,
+            &crate::LocalDeleteOptions::new().with_recursive().with_deadline(Duration::from_secs(60)),
+        )
+        .expect_err("expired deletion must stop before initial metadata inspection");
+
+    assert_eq!(std::io::ErrorKind::TimedOut, failure.io_error_kind());
+    assert_eq!(b"keep", fs::read(target.join("child")).unwrap().as_slice());
+}
+
+#[test]
+fn test_host_list_deadline_after_path_resolution_skips_directory_open() {
+    let fixture = tempfile::tempdir().expect("fixture should exist");
+    fs::create_dir(fixture.path().join("target")).unwrap();
+    let _clock = observations::DeadlineClockGuard::expire_at(DeadlineBoundary::HostListPathResolved);
+
+    let failure = LocalFileSystem::host()
+        .unwrap()
+        .list_with_options(
+            &fixture.path().join("target"),
+            &crate::LocalListOptions::new().with_deadline(Duration::from_secs(60)),
+        )
+        .expect_err("expired list deadline must stop before opening the directory");
+
+    assert_eq!(std::io::ErrorKind::TimedOut, failure.io_error_kind());
+}
+
+#[test]
+fn test_host_copy_parent_preflight_deadline_prevents_parent_creation() {
+    let fixture = tempfile::tempdir().expect("fixture should exist");
+    let source = fixture.path().join("source");
+    let target = fixture.path().join("new-parent/child/target");
+    fs::write(&source, b"source").unwrap();
+    let _clock = observations::DeadlineClockGuard::expire_at(DeadlineBoundary::HostCopyParentPreflightComplete);
+
+    let failure = LocalFileSystem::host()
+        .unwrap()
+        .copy_with_options(
+            &source,
+            &target,
+            &LocalCopyOptions::new().with_create_parent().with_deadline(Duration::from_secs(60)),
+        )
+        .expect_err("deadline after parent preflight must prevent creation");
+
+    assert_eq!(std::io::ErrorKind::TimedOut, failure.error().io_error_kind());
+    assert_eq!(crate::LocalCopyFailureState::Unchanged, failure.state());
+    assert!(!target.parent().unwrap().exists());
+}
+
+#[test]
+fn test_host_copy_parent_creation_deadline_preserves_created_parent_as_partial() {
+    let fixture = tempfile::tempdir().expect("fixture should exist");
+    let source = fixture.path().join("source");
+    let target = fixture.path().join("new-parent/child/target");
+    fs::write(&source, b"source").unwrap();
+    let _clock = observations::DeadlineClockGuard::expire_at(DeadlineBoundary::HostCopyParentCreated);
+
+    let failure = LocalFileSystem::host()
+        .unwrap()
+        .copy_with_options(
+            &source,
+            &target,
+            &LocalCopyOptions::new().with_create_parent().with_deadline(Duration::from_secs(60)),
+        )
+        .expect_err("deadline after one parent creation must stop before the next");
+
+    assert_eq!(std::io::ErrorKind::TimedOut, failure.error().io_error_kind());
+    assert_eq!(crate::LocalCopyFailureState::PartiallyPublished, failure.state());
+    assert!(fixture.path().join("new-parent").is_dir());
+    assert!(!fixture.path().join("new-parent/child").exists());
+}
+
+#[test]
 fn test_host_copy_directory_deadline_after_destination_inspection_preserves_target() {
     let (_fixture, source, target) = host_copy_directory_deadline_fixture(true);
     let _clock = observations::DeadlineClockGuard::expire_at(DeadlineBoundary::HostCopyDirectoryDestinationInspected);

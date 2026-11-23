@@ -103,10 +103,27 @@ impl HostLocalFileSystem {
         symlink_policy: LocalSymlinkPolicy,
         started_at: Instant,
     ) -> LocalResult<LocalDeleteOutcome> {
-        let bound = resolve_host_path(path, symlink_policy, false)?;
+        let budget = crate::local::DeleteBudget::new(*options, started_at);
+        let deadline = budget.absolute_deadline().map_err(|error| {
+            LocalFileError::from_io(LocalFileOperation::DeleteDirectory, Some(path.to_path_buf()), None, error)
+        })?;
+        budget.check_clock_deadline().map_err(|error| {
+            LocalFileError::from_io(LocalFileOperation::DeleteDirectory, Some(path.to_path_buf()), None, error)
+        })?;
+        let bound = super::resolve_host_path_with_deadline(path, symlink_policy, false, deadline)?;
+        #[cfg(test)]
+        crate::tests::rooted::support::resolution_observation_tests::reach_deadline_boundary(
+            crate::tests::rooted::support::resolution_observation_tests::DeadlineBoundary::HostDeletePathResolved,
+        );
+        budget.check_clock_deadline().map_err(|error| {
+            LocalFileError::from_io(LocalFileOperation::DeleteDirectory, Some(bound.clone()), None, error)
+        })?;
         let Some(metadata) = metadata_for_delete(&bound, options, LocalFileOperation::DeleteDirectory)? else {
             return Ok(LocalDeleteOutcome::new(false));
         };
+        budget.check_clock_deadline().map_err(|error| {
+            LocalFileError::from_io(LocalFileOperation::DeleteDirectory, Some(bound.clone()), None, error)
+        })?;
         if !metadata.file_type().is_dir() {
             return Err(
                 LocalFileError::new(LocalFileErrorKind::NotDirectory, LocalFileOperation::DeleteDirectory)
