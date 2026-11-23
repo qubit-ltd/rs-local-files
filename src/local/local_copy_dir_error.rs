@@ -176,7 +176,14 @@ impl LocalCopyDirError {
         self.local_kind
     }
 
-    /// Retains a structured local error classification with this native failure.
+    /// Retains a structured local error classification with this native
+    /// failure.
+    ///
+    /// # Parameters
+    /// - `kind`: Structured local error classification to retain.
+    ///
+    /// # Returns
+    /// The updated copy error.
     #[must_use]
     #[inline]
     pub(crate) fn with_local_kind(mut self, kind: crate::LocalFileErrorKind) -> Self {
@@ -184,7 +191,14 @@ impl LocalCopyDirError {
         self
     }
 
-    /// Retains the backend-selected top-level source kind in partial statistics.
+    /// Retains the backend-selected top-level source kind in partial
+    /// statistics.
+    ///
+    /// # Parameters
+    /// - `kind`: Source entry kind selected by the copy backend.
+    ///
+    /// # Returns
+    /// The updated copy error.
     #[must_use]
     #[inline]
     pub(crate) fn with_source_kind(mut self, kind: crate::LocalFileKind) -> Self {
@@ -359,7 +373,7 @@ mod error_contract_tests {
         .with_staging_context("destination/.file.tmp".into(), None);
 
         assert_eq!(
-            "failed to copy 'source/file' to 'destination/file' during CopyFileContents after LocalCopyDirStats { files: 0, directories: 0, bytes: 0, skipped: 0, overwritten: 0, non_atomic_publication: false, files_durable: true, metadata_effect: None }: read denied; staging path 'destination/.file.tmp'",
+            "failed to copy 'source/file' to 'destination/file' during CopyFileContents after LocalCopyDirStats { files: 0, directories: 0, bytes: 0, skipped: 0, overwritten: 0, non_atomic_publication: false, files_durable: true, metadata_effect: None, permissions_applied: 0, directory_permissions_applied: 0, source_kind: None }: read denied; staging path 'destination/.file.tmp'",
             error.to_string(),
         );
         let source = error.source().expect("native I/O failure is the source");

@@ -126,7 +126,8 @@ impl LocalCopyStats {
         self.overwritten
     }
 
-    /// Returns the number of destination permission changes confirmed by the backend.
+    /// Returns the number of destination permission changes confirmed by the
+    /// backend.
     #[must_use]
     #[inline]
     pub(crate) const fn permissions_applied(self) -> u64 {
@@ -136,8 +137,8 @@ impl LocalCopyStats {
     /// Returns confirmed permission changes on pre-existing directories.
     #[must_use]
     #[inline]
+    #[cfg(feature = "async")]
     pub(crate) const fn directory_permissions_applied(self) -> u64 {
         self.directory_permissions_applied
     }
-
 }

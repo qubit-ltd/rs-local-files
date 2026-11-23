@@ -143,8 +143,12 @@ fn test_exact_entry_validation_ignores_input_order_but_checks_path_and_kind() {
     let mut stage = parent
         .create_staged_directory(&LocalTempDirectoryOptions::new())
         .expect("stage");
-    stage.write_file_new(Path::new("a"), &mut &b"a"[..], 1).expect("write a");
-    stage.write_file_new(Path::new("b"), &mut &b"b"[..], 1).expect("write b");
+    stage
+        .write_file_new(Path::new("a"), &mut &b"a"[..], 1)
+        .expect("write a");
+    stage
+        .write_file_new(Path::new("b"), &mut &b"b"[..], 1)
+        .expect("write b");
     let a = LocalTreeEntry::new(Path::new("a").to_path_buf(), LocalFileKind::File).expect("entry a");
     let b = LocalTreeEntry::new(Path::new("b").to_path_buf(), LocalFileKind::File).expect("entry b");
     let validation = LocalTreeValidationOptions::new().with_exact_entries(vec![b.clone(), a.clone()]);

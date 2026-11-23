@@ -538,7 +538,7 @@ where
         Ok(value) => value,
         Err((failed_stage, source)) => {
             stage = failed_stage;
-            let reason = precheck_failure_reason.unwrap_or_else(|| {
+            let reason = precheck_failure_reason.unwrap_or({
                 if post_publication_conflict {
                     LocalConditionalFailureReason::PostPublicationConflict
                 } else {
@@ -869,7 +869,7 @@ mod backend_phase_error_contract_tests {
     }
 
     #[test]
-    fn candidate_verification_io_errors_are_not_misreported_as_target_failures() {
+    fn test_candidate_verification_io_errors_are_not_misreported_as_target_failures() {
         use super::super::fake_backend_tests::required_options;
         for absent in [true, false] {
             for phase in [FailurePhase::VerifyNotFound, FailurePhase::VerifyInvalidData] {
@@ -895,12 +895,7 @@ mod backend_phase_error_contract_tests {
                 } else {
                     LocalWritePrecondition::Content(Sha256::digest(b"old"))
                 };
-                let error = commit_conditional::<Sha256, _>(
-                    backend,
-                    precondition,
-                    required_options(),
-                    9,
-                )
+                let error = commit_conditional::<Sha256, _>(backend, precondition, required_options(), 9)
                     .expect_err("candidate verification failure must propagate");
                 assert_eq!(error.stage(), LocalConditionalWriteStage::Precheck);
                 assert_eq!(error.reason(), LocalConditionalFailureReason::Io);

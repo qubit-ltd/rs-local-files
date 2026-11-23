@@ -1477,7 +1477,10 @@ mod conditional_state_tests {
             crate::outcome::LocalConditionalPublicationState::NotPublished
         );
         assert!(!target_path.exists());
-        assert_eq!(recovery_bytes(error.candidate().expect("candidate copy retained")), b"B");
+        assert_eq!(
+            recovery_bytes(error.candidate().expect("candidate copy retained")),
+            b"B"
+        );
     }
 
     #[test]

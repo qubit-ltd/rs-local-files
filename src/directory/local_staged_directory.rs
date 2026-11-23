@@ -305,14 +305,26 @@ pub(in crate::directory) fn open_unix_tree_entry(
 }
 
 /// Distinguishes unavailable sync-only access from other Windows open failures.
+///
+/// The distinction lets Preferred synchronization retry with ordinary access
+/// while preserving unrelated open failures.
 #[cfg(windows)]
 pub(in crate::directory) enum WindowsTreeEntrySyncOpenError {
-    SyncAccessUnavailable(LocalFileError),
-    Other(LocalFileError),
+    /// The file could not be opened with sync-only access.
+    SyncAccessUnavailable(
+        /// Native error from the sync-access open attempt.
+        LocalFileError,
+    ),
+    /// A path, identity, or other native open check failed.
+    Other(
+        /// Native error from the failed path or identity check.
+        LocalFileError,
+    ),
 }
 
 #[cfg(windows)]
 impl WindowsTreeEntrySyncOpenError {
+    /// Returns the original error without its internal classification.
     pub(in crate::directory) fn into_error(self) -> LocalFileError {
         match self {
             Self::SyncAccessUnavailable(error) | Self::Other(error) => error,
@@ -391,10 +403,7 @@ fn open_windows_tree_entry_with_sync(
         let directory = components.peek().is_some() || kind == crate::LocalFileKind::Directory;
         let next = {
             #[cfg(feature = "test-support")]
-            if for_sync
-                && !directory
-                && crate::local::take_test_support("windows-sync-final-open-permission-denied")
-            {
+            if for_sync && !directory && crate::local::take_test_support("windows-sync-final-open-permission-denied") {
                 Err(std::io::Error::new(
                     std::io::ErrorKind::PermissionDenied,
                     "injected sync-only access denial",

@@ -13,10 +13,10 @@ use std::time::Instant;
 
 use super::HostLocalFileSystem;
 use super::bind_host_path;
+use super::check_host_path_deadline;
 use super::open_staged_writer;
 use super::resolve_host_path;
 use super::resolve_host_path_with_deadline;
-use super::check_host_path_deadline;
 use super::test_io_fault;
 use crate::LocalAtomicityRequirement;
 use crate::LocalDirectoryWalker;
@@ -228,7 +228,9 @@ impl HostLocalFileSystem {
                 })
             })
             .transpose()
-            .map_err(|error| LocalFileError::from_io(LocalFileOperation::List, Some(path.to_path_buf()), None, error))?;
+            .map_err(|error| {
+                LocalFileError::from_io(LocalFileOperation::List, Some(path.to_path_buf()), None, error)
+            })?;
         let bound = resolve_host_path_with_deadline(path, policy, true, deadline)?;
         #[cfg(test)]
         crate::tests::rooted::support::resolution_observation_tests::reach_deadline_boundary(

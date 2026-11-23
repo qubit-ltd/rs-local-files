@@ -10,8 +10,8 @@
 use std::time::Duration;
 use std::time::Instant;
 
-use crate::LocalCopyConflictPolicy;
 use crate::LocalAtomicityRequirement;
+use crate::LocalCopyConflictPolicy;
 use crate::LocalCopySourceMode;
 use crate::LocalCopyTypeConflictPolicy;
 use crate::LocalDurabilityRequirement;
@@ -202,14 +202,13 @@ impl LocalCopyDirOptions {
     }
 
     /// Returns the source mode that backend source selections must satisfy.
-    #[must_use]
     #[inline]
     pub(crate) const fn source_mode(&self) -> LocalCopySourceMode {
         self.source_mode
     }
 
-    /// Returns the atomicity requirement that destructive replacement must satisfy.
-    #[must_use]
+    /// Returns the atomicity requirement that destructive replacement must
+    /// satisfy.
     #[inline]
     pub(crate) const fn atomicity(&self) -> LocalAtomicityRequirement {
         self.atomicity
@@ -360,13 +359,26 @@ impl LocalCopyDirOptions {
     }
 
     /// Retains the public source mode for backend-side source revalidation.
+    ///
+    /// # Parameters
+    /// - `value`: Source mode requested by the caller.
+    ///
+    /// # Returns
+    /// Updated copy options.
     #[inline]
     pub(crate) const fn with_source_mode(mut self, value: LocalCopySourceMode) -> Self {
         self.source_mode = value;
         self
     }
 
-    /// Retains the public atomicity requirement for backend-side replacement checks.
+    /// Retains the public atomicity requirement for backend-side replacement
+    /// checks.
+    ///
+    /// # Parameters
+    /// - `value`: Atomicity requirement requested by the caller.
+    ///
+    /// # Returns
+    /// Updated copy options.
     #[inline]
     pub(crate) const fn with_atomicity(mut self, value: LocalAtomicityRequirement) -> Self {
         self.atomicity = value;

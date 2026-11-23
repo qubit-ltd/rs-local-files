@@ -40,7 +40,8 @@ pub struct LocalCopyDirStats {
     pub(crate) metadata_effect: CopyMetadataEffect,
     /// Number of permission changes confirmed on destination entries.
     pub(crate) permissions_applied: u64,
-    /// Number of confirmed permission changes on pre-existing destination directories.
+    /// Number of confirmed permission changes on pre-existing destination
+    /// directories.
     pub(crate) directory_permissions_applied: u64,
     /// Source kind selected by the rooted backend for the top-level request.
     pub(crate) source_kind: Option<crate::LocalFileKind>,

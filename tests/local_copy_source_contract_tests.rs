@@ -514,20 +514,27 @@ fn test_rooted_copy_required_atomicity_for_symlink_destination() {
     match result {
         Ok(outcome) => {
             assert!(outcome.atomic(), "successful replacement must be atomic");
-            assert!(!fs::symlink_metadata(directory.path().join("target"))
-                .expect("replacement should exist")
-                .file_type()
-                .is_symlink());
+            assert!(
+                !fs::symlink_metadata(directory.path().join("target"))
+                    .expect("replacement should exist")
+                    .file_type()
+                    .is_symlink()
+            );
         }
         Err(failure) => {
             assert_eq!(LocalFileErrorKind::RequirementNotMet, failure.error().kind());
-            assert!(fs::symlink_metadata(directory.path().join("target"))
-                .expect("original link must remain")
-                .file_type()
-                .is_symlink());
+            assert!(
+                fs::symlink_metadata(directory.path().join("target"))
+                    .expect("original link must remain")
+                    .file_type()
+                    .is_symlink()
+            );
         }
     }
-    assert_eq!(b"retained", fs::read(directory.path().join("referent")).unwrap().as_slice());
+    assert_eq!(
+        b"retained",
+        fs::read(directory.path().join("referent")).unwrap().as_slice()
+    );
 }
 
 /// A copied link must not silently downgrade required atomic publication.

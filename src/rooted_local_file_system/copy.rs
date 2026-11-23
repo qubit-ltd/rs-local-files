@@ -195,15 +195,14 @@ impl RootedLocalFileSystem {
                 .as_path()
                 .parent()
                 .filter(|parent| !parent.as_os_str().is_empty())
+            && let Err((error, created)) = prepare_rooted_copy_parent(&self.root, parent, &budget)
         {
-            if let Err((error, created)) = prepare_rooted_copy_parent(&self.root, parent, &budget) {
-                let failure = copy_failure_unchanged(rooted_io_error(LocalFileOperation::Copy, target, error));
-                return Err(if created {
-                    failure.with_state(crate::LocalCopyFailureState::PartiallyPublished)
-                } else {
-                    failure
-                });
-            }
+            let failure = copy_failure_unchanged(rooted_io_error(LocalFileOperation::Copy, target, error));
+            return Err(if created {
+                failure.with_state(crate::LocalCopyFailureState::PartiallyPublished)
+            } else {
+                failure
+            });
         }
         let stats = self
             .root
@@ -258,6 +257,15 @@ impl RootedLocalFileSystem {
     }
 }
 
+/// Creates missing parent directories through the rooted authority.
+///
+/// # Parameters
+/// - `root`: Rooted namespace used to inspect and create parent components.
+/// - `parent`: Relative destination parent path.
+/// - `budget`: Copy budget shared with the enclosing operation.
+///
+/// # Errors
+/// Returns the native error and whether this call created any parent.
 fn prepare_rooted_copy_parent(
     root: &crate::rooted::Root,
     parent: &Path,

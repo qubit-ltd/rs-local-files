@@ -82,6 +82,13 @@ pub(crate) fn canonicalize_existing_prefix(path: &Path) -> Result<PathBuf> {
 }
 
 /// Canonicalizes an existing prefix while sharing the copy operation budget.
+///
+/// # Parameters
+/// - `path`: Path whose existing prefix is canonicalized.
+/// - `budget`: Copy budget checked around native path operations.
+///
+/// # Errors
+/// Returns the native path error or a budget timeout.
 pub(crate) fn canonicalize_existing_prefix_with_budget(
     path: &Path,
     budget: &crate::local::CopyBudget,
@@ -206,6 +213,14 @@ pub(crate) fn ensure_parent_path_with_sync_dirs(path: &Path) -> Result<Vec<PathB
 /// Creates missing parent components with a deadline check between native
 /// inspections and each individual directory creation. The boolean on error
 /// reports whether this call already created a parent.
+///
+/// # Parameters
+/// - `path`: Destination path whose parent components may need creation.
+/// - `budget`: Copy budget checked between inspections and creations.
+///
+/// # Returns
+/// Returns created parent paths, or the error and whether any parent was
+/// created.
 pub(crate) fn ensure_parent_path_with_budget(
     path: &Path,
     budget: &crate::local::CopyBudget,

@@ -200,8 +200,16 @@ fn test_copy_reports_non_atomic_preferred_directory_replacement() {
             LocalFileSystem::host()
         }
         .expect("filesystem should open");
-        let source = if rooted { PathBuf::from("source") } else { directory.path().join("source") };
-        let target = if rooted { PathBuf::from("target") } else { directory.path().join("target") };
+        let source = if rooted {
+            PathBuf::from("source")
+        } else {
+            directory.path().join("source")
+        };
+        let target = if rooted {
+            PathBuf::from("target")
+        } else {
+            directory.path().join("target")
+        };
 
         let outcome = filesystem
             .copy_with_options(
@@ -215,7 +223,10 @@ fn test_copy_reports_non_atomic_preferred_directory_replacement() {
             .expect("preferred copy may use removal before installation");
 
         assert!(!outcome.atomic());
-        assert_eq!(b"payload", fs::read(directory.path().join("target")).unwrap().as_slice());
+        assert_eq!(
+            b"payload",
+            fs::read(directory.path().join("target")).unwrap().as_slice()
+        );
     }
 }
 

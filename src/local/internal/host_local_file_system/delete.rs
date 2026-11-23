@@ -105,10 +105,20 @@ impl HostLocalFileSystem {
     ) -> LocalResult<LocalDeleteOutcome> {
         let budget = crate::local::DeleteBudget::new(*options, started_at);
         let deadline = budget.absolute_deadline().map_err(|error| {
-            LocalFileError::from_io(LocalFileOperation::DeleteDirectory, Some(path.to_path_buf()), None, error)
+            LocalFileError::from_io(
+                LocalFileOperation::DeleteDirectory,
+                Some(path.to_path_buf()),
+                None,
+                error,
+            )
         })?;
         budget.check_clock_deadline().map_err(|error| {
-            LocalFileError::from_io(LocalFileOperation::DeleteDirectory, Some(path.to_path_buf()), None, error)
+            LocalFileError::from_io(
+                LocalFileOperation::DeleteDirectory,
+                Some(path.to_path_buf()),
+                None,
+                error,
+            )
         })?;
         let bound = super::resolve_host_path_with_deadline(path, symlink_policy, false, deadline)?;
         #[cfg(test)]

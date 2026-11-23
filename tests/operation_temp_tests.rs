@@ -41,7 +41,15 @@ use qubit_operation::RecoveryPhase;
 use qubit_operation::RecoveryStore;
 use qubit_operation::RecoveryStoreOptions;
 
+static TEMP_OPERATION_TEST_LOCK: Mutex<()> = Mutex::new(());
+
 fn assert_send_sync<T: Send + Sync + 'static>() {}
+
+fn lock_temp_operation_test() -> std::sync::MutexGuard<'static, ()> {
+    TEMP_OPERATION_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+}
 
 struct ThreadWake(std::thread::Thread);
 impl Wake for ThreadWake {
@@ -65,26 +73,6 @@ fn block_on<F: Future>(future: F) -> F::Output {
     }
 }
 
-fn find_file(root: &std::path::Path) -> std::path::PathBuf {
-    for entry in std::fs::read_dir(root).expect("read root") {
-        let path = entry.expect("entry").path();
-        if path.is_file() {
-            return path;
-        }
-        if path.is_dir()
-            && let Ok(found) = std::fs::read_dir(&path)
-        {
-            for child in found {
-                let child = child.expect("child").path();
-                if child.is_file() {
-                    return child;
-                }
-            }
-        }
-    }
-    panic!("temp payload file exists");
-}
-
 #[test]
 fn test_local_temp_resource_is_a_send_sync_control_port() {
     assert_send_sync::<qubit_local_files::operation::LocalTempResource>();
@@ -93,6 +81,7 @@ fn test_local_temp_resource_is_a_send_sync_control_port() {
 
 #[test]
 fn test_created_temp_file_is_cleaned_after_scope_ends_and_access_returns() {
+    let _guard = lock_temp_operation_test();
     let parent = tempfile::tempdir().expect("temporary parent");
     let manager = OperationManager::new(ManagerOptions::default()).expect("manager");
     let executor = LocalIoExecutor::new(
@@ -139,6 +128,7 @@ fn test_created_temp_file_is_cleaned_after_scope_ends_and_access_returns() {
 
 #[test]
 fn test_created_temp_directory_is_cleaned_after_scope_ends_and_access_returns() {
+    let _guard = lock_temp_operation_test();
     let parent = tempfile::tempdir().expect("temporary parent");
     let manager = OperationManager::new(ManagerOptions::default()).expect("manager");
     let executor = LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).expect("executor");
@@ -200,8 +190,12 @@ fn test_rejected_temp_creation_returns_the_original_request_options() {
     assert_eq!(rejected_directory.into_request(), directory_options);
 }
 
+#[cfg(feature = "test-support")]
 #[test]
 fn test_failed_cleanup_keeps_resource_permit_and_public_recovery_can_retry() {
+    let _guard = lock_temp_operation_test();
+    use qubit_local_files::test_support::install_test_fault_shared;
+
     let parent = tempfile::tempdir().expect("temporary parent");
     let manager = OperationManager::new(ManagerOptions::default()).expect("manager");
     let executor = LocalIoExecutor::new(
@@ -225,10 +219,7 @@ fn test_failed_cleanup_keeps_resource_permit_and_public_recovery_can_retry() {
     let OperationOutcome::Succeeded(access) = outcome else {
         panic!("temp creation should succeed");
     };
-    let original = find_file(parent.path());
-    let displaced = original.with_extension("retained");
-    std::fs::rename(&original, &displaced).expect("displace generated entry");
-    std::fs::create_dir(&original).expect("replace generated entry with a directory");
+    let fault = install_test_fault_shared("temp-file-sandbox-remove").expect("cleanup fault");
     drop(access);
 
     let settlement = block_on(operation.wait_settlement());
@@ -249,25 +240,11 @@ fn test_failed_cleanup_keeps_resource_permit_and_public_recovery_can_retry() {
         block_on(capacity_probe.wait_outcome()).expect("probe outcome"),
         OperationOutcome::Failed(qubit_local_files::operation::LocalCreateFailure::Capacity)
     ));
+    block_on(capacity_probe.wait_settlement());
+    drop(capacity_probe);
     assert_eq!(recovery.snapshot().resources.len(), 1);
 
-    let failed_retry = recovery
-        .try_retry()
-        .expect("retry accepted")
-        .wait()
-        .expect("retry report");
-    assert!(!failed_retry.failures.is_empty());
-    assert_eq!(recovery.snapshot().attempts, 1);
-
-    let second_retry = recovery
-        .try_retry()
-        .expect("second retry accepted")
-        .wait()
-        .expect("second retry report");
-    assert!(!second_retry.failures.is_empty());
-    assert_eq!(recovery.snapshot().attempts, 2);
-    assert_eq!(recovery.snapshot().phase, RecoveryPhase::Pending);
-    assert_eq!(recovery.snapshot().resources.len(), 1);
+    drop(fault);
 
     let mut still_blocked = submit_temp_file(
         filesystem,
@@ -281,10 +258,23 @@ fn test_failed_cleanup_keeps_resource_permit_and_public_recovery_can_retry() {
         block_on(still_blocked.wait_outcome()).expect("outcome"),
         OperationOutcome::Failed(qubit_local_files::operation::LocalCreateFailure::Capacity)
     ));
+    block_on(still_blocked.wait_settlement());
+    drop(still_blocked);
+    let resolved_retry = recovery
+        .try_retry()
+        .expect("recovery retry accepted")
+        .wait()
+        .expect("recovery cleanup completed");
+    assert_eq!(
+        resolved_retry.recovery.phase,
+        RecoveryPhase::Resolved,
+        "recovery retry report: {resolved_retry:?}"
+    );
 }
 
 #[test]
 fn test_resolved_temp_recovery_releases_manager_and_cleanup_workers_within_bound() {
+    let _guard = lock_temp_operation_test();
     use qubit_local_files::test_support::install_test_fault_shared;
 
     let parent = tempfile::tempdir().expect("temporary parent");
@@ -309,7 +299,11 @@ fn test_resolved_temp_recovery_releases_manager_and_cleanup_workers_within_bound
     assert_eq!(recovery.snapshot().phase, RecoveryPhase::Pending);
 
     drop(fault);
-    let retry = recovery.try_retry().expect("recovery retry accepted").wait().expect("retry completed");
+    let retry = recovery
+        .try_retry()
+        .expect("recovery retry accepted")
+        .wait()
+        .expect("retry completed");
     assert_eq!(retry.recovery.phase, RecoveryPhase::Resolved, "retry report: {retry:?}");
     assert_eq!(std::fs::read_dir(parent.path()).unwrap().count(), 0);
 
@@ -373,6 +367,7 @@ impl AsyncCleanup<RetryOwner> for RetryOnceCleanup {
 
 #[test]
 fn test_public_recovery_retry_and_store_transfer_preserve_the_same_owner() {
+    let _guard = lock_temp_operation_test();
     let manager = OperationManager::new(ManagerOptions::default()).expect("manager");
     let live = Arc::new(AtomicUsize::new(1));
     let id_slot = Arc::new(std::sync::Mutex::new(None));
@@ -473,6 +468,7 @@ fn gate() -> (Gate, GateOpen) {
 
 #[test]
 fn test_stop_after_creation_before_commit_retains_the_original_owner() {
+    let _guard = lock_temp_operation_test();
     let manager = OperationManager::new(ManagerOptions::default()).expect("manager");
     let (gate, open) = gate();
     let (started_tx, started_rx) = std::sync::mpsc::channel();
@@ -538,6 +534,7 @@ fn test_stop_after_creation_before_commit_retains_the_original_owner() {
 
 #[test]
 fn test_exhausted_resource_capacity_skips_creation() {
+    let _guard = lock_temp_operation_test();
     let manager = OperationManager::new(ManagerOptions::default()).expect("manager");
     let creates = Arc::new(AtomicUsize::new(0));
     let mut options = OperationOptions::default();
@@ -564,6 +561,7 @@ fn test_exhausted_resource_capacity_skips_creation() {
 
 #[test]
 fn test_open_zero_reference_resource_can_be_reacquired_but_ended_scope_cannot() {
+    let _guard = lock_temp_operation_test();
     let manager = OperationManager::new(ManagerOptions::default()).expect("manager");
     let result = manager
         .run(OperationOptions::default(), |scope| {

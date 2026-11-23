@@ -213,7 +213,10 @@ fn test_successful_symlink_copy_does_not_report_permission_preservation() {
         assert_eq!(1, outcome.stats().files());
         assert_eq!(0, outcome.stats().bytes());
         assert_eq!(LocalMetadataPreservePolicy::None, outcome.metadata_preservation());
-        assert_eq!(Path::new("referent"), fs::read_link(fixture.path().join("target")).unwrap());
+        assert_eq!(
+            Path::new("referent"),
+            fs::read_link(fixture.path().join("target")).unwrap()
+        );
     }
 }
 
@@ -245,7 +248,10 @@ fn test_successful_host_copy_reports_applied_permissions() {
         assert_eq!(1, outcome.stats().files());
         assert_eq!(6, outcome.stats().bytes());
         assert_eq!(0, outcome.stats().skipped());
-        assert_eq!(LocalMetadataPreservePolicy::Permissions, outcome.metadata_preservation());
+        assert_eq!(
+            LocalMetadataPreservePolicy::Permissions,
+            outcome.metadata_preservation()
+        );
         assert_eq!(0o600, fs::metadata(&target).unwrap().permissions().mode() & 0o777);
     }
 }

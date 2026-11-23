@@ -546,14 +546,16 @@ fn test_conditional_windows_candidate_name_change_keeps_recovery_copy() {
     put(&mut backend, b"B");
     let candidate_path = backend.candidate().namespace_path().to_path_buf();
     let replaced_candidate_path = candidate_path.clone();
-    backend.set_hooks(ConditionalHooks::from_test(crate::test_support::TestConditionalHooks::once(
-        crate::test_support::TestConditionalPoint::AfterPrecheck,
-        move || {
-            fs::remove_file(&replaced_candidate_path)?;
-            fs::write(&replaced_candidate_path, b"replacement entry")?;
-            Ok(())
-        },
-    )));
+    backend.set_hooks(ConditionalHooks::from_test(
+        crate::test_support::TestConditionalHooks::once(
+            crate::test_support::TestConditionalPoint::AfterPrecheck,
+            move || {
+                fs::remove_file(&replaced_candidate_path)?;
+                fs::write(&replaced_candidate_path, b"replacement entry")?;
+                Ok(())
+            },
+        ),
+    ));
 
     let failure = commit_conditional::<Sha256, _>(
         backend,
@@ -567,8 +569,13 @@ fn test_conditional_windows_candidate_name_change_keeps_recovery_copy() {
     assert_eq!(failure.reason(), crate::error::LocalConditionalFailureReason::Io);
     assert_eq!(failure.publication(), LocalConditionalPublicationState::NotPublished);
     assert_eq!(fs::read(&target).expect("old target should remain"), b"A");
-    assert_eq!(fs::read(&candidate_path).expect("replacement name remains untouched"), b"replacement entry");
-    let recovery = failure.candidate().expect("verified candidate copy remains recoverable");
+    assert_eq!(
+        fs::read(&candidate_path).expect("replacement name remains untouched"),
+        b"replacement entry"
+    );
+    let recovery = failure
+        .candidate()
+        .expect("verified candidate copy remains recoverable");
     assert_eq!(recovery.role(), LocalRecoveryFileRole::CandidateCopy);
     let mut reader = recovery.open_reader().expect("recovery copy should remain readable");
     let mut bytes = Vec::new();

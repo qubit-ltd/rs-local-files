@@ -223,11 +223,12 @@ pub(in crate::directory) fn verify_tree(
             configured_name_bytes = next;
             if let Some((expected_kind, already_configured)) = index.get_mut(entry.relative_path()) {
                 if *already_configured {
-                    return Err(
-                        LocalFileError::new(LocalFileErrorKind::InvalidOptions, LocalFileOperation::ValidateName)
-                            .with_path(stage.directory().diagnostic_path().join(entry.relative_path()))
-                            .with_reason("duplicate expected tree entry path"),
-                    );
+                    return Err(LocalFileError::new(
+                        LocalFileErrorKind::InvalidOptions,
+                        LocalFileOperation::ValidateName,
+                    )
+                    .with_path(stage.directory().diagnostic_path().join(entry.relative_path()))
+                    .with_reason("duplicate expected tree entry path"));
                 }
                 *already_configured = true;
                 mismatch |= *expected_kind != entry.kind();
@@ -236,17 +237,21 @@ pub(in crate::directory) fn verify_tree(
                     .iter()
                     .any(|previous| previous.relative_path() == entry.relative_path())
                 {
-                    return Err(
-                        LocalFileError::new(LocalFileErrorKind::InvalidOptions, LocalFileOperation::ValidateName)
-                            .with_path(stage.directory().diagnostic_path().join(entry.relative_path()))
-                            .with_reason("duplicate expected tree entry path"),
-                    );
+                    return Err(LocalFileError::new(
+                        LocalFileErrorKind::InvalidOptions,
+                        LocalFileOperation::ValidateName,
+                    )
+                    .with_path(stage.directory().diagnostic_path().join(entry.relative_path()))
+                    .with_reason("duplicate expected tree entry path"));
                 }
                 mismatch = true;
             }
         }
         if mismatch {
-            return Err(LocalFileError::new(LocalFileErrorKind::InvalidOptions, LocalFileOperation::ValidateName));
+            return Err(LocalFileError::new(
+                LocalFileErrorKind::InvalidOptions,
+                LocalFileOperation::ValidateName,
+            ));
         }
         for (_, configured) in index.values_mut() {
             *configured = false;

@@ -16,6 +16,7 @@ mod directory_list_deadline_tests;
 mod directory_native_failure_tests;
 mod error;
 mod filesystem_native_failure_tests;
+#[cfg(feature = "test-support")]
 mod host_copy_completion_deadline_tests;
 #[cfg(unix)]
 mod host_tree_symlink_deadline_tests;

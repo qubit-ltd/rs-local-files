@@ -598,6 +598,10 @@ impl LocalStagedDirectory {
                         LocalFileErrorKind::ChangedDuringRead,
                         LocalFileOperation::OpenRoot,
                     )))
+                } else if crate::local::take_test_support("tree-sync-fallback-open-failure") {
+                    Err(super::WindowsTreeEntrySyncOpenError::SyncAccessUnavailable(
+                        LocalFileError::new(LocalFileErrorKind::Unsupported, LocalFileOperation::Commit),
+                    ))
                 } else {
                     super::open_windows_tree_entry_for_sync(self, item.relative_path(), crate::LocalFileKind::File)
                 }
@@ -607,26 +611,30 @@ impl LocalStagedDirectory {
                 }
             };
             #[cfg(windows)]
+            let mut sync_capable = true;
+            #[cfg(windows)]
             let opened = match sync_opened {
                 Ok(file) => Ok(file),
                 Err(super::WindowsTreeEntrySyncOpenError::SyncAccessUnavailable(_))
                     if requirement == LocalFileSyncRequirement::Preferred =>
                 {
-                    let current = self
-                        .directory()
-                        .observe_entry(item.relative_path())
-                        .map_err(|cause| cause.with_path(self.directory().diagnostic_path().join(item.relative_path())))?;
-                    if current.identity() != Some(&expected)
-                        || current.metadata().kind() != crate::LocalFileKind::File
-                    {
-                        return Err(
-                            LocalFileError::new(LocalFileErrorKind::ChangedDuringRead, LocalFileOperation::Metadata)
-                                .with_path(self.directory().diagnostic_path().join(item.relative_path())),
-                        );
-                    }
-                    budget.check(&self.directory().diagnostic_path().join(item.relative_path()))?;
-                    synced = false;
-                    continue;
+                    #[cfg(feature = "test-support")]
+                    let ordinary_open = if crate::local::take_test_support("tree-sync-fallback-open-failure") {
+                        Err(LocalFileError::from_io(
+                            LocalFileOperation::OpenRoot,
+                            Some(self.directory().diagnostic_path().join(item.relative_path())),
+                            None,
+                            std::io::Error::new(std::io::ErrorKind::PermissionDenied, "injected fallback open failure"),
+                        ))
+                    } else {
+                        super::open_windows_tree_entry(self, item.relative_path(), crate::LocalFileKind::File)
+                    };
+                    #[cfg(not(feature = "test-support"))]
+                    let ordinary_open =
+                        super::open_windows_tree_entry(self, item.relative_path(), crate::LocalFileKind::File);
+                    let file = ordinary_open?;
+                    sync_capable = false;
+                    Ok(file)
                 }
                 Err(error) => return Err(error.into_error()),
             };
@@ -658,6 +666,11 @@ impl LocalStagedDirectory {
                 );
             }
             budget.check(&self.directory().diagnostic_path().join(item.relative_path()))?;
+            #[cfg(windows)]
+            if !sync_capable {
+                synced = false;
+                continue;
+            }
             #[cfg(test)]
             if let Err(source) = fail_tree_sync_if_scheduled() {
                 if requirement == LocalFileSyncRequirement::Required {
@@ -909,5 +922,38 @@ impl LocalStagedDirectory {
         })?;
         budget.check(parent.diagnostic_path())?;
         Ok(())
+    }
+}
+
+#[cfg(all(test, windows, feature = "test-support"))]
+mod windows_preferred_sync_tests {
+    use std::path::Path;
+
+    use crate::LocalFileSystem;
+    use crate::options::LocalDirectoryOpenOptions;
+    use crate::options::LocalListOptions;
+    use crate::options::LocalTempDirectoryOptions;
+    use crate::policy::LocalFileSyncRequirement;
+
+    #[test]
+    fn test_preferred_sync_returns_ordinary_fallback_open_failure() {
+        let fixture = tempfile::tempdir().expect("fixture");
+        let parent = LocalFileSystem::host()
+            .expect("host filesystem")
+            .open_directory_with_options(fixture.path(), &LocalDirectoryOpenOptions::new())
+            .expect("parent authority");
+        let mut stage = parent
+            .create_staged_directory(&LocalTempDirectoryOptions::new())
+            .expect("staged directory");
+        stage
+            .write_file_new(Path::new("payload"), &mut &b"payload"[..], 32)
+            .expect("payload");
+        let _fault = crate::local::install_test_fault_repeated("tree-sync-fallback-open-failure", 2)
+            .expect("fallback open fault");
+
+        let error = stage
+            .sync_files_with_options(&LocalListOptions::new(), LocalFileSyncRequirement::Preferred)
+            .expect_err("ordinary access failure must be returned");
+        assert_eq!(Some(std::io::ErrorKind::PermissionDenied), error.io_error_kind());
     }
 }

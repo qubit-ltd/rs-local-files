@@ -1429,16 +1429,15 @@ mod tests {
                         None,
                         std::io::Error::other("injected partial create failure"),
                     );
-                    let failure =
-                        super::retain_partial(
-                            reservation,
-                            error,
-                            recovery,
-                            executor.cleanup_executor(),
-                            disk,
-                            handle,
-                            cleanup_permit,
-                        );
+                    let failure = super::retain_partial(
+                        reservation,
+                        error,
+                        recovery,
+                        executor.cleanup_executor(),
+                        disk,
+                        handle,
+                        cleanup_permit,
+                    );
                     match failure {
                         LocalCreateFailure::PartialRetained { resource_id, .. } => {
                             *id.lock().expect("id lock") = Some(resource_id);
@@ -1482,16 +1481,15 @@ mod tests {
                         None,
                         std::io::Error::other("injected partial create failure"),
                     );
-                    let failure =
-                        super::retain_partial(
-                            reservation,
-                            error,
-                            recovery,
-                            executor.cleanup_executor(),
-                            disk,
-                            handle,
-                            cleanup_permit,
-                        );
+                    let failure = super::retain_partial(
+                        reservation,
+                        error,
+                        recovery,
+                        executor.cleanup_executor(),
+                        disk,
+                        handle,
+                        cleanup_permit,
+                    );
                     match failure {
                         LocalCreateFailure::PartialRetained { resource_id, .. } => {
                             *id.lock().expect("id lock") = Some(resource_id);

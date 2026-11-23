@@ -2,6 +2,8 @@
 //    Copyright (c) 2026 Haixing Hu.
 //
 //    SPDX-License-Identifier: Apache-2.0
+//
+//    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 #![cfg(all(windows, feature = "test-support"))]
 
@@ -26,9 +28,7 @@ fn parent(path: &Path) -> LocalDirectoryHandle {
         .expect("parent authority")
 }
 
-fn stage_with_file(
-    parent: &LocalDirectoryHandle,
-) -> qubit_local_files::directory::LocalStagedDirectory {
+fn stage_with_file(parent: &LocalDirectoryHandle) -> qubit_local_files::directory::LocalStagedDirectory {
     let mut stage = parent
         .create_staged_directory(&LocalTempDirectoryOptions::new())
         .expect("stage");
@@ -43,8 +43,7 @@ fn test_preferred_sync_open_failure_preserves_access_and_reports_unsynced() {
     let scratch = tempfile::tempdir().expect("fixture");
     let parent = parent(scratch.path());
     let stage = stage_with_file(&parent);
-    let _fault = install_test_fault("windows-sync-final-open-permission-denied")
-        .expect("sync-open selector");
+    let _fault = install_test_fault("windows-sync-final-open-permission-denied").expect("sync-open selector");
 
     let outcome = stage
         .publish_new(
@@ -61,8 +60,7 @@ fn test_required_sync_open_failure_preserves_stage_before_access_mutation() {
     let scratch = tempfile::tempdir().expect("fixture");
     let parent = parent(scratch.path());
     let stage = stage_with_file(&parent);
-    let _fault = install_test_fault("windows-sync-final-open-permission-denied")
-        .expect("sync-open selector");
+    let _fault = install_test_fault("windows-sync-final-open-permission-denied").expect("sync-open selector");
 
     let error = stage
         .publish_new(
@@ -79,11 +77,7 @@ fn test_required_sync_open_failure_preserves_stage_before_access_mutation() {
         qubit_local_files::outcome::LocalTreeAccessState::Preserved,
         error.access_state()
     );
-    error
-        .into_stage()
-        .expect("stage retained")
-        .cleanup()
-        .expect("cleanup");
+    error.into_stage().expect("stage retained").cleanup().expect("cleanup");
 }
 
 #[test]
@@ -101,11 +95,7 @@ fn test_preferred_sync_propagates_non_permission_open_failure() {
         )
         .expect_err("a non-permission open failure must not degrade Preferred");
     assert_eq!(LocalFileErrorKind::ChangedDuringRead, error.cause().kind());
-    error
-        .into_stage()
-        .expect("stage retained")
-        .cleanup()
-        .expect("cleanup");
+    error.into_stage().expect("stage retained").cleanup().expect("cleanup");
 }
 
 #[test]
@@ -117,8 +107,7 @@ fn test_preferred_access_sync_open_failure_degrades_current_and_read_only_polici
         let scratch = tempfile::tempdir().expect("fixture");
         let parent = parent(scratch.path());
         let stage = stage_with_file(&parent);
-        let _fault =
-            install_test_fault("tree-access-sync-capability").expect("access sync selector");
+        let _fault = install_test_fault("tree-access-sync-capability").expect("access sync selector");
         let outcome = stage
             .publish_new(
                 &parent,
@@ -128,10 +117,7 @@ fn test_preferred_access_sync_open_failure_degrades_current_and_read_only_polici
                     .with_file_sync(LocalFileSyncRequirement::Preferred),
             )
             .expect("Preferred sync capability may degrade after identity check");
-        assert!(
-            !outcome.file_synced(),
-            "{access:?} must report the sync downgrade"
-        );
+        assert!(!outcome.file_synced(), "{access:?} must report the sync downgrade");
     }
 }
 
@@ -140,8 +126,7 @@ fn test_preferred_access_propagates_non_permission_sync_open_failure() {
     let scratch = tempfile::tempdir().expect("fixture");
     let parent = parent(scratch.path());
     let stage = stage_with_file(&parent);
-    let _fault =
-        install_test_fault("tree-access-main-open-failure").expect("access failure selector");
+    let _fault = install_test_fault("tree-access-main-open-failure").expect("access failure selector");
 
     let error = stage
         .publish_new(
@@ -153,11 +138,7 @@ fn test_preferred_access_propagates_non_permission_sync_open_failure() {
         )
         .expect_err("a non-permission access-open failure must propagate");
     assert_eq!(LocalFileErrorKind::ChangedDuringRead, error.cause().kind());
-    error
-        .into_stage()
-        .expect("stage retained")
-        .cleanup()
-        .expect("cleanup");
+    error.into_stage().expect("stage retained").cleanup().expect("cleanup");
 }
 
 #[test]
@@ -165,8 +146,7 @@ fn test_preferred_owner_policy_sync_open_failure_publishes_unsynced() {
     let scratch = tempfile::tempdir().expect("fixture");
     let parent = parent(scratch.path());
     let stage = stage_with_file(&parent);
-    let _fault =
-        install_test_fault("owner-policy-sync-capability").expect("owner policy sync selector");
+    let _fault = install_test_fault("owner-policy-sync-capability").expect("owner policy sync selector");
     let policy = LocalOwnerAccessPolicy::new().with_windows_masks(0x0016_01ef, 0x0016_019f);
 
     let outcome = stage
@@ -186,8 +166,7 @@ fn test_preferred_owner_policy_propagates_non_permission_open_failure() {
     let scratch = tempfile::tempdir().expect("fixture");
     let parent = parent(scratch.path());
     let stage = stage_with_file(&parent);
-    let _fault = install_test_fault("owner-policy-main-open-failure")
-        .expect("owner policy failure selector");
+    let _fault = install_test_fault("owner-policy-main-open-failure").expect("owner policy failure selector");
     let policy = LocalOwnerAccessPolicy::new().with_windows_masks(0x0016_01ef, 0x0016_019f);
 
     let error = stage
@@ -200,9 +179,5 @@ fn test_preferred_owner_policy_propagates_non_permission_open_failure() {
         )
         .expect_err("a non-permission owner-policy open failure must propagate");
     assert_eq!(LocalFileErrorKind::ChangedDuringRead, error.cause().kind());
-    error
-        .into_stage()
-        .expect("stage retained")
-        .cleanup()
-        .expect("cleanup");
+    error.into_stage().expect("stage retained").cleanup().expect("cleanup");
 }

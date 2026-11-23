@@ -120,12 +120,8 @@ mod tests {
         }
     }
 
-    static PUBLISH_ON_CLONE_VTABLE: std::task::RawWakerVTable = std::task::RawWakerVTable::new(
-        publish_abort_during_clone,
-        |_| {},
-        |_| {},
-        drop_publish_on_clone_waker,
-    );
+    static PUBLISH_ON_CLONE_VTABLE: std::task::RawWakerVTable =
+        std::task::RawWakerVTable::new(publish_abort_during_clone, |_| {}, |_| {}, drop_publish_on_clone_waker);
 
     fn wait<W: Send + 'static>() -> (LocalAbortCleanupWait<W>, Arc<LocalAbortCleanupState<W>>) {
         let state = Arc::new(LocalAbortCleanupState {
@@ -326,7 +322,8 @@ mod tests {
             locks_available: AtomicBool::new(false),
             panic_on_drop: true,
         };
-        // SAFETY: the raw waker's data points to a probe kept alive until the poll returns.
+        // SAFETY: the raw waker's data points to a probe kept alive until the poll
+        // returns.
         let waker = unsafe {
             Waker::from_raw(std::task::RawWaker::new(
                 &probe as *const _ as *const (),

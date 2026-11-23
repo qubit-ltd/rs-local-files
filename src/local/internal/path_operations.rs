@@ -16,7 +16,7 @@ pub(crate) use path_management::canonicalize_existing_prefix_with_budget;
 #[cfg(test)]
 pub(crate) use path_management::clean_dir_path;
 pub(crate) use path_management::ensure_parent_path;
-pub(crate) use path_management::ensure_parent_path_with_sync_dirs;
 pub(crate) use path_management::ensure_parent_path_with_budget;
+pub(crate) use path_management::ensure_parent_path_with_sync_dirs;
 #[cfg(test)]
 pub(crate) use path_management::remove_any_path;

@@ -146,10 +146,7 @@ fn missing_package_anchors(
             let relative = if path.is_empty() {
                 source_relative.to_path_buf()
             } else {
-                let joined = source_relative
-                    .parent()
-                    .unwrap_or_else(|| Path::new("."))
-                    .join(path);
+                let joined = source_relative.parent().unwrap_or_else(|| Path::new(".")).join(path);
                 normalize(&joined)?
             };
             if !package_files.iter().any(|file| file == &relative) {

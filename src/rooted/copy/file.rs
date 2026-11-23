@@ -177,7 +177,10 @@ pub(super) fn copy_file(
             source,
             destination,
             statistics,
-            io::Error::new(ErrorKind::Unsupported, "required atomic replacement is unavailable for this destination"),
+            io::Error::new(
+                ErrorKind::Unsupported,
+                "required atomic replacement is unavailable for this destination",
+            ),
         )
         .with_local_kind(crate::LocalFileErrorKind::RequirementNotMet));
     }

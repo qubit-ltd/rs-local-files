@@ -54,6 +54,12 @@ pub(crate) fn resolve_host_path(
 
 /// Resolves a Host path while checking the operation's absolute deadline
 /// between each native path query.
+///
+/// # Parameters
+/// - `path`: Caller-supplied path to resolve.
+/// - `symlink_policy`: Whether resolution may follow symbolic links.
+/// - `follow_final`: Whether the final path component may be followed.
+/// - `deadline`: Optional absolute deadline shared with the caller's operation.
 pub(crate) fn resolve_host_path_with_deadline(
     path: &Path,
     symlink_policy: LocalSymlinkPolicy,
@@ -111,6 +117,14 @@ pub(crate) fn resolve_host_path_with_deadline(
     Ok(resolved)
 }
 
+/// Checks whether the shared Host path-resolution deadline has expired.
+///
+/// # Parameters
+/// - `deadline`: Optional absolute deadline for the operation.
+/// - `path`: Path attached to a timeout error.
+///
+/// # Errors
+/// Returns a timed-out local error when the deadline has passed.
 pub(crate) fn check_host_path_deadline(deadline: Option<Instant>, path: &Path) -> LocalResult<()> {
     let Some(deadline) = deadline else {
         return Ok(());

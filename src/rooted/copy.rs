@@ -116,30 +116,66 @@ pub(super) fn copy(
     #[cfg(feature = "test-support")]
     if crate::local::take_test_support("rooted-copy-target-becomes-directory") {
         root.remove_file(destination).map_err(|source_error| {
-            error(Stage::PrepareDestination, source, destination, Statistics::default(), source_error)
+            error(
+                Stage::PrepareDestination,
+                source,
+                destination,
+                Statistics::default(),
+                source_error,
+            )
         })?;
         root.create_dir(destination).map_err(|source_error| {
-            error(Stage::PrepareDestination, source, destination, Statistics::default(), source_error)
+            error(
+                Stage::PrepareDestination,
+                source,
+                destination,
+                Statistics::default(),
+                source_error,
+            )
         })?;
     }
     #[cfg(feature = "test-support")]
     if crate::local::take_test_support("rooted-copy-source-becomes-symlink") {
         root.remove_file(source).map_err(|source_error| {
-            error(Stage::InspectSource, source, destination, Statistics::default(), source_error)
+            error(
+                Stage::InspectSource,
+                source,
+                destination,
+                Statistics::default(),
+                source_error,
+            )
         })?;
         root.create_symlink_for_copy(std::path::Path::new("missing-source-target"), source, false)
             .map_err(|source_error| {
                 let (_, source_error, _) = source_error.into_parts();
-                error(Stage::InspectSource, source, destination, Statistics::default(), source_error)
+                error(
+                    Stage::InspectSource,
+                    source,
+                    destination,
+                    Statistics::default(),
+                    source_error,
+                )
             })?;
     }
     #[cfg(feature = "test-support")]
     if crate::local::take_test_support("rooted-copy-source-becomes-directory") {
         root.remove_file(source).map_err(|source_error| {
-            error(Stage::InspectSource, source, destination, Statistics::default(), source_error)
+            error(
+                Stage::InspectSource,
+                source,
+                destination,
+                Statistics::default(),
+                source_error,
+            )
         })?;
         root.create_dir(source).map_err(|source_error| {
-            error(Stage::InspectSource, source, destination, Statistics::default(), source_error)
+            error(
+                Stage::InspectSource,
+                source,
+                destination,
+                Statistics::default(),
+                source_error,
+            )
         })?;
     }
     let source_metadata = match root.symlink_metadata(source) {
@@ -174,7 +210,10 @@ pub(super) fn copy(
             source,
             destination,
             Statistics::default(),
-            io::Error::new(ErrorKind::InvalidInput, format!("copy source mode rejected actual source kind: {kind:?}")),
+            io::Error::new(
+                ErrorKind::InvalidInput,
+                format!("copy source mode rejected actual source kind: {kind:?}"),
+            ),
         )
         .with_local_kind(kind)
     })?;
@@ -184,7 +223,10 @@ pub(super) fn copy(
             source,
             destination,
             Statistics::default(),
-            io::Error::new(ErrorKind::Unsupported, "actual copy source cannot meet required guarantees"),
+            io::Error::new(
+                ErrorKind::Unsupported,
+                "actual copy source cannot meet required guarantees",
+            ),
         )
         .with_local_kind(crate::LocalFileErrorKind::RequirementNotMet));
     }

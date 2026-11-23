@@ -77,12 +77,10 @@ pub(crate) fn copy_file_with_options(
 ) -> CopyDirResult<()> {
     #[cfg(feature = "test-support")]
     if crate::local::take_test_support("copy-file-target-becomes-directory") {
-        std::fs::remove_file(dst).map_err(|source| {
-            copy_dir_error(LocalCopyDirStage::PrepareDestination, src, dst, stats, source)
-        })?;
-        std::fs::create_dir(dst).map_err(|source| {
-            copy_dir_error(LocalCopyDirStage::PrepareDestination, src, dst, stats, source)
-        })?;
+        std::fs::remove_file(dst)
+            .map_err(|source| copy_dir_error(LocalCopyDirStage::PrepareDestination, src, dst, stats, source))?;
+        std::fs::create_dir(dst)
+            .map_err(|source| copy_dir_error(LocalCopyDirStage::PrepareDestination, src, dst, stats, source))?;
     }
     let destination_metadata = with_copy_context(
         destination_metadata_if_exists(dst),
@@ -139,9 +137,7 @@ pub(crate) fn copy_file_with_options(
         }
         None => false,
     };
-    if destination_directory_requires_removal
-        && options.atomicity() == crate::LocalAtomicityRequirement::Required
-    {
+    if destination_directory_requires_removal && options.atomicity() == crate::LocalAtomicityRequirement::Required {
         return Err(copy_dir_error(
             LocalCopyDirStage::PrepareDestination,
             src,

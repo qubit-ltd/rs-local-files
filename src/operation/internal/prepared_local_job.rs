@@ -365,7 +365,8 @@ where
     }
     /// Polls for the child outcome summary and registers the current waker.
     /// # Parameters
-    /// - `cx` — task context whose waker is registered while the summary is pending.
+    /// - `cx` — task context whose waker is registered while the summary is
+    ///   pending.
     fn poll_outcome(&self, cx: &mut Context<'_>) -> Poll<ChildOutcomeSummary> {
         if let Some(value) = self.port.lock().unwrap_or_else(|e| e.into_inner()).summary.clone() {
             return Poll::Ready(value);
@@ -437,7 +438,8 @@ where
     }
     /// Polls for the settlement report and registers the current waker.
     /// # Parameters
-    /// - `cx` — task context whose waker is registered while settlement is pending.
+    /// - `cx` — task context whose waker is registered while settlement is
+    ///   pending.
     fn poll_settlement(&self, cx: &mut Context<'_>) -> Poll<Arc<SettlementReport>> {
         if let Some(value) = self.port.lock().unwrap_or_else(|e| e.into_inner()).settlement.clone() {
             return Poll::Ready(value);
@@ -639,9 +641,12 @@ where
         };
         Self::wake_all(wakers);
     }
-    /// Polls for and takes the operation outcome, registering the waker if pending.
+    /// Polls for and takes the operation outcome, registering the waker if
+    /// pending.
+    ///
     /// # Parameters
-    /// - `cx` — task context whose waker is registered until an outcome is ready.
+    /// - `cx` — task context whose waker is registered until an outcome is
+    ///   ready.
     fn poll_take_outcome(&self, cx: &mut Context<'_>) -> Poll<OperationOutcome<T, E>> {
         let ready = self.port.lock().unwrap_or_else(|e| e.into_inner()).outcome.take();
         if let Some(value) = ready {

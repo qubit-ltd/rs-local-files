@@ -93,7 +93,8 @@ impl DeleteBudget {
         self.check_clock_deadline()
     }
 
-    /// Checks elapsed-time expiry without consuming scheduler fault checkpoints.
+    /// Checks elapsed-time expiry without consuming scheduler fault
+    /// checkpoints.
     pub(crate) fn check_clock_deadline(&self) -> io::Result<()> {
         let deadline = self.absolute_deadline()?;
         #[cfg(test)]
@@ -113,7 +114,10 @@ impl DeleteBudget {
     pub(crate) fn absolute_deadline(&self) -> io::Result<Option<Instant>> {
         self.options.deadline().map_or(Ok(None), |duration| {
             self.started.checked_add(duration).map(Some).ok_or_else(|| {
-                io::Error::new(io::ErrorKind::InvalidInput, "delete deadline exceeds the monotonic clock range")
+                io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "delete deadline exceeds the monotonic clock range",
+                )
             })
         })
     }

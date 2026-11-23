@@ -55,6 +55,7 @@ impl CopyDirFrame {
     /// # Returns
     ///
     /// A frame ready to yield source entries.
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn new(
         src: PathBuf,
         dst: PathBuf,

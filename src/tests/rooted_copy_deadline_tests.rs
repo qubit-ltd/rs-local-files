@@ -68,7 +68,9 @@ fn test_rooted_delete_deadline_after_path_resolution_skips_initial_metadata() {
     let failure = filesystem
         .delete_directory_with_options(
             Path::new("target"),
-            &crate::LocalDeleteOptions::new().with_recursive().with_deadline(Duration::from_secs(60)),
+            &crate::LocalDeleteOptions::new()
+                .with_recursive()
+                .with_deadline(Duration::from_secs(60)),
         )
         .expect_err("expired deletion must stop before initial metadata inspection");
 
@@ -87,7 +89,9 @@ fn test_rooted_copy_parent_preflight_deadline_prevents_parent_creation() {
         .copy_with_options(
             Path::new("source"),
             Path::new("new-parent/child/target"),
-            &LocalCopyOptions::new().with_create_parent().with_deadline(Duration::from_secs(60)),
+            &LocalCopyOptions::new()
+                .with_create_parent()
+                .with_deadline(Duration::from_secs(60)),
         )
         .expect_err("deadline after parent preflight must prevent creation");
 
@@ -107,7 +111,9 @@ fn test_rooted_copy_parent_creation_deadline_preserves_created_parent_as_partial
         .copy_with_options(
             Path::new("source"),
             Path::new("new-parent/child/target"),
-            &LocalCopyOptions::new().with_create_parent().with_deadline(Duration::from_secs(60)),
+            &LocalCopyOptions::new()
+                .with_create_parent()
+                .with_deadline(Duration::from_secs(60)),
         )
         .expect_err("deadline after one parent creation must stop before the next");
 

@@ -42,12 +42,7 @@ impl<T> Future for AsyncReceiver<T> {
             return Poll::Ready(value);
         }
         let Some(new_waker) = safe_clone_waker(cx.waker()) else {
-            let value = self
-                .0
-                .value
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .take();
+            let value = self.0.value.lock().unwrap_or_else(|e| e.into_inner()).take();
             if let Some(value) = value {
                 let old_waker = self.0.waker.lock().unwrap_or_else(|e| e.into_inner()).take();
                 safe_drop_waker(old_waker);
@@ -76,8 +71,8 @@ impl<T> Future for AsyncReceiver<T> {
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
-    use std::sync::atomic::AtomicUsize;
     use std::sync::atomic::AtomicBool;
+    use std::sync::atomic::AtomicUsize;
     use std::sync::atomic::Ordering;
     use std::task::Wake;
     use std::task::Waker;
@@ -162,12 +157,8 @@ mod tests {
         }
     }
 
-    const CLONE_PUBLISH_VTABLE: std::task::RawWakerVTable = std::task::RawWakerVTable::new(
-        publish_during_clone,
-        |_| {},
-        |_| {},
-        drop_clone_publish_waker,
-    );
+    const CLONE_PUBLISH_VTABLE: std::task::RawWakerVTable =
+        std::task::RawWakerVTable::new(publish_during_clone, |_| {}, |_| {}, drop_clone_publish_waker);
 
     unsafe fn clone_counted_waker(data: *const ()) -> std::task::RawWaker {
         // SAFETY: the Arc allocation stays alive until all cloned raw wakers drop.
@@ -183,12 +174,8 @@ mod tests {
         count.0.fetch_add(1, Ordering::SeqCst);
     }
 
-    const COUNTED_DROP_VTABLE: std::task::RawWakerVTable = std::task::RawWakerVTable::new(
-        clone_counted_waker,
-        |_| {},
-        |_| {},
-        drop_counted_waker,
-    );
+    const COUNTED_DROP_VTABLE: std::task::RawWakerVTable =
+        std::task::RawWakerVTable::new(clone_counted_waker, |_| {}, |_| {}, drop_counted_waker);
 
     const PANIC_CLONE_VTABLE: std::task::RawWakerVTable =
         std::task::RawWakerVTable::new(panic_on_clone, |_| {}, |_| {}, drop_raw_waker);

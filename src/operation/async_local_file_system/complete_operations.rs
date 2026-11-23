@@ -1029,7 +1029,8 @@ impl AsyncLocalFileSystem {
     /// - `manager` — manager that owns the operation admission scope.
     /// - `operation` — cancellation and admission options.
     /// - `request` — owned input passed to the worker task.
-    /// - `requirements` — path, handle, byte, and per-operation limit requirements.
+    /// - `requirements` — path, handle, byte, and per-operation limit
+    ///   requirements.
     /// - `task` — closure that processes the request after admission.
     pub(super) fn submit_owned<R, T, E, F>(
         &self,
@@ -1066,7 +1067,8 @@ impl AsyncLocalFileSystem {
     /// - `manager` — operation manager that owns the admission scope.
     /// - `operation` — operation options used for admission and cancellation.
     /// - `request` — owned input retained if submission is rejected.
-    /// - `requirements` — path, handle, byte, and per-operation limit requirements.
+    /// - `requirements` — path, handle, byte, and per-operation limit
+    ///   requirements.
     /// - `task` — owned worker closure run after admission.
     /// # Type Parameters
     /// - `R` — type carried through the operation contract.
@@ -1567,10 +1569,18 @@ fn record_local_effect(
     observer.update(snapshot);
 }
 
-/// Counts copied entries and confirmed permission changes on pre-existing directories.
+/// Counts copied entries and confirmed permission changes on pre-existing
+/// directories.
 ///
 /// Permissions on newly created directories are represented by the copied
 /// directory count; this adds only existing-directory changes.
+///
+/// # Parameters
+/// - `stats`: Copy statistics containing completed file, directory, and
+///   existing-directory permission changes.
+///
+/// # Returns
+/// The number of modified entries confirmed by the operation.
 fn copied_modified_count(stats: LocalCopyStats) -> u64 {
     stats
         .files()

@@ -92,6 +92,14 @@ pub struct AsyncLocalFileSystem {
 impl AsyncLocalFileSystem {
     /// Builds a facade from its filesystem, executor, and optional captured
     /// Host base path.
+    ///
+    /// # Parameters
+    /// - `filesystem`: Filesystem used by this async facade.
+    /// - `executor`: Bounded executor for native I/O.
+    /// - `host_base`: Optional Host path captured for relative operations.
+    ///
+    /// # Returns
+    /// The configured async filesystem facade.
     pub(crate) fn new(
         filesystem: crate::LocalFileSystem,
         executor: LocalIoExecutor,
@@ -103,6 +111,7 @@ impl AsyncLocalFileSystem {
             host_base,
         }
     }
+
     /// Creates a Host facade after reading the process cwd on a local I/O
     /// worker.
     ///

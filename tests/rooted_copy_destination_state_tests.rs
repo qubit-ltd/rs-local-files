@@ -111,7 +111,12 @@ fn test_required_atomicity_rechecks_actual_rooted_source_kind() {
 
     assert_eq!(LocalFileErrorKind::RequirementNotMet, failure.error().kind());
     assert_eq!(LocalCopyFailureState::Unchanged, failure.state());
-    assert!(fs::symlink_metadata(directory.path().join("source")).unwrap().file_type().is_symlink());
+    assert!(
+        fs::symlink_metadata(directory.path().join("source"))
+            .unwrap()
+            .file_type()
+            .is_symlink()
+    );
     assert!(!directory.path().join("target").exists());
 }
 

@@ -1755,7 +1755,11 @@ fn test_async_copy_counts_confirmed_directory_permissions_with_mixed_and_partial
                 block_on(AsyncLocalFileSystem::host(executor)).unwrap()
             };
             let request_path = |path: &Path, relative: &str| {
-                if rooted { PathBuf::from(relative) } else { path.to_path_buf() }
+                if rooted {
+                    PathBuf::from(relative)
+                } else {
+                    path.to_path_buf()
+                }
             };
 
             if partial {
@@ -1763,7 +1767,10 @@ fn test_async_copy_counts_confirmed_directory_permissions_with_mixed_and_partial
                 std::fs::create_dir(source.join("second")).unwrap();
                 std::fs::create_dir(target.join("first")).unwrap();
                 std::fs::create_dir(target.join("second")).unwrap();
-                let names = std::fs::read_dir(&source).unwrap().map(|entry| entry.unwrap().file_name()).collect::<Vec<_>>();
+                let names = std::fs::read_dir(&source)
+                    .unwrap()
+                    .map(|entry| entry.unwrap().file_name())
+                    .collect::<Vec<_>>();
                 let empty_name = names[0].clone();
                 let deep_name = names[1].clone();
                 std::fs::create_dir(source.join(&deep_name).join("deep")).unwrap();
@@ -1772,51 +1779,70 @@ fn test_async_copy_counts_confirmed_directory_permissions_with_mixed_and_partial
                 mode(&target.join(&empty_name), 0o700);
                 mode(&source.join(&deep_name), 0o500);
                 mode(&target.join(&deep_name), 0o700);
-                let (mut operation, facts) = filesystem.submit_copy(
-                    &manager,
-                    Default::default(),
-                    LocalCopyRequest {
-                        source: request_path(&source, "source"),
-                        destination: request_path(&target, "target"),
-                        options: LocalCopyOptions::new()
-                            .with_tree_source()
-                            .with_conflict(LocalCopyConflictPolicy::Fail)
-                            .with_max_depth(2)
-                            .with_max_open_directories(4)
-                            .with_metadata_preservation(LocalMetadataPreservePolicy::Permissions),
-                    },
-                    Default::default(),
-                ).unwrap();
+                let (mut operation, facts) = filesystem
+                    .submit_copy(
+                        &manager,
+                        Default::default(),
+                        LocalCopyRequest {
+                            source: request_path(&source, "source"),
+                            destination: request_path(&target, "target"),
+                            options: LocalCopyOptions::new()
+                                .with_tree_source()
+                                .with_conflict(LocalCopyConflictPolicy::Fail)
+                                .with_max_depth(2)
+                                .with_max_open_directories(4)
+                                .with_metadata_preservation(LocalMetadataPreservePolicy::Permissions),
+                        },
+                        Default::default(),
+                    )
+                    .unwrap();
                 let outcome = operation.wait_outcome().unwrap();
-                assert!(matches!(outcome, qubit_operation::OperationOutcome::Failed(_)), "{outcome:?}");
+                assert!(
+                    matches!(outcome, qubit_operation::OperationOutcome::Failed(_)),
+                    "{outcome:?}"
+                );
                 let snapshot = facts.snapshot();
                 assert_eq!(2, snapshot.modified_count, "facts: {snapshot:?}");
                 assert_eq!(0, snapshot.modified_bytes);
-                assert_eq!(qubit_local_files::LocalPublicationState::Published, snapshot.publication);
-                assert_eq!(0o500, std::fs::metadata(target.join(empty_name)).unwrap().permissions().mode() & 0o777);
+                assert_eq!(
+                    qubit_local_files::LocalPublicationState::Published,
+                    snapshot.publication
+                );
+                assert_eq!(
+                    0o500,
+                    std::fs::metadata(target.join(empty_name)).unwrap().permissions().mode() & 0o777
+                );
                 assert!(target.join(&deep_name).join("deep").is_dir());
                 mode(&target.join(deep_name), 0o700);
             } else {
                 std::fs::write(source.join("leaf"), b"payload").unwrap();
                 mode(&source, 0o500);
                 mode(&target, 0o700);
-                let (mut operation, facts) = filesystem.submit_copy(
-                    &manager,
-                    Default::default(),
-                    LocalCopyRequest {
-                        source: request_path(&source, "source"),
-                        destination: request_path(&target, "target"),
-                        options: LocalCopyOptions::new()
-                            .with_tree_source()
-                            .with_conflict(LocalCopyConflictPolicy::Overwrite)
-                            .with_metadata_preservation(LocalMetadataPreservePolicy::Permissions),
-                    },
-                    Default::default(),
-                ).unwrap();
-                assert!(matches!(operation.wait_outcome().unwrap(), qubit_operation::OperationOutcome::Succeeded(_)));
+                let (mut operation, facts) = filesystem
+                    .submit_copy(
+                        &manager,
+                        Default::default(),
+                        LocalCopyRequest {
+                            source: request_path(&source, "source"),
+                            destination: request_path(&target, "target"),
+                            options: LocalCopyOptions::new()
+                                .with_tree_source()
+                                .with_conflict(LocalCopyConflictPolicy::Overwrite)
+                                .with_metadata_preservation(LocalMetadataPreservePolicy::Permissions),
+                        },
+                        Default::default(),
+                    )
+                    .unwrap();
+                assert!(matches!(
+                    operation.wait_outcome().unwrap(),
+                    qubit_operation::OperationOutcome::Succeeded(_)
+                ));
                 let snapshot = facts.snapshot();
                 assert_eq!(2, snapshot.modified_count);
-                assert_eq!(qubit_local_files::LocalPublicationState::Published, snapshot.publication);
+                assert_eq!(
+                    qubit_local_files::LocalPublicationState::Published,
+                    snapshot.publication
+                );
                 mode(&target, 0o700);
             }
             mode(&source, 0o700);

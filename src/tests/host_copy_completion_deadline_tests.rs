@@ -105,7 +105,11 @@ fn test_host_copy_deadline_after_source_resolution_skips_target_resolution() {
 
     let failure = LocalFileSystem::host()
         .unwrap()
-        .copy_with_options(&source, &target, &LocalCopyOptions::new().with_deadline(Duration::from_secs(60)))
+        .copy_with_options(
+            &source,
+            &target,
+            &LocalCopyOptions::new().with_deadline(Duration::from_secs(60)),
+        )
         .expect_err("deadline after source resolution must prevent target resolution and copy");
 
     assert_eq!(std::io::ErrorKind::TimedOut, failure.error().io_error_kind());
@@ -125,7 +129,9 @@ fn test_host_delete_deadline_after_path_resolution_skips_initial_metadata() {
         .unwrap()
         .delete_directory_with_options(
             &target,
-            &crate::LocalDeleteOptions::new().with_recursive().with_deadline(Duration::from_secs(60)),
+            &crate::LocalDeleteOptions::new()
+                .with_recursive()
+                .with_deadline(Duration::from_secs(60)),
         )
         .expect_err("expired deletion must stop before initial metadata inspection");
 
@@ -163,7 +169,9 @@ fn test_host_copy_parent_preflight_deadline_prevents_parent_creation() {
         .copy_with_options(
             &source,
             &target,
-            &LocalCopyOptions::new().with_create_parent().with_deadline(Duration::from_secs(60)),
+            &LocalCopyOptions::new()
+                .with_create_parent()
+                .with_deadline(Duration::from_secs(60)),
         )
         .expect_err("deadline after parent preflight must prevent creation");
 
@@ -185,7 +193,9 @@ fn test_host_copy_parent_creation_deadline_preserves_created_parent_as_partial()
         .copy_with_options(
             &source,
             &target,
-            &LocalCopyOptions::new().with_create_parent().with_deadline(Duration::from_secs(60)),
+            &LocalCopyOptions::new()
+                .with_create_parent()
+                .with_deadline(Duration::from_secs(60)),
         )
         .expect_err("deadline after one parent creation must stop before the next");
 

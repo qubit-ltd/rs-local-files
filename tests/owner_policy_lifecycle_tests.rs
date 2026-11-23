@@ -17,9 +17,9 @@ use std::path::Path;
 use qubit_local_files::LocalFileSystem;
 use qubit_local_files::directory::LocalDirectoryHandle;
 #[cfg(target_os = "linux")]
-use qubit_local_files::directory::LocalTreeValidationOptions;
-#[cfg(target_os = "linux")]
 use qubit_local_files::directory::LocalTreeEntry;
+#[cfg(target_os = "linux")]
+use qubit_local_files::directory::LocalTreeValidationOptions;
 use qubit_local_files::error::LocalFileErrorKind;
 #[cfg(target_os = "linux")]
 use qubit_local_files::observation::LocalObservationRequirement;
@@ -742,12 +742,13 @@ fn test_publish_preflight_failures_preserve_existing_owner_policy() {
             OsStr::new("published")
         };
         if failure == "validation" {
-            options = options.with_validation(
-                LocalTreeValidationOptions::new().with_exact_entries(vec![
-                    LocalTreeEntry::new(Path::new("missing").to_path_buf(), qubit_local_files::outcome::LocalFileKind::File)
-                        .expect("expected entry"),
-                ]),
-            );
+            options = options.with_validation(LocalTreeValidationOptions::new().with_exact_entries(vec![
+                    LocalTreeEntry::new(
+                        Path::new("missing").to_path_buf(),
+                        qubit_local_files::outcome::LocalFileKind::File,
+                    )
+                    .expect("expected entry"),
+                ]));
         }
         let selected_parent = if failure == "parent" { &other_parent } else { &parent };
         let error = stage

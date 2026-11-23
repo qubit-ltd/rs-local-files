@@ -488,11 +488,9 @@ mod tests {
 
     use super::LocalReadLease;
     use super::LocalStageFailure;
-    #[cfg(feature = "test-support")]
     use super::LocalStageOptions;
     use super::LocalTempCommandError;
     use super::command_error;
-    #[cfg(feature = "test-support")]
     use super::stage_bytes;
     use crate::operation::executor::LocalIoExecutor;
     use crate::operation::temp::submit_temp_file;
@@ -556,6 +554,8 @@ mod tests {
     fn test_repeated_exports_share_file_offset_and_hold_resource_until_last_lease() {
         use std::io::Read;
 
+        #[cfg(feature = "test-support")]
+        let _guard = SEAL_TEST_LOCK.lock().unwrap_or_else(|error| error.into_inner());
         let manager =
             qubit_operation::OperationManager::new(qubit_operation::ManagerOptions::default()).expect("manager");
         let executor = LocalIoExecutor::new(manager.clone(), crate::operation::LocalExecutionConfig::default())
