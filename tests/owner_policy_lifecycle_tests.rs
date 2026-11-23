@@ -18,6 +18,8 @@ use qubit_local_files::LocalFileSystem;
 use qubit_local_files::directory::LocalDirectoryHandle;
 #[cfg(target_os = "linux")]
 use qubit_local_files::directory::LocalTreeValidationOptions;
+#[cfg(target_os = "linux")]
+use qubit_local_files::directory::LocalTreeEntry;
 use qubit_local_files::error::LocalFileErrorKind;
 #[cfg(target_os = "linux")]
 use qubit_local_files::observation::LocalObservationRequirement;
@@ -687,6 +689,78 @@ fn test_publish_conflict_retains_stage_with_owner_policy() {
     stage.cleanup().expect("cleanup retained stage");
 }
 
+#[cfg(target_os = "linux")]
+#[test]
+fn test_publish_invalid_name_preserves_existing_owner_policy() {
+    use std::ffi::OsStr;
+
+    let scratch = tempfile::tempdir().expect("scratch directory");
+    let parent = parent(&scratch);
+    let original = LocalOwnerAccessPolicy::new().with_unix_modes(0o700, 0o600);
+    let requested = LocalOwnerAccessPolicy::new().with_unix_modes(0o700, 0o400);
+    let stage = parent
+        .create_staged_directory(&LocalTempDirectoryOptions::new().with_owner_access_policy(original))
+        .expect("stage with original policy");
+
+    let error = stage
+        .publish_new(
+            &parent,
+            OsStr::new("nested/name"),
+            &LocalTreePublishOptions::new().with_owner_access_policy(requested),
+        )
+        .expect_err("a multi-component name must fail preflight");
+    assert_eq!(LocalTreeMutationState::NotStarted, error.mutation_state());
+    assert_eq!(LocalTreeAccessState::Preserved, error.access_state());
+    let stage = error.into_stage().expect("preserved stage returned");
+    assert_eq!(Some(&original), stage.owner_access_policy());
+    stage.cleanup().expect("cleanup");
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn test_publish_preflight_failures_preserve_existing_owner_policy() {
+    use std::ffi::OsStr;
+
+    for failure in ["name", "parent", "validation"] {
+        let scratch = tempfile::tempdir().expect("scratch directory");
+        let parent = parent(&scratch);
+        let other_path = scratch.path().join("other");
+        fs::create_dir(&other_path).expect("other parent");
+        let other_parent = LocalFileSystem::host()
+            .expect("host filesystem")
+            .open_directory_with_options(&other_path, &LocalDirectoryOpenOptions::new())
+            .expect("other parent authority");
+        let original = LocalOwnerAccessPolicy::new().with_unix_modes(0o700, 0o600);
+        let requested = LocalOwnerAccessPolicy::new().with_unix_modes(0o700, 0o400);
+        let stage = parent
+            .create_staged_directory(&LocalTempDirectoryOptions::new().with_owner_access_policy(original))
+            .expect("stage with original policy");
+        let mut options = LocalTreePublishOptions::new().with_owner_access_policy(requested);
+        let destination = if failure == "name" {
+            OsStr::new("nested/name")
+        } else {
+            OsStr::new("published")
+        };
+        if failure == "validation" {
+            options = options.with_validation(
+                LocalTreeValidationOptions::new().with_exact_entries(vec![
+                    LocalTreeEntry::new(Path::new("missing").to_path_buf(), qubit_local_files::outcome::LocalFileKind::File)
+                        .expect("expected entry"),
+                ]),
+            );
+        }
+        let selected_parent = if failure == "parent" { &other_parent } else { &parent };
+        let error = stage
+            .publish_new(selected_parent, destination, &options)
+            .expect_err("preflight failure must preserve stage strategy");
+        assert_eq!(LocalTreeMutationState::NotStarted, error.mutation_state(), "{failure}");
+        assert_eq!(LocalTreeAccessState::Preserved, error.access_state(), "{failure}");
+        let stage = error.into_stage().expect("preserved stage returned");
+        assert_eq!(Some(&original), stage.owner_access_policy(), "{failure}");
+        stage.cleanup().expect("cleanup");
+    }
+}
+
 #[cfg(all(feature = "test-support", target_os = "linux"))]
 #[test]
 fn test_required_sync_failure_retains_stage_and_policy_before_conversion() {
@@ -713,9 +787,9 @@ fn test_required_sync_failure_retains_stage_and_policy_before_conversion() {
         .expect_err("required file sync failure must block policy transition and publication");
     assert_eq!(LocalTreeMutationState::NotStarted, error.mutation_state());
     assert_eq!(LocalTreeAccessState::Preserved, error.access_state());
-    assert_eq!(Some(&policy), error.owner_access_policy());
+    assert_eq!(None, error.owner_access_policy());
     let stage = error.into_stage().expect("stage retained");
-    assert_eq!(Some(&policy), stage.owner_access_policy());
+    assert_eq!(None, stage.owner_access_policy());
     stage.cleanup().expect("cleanup retained stage");
 }
 
@@ -1013,7 +1087,7 @@ fn test_nonempty_stage_rejects_unsearchable_root_policy_before_mutation() {
         .expect_err("unsearchable nonempty root cannot support final name-binding verification");
     assert_eq!(LocalFileErrorKind::RequirementNotMet, error.cause().kind());
     assert_eq!(LocalTreeAccessState::Preserved, error.access_state());
-    assert_eq!(Some(&policy), stage.owner_access_policy());
+    assert_eq!(None, stage.owner_access_policy());
     assert_eq!(
         0o700,
         fs::metadata(scratch.path().join(stage.relative_name()))
@@ -1150,8 +1224,10 @@ fn test_owner_policy_depth_one_rejects_nested_leaf_before_permission_changes() {
 fn test_owner_policy_handle_budget_rejects_before_any_mutation() {
     let scratch = tempfile::tempdir().expect("scratch directory");
     let parent = parent(&scratch);
+    let original = LocalOwnerAccessPolicy::new().with_unix_modes(0o700, 0o600);
+    let policy = LocalOwnerAccessPolicy::new().with_unix_modes(0o700, 0o400);
     let mut stage = parent
-        .create_staged_directory(&LocalTempDirectoryOptions::new())
+        .create_staged_directory(&LocalTempDirectoryOptions::new().with_owner_access_policy(original))
         .expect("stage");
     for index in 0..257 {
         stage
@@ -1162,13 +1238,12 @@ fn test_owner_policy_handle_budget_rejects_before_any_mutation() {
             )
             .expect("entry creation");
     }
-    let policy = LocalOwnerAccessPolicy::new().with_unix_modes(0o700, 0o400);
     let error = stage
         .apply_owner_access_policy_with_options(&policy, &LocalListOptions::new())
         .expect_err("more entries than the retained-handle budget must fail in preflight");
     assert_eq!(LocalFileErrorKind::ResourceLimit, error.cause().kind());
     assert_eq!(LocalTreeAccessState::Preserved, error.access_state());
-    assert_eq!(Some(&policy), stage.owner_access_policy());
+    assert_eq!(Some(&original), stage.owner_access_policy());
     assert!(
         fs::read_dir(scratch.path().join(stage.relative_name()))
             .expect("stage entries")

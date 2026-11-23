@@ -589,10 +589,48 @@ impl LocalStagedDirectory {
             #[cfg(unix)]
             let opened = root.open_reader(&relative, &crate::read::OpenOptions::default());
             #[cfg(windows)]
-            let opened = root.open_writer(
-                &relative,
-                &crate::write::OpenOptions::new(crate::write::Mode::OpenExistingAtStart),
-            );
+            let sync_opened = {
+                #[cfg(feature = "test-support")]
+                if crate::local::take_test_support("tree-sync-open-capability") {
+                    Err(std::io::Error::new(
+                        std::io::ErrorKind::PermissionDenied,
+                        "injected sync-only access denial",
+                    ))
+                } else {
+                    root.open_writer(
+                        &relative,
+                        &crate::write::OpenOptions::new(crate::write::Mode::OpenExistingAtStart),
+                    )
+                }
+                #[cfg(not(feature = "test-support"))]
+                {
+                    root.open_writer(
+                        &relative,
+                        &crate::write::OpenOptions::new(crate::write::Mode::OpenExistingAtStart),
+                    )
+                }
+            };
+            #[cfg(windows)]
+            let opened = match sync_opened {
+                Ok(file) => Ok(file),
+                Err(_) if requirement == LocalFileSyncRequirement::Preferred => {
+                    let current = self
+                        .directory()
+                        .observe_entry(item.relative_path())
+                        .map_err(|cause| cause.with_path(self.directory().diagnostic_path().join(item.relative_path())))?;
+                    if current.identity() != Some(&expected)
+                        || current.metadata().kind() != crate::LocalFileKind::File
+                    {
+                        return Err(
+                            LocalFileError::new(LocalFileErrorKind::ChangedDuringRead, LocalFileOperation::Metadata)
+                                .with_path(self.directory().diagnostic_path().join(item.relative_path())),
+                        );
+                    }
+                    synced = false;
+                    continue;
+                }
+                Err(source) => Err(source),
+            };
             #[cfg(not(any(unix, windows)))]
             let opened = root.open_writer(
                 &relative,

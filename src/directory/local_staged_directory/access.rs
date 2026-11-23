@@ -170,7 +170,10 @@ impl LocalStagedDirectory {
     /// configured budgets are exceeded, or `RequirementNotMet` when a rule
     /// or expected entry set is violated.
     pub fn verify_entries(&self, expected: &[LocalTreeEntry], options: &LocalTreeValidationOptions) -> LocalResult<()> {
-        if options.exact_entries().is_some_and(|configured| configured != expected) {
+        if options
+            .exact_entries()
+            .is_some_and(|configured| !same_tree_entry_set(configured, expected))
+        {
             return Err(LocalFileError::new(
                 LocalFileErrorKind::InvalidOptions,
                 LocalFileOperation::ValidateName,
@@ -245,6 +248,33 @@ impl LocalStagedDirectory {
             .directory()
             .list_with_options_started_at(Path::new("."), &recursive, started_at)?;
         Ok(LocalTreeObserver::new(self.directory().clone(), walker))
+    }
+}
+
+/// Compares exact tree entries by their unique relative paths and kinds.
+///
+/// Duplicate paths are rejected even when their kinds differ; `verify_tree`
+/// also rejects duplicates when it validates one exact input set.
+fn same_tree_entry_set(left: &[LocalTreeEntry], right: &[LocalTreeEntry]) -> bool {
+    fn index(entries: &[LocalTreeEntry]) -> Option<std::collections::HashMap<&Path, crate::LocalFileKind>> {
+        let mut result = std::collections::HashMap::with_capacity(entries.len());
+        for entry in entries {
+            if result
+                .insert(entry.relative_path(), entry.kind())
+                .is_some()
+            {
+                return None;
+            }
+        }
+        Some(result)
+    }
+
+    if left.len() != right.len() {
+        return false;
+    }
+    match (index(left), index(right)) {
+        (Some(left), Some(right)) => left == right,
+        _ => false,
     }
 }
 impl LocalStagedDirectory {
@@ -370,10 +400,6 @@ impl LocalStagedDirectory {
         validate_owner_policy(policy)
             .map_err(|cause| super::super::tree_recovery::LocalTreeAccessError::new(cause, State::Preserved))?;
         let file_synced = sync_requirement != LocalFileSyncRequirement::NotRequired && pre_synced;
-        self.owner_access_policy = Some(*policy);
-        if let Some(owner) = self.owner.as_mut() {
-            owner.set_owner_access_policy(Some(*policy));
-        }
         let (entries, traversal, maximum_entries, directory_mode_restricts_traversal) =
             self.collect_owner_policy_entries_started_at(policy, limits, started_at)?;
         #[cfg(test)]
@@ -811,6 +837,10 @@ impl LocalStagedDirectory {
                     if applied { State::Mixed } else { State::Preserved },
                 ));
             }
+            self.owner_access_policy = Some(*policy);
+            if let Some(owner) = self.owner.as_mut() {
+                owner.set_owner_access_policy(Some(*policy));
+            }
             let result = {
                 #[cfg(unix)]
                 {
@@ -921,6 +951,10 @@ impl LocalStagedDirectory {
                 )
             })?;
         let root_result = {
+            self.owner_access_policy = Some(*policy);
+            if let Some(owner) = self.owner.as_mut() {
+                owner.set_owner_access_policy(Some(*policy));
+            }
             #[cfg(unix)]
             {
                 crate::temp::internal::privacy_unix::apply_owner_access(&root, true, policy)
@@ -1812,12 +1846,30 @@ impl LocalStagedDirectory {
             if !matches!(*kind, crate::LocalFileKind::File | crate::LocalFileKind::Directory) {
                 continue;
             }
-            let file = match if sync_requirement == LocalFileSyncRequirement::NotRequired {
-                open_windows_tree_entry(self, relative, *kind)
+            let (file, sync_capable) = match if sync_requirement == LocalFileSyncRequirement::NotRequired
+                || *kind != crate::LocalFileKind::File
+            {
+                open_windows_tree_entry(self, relative, *kind).map(|file| (file, true))
             } else {
-                open_windows_tree_entry_for_sync(self, relative, *kind)
+                let sync_open = {
+                    #[cfg(feature = "test-support")]
+                    if crate::local::take_test_support("tree-access-sync-capability") {
+                        Err(LocalFileError::new(LocalFileErrorKind::Unsupported, LocalFileOperation::Commit))
+                    } else {
+                        open_windows_tree_entry_for_sync(self, relative, *kind)
+                    }
+                    #[cfg(not(feature = "test-support"))]
+                    {
+                        open_windows_tree_entry_for_sync(self, relative, *kind)
+                    }
+                };
+                match sync_open {
+                    Ok(file) => Ok((file, true)),
+                    Err(cause) if sync_requirement == LocalFileSyncRequirement::Required => Err(cause),
+                    Err(_) => open_windows_tree_entry(self, relative, *kind).map(|file| (file, false)),
+                }
             } {
-                Ok(file) => file,
+                Ok(opened) => opened,
                 Err(cause) => {
                     return Err(super::super::tree_recovery::LocalTreeAccessError::new(
                         cause,
@@ -1876,6 +1928,10 @@ impl LocalStagedDirectory {
             }
             applied += 1;
             if !is_directory && sync_requirement != LocalFileSyncRequirement::NotRequired {
+                if !sync_capable {
+                    synced = false;
+                    continue;
+                }
                 #[cfg(test)]
                 let sync_result = fail_tree_sync_if_scheduled().and_then(|()| file.sync_all());
                 #[cfg(not(test))]

@@ -134,6 +134,82 @@ fn test_duplicate_expected_paths_are_invalid_options() {
 }
 
 #[test]
+fn test_exact_entry_validation_ignores_input_order_but_checks_path_and_kind() {
+    let fixture = tempfile::tempdir().expect("fixture");
+    let fs = LocalFileSystem::host().expect("Host");
+    let parent = fs
+        .open_directory_with_options(fixture.path(), &LocalDirectoryOpenOptions::new())
+        .expect("parent");
+    let mut stage = parent
+        .create_staged_directory(&LocalTempDirectoryOptions::new())
+        .expect("stage");
+    stage.write_file_new(Path::new("a"), &mut &b"a"[..], 1).expect("write a");
+    stage.write_file_new(Path::new("b"), &mut &b"b"[..], 1).expect("write b");
+    let a = LocalTreeEntry::new(Path::new("a").to_path_buf(), LocalFileKind::File).expect("entry a");
+    let b = LocalTreeEntry::new(Path::new("b").to_path_buf(), LocalFileKind::File).expect("entry b");
+    let validation = LocalTreeValidationOptions::new().with_exact_entries(vec![b.clone(), a.clone()]);
+    stage
+        .verify_entries(&[a.clone(), b.clone()], &validation)
+        .expect("equivalent path and kind sets are order independent");
+
+    let wrong_kind = LocalTreeEntry::new(Path::new("b").to_path_buf(), LocalFileKind::Directory).expect("entry");
+    let wrong_kind_validation = LocalTreeValidationOptions::new().with_exact_entries(vec![a.clone(), wrong_kind]);
+    let error = stage
+        .verify_entries(
+            &[
+                LocalTreeEntry::new(Path::new("a").to_path_buf(), LocalFileKind::File).expect("entry"),
+                b.clone(),
+            ],
+            &wrong_kind_validation,
+        )
+        .expect_err("same paths with different kinds are not equivalent");
+    assert_eq!(error.kind(), LocalFileErrorKind::InvalidOptions);
+
+    let missing = LocalTreeEntry::new(Path::new("missing").to_path_buf(), LocalFileKind::File).expect("entry");
+    let missing_validation = LocalTreeValidationOptions::new().with_exact_entries(vec![a, missing]);
+    let error = stage
+        .verify_entries(
+            &[
+                LocalTreeEntry::new(Path::new("a").to_path_buf(), LocalFileKind::File).expect("entry"),
+                b,
+            ],
+            &missing_validation,
+        )
+        .expect_err("a missing path is not the same exact set");
+    assert_eq!(error.kind(), LocalFileErrorKind::InvalidOptions);
+
+    let duplicate = [
+        LocalTreeEntry::new(Path::new("a").to_path_buf(), LocalFileKind::File).expect("entry"),
+        LocalTreeEntry::new(Path::new("a").to_path_buf(), LocalFileKind::File).expect("entry"),
+    ];
+    let unique_options = LocalTreeValidationOptions::new().with_exact_entries(vec![
+        LocalTreeEntry::new(Path::new("a").to_path_buf(), LocalFileKind::File).expect("entry"),
+        LocalTreeEntry::new(Path::new("b").to_path_buf(), LocalFileKind::File).expect("entry"),
+    ]);
+    assert_eq!(
+        LocalFileErrorKind::InvalidOptions,
+        stage.verify_entries(&duplicate, &unique_options).unwrap_err().kind(),
+        "the caller-supplied exact paths must remain unique"
+    );
+    let duplicate_options = LocalTreeValidationOptions::new().with_exact_entries(duplicate.to_vec());
+    assert_eq!(
+        LocalFileErrorKind::InvalidOptions,
+        stage
+            .verify_entries(
+                &[
+                    LocalTreeEntry::new(Path::new("a").to_path_buf(), LocalFileKind::File).expect("entry"),
+                    LocalTreeEntry::new(Path::new("b").to_path_buf(), LocalFileKind::File).expect("entry"),
+                ],
+                &duplicate_options,
+            )
+            .unwrap_err()
+            .kind(),
+        "configured exact paths must remain unique"
+    );
+    stage.cleanup().expect("cleanup");
+}
+
+#[test]
 fn test_zero_deadline_and_entry_limit_reject_tree() {
     let fixture = tempfile::tempdir().expect("fixture");
     let fs = LocalFileSystem::host().expect("Host");
