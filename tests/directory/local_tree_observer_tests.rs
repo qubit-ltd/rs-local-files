@@ -186,26 +186,23 @@ fn test_exact_entry_validation_ignores_input_order_but_checks_path_and_kind() {
         LocalTreeEntry::new(Path::new("a").to_path_buf(), LocalFileKind::File).expect("entry"),
         LocalTreeEntry::new(Path::new("b").to_path_buf(), LocalFileKind::File).expect("entry"),
     ]);
-    assert_eq!(
-        LocalFileErrorKind::InvalidOptions,
-        stage.verify_entries(&duplicate, &unique_options).unwrap_err().kind(),
-        "the caller-supplied exact paths must remain unique"
-    );
+    let error = stage
+        .verify_entries(&duplicate, &unique_options)
+        .expect_err("the caller-supplied exact paths must remain unique");
+    assert_eq!(LocalFileErrorKind::InvalidOptions, error.kind());
+    assert_eq!(Some("duplicate expected tree entry path"), error.reason());
     let duplicate_options = LocalTreeValidationOptions::new().with_exact_entries(duplicate.to_vec());
-    assert_eq!(
-        LocalFileErrorKind::InvalidOptions,
-        stage
-            .verify_entries(
-                &[
-                    LocalTreeEntry::new(Path::new("a").to_path_buf(), LocalFileKind::File).expect("entry"),
-                    LocalTreeEntry::new(Path::new("b").to_path_buf(), LocalFileKind::File).expect("entry"),
-                ],
-                &duplicate_options,
-            )
-            .unwrap_err()
-            .kind(),
-        "configured exact paths must remain unique"
-    );
+    let error = stage
+        .verify_entries(
+            &[
+                LocalTreeEntry::new(Path::new("a").to_path_buf(), LocalFileKind::File).expect("entry"),
+                LocalTreeEntry::new(Path::new("b").to_path_buf(), LocalFileKind::File).expect("entry"),
+            ],
+            &duplicate_options,
+        )
+        .expect_err("configured exact paths must remain unique");
+    assert_eq!(LocalFileErrorKind::InvalidOptions, error.kind());
+    assert_eq!(Some("duplicate expected tree entry path"), error.reason());
     stage.cleanup().expect("cleanup");
 }
 

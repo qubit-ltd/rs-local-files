@@ -170,15 +170,6 @@ impl LocalStagedDirectory {
     /// configured budgets are exceeded, or `RequirementNotMet` when a rule
     /// or expected entry set is violated.
     pub fn verify_entries(&self, expected: &[LocalTreeEntry], options: &LocalTreeValidationOptions) -> LocalResult<()> {
-        if options
-            .exact_entries()
-            .is_some_and(|configured| !same_tree_entry_set(configured, expected))
-        {
-            return Err(LocalFileError::new(
-                LocalFileErrorKind::InvalidOptions,
-                LocalFileOperation::ValidateName,
-            ));
-        }
         super::super::internal::tree_verification::verify_tree(self, Some(expected), options)
     }
 
@@ -251,32 +242,6 @@ impl LocalStagedDirectory {
     }
 }
 
-/// Compares exact tree entries by their unique relative paths and kinds.
-///
-/// Duplicate paths are rejected even when their kinds differ; `verify_tree`
-/// also rejects duplicates when it validates one exact input set.
-fn same_tree_entry_set(left: &[LocalTreeEntry], right: &[LocalTreeEntry]) -> bool {
-    fn index(entries: &[LocalTreeEntry]) -> Option<std::collections::HashMap<&Path, crate::LocalFileKind>> {
-        let mut result = std::collections::HashMap::with_capacity(entries.len());
-        for entry in entries {
-            if result
-                .insert(entry.relative_path(), entry.kind())
-                .is_some()
-            {
-                return None;
-            }
-        }
-        Some(result)
-    }
-
-    if left.len() != right.len() {
-        return false;
-    }
-    match (index(left), index(right)) {
-        (Some(left), Some(right)) => left == right,
-        _ => false,
-    }
-}
 impl LocalStagedDirectory {
     /// Applies an access policy without publishing or relinquishing this stage.
     ///
@@ -715,18 +680,38 @@ impl LocalStagedDirectory {
                         }
                         #[cfg(windows)]
                         {
-                            match open_windows_tree_entry_for_sync(self, path, *kind) {
+                            let sync_open = {
+                                #[cfg(feature = "test-support")]
+                                if crate::local::take_test_support("owner-policy-main-open-failure") {
+                                    Err(super::WindowsTreeEntrySyncOpenError::Other(LocalFileError::new(
+                                        LocalFileErrorKind::ChangedDuringRead,
+                                        LocalFileOperation::OpenRoot,
+                                    )))
+                                } else {
+                                    open_windows_tree_entry_for_sync(self, path, *kind)
+                                }
+                                #[cfg(not(feature = "test-support"))]
+                                {
+                                    open_windows_tree_entry_for_sync(self, path, *kind)
+                                }
+                            };
+                            match sync_open {
                                 Ok(file) => {
                                     sync_capable = true;
                                     Ok(file)
                                 }
-                                Err(cause) if sync_requirement == LocalFileSyncRequirement::Required => {
+                                Err(super::WindowsTreeEntrySyncOpenError::SyncAccessUnavailable(cause))
+                                    if sync_requirement == LocalFileSyncRequirement::Required =>
+                                {
                                     return Err(super::super::tree_recovery::LocalTreeAccessError::new(
                                         cause,
                                         State::Preserved,
                                     ));
                                 }
-                                Err(_) => open_windows_tree_entry(self, path, *kind),
+                                Err(super::WindowsTreeEntrySyncOpenError::SyncAccessUnavailable(_)) => {
+                                    open_windows_tree_entry(self, path, *kind)
+                                }
+                                Err(super::WindowsTreeEntrySyncOpenError::Other(cause)) => Err(cause),
                             }
                         }
                         #[cfg(not(any(unix, windows)))]
@@ -1854,7 +1839,14 @@ impl LocalStagedDirectory {
                 let sync_open = {
                     #[cfg(feature = "test-support")]
                     if crate::local::take_test_support("tree-access-sync-capability") {
-                        Err(LocalFileError::new(LocalFileErrorKind::Unsupported, LocalFileOperation::Commit))
+                        Err(super::WindowsTreeEntrySyncOpenError::SyncAccessUnavailable(
+                            LocalFileError::new(LocalFileErrorKind::Unsupported, LocalFileOperation::Commit),
+                        ))
+                    } else if crate::local::take_test_support("tree-access-main-open-failure") {
+                        Err(super::WindowsTreeEntrySyncOpenError::Other(LocalFileError::new(
+                            LocalFileErrorKind::ChangedDuringRead,
+                            LocalFileOperation::OpenRoot,
+                        )))
                     } else {
                         open_windows_tree_entry_for_sync(self, relative, *kind)
                     }
@@ -1865,8 +1857,15 @@ impl LocalStagedDirectory {
                 };
                 match sync_open {
                     Ok(file) => Ok((file, true)),
-                    Err(cause) if sync_requirement == LocalFileSyncRequirement::Required => Err(cause),
-                    Err(_) => open_windows_tree_entry(self, relative, *kind).map(|file| (file, false)),
+                    Err(super::WindowsTreeEntrySyncOpenError::SyncAccessUnavailable(cause))
+                        if sync_requirement == LocalFileSyncRequirement::Required =>
+                    {
+                        Err(cause)
+                    }
+                    Err(super::WindowsTreeEntrySyncOpenError::SyncAccessUnavailable(_)) => {
+                        open_windows_tree_entry(self, relative, *kind).map(|file| (file, false))
+                    }
+                    Err(super::WindowsTreeEntrySyncOpenError::Other(cause)) => Err(cause),
                 }
             } {
                 Ok(opened) => opened,

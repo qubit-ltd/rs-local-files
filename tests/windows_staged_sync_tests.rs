@@ -10,6 +10,7 @@ use std::path::Path;
 
 use qubit_local_files::LocalFileSystem;
 use qubit_local_files::directory::LocalDirectoryHandle;
+use qubit_local_files::error::LocalFileErrorKind;
 use qubit_local_files::options::LocalDirectoryOpenOptions;
 use qubit_local_files::options::LocalTempDirectoryOptions;
 use qubit_local_files::options::LocalTreePublishOptions;
@@ -42,7 +43,8 @@ fn test_preferred_sync_open_failure_preserves_access_and_reports_unsynced() {
     let scratch = tempfile::tempdir().expect("fixture");
     let parent = parent(scratch.path());
     let stage = stage_with_file(&parent);
-    let _fault = install_test_fault("tree-sync-open-capability").expect("sync-open selector");
+    let _fault = install_test_fault("windows-sync-final-open-permission-denied")
+        .expect("sync-open selector");
 
     let outcome = stage
         .publish_new(
@@ -59,7 +61,8 @@ fn test_required_sync_open_failure_preserves_stage_before_access_mutation() {
     let scratch = tempfile::tempdir().expect("fixture");
     let parent = parent(scratch.path());
     let stage = stage_with_file(&parent);
-    let _fault = install_test_fault("tree-sync-open-capability").expect("sync-open selector");
+    let _fault = install_test_fault("windows-sync-final-open-permission-denied")
+        .expect("sync-open selector");
 
     let error = stage
         .publish_new(
@@ -76,6 +79,28 @@ fn test_required_sync_open_failure_preserves_stage_before_access_mutation() {
         qubit_local_files::outcome::LocalTreeAccessState::Preserved,
         error.access_state()
     );
+    error
+        .into_stage()
+        .expect("stage retained")
+        .cleanup()
+        .expect("cleanup");
+}
+
+#[test]
+fn test_preferred_sync_propagates_non_permission_open_failure() {
+    let scratch = tempfile::tempdir().expect("fixture");
+    let parent = parent(scratch.path());
+    let stage = stage_with_file(&parent);
+    let _fault = install_test_fault("tree-sync-main-open-failure").expect("open failure selector");
+
+    let error = stage
+        .publish_new(
+            &parent,
+            OsStr::new("published"),
+            &LocalTreePublishOptions::new().with_file_sync(LocalFileSyncRequirement::Preferred),
+        )
+        .expect_err("a non-permission open failure must not degrade Preferred");
+    assert_eq!(LocalFileErrorKind::ChangedDuringRead, error.cause().kind());
     error
         .into_stage()
         .expect("stage retained")
@@ -111,6 +136,31 @@ fn test_preferred_access_sync_open_failure_degrades_current_and_read_only_polici
 }
 
 #[test]
+fn test_preferred_access_propagates_non_permission_sync_open_failure() {
+    let scratch = tempfile::tempdir().expect("fixture");
+    let parent = parent(scratch.path());
+    let stage = stage_with_file(&parent);
+    let _fault =
+        install_test_fault("tree-access-main-open-failure").expect("access failure selector");
+
+    let error = stage
+        .publish_new(
+            &parent,
+            OsStr::new("published"),
+            &LocalTreePublishOptions::new()
+                .with_access(LocalTreeFinalAccess::CurrentUserOnly)
+                .with_file_sync(LocalFileSyncRequirement::Preferred),
+        )
+        .expect_err("a non-permission access-open failure must propagate");
+    assert_eq!(LocalFileErrorKind::ChangedDuringRead, error.cause().kind());
+    error
+        .into_stage()
+        .expect("stage retained")
+        .cleanup()
+        .expect("cleanup");
+}
+
+#[test]
 fn test_preferred_owner_policy_sync_open_failure_publishes_unsynced() {
     let scratch = tempfile::tempdir().expect("fixture");
     let parent = parent(scratch.path());
@@ -129,4 +179,30 @@ fn test_preferred_owner_policy_sync_open_failure_publishes_unsynced() {
         )
         .expect("Preferred owner policy sync capability may degrade");
     assert!(!outcome.file_synced());
+}
+
+#[test]
+fn test_preferred_owner_policy_propagates_non_permission_open_failure() {
+    let scratch = tempfile::tempdir().expect("fixture");
+    let parent = parent(scratch.path());
+    let stage = stage_with_file(&parent);
+    let _fault = install_test_fault("owner-policy-main-open-failure")
+        .expect("owner policy failure selector");
+    let policy = LocalOwnerAccessPolicy::new().with_windows_masks(0x0016_01ef, 0x0016_019f);
+
+    let error = stage
+        .publish_new(
+            &parent,
+            OsStr::new("published"),
+            &LocalTreePublishOptions::new()
+                .with_owner_access_policy(policy)
+                .with_file_sync(LocalFileSyncRequirement::Preferred),
+        )
+        .expect_err("a non-permission owner-policy open failure must propagate");
+    assert_eq!(LocalFileErrorKind::ChangedDuringRead, error.cause().kind());
+    error
+        .into_stage()
+        .expect("stage retained")
+        .cleanup()
+        .expect("cleanup");
 }

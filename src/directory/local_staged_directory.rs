@@ -304,6 +304,22 @@ pub(in crate::directory) fn open_unix_tree_entry(
         })
 }
 
+/// Distinguishes unavailable sync-only access from other Windows open failures.
+#[cfg(windows)]
+pub(in crate::directory) enum WindowsTreeEntrySyncOpenError {
+    SyncAccessUnavailable(LocalFileError),
+    Other(LocalFileError),
+}
+
+#[cfg(windows)]
+impl WindowsTreeEntrySyncOpenError {
+    pub(in crate::directory) fn into_error(self) -> LocalFileError {
+        match self {
+            Self::SyncAccessUnavailable(error) | Self::Other(error) => error,
+        }
+    }
+}
+
 /// Opens an entry beneath the stage by walking from the retained Windows owner.
 ///
 /// Handle-relative opens keep the operation bound to the owner authority.
@@ -319,7 +335,7 @@ pub(in crate::directory) fn open_windows_tree_entry(
     relative: &Path,
     kind: crate::LocalFileKind,
 ) -> LocalResult<File> {
-    open_windows_tree_entry_with_sync(stage, relative, kind, false)
+    open_windows_tree_entry_with_sync(stage, relative, kind, false).map_err(WindowsTreeEntrySyncOpenError::into_error)
 }
 
 /// Opens an entry using the Windows access mode required for tree syncing.
@@ -337,7 +353,7 @@ pub(in crate::directory) fn open_windows_tree_entry_for_sync(
     stage: &LocalStagedDirectory,
     relative: &Path,
     kind: crate::LocalFileKind,
-) -> LocalResult<File> {
+) -> Result<File, WindowsTreeEntrySyncOpenError> {
     open_windows_tree_entry_with_sync(stage, relative, kind, true)
 }
 
@@ -357,12 +373,13 @@ fn open_windows_tree_entry_with_sync(
     relative: &Path,
     kind: crate::LocalFileKind,
     for_sync: bool,
-) -> LocalResult<File> {
+) -> Result<File, WindowsTreeEntrySyncOpenError> {
     let mut current = stage
         .owner
         .as_ref()
         .expect("stage owner exists")
-        .open_child_for_access()?;
+        .open_child_for_access()
+        .map_err(WindowsTreeEntrySyncOpenError::Other)?;
     let mut components = relative
         .components()
         .filter_map(|component| match component {
@@ -372,19 +389,46 @@ fn open_windows_tree_entry_with_sync(
         .peekable();
     while let Some(name) = components.next() {
         let directory = components.peek().is_some() || kind == crate::LocalFileKind::Directory;
-        current = (if for_sync && !directory {
-            crate::temp::internal::privacy_windows::open_existing_entry_at_for_sync(&current, name, directory)
-        } else {
-            crate::temp::internal::privacy_windows::open_existing_entry_at(&current, name, directory)
-        })
-        .map_err(|source| {
-            LocalFileError::from_io(
-                LocalFileOperation::OpenRoot,
-                Some(stage.directory().diagnostic_path().join(relative)),
-                None,
-                source,
-            )
-        })?;
+        let next = {
+            #[cfg(feature = "test-support")]
+            if for_sync
+                && !directory
+                && crate::local::take_test_support("windows-sync-final-open-permission-denied")
+            {
+                Err(std::io::Error::new(
+                    std::io::ErrorKind::PermissionDenied,
+                    "injected sync-only access denial",
+                ))
+            } else if for_sync && !directory {
+                crate::temp::internal::privacy_windows::open_existing_entry_at_for_sync(&current, name, directory)
+            } else {
+                crate::temp::internal::privacy_windows::open_existing_entry_at(&current, name, directory)
+            }
+            #[cfg(not(feature = "test-support"))]
+            if for_sync && !directory {
+                crate::temp::internal::privacy_windows::open_existing_entry_at_for_sync(&current, name, directory)
+            } else {
+                crate::temp::internal::privacy_windows::open_existing_entry_at(&current, name, directory)
+            }
+        };
+        current = match next {
+            Ok(next) => next,
+            Err(source) => {
+                let sync_access_unavailable =
+                    for_sync && !directory && source.kind() == std::io::ErrorKind::PermissionDenied;
+                let cause = LocalFileError::from_io(
+                    LocalFileOperation::OpenRoot,
+                    Some(stage.directory().diagnostic_path().join(relative)),
+                    None,
+                    source,
+                );
+                return Err(if sync_access_unavailable {
+                    WindowsTreeEntrySyncOpenError::SyncAccessUnavailable(cause)
+                } else {
+                    WindowsTreeEntrySyncOpenError::Other(cause)
+                });
+            }
+        };
     }
     Ok(current)
 }

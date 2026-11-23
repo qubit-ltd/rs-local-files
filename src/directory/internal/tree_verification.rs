@@ -68,6 +68,7 @@ pub(in crate::directory) fn verify_tree(
     expected: Option<&[LocalTreeEntry]>,
     options: &LocalTreeValidationOptions,
 ) -> LocalResult<()> {
+    let expected = expected.or_else(|| options.exact_entries());
     let started = Instant::now();
     let deadline = options
         .limits()
@@ -173,6 +174,84 @@ pub(in crate::directory) fn verify_tree(
     } else {
         None
     };
+
+    if let (Some(configured), Some(index)) = (options.exact_entries(), expected_index.as_mut()) {
+        if let Some(maximum) = limits.max_entries()
+            && configured.len() > maximum
+        {
+            return Err(resource_error(
+                stage,
+                Path::new("."),
+                "tree validation entry limit exceeded",
+                Some(
+                    LocalResourceLimitError::new(LocalResourceKind::Entry, maximum, maximum, configured.len())
+                        .with_observed(configured.len()),
+                ),
+            ));
+        }
+        let mut configured_name_bytes = 0_usize;
+        let mut mismatch = configured.len() != index.len();
+        for (position, entry) in configured.iter().enumerate() {
+            check_deadline(stage, deadline)?;
+            let requested = entry.relative_path().as_os_str().as_encoded_bytes().len();
+            let next = configured_name_bytes.checked_add(requested).ok_or_else(|| {
+                resource_overflow(
+                    stage,
+                    entry.relative_path(),
+                    LocalResourceKind::SeenNameBytes,
+                    "tree validation name-byte count overflowed",
+                )
+            })?;
+            if let Some(maximum) = limits.max_seen_name_bytes()
+                && next > maximum
+            {
+                return Err(resource_error(
+                    stage,
+                    entry.relative_path(),
+                    "tree validation name-byte limit exceeded",
+                    Some(
+                        LocalResourceLimitError::new(
+                            LocalResourceKind::SeenNameBytes,
+                            maximum,
+                            maximum.saturating_sub(configured_name_bytes),
+                            requested,
+                        )
+                        .with_observed(next),
+                    ),
+                ));
+            }
+            configured_name_bytes = next;
+            if let Some((expected_kind, already_configured)) = index.get_mut(entry.relative_path()) {
+                if *already_configured {
+                    return Err(
+                        LocalFileError::new(LocalFileErrorKind::InvalidOptions, LocalFileOperation::ValidateName)
+                            .with_path(stage.directory().diagnostic_path().join(entry.relative_path()))
+                            .with_reason("duplicate expected tree entry path"),
+                    );
+                }
+                *already_configured = true;
+                mismatch |= *expected_kind != entry.kind();
+            } else {
+                if configured[..position]
+                    .iter()
+                    .any(|previous| previous.relative_path() == entry.relative_path())
+                {
+                    return Err(
+                        LocalFileError::new(LocalFileErrorKind::InvalidOptions, LocalFileOperation::ValidateName)
+                            .with_path(stage.directory().diagnostic_path().join(entry.relative_path()))
+                            .with_reason("duplicate expected tree entry path"),
+                    );
+                }
+                mismatch = true;
+            }
+        }
+        if mismatch {
+            return Err(LocalFileError::new(LocalFileErrorKind::InvalidOptions, LocalFileOperation::ValidateName));
+        }
+        for (_, configured) in index.values_mut() {
+            *configured = false;
+        }
+    }
 
     let mut name_bytes = expected_name_bytes;
     let mut count = 0_usize;
