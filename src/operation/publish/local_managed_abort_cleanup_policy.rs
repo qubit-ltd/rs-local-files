@@ -20,6 +20,7 @@ use super::LocalManagedAbortCleanup;
 use super::LocalManagedAbortResource;
 use super::local_abort_cleanup_failure;
 use crate::LocalFileError;
+use crate::operation::stream::dispose_panic_payload;
 
 impl<W: Send + 'static> AsyncCleanup<LocalManagedAbortResource<W>> for LocalManagedAbortCleanup<W> {
     /// Runs the native abort callback on a reserved cleanup worker.
@@ -68,25 +69,31 @@ impl<W: Send + 'static> AsyncCleanup<LocalManagedAbortResource<W>> for LocalMana
             else {
                 return;
             };
-            let error = {
+            let (error, panic_payload) = {
                 let mut native = resource.native.lock().unwrap_or_else(|error| error.into_inner());
                 match native.as_mut() {
-                    None => None,
+                    None => (None, None),
                     Some(owner) => {
                         match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| (resource.abort)(owner))) {
                             Ok(Ok(())) => {
                                 native.take();
-                                None
+                                (None, None)
                             }
-                            Ok(Err(error)) => Some(error),
-                            Err(_) => Some(LocalFileError::new(
-                                crate::LocalFileErrorKind::Indeterminate,
-                                crate::LocalFileOperation::Abort,
-                            )),
+                            Ok(Err(error)) => (Some(error), None),
+                            Err(payload) => (
+                                Some(LocalFileError::new(
+                                    crate::LocalFileErrorKind::Indeterminate,
+                                    crate::LocalFileOperation::Abort,
+                                )),
+                                Some(payload),
+                            ),
                         }
                     }
                 }
             };
+            if let Some(payload) = panic_payload {
+                dispose_panic_payload(payload);
+            }
             let outcome = match error {
                 None => CleanupOutcome::Released,
                 Some(error) => {
@@ -154,6 +161,8 @@ fn publish_abort_result<W: Send + 'static>(state: &LocalAbortCleanupState<W>) {
 mod tests {
     use std::future::Future;
     use std::sync::Arc;
+    use std::sync::atomic::AtomicUsize;
+    use std::sync::atomic::Ordering;
     use std::sync::mpsc;
     use std::task::Context;
     use std::task::Poll;
@@ -253,6 +262,27 @@ mod tests {
 
     fn abort_panics(_: &mut u8) -> Result<(), LocalFileError> {
         panic!("abort callback panic")
+    }
+
+    static PANIC_PAYLOAD_DROPS: AtomicUsize = AtomicUsize::new(0);
+
+    struct SecondaryAbortPanicPayload;
+    impl Drop for SecondaryAbortPanicPayload {
+        fn drop(&mut self) {
+            PANIC_PAYLOAD_DROPS.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+
+    struct AbortPanicPayload;
+    impl Drop for AbortPanicPayload {
+        fn drop(&mut self) {
+            PANIC_PAYLOAD_DROPS.fetch_add(1, Ordering::SeqCst);
+            std::panic::panic_any(SecondaryAbortPanicPayload);
+        }
+    }
+
+    fn abort_panics_with_panicking_payload(_: &mut u8) -> Result<(), LocalFileError> {
+        std::panic::panic_any(AbortPanicPayload);
     }
 
     struct AbortGate {
@@ -383,6 +413,34 @@ mod tests {
         assert_eq!(error.kind(), LocalFileErrorKind::Indeterminate);
         assert_eq!(error.operation(), LocalFileOperation::Abort);
         assert_eq!(*resource.native.lock().expect("native lock"), Some(9));
+    }
+
+    #[cfg(panic = "unwind")]
+    #[test]
+    fn test_abort_payload_destructor_panic_still_publishes_recoverable_writer() {
+        PANIC_PAYLOAD_DROPS.store(0, Ordering::SeqCst);
+        let (_manager, executor, id) = setup();
+        let cleanup = Arc::new(LocalManagedAbortCleanup::<u8>::new(executor.cleanup_executor()));
+        let resource = resource(&executor, id, abort_panics_with_panicking_payload);
+
+        let outcome = block_on(Arc::clone(&cleanup).cleanup(resource, cleanup_context()));
+        let CleanupOutcome::Failed { failure, mut resource } = outcome else {
+            panic!("abort panic must publish failure with its original writer");
+        };
+        let source = failure.source.expect("indeterminate abort error");
+        let error = source
+            .downcast_ref::<LocalFileError>()
+            .expect("local file error source");
+        assert_eq!(LocalFileErrorKind::Indeterminate, error.kind());
+        assert_eq!(LocalFileOperation::Abort, error.operation());
+        assert_eq!(2, PANIC_PAYLOAD_DROPS.load(Ordering::SeqCst));
+        assert_eq!(Some(9), *resource.native.lock().expect("original native writer"));
+
+        resource.abort = abort_ok;
+        assert!(matches!(
+            block_on(cleanup.cleanup(resource, cleanup_context())),
+            CleanupOutcome::Released
+        ));
     }
 
     #[test]

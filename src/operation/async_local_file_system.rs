@@ -908,8 +908,10 @@ where
             completion.value = Some(value);
             completion.waker.take()
         };
-        if let Some(waker) = waker {
-            let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| waker.wake()));
+        if let Some(waker) = waker
+            && let Err(payload) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| waker.wake()))
+        {
+            super::stream::dispose_panic_payload(payload);
         }
     });
     if scheduled.is_err() {
@@ -924,8 +926,10 @@ where
         let mut completion = completion.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(value) = completion.value.take() {
             drop(completion);
-            if let Some(waker) = new_waker.take() {
-                let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| drop(waker)));
+            if let Some(waker) = new_waker.take()
+                && let Err(payload) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| drop(waker)))
+            {
+                super::stream::dispose_panic_payload(payload);
             }
             return std::task::Poll::Ready(value);
         }
@@ -939,11 +943,15 @@ where
             std::mem::replace(&mut completion.waker, new_waker.take())
         };
         drop(completion);
-        if let Some(waker) = old_waker {
-            let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| drop(waker)));
+        if let Some(waker) = old_waker
+            && let Err(payload) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| drop(waker)))
+        {
+            super::stream::dispose_panic_payload(payload);
         }
-        if let Some(waker) = new_waker {
-            let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| drop(waker)));
+        if let Some(waker) = new_waker
+            && let Err(payload) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| drop(waker)))
+        {
+            super::stream::dispose_panic_payload(payload);
         }
         std::task::Poll::Pending
     })
@@ -1608,6 +1616,142 @@ mod tests {
             .expect("completion should wake the latest registered waker");
         assert!(first_wake_rx.try_recv().is_err());
         assert!(matches!(future.as_mut().poll(&mut second_context), Poll::Ready(Ok(23))));
+    }
+
+    #[cfg(panic = "unwind")]
+    #[test]
+    fn test_constructor_completion_survives_panicking_waker_payload_destructors() {
+        use std::future::Future;
+        use std::sync::atomic::AtomicUsize;
+        use std::sync::atomic::Ordering;
+        use std::sync::mpsc;
+        use std::task::RawWaker;
+        use std::task::RawWakerVTable;
+        use std::time::Duration;
+
+        struct SecondaryPayload(Arc<AtomicUsize>);
+        impl Drop for SecondaryPayload {
+            fn drop(&mut self) {
+                self.0.fetch_add(1, Ordering::SeqCst);
+            }
+        }
+        struct PanicPayload(Arc<AtomicUsize>);
+        impl Drop for PanicPayload {
+            fn drop(&mut self) {
+                self.0.fetch_add(1, Ordering::SeqCst);
+                std::panic::panic_any(SecondaryPayload(Arc::clone(&self.0)));
+            }
+        }
+        struct RawWake {
+            sender: mpsc::Sender<()>,
+            drops: Arc<AtomicUsize>,
+            panic_on_drop: bool,
+        }
+        impl Drop for RawWake {
+            fn drop(&mut self) {
+                if self.panic_on_drop {
+                    std::panic::panic_any(PanicPayload(Arc::clone(&self.drops)));
+                }
+            }
+        }
+        unsafe fn clone_waker(data: *const ()) -> RawWaker {
+            // SAFETY: every data pointer is a live Box<RawWake> owned by its RawWaker.
+            let state = unsafe { &*(data.cast::<RawWake>()) };
+            let clone = Box::new(RawWake {
+                sender: state.sender.clone(),
+                drops: Arc::clone(&state.drops),
+                panic_on_drop: true,
+            });
+            RawWaker::new(Box::into_raw(clone).cast(), &RAW_WAKER_VTABLE)
+        }
+        unsafe fn wake(data: *const ()) {
+            // SAFETY: wake consumes the Box<RawWake> represented by this RawWaker.
+            let state = unsafe { Box::from_raw(data.cast_mut().cast::<RawWake>()) };
+            let _ = state.sender.send(());
+            drop(state);
+        }
+        unsafe fn wake_by_ref(data: *const ()) {
+            // SAFETY: the borrowed RawWaker keeps its Box<RawWake> alive for this call.
+            let state = unsafe { &*(data.cast::<RawWake>()) };
+            let _ = state.sender.send(());
+        }
+        unsafe fn drop_waker(data: *const ()) {
+            // SAFETY: drop_waker consumes the Box<RawWake> represented by this RawWaker.
+            drop(unsafe { Box::from_raw(data.cast_mut().cast::<RawWake>()) });
+        }
+        static RAW_WAKER_VTABLE: RawWakerVTable = RawWakerVTable::new(clone_waker, wake, wake_by_ref, drop_waker);
+
+        fn make_waker(sender: mpsc::Sender<()>, drops: Arc<AtomicUsize>) -> Waker {
+            let state = Box::new(RawWake {
+                sender,
+                drops,
+                panic_on_drop: false,
+            });
+            // SAFETY: the vtable owns and releases exactly one Box<RawWake> per RawWaker.
+            unsafe { Waker::from_raw(RawWaker::new(Box::into_raw(state).cast(), &RAW_WAKER_VTABLE)) }
+        }
+
+        let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+        let executor = LocalIoExecutor::new(
+            manager,
+            LocalExecutionConfig {
+                worker_count: 1,
+                queue_capacity: 2,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let (started_tx, started_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        executor
+            .enqueue_task(move || {
+                started_tx.send(()).unwrap();
+                release_rx.recv().unwrap();
+            })
+            .unwrap();
+        started_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+
+        let (wake_tx, wake_rx) = mpsc::channel();
+        let drops = Arc::new(AtomicUsize::new(0));
+        let first_waker = make_waker(wake_tx.clone(), Arc::clone(&drops));
+        let second_waker = make_waker(wake_tx, Arc::clone(&drops));
+        let mut first_context = Context::from_waker(&first_waker);
+        let mut second_context = Context::from_waker(&second_waker);
+        let mut future = Box::pin(super::run_on_worker(&executor, || Ok::<_, crate::LocalFileError>(31)));
+
+        assert!(matches!(future.as_mut().poll(&mut first_context), Poll::Pending));
+        assert!(matches!(future.as_mut().poll(&mut second_context), Poll::Pending));
+        assert!(
+            drops.load(Ordering::SeqCst) >= 2,
+            "replaced and unused wakers were disposed"
+        );
+        release_tx.send(()).unwrap();
+        wake_rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("worker notified the current waiter");
+        assert!(matches!(future.as_mut().poll(&mut second_context), Poll::Ready(Ok(31))));
+        assert!(
+            drops.load(Ordering::SeqCst) >= 4,
+            "wake and ready-path payloads were disposed"
+        );
+
+        let (error_wake_tx, error_wake_rx) = mpsc::channel();
+        let error_waker = make_waker(error_wake_tx, Arc::clone(&drops));
+        let mut error_context = Context::from_waker(&error_waker);
+        let mut error_future = Box::pin(super::run_on_worker(&executor, || {
+            Err::<(), _>(crate::LocalFileError::new(
+                crate::LocalFileErrorKind::Io,
+                crate::LocalFileOperation::Configure,
+            ))
+        }));
+        assert!(matches!(error_future.as_mut().poll(&mut error_context), Poll::Pending));
+        error_wake_rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("worker notified the error waiter");
+        let Poll::Ready(Err(error)) = error_future.as_mut().poll(&mut error_context) else {
+            panic!("the original constructor error is delivered");
+        };
+        assert_eq!(crate::LocalFileErrorKind::Io, error.kind());
     }
 
     #[test]
