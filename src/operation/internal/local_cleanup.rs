@@ -16,6 +16,7 @@ use super::LocalTempNative;
 use super::LocalTempResource;
 use super::safe_clone_waker;
 use super::safe_drop_waker;
+use crate::operation::stream::dispose_panic_payload;
 
 #[path = "local_cleanup/local_cleanup.rs"]
 mod cleanup_runner;
@@ -56,7 +57,14 @@ fn clear_waker(state: &CleanupState) {
 ///
 /// * `state` — worker result and waiter state shared with the cleanup future.
 fn publish_cleanup_result(state: &CleanupState) {
-    if let Some(result) = state.pending_result.lock().unwrap_or_else(|e| e.into_inner()).take() {
+    let result = {
+        state
+            .pending_result
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .take()
+    };
+    if let Some(result) = result {
         *state.result.lock().unwrap_or_else(|e| e.into_inner()) = Some(result);
     }
     let waker = state.waker.lock().unwrap_or_else(|e| e.into_inner()).take();
@@ -72,9 +80,8 @@ fn publish_cleanup_result(state: &CleanupState) {
 /// * `waker` — task notification handle obtained from the waiting future.
 fn safe_wake(waker: Waker) {
     if let Err(payload) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| waker.wake())) {
-        // A panic payload can itself panic on Drop. Preserve the cleanup owner
-        // even for adversarial waker implementations.
-        std::mem::forget(payload);
+        // The shared bounded disposer contains a payload whose destructor panics.
+        dispose_panic_payload(payload);
     }
 }
 

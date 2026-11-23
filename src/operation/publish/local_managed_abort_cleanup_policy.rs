@@ -153,7 +153,7 @@ fn publish_abort_result<W: Send + 'static>(state: &LocalAbortCleanupState<W>) {
     if let Some(waker) = waker
         && let Err(payload) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| waker.wake()))
     {
-        std::mem::forget(payload);
+        dispose_panic_payload(payload);
     }
 }
 

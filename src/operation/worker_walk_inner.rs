@@ -85,13 +85,25 @@ impl WorkerWalkInner {
     /// # Parameters
     /// - `waker` — task to notify when close reaches a terminal state.
     pub(super) fn poll_closed(&self, waker: &Waker) -> Poll<io::Result<()>> {
-        if let Some(result) = self.close_state.lock().unwrap_or_else(|e| e.into_inner()).result() {
+        let result = {
+            self.close_state
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .result()
+        };
+        if let Some(result) = result {
             return Poll::Ready(result);
         }
         let registered_waker = match super::clone_poll_waker(waker) {
             Ok(waker) => waker,
             Err(payload) => {
-                if let Some(result) = self.close_state.lock().unwrap_or_else(|e| e.into_inner()).result() {
+                let result = {
+                    self.close_state
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .result()
+                };
+                if let Some(result) = result {
                     dispose_panic_payload(payload);
                     return Poll::Ready(result);
                 }
