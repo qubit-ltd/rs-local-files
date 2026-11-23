@@ -21,6 +21,7 @@ use super::Path;
 use super::RootedLocalFileSystem;
 use super::io;
 use super::resolve_rooted_path;
+use super::resolve_rooted_path_with_deadline;
 use super::rooted_io_error;
 use crate::local::DeleteBackend;
 use crate::local::LocalRelativePath;
@@ -81,13 +82,28 @@ impl RootedLocalFileSystem {
         symlink_policy: LocalSymlinkPolicy,
         started_at: Instant,
     ) -> LocalResult<LocalDeleteOutcome> {
-        let relative = resolve_rooted_path(
+        let budget = crate::local::DeleteBudget::new(*options, started_at);
+        budget.check_clock_deadline().map_err(|error| {
+            rooted_io_error(LocalFileOperation::DeleteDirectory, path, error)
+        })?;
+        let deadline = budget.absolute_deadline().map_err(|error| {
+            rooted_io_error(LocalFileOperation::DeleteDirectory, path, error)
+        })?;
+        let relative = resolve_rooted_path_with_deadline(
             &self.root,
             path,
             symlink_policy,
             false,
             LocalFileOperation::DeleteDirectory,
+            deadline,
         )?;
+        #[cfg(test)]
+        crate::tests::rooted::support::resolution_observation_tests::reach_deadline_boundary(
+            crate::tests::rooted::support::resolution_observation_tests::DeadlineBoundary::RootedDeletePathResolved,
+        );
+        budget.check_clock_deadline().map_err(|error| {
+            rooted_io_error(LocalFileOperation::DeleteDirectory, path, error)
+        })?;
         let metadata = match self.root.symlink_metadata(&relative) {
             Ok(metadata) => metadata,
             Err(error) if error.kind() == io::ErrorKind::NotFound && options.missing_ok() => {
@@ -97,6 +113,9 @@ impl RootedLocalFileSystem {
                 return Err(rooted_io_error(LocalFileOperation::DeleteDirectory, path, error));
             }
         };
+        budget.check_clock_deadline().map_err(|error| {
+            rooted_io_error(LocalFileOperation::DeleteDirectory, path, error)
+        })?;
         if metadata.kind() != crate::rooted::EntryKind::Directory {
             return Err(
                 LocalFileError::new(LocalFileErrorKind::NotDirectory, LocalFileOperation::DeleteDirectory)

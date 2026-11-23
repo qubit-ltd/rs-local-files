@@ -53,8 +53,9 @@ pub struct LocalCopyOutcome {
     atomic: bool,
     /// Whether required durability synchronization completed.
     durable: bool,
-    /// Metadata preservation applied to copied entries; skipped entries are
-    /// not covered by this policy.
+    /// Metadata preservation applied to copied regular files and directories.
+    /// Symbolic-link creation does not count as permission preservation, and
+    /// skipped entries are not covered by this policy.
     metadata_preservation: LocalMetadataPreservePolicy,
 }
 
@@ -118,10 +119,12 @@ impl LocalCopyOutcome {
         self.durable
     }
 
-    /// Returns metadata preservation applied to copied entries.
+    /// Returns metadata preservation applied to copied regular files and
+    /// directories.
     ///
-    /// Returns [`LocalMetadataPreservePolicy::None`] when no entries were
-    /// copied. Skipped entries are not covered by the reported policy.
+    /// Returns [`LocalMetadataPreservePolicy::None`] when no permission
+    /// operation completed. Creating a symbolic link does not preserve its
+    /// permissions; skipped entries are not covered by the reported policy.
     #[must_use = "the applied metadata policy should be inspected"]
     #[inline]
     pub const fn metadata_preservation(&self) -> LocalMetadataPreservePolicy {

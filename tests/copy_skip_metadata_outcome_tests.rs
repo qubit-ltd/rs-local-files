@@ -13,6 +13,7 @@ use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::fs::symlink;
 use std::path::Path;
+use std::path::PathBuf;
 
 use qubit_local_files::LocalFileSystem;
 use qubit_local_files::options::LocalCopyConflictPolicy;
@@ -183,33 +184,70 @@ fn test_host_symlink_skip_does_not_report_metadata_preservation() {
 }
 
 #[test]
+fn test_successful_symlink_copy_does_not_report_permission_preservation() {
+    for rooted in [false, true] {
+        let fixture = tempdir().expect("fixture should exist");
+        fs::write(fixture.path().join("referent"), b"referent").expect("referent should exist");
+        symlink("referent", fixture.path().join("source")).expect("source link should exist");
+        let filesystem = if rooted {
+            LocalFileSystem::rooted(fixture.path())
+        } else {
+            LocalFileSystem::host()
+        }
+        .expect("filesystem should open");
+        let source = if rooted {
+            PathBuf::from("source")
+        } else {
+            fixture.path().join("source")
+        };
+        let target = if rooted {
+            PathBuf::from("target")
+        } else {
+            fixture.path().join("target")
+        };
+
+        let outcome = filesystem
+            .copy_with_options(&source, &target, &skip_options().with_entry_source())
+            .expect("link copy should succeed");
+
+        assert_eq!(1, outcome.stats().files());
+        assert_eq!(0, outcome.stats().bytes());
+        assert_eq!(LocalMetadataPreservePolicy::None, outcome.metadata_preservation());
+        assert_eq!(Path::new("referent"), fs::read_link(fixture.path().join("target")).unwrap());
+    }
+}
+
+#[test]
 fn test_successful_host_copy_reports_applied_permissions() {
-    let fixture = tempdir().expect("fixture should exist");
-    let source = fixture.path().join("source");
-    let target = fixture.path().join("target");
-    fs::write(&source, b"copied").expect("source should exist");
-    set_mode(&source, 0o600);
+    for rooted in [false, true] {
+        let fixture = tempdir().expect("fixture should exist");
+        let source = fixture.path().join("source");
+        let target = fixture.path().join("target");
+        fs::write(&source, b"copied").expect("source should exist");
+        set_mode(&source, 0o600);
+        let filesystem = if rooted {
+            LocalFileSystem::rooted(fixture.path())
+        } else {
+            LocalFileSystem::host()
+        }
+        .expect("filesystem should open");
+        let source_path = if rooted { Path::new("source") } else { source.as_path() };
+        let target_path = if rooted { Path::new("target") } else { target.as_path() };
 
-    let outcome = LocalFileSystem::host()
-        .expect("host filesystem should open")
-        .copy_with_options(
-            &source,
-            &target,
-            &LocalCopyOptions::new().with_metadata_preservation(LocalMetadataPreservePolicy::Permissions),
-        )
-        .expect("copy should succeed");
+        let outcome = filesystem
+            .copy_with_options(
+                source_path,
+                target_path,
+                &LocalCopyOptions::new().with_metadata_preservation(LocalMetadataPreservePolicy::Permissions),
+            )
+            .expect("copy should succeed");
 
-    assert_eq!(1, outcome.stats().files());
-    assert_eq!(6, outcome.stats().bytes());
-    assert_eq!(0, outcome.stats().skipped());
-    assert_eq!(
-        LocalMetadataPreservePolicy::Permissions,
-        outcome.metadata_preservation()
-    );
-    assert_eq!(
-        0o600,
-        fs::metadata(&target).expect("target should exist").permissions().mode() & 0o777
-    );
+        assert_eq!(1, outcome.stats().files());
+        assert_eq!(6, outcome.stats().bytes());
+        assert_eq!(0, outcome.stats().skipped());
+        assert_eq!(LocalMetadataPreservePolicy::Permissions, outcome.metadata_preservation());
+        assert_eq!(0o600, fs::metadata(&target).unwrap().permissions().mode() & 0o777);
+    }
 }
 
 #[test]

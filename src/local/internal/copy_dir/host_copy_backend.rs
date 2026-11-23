@@ -229,6 +229,10 @@ impl CopyTreeBackend for HostCopyBackend {
             if previous_effect != CopyMetadataEffect::Indeterminate {
                 stats.metadata_effect = CopyMetadataEffect::Applied;
             }
+            stats.permissions_applied = stats.permissions_applied.saturating_add(1);
+            if !frame.destination_created() {
+                stats.directory_permissions_applied = stats.directory_permissions_applied.saturating_add(1);
+            }
         }
         Ok(())
     }

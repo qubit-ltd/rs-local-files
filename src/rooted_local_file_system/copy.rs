@@ -196,19 +196,21 @@ impl RootedLocalFileSystem {
                 .parent()
                 .filter(|parent| !parent.as_os_str().is_empty())
         {
-            budget
-                .check_deadline()
-                .map_err(|error| copy_failure_unchanged(rooted_io_error(LocalFileOperation::Copy, target, error)))?;
-            let parent =
-                crate::local::LocalRelativePath::new(parent).expect("parent of a validated rooted path is valid");
-            self.root
-                .create_dir_all(&parent)
-                .map_err(|error| copy_failure_unchanged(rooted_io_error(LocalFileOperation::Copy, target, error)))?;
+            if let Err((error, created)) = prepare_rooted_copy_parent(&self.root, parent, &budget) {
+                let failure = copy_failure_unchanged(rooted_io_error(LocalFileOperation::Copy, target, error));
+                return Err(if created {
+                    failure.with_state(crate::LocalCopyFailureState::PartiallyPublished)
+                } else {
+                    failure
+                });
+            }
         }
         let stats = self
             .root
             .copy_with_durability(&source_path, &target_path, internal_options, options.durability())
             .map_err(|error| copy_failure_from_dir_error(source, target, error, directory))?;
+        let selected_source_kind = stats.source_kind.unwrap_or(source_kind);
+        let directory = selected_source_kind == crate::LocalFileKind::Directory;
         if stats.was_fully_skipped() {
             return Ok(LocalCopyOutcome::new(
                 LocalCopyStats::from_internal(stats),
@@ -236,7 +238,7 @@ impl RootedLocalFileSystem {
             target,
         )
         .map_err(|error| copy_failure_published(error, LocalCopyStats::from_internal(stats)))?;
-        let content_durable = source_kind == crate::LocalFileKind::Symlink || stats.files_durable();
+        let content_durable = selected_source_kind == crate::LocalFileKind::Symlink || stats.files_durable();
         let durable = !directory && content_durable && parent_durable;
         Ok(LocalCopyOutcome::new(
             LocalCopyStats::from_internal(stats),
@@ -247,17 +249,69 @@ impl RootedLocalFileSystem {
             },
             !directory && stats.atomic_publication(),
             durable,
-            if stats.metadata_effect == crate::local::CopyMetadataEffect::Applied
-                || stats.files > 0
-                || stats.directories > 0
-                || stats.overwritten > 0
-            {
+            if stats.permissions_applied > 0 {
                 options.preserve_metadata()
             } else {
                 crate::LocalMetadataPreservePolicy::None
             },
         ))
     }
+}
+
+fn prepare_rooted_copy_parent(
+    root: &crate::rooted::Root,
+    parent: &Path,
+    budget: &crate::local::CopyBudget,
+) -> Result<(), (io::Error, bool)> {
+    let mut prefixes = Vec::new();
+    let mut prefix = std::path::PathBuf::new();
+    for component in parent.components() {
+        prefix.push(component.as_os_str());
+        prefixes.push(prefix.clone());
+    }
+    let mut missing = Vec::new();
+    for prefix in prefixes {
+        let relative = crate::local::LocalRelativePath::new(&prefix).expect("rooted parent prefix is valid");
+        budget.check_deadline().map_err(|error| (error, false))?;
+        match root.symlink_metadata(&relative) {
+            Ok(metadata) if metadata.kind() == crate::rooted::EntryKind::Directory => {}
+            Ok(_) => return Err((io::Error::from(io::ErrorKind::NotADirectory), false)),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => missing.push(prefix),
+            Err(error) => return Err((error, false)),
+        }
+        budget.check_deadline().map_err(|error| (error, false))?;
+    }
+    #[cfg(test)]
+    crate::tests::rooted::support::resolution_observation_tests::reach_deadline_boundary(
+        crate::tests::rooted::support::resolution_observation_tests::DeadlineBoundary::RootedCopyParentPreflightComplete,
+    );
+    budget.check_deadline().map_err(|error| (error, false))?;
+    let mut created = false;
+    for prefix in missing {
+        let relative = crate::local::LocalRelativePath::new(&prefix).expect("rooted parent prefix is valid");
+        budget.check_deadline().map_err(|error| (error, created))?;
+        match root.create_dir(&relative) {
+            Ok(()) => created = true,
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
+                budget.check_deadline().map_err(|error| (error, created))?;
+                if !root
+                    .symlink_metadata(&relative)
+                    .is_ok_and(|metadata| metadata.kind() == crate::rooted::EntryKind::Directory)
+                {
+                    return Err((error, created));
+                }
+            }
+            Err(error) => return Err((error, created)),
+        }
+        #[cfg(test)]
+        if created {
+            crate::tests::rooted::support::resolution_observation_tests::reach_deadline_boundary(
+                crate::tests::rooted::support::resolution_observation_tests::DeadlineBoundary::RootedCopyParentCreated,
+            );
+        }
+        budget.check_deadline().map_err(|error| (error, created))?;
+    }
+    Ok(())
 }
 
 /// Preserves copy failure details while adjusting publication state for a
@@ -286,6 +340,10 @@ fn copy_failure_from_dir_error(
     directory: bool,
 ) -> LocalCopyFailure {
     let installed_file = error.failure_state() == Some(crate::LocalCopyFailureState::Published);
+    let directory = error
+        .stats()
+        .source_kind
+        .map_or(directory, |kind| kind == crate::LocalFileKind::Directory);
     let failure = LocalCopyFailure::from_copy_dir_error(source, target, error);
     if directory && installed_file {
         failure.with_state(crate::LocalCopyFailureState::PartiallyPublished)

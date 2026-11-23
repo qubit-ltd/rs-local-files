@@ -219,7 +219,7 @@ fn test_recursive_delete_deadlines_preserve_partial_effects() {
             assert_eq!(std::io::ErrorKind::TimedOut, error.io_error_kind());
             assert!(tree.exists(), "unfinished root must remain");
             if checkpoint > removal_check {
-                assert_eq!(LocalFileErrorKind::PublicationIncomplete, error.kind());
+                assert_eq!(LocalFileErrorKind::PublicationIncomplete, error.kind(), "rooted={rooted}, checkpoint={checkpoint}, error={error:?}");
                 assert!(!child.exists(), "completed deletion must not be rolled back");
             } else {
                 assert_ne!(LocalFileErrorKind::PublicationIncomplete, error.kind());

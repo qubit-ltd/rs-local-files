@@ -47,6 +47,8 @@ pub struct LocalCopyDirError {
     cleanup_error: Option<io::Error>,
     /// Native I/O error that caused the failure.
     error: io::Error,
+    /// Optional structured classification retained by backend rechecks.
+    local_kind: Option<crate::LocalFileErrorKind>,
     /// Strongest destination effect proven before this error was created.
     failure_state: Option<LocalCopyFailureState>,
     /// Native state of the atomic destination entry being committed.
@@ -81,6 +83,7 @@ impl LocalCopyDirError {
             temporary_path: None,
             cleanup_error: None,
             error,
+            local_kind: None,
             failure_state: None,
             atomic_destination_state: None,
         }
@@ -164,6 +167,29 @@ impl LocalCopyDirError {
     #[inline]
     pub fn kind(&self) -> io::ErrorKind {
         self.error.kind()
+    }
+
+    /// Returns an optional higher-level classification selected by the backend.
+    #[must_use]
+    #[inline]
+    pub(crate) const fn local_kind(&self) -> Option<crate::LocalFileErrorKind> {
+        self.local_kind
+    }
+
+    /// Retains a structured local error classification with this native failure.
+    #[must_use]
+    #[inline]
+    pub(crate) fn with_local_kind(mut self, kind: crate::LocalFileErrorKind) -> Self {
+        self.local_kind = Some(kind);
+        self
+    }
+
+    /// Retains the backend-selected top-level source kind in partial statistics.
+    #[must_use]
+    #[inline]
+    pub(crate) fn with_source_kind(mut self, kind: crate::LocalFileKind) -> Self {
+        self.stats.source_kind = Some(kind);
+        self
     }
 
     /// Decomposes the failure into its stage, paths, statistics, and errors.

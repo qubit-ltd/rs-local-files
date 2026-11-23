@@ -34,6 +34,8 @@ pub(crate) fn internal_copy_options(
         .with_type_conflict(options.type_conflict())
         .with_symlink_policy(symlink_policy)
         .with_durability(options.durability())
+        .with_source_mode(options.source_mode())
+        .with_atomicity(options.atomicity())
         .with_started_at(started_at);
     if let Some(value) = options.max_depth() {
         result = result.with_max_depth(value);

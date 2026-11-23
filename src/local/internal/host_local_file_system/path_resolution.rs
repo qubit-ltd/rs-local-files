@@ -12,6 +12,7 @@ use std::io;
 use std::path::Component;
 use std::path::Path;
 use std::path::PathBuf;
+use std::time::Instant;
 
 use crate::LocalFileError;
 use crate::LocalFileErrorKind;
@@ -48,7 +49,19 @@ pub(crate) fn resolve_host_path(
     symlink_policy: LocalSymlinkPolicy,
     follow_final: bool,
 ) -> LocalResult<PathBuf> {
+    resolve_host_path_with_deadline(path, symlink_policy, follow_final, None)
+}
+
+/// Resolves a Host path while checking the operation's absolute deadline
+/// between each native path query.
+pub(crate) fn resolve_host_path_with_deadline(
+    path: &Path,
+    symlink_policy: LocalSymlinkPolicy,
+    follow_final: bool,
+    deadline: Option<Instant>,
+) -> LocalResult<PathBuf> {
     let bound = bind_host_path(path)?;
+    check_host_path_deadline(deadline, &bound)?;
     // Windows performs GetFullPathNameW normalization before filesystem
     // traversal for ordinary paths. Verbatim operands retain their spelling.
     #[cfg(windows)]
@@ -59,6 +72,7 @@ pub(crate) fn resolve_host_path(
     let mut components = traversal.components().peekable();
     let mut resolved = PathBuf::new();
     while let Some(component) = components.next() {
+        check_host_path_deadline(deadline, &bound)?;
         push_host_component(&mut resolved, component);
         if !matches!(component, Component::Normal(_)) {
             continue;
@@ -78,6 +92,7 @@ pub(crate) fn resolve_host_path(
                 ));
             }
         };
+        check_host_path_deadline(deadline, &bound)?;
         if !metadata.file_type().is_symlink() || (is_final && !follow_final) {
             continue;
         }
@@ -88,10 +103,31 @@ pub(crate) fn resolve_host_path(
                     .with_path(bound),
             );
         }
+        check_host_path_deadline(deadline, &bound)?;
         resolved = fs::canonicalize(&resolved)
             .map_err(|error| LocalFileError::from_io(LocalFileOperation::BindPath, Some(bound.clone()), None, error))?;
+        check_host_path_deadline(deadline, &bound)?;
     }
     Ok(resolved)
+}
+
+pub(crate) fn check_host_path_deadline(deadline: Option<Instant>, path: &Path) -> LocalResult<()> {
+    let Some(deadline) = deadline else {
+        return Ok(());
+    };
+    #[cfg(test)]
+    let now = crate::tests::rooted::support::resolution_observation_tests::copy_budget_now(Some(deadline));
+    #[cfg(not(test))]
+    let now = Instant::now();
+    if now >= deadline {
+        return Err(LocalFileError::from_io(
+            LocalFileOperation::BindPath,
+            Some(path.to_path_buf()),
+            None,
+            io::Error::new(io::ErrorKind::TimedOut, "local path-resolution deadline exceeded"),
+        ));
+    }
+    Ok(())
 }
 
 /// Appends one traversal component without normalizing verbatim Windows dots.

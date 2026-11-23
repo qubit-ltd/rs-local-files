@@ -71,16 +71,19 @@ pub(super) fn copy_tree(
             source_error,
         )
     })?;
+    let directories_before = statistics.directories;
     if !prepare_directory(root, source, destination, options, &mut statistics, budget)? {
         drop(root_permit);
         return Ok(statistics);
     }
     let reader = open_root_reader(root, source, destination, statistics)?;
+    let destination_created = statistics.directories > directories_before;
     let root_frame = CopyFrame {
         source: source.clone(),
         destination: destination.clone(),
         metadata: source_metadata,
         depth: 0,
+        destination_created,
         reader,
         directory_permit: root_permit,
     };
@@ -235,6 +238,7 @@ impl CopyTreeBackend for RootedCopyBackend<'_> {
                     &self.active_sources,
                     *stats,
                 )?;
+                let directories_before = stats.directories;
                 if prepare_directory(
                     self.root,
                     &source_child,
@@ -250,6 +254,7 @@ impl CopyTreeBackend for RootedCopyBackend<'_> {
                         &destination_child,
                         entry.metadata(),
                         frame.depth,
+                        stats.directories > directories_before,
                         &mut self.active_sources,
                         budget,
                         current,
@@ -343,6 +348,7 @@ impl CopyTreeBackend for RootedCopyBackend<'_> {
                             &self.active_sources,
                             *stats,
                         )?;
+                        let directories_before = stats.directories;
                         if prepare_directory(self.root, &resolved, &destination_child, self.options, stats, budget)? {
                             let current = *stats;
                             child_frame = Some(enter_directory(
@@ -351,6 +357,7 @@ impl CopyTreeBackend for RootedCopyBackend<'_> {
                                 &destination_child,
                                 resolved_metadata,
                                 frame.depth,
+                                stats.directories > directories_before,
                                 &mut self.active_sources,
                                 budget,
                                 current,
@@ -423,6 +430,7 @@ impl CopyTreeBackend for RootedCopyBackend<'_> {
             &frame.destination,
             frame.metadata,
             self.options,
+            frame.destination_created,
             stats,
         )?;
         self.active_sources.pop();
@@ -536,6 +544,7 @@ fn enter_directory(
     destination: &Path,
     metadata: Metadata,
     depth: usize,
+    destination_created: bool,
     active_sources: &mut Vec<Path>,
     budget: &CopyBudget,
     statistics: Statistics,
@@ -579,6 +588,7 @@ fn enter_directory(
         destination: destination.clone(),
         metadata,
         depth,
+        destination_created,
         reader,
         directory_permit,
     })

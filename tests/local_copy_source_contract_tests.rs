@@ -492,6 +492,44 @@ fn test_link_copy_overwrites_directory_link_without_removing_referent() {
     }
 }
 
+/// Required atomicity must be reflected by the actual rooted replacement path.
+#[cfg(unix)]
+#[test]
+fn test_rooted_copy_required_atomicity_for_symlink_destination() {
+    let directory = tempdir().expect("fixture should exist");
+    fs::write(directory.path().join("source"), b"replacement").expect("source should exist");
+    fs::write(directory.path().join("referent"), b"retained").expect("referent should exist");
+    std::os::unix::fs::symlink("referent", directory.path().join("target")).expect("target link should exist");
+    let filesystem = LocalFileSystem::rooted(directory.path()).expect("filesystem should open");
+
+    let result = filesystem.copy_with_options(
+        &PathBuf::from("source"),
+        &PathBuf::from("target"),
+        &LocalCopyOptions::new()
+            .with_entry_source()
+            .with_conflict(LocalCopyConflictPolicy::Overwrite)
+            .with_atomicity(LocalAtomicityRequirement::Required),
+    );
+
+    match result {
+        Ok(outcome) => {
+            assert!(outcome.atomic(), "successful replacement must be atomic");
+            assert!(!fs::symlink_metadata(directory.path().join("target"))
+                .expect("replacement should exist")
+                .file_type()
+                .is_symlink());
+        }
+        Err(failure) => {
+            assert_eq!(LocalFileErrorKind::RequirementNotMet, failure.error().kind());
+            assert!(fs::symlink_metadata(directory.path().join("target"))
+                .expect("original link must remain")
+                .file_type()
+                .is_symlink());
+        }
+    }
+    assert_eq!(b"retained", fs::read(directory.path().join("referent")).unwrap().as_slice());
+}
+
 /// A copied link must not silently downgrade required atomic publication.
 #[cfg(any(unix, windows))]
 #[test]

@@ -53,6 +53,10 @@ pub struct LocalCopyStats {
     /// Number of existing entries replaced, including directories merged under
     /// the Overwrite conflict policy.
     overwritten: u64,
+    /// Confirmed permission operations, used by async effect reporting.
+    permissions_applied: u64,
+    /// Confirmed permission changes on pre-existing directories.
+    directory_permissions_applied: u64,
 }
 
 impl LocalCopyStats {
@@ -64,6 +68,8 @@ impl LocalCopyStats {
             bytes: 0,
             skipped: 1,
             overwritten: 0,
+            permissions_applied: 0,
+            directory_permissions_applied: 0,
         }
     }
 
@@ -79,6 +85,8 @@ impl LocalCopyStats {
             bytes: stats.bytes,
             skipped: stats.skipped,
             overwritten: stats.overwritten,
+            permissions_applied: stats.permissions_applied,
+            directory_permissions_applied: stats.directory_permissions_applied,
         }
     }
 
@@ -117,4 +125,19 @@ impl LocalCopyStats {
     pub const fn overwritten(self) -> u64 {
         self.overwritten
     }
+
+    /// Returns the number of destination permission changes confirmed by the backend.
+    #[must_use]
+    #[inline]
+    pub(crate) const fn permissions_applied(self) -> u64 {
+        self.permissions_applied
+    }
+
+    /// Returns confirmed permission changes on pre-existing directories.
+    #[must_use]
+    #[inline]
+    pub(crate) const fn directory_permissions_applied(self) -> u64 {
+        self.directory_permissions_applied
+    }
+
 }

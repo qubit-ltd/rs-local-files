@@ -84,18 +84,38 @@ impl DeleteBudget {
             || crate::test_support::temp_cleanup_deadline_expired();
         #[cfg(not(feature = "test-support"))]
         let forced_expiry = false;
-        if forced_expiry
-            || self
-                .options
-                .deadline()
-                .is_some_and(|limit| self.started.elapsed() >= limit)
-        {
+        if forced_expiry {
+            return Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                "recursive deletion deadline exceeded",
+            ));
+        }
+        self.check_clock_deadline()
+    }
+
+    /// Checks elapsed-time expiry without consuming scheduler fault checkpoints.
+    pub(crate) fn check_clock_deadline(&self) -> io::Result<()> {
+        let deadline = self.absolute_deadline()?;
+        #[cfg(test)]
+        let now = crate::tests::rooted::support::resolution_observation_tests::copy_budget_now(deadline);
+        #[cfg(not(test))]
+        let now = Instant::now();
+        if deadline.is_some_and(|deadline| now >= deadline) {
             return Err(io::Error::new(
                 io::ErrorKind::TimedOut,
                 "recursive deletion deadline exceeded",
             ));
         }
         Ok(())
+    }
+
+    /// Returns the absolute monotonic deadline shared with path resolution.
+    pub(crate) fn absolute_deadline(&self) -> io::Result<Option<Instant>> {
+        self.options.deadline().map_or(Ok(None), |duration| {
+            self.started.checked_add(duration).map(Some).ok_or_else(|| {
+                io::Error::new(io::ErrorKind::InvalidInput, "delete deadline exceeds the monotonic clock range")
+            })
+        })
     }
 
     /// Charges a newly discovered entry before it is queued or inspected.

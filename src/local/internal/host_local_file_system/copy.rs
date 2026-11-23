@@ -37,12 +37,11 @@ use super::ensure_required_directory_durability;
 use super::fs;
 use super::io;
 use super::published_durability;
-use super::resolve_host_path;
 use super::sync_parent_directory;
 use super::test_io_fault;
 use crate::error::LocalFileEffectState;
+use crate::local::internal::canonicalize_existing_prefix_with_budget;
 use crate::local::internal::internal_copy_options;
-use crate::local::internal::path_operations::canonicalize_existing_prefix;
 
 impl HostLocalFileSystem {
     /// Copies through a Host namespace using an explicit symbolic-link policy.
@@ -105,11 +104,39 @@ impl HostLocalFileSystem {
         scope_root: Option<&Path>,
     ) -> LocalCopyResult {
         let symlink_policy = options.symlink_policy_override().unwrap_or(symlink_policy);
+        let copy_budget = crate::local::CopyBudget::new(internal_copy_options(options, symlink_policy, started_at));
+        let deadline = copy_budget
+            .absolute_deadline()
+            .map_err(|error| copy_failure_unchanged(copy_io_error(source, target, error)))?;
+        copy_budget
+            .check_deadline()
+            .map_err(|error| copy_failure_unchanged(copy_io_error(source, target, error)))?;
         let [bound_source, bound_target] = bind_host_paths([source, target]).map_err(copy_failure_unchanged)?;
-        let resolved_source =
-            resolve_host_path(&bound_source, symlink_policy, false).map_err(copy_failure_unchanged)?;
-        let resolved_target =
-            resolve_host_path(&bound_target, symlink_policy, false).map_err(copy_failure_unchanged)?;
+        copy_budget
+            .check_deadline()
+            .map_err(|error| copy_failure_unchanged(copy_io_error(&bound_source, &bound_target, error)))?;
+        let resolved_source = super::resolve_host_path_with_deadline(&bound_source, symlink_policy, false, deadline)
+            .map_err(copy_failure_unchanged)?;
+        #[cfg(test)]
+        crate::tests::rooted::support::resolution_observation_tests::reach_deadline_boundary(
+            crate::tests::rooted::support::resolution_observation_tests::DeadlineBoundary::HostCopySourceResolved,
+        );
+        copy_budget
+            .check_deadline()
+            .map_err(|error| copy_failure_unchanged(copy_io_error(&bound_source, &bound_target, error)))?;
+        let resolved_target = super::resolve_host_path_with_deadline(&bound_target, symlink_policy, false, deadline)
+            .map_err(copy_failure_unchanged)?;
+        #[cfg(test)]
+        crate::tests::rooted::support::resolution_observation_tests::reach_deadline_boundary(
+            crate::tests::rooted::support::resolution_observation_tests::DeadlineBoundary::HostCopyTargetResolved,
+        );
+        copy_budget
+            .check_deadline()
+            .map_err(|error| copy_failure_unchanged(copy_io_error(&bound_source, &bound_target, error)))?;
+        #[cfg(test)]
+        crate::tests::rooted::support::resolution_observation_tests::reach_deadline_boundary(
+            crate::tests::rooted::support::resolution_observation_tests::DeadlineBoundary::HostCopyPathsResolved,
+        );
         Self::copy_resolved_with_policy(
             &resolved_source,
             &resolved_target,
@@ -202,9 +229,15 @@ impl HostLocalFileSystem {
             )
         })?;
         if source_kind == crate::LocalFileKind::Directory {
+            budget
+                .check_deadline()
+                .map_err(|error| copy_failure_unchanged(copy_io_error(source, target, error)))?;
             let canonical_source = fs::canonicalize(source)
                 .map_err(|error| copy_failure_unchanged(copy_io_error(source, target, error)))?;
-            let canonical_target = canonicalize_existing_prefix(target)
+            budget
+                .check_deadline()
+                .map_err(|error| copy_failure_unchanged(copy_io_error(source, target, error)))?;
+            let canonical_target = canonicalize_existing_prefix_with_budget(target, &budget)
                 .map_err(|error| copy_failure_unchanged(copy_io_error(source, target, error)))?;
             if canonical_source.starts_with(&canonical_target) || canonical_target.starts_with(&canonical_source) {
                 return Err(copy_failure_unchanged(
@@ -231,8 +264,13 @@ impl HostLocalFileSystem {
 
         let source_is_directory = effective_metadata.file_type().is_dir();
         if source_is_directory {
-            if let Err(error) = prepare_copy_parent(target, options) {
-                return Err(copy_failure_unchanged(copy_io_error(source, target, error)));
+            if let Err((error, created)) = prepare_copy_parent(target, options, &budget) {
+                let failure = copy_failure_unchanged(copy_io_error(source, target, error));
+                return Err(if created {
+                    failure.with_state(crate::LocalCopyFailureState::PartiallyPublished)
+                } else {
+                    failure
+                });
             }
             let stats = match scope_root {
                 Some(scope_root) => {
@@ -258,11 +296,7 @@ impl HostLocalFileSystem {
                 LocalCopyMethod::Recursive,
                 false,
                 false,
-                if stats.metadata_effect == crate::local::internal::CopyMetadataEffect::Applied
-                    || stats.files > 0
-                    || stats.directories > 0
-                    || stats.overwritten > 0
-                {
+                if stats.permissions_applied > 0 {
                     options.preserve_metadata()
                 } else {
                     crate::LocalMetadataPreservePolicy::None
@@ -289,10 +323,15 @@ impl HostLocalFileSystem {
             ));
         }
 
-        let parent_dirs_to_sync = match prepare_copy_parent(target, options) {
+        let parent_dirs_to_sync = match prepare_copy_parent(target, options, &budget) {
             Ok(paths) => paths,
-            Err(error) => {
-                return Err(copy_failure_unchanged(copy_io_error(source, target, error)));
+            Err((error, created)) => {
+                let failure = copy_failure_unchanged(copy_io_error(source, target, error));
+                return Err(if created {
+                    failure.with_state(crate::LocalCopyFailureState::PartiallyPublished)
+                } else {
+                    failure
+                });
             }
         };
 
@@ -326,10 +365,10 @@ impl HostLocalFileSystem {
             LocalCopyMethod::StagedFile,
             stats.atomic_publication(),
             durable,
-            if public_stats.files() == 0 {
-                crate::LocalMetadataPreservePolicy::None
-            } else {
+            if public_stats.permissions_applied() > 0 {
                 options.preserve_metadata()
+            } else {
+                crate::LocalMetadataPreservePolicy::None
             },
         ))
     }
@@ -354,12 +393,15 @@ impl HostLocalFileSystem {
 ///
 /// Returns the first inspection or directory-creation error.
 #[inline]
-fn prepare_copy_parent(target: &Path, options: &LocalCopyOptions) -> io::Result<Vec<PathBuf>> {
-    if options.creates_parent() {
-        crate::local::ensure_parent_path_with_sync_dirs(target)
-    } else {
-        Ok(Vec::new())
+fn prepare_copy_parent(
+    target: &Path,
+    options: &LocalCopyOptions,
+    budget: &crate::local::CopyBudget,
+) -> Result<Vec<PathBuf>, (io::Error, bool)> {
+    if !options.creates_parent() {
+        return Ok(Vec::new());
     }
+    crate::local::internal::ensure_parent_path_with_budget(target, budget)
 }
 
 /// Copies a final symbolic-link entry without dereferencing it.
@@ -443,8 +485,17 @@ fn copy_symlink_entry(
     if let Err(error) = budget.check_deadline() {
         return Err(copy_failure_unchanged(copy_io_error(source, target, error)));
     }
-    let parent_dirs_to_sync = prepare_copy_parent(target, options)
-        .map_err(|error| copy_failure_unchanged(copy_io_error(source, target, error)))?;
+    let parent_dirs_to_sync = match prepare_copy_parent(target, options, budget) {
+        Ok(paths) => paths,
+        Err((error, created)) => {
+            let failure = copy_failure_unchanged(copy_io_error(source, target, error));
+            return Err(if created {
+                failure.with_state(crate::LocalCopyFailureState::PartiallyPublished)
+            } else {
+                failure
+            });
+        }
+    };
     let mut destination_removed = false;
     if action == CopyDestinationAction::Replace {
         let (delete_options, started_at) = budget.deletion_options();
@@ -534,7 +585,7 @@ fn copy_symlink_entry(
         LocalCopyMethod::StagedFile,
         false,
         durable,
-        options.preserve_metadata(),
+        crate::LocalMetadataPreservePolicy::None,
     ))
 }
 

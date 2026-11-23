@@ -147,11 +147,13 @@ pub(crate) use path_operations::absolute_path;
 pub(crate) use path_operations::add_path_context;
 #[cfg(test)]
 pub(crate) use path_operations::canonicalize_existing_prefix;
+pub(crate) use path_operations::canonicalize_existing_prefix_with_budget;
 #[cfg(test)]
 pub(crate) use path_operations::clean_dir_path;
 #[cfg(test)]
 pub(crate) use path_operations::ensure_parent_path;
 pub(crate) use path_operations::ensure_parent_path_with_sync_dirs;
+pub(crate) use path_operations::ensure_parent_path_with_budget;
 #[cfg(test)]
 pub(crate) use path_operations::remove_any_path;
 pub(crate) use publication_state::copy_failure_indeterminate;

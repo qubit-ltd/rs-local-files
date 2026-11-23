@@ -75,6 +75,15 @@ pub(crate) fn copy_file_with_options(
     stats: &mut LocalCopyDirStats,
     budget: &mut CopyBudget,
 ) -> CopyDirResult<()> {
+    #[cfg(feature = "test-support")]
+    if crate::local::take_test_support("copy-file-target-becomes-directory") {
+        std::fs::remove_file(dst).map_err(|source| {
+            copy_dir_error(LocalCopyDirStage::PrepareDestination, src, dst, stats, source)
+        })?;
+        std::fs::create_dir(dst).map_err(|source| {
+            copy_dir_error(LocalCopyDirStage::PrepareDestination, src, dst, stats, source)
+        })?;
+    }
     let destination_metadata = with_copy_context(
         destination_metadata_if_exists(dst),
         LocalCopyDirStage::PrepareDestination,
@@ -130,6 +139,21 @@ pub(crate) fn copy_file_with_options(
         }
         None => false,
     };
+    if destination_directory_requires_removal
+        && options.atomicity() == crate::LocalAtomicityRequirement::Required
+    {
+        return Err(copy_dir_error(
+            LocalCopyDirStage::PrepareDestination,
+            src,
+            dst,
+            stats,
+            std::io::Error::new(
+                std::io::ErrorKind::Unsupported,
+                "required atomic replacement is unavailable for a directory destination",
+            ),
+        )
+        .with_local_kind(crate::LocalFileErrorKind::RequirementNotMet));
+    }
 
     let (staged_file, copied, file_durable) = stage_copy_file(src, dst, options, stats, budget)?;
     if !commit_staged_copy_file(
@@ -168,6 +192,9 @@ pub(crate) fn copy_file_with_options(
             dst,
             stats,
         )?;
+    }
+    if options.preserves_permissions() {
+        stats.permissions_applied = stats.permissions_applied.saturating_add(1);
     }
     if destination_directory_requires_removal {
         stats.non_atomic_publication = true;

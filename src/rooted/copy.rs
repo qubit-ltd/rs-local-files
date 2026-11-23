@@ -113,6 +113,35 @@ pub(super) fn copy(
             source_error,
         ));
     }
+    #[cfg(feature = "test-support")]
+    if crate::local::take_test_support("rooted-copy-target-becomes-directory") {
+        root.remove_file(destination).map_err(|source_error| {
+            error(Stage::PrepareDestination, source, destination, Statistics::default(), source_error)
+        })?;
+        root.create_dir(destination).map_err(|source_error| {
+            error(Stage::PrepareDestination, source, destination, Statistics::default(), source_error)
+        })?;
+    }
+    #[cfg(feature = "test-support")]
+    if crate::local::take_test_support("rooted-copy-source-becomes-symlink") {
+        root.remove_file(source).map_err(|source_error| {
+            error(Stage::InspectSource, source, destination, Statistics::default(), source_error)
+        })?;
+        root.create_symlink_for_copy(std::path::Path::new("missing-source-target"), source, false)
+            .map_err(|source_error| {
+                let (_, source_error, _) = source_error.into_parts();
+                error(Stage::InspectSource, source, destination, Statistics::default(), source_error)
+            })?;
+    }
+    #[cfg(feature = "test-support")]
+    if crate::local::take_test_support("rooted-copy-source-becomes-directory") {
+        root.remove_file(source).map_err(|source_error| {
+            error(Stage::InspectSource, source, destination, Statistics::default(), source_error)
+        })?;
+        root.create_dir(source).map_err(|source_error| {
+            error(Stage::InspectSource, source, destination, Statistics::default(), source_error)
+        })?;
+    }
     let source_metadata = match root.symlink_metadata(source) {
         Ok(metadata) => metadata,
         Err(source_error) => {
@@ -125,7 +154,41 @@ pub(super) fn copy(
             ));
         }
     };
-    match source_metadata.kind() {
+    let source_kind = match source_metadata.kind() {
+        EntryKind::File => crate::LocalFileKind::File,
+        EntryKind::Directory => crate::LocalFileKind::Directory,
+        EntryKind::Symlink => crate::LocalFileKind::Symlink,
+        #[cfg(unix)]
+        EntryKind::Fifo => crate::LocalFileKind::Fifo,
+        #[cfg(unix)]
+        EntryKind::Socket => crate::LocalFileKind::Socket,
+        #[cfg(unix)]
+        EntryKind::BlockDevice => crate::LocalFileKind::BlockDevice,
+        #[cfg(unix)]
+        EntryKind::CharDevice => crate::LocalFileKind::CharDevice,
+        EntryKind::Other => crate::LocalFileKind::Other,
+    };
+    crate::local::validate_copy_source_kind(source_kind, options.source_mode()).map_err(|kind| {
+        error(
+            Stage::InspectSource,
+            source,
+            destination,
+            Statistics::default(),
+            io::Error::new(ErrorKind::InvalidInput, format!("copy source mode rejected actual source kind: {kind:?}")),
+        )
+        .with_local_kind(kind)
+    })?;
+    if crate::local::copy_source_guarantee_unavailable(source_kind, options.atomicity(), durability) {
+        return Err(error(
+            Stage::InspectSource,
+            source,
+            destination,
+            Statistics::default(),
+            io::Error::new(ErrorKind::Unsupported, "actual copy source cannot meet required guarantees"),
+        )
+        .with_local_kind(crate::LocalFileErrorKind::RequirementNotMet));
+    }
+    let result = match source_metadata.kind() {
         EntryKind::File => copy_file(
             root,
             source,
@@ -174,5 +237,11 @@ pub(super) fn copy(
             Statistics::default(),
             unsupported_source_error(),
         )),
-    }
+    };
+    result
+        .map(|mut stats| {
+            stats.source_kind = Some(source_kind);
+            stats
+        })
+        .map_err(|error| error.with_source_kind(source_kind))
 }
