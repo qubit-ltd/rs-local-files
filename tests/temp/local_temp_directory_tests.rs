@@ -370,9 +370,20 @@ fn test_local_temp_directory_exposes_creation_parent_and_cleanup_limits() {
     let creation_parent = fs::canonicalize(parent.path()).expect("parent should canonicalize");
     let initial_limits = temporary.cleanup_limits();
 
+    assert!(temporary.creation_parent().is_absolute());
+    let canonical_creation_parent =
+        fs::canonicalize(temporary.creation_parent()).expect("reported creation parent should canonicalize");
+    assert_eq!(creation_parent, canonical_creation_parent);
+
     let canonical_temporary_path = fs::canonicalize(temporary.path()).expect("temporary path should canonicalize");
-    assert!(canonical_temporary_path.starts_with(&creation_parent));
-    assert_eq!(creation_parent, temporary.creation_parent());
+    let sandbox_path = canonical_temporary_path
+        .parent()
+        .expect("temporary directory should have its cleanup sandbox parent");
+    assert_eq!(
+        Some(creation_parent.as_path()),
+        sandbox_path.parent(),
+        "the canonical temporary's direct parent should be beneath its creation parent",
+    );
     assert_eq!(LocalTempSourceState::Owned, temporary.source_state());
     assert_eq!(LocalTempCleanupLimits::new(), initial_limits);
 
