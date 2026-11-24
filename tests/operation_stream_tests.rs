@@ -2902,8 +2902,8 @@ fn test_stream_close_releases_buffer_budget_before_waking_close_waiter() {
     close_result.unwrap();
     drop(close);
     drop(writer);
-    assert!(probe.checked.load(std::sync::atomic::Ordering::Acquire));
     let admission = result_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+    assert!(probe.checked.load(std::sync::atomic::Ordering::Acquire));
     assert!(
         admission.is_ok(),
         "the full walker byte reservation is available when confirmed close wakes its waiter; got {admission:?}"
