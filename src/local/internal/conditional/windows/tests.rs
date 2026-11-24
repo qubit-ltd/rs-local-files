@@ -572,7 +572,10 @@ fn test_conditional_windows_candidate_name_change_keeps_recovery_copy() {
     )
     .expect_err("candidate identity change must stop publication");
 
-    assert!(replacement_completed.load(Ordering::SeqCst), "candidate replacement hook must complete");
+    assert!(
+        replacement_completed.load(Ordering::SeqCst),
+        "candidate replacement hook must complete"
+    );
     assert_eq!(failure.stage(), crate::error::LocalConditionalWriteStage::Publish);
     assert_eq!(failure.reason(), crate::error::LocalConditionalFailureReason::Io);
     assert_eq!(failure.publication(), LocalConditionalPublicationState::NotPublished);

@@ -999,22 +999,16 @@ mod missing_path_tests {
     #[test]
     fn test_tree_validation_checks_privacy_for_a_private_staged_tree() {
         let fixture = tempfile::tempdir().expect("fixture");
-        let mut stage = staged_directory(fixture.path());
+        let parent = LocalFileSystem::host()
+            .expect("host filesystem")
+            .open_directory_with_options(fixture.path(), &LocalDirectoryOpenOptions::new())
+            .expect("parent directory");
+        let mut stage = parent
+            .create_staged_directory(&LocalTempDirectoryOptions::new().with_privacy(LocalPrivacyRequirement::Required))
+            .expect("private staged directory");
         stage
             .write_file_new(Path::new("payload"), &mut &b"payload"[..], 7)
             .expect("write staged file");
-
-        #[cfg(windows)]
-        {
-            let root = stage
-                .owner
-                .as_ref()
-                .expect("stage owner exists")
-                .open_child_for_access()
-                .expect("open staged root for ACL setup");
-            crate::temp::internal::privacy_windows::apply_current_user_access(&root, true, false)
-                .expect("protect staged root with a current-user DACL");
-        }
 
         verify_tree(
             &stage,
