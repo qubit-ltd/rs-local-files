@@ -13,6 +13,7 @@ use std::os::unix::fs::symlink;
 #[cfg(windows)]
 use std::os::windows::fs::symlink_file;
 use std::path::Path;
+use std::path::PathBuf;
 use std::time::Duration;
 use std::time::Instant;
 
@@ -101,6 +102,71 @@ fn test_rooted_copy_parent_preflight_deadline_prevents_parent_creation() {
 }
 
 #[test]
+fn test_rooted_copy_accepts_parent_created_after_preflight() {
+    let fixture = tempfile::tempdir().expect("fixture should exist");
+    fs::write(fixture.path().join("source"), b"payload").expect("source should exist");
+    let filesystem = LocalFileSystem::rooted(fixture.path()).expect("rooted filesystem should open");
+    let mut expired_attempts = 0;
+    let mut completed = false;
+    let mut race_observed = false;
+
+    for allowance in 0..64 {
+        let parent = PathBuf::from(format!("parent-{allowance}"));
+        let native_parent = fixture.path().join(&parent);
+        let created_by_racer = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let callback_flag = std::sync::Arc::clone(&created_by_racer);
+        let callback_parent = native_parent.clone();
+        let _hook = observations::install_rooted_copy_parent_preflight_callback(move || {
+            fs::create_dir(callback_parent).expect("concurrent parent creation should win the race");
+            callback_flag.store(true, std::sync::atomic::Ordering::SeqCst);
+        });
+        let _clock = observations::DeadlineClockGuard::expire_after(allowance);
+        let target = parent.join("target");
+
+        match filesystem.copy_with_options(
+            Path::new("source"),
+            &target,
+            &LocalCopyOptions::new()
+                .with_create_parent()
+                .with_deadline(Duration::from_secs(60)),
+        ) {
+            Ok(outcome) => {
+                assert_eq!(1, outcome.stats().files());
+                assert_eq!(7, outcome.stats().bytes());
+                assert_eq!(b"payload", fs::read(fixture.path().join(&target)).unwrap().as_slice());
+                completed = true;
+                race_observed |= created_by_racer.load(std::sync::atomic::Ordering::SeqCst);
+                break;
+            }
+            Err(failure) => {
+                assert_eq!(ErrorKind::TimedOut, failure.error().io_error_kind());
+                if created_by_racer.load(std::sync::atomic::Ordering::SeqCst) {
+                    race_observed = true;
+                    assert!(native_parent.is_dir());
+                }
+                match failure.state() {
+                    LocalCopyFailureState::Unchanged | LocalCopyFailureState::PartiallyPublished => {
+                        assert!(!fixture.path().join(&target).exists());
+                    }
+                    LocalCopyFailureState::Published => {
+                        assert_eq!(b"payload", fs::read(fixture.path().join(&target)).unwrap().as_slice())
+                    }
+                    LocalCopyFailureState::Indeterminate => {}
+                }
+                expired_attempts += 1;
+            }
+        }
+    }
+
+    assert!(completed, "deadline sweep must eventually complete the copy");
+    assert!(race_observed, "a parent must be created after rooted preflight");
+    assert!(
+        expired_attempts >= 6,
+        "deadline sweep must cover the raced create check"
+    );
+}
+
+#[test]
 fn test_rooted_copy_parent_creation_deadline_preserves_created_parent_as_partial() {
     let fixture = tempfile::tempdir().expect("fixture should exist");
     fs::write(fixture.path().join("source"), b"source").unwrap();
@@ -121,6 +187,153 @@ fn test_rooted_copy_parent_creation_deadline_preserves_created_parent_as_partial
     assert_eq!(LocalCopyFailureState::PartiallyPublished, failure.state());
     assert!(fixture.path().join("new-parent").is_dir());
     assert!(!fixture.path().join("new-parent/child").exists());
+}
+
+#[test]
+fn test_rooted_copy_rejects_unrepresentable_deadline_before_mutation() {
+    let fixture = tempfile::tempdir().expect("fixture should exist");
+    fs::write(fixture.path().join("source"), b"source").expect("source should exist");
+    let filesystem = LocalFileSystem::rooted(fixture.path()).expect("rooted filesystem should open");
+
+    let failure = filesystem
+        .copy_with_options(
+            Path::new("source"),
+            Path::new("new-parent/target"),
+            &LocalCopyOptions::new()
+                .with_create_parent()
+                .with_deadline(Duration::MAX),
+        )
+        .expect_err("an unrepresentable copy deadline must fail before mutation");
+
+    assert_eq!(LocalFileOperation::Copy, failure.error().operation());
+    assert_eq!(LocalFileErrorKind::InvalidOptions, failure.error().kind());
+    assert_eq!(Some(Path::new("source")), failure.error().path());
+    assert_eq!(LocalCopyFailureState::Unchanged, failure.state());
+    assert!(!fixture.path().join("new-parent").exists());
+}
+
+#[test]
+fn test_rooted_copy_deadline_matrix_preserves_each_parent_creation_boundary() {
+    let fixture = tempfile::tempdir().expect("fixture should exist");
+    fs::write(fixture.path().join("source"), b"payload").expect("source should exist");
+    let filesystem = LocalFileSystem::rooted(fixture.path()).expect("rooted filesystem should open");
+    let mut expired_attempts = 0;
+    let mut completed = false;
+
+    // Sweep each deterministic deadline check up to successful completion. This
+    // covers failures during path resolution, parent preflight, and each parent
+    // creation while asserting that no target is published on an expired run.
+    for allowance in 0..512 {
+        let target = PathBuf::from(format!("case-{allowance}")).join("a/b/c/d/e/f/g/h/i/j/k/l/m/n/o/p/target");
+        let _clock = observations::DeadlineClockGuard::expire_after(allowance);
+        match filesystem.copy_with_options(
+            Path::new("source"),
+            &target,
+            &LocalCopyOptions::new()
+                .with_create_parent()
+                .with_deadline(Duration::from_secs(60)),
+        ) {
+            Ok(outcome) => {
+                assert_eq!(1, outcome.stats().files());
+                assert_eq!(b"payload", fs::read(fixture.path().join(&target)).unwrap().as_slice());
+                completed = true;
+                break;
+            }
+            Err(failure) => {
+                assert_eq!(ErrorKind::TimedOut, failure.error().io_error_kind());
+                match failure.state() {
+                    LocalCopyFailureState::Unchanged | LocalCopyFailureState::PartiallyPublished => {
+                        assert!(!fixture.path().join(&target).exists());
+                    }
+                    LocalCopyFailureState::Published => {
+                        assert_eq!(b"payload", fs::read(fixture.path().join(&target)).unwrap().as_slice())
+                    }
+                    LocalCopyFailureState::Indeterminate => {}
+                }
+                expired_attempts += 1;
+            }
+        }
+    }
+
+    assert!(
+        completed,
+        "the deadline sweep must eventually reach successful completion"
+    );
+    assert!(
+        expired_attempts >= 32,
+        "expected to cover each resolution and parent boundary"
+    );
+}
+
+#[test]
+fn test_rooted_delete_rejects_expired_and_unrepresentable_deadlines() {
+    let fixture = tempfile::tempdir().expect("fixture should exist");
+    fs::create_dir(fixture.path().join("target")).expect("target should exist");
+    fs::write(fixture.path().join("target/child"), b"preserve").expect("child should exist");
+    let filesystem = LocalFileSystem::rooted(fixture.path()).expect("rooted filesystem should open");
+
+    let expired = filesystem
+        .delete_directory_with_options(
+            Path::new("target"),
+            &crate::LocalDeleteOptions::new().with_deadline(Duration::ZERO),
+        )
+        .expect_err("an expired delete deadline must stop before metadata access");
+    assert_eq!(ErrorKind::TimedOut, expired.io_error_kind());
+
+    let overflow = filesystem
+        .delete_directory_with_options(
+            Path::new("target"),
+            &crate::LocalDeleteOptions::new().with_deadline(Duration::MAX),
+        )
+        .expect_err("an unrepresentable delete deadline must be rejected");
+    assert_eq!(LocalFileErrorKind::InvalidPath, overflow.kind());
+    assert_eq!(LocalFileOperation::DeleteDirectory, overflow.operation());
+    assert_eq!(ErrorKind::InvalidInput, overflow.io_error_kind());
+    assert_eq!(Some(Path::new("/target")), overflow.path());
+    assert_eq!(
+        b"preserve",
+        fs::read(fixture.path().join("target/child")).unwrap().as_slice()
+    );
+}
+
+#[test]
+fn test_rooted_delete_deadline_matrix_keeps_directory_until_deletion_can_finish() {
+    let fixture = tempfile::tempdir().expect("fixture should exist");
+    let filesystem = LocalFileSystem::rooted(fixture.path()).expect("rooted filesystem should open");
+    let mut expired_attempts = 0;
+    let mut completed = false;
+
+    for allowance in 0..32 {
+        let target = PathBuf::from(format!("case-{allowance}"));
+        let native_target = fixture.path().join(&target);
+        fs::create_dir(&native_target).expect("target directory should exist");
+        let _clock = observations::DeadlineClockGuard::expire_after(allowance);
+        match filesystem.delete_directory_with_options(
+            &target,
+            &crate::LocalDeleteOptions::new().with_deadline(Duration::from_secs(60)),
+        ) {
+            Ok(outcome) => {
+                assert!(outcome.deleted());
+                assert!(!native_target.exists());
+                completed = true;
+                break;
+            }
+            Err(error) => {
+                assert_eq!(ErrorKind::TimedOut, error.io_error_kind());
+                assert!(
+                    native_target.is_dir(),
+                    "an expired operation must preserve its directory"
+                );
+                expired_attempts += 1;
+            }
+        }
+    }
+
+    assert!(completed, "the deadline sweep must eventually reach deletion");
+    assert!(
+        expired_attempts >= 4,
+        "expected to cover resolution and metadata boundaries"
+    );
 }
 
 #[test]

@@ -24,6 +24,7 @@ thread_local! {
     static FORCED_EXPIRED: Cell<bool> = const { Cell::new(false) };
     static BOUNDARY_METADATA: Cell<Option<usize>> = const { Cell::new(None) };
     static HOST_INSTALL_BOUNDARIES: Cell<usize> = const { Cell::new(0) };
+    static ROOTED_COPY_PARENT_PREFLIGHT_CALLBACK: Cell<Option<Box<dyn FnOnce()>>> = const { Cell::new(None) };
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -150,6 +151,35 @@ pub(crate) fn reach_deadline_boundary(boundary: DeadlineBoundary) {
     if reached {
         BOUNDARY_METADATA.set(Some(METADATA.get()));
         FORCED_EXPIRED.set(true);
+    }
+    if boundary == DeadlineBoundary::RootedCopyParentPreflightComplete
+        && let Some(callback) = ROOTED_COPY_PARENT_PREFLIGHT_CALLBACK.take()
+    {
+        callback();
+    }
+}
+
+/// Installs a one-shot state change at rooted copy's completed parent
+/// preflight.
+pub(crate) fn install_rooted_copy_parent_preflight_callback(
+    callback: impl FnOnce() + 'static,
+) -> RootedCopyParentPreflightCallbackGuard {
+    assert!(
+        ROOTED_COPY_PARENT_PREFLIGHT_CALLBACK
+            .replace(Some(Box::new(callback)))
+            .is_none(),
+        "only one rooted copy preflight callback may be active on a test thread"
+    );
+    RootedCopyParentPreflightCallbackGuard
+}
+
+/// Clears an unused preflight callback if its operation exits before the
+/// boundary.
+pub(crate) struct RootedCopyParentPreflightCallbackGuard;
+
+impl Drop for RootedCopyParentPreflightCallbackGuard {
+    fn drop(&mut self) {
+        ROOTED_COPY_PARENT_PREFLIGHT_CALLBACK.set(None);
     }
 }
 

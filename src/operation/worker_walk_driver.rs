@@ -521,6 +521,48 @@ mod tests {
         locked_callbacks: AtomicUsize,
     }
 
+    struct PublishCloseDuringCloneProbe {
+        state: Arc<Mutex<WorkerWalkCloseState>>,
+    }
+
+    unsafe fn publish_close_then_panic_clone(data: *const ()) -> RawWaker {
+        // SAFETY: the probe outlives the compatibility close poll.
+        let probe = unsafe { &*(data.cast::<PublishCloseDuringCloneProbe>()) };
+        let waiters = probe
+            .state
+            .lock()
+            .unwrap()
+            .publish(Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "worker close failed during waker clone",
+            )))
+            .expect("close result must publish once");
+        for waiter in waiters {
+            waiter.wake();
+        }
+        crate::operation::poison_test_mutex(&probe.state);
+        panic!("injected close waker clone panic after publication");
+    }
+
+    unsafe fn no_op_waker_callback(_: *const ()) {}
+
+    static PUBLISH_CLOSE_THEN_PANIC_VTABLE: RawWakerVTable = RawWakerVTable::new(
+        publish_close_then_panic_clone,
+        no_op_waker_callback,
+        no_op_waker_callback,
+        no_op_waker_callback,
+    );
+
+    fn publish_close_then_panic_waker(probe: &PublishCloseDuringCloneProbe) -> Waker {
+        // SAFETY: the probe remains alive until after the synchronous poll.
+        unsafe {
+            Waker::from_raw(RawWaker::new(
+                probe as *const _ as *const (),
+                &PUBLISH_CLOSE_THEN_PANIC_VTABLE,
+            ))
+        }
+    }
+
     fn record_batch_waker_callback(probe: &BatchWakerProbe) {
         if probe.inner.commands.try_lock().is_err() {
             probe.locked_callbacks.fetch_add(1, Ordering::Relaxed);
@@ -1100,6 +1142,30 @@ mod tests {
     }
 
     #[test]
+    fn test_compatibility_close_poll_recovers_result_published_during_panicking_clone() {
+        let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+        let executor = LocalIoExecutor::new(manager, LocalExecutionConfig::default()).unwrap();
+        let directory = tempfile::tempdir().unwrap();
+        let driver = direct_driver(&directory, executor);
+        let probe = PublishCloseDuringCloneProbe {
+            state: Arc::clone(&driver.0.close_state),
+        };
+        let waker = publish_close_then_panic_waker(&probe);
+        let mut context = Context::from_waker(&waker);
+
+        let polled = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| driver.poll_closed(&mut context)));
+        assert!(polled.is_ok(), "published close result must survive waker clone panic");
+        match polled.unwrap() {
+            Poll::Ready(Err(error)) => {
+                assert_eq!(io::ErrorKind::PermissionDenied, error.kind());
+                assert_eq!("worker close failed during waker clone", error.to_string());
+            }
+            result => panic!("unexpected compatibility close result: {result:?}"),
+        }
+        assert!(driver.0.close_state.is_poisoned());
+    }
+
+    #[test]
     fn test_close_releases_byte_budget_before_notifying_waiters() {
         struct GateWake {
             notified: std::sync::mpsc::SyncSender<()>,
@@ -1385,7 +1451,9 @@ mod tests {
         let mut hostile_context = Context::from_waker(&hostile_waker);
         let batch = match driver.poll_batch(&mut hostile_context, 92, 8, 1024) {
             Poll::Ready(Ok(Some(entries))) => entries,
-            other => panic!("ready batch was not delivered after waiter destructor panic: {other:?}"),
+            other => {
+                panic!("ready batch was not delivered after waiter destructor panic: {other:?}")
+            }
         };
         assert_eq!(batch.as_slice(), std::slice::from_ref(&expected));
 

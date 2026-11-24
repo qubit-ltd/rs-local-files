@@ -135,6 +135,27 @@ mod tests {
         panic_on_drop: bool,
     }
 
+    struct PoisoningCloneProbe {
+        sender: std::sync::Mutex<Option<super::super::AsyncSender<u8>>>,
+        result: Arc<super::super::AsyncResult<u8>>,
+        panic_after_publish: bool,
+    }
+
+    unsafe fn publish_and_poison_during_clone(data: *const ()) -> std::task::RawWaker {
+        // SAFETY: the probe outlives the test poll and all raw-waker callbacks.
+        let probe = unsafe { &*(data.cast::<PoisoningCloneProbe>()) };
+        let sender = probe.sender.lock().unwrap().take().expect("sender available");
+        sender.send(83).expect("result publishes during waker clone");
+        crate::operation::poison_test_mutex(&probe.result.waker);
+        if probe.panic_after_publish {
+            panic!("injected waker clone panic after publishing completion");
+        }
+        std::task::RawWaker::new(data, &PUBLISH_AND_POISON_VTABLE)
+    }
+
+    const PUBLISH_AND_POISON_VTABLE: std::task::RawWakerVTable =
+        std::task::RawWakerVTable::new(publish_and_poison_during_clone, |_| {}, |_| {}, |_| {});
+
     unsafe fn publish_during_clone(data: *const ()) -> std::task::RawWaker {
         // SAFETY: the probe outlives the test poll and all raw-waker callbacks.
         let probe = unsafe { &*(data.cast::<ClonePublishProbe>()) };
@@ -211,6 +232,54 @@ mod tests {
             std::pin::Pin::new(&mut receiver).poll(&mut context),
             std::task::Poll::Ready(31)
         ));
+    }
+
+    #[test]
+    fn test_receiver_recovers_poisoned_waker_after_clone_panics_with_ready_result() {
+        let (sender, mut receiver) = async_result::<u8>();
+        let probe = PoisoningCloneProbe {
+            sender: std::sync::Mutex::new(Some(sender)),
+            result: Arc::clone(&receiver.0),
+            panic_after_publish: true,
+        };
+        let waker = unsafe {
+            Waker::from_raw(std::task::RawWaker::new(
+                &probe as *const _ as *const (),
+                &PUBLISH_AND_POISON_VTABLE,
+            ))
+        };
+        let mut context = std::task::Context::from_waker(&waker);
+
+        assert!(matches!(
+            std::pin::Pin::new(&mut receiver).poll(&mut context),
+            std::task::Poll::Ready(83)
+        ));
+        assert!(probe.result.waker.is_poisoned());
+        assert!(probe.result.value.lock().unwrap().is_none());
+    }
+
+    #[test]
+    fn test_receiver_recovers_poisoned_waker_when_result_arrives_during_registration() {
+        let (sender, mut receiver) = async_result::<u8>();
+        let probe = PoisoningCloneProbe {
+            sender: std::sync::Mutex::new(Some(sender)),
+            result: Arc::clone(&receiver.0),
+            panic_after_publish: false,
+        };
+        let waker = unsafe {
+            Waker::from_raw(std::task::RawWaker::new(
+                &probe as *const _ as *const (),
+                &PUBLISH_AND_POISON_VTABLE,
+            ))
+        };
+        let mut context = std::task::Context::from_waker(&waker);
+
+        assert!(matches!(
+            std::pin::Pin::new(&mut receiver).poll(&mut context),
+            std::task::Poll::Ready(83)
+        ));
+        assert!(probe.result.waker.is_poisoned());
+        assert!(probe.result.value.lock().unwrap().is_none());
     }
 
     #[test]

@@ -120,6 +120,38 @@ mod tests {
         }
     }
 
+    struct PublishCloseDuringCloneProbe {
+        state: Arc<Mutex<WorkerWalkCloseState>>,
+    }
+
+    unsafe fn publish_close_then_panic_clone(data: *const ()) -> std::task::RawWaker {
+        // SAFETY: the probe outlives the registration poll and its waker clone.
+        let probe = unsafe { &*(data.cast::<PublishCloseDuringCloneProbe>()) };
+        let waiters = probe
+            .state
+            .lock()
+            .unwrap()
+            .publish(Err(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "close failed during waker clone",
+            )))
+            .expect("close result must publish once");
+        for waiter in waiters {
+            waiter.wake();
+        }
+        crate::operation::poison_test_mutex(&probe.state);
+        panic!("injected waker clone panic after close publication");
+    }
+
+    unsafe fn no_op_waker_callback(_: *const ()) {}
+
+    static PUBLISH_CLOSE_THEN_PANIC_VTABLE: std::task::RawWakerVTable = std::task::RawWakerVTable::new(
+        publish_close_then_panic_clone,
+        no_op_waker_callback,
+        no_op_waker_callback,
+        no_op_waker_callback,
+    );
+
     static PANIC_DROP_VTABLE: std::task::RawWakerVTable = std::task::RawWakerVTable::new(
         panic_drop_clone,
         panic_drop_wake,
@@ -215,6 +247,29 @@ mod tests {
         let mut registration = CloseWaitRegistration::new(state);
         let waker = super::super::panic_clone_waker();
         assert!(matches!(registration.poll(&waker), Poll::Ready(Ok(()))));
+    }
+
+    #[test]
+    fn test_registration_recovers_close_published_during_panicking_waker_clone() {
+        let state = Arc::new(Mutex::new(WorkerWalkCloseState::default()));
+        let probe = PublishCloseDuringCloneProbe {
+            state: Arc::clone(&state),
+        };
+        let waker = unsafe {
+            Waker::from_raw(std::task::RawWaker::new(
+                &probe as *const _ as *const (),
+                &PUBLISH_CLOSE_THEN_PANIC_VTABLE,
+            ))
+        };
+        let mut registration = CloseWaitRegistration::new(Arc::clone(&state));
+
+        assert!(matches!(
+            registration.poll(&waker),
+            Poll::Ready(Err(error))
+                if error.kind() == std::io::ErrorKind::PermissionDenied
+                    && error.to_string() == "close failed during waker clone"
+        ));
+        assert!(state.is_poisoned());
     }
 
     #[test]
