@@ -118,6 +118,47 @@ fn test_host_copy_deadline_after_source_resolution_skips_target_resolution() {
 }
 
 #[test]
+fn test_host_copy_deadline_after_target_resolution_prevents_publication() {
+    let fixture = tempfile::tempdir().expect("fixture should exist");
+    let source = fixture.path().join("source");
+    let target = fixture.path().join("target");
+    fs::write(&source, b"source").expect("source should exist");
+    let _clock = observations::DeadlineClockGuard::expire_at(DeadlineBoundary::HostCopyTargetResolved);
+
+    let failure = LocalFileSystem::host()
+        .unwrap()
+        .copy_with_options(
+            &source,
+            &target,
+            &LocalCopyOptions::new().with_deadline(Duration::from_secs(60)),
+        )
+        .expect_err("deadline after target resolution must prevent publication");
+
+    assert_eq!(std::io::ErrorKind::TimedOut, failure.error().io_error_kind());
+    assert_eq!(crate::LocalCopyFailureState::Unchanged, failure.state());
+    assert!(source.exists());
+    assert!(!target.exists());
+}
+
+#[test]
+fn test_host_copy_rejects_unrepresentable_deadline_before_path_resolution() {
+    let fixture = tempfile::tempdir().expect("fixture should exist");
+    let source = fixture.path().join("source");
+    let target = fixture.path().join("target");
+    fs::write(&source, b"source").expect("source should exist");
+
+    let failure = LocalFileSystem::host()
+        .unwrap()
+        .copy_with_options(&source, &target, &LocalCopyOptions::new().with_deadline(Duration::MAX))
+        .expect_err("an unrepresentable deadline must be rejected");
+
+    assert_eq!(std::io::ErrorKind::InvalidInput, failure.error().io_error_kind());
+    assert_eq!(crate::LocalCopyFailureState::Unchanged, failure.state());
+    assert!(source.exists());
+    assert!(!target.exists());
+}
+
+#[test]
 fn test_host_delete_deadline_after_path_resolution_skips_initial_metadata() {
     let fixture = tempfile::tempdir().expect("fixture should exist");
     let target = fixture.path().join("target");

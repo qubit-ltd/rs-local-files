@@ -34,7 +34,6 @@ use qubit_local_files::options::LocalTempFileOptions;
 use qubit_local_files::outcome::LocalPersistCleanupState;
 use qubit_local_files::outcome::LocalPersistFailureState;
 use qubit_local_files::outcome::LocalPersistMethod;
-#[cfg(all(feature = "test-support", unix))]
 use qubit_local_files::outcome::LocalPersistStage;
 use qubit_local_files::outcome::LocalTempSourceState;
 use qubit_local_files::policy::LocalDurabilityRequirement;
@@ -1594,10 +1593,26 @@ fn test_local_temp_file_persist_respects_conflict_and_overwrite_policy() {
         .expect("temporary file should be created");
     Output::write_fully(&mut temporary, b"replacement").expect("temporary file should accept bytes");
 
-    let error = temporary
+    let mut error = temporary
         .persist(&target)
         .expect_err("default persistence must not replace an existing file");
     assert_eq!(target, error.requested_target());
+    assert_eq!(Some(target.as_path()), error.resolved_target());
+    assert_eq!(LocalPersistStage::InstallDestination, error.stage());
+    assert_eq!(LocalPersistFailureState::NotPublished, error.state());
+    assert_eq!(LocalTempSourceState::Owned, error.source_state());
+    assert_eq!(LocalFileErrorKind::AlreadyExists, error.kind());
+    assert_eq!(LocalFileErrorKind::AlreadyExists, error.error().kind());
+    assert_eq!(
+        Some(ErrorKind::AlreadyExists),
+        error.error().io_error().map(std::io::Error::kind)
+    );
+    assert!(std::error::Error::source(&error).is_some());
+    let display = error.to_string();
+    assert!(display.contains("InstallDestination"));
+    let retained_path = error.resource().path().to_path_buf();
+    assert_eq!(retained_path, error.resource_mut().path());
+    assert!(retained_path.exists(), "failure should retain its retryable resource");
     let LocalPersistErrorParts {
         error: _io,
         resource: temporary,

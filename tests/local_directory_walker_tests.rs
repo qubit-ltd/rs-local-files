@@ -210,6 +210,9 @@ fn test_local_directory_walker_rejects_handle_budget_exhaustion() {
     assert_eq!(1, source.limit());
     assert_eq!(0, source.remaining());
     assert_eq!(1, source.requested());
+    assert_eq!(None, source.observed());
+    assert!(!source.overflowed());
+    assert!(source.to_string().contains("overflowed=false"));
 }
 
 /// Verifies deep traversal can reopen frames instead of exhausting handles.
