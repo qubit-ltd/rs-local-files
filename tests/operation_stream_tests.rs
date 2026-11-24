@@ -498,8 +498,7 @@ fn test_staged_commit_reports_unpublished_failure_and_can_retry() {
             &manager,
             Default::default(),
             target.clone(),
-            LocalWriteOptions::new(LocalWriteMode::CreateOrReplace)
-                .with_file_sync(LocalFileSyncRequirement::Required),
+            LocalWriteOptions::new(LocalWriteMode::CreateOrReplace).with_file_sync(LocalFileSyncRequirement::Required),
         )
         .unwrap();
     let mut writer = match opening.wait_outcome().unwrap() {
