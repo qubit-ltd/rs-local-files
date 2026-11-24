@@ -1013,7 +1013,7 @@ mod missing_path_tests {
         stage.cleanup().expect("cleanup stage");
     }
 
-    #[cfg(unix)]
+    #[cfg(target_os = "linux")]
     #[test]
     fn test_tree_validation_checks_the_exact_owner_access_policy_for_root_and_entries() {
         use crate::policy::LocalOwnerAccessPolicy;
@@ -1027,6 +1027,42 @@ mod missing_path_tests {
             .with_owner_access_policy(LocalOwnerAccessPolicy::new().with_unix_modes(0o700, 0o600));
 
         verify_tree(&stage, None, &options).expect("the stage root and file match the exact owner access policy");
+        stage.cleanup().expect("cleanup stage");
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn test_tree_validation_fails_closed_when_exact_owner_acl_is_unsupported() {
+        use crate::policy::LocalOwnerAccessPolicy;
+
+        let fixture = tempfile::tempdir().expect("fixture");
+        let mut stage = staged_directory(fixture.path());
+        stage
+            .write_file_new(Path::new("payload"), &mut &b"payload"[..], 7)
+            .expect("write staged file");
+        let options = LocalTreeValidationOptions::new()
+            .with_owner_access_policy(LocalOwnerAccessPolicy::new().with_unix_modes(0o700, 0o600));
+
+        let root_error = verify_tree(&stage, None, &options)
+            .expect_err("macOS cannot verify the exact owner ACL policy");
+        assert_eq!(crate::LocalFileErrorKind::Unsupported, root_error.kind());
+
+        let identity = stage
+            .directory()
+            .observe_entry(Path::new("payload"))
+            .expect("observe staged file")
+            .identity()
+            .cloned()
+            .expect("entry identity");
+        let entry_error = verify_entry_privacy(
+            &stage,
+            Path::new("payload"),
+            LocalFileKind::File,
+            Some(&identity),
+            &options,
+        )
+        .expect_err("entry validation must fail closed when exact ACL inspection is unavailable");
+        assert_eq!(crate::LocalFileErrorKind::Unsupported, entry_error.kind());
         stage.cleanup().expect("cleanup stage");
     }
 
