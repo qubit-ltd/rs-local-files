@@ -961,6 +961,34 @@ fn test_temp_seal_returns_a_read_lease_for_the_same_registered_resource() {
         }
         _ => panic!("temp seal failed"),
     }
+    drop(block_on(operation.wait_settlement()));
+    drop(operation);
+    drop(same_access);
+    drop(creation);
+    drop(async_filesystem);
+    let cleanup_deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while std::fs::read_dir(directory.path()).unwrap().next().is_some()
+        && std::time::Instant::now() < cleanup_deadline
+    {
+        std::thread::yield_now();
+    }
+    assert_eq!(
+        0,
+        std::fs::read_dir(directory.path()).unwrap().count(),
+        "dropping the last sealed-resource lease should finish native cleanup",
+    );
+    let executor_shutdown = executor
+        .request_shutdown(qubit_operation::ShutdownMode::Drain)
+        .wait()
+        .expect("executor group shutdown should complete after sealing");
+    assert_eq!(executor_shutdown.snapshot.active_operations, 0);
+    drop(executor);
+    let manager_shutdown = manager
+        .request_shutdown(qubit_operation::ShutdownMode::Drain)
+        .wait()
+        .expect("manager shutdown should release temporary-resource tracking");
+    assert_eq!(manager_shutdown.snapshot.active_operations, 0);
+    assert_eq!(manager_shutdown.snapshot.recovery_groups, 0);
 }
 
 #[test]

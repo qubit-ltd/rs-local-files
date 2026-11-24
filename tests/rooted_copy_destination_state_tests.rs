@@ -137,6 +137,45 @@ fn test_rooted_copy_reports_method_for_backend_selected_source_kind() {
 }
 
 #[test]
+fn test_rooted_copy_race_rewrite_rejects_directory_entries_without_mutation() {
+    for (fault, directory_entry) in [
+        ("rooted-copy-target-becomes-directory", false),
+        ("rooted-copy-source-becomes-symlink", true),
+        ("rooted-copy-source-becomes-directory", true),
+    ] {
+        let directory = tempdir().expect("temporary root should be created");
+        if directory_entry {
+            fs::create_dir(directory.path().join("source")).expect("source directory should be created");
+        } else {
+            fs::write(directory.path().join("source"), b"source").expect("source should be written");
+            fs::create_dir(directory.path().join("target")).expect("target directory should be created");
+        }
+        let rooted = LocalFileSystem::rooted(directory.path()).expect("root authority should open");
+        let _fault = install_test_fault(fault).expect("race injection installs");
+        let options = if directory_entry {
+            LocalCopyOptions::new()
+        } else {
+            LocalCopyOptions::new()
+                .with_conflict(LocalCopyConflictPolicy::Overwrite)
+                .with_type_conflict(LocalCopyTypeConflictPolicy::Replace)
+        };
+
+        let failure = rooted
+            .copy_with_options(Path::new("source"), Path::new("target"), &options)
+            .expect_err("race rewrite must fail when its entry is a directory");
+
+        assert_eq!(LocalCopyFailureState::Unchanged, failure.state());
+        if directory_entry {
+            assert!(directory.path().join("source").is_dir());
+            assert!(!directory.path().join("target").exists());
+        } else {
+            assert_eq!(b"source", fs::read(directory.path().join("source")).unwrap().as_slice());
+            assert!(directory.path().join("target").is_dir());
+        }
+    }
+}
+
+#[test]
 fn test_create_parent_remains_after_source_open_failure_without_destination_publication() {
     let directory = tempdir().expect("temporary root should be created");
     fs::write(directory.path().join("source"), b"replacement").expect("source file should be written");

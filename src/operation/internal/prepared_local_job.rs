@@ -1759,6 +1759,8 @@ mod prepared_job_ownership_tests {
     use std::sync::Mutex;
     use std::sync::atomic::AtomicUsize;
     use std::sync::atomic::Ordering;
+    use std::task::Context;
+    use std::task::Poll;
     use std::task::Wake;
     use std::task::Waker;
 
@@ -1840,6 +1842,139 @@ mod prepared_job_ownership_tests {
             .wait()
             .expect("executor shuts down");
         assert_eq!(0, shutdown.snapshot.active_operations);
+    }
+
+    unsafe fn publish_outcome_during_waker_clone(data: *const ()) -> std::task::RawWaker {
+        // SAFETY: the RawWaker owns an Arc reference retained through the poll.
+        unsafe { Arc::<PreparedLocalJob<String, (), ()>>::increment_strong_count(data.cast()) };
+        let job = unsafe { &*(data.cast::<PreparedLocalJob<String, (), ()>>()) };
+        job.port.lock().unwrap_or_else(|error| error.into_inner()).outcome = Some(OperationOutcome::Succeeded(()));
+        std::task::RawWaker::new(data, &PUBLISH_OUTCOME_VTABLE)
+    }
+
+    unsafe fn drop_outcome_waker(data: *const ()) {
+        // SAFETY: this releases one Arc reference owned by the RawWaker.
+        drop(unsafe { Arc::<PreparedLocalJob<String, (), ()>>::from_raw(data.cast()) });
+    }
+
+    unsafe fn wake_outcome_waker(data: *const ()) {
+        // SAFETY: wake consumes the RawWaker's Arc reference.
+        unsafe { drop_outcome_waker(data) };
+    }
+
+    unsafe fn wake_outcome_waker_by_ref(_: *const ()) {}
+
+    static PUBLISH_OUTCOME_VTABLE: std::task::RawWakerVTable = std::task::RawWakerVTable::new(
+        publish_outcome_during_waker_clone,
+        wake_outcome_waker,
+        wake_outcome_waker_by_ref,
+        drop_outcome_waker,
+    );
+
+    #[test]
+    fn test_outcome_poll_rechecks_after_waker_clone_publishes_result() {
+        let manager = OperationManager::new(ManagerOptions::default()).expect("manager");
+        let executor = LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).expect("executor");
+        let job = make_job(&executor);
+        #[cfg(panic = "unwind")]
+        crate::operation::poison_test_mutex(&job._owned_permit);
+        let raw = Arc::into_raw(Arc::clone(&job)).cast_mut().cast::<()>();
+        // SAFETY: the RawWaker owns an Arc reference and is dropped after the
+        // poll; its clone callback publishes the worker result between checks.
+        let hostile = unsafe { Waker::from_raw(std::task::RawWaker::new(raw.cast_const(), &PUBLISH_OUTCOME_VTABLE)) };
+        let mut context = Context::from_waker(&hostile);
+
+        assert!(matches!(
+            PreparedExternalOperation::poll_take_outcome(&*job, &mut context),
+            Poll::Ready(OperationOutcome::Succeeded(()))
+        ));
+    }
+
+    #[test]
+    #[cfg(panic = "unwind")]
+    fn test_request_stop_recovers_poisoned_port_and_wakes_registered_waiter() {
+        let manager = OperationManager::new(ManagerOptions::default()).expect("manager");
+        let executor = LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).expect("executor");
+        let job = make_job(&executor);
+        let wake_count = Arc::new(WakeCount(AtomicUsize::new(0)));
+        job.port.lock().expect("job state port").wakers[0] = Some(Waker::from(Arc::clone(&wake_count)));
+        job.poison_lifecycle_locks();
+
+        OperationControl::request_stop(&*job, qubit_operation::StopReason::UserCancelled);
+
+        assert_eq!(1, wake_count.0.load(Ordering::SeqCst));
+        assert_eq!(
+            Some(qubit_operation::StopReason::UserCancelled),
+            job.port.lock().unwrap_or_else(|error| error.into_inner()).stop
+        );
+    }
+
+    #[test]
+    fn test_stop_before_activation_releases_poisoned_byte_permit_without_running_task() {
+        use qubit_operation::StopReason;
+
+        let manager = OperationManager::new(ManagerOptions::default()).expect("manager");
+        let executor = LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).expect("executor");
+        let task_ran = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let observed = Arc::new(Mutex::new(None));
+        let observed_job = Arc::clone(&observed);
+        let task_ran_by_job = Arc::clone(&task_ran);
+        let executor_for_job = executor.clone();
+        let mut parent = manager
+            .try_submit(Default::default(), move |scope| {
+                let task_ran = Arc::clone(&task_ran_by_job);
+                let job = PreparedLocalJob::new(
+                    Arc::clone(&executor_for_job.inner),
+                    String::from("cancel before activation"),
+                    executor_for_job.reserve_slot().expect("queue slot"),
+                    Arc::new(Mutex::new(
+                        executor_for_job.reserve_bytes(17).expect("owned byte permit"),
+                    )),
+                    executor_for_job.reserve_handle().expect("handle permit"),
+                    LocalFactObserver::new(),
+                    move |_| {
+                        task_ran.store(true, Ordering::SeqCst);
+                        OperationOutcome::<(), ()>::Succeeded(())
+                    },
+                );
+                PreparedExternalOperation::bind(&*job, scope.id()).expect("bind job identity");
+                #[cfg(panic = "unwind")]
+                {
+                    let byte_permit = Arc::clone(
+                        job._owned_permit
+                            .lock()
+                            .expect("owned byte permit slot")
+                            .as_ref()
+                            .expect("owned byte permit"),
+                    );
+                    crate::operation::poison_test_mutex(&byte_permit);
+                }
+                OperationControl::request_stop(&*job, StopReason::UserCancelled);
+                PreparedExternalOperation::activate(Arc::clone(&job), scope)
+                    .expect("stopped job is still queued for lifecycle release");
+                *observed_job.lock().expect("observed job slot") = Some(job);
+                Ok::<_, ()>(())
+            })
+            .expect("parent operation");
+        assert!(matches!(
+            parent.wait_outcome().expect("parent outcome"),
+            OperationOutcome::Succeeded(())
+        ));
+        let shutdown = manager
+            .request_shutdown(qubit_operation::ShutdownMode::Drain)
+            .wait()
+            .expect("queued stopped job should settle during drain");
+        assert_eq!(0, shutdown.snapshot.cleaning_resources);
+        assert!(!task_ran.load(Ordering::SeqCst));
+        let job = observed
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .take()
+            .expect("prepared job");
+        let snapshot = OperationControl::snapshot(&*job);
+        assert_eq!(qubit_operation::ExecutionPhase::Finished, snapshot.execution);
+        assert!(snapshot.input_released);
+        assert_eq!(0, executor.inner.byte_slots.used());
     }
 
     fn operation_id(manager: &OperationManager) -> qubit_operation::OperationId {

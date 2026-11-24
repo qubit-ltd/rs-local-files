@@ -891,6 +891,12 @@ fn test_staged_async_writer_cleanup_failure_can_be_retried() {
     drop(fault);
     assert!(error.to_string().contains("Abort"));
     rooted_opening.wait_settlement().unwrap();
+    let shutdown = rooted_manager
+        .request_shutdown(qubit_operation::ShutdownMode::Drain)
+        .wait()
+        .expect("rooted stream cleanup should settle during manager shutdown");
+    assert_eq!(shutdown.snapshot.cleaning_resources, 0);
+    assert_eq!(shutdown.snapshot.unconfirmed_users, 0);
     assert_eq!(
         std::fs::read_dir(rooted_directory.path()).unwrap().count(),
         0,

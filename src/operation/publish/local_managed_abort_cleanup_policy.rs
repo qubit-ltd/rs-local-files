@@ -487,6 +487,43 @@ mod tests {
     }
 
     #[test]
+    fn test_publish_abort_result_recovers_poisoned_publication_locks() {
+        let state = Arc::new(LocalAbortCleanupState {
+            owner: std::sync::Mutex::new(None::<LocalManagedAbortResource<u8>>),
+            result: std::sync::Mutex::new(None),
+            pending_result: std::sync::Mutex::new(Some(CleanupOutcome::Released)),
+            waker: std::sync::Mutex::new(Some(Waker::noop().clone())),
+        });
+        for lock in [0, 1, 2] {
+            let state = Arc::clone(&state);
+            let poisoner = std::thread::spawn(move || {
+                match lock {
+                    0 => drop(state.pending_result.lock().expect("pending result lock")),
+                    1 => drop(state.result.lock().expect("published result lock")),
+                    _ => drop(state.waker.lock().expect("cleanup waker lock")),
+                }
+                panic!("poison abort publication lock");
+            });
+            assert!(poisoner.join().is_err());
+        }
+
+        publish_abort_result(&state);
+
+        assert!(matches!(
+            state.result.lock().unwrap_or_else(|error| error.into_inner()).take(),
+            Some(CleanupOutcome::Released)
+        ));
+        assert!(
+            state
+                .pending_result
+                .lock()
+                .unwrap_or_else(|error| error.into_inner())
+                .is_none()
+        );
+        assert!(state.waker.lock().unwrap_or_else(|error| error.into_inner()).is_none());
+    }
+
+    #[test]
     fn test_panicking_waker_does_not_lose_cleanup_completion() {
         let (_manager, executor, id) = setup();
         let cleanup = Arc::new(LocalManagedAbortCleanup::<AbortGate>::new(

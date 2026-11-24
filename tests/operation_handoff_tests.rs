@@ -488,3 +488,44 @@ fn test_stream_cancellation_interrupts_a_pending_owned_input() {
         OperationOutcome::Stopped(_) | OperationOutcome::Failed(LocalStageFailure::Stopped)
     ));
 }
+
+#[test]
+fn test_stream_input_error_is_reported_and_releases_staged_resource() {
+    struct FailingInput;
+    impl AsyncInput for FailingInput {
+        type Item = u8;
+        unsafe fn poll_read_unchecked(
+            self: Pin<&mut Self>,
+            _cx: &mut Context<'_>,
+            _output: &mut [u8],
+            _index: usize,
+            _count: usize,
+        ) -> Poll<std::io::Result<usize>> {
+            Poll::Ready(Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "injected source stream failure",
+            )))
+        }
+    }
+
+    let (manager, executor, filesystem) = setup();
+    let mut operation = stage_stream(
+        filesystem,
+        executor,
+        &manager.as_async(),
+        OperationOptions::default(),
+        FailingInput,
+        LocalStageOptions::default(),
+    )
+    .expect("stream operation should be admitted before its input is polled");
+
+    assert!(matches!(
+        block_on(operation.wait_outcome()).expect("operation outcome"),
+        OperationOutcome::Failed(LocalStageFailure::Io(error))
+            if error.kind() == std::io::ErrorKind::InvalidData
+                && error.to_string().contains("injected source stream failure")
+    ));
+    let settlement = block_on(operation.wait_settlement());
+    assert_eq!(0, settlement.recovery_count);
+    assert!(settlement.cleanup_failures.is_empty());
+}

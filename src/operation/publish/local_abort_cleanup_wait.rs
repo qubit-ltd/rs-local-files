@@ -185,6 +185,25 @@ mod tests {
     }
 
     #[test]
+    fn test_abort_wait_consumes_ready_result_after_waker_lock_poison() {
+        let (mut wait, state) = wait::<u8>();
+        *state.result.lock().expect("cleanup result lock") = Some(CleanupOutcome::Released);
+        let waker_state = Arc::clone(&state);
+        let poisoner = std::thread::spawn(move || {
+            let _guard = waker_state.waker.lock().expect("registered waker lock");
+            panic!("poison registered waker lock after result publication");
+        });
+        assert!(poisoner.join().is_err());
+        let mut context = Context::from_waker(Waker::noop());
+
+        assert!(matches!(
+            Future::poll(std::pin::Pin::new(&mut wait), &mut context),
+            Poll::Ready(CleanupOutcome::Released)
+        ));
+        assert!(state.waker.lock().unwrap_or_else(|error| error.into_inner()).is_none());
+    }
+
+    #[test]
     fn test_abort_wait_registers_waker_after_poisoned_waker_lock() {
         let (mut wait, state) = wait::<u8>();
         let waker_state = Arc::clone(&state);
@@ -263,6 +282,16 @@ mod tests {
         std::panic::panic_any(());
     }
 
+    unsafe fn publish_while_poisoning_then_panic_on_clone(data: *const ()) -> std::task::RawWaker {
+        // SAFETY: the raw waker owns one Arc reference and this callback
+        // temporarily increments it before accessing the shared test state.
+        unsafe { Arc::<LocalAbortCleanupState<u8>>::increment_strong_count(data.cast()) };
+        let state = unsafe { Arc::<LocalAbortCleanupState<u8>>::from_raw(data.cast()) };
+        let mut result = state.result.lock().expect("cleanup result lock");
+        *result = Some(CleanupOutcome::Released);
+        std::panic::panic_any(());
+    }
+
     unsafe fn drop_arc(data: *const ()) {
         // SAFETY: this is the one reference owned by the raw waker.
         drop(unsafe { Arc::<LocalAbortCleanupState<u8>>::from_raw(data.cast()) });
@@ -275,6 +304,9 @@ mod tests {
 
     static PUBLISH_PANIC_VTABLE: std::task::RawWakerVTable =
         std::task::RawWakerVTable::new(publish_then_panic_on_clone, no_op, no_op, drop_arc);
+
+    static PUBLISH_POISON_PANIC_VTABLE: std::task::RawWakerVTable =
+        std::task::RawWakerVTable::new(publish_while_poisoning_then_panic_on_clone, no_op, no_op, drop_arc);
 
     #[test]
     fn test_abort_wait_stays_pending_when_waker_clone_panics() {
@@ -314,6 +346,34 @@ mod tests {
     }
 
     #[test]
+    fn test_abort_wait_recovers_poisoned_result_and_waker_after_hostile_clone() {
+        let (mut wait, state) = wait::<u8>();
+        let waker_state = Arc::clone(&state);
+        let poisoner = std::thread::spawn(move || {
+            let _guard = waker_state.waker.lock().expect("registered waker lock");
+            panic!("poison registered waker lock before hostile clone");
+        });
+        assert!(poisoner.join().is_err());
+        let data = Arc::into_raw(Arc::clone(&state)).cast_mut().cast::<()>();
+        // SAFETY: the raw waker owns one Arc reference; its clone callback
+        // publishes the result while panicking with the result mutex held.
+        let hostile = unsafe {
+            Waker::from_raw(std::task::RawWaker::new(
+                data.cast_const(),
+                &PUBLISH_POISON_PANIC_VTABLE,
+            ))
+        };
+        let mut context = Context::from_waker(&hostile);
+
+        assert!(matches!(
+            Future::poll(std::pin::Pin::new(&mut wait), &mut context),
+            Poll::Ready(CleanupOutcome::Released)
+        ));
+        assert!(state.result.lock().unwrap_or_else(|error| error.into_inner()).is_none());
+        assert!(state.waker.lock().unwrap_or_else(|error| error.into_inner()).is_none());
+    }
+
+    #[test]
     fn test_abort_wait_drops_clone_published_waker_outside_locks_and_contains_panic() {
         let (mut wait, state) = wait::<u8>();
         let probe = PublishOnCloneProbe {
@@ -338,6 +398,40 @@ mod tests {
         ));
         assert_eq!(1, probe.drops.load(Ordering::SeqCst));
         assert!(probe.locks_available.load(Ordering::SeqCst));
+        std::mem::forget(waker);
+    }
+
+    #[test]
+    fn test_abort_wait_consumes_clone_published_result_with_poisoned_waker_lock() {
+        let (mut wait, state) = wait::<u8>();
+        let waker_state = Arc::clone(&state);
+        let poisoner = std::thread::spawn(move || {
+            let _guard = waker_state.waker.lock().expect("registered waker lock");
+            panic!("poison registered waker lock before result publication");
+        });
+        assert!(poisoner.join().is_err());
+        let probe = PublishOnCloneProbe {
+            state,
+            drops: AtomicUsize::new(0),
+            locks_available: AtomicBool::new(true),
+            panic_on_drop: false,
+        };
+        // SAFETY: the raw waker references the probe, which remains alive
+        // until the poll has consumed and dropped its cloned waker.
+        let waker = unsafe {
+            Waker::from_raw(std::task::RawWaker::new(
+                &probe as *const _ as *const (),
+                &PUBLISH_ON_CLONE_VTABLE,
+            ))
+        };
+        let mut context = Context::from_waker(&waker);
+
+        assert!(matches!(
+            Future::poll(std::pin::Pin::new(&mut wait), &mut context),
+            Poll::Ready(CleanupOutcome::Released)
+        ));
+        assert_eq!(1, probe.drops.load(Ordering::SeqCst));
+        assert!(!probe.locks_available.load(Ordering::SeqCst));
         std::mem::forget(waker);
     }
 }

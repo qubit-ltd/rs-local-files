@@ -1382,4 +1382,35 @@ mod authority_and_native_failure_tests {
             b"original"
         );
     }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_root_tree_copy_rejects_regular_file_source_before_destination_creation() {
+        let fixture = tempfile::tempdir().expect("root fixture should exist");
+        fs::write(fixture.path().join("source"), b"file source").expect("source file should exist");
+        fs::create_dir(fixture.path().join("nested")).expect("destination parent should exist");
+        let root = Root::open(fixture.path()).expect("root should open");
+        let source = LocalRelativePath::new(Path::new("source")).expect("source path should be relative");
+        let destination =
+            LocalRelativePath::new(Path::new("nested/target")).expect("destination path should be relative");
+
+        let failure = root
+            .copy_with_durability(
+                &source,
+                &destination,
+                crate::local::LocalCopyDirOptions::new().with_source_mode(crate::options::LocalCopySourceMode::Tree),
+                crate::policy::LocalDurabilityRequirement::NotRequired,
+            )
+            .expect_err("tree copy must reject a regular file source");
+
+        assert_eq!(std::io::ErrorKind::InvalidInput, failure.error().kind());
+        assert_eq!(Some(crate::LocalFileErrorKind::RequirementNotMet), failure.local_kind());
+        assert_eq!(crate::local::LocalCopyDirStage::InspectSource, failure.stage());
+        assert!(failure.failure_state().is_none());
+        assert!(!fixture.path().join("nested/target").exists());
+        assert_eq!(
+            b"file source",
+            fs::read(fixture.path().join("source")).unwrap().as_slice()
+        );
+    }
 }
