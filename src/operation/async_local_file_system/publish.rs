@@ -9,6 +9,7 @@
 use std::io::IoSlice;
 use std::sync::Arc;
 use std::sync::Mutex;
+use std::sync::MutexGuard;
 
 use qubit_io::Output;
 use qubit_operation::EffectFact;
@@ -63,6 +64,26 @@ use crate::operation::publish::record_writer_effect;
 use crate::operation::publish::stop_report;
 use crate::operation::publish::transition_temp_native;
 use crate::operation::publish::update_writer_effect_observer;
+
+/// Locks publication state while recovering its value after a prior panic.
+///
+/// Poisoning records that a thread unwound while holding the mutex, but these
+/// slots only protect ownership transfer bookkeeping; retaining the contained
+/// state allows the operation's cleanup path to settle the native resource.
+///
+/// # Type Parameters
+///
+/// * `T` is the publication state protected by the mutex.
+///
+/// # Parameters
+///
+/// * `mutex` protects the ownership-transfer state being recovered.
+fn lock_publication_state<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
+    match mutex.lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => poisoned.into_inner(),
+    }
+}
 
 impl AsyncLocalFileSystem {
     /// Sets the default symlink policy on this facade's owned filesystem value.
@@ -164,14 +185,14 @@ impl AsyncLocalFileSystem {
                     }
                 };
                 let resource_id = writer_resource.id();
-                *writer_resource.id.lock().unwrap_or_else(|error| error.into_inner()) = Some(resource_id);
+                *lock_publication_state(&writer_resource.id) = Some(resource_id);
                 let writer = match filesystem.open_writer_with_options(&destination, &request.options) {
                     Ok(writer) => writer,
                     Err(error) => {
                         return OperationOutcome::Failed(LocalWriterCommandError::Open(error));
                     }
                 };
-                *writer_resource.native.lock().unwrap_or_else(|error| error.into_inner()) = Some(writer);
+                *lock_publication_state(&writer_resource.native) = Some(writer);
                 let submitted_bytes = request.bytes.len() as u64;
                 let append_mode = request.options.mode() == crate::LocalWriteMode::Append;
                 let mut append_effect_recorded = false;
@@ -189,7 +210,7 @@ impl AsyncLocalFileSystem {
                     }
                     let slices = [IoSlice::new(&request.bytes[offset..])];
                     let write_result = {
-                        let mut native = writer_resource.native.lock().unwrap_or_else(|error| error.into_inner());
+                        let mut native = lock_publication_state(&writer_resource.native);
                         native
                             .as_mut()
                             .expect("managed writer is available")
@@ -241,7 +262,7 @@ impl AsyncLocalFileSystem {
                     }
                 }
                 let flush_result = {
-                    let mut native = writer_resource.native.lock().unwrap_or_else(|error| error.into_inner());
+                    let mut native = lock_publication_state(&writer_resource.native);
                     Output::flush(native.as_mut().expect("managed writer is available"))
                 };
                 if let Err(source) = flush_result {
@@ -279,10 +300,7 @@ impl AsyncLocalFileSystem {
                         append_effect_recorded,
                     );
                 }
-                let writer = writer_resource
-                    .native
-                    .lock()
-                    .unwrap_or_else(|error| error.into_inner())
+                let writer = lock_publication_state(&writer_resource.native)
                     .take()
                     .expect("managed writer is available at publication");
                 match writer.commit() {
@@ -615,7 +633,7 @@ impl AsyncLocalFileSystem {
                     }
                 };
                 let resource_id = writer_resource.id();
-                *writer_resource.id.lock().unwrap_or_else(|error| error.into_inner()) = Some(resource_id);
+                *lock_publication_state(&writer_resource.id) = Some(resource_id);
                 let writer =
                     match filesystem.open_conditional_writer::<D>(&destination, request.precondition, &request.options)
                     {
@@ -624,14 +642,14 @@ impl AsyncLocalFileSystem {
                             return OperationOutcome::Failed(LocalConditionalWriterCommandError::Open(error));
                         }
                     };
-                *writer_resource.native.lock().unwrap_or_else(|error| error.into_inner()) = Some(writer);
+                *lock_publication_state(&writer_resource.native) = Some(writer);
                 let mut offset = 0;
                 while offset < request.bytes.len() {
                     if let Some(stop) = stop_report(scope) {
                         return abort_managed_conditional_after_stop(&writer_resource, stop);
                     }
                     let write_result = {
-                        let mut native = writer_resource.native.lock().unwrap_or_else(|error| error.into_inner());
+                        let mut native = lock_publication_state(&writer_resource.native);
                         Output::write(
                             native.as_mut().expect("managed conditional writer is available"),
                             &request.bytes[offset..],
@@ -665,7 +683,7 @@ impl AsyncLocalFileSystem {
                     }
                 }
                 let flush_result = {
-                    let mut native = writer_resource.native.lock().unwrap_or_else(|error| error.into_inner());
+                    let mut native = lock_publication_state(&writer_resource.native);
                     Output::flush(native.as_mut().expect("managed conditional writer is available"))
                 };
                 if let Err(source) = flush_result {
@@ -685,10 +703,7 @@ impl AsyncLocalFileSystem {
                 if let Some(stop) = stop_report(scope) {
                     return abort_managed_conditional_after_stop(&writer_resource, stop);
                 }
-                let writer = writer_resource
-                    .native
-                    .lock()
-                    .unwrap_or_else(|error| error.into_inner())
+                let writer = lock_publication_state(&writer_resource.native)
                     .take()
                     .expect("managed conditional writer is available before commit");
                 match writer.commit() {
@@ -786,9 +801,7 @@ impl AsyncLocalFileSystem {
         let request_for_body = Arc::clone(&request_owner);
         let executor = self.executor.clone();
         let submit = scoped.as_async().try_submit(operation, move |scope| async move {
-            let request = request_for_body
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
+            let request = lock_publication_state(&request_for_body)
                 .take()
                 .expect("accepted local temp command retains its request");
             if scope.context().stop_reason().is_some() {
@@ -830,9 +843,7 @@ impl AsyncLocalFileSystem {
             Ok(handle) => Ok((handle, returned_access, observer)),
             Err(error) => {
                 let (reason, _body) = error.into_parts();
-                let request = request_owner
-                    .lock()
-                    .unwrap_or_else(|e| e.into_inner())
+                let request = lock_publication_state(&request_owner)
                     .take()
                     .expect("rejected temp command returns its original request");
                 let rejection = match reason {
@@ -855,12 +866,19 @@ impl AsyncLocalFileSystem {
 #[cfg(test)]
 mod relative_host_publish_tests {
     use std::path::PathBuf;
+    use std::sync::Arc;
+    use std::sync::Mutex;
+    use std::task::Context;
+    use std::task::Poll;
+    use std::task::Wake;
+    use std::task::Waker;
 
     use qubit_operation::ManagerOptions;
     use qubit_operation::OperationManager;
     use qubit_operation::OperationOutcome;
 
     use super::AsyncLocalFileSystem;
+    use super::lock_publication_state;
     use crate::operation::LocalExecutionConfig;
     use crate::operation::LocalIoExecutor;
     use crate::operation::LocalOperationOptions;
@@ -869,8 +887,15 @@ mod relative_host_publish_tests {
     use crate::operation::publish::LocalConditionalWriterCommitRequest;
     use crate::operation::publish::LocalStagedTreeFile;
     use crate::operation::publish::LocalStagedTreePublishRequest;
+    use crate::operation::publish::LocalTempLifecycleCommand;
+    use crate::operation::publish::LocalTempLifecycleError;
+    use crate::operation::publish::LocalTempLifecycleRequest;
+    use crate::operation::publish::LocalTempLifecycleResult;
     use crate::operation::publish::LocalWriterCommitRequest;
+    use crate::operation::submit_temp_file;
+    use crate::options::LocalPersistOptions;
     use crate::options::LocalTempDirectoryOptions;
+    use crate::options::LocalTempFileOptions;
     use crate::options::LocalTreePublishOptions;
     use crate::options::LocalWriteMode;
     use crate::options::LocalWriteOptions;
@@ -884,6 +909,248 @@ mod relative_host_publish_tests {
             executor,
             Some(root.to_path_buf()),
         )
+    }
+
+    fn create_temp_file_access(
+        manager: &OperationManager,
+        root: &std::path::Path,
+    ) -> (crate::operation::temp::LocalTempFileAccess, LocalIoExecutor) {
+        let executor = LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).unwrap();
+        let mut creation = submit_temp_file(
+            crate::LocalFileSystem::host().unwrap(),
+            executor.clone(),
+            &manager.as_async(),
+            Default::default(),
+            LocalTempFileOptions::new().with_parent(root),
+        )
+        .unwrap();
+        let access = match block_on(creation.wait_outcome()).unwrap() {
+            OperationOutcome::Succeeded(access) => access,
+            _ => panic!("temporary file creation failed"),
+        };
+        (access, executor)
+    }
+
+    fn block_on<F: std::future::Future>(future: F) -> F::Output {
+        struct ThreadWake(std::thread::Thread);
+        impl Wake for ThreadWake {
+            fn wake(self: Arc<Self>) {
+                self.0.unpark();
+            }
+            fn wake_by_ref(self: &Arc<Self>) {
+                self.0.unpark();
+            }
+        }
+
+        let waker = Waker::from(Arc::new(ThreadWake(std::thread::current())));
+        let mut context = Context::from_waker(&waker);
+        let mut future = std::pin::pin!(future);
+        loop {
+            match future.as_mut().poll(&mut context) {
+                Poll::Ready(value) => return value,
+                Poll::Pending => std::thread::park(),
+            }
+        }
+    }
+
+    #[test]
+    fn test_temp_lifecycle_persist_failure_retains_resource_for_keep() {
+        let directory = tempfile::tempdir().unwrap();
+        let target = directory.path().join("occupied");
+        std::fs::write(&target, b"keep existing target").unwrap();
+        let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+        let (access, executor) = create_temp_file_access(&manager, directory.path());
+        let filesystem = AsyncLocalFileSystem::new(
+            crate::LocalFileSystem::host().unwrap(),
+            executor,
+            Some(directory.path().to_path_buf()),
+        );
+
+        let (mut persist, access, facts) = filesystem
+            .submit_temp_lifecycle(
+                &manager,
+                Default::default(),
+                LocalTempLifecycleRequest {
+                    access,
+                    command: LocalTempLifecycleCommand::Persist {
+                        target: target.clone(),
+                        options: LocalPersistOptions::new(),
+                    },
+                },
+            )
+            .unwrap();
+        assert!(matches!(
+            block_on(persist.wait_outcome()).unwrap(),
+            OperationOutcome::Failed(LocalTempLifecycleError::Persist(_))
+        ));
+        assert_eq!(std::fs::read(&target).unwrap(), b"keep existing target");
+        assert_eq!(facts.snapshot().publication, LocalPublicationState::NotPublished);
+
+        let (mut keep, _, facts) = filesystem
+            .submit_temp_lifecycle(
+                &manager,
+                Default::default(),
+                LocalTempLifecycleRequest {
+                    access,
+                    command: LocalTempLifecycleCommand::Keep,
+                },
+            )
+            .unwrap();
+        let kept = match block_on(keep.wait_outcome()).unwrap() {
+            OperationOutcome::Succeeded(LocalTempLifecycleResult::Persisted(outcome)) => outcome,
+            _ => panic!("temporary resource should remain available for keep"),
+        };
+        assert!(kept.path().exists());
+        assert_eq!(facts.snapshot().publication, LocalPublicationState::Published);
+        std::fs::remove_file(kept.path()).unwrap();
+    }
+
+    #[test]
+    fn test_temp_lifecycle_seal_preserves_resource_identity_for_read_lease() {
+        let directory = tempfile::tempdir().unwrap();
+        let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+        let (access, executor) = create_temp_file_access(&manager, directory.path());
+        let resource_id = access.resource_id();
+        let filesystem = AsyncLocalFileSystem::new(
+            crate::LocalFileSystem::host().unwrap(),
+            executor.clone(),
+            Some(directory.path().to_path_buf()),
+        );
+        let (mut seal, access, _) = filesystem
+            .submit_temp_lifecycle(
+                &manager,
+                Default::default(),
+                LocalTempLifecycleRequest {
+                    access,
+                    command: LocalTempLifecycleCommand::Seal {
+                        options: crate::LocalSealOptions::default(),
+                    },
+                },
+            )
+            .unwrap();
+        let lease = match block_on(seal.wait_outcome()).unwrap() {
+            OperationOutcome::Succeeded(LocalTempLifecycleResult::Sealed(lease)) => lease,
+            _ => panic!("temporary file sealing failed"),
+        };
+        assert_eq!(lease.resource_id(), resource_id);
+
+        let (mut repeated, _, _) = filesystem
+            .submit_temp_lifecycle(
+                &manager,
+                Default::default(),
+                LocalTempLifecycleRequest {
+                    access,
+                    command: LocalTempLifecycleCommand::Keep,
+                },
+            )
+            .unwrap();
+        assert!(matches!(
+            block_on(repeated.wait_outcome()).unwrap(),
+            OperationOutcome::Failed(LocalTempLifecycleError::Unsupported(_))
+        ));
+        let exported = block_on(lease.export_read_handle(&executor)).unwrap();
+        assert_eq!(exported.lease.resource_id(), resource_id);
+    }
+
+    #[test]
+    fn test_temp_lifecycle_closed_executor_returns_original_resource_request() {
+        let directory = tempfile::tempdir().unwrap();
+        let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+        let (access, executor) = create_temp_file_access(&manager, directory.path());
+        let resource_id = access.resource_id();
+        let filesystem = AsyncLocalFileSystem::new(
+            crate::LocalFileSystem::host().unwrap(),
+            executor.clone(),
+            Some(directory.path().to_path_buf()),
+        );
+        let executor_shutdown = executor
+            .request_shutdown(qubit_operation::ShutdownMode::Drain)
+            .wait()
+            .expect("executor group should drain before lifecycle submission");
+        assert_eq!(executor_shutdown.snapshot.active_operations, 0);
+
+        let rejection = match filesystem.submit_temp_lifecycle(
+            &manager,
+            Default::default(),
+            LocalTempLifecycleRequest {
+                access,
+                command: LocalTempLifecycleCommand::Keep,
+            },
+        ) {
+            Err(rejection) => rejection,
+            Ok(_) => panic!("a drained executor must reject temp lifecycle work"),
+        };
+        assert_eq!(rejection.rejection(), crate::operation::LocalSubmitRejection::Closed);
+        let request = rejection.into_request();
+        assert_eq!(request.access.resource_id(), resource_id);
+        drop(request);
+        drop(filesystem);
+        drop(executor);
+        let manager_shutdown = manager
+            .request_shutdown(qubit_operation::ShutdownMode::Drain)
+            .wait()
+            .expect("manager cleanup should finish after rejected resource is dropped");
+        assert_eq!(manager_shutdown.snapshot.active_operations, 0);
+        assert_eq!(std::fs::read_dir(directory.path()).unwrap().count(), 0);
+    }
+
+    #[test]
+    fn test_temp_lifecycle_manager_capacity_rejection_returns_original_request() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut manager_options = ManagerOptions::default();
+        manager_options.limits.active_operations = 1;
+        manager_options.limits.queued_operations = 1;
+        let manager = OperationManager::new(manager_options).unwrap();
+        let (access, executor) = create_temp_file_access(&manager, directory.path());
+        let resource_id = access.resource_id();
+        let filesystem = AsyncLocalFileSystem::new(
+            crate::LocalFileSystem::host().unwrap(),
+            executor.clone(),
+            Some(directory.path().to_path_buf()),
+        );
+
+        let rejection = match filesystem.submit_temp_lifecycle(
+            &manager,
+            Default::default(),
+            LocalTempLifecycleRequest {
+                access,
+                command: LocalTempLifecycleCommand::Keep,
+            },
+        ) {
+            Err(rejection) => rejection,
+            Ok(_) => panic!("an exhausted manager must reject another active operation"),
+        };
+        assert_eq!(
+            rejection.rejection(),
+            crate::operation::LocalSubmitRejection::CapacityExceeded
+        );
+        let request = rejection.into_request();
+        assert_eq!(request.access.resource_id(), resource_id);
+
+        drop(request);
+        drop(filesystem);
+        drop(executor);
+        let manager_shutdown = manager
+            .request_shutdown(qubit_operation::ShutdownMode::Drain)
+            .wait()
+            .expect("manager cleanup should finish after rejected resource is dropped");
+        assert_eq!(manager_shutdown.snapshot.active_operations, 0);
+        assert_eq!(std::fs::read_dir(directory.path()).unwrap().count(), 0);
+    }
+
+    #[test]
+    #[cfg(panic = "unwind")]
+    fn test_publication_state_lock_recovers_owned_state_after_panic() {
+        let state = Arc::new(Mutex::new(Some(17_u8)));
+        let poison_state = Arc::clone(&state);
+        let poisoner = std::thread::spawn(move || {
+            let _guard = poison_state.lock().expect("publication state lock");
+            panic!("poison publication state lock");
+        });
+        assert!(poisoner.join().is_err());
+
+        assert_eq!(Some(17), lock_publication_state(&state).take());
+        assert!(lock_publication_state(&state).is_none());
     }
 
     #[test]

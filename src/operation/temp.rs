@@ -387,6 +387,7 @@ mod tests {
 
     use qubit_operation::ManagerOptions;
     use qubit_operation::OperationManager;
+    use qubit_operation::OperationOptions;
     use qubit_operation::OperationOutcome;
     use qubit_operation::StopReason;
 
@@ -1503,6 +1504,54 @@ mod tests {
         assert!(id.lock().expect("id lock").is_some());
         assert_eq!(completion.settlement.recovery_count, 0);
         assert_eq!(std::fs::read_dir(parent.path()).expect("read parent").count(), 0);
+    }
+
+    #[test]
+    fn test_temporary_creation_rejects_when_shared_disk_reservation_is_exhausted() {
+        let parent = tempfile::tempdir().expect("temporary parent");
+        let manager = OperationManager::new(ManagerOptions::default()).expect("manager");
+        let executor = super::super::LocalIoExecutor::new(
+            manager.clone(),
+            super::super::LocalExecutionConfig {
+                max_disk_bytes: 1,
+                ..super::super::LocalExecutionConfig::default()
+            },
+        )
+        .expect("executor");
+        let occupied = executor.reserve_disk(1).expect("reserve the only disk byte");
+        let filesystem = crate::LocalFileSystem::host().expect("filesystem");
+        let async_manager = manager.as_async();
+
+        let mut file = super::submit_temp_file(
+            filesystem.clone(),
+            executor.clone(),
+            &async_manager,
+            OperationOptions::default(),
+            crate::options::LocalTempFileOptions::new().with_parent(parent.path()),
+        )
+        .expect("file request admitted");
+        assert!(matches!(
+            block_on(file.wait_outcome()).expect("file outcome"),
+            OperationOutcome::Failed(LocalCreateFailure::Capacity)
+        ));
+        assert_eq!(0, block_on(file.wait_settlement()).recovery_count);
+        assert_eq!(0, std::fs::read_dir(parent.path()).expect("read parent").count());
+
+        let mut directory = super::submit_temp_directory(
+            filesystem,
+            executor,
+            &async_manager,
+            OperationOptions::default(),
+            crate::options::LocalTempDirectoryOptions::new().with_parent(parent.path()),
+        )
+        .expect("directory request admitted");
+        assert!(matches!(
+            block_on(directory.wait_outcome()).expect("directory outcome"),
+            OperationOutcome::Failed(LocalCreateFailure::Capacity)
+        ));
+        assert_eq!(0, block_on(directory.wait_settlement()).recovery_count);
+        assert_eq!(0, std::fs::read_dir(parent.path()).expect("read parent").count());
+        drop(occupied);
     }
 
     struct WakePanics;

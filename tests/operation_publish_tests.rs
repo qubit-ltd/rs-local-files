@@ -967,8 +967,7 @@ fn test_temp_seal_returns_a_read_lease_for_the_same_registered_resource() {
     drop(creation);
     drop(async_filesystem);
     let cleanup_deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-    while std::fs::read_dir(directory.path()).unwrap().next().is_some()
-        && std::time::Instant::now() < cleanup_deadline
+    while std::fs::read_dir(directory.path()).unwrap().next().is_some() && std::time::Instant::now() < cleanup_deadline
     {
         std::thread::yield_now();
     }
@@ -1066,6 +1065,32 @@ fn test_sealed_temp_rejects_repeat_lifecycle_commands_without_consuming_the_owne
     }
     let exported = block_on(lease.export_read_handle(&executor)).unwrap();
     assert_eq!(exported.lease.resource_id(), resource_id);
+    drop(exported);
+    drop(lease);
+    drop(access);
+    drop(block_on(seal.wait_settlement()));
+    drop(block_on(creation.wait_settlement()));
+    drop(seal);
+    drop(creation);
+    drop(async_filesystem);
+    let cleanup_deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while std::fs::read_dir(directory.path()).unwrap().next().is_some() && std::time::Instant::now() < cleanup_deadline
+    {
+        std::thread::yield_now();
+    }
+    assert_eq!(0, std::fs::read_dir(directory.path()).unwrap().count());
+    let executor_shutdown = executor
+        .request_shutdown(qubit_operation::ShutdownMode::Drain)
+        .wait()
+        .expect("executor group shutdown should complete after lifecycle rejection");
+    assert_eq!(executor_shutdown.snapshot.active_operations, 0);
+    drop(executor);
+    let manager_shutdown = manager
+        .request_shutdown(qubit_operation::ShutdownMode::Drain)
+        .wait()
+        .expect("manager shutdown should release temporary-resource tracking");
+    assert_eq!(manager_shutdown.snapshot.active_operations, 0);
+    assert_eq!(manager_shutdown.snapshot.recovery_groups, 0);
 }
 
 #[test]

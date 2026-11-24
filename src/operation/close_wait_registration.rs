@@ -218,6 +218,32 @@ mod tests {
     }
 
     #[test]
+    fn test_published_close_wakes_registered_task_and_keeps_result_observable() {
+        let state = Arc::new(Mutex::new(WorkerWalkCloseState::default()));
+        let probe = panic_drop_probe();
+        let waker = panic_drop_waker(Arc::clone(&probe));
+        let mut registration = CloseWaitRegistration::new(Arc::clone(&state));
+        assert!(registration.poll(&waker).is_pending());
+        probe.panic_on_drop.store(false, Ordering::SeqCst);
+        drop(waker);
+        let waiters = state
+            .lock()
+            .unwrap()
+            .publish(Ok(()))
+            .expect("first terminal publication");
+        assert_eq!(1, waiters.len());
+        for waiter in waiters {
+            waiter.wake();
+        }
+        assert_eq!(
+            1,
+            Arc::strong_count(&probe),
+            "published waiter releases its stored waker"
+        );
+        assert!(matches!(registration.poll(Waker::noop()), Poll::Ready(Ok(()))));
+    }
+
+    #[test]
     #[cfg(panic = "unwind")]
     fn test_replacement_and_cancellation_survive_waker_drop_panic() {
         let state = Arc::new(Mutex::new(WorkerWalkCloseState::default()));

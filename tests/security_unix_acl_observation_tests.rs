@@ -11,6 +11,7 @@ use std::ffi::CString;
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::MetadataExt;
 use std::os::unix::fs::PermissionsExt;
+use std::path::Path;
 
 use qubit_local_files::LocalFileSystem;
 use qubit_local_files::observation::LocalAclPresence;
@@ -18,16 +19,7 @@ use qubit_local_files::observation::LocalObservationRequirement;
 use qubit_local_files::observation::LocalSecurityObservationOptions;
 use qubit_local_files::options::LocalObservedReadOptions;
 
-#[test]
-fn test_required_security_observation_reports_mode_owner_and_acl_from_reader() {
-    let directory = tempfile::tempdir().expect("temporary directory should be created");
-    let path = directory.path().join("private-data");
-    std::fs::write(&path, b"private payload").expect("fixture should be written");
-    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o640)).expect("fixture mode should be set");
-
-    // Install a valid extended ACL through the real filesystem interface. This
-    // verifies the public observation path reports ACL presence from the
-    // retained reader descriptor rather than only validating synthetic bytes.
+fn install_extended_acl(path: &Path) -> Vec<u8> {
     let native_path = CString::new(path.as_os_str().as_bytes()).expect("temporary path has no NUL");
     let acl_name = c"system.posix_acl_access";
     let acl = [
@@ -52,6 +44,20 @@ fn test_required_security_observation_reports_mode_owner_and_acl_from_reader() {
         )
     };
     assert_eq!(status, 0, "runner filesystem must support POSIX ACL fixtures");
+    acl
+}
+
+#[test]
+fn test_required_security_observation_reports_mode_owner_and_acl_from_reader() {
+    let directory = tempfile::tempdir().expect("temporary directory should be created");
+    let path = directory.path().join("private-data");
+    std::fs::write(&path, b"private payload").expect("fixture should be written");
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o640)).expect("fixture mode should be set");
+
+    // Install a valid extended ACL through the real filesystem interface. This
+    // verifies the public observation path reports ACL presence from the
+    // retained reader descriptor rather than only validating synthetic bytes.
+    let acl = install_extended_acl(&path);
 
     let metadata = std::fs::metadata(&path).expect("fixture metadata should be available");
     let reader = LocalFileSystem::host()
@@ -78,4 +84,63 @@ fn test_required_security_observation_reports_mode_owner_and_acl_from_reader() {
     );
     assert_eq!(access.access_acl(), LocalAclPresence::Present);
     assert_eq!(access.default_acl(), LocalAclPresence::Absent);
+}
+
+#[test]
+fn test_required_security_observation_rejects_acl_byte_limit_without_partial_facts() {
+    let directory = tempfile::tempdir().expect("temporary directory should be created");
+    let path = directory.path().join("bounded-acl");
+    std::fs::write(&path, b"private payload").expect("fixture should be written");
+    let acl = install_extended_acl(&path);
+    let reader = LocalFileSystem::host()
+        .expect("host filesystem should open")
+        .open_observed_reader(&path, &LocalObservedReadOptions::new())
+        .expect("reader should open");
+
+    let error = reader
+        .security_observation(
+            &LocalSecurityObservationOptions::new()
+                .with_access(LocalObservationRequirement::Required)
+                .with_max_acl_bytes(acl.len() - 1),
+        )
+        .expect_err("an ACL larger than the configured byte budget must fail");
+    assert_eq!(
+        qubit_local_files::error::LocalFileErrorKind::ResourceLimit,
+        error.kind()
+    );
+    let limit = error.resource_limit_error().expect("ACL byte limit remains structured");
+    assert_eq!(qubit_local_files::error::LocalResourceKind::AclBytes, limit.resource());
+    assert_eq!(Some(acl.len()), limit.observed());
+}
+
+#[test]
+fn test_required_security_observation_rejects_acl_entry_limit_without_partial_facts() {
+    let directory = tempfile::tempdir().expect("temporary directory should be created");
+    let path = directory.path().join("bounded-acl-entries");
+    std::fs::write(&path, b"private payload").expect("fixture should be written");
+    install_extended_acl(&path);
+    let reader = LocalFileSystem::host()
+        .expect("host filesystem should open")
+        .open_observed_reader(&path, &LocalObservedReadOptions::new())
+        .expect("reader should open");
+
+    let error = reader
+        .security_observation(
+            &LocalSecurityObservationOptions::new()
+                .with_access(LocalObservationRequirement::Required)
+                .with_max_acl_entries(4),
+        )
+        .expect_err("five ACL entries must exceed a four-entry budget");
+    assert_eq!(
+        qubit_local_files::error::LocalFileErrorKind::ResourceLimit,
+        error.kind()
+    );
+    let limit = error
+        .resource_limit_error()
+        .expect("ACL entry limit remains structured");
+    assert_eq!(
+        qubit_local_files::error::LocalResourceKind::AclEntries,
+        limit.resource()
+    );
+    assert_eq!(Some(5), limit.observed());
 }

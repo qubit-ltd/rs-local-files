@@ -190,6 +190,83 @@ fn test_rejected_temp_creation_returns_the_original_request_options() {
     assert_eq!(rejected_directory.into_request(), directory_options);
 }
 
+#[test]
+fn test_temp_handle_capacity_rejects_without_mutation_and_recovers_for_retry() {
+    let _guard = lock_temp_operation_test();
+    let parent = tempfile::tempdir().expect("temporary parent");
+    let manager = OperationManager::new(ManagerOptions::default()).expect("manager");
+    let executor = LocalIoExecutor::new(
+        manager.clone(),
+        LocalExecutionConfig {
+            max_open_handles: 1,
+            ..LocalExecutionConfig::default()
+        },
+    )
+    .expect("executor");
+    let filesystem = LocalFileSystem::host().expect("host filesystem");
+    let async_manager = manager.as_async();
+
+    let mut first = submit_temp_file(
+        filesystem.clone(),
+        executor.clone(),
+        &async_manager,
+        OperationOptions::default(),
+        LocalTempFileOptions::new().with_parent(parent.path()),
+    )
+    .expect("first request admitted");
+    let OperationOutcome::Succeeded(access) = block_on(first.wait_outcome()).expect("first outcome") else {
+        panic!("first temporary file should be created");
+    };
+
+    let mut rejected_file = submit_temp_file(
+        filesystem.clone(),
+        executor.clone(),
+        &async_manager,
+        OperationOptions::default(),
+        LocalTempFileOptions::new().with_parent(parent.path()),
+    )
+    .expect("manager admission is separate from handle capacity");
+    assert!(matches!(
+        block_on(rejected_file.wait_outcome()).expect("rejected file outcome"),
+        OperationOutcome::Failed(LocalCreateFailure::Capacity)
+    ));
+    assert_eq!(0, block_on(rejected_file.wait_settlement()).recovery_count);
+
+    let mut rejected_directory = submit_temp_directory(
+        filesystem.clone(),
+        executor.clone(),
+        &async_manager,
+        OperationOptions::default(),
+        LocalTempDirectoryOptions::new().with_parent(parent.path()),
+    )
+    .expect("manager admission is separate from handle capacity");
+    assert!(matches!(
+        block_on(rejected_directory.wait_outcome()).expect("rejected directory outcome"),
+        OperationOutcome::Failed(LocalCreateFailure::Capacity)
+    ));
+    assert_eq!(0, block_on(rejected_directory.wait_settlement()).recovery_count);
+    assert_eq!(1, std::fs::read_dir(parent.path()).expect("read parent").count());
+
+    drop(access);
+    assert_eq!(0, block_on(first.wait_settlement()).recovery_count);
+    assert_eq!(0, std::fs::read_dir(parent.path()).expect("read parent").count());
+
+    let mut retry = submit_temp_directory(
+        filesystem,
+        executor,
+        &async_manager,
+        OperationOptions::default(),
+        LocalTempDirectoryOptions::new().with_parent(parent.path()),
+    )
+    .expect("released handle capacity should admit retry");
+    let OperationOutcome::Succeeded(access) = block_on(retry.wait_outcome()).expect("retry outcome") else {
+        panic!("retry should create a directory");
+    };
+    drop(access);
+    assert_eq!(0, block_on(retry.wait_settlement()).recovery_count);
+    assert_eq!(0, std::fs::read_dir(parent.path()).expect("read parent").count());
+}
+
 #[cfg(feature = "test-support")]
 #[test]
 fn test_failed_cleanup_keeps_resource_permit_and_public_recovery_can_retry() {

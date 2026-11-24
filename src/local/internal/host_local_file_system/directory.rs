@@ -85,6 +85,12 @@ impl HostLocalFileSystem {
         if options.recursive() {
             return create_host_directory_tree(&bound, options.exists_ok()).map(LocalCreateDirectoryOutcome::new);
         }
+        #[cfg(feature = "test-support")]
+        if crate::local::take_test_support("host-create-directory-target-race") {
+            fs::create_dir(&bound).map_err(|source| {
+                LocalFileError::from_io(LocalFileOperation::CreateDirectory, Some(bound.clone()), None, source)
+            })?;
+        }
         let result = fs::create_dir(&bound);
         match result {
             Ok(()) => Ok(LocalCreateDirectoryOutcome::new(!existed)),
@@ -158,6 +164,10 @@ fn create_host_directory_tree(path: &Path, exists_ok: bool) -> LocalResult<bool>
                         created_any,
                         crate::local::test_fault_error(),
                     ));
+                }
+                #[cfg(feature = "test-support")]
+                if crate::local::take_test_support("host-create-directory-component-race") {
+                    fs::create_dir(&current).map_err(|error| create_component_error(&current, created_any, error))?;
                 }
                 match fs::create_dir(&current) {
                     Ok(()) => {
