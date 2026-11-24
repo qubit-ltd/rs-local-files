@@ -554,8 +554,7 @@ fn test_closed_writer_retains_commit_error_without_retry_permission() {
             &manager,
             OperationOptions::default(),
             target.clone(),
-            LocalWriteOptions::new(LocalWriteMode::CreateOrReplace)
-                .with_file_sync(LocalFileSyncRequirement::Required),
+            LocalWriteOptions::new(LocalWriteMode::CreateOrReplace).with_file_sync(LocalFileSyncRequirement::Required),
         )
         .unwrap();
     let mut writer = match opening.wait_outcome().unwrap() {
@@ -2793,6 +2792,9 @@ fn test_failed_stream_opens_release_byte_reservations_before_outcome() {
 
 #[test]
 fn test_stream_close_releases_buffer_budget_before_waking_close_waiter() {
+    use std::sync::atomic::AtomicBool;
+    use std::sync::mpsc;
+
     use qubit_local_files::LocalFileSystem;
     use qubit_local_files::operation::AsyncLocalFileSystem;
     use qubit_local_files::operation::LocalExecutionConfig;
@@ -2803,8 +2805,6 @@ fn test_stream_close_releases_buffer_budget_before_waking_close_waiter() {
     use qubit_local_files::options::LocalWriteOptions;
     use qubit_operation::OperationManager;
     use qubit_operation::OperationOutcome;
-    use std::sync::atomic::AtomicBool;
-    use std::sync::mpsc;
 
     struct OpenWalkerOnWake {
         filesystem: AsyncLocalFileSystem,
@@ -2812,13 +2812,7 @@ fn test_stream_close_releases_buffer_budget_before_waking_close_waiter() {
         path: PathBuf,
         checked: AtomicBool,
         opening: Mutex<Option<LocalOperation<AsyncLocalDirectoryWalker>>>,
-        result: Mutex<
-            Option<
-                mpsc::SyncSender<
-                    Result<(), qubit_local_files::operation::LocalSubmitRejection>,
-                >,
-            >,
-        >,
+        result: Mutex<Option<mpsc::SyncSender<Result<(), qubit_local_files::operation::LocalSubmitRejection>>>>,
     }
 
     impl std::task::Wake for OpenWalkerOnWake {
