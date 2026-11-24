@@ -1661,12 +1661,13 @@ fn test_local_temp_file_close_rejects_stream_access_and_allows_cleanup() {
 #[test]
 fn test_local_temp_file_creation_parent_and_source_state_track_lifecycle() {
     let parent = tempdir().expect("temporary parent should be created");
+    let parent_path = fs::canonicalize(parent.path()).expect("temporary parent should canonicalize");
     let mut temporary = LocalFileSystem::host()
         .expect("Host filesystem should open")
-        .create_temp_file_with_options(&LocalTempFileOptions::new().with_parent(parent.path()))
+        .create_temp_file_with_options(&LocalTempFileOptions::new().with_parent(&parent_path))
         .expect("temporary file should be created");
 
-    assert_eq!(parent.path(), temporary.creation_parent());
+    assert_eq!(parent_path, temporary.creation_parent());
     assert!(temporary.path().starts_with(temporary.creation_parent()));
     assert_eq!(LocalTempSourceState::Owned, temporary.source_state());
 
