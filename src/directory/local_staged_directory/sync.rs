@@ -598,7 +598,9 @@ impl LocalStagedDirectory {
                         LocalFileErrorKind::ChangedDuringRead,
                         LocalFileOperation::OpenRoot,
                     )))
-                } else if crate::local::take_test_support("tree-sync-fallback-open-failure") {
+                } else if crate::local::take_repeated_test_support(
+                    "tree-sync-fallback-open-failure",
+                ) {
                     Err(super::WindowsTreeEntrySyncOpenError::SyncAccessUnavailable(
                         LocalFileError::new(LocalFileErrorKind::Unsupported, LocalFileOperation::Commit),
                     ))
@@ -619,7 +621,9 @@ impl LocalStagedDirectory {
                     if requirement == LocalFileSyncRequirement::Preferred =>
                 {
                     #[cfg(feature = "test-support")]
-                    let ordinary_open = if crate::local::take_test_support("tree-sync-fallback-open-failure") {
+                    let ordinary_open = if crate::local::take_repeated_test_support(
+                        "tree-sync-fallback-open-failure",
+                    ) {
                         Err(LocalFileError::from_io(
                             LocalFileOperation::OpenRoot,
                             Some(self.directory().diagnostic_path().join(item.relative_path())),
@@ -948,12 +952,17 @@ mod windows_preferred_sync_tests {
         stage
             .write_file_new(Path::new("payload"), &mut &b"payload"[..], 32)
             .expect("payload");
-        let _fault = crate::local::install_test_fault_repeated("tree-sync-fallback-open-failure", 2)
-            .expect("fallback open fault");
+        let _fault =
+            crate::local::install_test_fault_repeated("tree-sync-fallback-open-failure", 2)
+                .expect("fallback open fault");
 
         let error = stage
-            .sync_files_with_options(&LocalListOptions::new(), LocalFileSyncRequirement::Preferred)
+            .sync_files_with_options(
+                &LocalListOptions::new(),
+                LocalFileSyncRequirement::Preferred,
+            )
             .expect_err("ordinary access failure must be returned");
+        assert_eq!(2, crate::local::test_fault_occurrence_count());
         assert_eq!(std::io::ErrorKind::PermissionDenied, error.io_error_kind());
     }
 }

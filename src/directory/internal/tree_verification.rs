@@ -1004,12 +1004,24 @@ mod missing_path_tests {
             .write_file_new(Path::new("payload"), &mut &b"payload"[..], 7)
             .expect("write staged file");
 
+        #[cfg(windows)]
+        {
+            let root = stage
+                .owner
+                .as_ref()
+                .expect("stage owner exists")
+                .open_child_for_access()
+                .expect("open staged root for ACL setup");
+            crate::temp::internal::privacy_windows::apply_current_user_access(&root, true, false)
+                .expect("protect staged root with a current-user DACL");
+        }
+
         verify_tree(
             &stage,
             None,
             &LocalTreeValidationOptions::new().with_privacy(LocalPrivacyRequirement::Required),
         )
-        .expect("the default staged-directory permissions satisfy required privacy");
+        .expect("the staged tree satisfies required privacy");
         stage.cleanup().expect("cleanup stage");
     }
 
