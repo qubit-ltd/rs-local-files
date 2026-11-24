@@ -480,7 +480,7 @@ fn test_staged_commit_reports_unpublished_failure_and_can_retry() {
     use qubit_local_files::operation::LocalIoExecutor;
     use qubit_local_files::options::LocalWriteMode;
     use qubit_local_files::options::LocalWriteOptions;
-    use qubit_local_files::policy::LocalDurabilityRequirement;
+    use qubit_local_files::policy::LocalFileSyncRequirement;
     use qubit_local_files::test_support::install_test_fault_shared;
     use qubit_operation::ManagerOptions;
     use qubit_operation::OperationManager;
@@ -499,12 +499,16 @@ fn test_staged_commit_reports_unpublished_failure_and_can_retry() {
             Default::default(),
             target.clone(),
             LocalWriteOptions::new(LocalWriteMode::CreateOrReplace)
-                .with_durability(LocalDurabilityRequirement::Required),
+                .with_file_sync(LocalFileSyncRequirement::Required),
         )
         .unwrap();
     let mut writer = match opening.wait_outcome().unwrap() {
         OperationOutcome::Succeeded(writer) => writer,
-        _ => panic!("writer open failed"),
+        OperationOutcome::Failed(error) => panic!("writer open failed: {error:#?}"),
+        OperationOutcome::ChildFailed(failure) => panic!("writer open child failed: {failure:#?}"),
+        OperationOutcome::Stopped(stop) => panic!("writer open stopped: {stop:#?}"),
+        OperationOutcome::Panicked(panic) => panic!("writer open panicked: {panic:#?}"),
+        OperationOutcome::ExecutionFailed(failure) => panic!("writer open execution failed: {failure:#?}"),
     };
     assert_eq!(
         poll_worker(|cx| Pin::new(&mut writer).poll_write(cx, b"staged")).unwrap(),
