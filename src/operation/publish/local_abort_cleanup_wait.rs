@@ -282,7 +282,8 @@ mod tests {
         std::panic::panic_any(());
     }
 
-    unsafe fn publish_while_poisoning_then_panic_on_clone(data: *const ()) -> std::task::RawWaker {
+    #[cfg(panic = "unwind")]
+    unsafe fn publish_then_poison_result_and_panic_on_clone(data: *const ()) -> std::task::RawWaker {
         // SAFETY: the raw waker owns one Arc reference and this callback
         // temporarily increments it before accessing the shared test state.
         unsafe { Arc::<LocalAbortCleanupState<u8>>::increment_strong_count(data.cast()) };
@@ -305,8 +306,9 @@ mod tests {
     static PUBLISH_PANIC_VTABLE: std::task::RawWakerVTable =
         std::task::RawWakerVTable::new(publish_then_panic_on_clone, no_op, no_op, drop_arc);
 
-    static PUBLISH_POISON_PANIC_VTABLE: std::task::RawWakerVTable =
-        std::task::RawWakerVTable::new(publish_while_poisoning_then_panic_on_clone, no_op, no_op, drop_arc);
+    #[cfg(panic = "unwind")]
+    static POISON_RESULT_PANIC_VTABLE: std::task::RawWakerVTable =
+        std::task::RawWakerVTable::new(publish_then_poison_result_and_panic_on_clone, no_op, no_op, drop_arc);
 
     #[test]
     fn test_abort_wait_stays_pending_when_waker_clone_panics() {
@@ -345,6 +347,7 @@ mod tests {
         assert!(state.waker.lock().expect("registered waker lock").is_none());
     }
 
+    #[cfg(panic = "unwind")]
     #[test]
     fn test_abort_wait_recovers_poisoned_result_and_waker_after_hostile_clone() {
         let (mut wait, state) = wait::<u8>();
@@ -360,9 +363,28 @@ mod tests {
         let hostile = unsafe {
             Waker::from_raw(std::task::RawWaker::new(
                 data.cast_const(),
-                &PUBLISH_POISON_PANIC_VTABLE,
+                &POISON_RESULT_PANIC_VTABLE,
             ))
         };
+        let mut context = Context::from_waker(&hostile);
+
+        assert!(matches!(
+            Future::poll(std::pin::Pin::new(&mut wait), &mut context),
+            Poll::Ready(CleanupOutcome::Released)
+        ));
+        assert!(state.result.lock().unwrap_or_else(|error| error.into_inner()).is_none());
+        assert!(state.waker.lock().unwrap_or_else(|error| error.into_inner()).is_none());
+    }
+
+    #[cfg(panic = "unwind")]
+    #[test]
+    fn test_abort_wait_recovers_result_poisoned_during_waker_clone_panic() {
+        let (mut wait, state) = wait::<u8>();
+        let data = Arc::into_raw(Arc::clone(&state)).cast_mut().cast::<()>();
+        // SAFETY: the clone callback poisons the result lock while publishing;
+        // drop releases the initial Arc reference exactly once.
+        let hostile =
+            unsafe { Waker::from_raw(std::task::RawWaker::new(data.cast_const(), &POISON_RESULT_PANIC_VTABLE)) };
         let mut context = Context::from_waker(&hostile);
 
         assert!(matches!(
@@ -433,5 +455,33 @@ mod tests {
         assert_eq!(1, probe.drops.load(Ordering::SeqCst));
         assert!(!probe.locks_available.load(Ordering::SeqCst));
         std::mem::forget(waker);
+    }
+
+    #[cfg(panic = "unwind")]
+    #[test]
+    fn test_abort_wait_recovers_poisoned_waker_after_clone_panic_publishes_result() {
+        let (mut wait, state) = wait::<u8>();
+        let wake_count = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let registered = Waker::from(Arc::new(TestWake(Arc::clone(&wake_count))));
+        let mut registered_context = Context::from_waker(&registered);
+
+        assert!(matches!(
+            Future::poll(std::pin::Pin::new(&mut wait), &mut registered_context),
+            Poll::Pending
+        ));
+        assert!(state.waker.lock().expect("registered waker lock").is_some());
+        crate::operation::poison_test_mutex(&state.waker);
+
+        let data = Arc::into_raw(Arc::clone(&state)).cast_mut().cast::<()>();
+        // SAFETY: the clone callback publishes through this Arc and panics;
+        // drop releases the initial Arc reference exactly once.
+        let hostile = unsafe { Waker::from_raw(std::task::RawWaker::new(data.cast_const(), &PUBLISH_PANIC_VTABLE)) };
+        let mut hostile_context = Context::from_waker(&hostile);
+        assert!(matches!(
+            Future::poll(std::pin::Pin::new(&mut wait), &mut hostile_context),
+            Poll::Ready(CleanupOutcome::Released)
+        ));
+        assert!(state.waker.lock().unwrap_or_else(|error| error.into_inner()).is_none());
+        assert_eq!(0, wake_count.load(std::sync::atomic::Ordering::SeqCst));
     }
 }

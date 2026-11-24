@@ -12,13 +12,16 @@ use std::path::Path;
 
 use qubit_local_files::LocalFileSystem;
 use qubit_local_files::error::LocalFileErrorKind;
+use qubit_local_files::error::LocalFileOperation;
 use qubit_local_files::options::LocalDirectoryOpenOptions;
 use qubit_local_files::options::LocalPersistOptions;
+use qubit_local_files::options::LocalRenameOptions;
 use qubit_local_files::options::LocalSealOptions;
 use qubit_local_files::options::LocalTempDirectoryOptions;
 use qubit_local_files::options::LocalTempFileOptions;
 use qubit_local_files::options::LocalWriteMode;
 use qubit_local_files::options::LocalWriteOptions;
+use qubit_local_files::outcome::LocalRenameFailureState;
 use qubit_local_files::policy::LocalFileSyncRequirement;
 use tempfile::tempdir;
 
@@ -73,6 +76,40 @@ fn test_rooted_path_lexical_escape_is_rejected_with_namespace_context() {
         .expect_err("lexical parent must not leave the virtual root");
     assert_eq!(error.kind(), LocalFileErrorKind::InvalidPath);
     assert_eq!(error.path(), Some(Path::new("../outside")));
+}
+
+#[test]
+fn test_rooted_metadata_resolution_error_preserves_namespace_context() {
+    let fixture = tempdir().expect("fixture");
+    let filesystem = LocalFileSystem::rooted(fixture.path()).expect("rooted filesystem");
+    let path = Path::new("../outside");
+
+    let error = filesystem
+        .metadata(path)
+        .expect_err("metadata must reject a path that escapes its root");
+
+    assert_eq!(LocalFileErrorKind::InvalidPath, error.kind());
+    assert_eq!(LocalFileOperation::Metadata, error.operation());
+    assert_eq!(Some(path), error.path());
+}
+
+#[test]
+fn test_rooted_rename_rejects_directory_syntax_for_file() {
+    let fixture = tempdir().expect("fixture");
+    std::fs::write(fixture.path().join("file"), b"payload").expect("file fixture");
+    let filesystem = LocalFileSystem::rooted(fixture.path()).expect("rooted filesystem");
+    let source = Path::new("file/");
+
+    let failure = filesystem
+        .rename_with_options(source, Path::new("renamed"), &LocalRenameOptions::new())
+        .expect_err("a directory-qualified file must not be renamed as a directory");
+
+    assert_eq!(LocalRenameFailureState::Unchanged, failure.state());
+    assert_eq!(LocalFileErrorKind::NotDirectory, failure.error().kind());
+    assert_eq!(LocalFileOperation::Rename, failure.error().operation());
+    assert_eq!(Some(Path::new("/file")), failure.error().path());
+    assert!(fixture.path().join("file").is_file());
+    assert!(!fixture.path().join("renamed").exists());
 }
 
 #[test]

@@ -13,10 +13,17 @@ use crate::local::LocalCopyDirStats;
 fn test_local_copy_dir_stats_exposes_counts_and_publication_flags() {
     let stats = LocalCopyDirStats::default();
     assert_eq!(stats.files(), 0);
+    assert_eq!(stats.symlinks(), 0);
     assert_eq!(stats.directories(), 0);
     assert_eq!(stats.bytes(), 0);
     assert_eq!(stats.skipped(), 0);
     assert_eq!(stats.overwritten(), 0);
     assert!(stats.atomic_publication());
     assert!(stats.files_durable());
+
+    let stats = LocalCopyDirStats {
+        symlinks: 2,
+        ..LocalCopyDirStats::default()
+    };
+    assert_eq!(stats.symlinks(), 2);
 }

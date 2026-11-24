@@ -44,6 +44,8 @@ use crate::local::LocalCopyDirStats;
 pub struct LocalCopyStats {
     /// Number of regular files and symbolic-link entries copied.
     files: u64,
+    /// Number of copied symbolic-link entries.
+    symlinks: u64,
     /// Number of destination directories created.
     directories: u64,
     /// Number of regular-file bytes copied.
@@ -64,6 +66,7 @@ impl LocalCopyStats {
     pub(crate) const fn skipped_one() -> Self {
         Self {
             files: 0,
+            symlinks: 0,
             directories: 0,
             bytes: 0,
             skipped: 1,
@@ -81,6 +84,7 @@ impl LocalCopyStats {
     pub(crate) const fn from_internal(stats: LocalCopyDirStats) -> Self {
         Self {
             files: stats.files,
+            symlinks: stats.symlinks,
             directories: stats.directories,
             bytes: stats.bytes,
             skipped: stats.skipped,
@@ -95,6 +99,13 @@ impl LocalCopyStats {
     #[inline]
     pub const fn files(self) -> u64 {
         self.files
+    }
+
+    /// Returns the number of copied entries that are symbolic links.
+    #[must_use]
+    #[inline]
+    pub const fn symlinks(self) -> u64 {
+        self.symlinks
     }
 
     /// Returns the number of destination directories created.

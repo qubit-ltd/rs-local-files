@@ -187,7 +187,10 @@ pub(super) fn copy_symlink(
             };
             mark_partial_after_removal(failure, destination_removed)
         })?;
-    statistics.files = checked_add(statistics.files, 1, source, destination, statistics)?;
+    let files = checked_add(statistics.files, 1, source, destination, statistics)?;
+    let symlinks = checked_add(statistics.symlinks, 1, source, destination, statistics)?;
+    statistics.files = files;
+    statistics.symlinks = symlinks;
     if destination_metadata.is_some() {
         statistics.overwritten = checked_add(statistics.overwritten, 1, source, destination, statistics)?;
     }

@@ -17,6 +17,9 @@ pub struct LocalCopyDirStats {
     /// Number of regular files and symbolic-link entries copied.
     pub files: u64,
 
+    /// Number of copied entries that are symbolic links.
+    pub symlinks: u64,
+
     /// Number of destination directories created.
     pub directories: u64,
 
@@ -52,6 +55,7 @@ impl Default for LocalCopyDirStats {
     fn default() -> Self {
         Self {
             files: 0,
+            symlinks: 0,
             directories: 0,
             bytes: 0,
             skipped: 0,
@@ -75,6 +79,16 @@ impl LocalCopyDirStats {
     #[inline]
     pub const fn files(&self) -> u64 {
         self.files
+    }
+
+    /// Returns the number of copied entries that are symbolic links.
+    ///
+    /// # Returns
+    /// Copied symbolic-link entry count.
+    #[must_use]
+    #[inline]
+    pub const fn symlinks(&self) -> u64 {
+        self.symlinks
     }
 
     /// Returns the number of destination directories created.
