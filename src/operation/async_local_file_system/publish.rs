@@ -1469,8 +1469,9 @@ mod relative_host_publish_tests {
         use sha2::Sha256;
 
         let directory = tempfile::tempdir().unwrap();
+        let host_base = std::fs::canonicalize(directory.path()).unwrap();
         let manager = OperationManager::new(ManagerOptions::default()).unwrap();
-        let filesystem = filesystem(&manager, directory.path())
+        let filesystem = filesystem(&manager, &host_base)
             .with_symlink_policy(crate::policy::LocalSymlinkPolicy::Reject)
             .unwrap();
         let (mut operation, observer) = filesystem
@@ -1492,7 +1493,7 @@ mod relative_host_publish_tests {
             OperationOutcome::Succeeded(_)
         ));
         assert_eq!(
-            std::fs::read(directory.path().join("conditional")).unwrap(),
+            std::fs::read(host_base.join("conditional")).unwrap(),
             b"relative conditional"
         );
         assert_eq!(observer.snapshot().publication, LocalPublicationState::Published);
@@ -1541,7 +1542,8 @@ mod relative_host_publish_tests {
         use crate::test_support::TestConditionalPoint;
 
         let directory = tempfile::tempdir().unwrap();
-        let destination = directory.path().join("conditional-write-error");
+        let host_base = std::fs::canonicalize(directory.path()).unwrap();
+        let destination = host_base.join("conditional-write-error");
         std::fs::write(&destination, b"original").unwrap();
         let manager = OperationManager::new(ManagerOptions::default()).unwrap();
         let executor = LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).unwrap();
@@ -1555,7 +1557,7 @@ mod relative_host_publish_tests {
                     ))
                 })),
             executor,
-            Some(directory.path().to_path_buf()),
+            Some(host_base),
         )
         .with_symlink_policy(crate::policy::LocalSymlinkPolicy::Reject)
         .unwrap();
