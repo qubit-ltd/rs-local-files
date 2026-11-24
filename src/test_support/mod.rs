@@ -68,8 +68,13 @@ pub use test_gate::TestGateGuard;
 #[cfg(feature = "test-support")]
 pub(crate) use test_gate::hit_test_gate;
 #[cfg(feature = "test-support")]
+pub(crate) use test_gate::hit_test_gate_for_path;
+#[cfg(feature = "test-support")]
 #[doc(hidden)]
 pub use test_gate::install_test_gate;
+#[cfg(feature = "test-support")]
+#[doc(hidden)]
+pub use test_gate::install_test_gate_for_path;
 
 #[cfg(feature = "test-support")]
 #[doc(hidden)]

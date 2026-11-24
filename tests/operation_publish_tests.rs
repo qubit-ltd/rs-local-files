@@ -1514,7 +1514,7 @@ fn test_stop_during_native_publish_preserves_published_fact_when_parent_sync_fai
     use qubit_local_files::outcome::LocalWriteFailureState;
     use qubit_local_files::policy::LocalDurabilityRequirement;
     use qubit_local_files::test_support::install_test_fault_shared;
-    use qubit_local_files::test_support::install_test_gate;
+    use qubit_local_files::test_support::install_test_gate_for_path;
     use qubit_operation::StopReason;
 
     let _support_lock = PUBLISH_TEST_SUPPORT_LOCK
@@ -1524,7 +1524,11 @@ fn test_stop_during_native_publish_preserves_published_fact_when_parent_sync_fai
     let destination = directory.path().join("nested/created/payload");
     let manager = OperationManager::new(ManagerOptions::default()).unwrap();
     let filesystem = facade(&manager);
-    let gate = install_test_gate("atomic-writer-after-install-before-parent-sync").unwrap();
+    let gate = install_test_gate_for_path(
+        "atomic-writer-after-install-before-parent-sync",
+        &destination,
+    )
+    .unwrap();
     let _fault = install_test_fault_shared("atomic-writer-created-parent-sync").unwrap();
     let (mut operation, observer) = filesystem
         .submit_writer_commit(

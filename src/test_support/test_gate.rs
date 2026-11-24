@@ -9,6 +9,8 @@
 
 use std::collections::HashMap;
 use std::io;
+use std::path::Path;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::OnceLock;
@@ -22,10 +24,10 @@ use gate_state::GateState;
 pub use test_gate_guard::TestGateGuard;
 
 /// Registry of currently installed test gates keyed by their selector names.
-static GATES: OnceLock<Mutex<HashMap<String, Arc<GateState>>>> = OnceLock::new();
+static GATES: OnceLock<Mutex<HashMap<(String, Option<PathBuf>), Arc<GateState>>>> = OnceLock::new();
 
 /// Returns the process-wide registry used to coordinate test gates.
-fn gates() -> &'static Mutex<HashMap<String, Arc<GateState>>> {
+fn gates() -> &'static Mutex<HashMap<(String, Option<PathBuf>), Arc<GateState>>> {
     GATES.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
@@ -49,22 +51,48 @@ fn gates() -> &'static Mutex<HashMap<String, Arc<GateState>>> {
 /// dropped.
 #[doc(hidden)]
 pub fn install_test_gate(name: &str) -> io::Result<TestGateGuard> {
+    install_gate(name, None)
+}
+
+/// Installs a named gate that only workers operating on `path` can reach.
+///
+/// This keeps a test-owned gate from pausing an unrelated operation that uses
+/// the same native boundary in another test running in this process.
+///
+/// # Parameters
+///
+/// - `name`: Non-empty selector used by a worker.
+/// - `path`: Exact operation path allowed to enter this gate.
+///
+/// # Errors
+///
+/// Returns `InvalidInput` for an empty selector and `AlreadyExists` when the
+/// same name and path are already installed.
+#[doc(hidden)]
+pub fn install_test_gate_for_path(name: &str, path: &Path) -> io::Result<TestGateGuard> {
+    install_gate(name, Some(path.to_path_buf()))
+}
+
+fn install_gate(name: &str, path: Option<PathBuf>) -> io::Result<TestGateGuard> {
     if name.is_empty() {
-        return Err(io::Error::new(io::ErrorKind::InvalidInput, "test gate name is empty"));
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "test gate name is empty",
+        ));
     }
     let state = Arc::new(GateState::default());
-    let mut active = gates().lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-    if active.contains_key(name) {
+    let key = (name.to_owned(), path);
+    let mut active = gates()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if active.contains_key(&key) {
         return Err(io::Error::new(
             io::ErrorKind::AlreadyExists,
             "test gate selector is already installed",
         ));
     }
-    active.insert(name.to_owned(), Arc::clone(&state));
-    Ok(TestGateGuard {
-        name: name.to_owned(),
-        state,
-    })
+    active.insert(key.clone(), Arc::clone(&state));
+    Ok(TestGateGuard { key, state })
 }
 
 /// Pauses the current worker if the named test gate is installed.
@@ -76,10 +104,32 @@ pub(crate) fn hit_test_gate(name: &str) {
     let state = gates()
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
-        .get(name)
+        .get(&(name.to_owned(), None))
         .cloned();
+    hit_gate_state(state);
+}
+
+/// Pauses a worker only when a path-scoped gate matches the exact operation path.
+///
+/// # Parameters
+///
+/// - `name`: Selector of the gate.
+/// - `path`: Operation path associated with the worker boundary.
+pub(crate) fn hit_test_gate_for_path(name: &str, path: &Path) {
+    let state = gates()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .get(&(name.to_owned(), Some(path.to_path_buf())))
+        .cloned();
+    hit_gate_state(state);
+}
+
+fn hit_gate_state(state: Option<Arc<GateState>>) {
     let Some(state) = state else { return };
-    let mut phase = state.phase.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut phase = state
+        .phase
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     phase.0 = true;
     state.changed.notify_all();
     while !phase.1 {
@@ -93,7 +143,9 @@ pub(crate) fn hit_test_gate(name: &str) {
 #[cfg(test)]
 mod tests {
     use super::hit_test_gate;
+    use super::hit_test_gate_for_path;
     use super::install_test_gate;
+    use super::install_test_gate_for_path;
 
     #[test]
     fn test_gate_releases_worker_after_entered_notification() {
@@ -111,5 +163,40 @@ mod tests {
         gate.wait_until_entered();
         drop(gate);
         worker.join().unwrap();
+    }
+
+    #[test]
+    fn test_path_scoped_gate_ignores_workers_for_other_paths() {
+        use std::path::Path;
+        use std::sync::mpsc;
+        use std::time::Duration;
+
+        let gate =
+            install_test_gate_for_path("path-scoped-test-gate", Path::new("/target/one")).unwrap();
+        let (unrelated_tx, unrelated_rx) = mpsc::channel();
+        let unrelated = std::thread::spawn(move || {
+            hit_test_gate_for_path("path-scoped-test-gate", Path::new("/target/two"));
+            unrelated_tx.send(()).unwrap();
+        });
+        unrelated_rx
+            .recv_timeout(Duration::from_secs(2))
+            .expect("a different target does not enter the installed gate");
+        unrelated.join().unwrap();
+
+        let (matching_tx, matching_rx) = mpsc::channel();
+        let matching = std::thread::spawn(move || {
+            hit_test_gate_for_path("path-scoped-test-gate", Path::new("/target/one"));
+            matching_tx.send(()).unwrap();
+        });
+        gate.wait_until_entered();
+        assert!(
+            matching_rx.try_recv().is_err(),
+            "the matching worker waits for release"
+        );
+        gate.release();
+        matching_rx
+            .recv_timeout(Duration::from_secs(2))
+            .expect("the matching target is released");
+        matching.join().unwrap();
     }
 }
