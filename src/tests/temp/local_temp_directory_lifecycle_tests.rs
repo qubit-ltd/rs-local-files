@@ -145,7 +145,8 @@ fn test_rooted_created_handle_constructor_without_sandbox_parent_uses_empty_crea
     let path = std::path::PathBuf::from("resource");
     let native_path = fixture.path().join(&path);
     fs::create_dir(&native_path).expect("resource directory");
-    let handle = fs::File::open(&native_path).expect("open created resource handle");
+    let handle = crate::local::internal::open_root_directory(&native_path)
+        .expect("open and verify created resource directory handle");
     let mut temporary = LocalTempDirectory::rooted_from_created_handle(
         root,
         path,

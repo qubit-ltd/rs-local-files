@@ -538,6 +538,10 @@ fn test_conditional_windows_absent_race_never_overwrites_late_target() {
 
 #[test]
 fn test_conditional_windows_candidate_name_change_keeps_recovery_copy() {
+    use std::sync::Arc;
+    use std::sync::atomic::AtomicBool;
+    use std::sync::atomic::Ordering;
+
     let directory = tempfile::tempdir().expect("fixture directory should be created");
     let target = directory.path().join("target");
     fs::write(&target, b"A").expect("old target should be written");
@@ -546,12 +550,15 @@ fn test_conditional_windows_candidate_name_change_keeps_recovery_copy() {
     put(&mut backend, b"B");
     let candidate_path = backend.candidate().namespace_path().to_path_buf();
     let replaced_candidate_path = candidate_path.clone();
+    let replacement_completed = Arc::new(AtomicBool::new(false));
+    let replacement_completed_in_hook = Arc::clone(&replacement_completed);
     backend.set_hooks(ConditionalHooks::from_test(
         crate::test_support::TestConditionalHooks::once(
-            crate::test_support::TestConditionalPoint::AfterPrecheck,
+            crate::test_support::TestConditionalPoint::BeforePublish,
             move || {
                 fs::remove_file(&replaced_candidate_path)?;
                 fs::write(&replaced_candidate_path, b"replacement entry")?;
+                replacement_completed_in_hook.store(true, Ordering::SeqCst);
                 Ok(())
             },
         ),
@@ -565,6 +572,7 @@ fn test_conditional_windows_candidate_name_change_keeps_recovery_copy() {
     )
     .expect_err("candidate identity change must stop publication");
 
+    assert!(replacement_completed.load(Ordering::SeqCst), "candidate replacement hook must complete");
     assert_eq!(failure.stage(), crate::error::LocalConditionalWriteStage::Publish);
     assert_eq!(failure.reason(), crate::error::LocalConditionalFailureReason::Io);
     assert_eq!(failure.publication(), LocalConditionalPublicationState::NotPublished);
