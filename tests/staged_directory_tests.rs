@@ -94,7 +94,7 @@ fn test_staged_owner_policy_applies_to_nested_files_and_directories() {
     stage.cleanup().expect("stage should clean up");
 }
 
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 #[test]
 fn test_staged_owner_policy_requires_traversal_only_for_nonempty_stages() {
     use std::os::unix::fs::PermissionsExt;
@@ -158,6 +158,76 @@ fn test_staged_owner_policy_requires_traversal_only_for_nonempty_stages() {
     );
     std::fs::set_permissions(&empty_path, std::fs::Permissions::from_mode(0o700)).expect("restore cleanup traversal");
     empty.cleanup().expect("empty stage should clean up");
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn test_macos_staged_owner_policy_fails_closed_after_preserving_traversal_contract() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let fixture = tempfile::tempdir().expect("fixture should be created");
+    let filesystem = LocalFileSystem::host().expect("host filesystem should open");
+    let parent = filesystem
+        .open_directory_with_options(fixture.path(), &LocalDirectoryOpenOptions::new())
+        .expect("parent should open");
+    let policy = LocalOwnerAccessPolicy::new().with_unix_modes(0o300, 0o000);
+
+    let mut nonempty = parent
+        .create_staged_directory(&LocalTempDirectoryOptions::new())
+        .expect("nonempty stage should be created");
+    nonempty
+        .write_file_new(Path::new("payload"), &mut &b"value"[..], 5)
+        .expect("payload should be written");
+    let nonempty_path = fixture.path().join(nonempty.relative_name());
+    let error = nonempty
+        .apply_owner_access_policy_with_options(&policy, &LocalListOptions::new())
+        .expect_err("nonempty stage must remain traversable for verification");
+    assert_eq!(
+        qubit_local_files::error::LocalFileErrorKind::RequirementNotMet,
+        error.cause().kind()
+    );
+    assert_eq!(LocalTreeAccessState::Preserved, error.access_state());
+    assert_eq!(
+        0o700,
+        std::fs::metadata(&nonempty_path)
+            .expect("stage metadata")
+            .permissions()
+            .mode()
+            & 0o777
+    );
+    assert_eq!(
+        b"value",
+        std::fs::read(nonempty_path.join("payload"))
+            .unwrap()
+            .as_slice()
+    );
+    nonempty
+        .cleanup()
+        .expect("nonempty stage should remain recoverable");
+
+    let mut empty = parent
+        .create_staged_directory(&LocalTempDirectoryOptions::new())
+        .expect("empty stage should be created");
+    let empty_path = fixture.path().join(empty.relative_name());
+    let error = empty
+        .apply_owner_access_policy_with_options(&policy, &LocalListOptions::new())
+        .expect_err("macOS must fail closed when exact owner ACL verification is unsupported");
+    assert_eq!(
+        qubit_local_files::error::LocalFileErrorKind::Unsupported,
+        error.cause().kind()
+    );
+    assert_eq!(LocalTreeAccessState::Indeterminate, error.access_state());
+    assert_eq!(
+        0o700,
+        std::fs::metadata(&empty_path)
+            .expect("unsupported policy leaves stage permissions unchanged")
+            .permissions()
+            .mode()
+            & 0o777
+    );
+    empty
+        .cleanup()
+        .expect("empty stage should remain recoverable");
 }
 
 #[cfg(unix)]
