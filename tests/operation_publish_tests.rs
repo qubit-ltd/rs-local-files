@@ -407,6 +407,7 @@ fn test_conditional_writer_cancellation_at_precommit_gate_aborts_without_publish
         operation.wait_outcome().unwrap(),
         OperationOutcome::Stopped(report) if report.reason == StopReason::UserCancelled
     ));
+    operation.wait_settlement().unwrap();
     assert!(!destination.exists());
     assert_eq!(
         observer.snapshot().publication,
