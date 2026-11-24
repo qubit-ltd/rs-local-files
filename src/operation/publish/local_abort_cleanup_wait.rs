@@ -360,12 +360,8 @@ mod tests {
         let data = Arc::into_raw(Arc::clone(&state)).cast_mut().cast::<()>();
         // SAFETY: the raw waker owns one Arc reference; its clone callback
         // publishes the result while panicking with the result mutex held.
-        let hostile = unsafe {
-            Waker::from_raw(std::task::RawWaker::new(
-                data.cast_const(),
-                &POISON_RESULT_PANIC_VTABLE,
-            ))
-        };
+        let hostile =
+            unsafe { Waker::from_raw(std::task::RawWaker::new(data.cast_const(), &POISON_RESULT_PANIC_VTABLE)) };
         let mut context = Context::from_waker(&hostile);
 
         assert!(matches!(

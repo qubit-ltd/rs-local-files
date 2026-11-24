@@ -1050,6 +1050,17 @@ mod relative_host_publish_tests {
         ));
         let exported = block_on(lease.export_read_handle(&executor)).unwrap();
         assert_eq!(exported.lease.resource_id(), resource_id);
+
+        drop(exported);
+        drop(lease);
+        drop(filesystem);
+        drop(executor);
+        let manager_shutdown = manager
+            .request_shutdown(qubit_operation::ShutdownMode::Drain)
+            .wait()
+            .expect("manager cleanup should finish after the exported lease is dropped");
+        assert_eq!(manager_shutdown.snapshot.active_operations, 0);
+        assert_eq!(std::fs::read_dir(directory.path()).unwrap().count(), 0);
     }
 
     #[test]
