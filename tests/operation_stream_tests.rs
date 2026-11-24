@@ -2792,6 +2792,134 @@ fn test_failed_stream_opens_release_byte_reservations_before_outcome() {
 }
 
 #[test]
+fn test_stream_close_releases_buffer_budget_before_waking_close_waiter() {
+    use qubit_local_files::LocalFileSystem;
+    use qubit_local_files::operation::AsyncLocalFileSystem;
+    use qubit_local_files::operation::LocalExecutionConfig;
+    use qubit_local_files::operation::LocalIoExecutor;
+    use qubit_local_files::operation::LocalOperation;
+    use qubit_local_files::operation::stream::LOCAL_WALK_BATCH_BYTES;
+    use qubit_local_files::options::LocalListOptions;
+    use qubit_local_files::options::LocalWriteOptions;
+    use qubit_operation::OperationManager;
+    use qubit_operation::OperationOutcome;
+    use std::sync::atomic::AtomicBool;
+    use std::sync::mpsc;
+
+    struct OpenWalkerOnWake {
+        filesystem: AsyncLocalFileSystem,
+        manager: OperationManager,
+        path: PathBuf,
+        checked: AtomicBool,
+        opening: Mutex<Option<LocalOperation<AsyncLocalDirectoryWalker>>>,
+        result: Mutex<
+            Option<
+                mpsc::SyncSender<
+                    Result<(), qubit_local_files::operation::LocalSubmitRejection>,
+                >,
+            >,
+        >,
+    }
+
+    impl std::task::Wake for OpenWalkerOnWake {
+        fn wake(self: Arc<Self>) {
+            self.wake_by_ref();
+        }
+
+        fn wake_by_ref(self: &Arc<Self>) {
+            if self.checked.swap(true, std::sync::atomic::Ordering::AcqRel) {
+                return;
+            }
+            match self.filesystem.submit_open_walker(
+                &self.manager,
+                Default::default(),
+                self.path.clone(),
+                LocalListOptions::default(),
+            ) {
+                Ok(opening) => {
+                    *self.opening.lock().unwrap() = Some(opening);
+                    self.result.lock().unwrap().take().unwrap().send(Ok(())).unwrap();
+                }
+                Err(error) => self
+                    .result
+                    .lock()
+                    .unwrap()
+                    .take()
+                    .unwrap()
+                    .send(Err(error.rejection()))
+                    .unwrap(),
+            }
+        }
+    }
+
+    let directory = tempfile::tempdir().unwrap();
+    let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+    let executor = LocalIoExecutor::new(
+        manager.clone(),
+        LocalExecutionConfig {
+            max_owned_bytes: LOCAL_WALK_BATCH_BYTES,
+            ..LocalExecutionConfig::default()
+        },
+    )
+    .unwrap();
+    let filesystem = LocalFileSystem::host().unwrap().into_async(executor).unwrap();
+    let mut writer_opening = filesystem
+        .submit_open_writer(
+            &manager,
+            Default::default(),
+            directory.path().join("writer"),
+            LocalWriteOptions::default(),
+        )
+        .unwrap()
+        .0;
+    let mut writer = match writer_opening.wait_outcome().unwrap() {
+        OperationOutcome::Succeeded(writer) => writer,
+        _ => panic!("writer should open"),
+    };
+    let probe = Arc::new(OpenWalkerOnWake {
+        filesystem: filesystem.clone(),
+        manager: manager.clone(),
+        path: directory.path().to_path_buf(),
+        checked: AtomicBool::new(false),
+        opening: Mutex::new(None),
+        result: Mutex::new(None),
+    });
+    let (result_tx, result_rx) = mpsc::sync_channel(1);
+    *probe.result.lock().unwrap() = Some(result_tx);
+    let waker = Waker::from(Arc::clone(&probe));
+    let mut context = Context::from_waker(&waker);
+    let mut close = Box::pin(writer.close());
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let close_result = loop {
+        match close.as_mut().poll(&mut context) {
+            Poll::Ready(result) => break result,
+            Poll::Pending => {
+                assert!(Instant::now() < deadline, "writer close did not complete");
+                std::thread::yield_now();
+            }
+        }
+    };
+    close_result.unwrap();
+    drop(close);
+    drop(writer);
+    assert!(probe.checked.load(std::sync::atomic::Ordering::Acquire));
+    let admission = result_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+    assert!(
+        admission.is_ok(),
+        "the full walker byte reservation is available when confirmed close wakes its waiter; got {admission:?}"
+    );
+    let mut walker_opening = probe.opening.lock().unwrap().take().unwrap();
+    let mut walker = match walker_opening.wait_outcome().unwrap() {
+        OperationOutcome::Succeeded(walker) => walker,
+        _ => panic!("walker should open after the writer buffer budget is released"),
+    };
+    poll_worker(|cx| Box::pin(walker.close()).as_mut().poll(cx)).unwrap();
+    drop(walker);
+    walker_opening.wait_settlement().unwrap();
+    writer_opening.wait_settlement().unwrap();
+}
+
+#[test]
 fn test_settled_walker_reuses_full_byte_budget_after_all_close_paths() {
     use qubit_local_files::LocalFileSystem;
     use qubit_local_files::operation::LocalExecutionConfig;

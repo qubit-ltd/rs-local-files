@@ -56,4 +56,11 @@ impl WorkerStreamInner {
             .unwrap_or_else(|error| error.into_inner())
             .take();
     }
+
+    /// Returns the stream buffer reservation after confirmed stream closure.
+    pub(super) fn release_buffer_budget(&self) {
+        let mut budget = self._buffer_budget.lock().unwrap_or_else(|error| error.into_inner());
+        let reserved_bytes = budget.amount();
+        budget.shrink(reserved_bytes);
+    }
 }

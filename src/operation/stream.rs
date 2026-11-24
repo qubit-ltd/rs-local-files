@@ -266,6 +266,7 @@ fn drain_stream_commands(inner: Arc<WorkerStreamInner>) {
             && inner.native.lock().unwrap_or_else(|e| e.into_inner()).is_none()
         {
             inner.release_handle_budget();
+            inner.release_buffer_budget();
         }
         if let Ok(completion) = &result {
             match completion {
