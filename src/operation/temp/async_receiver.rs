@@ -57,7 +57,7 @@ impl<T> Future for AsyncReceiver<T> {
             .unwrap_or_else(|e| e.into_inner())
             .replace(new_waker);
         safe_drop_waker(old_waker);
-        let value = { self.0.value.lock().unwrap_or_else(|e| e.into_inner()).take() };
+        let value = self.0.value.lock().unwrap_or_else(|e| e.into_inner()).take();
         if let Some(value) = value {
             let old_waker = self.0.waker.lock().unwrap_or_else(|e| e.into_inner()).take();
             safe_drop_waker(old_waker);
