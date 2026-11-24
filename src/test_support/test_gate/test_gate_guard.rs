@@ -9,13 +9,14 @@
 
 use std::sync::Arc;
 
+use super::GateKey;
 use super::gate_state::GateState;
 
 /// Test-owned handle for synchronizing with one native worker boundary.
 #[doc(hidden)]
 pub struct TestGateGuard {
     /// Selector removed from the registry when this guard is dropped.
-    pub(super) key: (String, Option<std::path::PathBuf>),
+    pub(super) key: GateKey,
     /// Shared signal state used by the blocked worker and test thread.
     pub(super) state: Arc<GateState>,
 }
@@ -63,9 +64,7 @@ impl Drop for TestGateGuard {
     /// Releases waiters and removes this guard's selector from the registry.
     fn drop(&mut self) {
         self.release();
-        let mut active = super::gates()
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut active = super::gates().lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         if active
             .get(&self.key)
             .is_some_and(|state| Arc::ptr_eq(state, &self.state))

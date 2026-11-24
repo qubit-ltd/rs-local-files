@@ -1521,14 +1521,11 @@ fn test_stop_during_native_publish_preserves_published_fact_when_parent_sync_fai
         .lock()
         .unwrap_or_else(|error| error.into_inner());
     let directory = tempfile::tempdir().unwrap();
-    let destination = directory.path().join("nested/created/payload");
+    let canonical_root = std::fs::canonicalize(directory.path()).unwrap();
+    let destination = canonical_root.join("nested/created/payload");
     let manager = OperationManager::new(ManagerOptions::default()).unwrap();
     let filesystem = facade(&manager);
-    let gate = install_test_gate_for_path(
-        "atomic-writer-after-install-before-parent-sync",
-        &destination,
-    )
-    .unwrap();
+    let gate = install_test_gate_for_path("atomic-writer-after-install-before-parent-sync", &destination).unwrap();
     let _fault = install_test_fault_shared("atomic-writer-created-parent-sync").unwrap();
     let (mut operation, observer) = filesystem
         .submit_writer_commit(

@@ -23,11 +23,17 @@ mod test_gate_guard;
 use gate_state::GateState;
 pub use test_gate_guard::TestGateGuard;
 
+/// Selector used to locate a named gate, optionally restricted to one path.
+pub(super) type GateKey = (String, Option<PathBuf>);
+
+/// Process-local registry of gate states.
+type GateRegistry = Mutex<HashMap<GateKey, Arc<GateState>>>;
+
 /// Registry of currently installed test gates keyed by their selector names.
-static GATES: OnceLock<Mutex<HashMap<(String, Option<PathBuf>), Arc<GateState>>>> = OnceLock::new();
+static GATES: OnceLock<GateRegistry> = OnceLock::new();
 
 /// Returns the process-wide registry used to coordinate test gates.
-fn gates() -> &'static Mutex<HashMap<(String, Option<PathBuf>), Arc<GateState>>> {
+fn gates() -> &'static GateRegistry {
     GATES.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
@@ -73,18 +79,24 @@ pub fn install_test_gate_for_path(name: &str, path: &Path) -> io::Result<TestGat
     install_gate(name, Some(path.to_path_buf()))
 }
 
+/// Registers a named gate, optionally restricted to one exact operation path.
+///
+/// # Parameters
+///
+/// - `name`: Non-empty selector used by a worker.
+/// - `path`: Optional exact operation path used to scope the gate.
+///
+/// # Errors
+///
+/// Returns `InvalidInput` for an empty selector and `AlreadyExists` when the
+/// same selector is already installed.
 fn install_gate(name: &str, path: Option<PathBuf>) -> io::Result<TestGateGuard> {
     if name.is_empty() {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "test gate name is empty",
-        ));
+        return Err(io::Error::new(io::ErrorKind::InvalidInput, "test gate name is empty"));
     }
     let state = Arc::new(GateState::default());
     let key = (name.to_owned(), path);
-    let mut active = gates()
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut active = gates().lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     if active.contains_key(&key) {
         return Err(io::Error::new(
             io::ErrorKind::AlreadyExists,
@@ -109,7 +121,8 @@ pub(crate) fn hit_test_gate(name: &str) {
     hit_gate_state(state);
 }
 
-/// Pauses a worker only when a path-scoped gate matches the exact operation path.
+/// Pauses a worker only when a path-scoped gate matches the exact operation
+/// path.
 ///
 /// # Parameters
 ///
@@ -124,12 +137,14 @@ pub(crate) fn hit_test_gate_for_path(name: &str, path: &Path) {
     hit_gate_state(state);
 }
 
+/// Marks an installed gate as entered and blocks until its guard releases it.
+///
+/// # Parameters
+///
+/// - `state`: Gate state to signal and wait on, or `None` when no gate matched.
 fn hit_gate_state(state: Option<Arc<GateState>>) {
     let Some(state) = state else { return };
-    let mut phase = state
-        .phase
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut phase = state.phase.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     phase.0 = true;
     state.changed.notify_all();
     while !phase.1 {
@@ -171,8 +186,7 @@ mod tests {
         use std::sync::mpsc;
         use std::time::Duration;
 
-        let gate =
-            install_test_gate_for_path("path-scoped-test-gate", Path::new("/target/one")).unwrap();
+        let gate = install_test_gate_for_path("path-scoped-test-gate", Path::new("/target/one")).unwrap();
         let (unrelated_tx, unrelated_rx) = mpsc::channel();
         let unrelated = std::thread::spawn(move || {
             hit_test_gate_for_path("path-scoped-test-gate", Path::new("/target/two"));
@@ -189,10 +203,7 @@ mod tests {
             matching_tx.send(()).unwrap();
         });
         gate.wait_until_entered();
-        assert!(
-            matching_rx.try_recv().is_err(),
-            "the matching worker waits for release"
-        );
+        assert!(matching_rx.try_recv().is_err(), "the matching worker waits for release");
         gate.release();
         matching_rx
             .recv_timeout(Duration::from_secs(2))

@@ -197,13 +197,9 @@ fn test_macos_staged_owner_policy_fails_closed_after_preserving_traversal_contra
     );
     assert_eq!(
         b"value",
-        std::fs::read(nonempty_path.join("payload"))
-            .unwrap()
-            .as_slice()
+        std::fs::read(nonempty_path.join("payload")).unwrap().as_slice()
     );
-    nonempty
-        .cleanup()
-        .expect("nonempty stage should remain recoverable");
+    nonempty.cleanup().expect("nonempty stage should remain recoverable");
 
     let mut empty = parent
         .create_staged_directory(&LocalTempDirectoryOptions::new())
@@ -225,9 +221,7 @@ fn test_macos_staged_owner_policy_fails_closed_after_preserving_traversal_contra
             .mode()
             & 0o777
     );
-    empty
-        .cleanup()
-        .expect("empty stage should remain recoverable");
+    empty.cleanup().expect("empty stage should remain recoverable");
 }
 
 #[cfg(unix)]
