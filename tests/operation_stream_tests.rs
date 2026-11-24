@@ -2806,6 +2806,7 @@ fn test_stream_close_releases_buffer_budget_before_waking_close_waiter() {
     use qubit_local_files::operation::LocalOperation;
     use qubit_local_files::operation::stream::LOCAL_WALK_BATCH_BYTES;
     use qubit_local_files::options::LocalListOptions;
+    use qubit_local_files::options::LocalWriteMode;
     use qubit_local_files::options::LocalWriteOptions;
     use qubit_operation::OperationManager;
     use qubit_operation::OperationOutcome;
@@ -2861,12 +2862,14 @@ fn test_stream_close_releases_buffer_budget_before_waking_close_waiter() {
     )
     .unwrap();
     let filesystem = LocalFileSystem::host().unwrap().into_async(executor).unwrap();
+    let writer_path = directory.path().join("writer");
+    std::fs::write(&writer_path, b"seed").unwrap();
     let mut writer_opening = filesystem
         .submit_open_writer(
             &manager,
             Default::default(),
-            directory.path().join("writer"),
-            LocalWriteOptions::default(),
+            writer_path,
+            LocalWriteOptions::new(LocalWriteMode::Append),
         )
         .unwrap()
         .0;
