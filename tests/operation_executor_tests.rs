@@ -161,8 +161,8 @@ fn test_oversized_owned_read_limit_is_rejected_with_original_request() {
         ..LocalExecutionConfig::default()
     };
     let executor = LocalIoExecutor::new(manager.clone(), config).unwrap();
-    let filesystem = block_on(AsyncLocalFileSystem::host(executor)).unwrap();
-    let path = PathBuf::from("./owned-limit-original");
+    let filesystem = LocalFileSystem::host().unwrap().into_async(executor).unwrap();
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("owned-limit-original");
     let rejected = match filesystem.submit_read_all_with_observer(
         &manager,
         Default::default(),
@@ -201,7 +201,7 @@ fn test_observed_complete_read_keeps_owned_byte_limit_details() {
         },
     )
     .unwrap();
-    let filesystem = block_on(AsyncLocalFileSystem::host(executor)).unwrap();
+    let filesystem = LocalFileSystem::host().unwrap().into_async(executor).unwrap();
     let mut held_opening = filesystem
         .submit_open_reader(&manager, Default::default(), held_path, LocalReadOptions::default())
         .unwrap();
@@ -271,7 +271,7 @@ fn test_read_submission_returns_request_when_fact_observer_capacity_is_exhausted
         },
     )
     .unwrap();
-    let filesystem = block_on(AsyncLocalFileSystem::host(executor)).unwrap();
+    let filesystem = LocalFileSystem::host().unwrap().into_async(executor).unwrap();
     let (mut first, observer) = filesystem
         .submit_read_all_with_observer(
             &manager,
@@ -413,12 +413,12 @@ fn test_host_relative_reads_use_cwd_captured_by_async_conversion() {
     }
 
     let original_cwd = std::env::current_dir().unwrap();
-    let _restore = RestoreCwd(original_cwd);
     let first = tempfile::tempdir().unwrap();
     let second = tempfile::tempdir().unwrap();
     std::fs::write(first.path().join("payload"), b"from-first").unwrap();
     std::fs::write(second.path().join("payload"), b"from-second").unwrap();
 
+    let _restore = RestoreCwd(original_cwd);
     std::env::set_current_dir(first.path()).unwrap();
     let manager = OperationManager::new(ManagerOptions::default()).unwrap();
     let filesystem = host_async(manager.clone());
