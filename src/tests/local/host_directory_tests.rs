@@ -65,7 +65,7 @@ fn test_host_directory_creation_accepts_concurrent_directory_creation() {
     drop(race);
 
     let target = directory.path().join("raced-parent/child");
-    let _race = crate::test_support::install_test_fault("host-create-directory-component-race")
+    let race = crate::test_support::install_test_fault("host-create-directory-component-race")
         .expect("recursive parent race should install");
     let outcome = host(
         &target,
@@ -74,6 +74,32 @@ fn test_host_directory_creation_accepts_concurrent_directory_creation() {
     )
     .expect("recursive creation should continue after an ancestor wins a race");
     assert!(outcome.created());
+    assert!(target.is_dir());
+    drop(race);
+
+    let target = directory.path().join("nonrecursive-race-rejected");
+    let race = crate::test_support::install_test_fault("host-create-directory-target-race")
+        .expect("rejected target race should install");
+    let error = host(
+        &target,
+        &LocalCreateDirectoryOptions::new(),
+        LocalSymlinkPolicy::FollowAcrossScope,
+    )
+    .expect_err("exists_ok=false must reject a directory created by another actor");
+    assert_eq!(LocalFileErrorKind::AlreadyExists, error.kind());
+    assert!(target.is_dir());
+    drop(race);
+
+    let target = directory.path().join("recursive-race-rejected");
+    let _race = crate::test_support::install_test_fault("host-create-directory-component-race")
+        .expect("rejected recursive race should install");
+    let error = host(
+        &target,
+        &LocalCreateDirectoryOptions::new().with_recursive(),
+        LocalSymlinkPolicy::FollowAcrossScope,
+    )
+    .expect_err("recursive exists_ok=false must reject a directory created by another actor");
+    assert_eq!(LocalFileErrorKind::AlreadyExists, error.kind());
     assert!(target.is_dir());
 }
 
