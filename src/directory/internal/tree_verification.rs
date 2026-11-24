@@ -1043,8 +1043,8 @@ mod missing_path_tests {
         let options = LocalTreeValidationOptions::new()
             .with_owner_access_policy(LocalOwnerAccessPolicy::new().with_unix_modes(0o700, 0o600));
 
-        let root_error = verify_tree(&stage, None, &options)
-            .expect_err("macOS cannot verify the exact owner ACL policy");
+        let root_error =
+            verify_tree(&stage, None, &options).expect_err("macOS cannot verify the exact owner ACL policy");
         assert_eq!(crate::LocalFileErrorKind::Unsupported, root_error.kind());
 
         let identity = stage
