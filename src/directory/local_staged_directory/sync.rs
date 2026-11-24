@@ -954,6 +954,6 @@ mod windows_preferred_sync_tests {
         let error = stage
             .sync_files_with_options(&LocalListOptions::new(), LocalFileSyncRequirement::Preferred)
             .expect_err("ordinary access failure must be returned");
-        assert_eq!(Some(std::io::ErrorKind::PermissionDenied), error.io_error_kind());
+        assert_eq!(std::io::ErrorKind::PermissionDenied, error.io_error_kind());
     }
 }
