@@ -345,6 +345,13 @@ fn test_public_directory_handle_operations_cover_success_and_resolution_errors()
         qubit_local_files::outcome::LocalFileKind::Directory
     );
 
+    // The Linux rooted resolver reports the unresolved descendant as an
+    // InvalidPath; Windows preserves the native not-a-directory result.
+    let file_parent_error_kind = if cfg!(windows) {
+        LocalFileErrorKind::NotDirectory
+    } else {
+        LocalFileErrorKind::InvalidPath
+    };
     for (path, expected, expected_operation) in [
         (
             Path::new("/absolute"),
@@ -363,7 +370,7 @@ fn test_public_directory_handle_operations_cover_success_and_resolution_errors()
         ),
         (
             Path::new("payload/child"),
-            LocalFileErrorKind::InvalidPath,
+            file_parent_error_kind,
             LocalFileOperation::OpenRoot,
         ),
     ] {
@@ -436,13 +443,31 @@ fn test_public_directory_handle_listing_metadata_and_security_errors() {
     assert_eq!(error.kind(), LocalFileErrorKind::TypeConflict);
     assert_eq!(error.operation(), LocalFileOperation::List);
 
-    let observation = handle
-        .security_observation(&LocalSecurityObservationOptions::new())
-        .expect("best effort security facts should be queryable");
-    assert!(
-        observation.identity().is_some()
-            || observation.filesystem().is_some()
-            || observation.access().is_some()
-            || observation.link_count().is_some()
-    );
+    #[cfg(windows)]
+    {
+        let best_effort = handle
+            .security_observation(&LocalSecurityObservationOptions::new())
+            .expect_err("best effort must preserve access denial from the retained handle");
+        assert_eq!(best_effort.kind(), LocalFileErrorKind::PermissionDenied);
+
+        let required = handle
+            .security_observation(
+                &LocalSecurityObservationOptions::new()
+                    .with_access(qubit_local_files::observation::LocalObservationRequirement::Required),
+            )
+            .expect_err("required access facts must preserve the same native access denial");
+        assert_eq!(required.kind(), LocalFileErrorKind::PermissionDenied);
+    }
+    #[cfg(not(windows))]
+    {
+        let observation = handle
+            .security_observation(&LocalSecurityObservationOptions::new())
+            .expect("best effort security facts should be queryable");
+        assert!(
+            observation.identity().is_some()
+                || observation.filesystem().is_some()
+                || observation.access().is_some()
+                || observation.link_count().is_some()
+        );
+    }
 }
