@@ -536,7 +536,7 @@ fn test_closed_writer_retains_commit_error_without_retry_permission() {
     use qubit_local_files::operation::LocalIoExecutor;
     use qubit_local_files::options::LocalWriteMode;
     use qubit_local_files::options::LocalWriteOptions;
-    use qubit_local_files::policy::LocalDurabilityRequirement;
+    use qubit_local_files::policy::LocalFileSyncRequirement;
     use qubit_local_files::test_support::install_test_fault_shared;
     use qubit_local_files::test_support::install_test_gate;
     use qubit_operation::OperationOptions;
@@ -555,12 +555,18 @@ fn test_closed_writer_retains_commit_error_without_retry_permission() {
             OperationOptions::default(),
             target.clone(),
             LocalWriteOptions::new(LocalWriteMode::CreateOrReplace)
-                .with_durability(LocalDurabilityRequirement::Required),
+                .with_file_sync(LocalFileSyncRequirement::Required),
         )
         .unwrap();
     let mut writer = match opening.wait_outcome().unwrap() {
         OperationOutcome::Succeeded(writer) => writer,
-        _ => panic!("staged writer open failed"),
+        OperationOutcome::Failed(error) => panic!("staged writer open failed: {error:#?}"),
+        OperationOutcome::ChildFailed(failure) => panic!("staged writer open child failed: {failure:#?}"),
+        OperationOutcome::Stopped(stop) => panic!("staged writer open stopped: {stop:#?}"),
+        OperationOutcome::Panicked(panic) => panic!("staged writer open panicked: {panic:#?}"),
+        OperationOutcome::ExecutionFailed(failure) => {
+            panic!("staged writer open execution failed: {failure:#?}")
+        }
     };
 
     let gate = install_test_gate("rlf9-writer-after-stage-write").unwrap();
