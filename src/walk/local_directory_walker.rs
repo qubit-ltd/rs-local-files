@@ -25,6 +25,7 @@ use super::local_directory_walker_support::consume_entry_budgets;
 use super::local_directory_walker_support::directory_limit_error;
 use super::local_directory_walker_support::directory_pool;
 use super::local_directory_walker_support::is_terminal_walk_error;
+use super::local_directory_walker_support::LogicalPathNameBudget;
 #[cfg(feature = "test-support")]
 use super::local_directory_walker_support::scripted_open_directory_error;
 use super::local_directory_walker_support::validate_options;
@@ -104,6 +105,8 @@ pub struct LocalDirectoryWalker {
     entry_budget: Option<ResourceBudget<LocalResourceKind, usize>>,
     /// Optional budget tracking memory used by duplicate-name detection.
     seen_name_budget: Option<ResourceBudget<LocalResourceKind, usize>>,
+    /// Optional logical relative-path budget used only by tree validation.
+    logical_path_name_budget: Option<LogicalPathNameBudget>,
     /// Monotonic deadline fixed when the walker is created.
     deadline: Option<Instant>,
     /// Optional root-relative subtree controlling recursive descent.
@@ -255,6 +258,7 @@ impl LocalDirectoryWalker {
             seen_name_budget: options
                 .max_seen_name_bytes()
                 .map(|limit| ResourceBudget::new(LocalResourceKind::SeenNameBytes, limit)),
+            logical_path_name_budget: None,
             deadline,
             descend_subtree: None,
             started: false,
@@ -396,6 +400,7 @@ impl LocalDirectoryWalker {
             seen_name_budget: options
                 .max_seen_name_bytes()
                 .map(|limit| ResourceBudget::new(LocalResourceKind::SeenNameBytes, limit)),
+            logical_path_name_budget: None,
             deadline,
             descend_subtree: None,
             started: false,
@@ -455,6 +460,34 @@ impl LocalDirectoryWalker {
             rooted.descend_subtree = self.descend_subtree.clone();
         }
         Ok(self)
+    }
+
+    /// Applies tree validation's logical relative-path name-byte budget.
+    ///
+    /// This internal policy runs after the walker's depth and entry-count
+    /// admission, but before Host metadata/descent or Rooted path resolution.
+    /// Ordinary listing callers do not configure it.
+    pub(crate) fn with_logical_path_name_budget(
+        mut self,
+        observed: usize,
+        limit: usize,
+        diagnostic_root: PathBuf,
+    ) -> Self {
+        self.logical_path_name_budget =
+            Some(LogicalPathNameBudget::new(observed, limit, diagnostic_root));
+        self
+    }
+
+    /// Charges a relative entry path to the optional tree validation budget.
+    fn consume_logical_path_name_budget(&mut self, relative: &Path) -> LocalResult<()> {
+        let Some(budget) = self.logical_path_name_budget.as_mut() else {
+            return Ok(());
+        };
+        if let Err(error) = budget.consume(relative) {
+            self.terminated = true;
+            return Err(error);
+        }
+        Ok(())
     }
 
     /// Binds the filesystem PWD snapshot used by yielded errors.
@@ -1002,6 +1035,7 @@ impl LocalDirectoryWalker {
                 pool,
                 &mut self.entry_budget,
                 &mut self.seen_name_budget,
+                &mut self.logical_path_name_budget,
                 self.deadline,
             );
             if matches!(&result, Some(Err(error)) if is_terminal_walk_error(error, self.options.error_policy())) {
@@ -1039,6 +1073,10 @@ impl LocalDirectoryWalker {
                 continue;
             }
             if let Err(error) = self.consume_host_entry_budgets(&entry, &relative_parent) {
+                return Some(Err(error));
+            }
+            let relative = relative_parent.join(entry.file_name());
+            if let Err(error) = self.consume_logical_path_name_budget(&relative) {
                 return Some(Err(error));
             }
             return Some(self.build_host_entry(entry, &relative_parent, entry_depth));
@@ -1188,6 +1226,7 @@ fn next_rooted_entry(
     pool: &Option<ManagedResourcePool<LocalResourceKind, usize>>,
     entry_budget: &mut Option<ResourceBudget<LocalResourceKind, usize>>,
     seen_name_budget: &mut Option<ResourceBudget<LocalResourceKind, usize>>,
+    logical_path_name_budget: &mut Option<LogicalPathNameBudget>,
     deadline: Option<Instant>,
 ) -> Option<LocalResult<LocalDirectoryEntry>> {
     loop {
@@ -1363,6 +1402,12 @@ fn next_rooted_entry(
                     if let Err(error) = consume_entry_budgets(entry_budget, seen_name_budget, &name, &failed_path) {
                         return Some(Err(error));
                     }
+                    let relative = output_parent.join(&name);
+                    if let Some(budget) = logical_path_name_budget.as_mut()
+                        && let Err(error) = budget.consume(&relative)
+                    {
+                        return Some(Err(error));
+                    }
                     return Some(Err(walk_io_error(&failed_path, error.into_io_error())));
                 }
                 if let Some(frame) = pop_rooted_frame(state)
@@ -1384,6 +1429,11 @@ fn next_rooted_entry(
         }
         let authority_path = authority_parent.join(entry.name());
         let output_path = output_parent.join(entry.name());
+        if let Some(budget) = logical_path_name_budget.as_mut()
+            && let Err(error) = budget.consume(&output_path)
+        {
+            return Some(Err(error));
+        }
         let entry_metadata = entry.metadata();
         let metadata = crate::rooted_local_file_system::rooted_metadata(entry_metadata);
         let may_descend = options.recursive()
@@ -1393,6 +1443,13 @@ fn next_rooted_entry(
                 .as_deref()
                 .is_none_or(|subtree| output_path.starts_with(subtree) || subtree.starts_with(&output_path));
         {
+            #[cfg(feature = "test-support")]
+            if crate::local::take_test_support("walker-rooted-entry-resolution") {
+                return Some(Err(walk_io_error(
+                    &namespace_root.join(&output_path),
+                    crate::local::test_fault_error(),
+                )));
+            }
             if let Err(error) = crate::rooted_local_file_system::resolve_rooted_path_allow_root_with_deadline(
                 &state.root,
                 &authority_path,

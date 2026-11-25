@@ -97,6 +97,35 @@ fn test_terminal_entry_budget_releases_host_and_rooted_frames() {
 }
 
 #[test]
+fn test_logical_path_name_budget_precedes_host_child_directory_open() {
+    let directory = tempfile::tempdir().expect("walker fixture should be created");
+    fs::create_dir(directory.path().join("blocked")).expect("blocked directory should be created");
+    let options = LocalListOptions::new()
+        .with_recursive()
+        .with_max_open_directories(1)
+        .with_reopen_policy(LocalDirectoryReopenPolicy::Fail);
+    let mut walker = host(&directory, options).with_logical_path_name_budget(
+        0,
+        0,
+        directory.path().to_path_buf(),
+    );
+
+    let error = walker
+        .next()
+        .expect("the over-budget directory should produce an error")
+        .expect_err("the name budget must be checked before opening the child reader");
+
+    assert_eq!(crate::LocalFileErrorKind::ResourceLimit, error.kind());
+    assert_eq!(Some(directory.path().join("blocked").as_path()), error.path());
+    let facts = error.resource_limit_error().expect("logical name-budget facts");
+    assert_eq!(crate::LocalResourceKind::SeenNameBytes, facts.resource());
+    assert_eq!(0, facts.limit());
+    assert_eq!(7, facts.requested());
+    assert_eq!(Some(7), facts.observed());
+    assert_released(&walker);
+}
+
+#[test]
 #[cfg(feature = "test-support")]
 fn test_fail_fast_releases_both_backend_states() {
     let directory = fixture();

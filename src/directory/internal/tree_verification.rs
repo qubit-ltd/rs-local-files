@@ -258,7 +258,6 @@ pub(in crate::directory) fn verify_tree(
         }
     }
 
-    let mut name_bytes = expected_name_bytes;
     let mut count = 0_usize;
     let mut link_counts = LinkCounts::new();
     // This verifier charges expected and observed logical paths together
@@ -271,13 +270,24 @@ pub(in crate::directory) fn verify_tree(
         .with_recursive()
         .with_symlink_policy(LocalSymlinkPolicy::Reject)
         .with_error_policy(crate::options::LocalWalkErrorPolicy::FailFast);
-    let observer = stage
+    let mut observer = stage
         .observe_tree_with_options(&walk_limits)
         .map_err(|error| context_error(error, stage, Path::new("."), "tree traversal could not start"))?;
+    if let Some(maximum) = limits.max_seen_name_bytes() {
+        observer = observer.with_logical_path_name_budget(expected_name_bytes, maximum);
+    }
     for result in observer {
         check_deadline(stage, deadline)?;
-        let item =
-            result.map_err(|error| context_error(error, stage, Path::new("."), "tree entry observation failed"))?;
+        let item = result.map_err(|error| {
+            if error
+                .resource_limit_error()
+                .is_some_and(|facts| facts.resource() == LocalResourceKind::SeenNameBytes)
+            {
+                error
+            } else {
+                context_error(error, stage, Path::new("."), "tree entry observation failed")
+            }
+        })?;
         let path = item.relative_path();
         let kind = item.observation().metadata().kind();
         let depth = path.components().count();
@@ -315,33 +325,6 @@ pub(in crate::directory) fn verify_tree(
                 "tree validation entry limit exceeded",
             ));
         }
-        let requested = path.as_os_str().as_encoded_bytes().len();
-        let next_name_bytes = name_bytes.checked_add(requested).ok_or_else(|| {
-            resource_overflow(
-                stage,
-                path,
-                LocalResourceKind::SeenNameBytes,
-                "tree validation name-byte count overflowed",
-            )
-        })?;
-        if let Some(maximum) = limits.max_seen_name_bytes()
-            && next_name_bytes > maximum
-        {
-            return Err(tree_limit(
-                stage,
-                path,
-                LocalResourceLimitError::new(
-                    LocalResourceKind::SeenNameBytes,
-                    maximum,
-                    maximum.saturating_sub(name_bytes),
-                    requested,
-                )
-                .with_observed(next_name_bytes),
-                "tree validation name-byte limit exceeded",
-            ));
-        }
-        name_bytes = next_name_bytes;
-
         if (options.rejects_symlinks() && kind == LocalFileKind::Symlink)
             || (options.rejects_special_files()
                 && !matches!(
@@ -815,6 +798,7 @@ mod missing_path_tests {
     use crate::LocalResourceKind;
     use crate::directory::LocalTreeEntry;
     use crate::directory::LocalTreeValidationOptions;
+    use crate::options::LocalCreateDirectoryOptions;
     use crate::options::LocalDirectoryOpenOptions;
     use crate::options::LocalListOptions;
     use crate::options::LocalTempDirectoryOptions;
@@ -825,6 +809,15 @@ mod missing_path_tests {
             .expect("host filesystem")
             .open_directory_with_options(fixture, &LocalDirectoryOpenOptions::new())
             .expect("parent directory")
+            .create_staged_directory(&LocalTempDirectoryOptions::new())
+            .expect("staged directory")
+    }
+
+    fn rooted_staged_directory(fixture: &Path) -> crate::directory::LocalStagedDirectory {
+        LocalFileSystem::rooted(fixture)
+            .expect("rooted filesystem")
+            .open_directory_with_options(Path::new("/"), &LocalDirectoryOpenOptions::new())
+            .expect("root directory")
             .create_staged_directory(&LocalTempDirectoryOptions::new())
             .expect("staged directory")
     }
@@ -1143,6 +1136,59 @@ mod missing_path_tests {
         assert_eq!(1, facts.limit());
         assert_eq!(7, facts.requested());
         assert_eq!(Some(7), facts.observed());
+        stage.cleanup().expect("cleanup stage");
+    }
+
+    #[test]
+    #[cfg(feature = "test-support")]
+    fn test_tree_validation_name_budget_precedes_rooted_entry_resolution() {
+        let fixture = tempfile::tempdir().expect("fixture");
+        let mut stage = rooted_staged_directory(fixture.path());
+        let _created = stage
+            .directory()
+            .create_directory_with_options(
+                Path::new("blocked"),
+                &LocalCreateDirectoryOptions::new(),
+            )
+            .expect("create staged child directory");
+        stage
+            .write_file_new(Path::new("blocked/payload"), &mut &b"payload"[..], 7)
+            .expect("write nested staged file");
+        let _fault = crate::test_support::install_test_fault("walker-rooted-entry-resolution")
+            .expect("rooted entry-resolution fault should install");
+        let options = LocalTreeValidationOptions::new()
+            .with_limits(LocalListOptions::new().with_max_seen_name_bytes(0));
+
+        let error = verify_tree(&stage, None, &options)
+            .expect_err("budget must reject the directory first");
+
+        assert_eq!(crate::LocalFileErrorKind::ResourceLimit, error.kind());
+        assert_eq!(
+            Some("tree validation name-byte limit exceeded"),
+            error.reason()
+        );
+        assert_eq!(
+            Some(
+                stage
+                    .directory()
+                    .diagnostic_path()
+                    .join("blocked")
+                    .as_path()
+            ),
+            error.path()
+        );
+        let facts = error
+            .resource_limit_error()
+            .expect("name-byte budget facts");
+        assert_eq!(LocalResourceKind::SeenNameBytes, facts.resource());
+        assert_eq!(0, facts.limit());
+        assert_eq!(7, facts.requested());
+        assert_eq!(Some(7), facts.observed());
+        assert!(
+            crate::local::take_test_support("walker-rooted-entry-resolution"),
+            "the budget must be checked before rooted entry resolution"
+        );
+        drop(_fault);
         stage.cleanup().expect("cleanup stage");
     }
 

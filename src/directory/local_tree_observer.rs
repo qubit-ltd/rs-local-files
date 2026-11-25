@@ -96,6 +96,17 @@ impl LocalTreeObserver {
     pub(crate) fn new(directory: LocalDirectoryHandle, walker: LocalDirectoryWalker) -> Self {
         Self { directory, walker }
     }
+
+    /// Applies the staged-tree verifier's combined logical path-byte budget
+    /// at the walker's raw-entry admission point.
+    pub(crate) fn with_logical_path_name_budget(mut self, observed: usize, limit: usize) -> Self {
+        self.walker = self.walker.with_logical_path_name_budget(
+            observed,
+            limit,
+            self.directory.diagnostic_path().to_path_buf(),
+        );
+        self
+    }
 }
 
 impl Iterator for LocalTreeObserver {
