@@ -944,25 +944,25 @@ impl LocalStagedDirectory {
                 )
             })?;
         }
+        let binding_matches = self
+            .owner
+            .as_ref()
+            .expect("stage owner exists")
+            .binding_matches_identity()
+            .map_err(|cause| {
+                super::super::tree_recovery::LocalTreeAccessError::new(
+                    cause,
+                    if applied { State::Mixed } else { State::Preserved },
+                )
+            })?;
+        if !binding_matches {
+            return Err(super::super::tree_recovery::LocalTreeAccessError::new(
+                LocalFileError::new(LocalFileErrorKind::ChangedDuringRead, LocalFileOperation::Metadata),
+                if applied { State::Mixed } else { State::Preserved },
+            ));
+        }
         #[cfg(not(windows))]
         let root = {
-            let binding_matches = self
-                .owner
-                .as_ref()
-                .expect("stage owner exists")
-                .binding_matches_identity()
-                .map_err(|cause| {
-                    super::super::tree_recovery::LocalTreeAccessError::new(
-                        cause,
-                        if applied { State::Mixed } else { State::Preserved },
-                    )
-                })?;
-            if !binding_matches {
-                return Err(super::super::tree_recovery::LocalTreeAccessError::new(
-                    LocalFileError::new(LocalFileErrorKind::ChangedDuringRead, LocalFileOperation::Metadata),
-                    if applied { State::Mixed } else { State::Preserved },
-                ));
-            }
             self.directory()
                 .root_authority()
                 .and_then(|root| {
