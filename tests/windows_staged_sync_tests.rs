@@ -184,8 +184,7 @@ fn test_owner_policy_replaced_stage_name_blocks_root_acl_mutation() {
     let backup_relative = std::path::PathBuf::from(backup_name);
     let backup = scratch.path().join(&backup_relative);
     let policy = LocalOwnerAccessPolicy::new().with_windows_masks(0x0016_01ef, 0x0016_019f);
-    let _fault = install_test_fault("owner-policy-replace-stage-before-root")
-        .expect("replacement selector");
+    let _fault = install_test_fault("owner-policy-replace-stage-before-root").expect("replacement selector");
 
     let error = stage
         .apply_owner_access_policy_with_options(&policy, &LocalListOptions::new())

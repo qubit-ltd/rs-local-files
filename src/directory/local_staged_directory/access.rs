@@ -795,9 +795,9 @@ impl LocalStagedDirectory {
         #[cfg(windows)]
         let root = {
             let owner = self.owner.as_ref().expect("stage owner exists");
-            let binding_matches = owner.binding_matches_identity().map_err(|cause| {
-                super::super::tree_recovery::LocalTreeAccessError::new(cause, State::Preserved)
-            })?;
+            let binding_matches = owner
+                .binding_matches_identity()
+                .map_err(|cause| super::super::tree_recovery::LocalTreeAccessError::new(cause, State::Preserved))?;
             if !binding_matches {
                 return Err(super::super::tree_recovery::LocalTreeAccessError::new(
                     LocalFileError::new(LocalFileErrorKind::ChangedDuringRead, LocalFileOperation::Metadata)
@@ -809,9 +809,9 @@ impl LocalStagedDirectory {
             // mutation rights on Windows. Open the staged root through its
             // retained parent before changing any child, and pin the expected
             // identity on the handle that will receive the root policy.
-            let root = owner.open_child_for_access().map_err(|cause| {
-                super::super::tree_recovery::LocalTreeAccessError::new(cause, State::Preserved)
-            })?;
+            let root = owner
+                .open_child_for_access()
+                .map_err(|cause| super::super::tree_recovery::LocalTreeAccessError::new(cause, State::Preserved))?;
             let root_observation = crate::observation::query::query_observation(
                 &root,
                 crate::observation::LocalObservationRequirement::Required,
