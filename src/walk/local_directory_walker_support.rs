@@ -9,7 +9,6 @@
 
 use std::ffi::OsStr;
 use std::path::Path;
-use std::path::PathBuf;
 use std::time::Instant;
 
 use qubit_budget::InsufficientBudgetError;
@@ -24,58 +23,6 @@ use crate::LocalListOptions;
 use crate::LocalResourceKind;
 use crate::LocalResourceLimitError;
 use crate::LocalResult;
-
-/// Enforces tree validation's logical encoded-byte budget before Host-side
-/// inspection/descent or Rooted path resolution.
-#[derive(Debug)]
-pub(super) struct LogicalPathNameBudget {
-    limit: usize,
-    observed: usize,
-    diagnostic_root: PathBuf,
-}
-
-impl LogicalPathNameBudget {
-    /// Creates a budget seeded with bytes already charged to expected paths.
-    pub(super) fn new(observed: usize, limit: usize, diagnostic_root: PathBuf) -> Self {
-        Self {
-            limit,
-            observed,
-            diagnostic_root,
-        }
-    }
-
-    /// Charges one relative path and reports the exact namespace path if it
-    /// would exceed the combined expected-and-observed allowance.
-    pub(super) fn consume(&mut self, relative: &Path) -> LocalResult<()> {
-        let requested = relative.as_os_str().as_encoded_bytes().len();
-        let path = self.diagnostic_root.join(relative);
-        let Some(observed) = self.observed.checked_add(requested) else {
-            return Err(LocalFileError::from_resource_limit(
-                LocalFileOperation::Read,
-                Some(path),
-                LocalResourceLimitError::new(LocalResourceKind::SeenNameBytes, usize::MAX, 0, 1)
-                    .with_overflow(),
-            )
-            .with_reason("tree validation name-byte count overflowed"));
-        };
-        if observed > self.limit {
-            return Err(LocalFileError::from_resource_limit(
-                LocalFileOperation::Read,
-                Some(path),
-                LocalResourceLimitError::new(
-                    LocalResourceKind::SeenNameBytes,
-                    self.limit,
-                    self.limit.saturating_sub(self.observed),
-                    requested,
-                )
-                .with_observed(observed),
-            )
-            .with_reason("tree validation name-byte limit exceeded"));
-        }
-        self.observed = observed;
-        Ok(())
-    }
-}
 
 /// Closes one host frame reader and drops its capacity permit.
 ///

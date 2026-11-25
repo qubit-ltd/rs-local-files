@@ -1146,40 +1146,25 @@ mod missing_path_tests {
         let mut stage = rooted_staged_directory(fixture.path());
         let _created = stage
             .directory()
-            .create_directory_with_options(
-                Path::new("blocked"),
-                &LocalCreateDirectoryOptions::new(),
-            )
+            .create_directory_with_options(Path::new("blocked"), &LocalCreateDirectoryOptions::new())
             .expect("create staged child directory");
         stage
             .write_file_new(Path::new("blocked/payload"), &mut &b"payload"[..], 7)
             .expect("write nested staged file");
         let _fault = crate::test_support::install_test_fault("walker-rooted-entry-resolution")
             .expect("rooted entry-resolution fault should install");
-        let options = LocalTreeValidationOptions::new()
-            .with_limits(LocalListOptions::new().with_max_seen_name_bytes(0));
+        let options =
+            LocalTreeValidationOptions::new().with_limits(LocalListOptions::new().with_max_seen_name_bytes(0));
 
-        let error = verify_tree(&stage, None, &options)
-            .expect_err("budget must reject the directory first");
+        let error = verify_tree(&stage, None, &options).expect_err("budget must reject the directory first");
 
         assert_eq!(crate::LocalFileErrorKind::ResourceLimit, error.kind());
+        assert_eq!(Some("tree validation name-byte limit exceeded"), error.reason());
         assert_eq!(
-            Some("tree validation name-byte limit exceeded"),
-            error.reason()
-        );
-        assert_eq!(
-            Some(
-                stage
-                    .directory()
-                    .diagnostic_path()
-                    .join("blocked")
-                    .as_path()
-            ),
+            Some(stage.directory().diagnostic_path().join("blocked").as_path()),
             error.path()
         );
-        let facts = error
-            .resource_limit_error()
-            .expect("name-byte budget facts");
+        let facts = error.resource_limit_error().expect("name-byte budget facts");
         assert_eq!(LocalResourceKind::SeenNameBytes, facts.resource());
         assert_eq!(0, facts.limit());
         assert_eq!(7, facts.requested());

@@ -10,6 +10,7 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 
+use super::super::logical_path_name_budget::LogicalPathNameBudget;
 use super::RootedWalkFrame;
 use crate::rooted::Root;
 
@@ -26,4 +27,6 @@ pub(in crate::walk) struct RootedWalkState {
     pub(in crate::walk) symlink_policy: crate::LocalSymlinkPolicy,
     /// Optional requested-root-relative subtree controlling descent.
     pub(in crate::walk) descend_subtree: Option<std::path::PathBuf>,
+    /// Optional tree-validation path-byte budget applied to enumerated entries.
+    pub(in crate::walk) logical_path_name_budget: Option<LogicalPathNameBudget>,
 }

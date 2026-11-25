@@ -25,11 +25,11 @@ use super::local_directory_walker_support::consume_entry_budgets;
 use super::local_directory_walker_support::directory_limit_error;
 use super::local_directory_walker_support::directory_pool;
 use super::local_directory_walker_support::is_terminal_walk_error;
-use super::local_directory_walker_support::LogicalPathNameBudget;
 #[cfg(feature = "test-support")]
 use super::local_directory_walker_support::scripted_open_directory_error;
 use super::local_directory_walker_support::validate_options;
 use super::local_directory_walker_support::walker_deadline;
+use super::logical_path_name_budget::LogicalPathNameBudget;
 use crate::LocalDirectoryEntry;
 use crate::LocalDirectoryReopenPolicy;
 use crate::LocalFileError;
@@ -391,6 +391,7 @@ impl LocalDirectoryWalker {
                 followed_directories,
                 symlink_policy,
                 descend_subtree: None,
+                logical_path_name_budget: None,
             }),
             terminated: false,
             symlink_policy,
@@ -467,18 +468,33 @@ impl LocalDirectoryWalker {
     /// This internal policy runs after the walker's depth and entry-count
     /// admission, but before Host metadata/descent or Rooted path resolution.
     /// Ordinary listing callers do not configure it.
+    ///
+    /// # Parameters
+    ///
+    /// - `observed`: Encoded bytes already charged to the expected tree paths.
+    /// - `limit`: Maximum combined encoded-byte count for expected and observed
+    ///   paths.
+    /// - `diagnostic_root`: Namespace root used to report an over-budget path.
     pub(crate) fn with_logical_path_name_budget(
         mut self,
         observed: usize,
         limit: usize,
         diagnostic_root: PathBuf,
     ) -> Self {
-        self.logical_path_name_budget =
-            Some(LogicalPathNameBudget::new(observed, limit, diagnostic_root));
+        let budget = LogicalPathNameBudget::new(observed, limit, diagnostic_root);
+        if let Some(rooted) = self.rooted.as_mut() {
+            rooted.logical_path_name_budget = Some(budget);
+        } else {
+            self.logical_path_name_budget = Some(budget);
+        }
         self
     }
 
     /// Charges a relative entry path to the optional tree validation budget.
+    ///
+    /// # Parameters
+    ///
+    /// - `relative`: Root-relative entry path to charge.
     fn consume_logical_path_name_budget(&mut self, relative: &Path) -> LocalResult<()> {
         let Some(budget) = self.logical_path_name_budget.as_mut() else {
             return Ok(());
@@ -1035,7 +1051,6 @@ impl LocalDirectoryWalker {
                 pool,
                 &mut self.entry_budget,
                 &mut self.seen_name_budget,
-                &mut self.logical_path_name_budget,
                 self.deadline,
             );
             if matches!(&result, Some(Err(error)) if is_terminal_walk_error(error, self.options.error_policy())) {
@@ -1075,9 +1090,11 @@ impl LocalDirectoryWalker {
             if let Err(error) = self.consume_host_entry_budgets(&entry, &relative_parent) {
                 return Some(Err(error));
             }
-            let relative = relative_parent.join(entry.file_name());
-            if let Err(error) = self.consume_logical_path_name_budget(&relative) {
-                return Some(Err(error));
+            if self.logical_path_name_budget.is_some() {
+                let relative = relative_parent.join(entry.file_name());
+                if let Err(error) = self.consume_logical_path_name_budget(&relative) {
+                    return Some(Err(error));
+                }
             }
             return Some(self.build_host_entry(entry, &relative_parent, entry_depth));
         }
@@ -1226,7 +1243,6 @@ fn next_rooted_entry(
     pool: &Option<ManagedResourcePool<LocalResourceKind, usize>>,
     entry_budget: &mut Option<ResourceBudget<LocalResourceKind, usize>>,
     seen_name_budget: &mut Option<ResourceBudget<LocalResourceKind, usize>>,
-    logical_path_name_budget: &mut Option<LogicalPathNameBudget>,
     deadline: Option<Instant>,
 ) -> Option<LocalResult<LocalDirectoryEntry>> {
     loop {
@@ -1403,7 +1419,7 @@ fn next_rooted_entry(
                         return Some(Err(error));
                     }
                     let relative = output_parent.join(&name);
-                    if let Some(budget) = logical_path_name_budget.as_mut()
+                    if let Some(budget) = state.logical_path_name_budget.as_mut()
                         && let Err(error) = budget.consume(&relative)
                     {
                         return Some(Err(error));
@@ -1429,7 +1445,7 @@ fn next_rooted_entry(
         }
         let authority_path = authority_parent.join(entry.name());
         let output_path = output_parent.join(entry.name());
-        if let Some(budget) = logical_path_name_budget.as_mut()
+        if let Some(budget) = state.logical_path_name_budget.as_mut()
             && let Err(error) = budget.consume(&output_path)
         {
             return Some(Err(error));

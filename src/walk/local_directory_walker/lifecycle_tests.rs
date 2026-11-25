@@ -104,11 +104,7 @@ fn test_logical_path_name_budget_precedes_host_child_directory_open() {
         .with_recursive()
         .with_max_open_directories(1)
         .with_reopen_policy(LocalDirectoryReopenPolicy::Fail);
-    let mut walker = host(&directory, options).with_logical_path_name_budget(
-        0,
-        0,
-        directory.path().to_path_buf(),
-    );
+    let mut walker = host(&directory, options).with_logical_path_name_budget(0, 0, directory.path().to_path_buf());
 
     let error = walker
         .next()
