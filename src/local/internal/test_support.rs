@@ -86,7 +86,8 @@ pub fn install_test_fault_shared(name: &str) -> io::Result<TestFaultGuard> {
     install_test_fault_for(name, 1, true)
 }
 
-/// Installs a shared deterministic fault for one namespace-absolute destination path.
+/// Installs a shared deterministic fault for one namespace-absolute destination
+/// path.
 ///
 /// # Parameters
 ///
@@ -99,10 +100,7 @@ pub fn install_test_fault_shared(name: &str) -> io::Result<TestFaultGuard> {
 /// Other threads wait until the active guard is released.
 #[doc(hidden)]
 #[cfg(feature = "test-support")]
-pub fn install_test_fault_shared_for_path(
-    name: &str,
-    path: &std::path::Path,
-) -> io::Result<TestFaultGuard> {
+pub fn install_test_fault_shared_for_path(name: &str, path: &std::path::Path) -> io::Result<TestFaultGuard> {
     install_test_fault_for_path(name, 1, true, Some(path.to_owned()))
 }
 
@@ -148,6 +146,24 @@ fn install_test_fault_for(name: &str, repeat_count: usize, shared: bool) -> io::
     install_test_fault_for_path(name, repeat_count, shared, None)
 }
 
+/// Installs a selector and initializes its one-shot or repeated occurrence
+/// state, optionally restricted to a destination path.
+///
+/// # Parameters
+///
+/// * `name` - Static selector name matched at a native operation boundary.
+/// * `repeat_count` - Number of matching calls that should fail.
+/// * `shared` - Whether local worker threads may consume the selector.
+/// * `path` - Optional namespace-absolute destination path for the selector.
+///
+/// # Errors
+///
+/// Returns `AlreadyExists` if this thread already owns an installed guard.
+/// Otherwise installation waits until the active guard is released.
+///
+/// # Returns
+///
+/// Returns a guard that releases the selector when dropped.
 #[cfg(feature = "test-support")]
 fn install_test_fault_for_path(
     name: &str,
@@ -254,6 +270,16 @@ pub(crate) fn is_enabled(name: &str) -> bool {
 }
 
 /// Returns whether the selector matches a destination path.
+///
+/// # Parameters
+///
+/// * `name` - Static selector name at a test fault boundary.
+/// * `path` - Destination path to compare with the installed selector.
+///
+/// # Returns
+///
+/// `true` only when the calling thread or a shared worker owns an installed
+/// selector with the same name and destination path.
 #[cfg(feature = "test-support")]
 #[inline]
 pub(crate) fn is_enabled_for_path(name: &str, path: &std::path::Path) -> bool {

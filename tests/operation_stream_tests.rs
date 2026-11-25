@@ -807,11 +807,9 @@ fn test_staged_async_writer_cleanup_failure_can_be_retried() {
         6
     );
 
-    let fault = qubit_local_files::test_support::install_test_fault_shared_for_path(
-        "writer-staged-abort-cleanup",
-        &target,
-    )
-    .unwrap();
+    let fault =
+        qubit_local_files::test_support::install_test_fault_shared_for_path("writer-staged-abort-cleanup", &target)
+            .unwrap();
     let error = poll_worker(|cx| Box::pin(writer.close()).as_mut().poll(cx)).unwrap_err();
     let cause = local_file_error_in_chain(&error).expect("close error retains LocalFileError");
     assert_eq!(cause.operation(), qubit_local_files::error::LocalFileOperation::Abort);
@@ -936,10 +934,7 @@ fn test_staged_abort_fault_only_affects_its_registered_path() {
     let unrelated = directory.path().join("unrelated.txt");
     let manager = OperationManager::new(ManagerOptions::default()).unwrap();
     let executor = LocalIoExecutor::new(manager.clone(), Default::default()).unwrap();
-    let filesystem = LocalFileSystem::host()
-        .unwrap()
-        .into_async(executor)
-        .unwrap();
+    let filesystem = LocalFileSystem::host().unwrap().into_async(executor).unwrap();
     let fault = install_test_fault_shared_for_path("writer-staged-abort-cleanup", &target).unwrap();
 
     let (mut unrelated_open, _) = filesystem
