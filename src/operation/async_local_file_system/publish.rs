@@ -289,10 +289,7 @@ impl AsyncLocalFileSystem {
                 // Cancellation is honored up to this gate. There is no stop check
                 // after entering commit: the native publication result is authoritative.
                 #[cfg(feature = "test-support")]
-                crate::test_support::hit_test_gate_for_path(
-                    "lf7-writer-before-publish",
-                    &destination,
-                );
+                crate::test_support::hit_test_gate_for_path("lf7-writer-before-publish", &destination);
                 if let Some(stop) = stop_report(scope) {
                     return abort_managed_writer_after_stop(
                         &writer_resource,

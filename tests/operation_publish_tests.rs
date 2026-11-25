@@ -1316,8 +1316,7 @@ fn test_cancellation_at_last_precommit_gate_aborts_without_publishing() {
     let destination = directory.path().join("cancelled-at-gate");
     let manager = OperationManager::new(ManagerOptions::default()).unwrap();
     let filesystem = facade(&manager);
-    let gate =
-        Arc::new(install_test_gate_for_path("lf7-writer-before-publish", &destination).unwrap());
+    let gate = Arc::new(install_test_gate_for_path("lf7-writer-before-publish", &destination).unwrap());
     let (mut operation, observer) = filesystem
         .submit_writer_commit(
             &manager,
@@ -1336,9 +1335,7 @@ fn test_cancellation_at_last_precommit_gate_aborts_without_publishing() {
         gate_waiter.wait_until_entered();
         let _ = entered_sender.send(());
     });
-    let target_reached_gate = entered_receiver
-        .recv_timeout(std::time::Duration::from_secs(5))
-        .is_ok();
+    let target_reached_gate = entered_receiver.recv_timeout(std::time::Duration::from_secs(5)).is_ok();
     if !target_reached_gate {
         let _ = operation.request_stop(StopReason::UserCancelled);
         gate.release();
@@ -1346,9 +1343,7 @@ fn test_cancellation_at_last_precommit_gate_aborts_without_publishing() {
         let outcome = operation.wait_outcome();
         panic!("target writer did not reach its path-scoped publish gate; outcome: {outcome:?}");
     }
-    gate_waiter
-        .join()
-        .expect("gate waiter should exit after target entry");
+    gate_waiter.join().expect("gate waiter should exit after target entry");
 
     let unrelated_destination = directory.path().join("unrelated-writer");
     let (mut unrelated_operation, _) = filesystem
@@ -1371,9 +1366,7 @@ fn test_cancellation_at_last_precommit_gate_aborts_without_publishing() {
         );
         let _ = unrelated_sender.send(succeeded);
     });
-    let unrelated_result_before_release = unrelated_receiver
-        .recv_timeout(std::time::Duration::from_secs(5))
-        .ok();
+    let unrelated_result_before_release = unrelated_receiver.recv_timeout(std::time::Duration::from_secs(5)).ok();
     let unrelated_completed_before_release = unrelated_result_before_release.is_some();
 
     operation.request_stop(StopReason::UserCancelled);
@@ -1383,9 +1376,7 @@ fn test_cancellation_at_last_precommit_gate_aborts_without_publishing() {
             .recv_timeout(std::time::Duration::from_secs(5))
             .unwrap_or(false)
     });
-    unrelated_waiter
-        .join()
-        .expect("unrelated writer waiter should exit");
+    unrelated_waiter.join().expect("unrelated writer waiter should exit");
     assert!(
         unrelated_completed_before_release,
         "a different destination must not enter the target writer's gate"
