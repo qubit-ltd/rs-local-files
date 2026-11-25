@@ -956,8 +956,8 @@ impl LocalStagedDirectory {
                 )
             })?;
         #[cfg(all(feature = "test-support", windows))]
-        let binding_matches = binding_matches
-            && !crate::local::take_test_support("owner-policy-stage-binding-mismatch-before-root");
+        let binding_matches =
+            binding_matches && !crate::local::take_test_support("owner-policy-stage-binding-mismatch-before-root");
         if !binding_matches {
             return Err(super::super::tree_recovery::LocalTreeAccessError::new(
                 LocalFileError::new(LocalFileErrorKind::ChangedDuringRead, LocalFileOperation::Metadata),

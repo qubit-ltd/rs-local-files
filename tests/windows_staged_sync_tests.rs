@@ -180,8 +180,8 @@ fn test_owner_policy_late_stage_binding_mismatch_blocks_root_acl_mutation() {
     let expected_identity = stage.identity().cloned().expect("stage identity");
     let native = scratch.path().join(stage.relative_name());
     let policy = LocalOwnerAccessPolicy::new().with_windows_masks(0x0016_01ef, 0x0016_019f);
-    let _fault = install_test_fault("owner-policy-stage-binding-mismatch-before-root")
-        .expect("binding mismatch selector");
+    let _fault =
+        install_test_fault("owner-policy-stage-binding-mismatch-before-root").expect("binding mismatch selector");
 
     let error = stage
         .apply_owner_access_policy_with_options(&policy, &LocalListOptions::new())
