@@ -10,34 +10,34 @@
 use std::path::Path;
 #[cfg(all(test, feature = "async"))]
 mod read_preflight_tests {
+    use std::collections::HashMap;
     use std::path::Path;
     use std::path::PathBuf;
 
-    type ReadPreflightTestGate = (PathBuf, std::sync::mpsc::Sender<()>, std::sync::mpsc::Receiver<()>);
-    static READ_PREFLIGHT_TEST_GATE: std::sync::Mutex<Option<ReadPreflightTestGate>> = std::sync::Mutex::new(None);
+    type ReadPreflightTestGate = (std::sync::mpsc::Sender<()>, std::sync::mpsc::Receiver<()>);
+    static READ_PREFLIGHT_TEST_GATES: std::sync::LazyLock<
+        std::sync::Mutex<HashMap<PathBuf, ReadPreflightTestGate>>,
+    > = std::sync::LazyLock::new(|| std::sync::Mutex::new(HashMap::new()));
 
     pub(super) fn install_read_preflight_test_gate(
         path: PathBuf,
         entered: std::sync::mpsc::Sender<()>,
         release: std::sync::mpsc::Receiver<()>,
     ) {
-        *READ_PREFLIGHT_TEST_GATE
+        READ_PREFLIGHT_TEST_GATES
             .lock()
-            .unwrap_or_else(|error| error.into_inner()) = Some((path, entered, release));
+            .unwrap_or_else(|error| error.into_inner())
+            .insert(path, (entered, release));
     }
 
     pub(super) fn pause_read_after_preflight(path: &Path) {
         let gate = {
-            let mut registered = READ_PREFLIGHT_TEST_GATE
+            let mut registered = READ_PREFLIGHT_TEST_GATES
                 .lock()
                 .unwrap_or_else(|error| error.into_inner());
-            if registered.as_ref().is_some_and(|(target, _, _)| target == path) {
-                registered.take()
-            } else {
-                None
-            }
+            registered.remove(path)
         };
-        if let Some((_, entered, release)) = gate {
+        if let Some((entered, release)) = gate {
             let _ = entered.send(());
             let _ = release.recv();
         }
@@ -50,7 +50,7 @@ mod read_preflight_tests {
         use std::sync::mpsc;
 
         let poisoned = catch_unwind(|| {
-            let _guard = READ_PREFLIGHT_TEST_GATE.lock().unwrap();
+            let _guard = READ_PREFLIGHT_TEST_GATES.lock().unwrap();
             panic!("poison the test gate registration lock");
         });
         assert!(poisoned.is_err());
@@ -64,11 +64,40 @@ mod read_preflight_tests {
 
         entered_rx.recv().unwrap();
         assert!(
-            READ_PREFLIGHT_TEST_GATE
+            !READ_PREFLIGHT_TEST_GATES
                 .lock()
                 .unwrap_or_else(|error| error.into_inner())
-                .is_none()
+                .contains_key(&path)
         );
+    }
+
+    #[cfg(test)]
+    #[test]
+    fn test_read_preflight_gate_keeps_distinct_path_registrations() {
+        use std::sync::mpsc;
+
+        let directory = tempfile::tempdir().unwrap();
+        let first_path = directory.path().join("first");
+        let second_path = directory.path().join("second");
+
+        let (first_entered_tx, first_entered_rx) = mpsc::channel();
+        let (first_release_tx, first_release_rx) = mpsc::channel();
+        first_release_tx.send(()).unwrap();
+        install_read_preflight_test_gate(first_path.clone(), first_entered_tx, first_release_rx);
+
+        let (second_entered_tx, second_entered_rx) = mpsc::channel();
+        let (second_release_tx, second_release_rx) = mpsc::channel();
+        second_release_tx.send(()).unwrap();
+        install_read_preflight_test_gate(second_path.clone(), second_entered_tx, second_release_rx);
+
+        pause_read_after_preflight(&first_path);
+        first_entered_rx
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .expect("first path gate must survive registration of a second path");
+        pause_read_after_preflight(&second_path);
+        second_entered_rx
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .expect("second path gate must remain independently registered");
     }
 }
 
