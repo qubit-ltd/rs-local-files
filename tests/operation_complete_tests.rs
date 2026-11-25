@@ -23,10 +23,13 @@ use qubit_local_files::operation::complete::LocalDeleteRequest;
 use qubit_local_files::operation::complete::LocalReadAtRequest;
 use qubit_local_files::operation::complete::LocalReadPrefixRequest;
 use qubit_local_files::operation::complete::LocalRenameRequest;
+#[cfg(unix)]
 use qubit_local_files::options::LocalCopyConflictPolicy;
 use qubit_local_files::options::LocalCopyOptions;
+#[cfg(unix)]
 use qubit_local_files::options::LocalCopyTypeConflictPolicy;
 use qubit_local_files::options::LocalDeleteOptions;
+#[cfg(unix)]
 use qubit_local_files::options::LocalMetadataPreservePolicy;
 use qubit_local_files::options::LocalReadAllOptions;
 use qubit_local_files::options::LocalRenameOptions;
