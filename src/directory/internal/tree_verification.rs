@@ -261,7 +261,12 @@ pub(in crate::directory) fn verify_tree(
     let mut name_bytes = expected_name_bytes;
     let mut count = 0_usize;
     let mut link_counts = LinkCounts::new();
+    // This verifier charges expected and observed logical paths together
+    // below. The walker counts native name-storage bytes independently
+    // (UTF-16 on Windows), so forwarding the same limit could fail early with
+    // the walker's root path instead of this validator's staged-entry path.
     let walk_limits = limits
+        .without_max_seen_name_bytes()
         .without_max_depth()
         .with_recursive()
         .with_symlink_policy(LocalSymlinkPolicy::Reject)
@@ -1130,7 +1135,14 @@ mod missing_path_tests {
         let error = verify_tree(&stage, None, &options)
             .expect_err("the observed encoded path exceeds the configured name-byte budget");
         assert_eq!(crate::LocalFileErrorKind::ResourceLimit, error.kind());
-        assert_eq!(Some("tree entry observation failed"), error.reason());
+        assert_eq!(Some("tree validation name-byte limit exceeded"), error.reason());
+        let expected_path = stage.directory().diagnostic_path().join("payload");
+        assert_eq!(Some(expected_path.as_path()), error.path());
+        let facts = error.resource_limit_error().expect("observed name-byte facts");
+        assert_eq!(LocalResourceKind::SeenNameBytes, facts.resource());
+        assert_eq!(1, facts.limit());
+        assert_eq!(7, facts.requested());
+        assert_eq!(Some(7), facts.observed());
         stage.cleanup().expect("cleanup stage");
     }
 
