@@ -7,6 +7,9 @@
 // =============================================================================
 //! Process-local test fault selector state.
 
+#[cfg(feature = "test-support")]
+use std::path::PathBuf;
+
 /// Selector owner and name retained while one test controls fault injection.
 #[cfg(feature = "test-support")]
 pub(super) struct ActiveFault {
@@ -16,4 +19,6 @@ pub(super) struct ActiveFault {
     pub(super) shared: bool,
     /// Native fault boundary selected by the owning test.
     pub(super) name: String,
+    /// Optional destination path that scopes this selector to one writer.
+    pub(super) path: Option<PathBuf>,
 }

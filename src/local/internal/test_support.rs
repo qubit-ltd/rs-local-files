@@ -86,6 +86,26 @@ pub fn install_test_fault_shared(name: &str) -> io::Result<TestFaultGuard> {
     install_test_fault_for(name, 1, true)
 }
 
+/// Installs a shared deterministic fault for one namespace-absolute destination path.
+///
+/// # Parameters
+///
+/// * `name` - Static selector name matched at a native operation boundary.
+/// * `path` - Namespace-absolute destination path retained by the writer.
+///
+/// # Errors
+///
+/// Returns `AlreadyExists` if this thread already owns an installed guard.
+/// Other threads wait until the active guard is released.
+#[doc(hidden)]
+#[cfg(feature = "test-support")]
+pub fn install_test_fault_shared_for_path(
+    name: &str,
+    path: &std::path::Path,
+) -> io::Result<TestFaultGuard> {
+    install_test_fault_for_path(name, 1, true, Some(path.to_owned()))
+}
+
 /// Installs a fault selector that fails a finite number of matching calls.
 ///
 /// # Parameters
@@ -125,6 +145,16 @@ pub(crate) fn install_test_fault_repeated(name: &str, count: usize) -> io::Resul
 /// Returns a guard that releases the selector and wakes a waiting installer.
 #[cfg(feature = "test-support")]
 fn install_test_fault_for(name: &str, repeat_count: usize, shared: bool) -> io::Result<TestFaultGuard> {
+    install_test_fault_for_path(name, repeat_count, shared, None)
+}
+
+#[cfg(feature = "test-support")]
+fn install_test_fault_for_path(
+    name: &str,
+    repeat_count: usize,
+    shared: bool,
+    path: Option<std::path::PathBuf>,
+) -> io::Result<TestFaultGuard> {
     let owner = std::thread::current().id();
     let mut active = ACTIVE_FAULT.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     loop {
@@ -148,6 +178,7 @@ fn install_test_fault_for(name: &str, repeat_count: usize, shared: bool) -> io::
         owner,
         shared,
         name: name.to_owned(),
+        path,
     });
     ONE_SHOT_FAULT_TAKEN.store(false, Ordering::Relaxed);
     NTH_FAULT_OCCURRENCES.store(0, Ordering::Relaxed);
@@ -219,7 +250,14 @@ pub(crate) fn fault_error() -> io::Error {
 #[must_use]
 #[inline]
 pub(crate) fn is_enabled(name: &str) -> bool {
-    is_enabled_impl(name)
+    is_enabled_impl(name, None)
+}
+
+/// Returns whether the selector matches a destination path.
+#[cfg(feature = "test-support")]
+#[inline]
+pub(crate) fn is_enabled_for_path(name: &str, path: &std::path::Path) -> bool {
+    is_enabled_impl(name, Some(path))
 }
 
 /// Takes the selected fault once during the owning thread's guard lifetime.
@@ -288,14 +326,22 @@ pub(crate) fn take_on_nth(name: &str, occurrence: usize) -> bool {
 /// `false`.
 #[cfg(feature = "test-support")]
 #[inline]
-fn is_enabled_impl(name: &str) -> bool {
+fn is_enabled_impl(name: &str, path: Option<&std::path::Path>) -> bool {
     let owner = std::thread::current().id();
     ACTIVE_FAULT
         .0
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
         .as_ref()
-        .is_some_and(|active| (active.shared || active.owner == owner) && active.name == name)
+        .is_some_and(|active| {
+            (active.shared || active.owner == owner)
+                && active.name == name
+                && match (&active.path, path) {
+                    (None, _) => true,
+                    (Some(active_path), Some(path)) => active_path == path,
+                    (Some(_), None) => false,
+                }
+        })
 }
 
 /// Provides the disabled-feature result for fault-selector checks.
@@ -308,7 +354,7 @@ fn is_enabled_impl(name: &str) -> bool {
 /// Always returns `false` when internal test support is disabled.
 #[cfg(not(feature = "test-support"))]
 #[inline]
-fn is_enabled_impl(_name: &str) -> bool {
+fn is_enabled_impl(_name: &str, _path: Option<&std::path::Path>) -> bool {
     false
 }
 
@@ -323,7 +369,7 @@ fn is_enabled_impl(_name: &str) -> bool {
 #[cfg(feature = "test-support")]
 #[inline]
 fn take_impl(name: &str) -> bool {
-    is_enabled_impl(name)
+    is_enabled_impl(name, None)
         && ONE_SHOT_FAULT_TAKEN
             .compare_exchange(false, true, Ordering::Relaxed, Ordering::Relaxed)
             .is_ok()
@@ -342,7 +388,7 @@ fn take_impl(name: &str) -> bool {
 #[must_use]
 #[inline]
 fn take_on_nth_impl(name: &str, occurrence: usize) -> bool {
-    is_enabled_impl(name) && NTH_FAULT_OCCURRENCES.fetch_add(1, Ordering::Relaxed) + 1 == occurrence
+    is_enabled_impl(name, None) && NTH_FAULT_OCCURRENCES.fetch_add(1, Ordering::Relaxed) + 1 == occurrence
 }
 
 #[cfg(all(test, feature = "test-support"))]

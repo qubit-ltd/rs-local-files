@@ -345,7 +345,7 @@ impl LocalFileWriter {
         }
         let previous_failure_state = self.failure_state;
         #[cfg(feature = "test-support")]
-        if crate::local::test_support_enabled("writer-staged-abort-cleanup")
+        if crate::local::test_support_enabled_for_path("writer-staged-abort-cleanup", &self.path)
             && matches!(
                 self.backend.as_ref(),
                 Some(LocalFileWriterBackend::Staged(_) | LocalFileWriterBackend::Rooted(_))

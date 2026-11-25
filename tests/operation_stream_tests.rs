@@ -772,7 +772,6 @@ fn test_staged_async_writer_cleanup_failure_can_be_retried() {
     use qubit_local_files::operation::LocalIoExecutor;
     use qubit_local_files::options::LocalWriteMode;
     use qubit_local_files::options::LocalWriteOptions;
-    use qubit_local_files::test_support::install_test_fault_shared;
     use qubit_operation::ManagerOptions;
     use qubit_operation::OperationManager;
     use qubit_operation::OperationOutcome;
@@ -808,7 +807,11 @@ fn test_staged_async_writer_cleanup_failure_can_be_retried() {
         6
     );
 
-    let fault = install_test_fault_shared("writer-staged-abort-cleanup").unwrap();
+    let fault = qubit_local_files::test_support::install_test_fault_shared_for_path(
+        "writer-staged-abort-cleanup",
+        &target,
+    )
+    .unwrap();
     let error = poll_worker(|cx| Box::pin(writer.close()).as_mut().poll(cx)).unwrap_err();
     let cause = local_file_error_in_chain(&error).expect("close error retains LocalFileError");
     assert_eq!(cause.operation(), qubit_local_files::error::LocalFileOperation::Abort);
@@ -882,7 +885,7 @@ fn test_staged_async_writer_cleanup_failure_can_be_retried() {
         .submit_open_writer(
             &rooted_manager,
             Default::default(),
-            rooted_target,
+            rooted_target.clone(),
             LocalWriteOptions::new(LocalWriteMode::CreateOrReplace),
         )
         .unwrap();
@@ -894,7 +897,11 @@ fn test_staged_async_writer_cleanup_failure_can_be_retried() {
         poll_worker(|cx| Pin::new(&mut rooted_writer).poll_write(cx, b"staged")).unwrap(),
         6
     );
-    let fault = install_test_fault_shared("writer-staged-abort-cleanup").unwrap();
+    let fault = qubit_local_files::test_support::install_test_fault_shared_for_path(
+        "writer-staged-abort-cleanup",
+        &std::path::Path::new("/").join(&rooted_target),
+    )
+    .unwrap();
     let error = poll_worker(|cx| Box::pin(rooted_writer.close()).as_mut().poll(cx)).unwrap_err();
     drop(fault);
     assert!(error.to_string().contains("Abort"));
@@ -910,6 +917,64 @@ fn test_staged_async_writer_cleanup_failure_can_be_retried() {
         0,
         "Rooted recovery must retain ownership and remove the staging entry"
     );
+}
+
+#[cfg(feature = "test-support")]
+#[test]
+fn test_staged_abort_fault_only_affects_its_registered_path() {
+    use qubit_local_files::LocalFileSystem;
+    use qubit_local_files::operation::LocalIoExecutor;
+    use qubit_local_files::options::LocalWriteMode;
+    use qubit_local_files::options::LocalWriteOptions;
+    use qubit_local_files::test_support::install_test_fault_shared_for_path;
+    use qubit_operation::ManagerOptions;
+    use qubit_operation::OperationManager;
+    use qubit_operation::OperationOutcome;
+
+    let directory = tempfile::tempdir().unwrap();
+    let target = directory.path().join("fault-target.txt");
+    let unrelated = directory.path().join("unrelated.txt");
+    let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+    let executor = LocalIoExecutor::new(manager.clone(), Default::default()).unwrap();
+    let filesystem = LocalFileSystem::host()
+        .unwrap()
+        .into_async(executor)
+        .unwrap();
+    let fault = install_test_fault_shared_for_path("writer-staged-abort-cleanup", &target).unwrap();
+
+    let (mut unrelated_open, _) = filesystem
+        .submit_open_writer(
+            &manager,
+            Default::default(),
+            unrelated,
+            LocalWriteOptions::new(LocalWriteMode::CreateOrReplace),
+        )
+        .unwrap();
+    let mut unrelated_writer = match unrelated_open.wait_outcome().unwrap() {
+        OperationOutcome::Succeeded(writer) => writer,
+        _ => panic!("unrelated writer failed to open"),
+    };
+    poll_worker(|cx| Box::pin(unrelated_writer.close()).as_mut().poll(cx)).unwrap();
+    drop(unrelated_writer);
+    unrelated_open.wait_settlement().unwrap();
+
+    let (mut target_open, _) = filesystem
+        .submit_open_writer(
+            &manager,
+            Default::default(),
+            target,
+            LocalWriteOptions::new(LocalWriteMode::CreateOrReplace),
+        )
+        .unwrap();
+    let mut target_writer = match target_open.wait_outcome().unwrap() {
+        OperationOutcome::Succeeded(writer) => writer,
+        _ => panic!("fault target writer failed to open"),
+    };
+    let error = poll_worker(|cx| Box::pin(target_writer.close()).as_mut().poll(cx)).unwrap_err();
+    assert!(error.to_string().contains("Abort"));
+    drop(fault);
+    drop(target_writer);
+    target_open.wait_settlement().unwrap();
 }
 
 #[derive(Default)]

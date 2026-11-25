@@ -85,3 +85,6 @@ pub use crate::local::install_test_fault;
 #[cfg(feature = "test-support")]
 #[doc(hidden)]
 pub use crate::local::install_test_fault_shared;
+#[cfg(feature = "test-support")]
+#[doc(hidden)]
+pub use crate::local::install_test_fault_shared_for_path;

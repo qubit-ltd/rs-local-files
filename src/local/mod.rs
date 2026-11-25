@@ -25,8 +25,12 @@ pub use internal::test_support::install_test_fault;
 pub(crate) use internal::test_support::install_test_fault_repeated;
 #[cfg(feature = "test-support")]
 pub use internal::test_support::install_test_fault_shared;
+#[cfg(feature = "test-support")]
+pub use internal::test_support::install_test_fault_shared_for_path;
 pub(crate) use internal::test_support::io_error as test_io_error;
 pub(crate) use internal::test_support::is_enabled as test_support_enabled;
+#[cfg(feature = "test-support")]
+pub(crate) use internal::test_support::is_enabled_for_path as test_support_enabled_for_path;
 #[cfg(feature = "test-support")]
 pub(crate) use internal::test_support::take as take_test_support;
 #[cfg(feature = "test-support")]
