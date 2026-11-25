@@ -15,9 +15,8 @@ mod read_preflight_tests {
     use std::path::PathBuf;
 
     type ReadPreflightTestGate = (std::sync::mpsc::Sender<()>, std::sync::mpsc::Receiver<()>);
-    static READ_PREFLIGHT_TEST_GATES: std::sync::LazyLock<
-        std::sync::Mutex<HashMap<PathBuf, ReadPreflightTestGate>>,
-    > = std::sync::LazyLock::new(|| std::sync::Mutex::new(HashMap::new()));
+    static READ_PREFLIGHT_TEST_GATES: std::sync::LazyLock<std::sync::Mutex<HashMap<PathBuf, ReadPreflightTestGate>>> =
+        std::sync::LazyLock::new(|| std::sync::Mutex::new(HashMap::new()));
 
     pub(super) fn install_read_preflight_test_gate(
         path: PathBuf,
