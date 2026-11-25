@@ -1306,7 +1306,7 @@ fn test_queued_temp_persist_observes_stop_before_publishing() {
 #[cfg(feature = "test-support")]
 #[test]
 fn test_cancellation_at_last_precommit_gate_aborts_without_publishing() {
-    use qubit_local_files::test_support::install_test_gate;
+    use qubit_local_files::test_support::install_test_gate_for_path;
     use qubit_operation::StopReason;
 
     let _gate_lock = WRITER_PUBLISH_GATE_TEST_LOCK
@@ -1316,7 +1316,8 @@ fn test_cancellation_at_last_precommit_gate_aborts_without_publishing() {
     let destination = directory.path().join("cancelled-at-gate");
     let manager = OperationManager::new(ManagerOptions::default()).unwrap();
     let filesystem = facade(&manager);
-    let gate = install_test_gate("lf7-writer-before-publish").unwrap();
+    let gate =
+        Arc::new(install_test_gate_for_path("lf7-writer-before-publish", &destination).unwrap());
     let (mut operation, observer) = filesystem
         .submit_writer_commit(
             &manager,
@@ -1329,9 +1330,68 @@ fn test_cancellation_at_last_precommit_gate_aborts_without_publishing() {
             LocalOperationOptions::default(),
         )
         .unwrap();
-    gate.wait_until_entered();
+    let gate_waiter = Arc::clone(&gate);
+    let (entered_sender, entered_receiver) = std::sync::mpsc::channel();
+    let gate_waiter = std::thread::spawn(move || {
+        gate_waiter.wait_until_entered();
+        let _ = entered_sender.send(());
+    });
+    let target_reached_gate = entered_receiver
+        .recv_timeout(std::time::Duration::from_secs(5))
+        .is_ok();
+    if !target_reached_gate {
+        let _ = operation.request_stop(StopReason::UserCancelled);
+        gate.release();
+        let _ = gate_waiter.join();
+        let outcome = operation.wait_outcome();
+        panic!("target writer did not reach its path-scoped publish gate; outcome: {outcome:?}");
+    }
+    gate_waiter
+        .join()
+        .expect("gate waiter should exit after target entry");
+
+    let unrelated_destination = directory.path().join("unrelated-writer");
+    let (mut unrelated_operation, _) = filesystem
+        .submit_writer_commit(
+            &manager,
+            Default::default(),
+            LocalWriterCommitRequest {
+                path: unrelated_destination.clone(),
+                options: LocalWriteOptions::new(LocalWriteMode::CreateOrReplace),
+                bytes: b"unrelated writer proceeds".to_vec(),
+            },
+            LocalOperationOptions::default(),
+        )
+        .unwrap();
+    let (unrelated_sender, unrelated_receiver) = std::sync::mpsc::channel();
+    let unrelated_waiter = std::thread::spawn(move || {
+        let succeeded = matches!(
+            unrelated_operation.wait_outcome().unwrap(),
+            OperationOutcome::Succeeded(_)
+        );
+        let _ = unrelated_sender.send(succeeded);
+    });
+    let unrelated_result_before_release = unrelated_receiver
+        .recv_timeout(std::time::Duration::from_secs(5))
+        .ok();
+    let unrelated_completed_before_release = unrelated_result_before_release.is_some();
+
     operation.request_stop(StopReason::UserCancelled);
     gate.release();
+    let unrelated_succeeded = unrelated_result_before_release.unwrap_or_else(|| {
+        unrelated_receiver
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .unwrap_or(false)
+    });
+    unrelated_waiter
+        .join()
+        .expect("unrelated writer waiter should exit");
+    assert!(
+        unrelated_completed_before_release,
+        "a different destination must not enter the target writer's gate"
+    );
+    assert!(unrelated_succeeded);
+    assert!(unrelated_destination.exists());
     assert!(matches!(
         operation.wait_outcome().unwrap(),
         OperationOutcome::Stopped(_)
@@ -1347,7 +1407,7 @@ fn test_cancellation_at_last_precommit_gate_aborts_without_publishing() {
 #[test]
 fn test_failed_abort_after_stop_returns_retryable_writer_and_cleanup_error() {
     use qubit_local_files::test_support::install_test_fault_shared;
-    use qubit_local_files::test_support::install_test_gate;
+    use qubit_local_files::test_support::install_test_gate_for_path;
     use qubit_operation::StopReason;
 
     let _gate_lock = WRITER_PUBLISH_GATE_TEST_LOCK
@@ -1361,7 +1421,7 @@ fn test_failed_abort_after_stop_returns_retryable_writer_and_cleanup_error() {
     let manager = OperationManager::new(ManagerOptions::default()).unwrap();
     let executor = LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).unwrap();
     let filesystem = block_on(AsyncLocalFileSystem::host(executor.clone())).unwrap();
-    let gate = install_test_gate("lf7-writer-before-publish").unwrap();
+    let gate = install_test_gate_for_path("lf7-writer-before-publish", &destination).unwrap();
     let (mut operation, _) = filesystem
         .submit_writer_commit(
             &manager,
