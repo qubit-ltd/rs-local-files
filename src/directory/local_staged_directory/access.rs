@@ -792,6 +792,45 @@ impl LocalStagedDirectory {
         retained: &[RetainedOwnerPolicyEntry],
     ) -> Result<std::fs::File, super::super::tree_recovery::LocalTreeAccessError> {
         use crate::outcome::LocalTreeAccessState as State;
+        #[cfg(windows)]
+        let root = {
+            let owner = self.owner.as_ref().expect("stage owner exists");
+            let binding_matches = owner.binding_matches_identity().map_err(|cause| {
+                super::super::tree_recovery::LocalTreeAccessError::new(cause, State::Preserved)
+            })?;
+            if !binding_matches {
+                return Err(super::super::tree_recovery::LocalTreeAccessError::new(
+                    LocalFileError::new(LocalFileErrorKind::ChangedDuringRead, LocalFileOperation::Metadata)
+                        .with_path(self.directory().diagnostic_path().to_path_buf()),
+                    State::Preserved,
+                ));
+            }
+            // The ordinary rooted directory authority does not carry ACL
+            // mutation rights on Windows. Open the staged root through its
+            // retained parent before changing any child, and pin the expected
+            // identity on the handle that will receive the root policy.
+            let root = owner.open_child_for_access().map_err(|cause| {
+                super::super::tree_recovery::LocalTreeAccessError::new(cause, State::Preserved)
+            })?;
+            let root_observation = crate::observation::query::query_observation(
+                &root,
+                crate::observation::LocalObservationRequirement::Required,
+            )
+            .map_err(|cause| {
+                super::super::tree_recovery::LocalTreeAccessError::new(
+                    cause.with_path(self.directory().diagnostic_path().to_path_buf()),
+                    State::Preserved,
+                )
+            })?;
+            if root_observation.identity() != self.identity.as_ref() {
+                return Err(super::super::tree_recovery::LocalTreeAccessError::new(
+                    LocalFileError::new(LocalFileErrorKind::ChangedDuringRead, LocalFileOperation::Metadata)
+                        .with_path(self.directory().diagnostic_path().to_path_buf()),
+                    State::Preserved,
+                ));
+            }
+            root
+        };
         let mut applied = false;
         for (path, kind, expected, file, _) in retained {
             #[cfg(feature = "test-support")]
@@ -905,36 +944,38 @@ impl LocalStagedDirectory {
                 )
             })?;
         }
-        let binding_matches = self
-            .owner
-            .as_ref()
-            .expect("stage owner exists")
-            .binding_matches_identity()
-            .map_err(|cause| {
-                super::super::tree_recovery::LocalTreeAccessError::new(
-                    cause,
+        #[cfg(not(windows))]
+        let root = {
+            let binding_matches = self
+                .owner
+                .as_ref()
+                .expect("stage owner exists")
+                .binding_matches_identity()
+                .map_err(|cause| {
+                    super::super::tree_recovery::LocalTreeAccessError::new(
+                        cause,
+                        if applied { State::Mixed } else { State::Preserved },
+                    )
+                })?;
+            if !binding_matches {
+                return Err(super::super::tree_recovery::LocalTreeAccessError::new(
+                    LocalFileError::new(LocalFileErrorKind::ChangedDuringRead, LocalFileOperation::Metadata),
                     if applied { State::Mixed } else { State::Preserved },
-                )
-            })?;
-        if !binding_matches {
-            return Err(super::super::tree_recovery::LocalTreeAccessError::new(
-                LocalFileError::new(LocalFileErrorKind::ChangedDuringRead, LocalFileOperation::Metadata),
-                if applied { State::Mixed } else { State::Preserved },
-            ));
-        }
-        let root = self
-            .directory()
-            .root_authority()
-            .and_then(|root| {
-                root.try_clone_authority()
-                    .map_err(|source| LocalFileError::from_io(LocalFileOperation::Metadata, None, None, source))
-            })
-            .map_err(|cause| {
-                super::super::tree_recovery::LocalTreeAccessError::new(
-                    cause,
-                    if applied { State::Mixed } else { State::Indeterminate },
-                )
-            })?;
+                ));
+            }
+            self.directory()
+                .root_authority()
+                .and_then(|root| {
+                    root.try_clone_authority()
+                        .map_err(|source| LocalFileError::from_io(LocalFileOperation::Metadata, None, None, source))
+                })
+                .map_err(|cause| {
+                    super::super::tree_recovery::LocalTreeAccessError::new(
+                        cause,
+                        if applied { State::Mixed } else { State::Indeterminate },
+                    )
+                })?
+        };
         let root_result = {
             self.owner_access_policy = Some(*policy);
             if let Some(owner) = self.owner.as_mut() {

@@ -159,6 +159,11 @@ fn test_preferred_owner_policy_sync_open_failure_publishes_unsynced() {
         )
         .expect("Preferred owner policy sync capability may degrade");
     assert!(!outcome.file_synced());
+    assert_eq!(Some(&policy), outcome.owner_access_policy());
+    assert_eq!(
+        qubit_local_files::outcome::LocalTreeAccessState::OwnerPolicyApplied,
+        outcome.access_state()
+    );
 }
 
 #[test]
