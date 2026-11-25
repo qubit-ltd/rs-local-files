@@ -168,7 +168,7 @@ fn test_preferred_owner_policy_sync_open_failure_publishes_unsynced() {
 }
 
 #[test]
-fn test_owner_policy_replaced_stage_name_blocks_root_acl_mutation() {
+fn test_owner_policy_late_stage_binding_mismatch_blocks_root_acl_mutation() {
     let scratch = tempfile::tempdir().expect("fixture");
     let parent = parent(scratch.path());
     let mut stage = parent
@@ -179,13 +179,9 @@ fn test_owner_policy_replaced_stage_name_blocks_root_acl_mutation() {
         .expect("payload");
     let expected_identity = stage.identity().cloned().expect("stage identity");
     let native = scratch.path().join(stage.relative_name());
-    let mut backup_name = stage.relative_name().to_os_string();
-    backup_name.push(".owner-policy-original");
-    let backup_relative = std::path::PathBuf::from(backup_name);
-    let backup = scratch.path().join(&backup_relative);
     let policy = LocalOwnerAccessPolicy::new().with_windows_masks(0x0016_01ef, 0x0016_019f);
-    let _fault = install_test_fault("owner-policy-replace-stage-before-root")
-        .expect("replacement selector");
+    let _fault = install_test_fault("owner-policy-stage-binding-mismatch-before-root")
+        .expect("binding mismatch selector");
 
     let error = stage
         .apply_owner_access_policy_with_options(&policy, &LocalListOptions::new())
@@ -195,32 +191,19 @@ fn test_owner_policy_replaced_stage_name_blocks_root_acl_mutation() {
         qubit_local_files::outcome::LocalTreeAccessState::Mixed,
         error.access_state()
     );
-    let replacement = parent
-        .observe_entry(Path::new(stage.relative_name()))
-        .expect("replacement stage name remains observable");
-    assert_ne!(Some(&expected_identity), replacement.identity());
     let retained_stage = parent
-        .observe_entry(&backup_relative)
-        .expect("retained stage remains observable at the backup name");
+        .observe_entry(Path::new(stage.relative_name()))
+        .expect("original stage name remains observable");
     assert_eq!(Some(&expected_identity), retained_stage.identity());
     assert_eq!(
         &b"payload"[..],
-        std::fs::read(backup.join("payload"))
-            .expect("retained payload remains readable")
+        std::fs::read(native.join("payload"))
+            .expect("original payload remains readable")
             .as_slice()
-    );
-    assert!(
-        std::fs::read_dir(&native)
-            .expect("replacement directory remains present")
-            .next()
-            .is_none(),
-        "root policy must not mutate or populate the replacement directory"
     );
 
     drop(error);
-    std::fs::remove_dir(&native).expect("remove injected replacement");
-    std::fs::rename(&backup, &native).expect("restore original stage binding");
-    stage.cleanup().expect("cleanup restored original stage");
+    stage.cleanup().expect("cleanup unchanged original stage");
 }
 
 #[test]
