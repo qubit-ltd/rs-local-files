@@ -124,6 +124,7 @@ impl HostLocalFileSystem {
         path: &Path,
         options: &LocalWriteOptions,
         symlink_policy: LocalSymlinkPolicy,
+        authority_identity: usize,
     ) -> LocalResult<LocalFileWriter> {
         let follow_final = options.mode() != LocalWriteMode::CreateNew;
         let diagnostic_path = bind_host_path(path)?;
@@ -158,7 +159,8 @@ impl HostLocalFileSystem {
         }
         let backend = match options.mode() {
             LocalWriteMode::CreateNew | LocalWriteMode::CreateOrReplace => LocalFileWriterBackend::Staged(
-                open_staged_writer(&bound, options).map_err(|error| error.with_path(diagnostic_path.clone()))?,
+                open_staged_writer(&bound, options, authority_identity)
+                    .map_err(|error| error.with_path(diagnostic_path.clone()))?,
             ),
             LocalWriteMode::Append => {
                 let metadata = test_io_fault("local-fs-open-writer-append-metadata")

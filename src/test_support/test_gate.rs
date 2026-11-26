@@ -98,6 +98,17 @@ pub fn install_test_gate_for_local_filesystem(
     install_test_gate_for_authority(name, authority)
 }
 
+/// Installs a path gate scoped to one synchronous filesystem authority.
+#[doc(hidden)]
+pub fn install_test_gate_for_local_filesystem_path(
+    name: &str,
+    filesystem: &crate::LocalFileSystem,
+    path: &Path,
+) -> io::Result<TestGateGuard> {
+    let authority = Arc::as_ptr(&filesystem.core) as usize;
+    install_test_gate_for_authority_path(name, authority, path)
+}
+
 /// Installs a named gate that only workers operating on `path` can reach.
 ///
 /// This keeps a test-owned gate from pausing an unrelated operation that uses
@@ -198,6 +209,7 @@ pub(crate) fn hit_test_gate_for_authority(name: &str, authority: usize) {
 ///
 /// - `name`: Selector of the gate.
 /// - `path`: Operation path associated with the worker boundary.
+#[cfg(test)]
 pub(crate) fn hit_test_gate_for_path(name: &str, path: &Path) {
     let state = gates()
         .lock()

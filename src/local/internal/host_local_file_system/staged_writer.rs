@@ -28,6 +28,7 @@ use super::io;
 pub(crate) fn open_staged_writer(
     path: &Path,
     options: &LocalWriteOptions,
+    authority_identity: usize,
 ) -> LocalResult<crate::local::LocalAtomicWriter> {
     let mut native_options = crate::local::LocalAtomicWriteOptions::new()
         .with_durability(options.durability())
@@ -42,7 +43,7 @@ pub(crate) fn open_staged_writer(
     if let Some(timeout) = options.open_retry_timeout() {
         native_options = native_options.with_open_retry_timeout(timeout);
     }
-    crate::local::LocalAtomicWriter::new(path, native_options).map_err(|error| {
+    crate::local::LocalAtomicWriter::new_with_authority(path, native_options, authority_identity).map_err(|error| {
         let kind = error.kind();
         LocalFileError::from_io(
             LocalFileOperation::OpenWriter,

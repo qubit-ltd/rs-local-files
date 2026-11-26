@@ -100,6 +100,8 @@ const ATOMIC_WRITE_TEMP_PREFIX: &str = ".atomic-write-";
 #[must_use = "atomic writes have no effect unless the writer is committed"]
 #[derive(Debug)]
 pub(crate) struct LocalAtomicWriter {
+    /// Captured filesystem authority used to scope deterministic test gates.
+    authority_identity: usize,
     /// Controls metadata copying independently of regular-destination identity.
     metadata_policy: LocalWriteMetadataPolicy,
     /// Requested destination path.
@@ -137,7 +139,17 @@ impl LocalAtomicWriter {
     /// # Errors
     /// Returns a structured error when parent preparation, destination
     /// inspection, or staging-file creation fails.
+    #[cfg(test)]
     pub(crate) fn new(path: &Path, options: LocalAtomicWriteOptions) -> Result<Self, LocalAtomicWriteError> {
+        Self::new_with_authority(path, options, 0)
+    }
+
+    /// Creates an atomic writer retaining the initiating filesystem identity.
+    pub(crate) fn new_with_authority(
+        path: &Path,
+        options: LocalAtomicWriteOptions,
+        authority_identity: usize,
+    ) -> Result<Self, LocalAtomicWriteError> {
         let operation_path = with_atomic_context(
             absolute_path(path),
             LocalAtomicWriteStage::PrepareParent,
@@ -219,6 +231,7 @@ impl LocalAtomicWriter {
             LocalAtomicDestinationState::Unchanged,
         )?;
         Ok(Self {
+            authority_identity,
             path: path.to_path_buf(),
             operation_path,
             parent_dirs_to_sync,
@@ -619,8 +632,9 @@ impl LocalAtomicWriter {
             );
         }
         #[cfg(feature = "test-support")]
-        crate::test_support::hit_test_gate_for_path(
+        crate::test_support::hit_test_gate_for_authority_path(
             "atomic-writer-after-install-before-parent-sync",
+            self.authority_identity,
             &self.operation_path,
         );
         if self.durability == LocalDurabilityRequirement::NotRequired {
