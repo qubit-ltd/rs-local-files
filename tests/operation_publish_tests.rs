@@ -2350,7 +2350,7 @@ fn test_staged_publish_gates_are_scoped_to_filesystem_authority() {
     }
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(all(target_os = "linux", feature = "test-support"))]
 #[test]
 fn test_cleanup_recovery_retains_shrunk_quota_across_parts_and_retry_failure() {
     use std::os::unix::fs::PermissionsExt;
