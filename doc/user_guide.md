@@ -57,8 +57,8 @@ because the scope still owns the resource until its last user releases it.
 
 ```rust,no_run
 # #[cfg(feature = "async")]
-# async fn example() -> Result<(), Box<dyn std::error::Error>> {
-// BEGIN executable async walker example
+# async fn example() -> Result<Vec<qubit_operation::RecoveryHandle>, Box<dyn std::error::Error>> {
+// BEGIN executable async reader example
 use std::path::PathBuf;
 use qubit_local_files::{
     AsyncLocalFileSystem, LocalExecutionConfig, LocalIoExecutor,
@@ -78,14 +78,109 @@ let mut opening = filesystem.submit_open_reader(
 let mut opening = opening.into_async();
 let mut reader = match opening.wait_outcome().await? {
     OperationOutcome::Succeeded(reader) => reader,
-    _ => return Err(std::io::Error::other("reader open did not succeed").into()),
+    OperationOutcome::Failed(error) => {
+        let settlement = opening.wait_settlement().await;
+        eprintln!("native reader open error: {error}");
+        for failure in settlement.cleanup_failures.iter() {
+            eprintln!("reader cleanup diagnostic: {failure:?}");
+        }
+        for recovery in settlement.recoveries.iter() {
+            eprintln!("reader recovery owner retained: {recovery:?}");
+        }
+        return Ok(settlement.recoveries.to_vec());
+    }
+    OperationOutcome::Stopped(report) => {
+        let settlement = opening.wait_settlement().await;
+        for failure in settlement.cleanup_failures.iter() {
+            eprintln!("reader cleanup diagnostic: {failure:?}");
+        }
+        for recovery in settlement.recoveries.iter() {
+            eprintln!("reader recovery owner retained: {recovery:?}");
+        }
+        eprintln!("reader open stopped: {report:?}");
+        return Ok(settlement.recoveries.to_vec());
+    }
+    _ => return Err(std::io::Error::other("reader open did not produce a reader").into()),
 };
-reader.close().await?;
+let close_result = reader.close().await;
 drop(reader);
 let settlement = opening.wait_settlement().await;
-assert_eq!(settlement.recovery_count, 0);
-// END executable async walker example
-# Ok(())
+if let Err(error) = close_result {
+    eprintln!("reader close diagnostic: {error}");
+}
+for failure in settlement.cleanup_failures.iter() {
+    eprintln!("reader settlement diagnostic: {failure:?}");
+}
+for recovery in settlement.recoveries.iter() {
+    eprintln!("reader recovery owner retained: {recovery:?}");
+}
+Ok(settlement.recoveries.to_vec())
+// END executable async reader example
+# }
+```
+
+If opening fails, record that native error and still wait for settlement.
+Return recovery handles to the caller separately from the open diagnostic:
+
+```rust,no_run
+# #[cfg(feature = "async")]
+# async fn example() -> Result<Vec<qubit_operation::RecoveryHandle>, Box<dyn std::error::Error>> {
+// BEGIN executable async reader failure example
+use std::path::PathBuf;
+use qubit_local_files::{AsyncLocalFileSystem, LocalExecutionConfig, LocalIoExecutor};
+use qubit_local_files::options::LocalReadOptions;
+use qubit_operation::{ManagerOptions, OperationManager, OperationOptions, OperationOutcome};
+
+let manager = OperationManager::new(ManagerOptions::default())?;
+let executor = LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default())?;
+let filesystem = AsyncLocalFileSystem::host(executor).await?;
+let mut opening = filesystem.submit_open_reader(
+    &manager,
+    OperationOptions::default(),
+    PathBuf::from("missing-input.txt"),
+    LocalReadOptions::default(),
+)?.into_async();
+let recoveries = match opening.wait_outcome().await? {
+    OperationOutcome::Failed(error) => {
+        let settlement = opening.wait_settlement().await;
+        eprintln!("native reader open error: {error}");
+        for failure in settlement.cleanup_failures.iter() {
+            eprintln!("reader settlement diagnostic: {failure:?}");
+        }
+        for recovery in settlement.recoveries.iter() {
+            eprintln!("reader recovery owner retained: {recovery:?}");
+        }
+        settlement.recoveries.to_vec()
+    }
+    OperationOutcome::Succeeded(mut reader) => {
+        let close_result = reader.close().await;
+        drop(reader);
+        let settlement = opening.wait_settlement().await;
+        if let Err(error) = close_result {
+            eprintln!("reader close diagnostic: {error}");
+        }
+        for failure in settlement.cleanup_failures.iter() {
+            eprintln!("reader settlement diagnostic: {failure:?}");
+        }
+        for recovery in settlement.recoveries.iter() {
+            eprintln!("reader recovery owner retained: {recovery:?}");
+        }
+        return Err(std::io::Error::other("expected missing input").into());
+    }
+    OperationOutcome::Stopped(report) => {
+        let settlement = opening.wait_settlement().await;
+        for failure in settlement.cleanup_failures.iter() {
+            eprintln!("reader cleanup diagnostic: {failure:?}");
+        }
+        for recovery in settlement.recoveries.iter() {
+            eprintln!("reader recovery owner retained: {recovery:?}");
+        }
+        return Err(std::io::Error::other(format!("reader open stopped: {report:?}")).into());
+    }
+    _ => return Err(std::io::Error::other("reader open did not fail").into()),
+};
+Ok(recoveries)
+// END executable async reader failure example
 # }
 ```
 
@@ -160,8 +255,16 @@ lifecycle rules. Concurrent walkers compete for this same pool, and close
 returns the reservation. Set an explicit positive limit when nested traversal
 must keep multiple directory readers open, and size `max_open_handles` to cover
 that full reservation plus other active operations. A zero limit remains an
-invalid walker option; a request that cannot reserve its full allowance is
-rejected with `CapacityExceeded`.
+invalid walker option: when admission resources are available, the submitted
+operation outcome reports `InvalidOptions`. Submission first reserves the full
+allowance, so insufficient shared capacity returns `CapacityExceeded` before
+that outcome is created.
+
+The worker retains one batch of at most 256 KiB and at most one deferred path
+for lookahead, also bounded to 256 KiB. A single path larger than that lookahead
+bound is discarded and reported as a resource-limit error. The batch and
+lookahead bounds are separate; together they cap walker-retained path bytes at
+512 KiB, excluding allocation overhead.
 
 If cleanup reports a retained walker owner, settlement carries a recovery handle.
 Keep it until cleanup succeeds or ownership is handed to an operator. A walker
@@ -794,8 +897,10 @@ parent directory.
 
 `verify_entries()` compares the observed entries with the configured exact set;
 include each link entry, but do not add descendants reachable through an alias.
-Both lists must have unique paths, and matching is order independent by path
-and entry kind. Duplicate paths return `InvalidOptions`. A finite depth limit
+Both input lists must have unique paths, and matching is order independent by
+path and entry kind. Repeated paths supplied in either input list return
+`InvalidOptions`. If traversal observes an entry path more than once, the
+observed tree violates the request and returns `RequirementNotMet`. A finite depth limit
 checks the complete tree and returns an error if any entry exceeds that depth;
 it does not silently truncate validation. Expected-path bytes are charged
 before indexing, and verification shares the configured entry, depth,
@@ -1981,12 +2086,45 @@ Windows Rooted symbolic-link reads, type checks, and creation remain relative
 to opened handles. Copying the link itself never opens its dangling or external
 target.
 
-## Recursive deletion budgets
+## Directory deletion limits
 
 `LocalDeleteOptions` accepts `with_max_depth`, `with_max_entries`,
 `with_max_pending_path_bytes`, and `with_deadline`. All are unbounded by default;
-matching `without_*` methods remove individual limits. Budgets apply to recursive
-directory deletion. The requested directory counts as one entry at depth zero.
+matching `without_*` methods remove individual limits. Depth, entry, and pending
+path-byte budgets apply only to recursive directory deletion. The cooperative
+deadline applies to strict and recursive directory deletion. It is checked
+between native calls and cannot interrupt blocked I/O. A zero-duration
+deadline makes even strict deletion of an empty directory time out before the
+directory is removed. `delete_file` removes one file entry and does not use
+these directory limits.
+
+For example, the strict-directory request below times out and leaves the empty
+directory in place; the file request has no directory traversal budget:
+
+```rust,no_run
+use std::path::Path;
+use std::time::Duration;
+use std::fs;
+use qubit_local_files::LocalFileSystem;
+use qubit_local_files::options::LocalDeleteOptions;
+
+let fixture = tempfile::tempdir()?;
+fs::create_dir(fixture.path().join("empty"))?;
+fs::write(fixture.path().join("one-file"), b"payload")?;
+let filesystem = LocalFileSystem::host()?;
+let strict = LocalDeleteOptions::new().with_deadline(Duration::ZERO);
+let error = filesystem.delete_directory_with_options(&fixture.path().join("empty"), &strict)
+    .expect_err("zero deadline expires before strict directory removal");
+assert_eq!(std::io::ErrorKind::TimedOut, error.io_error_kind());
+assert!(fixture.path().join("empty").is_dir());
+let file = filesystem.delete_file_with_options(&fixture.path().join("one-file"), &strict)?;
+assert!(file.deleted());
+assert!(!fixture.path().join("one-file").exists());
+# Ok::<(), Box<dyn std::error::Error>>(())
+```
+
+The requested directory counts as one entry at depth zero when recursive
+deletion is enabled.
 Every discovered child consumes entry capacity before entering the work queue;
 its native encoded path length consumes pending-path capacity until popped.
 This queue limit excludes allocator overhead and in-flight enumeration objects. Both Host

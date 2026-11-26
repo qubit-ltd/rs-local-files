@@ -142,9 +142,11 @@ impl AsyncLocalFileSystem {
     ///
     /// The ordinary executor handle pool reserves one enumeration reader by
     /// default, or the complete explicit `max_open_directories` value. A zero
-    /// or unavailable reservation is rejected with `CapacityExceeded`; the
-    /// reservation is returned when the walker closes. Temporary resolution
-    /// handles and cleanup handles follow their separate existing budgets.
+    /// limit is reported as `InvalidOptions` in the operation outcome when
+    /// admission resources are available; if the full reservation cannot be
+    /// acquired, submission returns `CapacityExceeded` first. The reservation
+    /// is returned when the walker closes. Temporary resolution handles and
+    /// cleanup handles follow their separate existing budgets.
     /// The facade binds submissions to this executor's operation group, so a
     /// draining group rejects new walker work. Already accepted work can still
     /// finish cleanup on the executor's dedicated cleanup queue.
@@ -382,9 +384,11 @@ impl AsyncLocalFileSystem {
                             super::stream::LocalNativeStream::Reader(reader),
                             worker_budget,
                             worker_handle,
-                            None,
-                            false,
-                            Arc::as_ptr(&filesystem.core) as usize,
+                            super::stream::WorkerStreamOptions {
+                                observer: None,
+                                append_mode: false,
+                                authority_identity: Arc::as_ptr(&filesystem.core) as usize,
+                            },
                         );
                         match resource.and_then(super::stream::AsyncLocalFileReader::new) {
                             Ok(reader) => OperationOutcome::Succeeded(reader),
@@ -529,9 +533,11 @@ impl AsyncLocalFileSystem {
                         super::stream::LocalNativeStream::Writer(Box::new(writer)),
                         worker_budget,
                         worker_handle,
-                        Some(worker_observer),
-                        options.mode() == crate::LocalWriteMode::Append,
-                        Arc::as_ptr(&filesystem.core) as usize,
+                        super::stream::WorkerStreamOptions {
+                            observer: Some(worker_observer),
+                            append_mode: options.mode() == crate::LocalWriteMode::Append,
+                            authority_identity: Arc::as_ptr(&filesystem.core) as usize,
+                        },
                     );
                     match resource.and_then(super::stream::AsyncLocalFileWriter::new) {
                         Ok(writer) => OperationOutcome::Succeeded(writer),

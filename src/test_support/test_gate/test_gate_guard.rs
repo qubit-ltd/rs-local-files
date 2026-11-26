@@ -39,6 +39,10 @@ impl TestGateGuard {
     /// Waits for a worker to enter the gate up to the given duration.
     ///
     /// Returns `false` if the deadline expires before entry or release.
+    ///
+    /// # Parameters
+    ///
+    /// * `timeout` is the maximum duration to wait for entry.
     pub fn wait_until_entered_timeout(&self, timeout: std::time::Duration) -> bool {
         let mut phase = self
             .state

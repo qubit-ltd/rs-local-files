@@ -296,10 +296,7 @@ async fn seal_access(
             // transition bridge still stores the sealed owner before waking
             // the operation future.
             #[cfg(feature = "test-support")]
-            crate::test_support::hit_test_gate_for_authority(
-                "lf6-stage-bytes-after-native-seal",
-                authority_identity,
-            );
+            crate::test_support::hit_test_gate_for_authority("lf6-stage-bytes-after-native-seal", authority_identity);
             transition
         })
         .map_err(command_error)?;

@@ -1634,10 +1634,11 @@ fn test_stop_during_native_publish_preserves_published_fact_when_parent_sync_fai
 #[cfg(feature = "test-support")]
 #[test]
 fn test_sync_atomic_publish_gate_isolated_by_filesystem_authority() {
-    use qubit_local_files::LocalFileSystem;
-    use qubit_local_files::test_support::install_test_gate_for_local_filesystem_path;
     use std::sync::mpsc;
     use std::time::Duration;
+
+    use qubit_local_files::LocalFileSystem;
+    use qubit_local_files::test_support::install_test_gate_for_local_filesystem_path;
 
     fn publish(filesystem: LocalFileSystem, destination: PathBuf, bytes: &'static [u8]) -> Result<(), String> {
         let mut writer = filesystem
@@ -1649,7 +1650,9 @@ fn test_sync_atomic_publish_gate_isolated_by_filesystem_authority() {
         writer.commit().map(|_| ()).map_err(|error| error.to_string())
     }
 
-    let _gate_lock = WRITER_PUBLISH_GATE_TEST_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+    let _gate_lock = WRITER_PUBLISH_GATE_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
     let directory = tempfile::tempdir().unwrap();
     let destination = std::fs::canonicalize(directory.path()).unwrap().join("published");
     let target_filesystem = LocalFileSystem::host().unwrap();
@@ -1856,8 +1859,7 @@ fn test_staged_tree_publish_preserves_caller_validation_limits_and_recovery() {
                     bytes: b"staged".to_vec(),
                 }],
                 publish_options: LocalTreePublishOptions::new().with_validation(
-                    LocalTreeValidationOptions::new()
-                        .with_limits(LocalListOptions::new().with_max_entries(0)),
+                    LocalTreeValidationOptions::new().with_limits(LocalListOptions::new().with_max_entries(0)),
                 ),
             },
             LocalOperationOptions::default(),
@@ -1958,8 +1960,7 @@ fn test_staged_recovery_retains_and_refunds_handle_quota_across_cleanup() {
                     },
                 ],
                 publish_options: LocalTreePublishOptions::new().with_owner_access_policy(
-                    qubit_local_files::policy::LocalOwnerAccessPolicy::new()
-                        .with_unix_modes(0o700, 0o600),
+                    qubit_local_files::policy::LocalOwnerAccessPolicy::new().with_unix_modes(0o700, 0o600),
                 ),
             },
             LocalOperationOptions::default(),
@@ -1976,14 +1977,12 @@ fn test_staged_recovery_retains_and_refunds_handle_quota_across_cleanup() {
         bytes: b"writer".to_vec(),
     };
     let (mut writer_operation, _) = filesystem
-        .submit_writer_commit(
-            &manager,
-            Default::default(),
-            writer,
-            LocalOperationOptions::default(),
-        )
+        .submit_writer_commit(&manager, Default::default(), writer, LocalOperationOptions::default())
         .expect("shrunk recovery quota leaves capacity for this writer");
-    assert!(matches!(writer_operation.wait_outcome().unwrap(), OperationOutcome::Succeeded(_)));
+    assert!(matches!(
+        writer_operation.wait_outcome().unwrap(),
+        OperationOutcome::Succeeded(_)
+    ));
 
     recovery.cleanup().unwrap();
     let (mut writer, _) = filesystem
@@ -1998,10 +1997,7 @@ fn test_staged_recovery_retains_and_refunds_handle_quota_across_cleanup() {
             LocalOperationOptions::default(),
         )
         .expect("successful cleanup refunds the retained handle quota");
-    assert!(matches!(
-        writer.wait_outcome().unwrap(),
-        OperationOutcome::Succeeded(_)
-    ));
+    assert!(matches!(writer.wait_outcome().unwrap(), OperationOutcome::Succeeded(_)));
 }
 
 #[test]
@@ -2056,10 +2052,7 @@ fn test_successful_staged_publish_refunds_transient_and_root_handle_quota() {
             LocalOperationOptions::default(),
         )
         .expect("successful publication refunds all staged handle quota");
-    assert!(matches!(
-        writer.wait_outcome().unwrap(),
-        OperationOutcome::Succeeded(_)
-    ));
+    assert!(matches!(writer.wait_outcome().unwrap(), OperationOutcome::Succeeded(_)));
 }
 
 #[test]
@@ -2074,11 +2067,7 @@ fn test_staged_publish_checks_caller_exact_manifest_against_generated_manifest()
     let directory = tempfile::tempdir().unwrap();
     let manager = OperationManager::new(ManagerOptions::default()).unwrap();
     let filesystem = facade(&manager);
-    let wrong = LocalTreeEntry::new(
-        PathBuf::from("other"),
-        qubit_local_files::outcome::LocalFileKind::File,
-    )
-    .unwrap();
+    let wrong = LocalTreeEntry::new(PathBuf::from("other"), qubit_local_files::outcome::LocalFileKind::File).unwrap();
     let (mut operation, _) = filesystem
         .submit_staged_tree_publish(
             &manager,
@@ -2092,8 +2081,7 @@ fn test_staged_publish_checks_caller_exact_manifest_against_generated_manifest()
                     bytes: b"payload".to_vec(),
                 }],
                 publish_options: LocalTreePublishOptions::new().with_validation(
-                    qubit_local_files::directory::LocalTreeValidationOptions::new()
-                        .with_exact_entries(vec![wrong]),
+                    qubit_local_files::directory::LocalTreeValidationOptions::new().with_exact_entries(vec![wrong]),
                 ),
             },
             LocalOperationOptions::default(),
@@ -2107,10 +2095,7 @@ fn test_staged_publish_checks_caller_exact_manifest_against_generated_manifest()
             );
             let (native, _) = error.into_parts();
             let (_, stage, _) = native.into_parts();
-            stage
-                .expect("manifest mismatch preserves stage")
-                .cleanup()
-                .unwrap();
+            stage.expect("manifest mismatch preserves stage").cleanup().unwrap();
         }
         outcome => panic!("conflicting exact manifest must prevent publication, got {outcome:?}"),
     }
@@ -2157,9 +2142,8 @@ fn test_recovery_charges_retained_roots_and_rejects_over_remaining_quota() {
                         bytes: b"second".to_vec(),
                     },
                 ],
-                publish_options: LocalTreePublishOptions::new().with_owner_access_policy(
-                    LocalOwnerAccessPolicy::new().with_unix_modes(0o700, 0o600),
-                ),
+                publish_options: LocalTreePublishOptions::new()
+                    .with_owner_access_policy(LocalOwnerAccessPolicy::new().with_unix_modes(0o700, 0o600)),
             },
             LocalOperationOptions::default(),
         )
@@ -2174,8 +2158,7 @@ fn test_recovery_charges_retained_roots_and_rejects_over_remaining_quota() {
         name: name.into(),
         stage_options: LocalTempDirectoryOptions::new(),
         files: Vec::new(),
-        publish_options: LocalTreePublishOptions::new()
-            .with_owner_access_policy(LocalOwnerAccessPolicy::new()),
+        publish_options: LocalTreePublishOptions::new().with_owner_access_policy(LocalOwnerAccessPolicy::new()),
     };
     let (mut publish_operation, _) = filesystem
         .submit_staged_tree_publish(
@@ -2237,7 +2220,10 @@ fn test_recovery_charges_retained_roots_and_rejects_over_remaining_quota() {
             LocalOperationOptions::default(),
         )
         .expect("dropping both recovery owners refunds their retained-root quota");
-    assert!(matches!(after_drop.wait_outcome().unwrap(), OperationOutcome::Succeeded(_)));
+    assert!(matches!(
+        after_drop.wait_outcome().unwrap(),
+        OperationOutcome::Succeeded(_)
+    ));
 }
 
 #[cfg(feature = "test-support")]
@@ -2302,12 +2288,13 @@ fn test_concurrent_staged_submissions_compete_for_shared_handle_quota() {
 #[cfg(feature = "test-support")]
 #[test]
 fn test_staged_publish_gates_are_scoped_to_filesystem_authority() {
+    use std::time::Duration;
+
     use qubit_local_files::operation::publish::LocalStagedTreeFile;
     use qubit_local_files::operation::publish::LocalStagedTreePublishRequest;
     use qubit_local_files::options::LocalTempDirectoryOptions;
     use qubit_local_files::options::LocalTreePublishOptions;
     use qubit_local_files::test_support::install_test_gate_for_filesystem;
-    use std::time::Duration;
 
     let directory = tempfile::tempdir().unwrap();
     let manager = OperationManager::new(ManagerOptions::default()).unwrap();
@@ -2344,7 +2331,10 @@ fn test_staged_publish_gates_are_scoped_to_filesystem_authority() {
             assert!(matches!(outcome, OperationOutcome::Succeeded(_)));
             panic!("same-name staged publish from another authority consumed the target gate");
         }
-        assert!(matches!(unrelated.wait_outcome().unwrap(), OperationOutcome::Succeeded(_)));
+        assert!(matches!(
+            unrelated.wait_outcome().unwrap(),
+            OperationOutcome::Succeeded(_)
+        ));
 
         let (mut target, _) = target_filesystem
             .submit_staged_tree_publish(
@@ -2363,6 +2353,8 @@ fn test_staged_publish_gates_are_scoped_to_filesystem_authority() {
 #[cfg(target_os = "linux")]
 #[test]
 fn test_cleanup_recovery_retains_shrunk_quota_across_parts_and_retry_failure() {
+    use std::os::unix::fs::PermissionsExt;
+
     use qubit_local_files::directory::LocalTreeRetainedResource;
     use qubit_local_files::operation::LocalSubmitRejection;
     use qubit_local_files::operation::publish::LocalStagedTreeFile;
@@ -2371,7 +2363,6 @@ fn test_cleanup_recovery_retains_shrunk_quota_across_parts_and_retry_failure() {
     use qubit_local_files::options::LocalTempDirectoryOptions;
     use qubit_local_files::options::LocalTreePublishOptions;
     use qubit_local_files::policy::LocalOwnerAccessPolicy;
-    use std::os::unix::fs::PermissionsExt;
 
     let directory = tempfile::tempdir().unwrap();
     let manager = OperationManager::new(ManagerOptions::default()).unwrap();
@@ -2402,9 +2393,8 @@ fn test_cleanup_recovery_retains_shrunk_quota_across_parts_and_retry_failure() {
                         bytes: b"second".to_vec(),
                     },
                 ],
-                publish_options: LocalTreePublishOptions::new().with_owner_access_policy(
-                    LocalOwnerAccessPolicy::new().with_unix_modes(0o700, 0o600),
-                ),
+                publish_options: LocalTreePublishOptions::new()
+                    .with_owner_access_policy(LocalOwnerAccessPolicy::new().with_unix_modes(0o700, 0o600)),
             },
             LocalOperationOptions::default(),
         )
@@ -2415,8 +2405,8 @@ fn test_cleanup_recovery_retains_shrunk_quota_across_parts_and_retry_failure() {
     };
     let stage_path = directory.path().join(write_recovery.relative_name());
     std::fs::set_permissions(&stage_path, std::fs::Permissions::from_mode(0o500)).unwrap();
-    let _cleanup_fault = qubit_local_files::test_support::install_test_fault_shared("lf10-staged-cleanup-failure")
-        .unwrap();
+    let _cleanup_fault =
+        qubit_local_files::test_support::install_test_fault_shared("lf10-staged-cleanup-failure").unwrap();
     let cleanup_error = write_recovery
         .cleanup()
         .expect_err("injected Cleanup failure should retain its cleanup owner");
@@ -2430,8 +2420,7 @@ fn test_cleanup_recovery_retains_shrunk_quota_across_parts_and_retry_failure() {
         name: name.into(),
         stage_options: LocalTempDirectoryOptions::new(),
         files: Vec::new(),
-        publish_options: LocalTreePublishOptions::new()
-            .with_owner_access_policy(LocalOwnerAccessPolicy::new()),
+        publish_options: LocalTreePublishOptions::new().with_owner_access_policy(LocalOwnerAccessPolicy::new()),
     };
     let (mut publish_operation, _) = filesystem
         .submit_staged_tree_publish(
@@ -2502,8 +2491,14 @@ fn test_cleanup_recovery_retains_shrunk_quota_across_parts_and_retry_failure() {
                 name: "drop-recovery".into(),
                 stage_options: LocalTempDirectoryOptions::new(),
                 files: vec![
-                    LocalStagedTreeFile { path: PathBuf::from("duplicate"), bytes: b"one".to_vec() },
-                    LocalStagedTreeFile { path: PathBuf::from("duplicate"), bytes: b"two".to_vec() },
+                    LocalStagedTreeFile {
+                        path: PathBuf::from("duplicate"),
+                        bytes: b"one".to_vec(),
+                    },
+                    LocalStagedTreeFile {
+                        path: PathBuf::from("duplicate"),
+                        bytes: b"two".to_vec(),
+                    },
                 ],
                 publish_options: LocalTreePublishOptions::new(),
             },
@@ -2523,8 +2518,14 @@ fn test_cleanup_recovery_retains_shrunk_quota_across_parts_and_retry_failure() {
                 name: "other-drop-recovery".into(),
                 stage_options: LocalTempDirectoryOptions::new(),
                 files: vec![
-                    LocalStagedTreeFile { path: PathBuf::from("duplicate"), bytes: b"one".to_vec() },
-                    LocalStagedTreeFile { path: PathBuf::from("duplicate"), bytes: b"two".to_vec() },
+                    LocalStagedTreeFile {
+                        path: PathBuf::from("duplicate"),
+                        bytes: b"one".to_vec(),
+                    },
+                    LocalStagedTreeFile {
+                        path: PathBuf::from("duplicate"),
+                        bytes: b"two".to_vec(),
+                    },
                 ],
                 publish_options: LocalTreePublishOptions::new(),
             },

@@ -194,13 +194,9 @@ fn test_rooted_copy_deadline_after_destination_revalidation_preserves_target() {
     let fixture = tempfile::tempdir().expect("fixture should exist");
     fs::write(fixture.path().join("source"), b"replacement").expect("source should exist");
     fs::create_dir(fixture.path().join("target")).expect("target directory should exist");
-    fs::write(fixture.path().join("target/child"), b"original")
-        .expect("target child should exist");
-    let filesystem =
-        LocalFileSystem::rooted(fixture.path()).expect("rooted filesystem should open");
-    let _clock = observations::DeadlineClockGuard::expire_at(
-        DeadlineBoundary::RootedCopyDestinationRevalidated,
-    );
+    fs::write(fixture.path().join("target/child"), b"original").expect("target child should exist");
+    let filesystem = LocalFileSystem::rooted(fixture.path()).expect("rooted filesystem should open");
+    let _clock = observations::DeadlineClockGuard::expire_at(DeadlineBoundary::RootedCopyDestinationRevalidated);
 
     let failure = filesystem
         .copy_with_options(
@@ -215,7 +211,10 @@ fn test_rooted_copy_deadline_after_destination_revalidation_preserves_target() {
 
     assert_eq!(ErrorKind::TimedOut, failure.error().io_error_kind());
     assert_eq!(LocalCopyFailureState::Unchanged, failure.state());
-    assert_eq!(b"original", fs::read(fixture.path().join("target/child")).unwrap().as_slice());
+    assert_eq!(
+        b"original",
+        fs::read(fixture.path().join("target/child")).unwrap().as_slice()
+    );
 }
 
 #[test]
@@ -223,11 +222,8 @@ fn test_rooted_copy_deadline_after_writer_identity_check_prevents_install() {
     let fixture = tempfile::tempdir().expect("fixture should exist");
     fs::write(fixture.path().join("source"), b"replacement").expect("source should exist");
     fs::write(fixture.path().join("target"), b"original").expect("target should exist");
-    let filesystem =
-        LocalFileSystem::rooted(fixture.path()).expect("rooted filesystem should open");
-    let _clock = observations::DeadlineClockGuard::expire_at(
-        DeadlineBoundary::RootedWriterIdentityVerified,
-    );
+    let filesystem = LocalFileSystem::rooted(fixture.path()).expect("rooted filesystem should open");
+    let _clock = observations::DeadlineClockGuard::expire_at(DeadlineBoundary::RootedWriterIdentityVerified);
 
     let failure = filesystem
         .copy_with_options(

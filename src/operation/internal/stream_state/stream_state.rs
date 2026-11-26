@@ -967,7 +967,10 @@ mod tests {
         let mut cx = Context::from_waker(std::task::Waker::noop());
         let mut prefix = [0; 1];
 
-        assert!(matches!(state.poll_read(&resource, &mut cx, &mut prefix), Poll::Ready(Ok(1))));
+        assert!(matches!(
+            state.poll_read(&resource, &mut cx, &mut prefix),
+            Poll::Ready(Ok(1))
+        ));
         assert!(state.read_buffer.capacity() > 0);
         state.request_close_on_drop(&resource);
 

@@ -127,7 +127,10 @@ pub(super) fn panic_clone_waker() -> std::task::Waker {
 }
 #[path = "worker_stream_driver.rs"]
 mod worker_stream_driver;
+#[path = "worker_stream_options.rs"]
+mod worker_stream_options;
 pub(crate) use worker_stream_driver::WorkerStreamDriver;
+pub(crate) use worker_stream_options::WorkerStreamOptions;
 #[path = "worker_closable.rs"]
 mod worker_closable;
 use worker_closable::WorkerClosable;
@@ -263,10 +266,7 @@ fn drain_stream_commands(inner: Arc<WorkerStreamInner>) {
         if matches!(&request.request.command, LocalStreamCommand::Write { .. })
             && matches!(&result, Ok(LocalStreamCompletion::Written(_)))
         {
-            crate::test_support::hit_test_gate_for_authority(
-                "rlf9-writer-after-stage-write",
-                inner.authority_identity,
-            );
+            crate::test_support::hit_test_gate_for_authority("rlf9-writer-after-stage-write", inner.authority_identity);
         }
         if matches!(
             request.request.command,

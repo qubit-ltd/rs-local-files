@@ -1184,14 +1184,17 @@ kind. Create's `exists_ok` accepts only an existing directory.
 
 ### 17.2 Delete
 
-File deletion
-removes a non-directory or link; directory deletion is separate and recursion is
-explicit. Recursive deletion accepts optional depth, discovered-entry, pending-path
-byte, and cooperative elapsed-time budgets. The root counts as one entry at depth
-zero. Pending bytes bound encoded paths in the work queue, excluding allocator
-overhead and in-flight enumeration objects; children are charged before queuing.
-Budget failures retain typed resource facts even after partial deletion. Native
-defaults remain replaceable; provider adapters enforce mandatory ceilings.
+File deletion removes a non-directory or link; directory deletion is separate
+and recursion is explicit. Strict and recursive directory deletion both check
+the cooperative deadline between native calls, so a zero deadline times out
+before removing even an empty strict directory. File deletion does not use the
+directory deadline. Recursive deletion additionally accepts depth,
+discovered-entry, and pending-path byte budgets. The root counts as one entry at
+depth zero. Pending bytes bound encoded paths in the work queue, excluding
+allocator overhead and in-flight enumeration objects; children are charged
+before queuing. Budget failures retain typed resource facts even after partial
+deletion. Native defaults remain replaceable; provider adapters enforce
+mandatory ceilings.
 
 ### 17.3 Rename
 
@@ -1665,6 +1668,14 @@ stopped or cancelled operation does not imply that an already-started native
 call was interrupted, and recovery owners remain available when cleanup is
 unconfirmed.
 
+`request_stop()` requests cooperative cancellation; the return value only says
+whether the request was accepted. Complete reads check between read blocks,
+while other operations check at their documented checkpoints. A native call
+already in progress is not interrupted. Abandoning a future that waits for an
+outcome only abandons that wait; it does not request stop or cancel accepted
+work. Call `request_stop()` explicitly when needed, then take the outcome and
+wait for settlement after closing or transferring any returned resource.
+
 Complete reads return a `LocalFactObserver` independently of their byte result.
 `submit_read_all` checks cooperative stop between read blocks and uses the same
 reader for before/after observations that detect changes; these observations
@@ -1684,9 +1695,10 @@ batch-byte reservation, a reservation from the executor's ordinary handle pool
 for its active enumeration readers, and a cleanup reservation. The reader
 reservation is acquired atomically for the full effective
 `max_open_directories` limit: one when omitted, or the explicit positive
-limit. Zero remains an invalid walker option; requests above executor capacity
-or competing for unavailable shared capacity are rejected with
-`CapacityExceeded`. The same effective limit is passed to the native walker.
+limit. Zero remains an invalid walker option. When admission resources are
+available, the operation outcome reports `InvalidOptions`; requests that cannot
+reserve their full allowance are rejected with `CapacityExceeded` first. The
+same effective limit is passed to the native walker.
 The whole reader reservation returns after confirmed close, even when fewer
 readers were active. Temporary resolution handles, captured root authority,
 and cleanup capacity remain separately accounted. Each `next_batch()` request
@@ -1704,6 +1716,11 @@ to each waiter. A confirmed close makes the batch-byte reservation reusable
 even while the worker callback that published that result is returning. Path
 batches already returned remain owned by the caller and keep their public
 `Vec<PathBuf>` representation.
+
+The worker retains at most one 256 KiB batch and one deferred lookahead path
+of at most 256 KiB. A larger individual path is discarded and reported as a
+resource-limit error. These separate bounds limit retained path bytes to
+512 KiB, excluding allocation overhead.
 
 The cleanup reservation is acquired before the walker is published, so a
 transient full ordinary queue cannot consume the walker's reserved cleanup
@@ -1905,8 +1922,9 @@ full-tree traversal. Access changes also traverse affected entries; exact owner
 policy retains at most 256 child identities and management handles by default,
 with `max_entries` replacing that bound. `verify_entries()` compares the
 observed entry set with the supplied expected set exactly, independent of
-order. Both sets must have unique paths or verification returns
-`InvalidOptions`; path bytes are charged before the
+order. Repeated paths in either supplied set return `InvalidOptions`. If
+traversal observes the same entry path more than once, it returns
+`RequirementNotMet`. Path bytes are charged before the
 borrowed-reference index is built, and traversal/indexing share the selected
 entry, depth, byte, open-directory, and deadline limits. The byte budget counts
 logical path bytes; it is not a process-wide heap limit for hash buckets or

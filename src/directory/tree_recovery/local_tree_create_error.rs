@@ -51,6 +51,14 @@ pub struct LocalTreeCreateError {
 impl LocalTreeCreateError {
     /// Attaches a shared executor quota to every native owner retained by a
     /// partial creation failure and reports the retained root-handle count.
+    ///
+    /// # Parameters
+    ///
+    /// * `quota` is the shared executor reservation retained by each owner.
+    ///
+    /// # Returns
+    ///
+    /// The number of root handles retained by the affected owners.
     pub(crate) fn retain_handle_quota(&mut self, quota: std::sync::Arc<dyn Send + Sync>) -> usize {
         let mut owners = 0_usize;
         if let Some(stage) = self.stage.as_mut() {

@@ -88,6 +88,11 @@ fn lock_publication_state<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 
 /// Shrinks the peak staged-publish reservation to the handles still retained
 /// by its recovery owner after transient worker handles have been released.
+///
+/// # Parameters
+///
+/// * `quota` is the staged publish reservation to shrink.
+/// * `retained_handles` is the number of handles that remain with recovery.
 fn shrink_staged_handle_quota(quota: &Mutex<Permit>, retained_handles: usize) {
     let mut permit = quota.lock().unwrap_or_else(|error| error.into_inner());
     let release = permit.amount().saturating_sub(retained_handles);
@@ -526,14 +531,10 @@ impl AsyncLocalFileSystem {
                     if let Some(stop) = stop_report(scope) {
                         return match stage.cleanup() {
                             Ok(()) => OperationOutcome::Stopped(stop),
-                            Err(error) => {
-                                OperationOutcome::Failed(LocalStagedTreePublishError::Cleanup(
-                                    {
-                                        shrink_staged_handle_quota(&handle_quota, 2);
-                                        LocalStagedTreeReservedError::new(error, reservation.clone())
-                                    },
-                                ))
-                            }
+                            Err(error) => OperationOutcome::Failed(LocalStagedTreePublishError::Cleanup({
+                                shrink_staged_handle_quota(&handle_quota, 2);
+                                LocalStagedTreeReservedError::new(error, reservation.clone())
+                            })),
                         };
                     }
                     let entry =
@@ -574,14 +575,10 @@ impl AsyncLocalFileSystem {
                 if let Some(stop) = stop_report(scope) {
                     return match stage.cleanup() {
                         Ok(()) => OperationOutcome::Stopped(stop),
-                        Err(error) => {
-                            OperationOutcome::Failed(LocalStagedTreePublishError::Cleanup(
-                                {
-                                    shrink_staged_handle_quota(&handle_quota, 2);
-                                    LocalStagedTreeReservedError::new(error, reservation.clone())
-                                },
-                            ))
-                        }
+                        Err(error) => OperationOutcome::Failed(LocalStagedTreePublishError::Cleanup({
+                            shrink_staged_handle_quota(&handle_quota, 2);
+                            LocalStagedTreeReservedError::new(error, reservation.clone())
+                        })),
                     };
                 }
                 match stage.publish_new(&parent, &request.name, &publish_options) {
@@ -785,10 +782,7 @@ impl AsyncLocalFileSystem {
                     return abort_managed_conditional_after_stop(&writer_resource, stop);
                 }
                 #[cfg(feature = "test-support")]
-                crate::test_support::hit_test_gate_for_authority(
-                    "lf7-conditional-before-publish",
-                    test_gate_authority,
-                );
+                crate::test_support::hit_test_gate_for_authority("lf7-conditional-before-publish", test_gate_authority);
                 if let Some(stop) = stop_report(scope) {
                     return abort_managed_conditional_after_stop(&writer_resource, stop);
                 }
@@ -908,10 +902,7 @@ impl AsyncLocalFileSystem {
             let command = request.command;
             let receiver = request.access.enqueue_native_transition(&executor, move |native| {
                 #[cfg(feature = "test-support")]
-                crate::test_support::hit_test_gate_for_resource(
-                    "lf7-temp-before-persist-primitive",
-                    gate_resource,
-                );
+                crate::test_support::hit_test_gate_for_resource("lf7-temp-before-persist-primitive", gate_resource);
                 transition_temp_native(native, command, lease_access, context)
             });
             let receiver = match receiver {
@@ -1016,16 +1007,21 @@ mod relative_host_publish_tests {
         )
         .unwrap();
         let gate = Arc::new(std::sync::Barrier::new(3));
-        let attempts = (0..2).map(|_| {
-            let executor = executor.clone();
-            let gate = Arc::clone(&gate);
-            std::thread::spawn(move || {
-                gate.wait();
-                executor.reserve_handles(3)
+        let attempts = (0..2)
+            .map(|_| {
+                let executor = executor.clone();
+                let gate = Arc::clone(&gate);
+                std::thread::spawn(move || {
+                    gate.wait();
+                    executor.reserve_handles(3)
+                })
             })
-        }).collect::<Vec<_>>();
+            .collect::<Vec<_>>();
         gate.wait();
-        let permits = attempts.into_iter().map(|attempt| attempt.join().unwrap()).collect::<Vec<_>>();
+        let permits = attempts
+            .into_iter()
+            .map(|attempt| attempt.join().unwrap())
+            .collect::<Vec<_>>();
         assert_eq!(1, permits.iter().filter(|permit| permit.is_some()).count());
         drop(permits);
         assert!(executor.reserve_handles(5).is_some());

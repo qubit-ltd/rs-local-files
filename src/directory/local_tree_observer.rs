@@ -113,11 +113,15 @@ impl LocalTreeObserver {
     }
 
     /// Applies strict staged-tree depth admission before entry observation.
+    ///
+    /// # Parameters
+    ///
+    /// * `limit` is the maximum admitted relative depth, or `None` for no
+    ///   limit.
     pub(crate) fn with_logical_depth_limit(mut self, limit: Option<usize>) -> Self {
-        self.walker = self.walker.with_logical_depth_limit(
-            limit,
-            self.directory.diagnostic_path().to_path_buf(),
-        );
+        self.walker = self
+            .walker
+            .with_logical_depth_limit(limit, self.directory.diagnostic_path().to_path_buf());
         self
     }
 }

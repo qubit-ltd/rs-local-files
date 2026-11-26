@@ -294,13 +294,7 @@ pub(super) fn copy_file(
                 sentinel.write_all(b"replacement sentinel")
             });
             let source_error = race_result.err().unwrap_or_else(crate::local::test_fault_error);
-            let mut failure = error(
-                Stage::PrepareDestination,
-                source,
-                destination,
-                statistics,
-                source_error,
-            );
+            let mut failure = error(Stage::PrepareDestination, source, destination, statistics, source_error);
             if let Err(cleanup) = writer.abort() {
                 failure = failure.with_staging_context(
                     writer.staging_path().to_path_buf(),
