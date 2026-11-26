@@ -7,6 +7,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from contextlib import redirect_stderr
 from unittest import mock
@@ -57,7 +58,9 @@ if os.environ.get('FAKE_COVERAGE_FAIL'):
         subprocess.run(["git", "-C", str(self.root), "commit", "-qm", "baseline"], check=True)
 
     def tearDown(self):
+        lock_path = self.root.parent / f".{self.root.name}.coverage-provenance.lock"
         self.temp.cleanup()
+        lock_path.unlink(missing_ok=True)
 
     def run_provenance(self, extra_env=None):
         env = os.environ.copy()
@@ -207,6 +210,70 @@ if os.environ.get('FAKE_COVERAGE_FAIL'):
                 continue
             self.assertEqual((self.root / relative).read_bytes(), content, relative)
         self.assertEqual(self.backup_directories(), [])
+
+    def test_concurrent_collection_is_rejected_while_first_run_rolls_back(self):
+        outputs = self.write_old_outputs()
+        started = self.root.with_suffix(".collector-started")
+        release = self.root.with_suffix(".collector-release")
+        self.coverage.write_text(
+            """import os, pathlib, time
+root = pathlib.Path.cwd()
+if os.environ.get('FAKE_COVERAGE_BLOCK'):
+    pathlib.Path(os.environ['FAKE_COVERAGE_STARTED']).touch()
+    release = pathlib.Path(os.environ['FAKE_COVERAGE_RELEASE'])
+    while not release.exists():
+        time.sleep(0.01)
+for relative, content in {
+    'coverage-summary.md': 'new summary', 'coverage.json': '{}', 'lcov.info': '',
+    'coverage.txt': '', 'coverage-badge.json': '{}', 'ci-summary.json': '{}',
+    'target/llvm-cov/html/index.html': 'new html',
+    'target/llvm-cov/cobertura.xml': '<coverage/>',
+}.items():
+    path = root / relative
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content)
+if os.environ.get('FAKE_COVERAGE_FAIL'):
+    raise SystemExit(17)
+""",
+            encoding="utf-8",
+        )
+        env = os.environ.copy()
+        env["RLF_COVERAGE_COMMAND"] = str(self.coverage)
+        env["RLF_COVERAGE_TEST_MODE"] = "1"
+        env["FAKE_COVERAGE_BLOCK"] = "1"
+        env["FAKE_COVERAGE_FAIL"] = "1"
+        env["FAKE_COVERAGE_STARTED"] = str(started)
+        env["FAKE_COVERAGE_RELEASE"] = str(release)
+        first = subprocess.Popen(
+            [sys.executable, str(SCRIPT), "--project-root", str(self.root)],
+            text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env,
+        )
+        try:
+            for _ in range(500):
+                if started.exists():
+                    break
+                if first.poll() is not None:
+                    self.fail("first provenance process exited before entering collection")
+                time.sleep(0.01)
+            self.assertTrue(started.exists(), "first provenance process did not enter collection")
+            second = self.run_provenance()
+            self.assertNotEqual(second.returncode, 0)
+            self.assertIn("another coverage provenance run is active", second.stderr)
+        finally:
+            release.touch()
+            stdout, stderr = first.communicate(timeout=10)
+            started.unlink(missing_ok=True)
+            release.unlink(missing_ok=True)
+        self.assertEqual(first.returncode, 17, stdout + stderr)
+        for relative, content in outputs.items():
+            if relative == "coverage-metadata.json":
+                self.assertFalse((self.root / relative).exists())
+            else:
+                self.assertEqual((self.root / relative).read_bytes(), content, relative)
+        self.assertEqual(self.backup_directories(), [])
+        subsequent = self.run_provenance()
+        self.assertEqual(subsequent.returncode, 0, subsequent.stderr)
+        self.assertTrue((self.root / "coverage-metadata.json").is_file())
 
     def test_failed_restore_keeps_backup_and_continues_restoring_other_outputs(self):
         outputs = self.write_old_outputs()

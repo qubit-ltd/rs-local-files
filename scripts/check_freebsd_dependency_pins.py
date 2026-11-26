@@ -49,12 +49,13 @@ def _workflow_pins(source: str, path: str) -> tuple[list[str], list[str], list[s
 
 def validate(tsv: str, workflow: str) -> None:
     pins = _tsv_pins(tsv)
-    expected = {"../rs-redact", "../rs-json"}
-    if set(pins) & expected != expected:
-        missing = sorted(expected - set(pins))
-        raise PinError(f"TSV is missing required FreeBSD dependencies: {', '.join(missing)}")
+    stale = {"../rs-redact", "../rs-json"} & set(pins)
+    if stale:
+        raise PinError(f"unused sibling dependency pins remain: {', '.join(sorted(stale))}")
+    if any(path in workflow for path in ("../rs-redact", "../rs-json")):
+        raise PinError("FreeBSD workflow still prepares an unused sibling dependency")
 
-    for path in sorted(expected):
+    for path in sorted(pins):
         url, revision = pins[path]
         remotes, fetches, heads = _workflow_pins(workflow, path)
         if len(remotes) != 1:
