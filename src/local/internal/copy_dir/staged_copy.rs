@@ -465,19 +465,18 @@ mod symlink_source_read_tests {
     }
 }
 
-/// Creates a symbolic link at `target` using the source entry type where the
-/// native platform requires that distinction.
+/// Creates a symbolic link at `target` using its stored target and source kind.
 ///
 /// # Parameters
 ///
-/// * `link_target` - Link target stored in the new directory entry.
-/// * `_source` - Source entry used to determine the Windows link kind.
-/// * `target` - Destination link path.
+/// * `link_target` - Path stored in the new symbolic-link entry.
+/// * `source_is_directory` - Whether the source is a Windows directory link.
+/// * `target` - Path where the new symbolic link is created.
 ///
 /// # Errors
 ///
-/// Returns source-type inspection or native link-creation errors, or
-/// `Unsupported` on platforms that do not expose symbolic links.
+/// Returns a native link-creation error, or `Unsupported` on platforms that do
+/// not expose symbolic links.
 fn create_symlink_entry(
     link_target: &Path,
     source_is_directory: bool,

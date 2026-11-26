@@ -583,27 +583,23 @@ fn copy_symlink_entry(
     ))
 }
 
-/// Creates a symbolic link with the platform-specific link-kind API.
+/// Determines whether a source symbolic link points to a directory link.
 ///
-/// Reads the source link kind without following its target on Windows.
-/// Returns source inspection or link-creation errors, or `Unsupported` where
-/// native symbolic links are unavailable.
+/// Windows needs this distinction when creating a symbolic link. Other
+/// platforms do not require it and return `false` without inspecting `source`.
 ///
 /// # Parameters
 ///
-/// - `link_target`: Stored target path read from the source symbolic link.
-/// - `_source`: Source link used on Windows to determine file versus directory
-///   link kind.
-/// - `target`: Destination path where the symbolic link is created.
+/// - `source`: Symbolic link whose entry type is inspected on Windows.
 ///
 /// # Returns
 ///
-/// `Ok(())` after creating the link.
+/// `Ok(true)` for a Windows directory symbolic link and `Ok(false)` otherwise.
 ///
 /// # Errors
 ///
-/// Returns a source-inspection or link-creation error, or `Unsupported` on
-/// platforms without native symbolic-link support.
+/// Returns a native metadata error if the Windows source link cannot be
+/// inspected.
 fn symlink_source_is_directory(source: &Path) -> io::Result<bool> {
     #[cfg(windows)]
     {
