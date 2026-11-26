@@ -473,6 +473,7 @@ impl AsyncLocalFileSystem {
         };
         let reservation = LocalStagedTreeDiskReservation(Arc::new(disk));
         let filesystem = self.filesystem.clone();
+        let authority_identity = Arc::as_ptr(&filesystem.core) as usize;
         self.submit_owned_with_bytes(
             manager,
             operation,
@@ -493,7 +494,10 @@ impl AsyncLocalFileSystem {
                     return OperationOutcome::Stopped(stop);
                 }
                 #[cfg(feature = "test-support")]
-                crate::test_support::hit_test_gate("lf10-staged-publish-after-admission");
+                crate::test_support::hit_test_gate_for_authority(
+                    "lf10-staged-publish-after-admission",
+                    authority_identity,
+                );
                 let parent = match filesystem
                     .open_directory_with_options(&parent_path, &crate::options::LocalDirectoryOpenOptions::new())
                 {
@@ -554,7 +558,10 @@ impl AsyncLocalFileSystem {
                     }
                     record_stage_write(scope, &observer, file.bytes.len() as u64, EffectFact::Known);
                     #[cfg(feature = "test-support")]
-                    crate::test_support::hit_test_gate("lf10-staged-publish-after-stage-write");
+                    crate::test_support::hit_test_gate_for_authority(
+                        "lf10-staged-publish-after-stage-write",
+                        authority_identity,
+                    );
                     expected.push(entry);
                 }
                 let validation = request
