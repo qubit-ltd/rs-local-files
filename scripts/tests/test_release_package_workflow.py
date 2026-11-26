@@ -27,6 +27,7 @@ class ReleasePackageWorkflowTests(unittest.TestCase):
         self.assertEqual(task_list.count('"project-hook"'), 1)
 
         project_hook = (ROOT / ".infra/project-ci-check.local.sh").read_text(encoding="utf-8")
+        self.assertIn("rs-infra-verify --project \"$project_root\" lock check", project_hook)
         self.assertIn("run --suite build", project_hook)
         self.assertIn("run --suite test", project_hook)
         self.assertNotIn("--suite package", project_hook)
