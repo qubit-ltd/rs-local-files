@@ -792,11 +792,7 @@ impl LocalTempDirectory {
                     }
                 };
                 let destination = resolved;
-                let parent_created = match prepare_rooted_parent(
-                    &rooted.root,
-                    &destination,
-                    options.creates_parent(),
-                ) {
+                let parent_created = match prepare_rooted_parent(&rooted.root, &destination, options.creates_parent()) {
                     Ok(created) => created,
                     Err(error) => {
                         return Err(self.persist_error(

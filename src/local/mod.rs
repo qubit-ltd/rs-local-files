@@ -95,6 +95,7 @@ pub(crate) use internal::copy_failure_published;
 pub(crate) use internal::copy_failure_unchanged;
 pub(crate) use internal::copy_file_replace_requires_atomicity;
 pub(crate) use internal::copy_file_with_options;
+pub(crate) use internal::copy_metadata_guarantee_unavailable;
 pub(crate) use internal::copy_source_guarantee_unavailable;
 pub(crate) use internal::copy_tree;
 #[cfg(any(unix, windows))]

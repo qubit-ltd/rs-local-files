@@ -177,6 +177,30 @@ impl RootedLocalFileSystem {
                 crate::LocalMetadataPreservePolicy::None,
             ));
         }
+        if source_kind == crate::LocalFileKind::Symlink
+            && options.conflict() == crate::LocalCopyConflictPolicy::Skip
+            && target_exists
+        {
+            return Ok(LocalCopyOutcome::new(
+                LocalCopyStats::skipped_one(),
+                if directory {
+                    LocalCopyMethod::Recursive
+                } else {
+                    LocalCopyMethod::StagedFile
+                },
+                false,
+                false,
+                crate::LocalMetadataPreservePolicy::None,
+            ));
+        }
+        if crate::local::copy_metadata_guarantee_unavailable(source_kind, options.preserve_metadata()) {
+            return Err(copy_failure_unchanged(
+                LocalFileError::new(LocalFileErrorKind::RequirementNotMet, LocalFileOperation::Copy)
+                    .with_reason("portable permission metadata cannot be preserved for a symbolic-link source")
+                    .with_path(source.to_path_buf())
+                    .with_target(target.to_path_buf()),
+            ));
+        }
         if crate::local::copy_file_replace_requires_atomicity(
             directory,
             options.atomicity(),

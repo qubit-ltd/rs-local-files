@@ -16,6 +16,7 @@ use std::path::Path;
 use std::path::PathBuf;
 
 use qubit_local_files::LocalFileSystem;
+use qubit_local_files::error::LocalFileErrorKind;
 use qubit_local_files::options::LocalCopyConflictPolicy;
 use qubit_local_files::options::LocalCopyOptions;
 use qubit_local_files::options::LocalCopyTypeConflictPolicy;
@@ -184,7 +185,7 @@ fn test_host_symlink_skip_does_not_report_metadata_preservation() {
 }
 
 #[test]
-fn test_successful_symlink_copy_does_not_report_permission_preservation() {
+fn test_symlink_copy_rejects_unavailable_permission_preservation() {
     for rooted in [false, true] {
         let fixture = tempdir().expect("fixture should exist");
         fs::write(fixture.path().join("referent"), b"referent").expect("referent should exist");
@@ -206,17 +207,22 @@ fn test_successful_symlink_copy_does_not_report_permission_preservation() {
             fixture.path().join("target")
         };
 
-        let outcome = filesystem
+        let failure = filesystem
             .copy_with_options(&source, &target, &skip_options().with_entry_source())
-            .expect("link copy should succeed");
+            .expect_err("link permission preservation is unsupported");
 
-        assert_eq!(1, outcome.stats().files());
-        assert_eq!(0, outcome.stats().bytes());
-        assert_eq!(LocalMetadataPreservePolicy::None, outcome.metadata_preservation());
+        assert_eq!(LocalFileErrorKind::RequirementNotMet, failure.error().kind());
+        assert!(
+            fs::symlink_metadata(fixture.path().join("source"))
+                .unwrap()
+                .file_type()
+                .is_symlink()
+        );
         assert_eq!(
             Path::new("referent"),
-            fs::read_link(fixture.path().join("target")).unwrap()
+            fs::read_link(fixture.path().join("source")).unwrap()
         );
+        assert!(!fixture.path().join("target").exists());
     }
 }
 

@@ -487,6 +487,14 @@ fn copy_symlink_entry(
             crate::LocalMetadataPreservePolicy::None,
         ));
     }
+    if crate::local::copy_metadata_guarantee_unavailable(crate::LocalFileKind::Symlink, options.preserve_metadata()) {
+        return Err(copy_failure_unchanged(
+            LocalFileError::new(LocalFileErrorKind::RequirementNotMet, LocalFileOperation::Copy)
+                .with_reason("portable permission metadata cannot be preserved for a symbolic-link source")
+                .with_path(source.to_path_buf())
+                .with_target(target.to_path_buf()),
+        ));
+    }
     debug_assert!(matches!(
         action,
         CopyDestinationAction::Create | CopyDestinationAction::Replace
@@ -568,8 +576,7 @@ fn copy_symlink_entry(
         return if action == CopyDestinationAction::Replace {
             Err(copy_failure_indeterminate(failure))
         } else if !parent_dirs_to_sync.is_empty() {
-            Err(copy_failure_unchanged(failure)
-                .with_state(crate::LocalCopyFailureState::PartiallyPublished))
+            Err(copy_failure_unchanged(failure).with_state(crate::LocalCopyFailureState::PartiallyPublished))
         } else {
             Err(copy_failure_unchanged(failure))
         };
@@ -803,6 +810,17 @@ fn copy_pipeline_failure(source: &Path, target: &Path, error: crate::local::Loca
 
 /// Combines a known parent creation with a recursive-copy failure that proves
 /// the final file was never committed.
+///
+/// # Parameters
+///
+/// - `source`: Resolved source path associated with the failed copy.
+/// - `target`: Resolved destination path associated with the failed copy.
+/// - `error`: Internal directory-copy failure to preserve.
+/// - `parent_created`: Whether this operation created a destination parent.
+///
+/// # Returns
+///
+/// A copy failure that includes the parent creation effect when applicable.
 #[inline]
 fn copy_pipeline_failure_with_parent_effect(
     source: &Path,
@@ -821,9 +839,7 @@ fn copy_pipeline_failure_with_parent_effect(
             None | Some(crate::LocalCopyFailureState::Unchanged)
         );
     let failure = copy_pipeline_failure(source, target, error);
-    if parent_created
-        && (failure.state() == crate::LocalCopyFailureState::Unchanged || precommit_file_failure)
-    {
+    if parent_created && (failure.state() == crate::LocalCopyFailureState::Unchanged || precommit_file_failure) {
         failure.with_state(crate::LocalCopyFailureState::PartiallyPublished)
     } else {
         failure

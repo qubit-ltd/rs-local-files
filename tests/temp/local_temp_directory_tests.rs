@@ -18,9 +18,9 @@ use std::path::PathBuf;
 use std::process::Command;
 
 use qubit_local_files::LocalFileSystem;
-use qubit_local_files::error::LocalFileErrorKind;
 #[cfg(feature = "test-support")]
 use qubit_local_files::error::LocalFileEffectState;
+use qubit_local_files::error::LocalFileErrorKind;
 #[cfg(feature = "test-support")]
 use qubit_local_files::error::LocalFileOperation;
 use qubit_local_files::error::LocalPersistErrorParts;
@@ -55,8 +55,7 @@ fn test_temp_directory_persist_reports_created_parent_effect_after_install_fault
         } else {
             directory.path().join("parent/target")
         };
-        let _fault =
-            install_test_fault("temp-persist-install").expect("persist fault should install");
+        let _fault = install_test_fault("temp-persist-install").expect("persist fault should install");
 
         let failure = temporary
             .persist_with(&target, LocalPersistOptions::new().with_create_parent())

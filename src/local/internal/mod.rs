@@ -110,6 +110,7 @@ pub(crate) use copy_dir::copy_dir_all_with_paths_scoped;
 pub(crate) use copy_dir::copy_file_with_options;
 pub(crate) use copy_metadata_effect::CopyMetadataEffect;
 pub(crate) use copy_policy::copy_file_replace_requires_atomicity;
+pub(crate) use copy_policy::copy_metadata_guarantee_unavailable;
 pub(crate) use copy_policy::copy_source_guarantee_unavailable;
 pub(crate) use copy_policy::validate_copy_source_kind;
 pub(crate) use copy_tree::copy_tree;

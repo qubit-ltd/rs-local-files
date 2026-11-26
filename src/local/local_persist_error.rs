@@ -132,9 +132,7 @@ impl<T> LocalPersistError<T> {
             error,
         );
         let error = match state {
-            LocalPersistFailureState::Published => {
-                error.with_effect_state(crate::error::LocalFileEffectState::Applied)
-            }
+            LocalPersistFailureState::Published => error.with_effect_state(crate::error::LocalFileEffectState::Applied),
             LocalPersistFailureState::Indeterminate => {
                 error.with_effect_state(crate::error::LocalFileEffectState::Indeterminate)
             }
@@ -277,11 +275,16 @@ impl<T> LocalPersistError<T> {
     }
 
     /// Records a native namespace effect independently of target publication.
+    ///
+    /// # Parameters
+    ///
+    /// - `state`: Effect state established by the native operation.
+    ///
+    /// # Returns
+    ///
+    /// The failure with the native effect state attached.
     #[inline]
-    pub(crate) fn with_effect_state(
-        mut self,
-        state: crate::error::LocalFileEffectState,
-    ) -> Self {
+    pub(crate) fn with_effect_state(mut self, state: crate::error::LocalFileEffectState) -> Self {
         self.error = Box::new((*self.error).with_effect_state(state));
         self
     }
