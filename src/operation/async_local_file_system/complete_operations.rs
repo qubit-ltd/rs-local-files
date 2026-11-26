@@ -67,7 +67,7 @@ use crate::outcome::LocalRenameFailure;
 use crate::outcome::LocalRenameFailureState;
 
 #[cfg(test)]
-type ReadAllTestGate = (PathBuf, std::sync::mpsc::Sender<()>, std::sync::mpsc::Receiver<()>);
+type ReadAllTestGate = (usize, PathBuf, std::sync::mpsc::Sender<()>, std::sync::mpsc::Receiver<()>);
 #[cfg(test)]
 static READ_ALL_TEST_GATE: Mutex<Option<ReadAllTestGate>> = Mutex::new(None);
 #[cfg(test)]
@@ -82,6 +82,7 @@ enum DiscardBufferTestStage {
 
 #[cfg(test)]
 type DiscardBufferTestGate = (
+    usize,
     PathBuf,
     std::sync::mpsc::Sender<DiscardBufferTestStage>,
     Arc<Mutex<std::sync::mpsc::Receiver<()>>>,
@@ -90,19 +91,20 @@ type DiscardBufferTestGate = (
 static DISCARD_BUFFER_TEST_GATE: Mutex<Option<DiscardBufferTestGate>> = Mutex::new(None);
 
 #[cfg(test)]
-struct DiscardBufferTestGateGuard(PathBuf);
+struct DiscardBufferTestGateGuard(usize, PathBuf);
 
 #[cfg(test)]
 impl DiscardBufferTestGateGuard {
     fn install(
+        authority: usize,
         path: PathBuf,
         entered: std::sync::mpsc::Sender<DiscardBufferTestStage>,
         release: std::sync::mpsc::Receiver<()>,
     ) -> Self {
         *DISCARD_BUFFER_TEST_GATE
             .lock()
-            .unwrap_or_else(|error| error.into_inner()) = Some((path.clone(), entered, Arc::new(Mutex::new(release))));
-        Self(path)
+            .unwrap_or_else(|error| error.into_inner()) = Some((authority, path.clone(), entered, Arc::new(Mutex::new(release))));
+        Self(authority, path)
     }
 }
 
@@ -112,38 +114,38 @@ impl Drop for DiscardBufferTestGateGuard {
         let mut gate = DISCARD_BUFFER_TEST_GATE
             .lock()
             .unwrap_or_else(|error| error.into_inner());
-        if gate.as_ref().is_some_and(|(path, _, _)| path == &self.0) {
+        if gate.as_ref().is_some_and(|(authority, path, _, _)| *authority == self.0 && path == &self.1) {
             gate.take();
         }
     }
 }
 
 #[cfg(test)]
-fn pause_discard_buffer_test_gate(path: &Path, stage: DiscardBufferTestStage) {
+fn pause_discard_buffer_test_gate(authority: usize, path: &Path, stage: DiscardBufferTestStage) {
     let gate = DISCARD_BUFFER_TEST_GATE
         .lock()
         .unwrap_or_else(|error| error.into_inner())
         .as_ref()
-        .filter(|(target, _, _)| target == path)
-        .map(|(_, entered, release)| (entered.clone(), Arc::clone(release)));
+        .filter(|(target_authority, target, _, _)| *target_authority == authority && target == path)
+        .map(|(_, _, entered, release)| (entered.clone(), Arc::clone(release)));
     if let Some((entered, release)) = gate {
         entered.send(stage).expect("buffer discard observer remains connected");
         release
             .lock()
             .unwrap_or_else(|error| error.into_inner())
-            .recv()
-            .expect("buffer discard test resumes worker");
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .expect("buffer discard test resumes worker within five seconds");
     }
 }
 
 #[cfg(test)]
-struct ReadAllTestGateGuard(PathBuf);
+struct ReadAllTestGateGuard(usize, PathBuf);
 
 #[cfg(test)]
 impl ReadAllTestGateGuard {
-    fn install(path: PathBuf, entered: std::sync::mpsc::Sender<()>, release: std::sync::mpsc::Receiver<()>) -> Self {
-        *READ_ALL_TEST_GATE.lock().unwrap_or_else(|error| error.into_inner()) = Some((path.clone(), entered, release));
-        Self(path)
+    fn install(authority: usize, path: PathBuf, entered: std::sync::mpsc::Sender<()>, release: std::sync::mpsc::Receiver<()>) -> Self {
+        *READ_ALL_TEST_GATE.lock().unwrap_or_else(|error| error.into_inner()) = Some((authority, path.clone(), entered, release));
+        Self(authority, path)
     }
 }
 
@@ -151,7 +153,7 @@ impl ReadAllTestGateGuard {
 impl Drop for ReadAllTestGateGuard {
     fn drop(&mut self) {
         let mut gate = READ_ALL_TEST_GATE.lock().unwrap_or_else(|error| error.into_inner());
-        if gate.as_ref().is_some_and(|(path, _, _)| path == &self.0) {
+        if gate.as_ref().is_some_and(|(authority, path, _, _)| *authority == self.0 && path == &self.1) {
             gate.take();
         }
     }
@@ -167,18 +169,19 @@ mod read_at_success_tests {
 
     static READ_AT_SUCCESS_TEST_GATE: Mutex<Option<ReadAllTestGate>> = Mutex::new(None);
 
-    pub(super) struct ReadAtSuccessTestGateGuard(PathBuf);
+    pub(super) struct ReadAtSuccessTestGateGuard(usize, PathBuf);
 
     impl ReadAtSuccessTestGateGuard {
         pub(super) fn install(
+            authority: usize,
             path: PathBuf,
             entered: std::sync::mpsc::Sender<()>,
             release: std::sync::mpsc::Receiver<()>,
         ) -> Self {
             *READ_AT_SUCCESS_TEST_GATE
                 .lock()
-                .unwrap_or_else(|error| error.into_inner()) = Some((path.clone(), entered, release));
-            Self(path)
+                .unwrap_or_else(|error| error.into_inner()) = Some((authority, path.clone(), entered, release));
+            Self(authority, path)
         }
     }
 
@@ -187,26 +190,26 @@ mod read_at_success_tests {
             let mut gate = READ_AT_SUCCESS_TEST_GATE
                 .lock()
                 .unwrap_or_else(|error| error.into_inner());
-            if gate.as_ref().is_some_and(|(path, _, _)| path == &self.0) {
+            if gate.as_ref().is_some_and(|(authority, path, _, _)| *authority == self.0 && path == &self.1) {
                 gate.take();
             }
         }
     }
 
-    pub(super) fn pause_read_at_success_test_gate(path: &Path) {
+    pub(super) fn pause_read_at_success_test_gate(authority: usize, path: &Path) {
         let gate = {
             let mut registered = READ_AT_SUCCESS_TEST_GATE
                 .lock()
                 .unwrap_or_else(|error| error.into_inner());
-            if registered.as_ref().is_some_and(|(target, _, _)| target == path) {
+            if registered.as_ref().is_some_and(|(target_authority, target, _, _)| *target_authority == authority && target == path) {
                 registered.take()
             } else {
                 None
             }
         };
-        if let Some((_, entered, release)) = gate {
+        if let Some((_, _, entered, release)) = gate {
             let _ = entered.send(());
-            let _ = release.recv();
+            let _ = release.recv_timeout(std::time::Duration::from_secs(5));
         }
     }
 }
@@ -406,6 +409,7 @@ impl AsyncLocalFileSystem {
             _ => request.path.clone(),
         };
         let filesystem = self.filesystem.clone();
+        let authority_identity = Arc::as_ptr(&filesystem.core) as usize;
         self.submit_owned(
             manager,
             operation,
@@ -440,7 +444,7 @@ impl AsyncLocalFileSystem {
                 let mut complete = true;
                 loop {
                     if let Some(stopped) = stop_outcome(_scope) {
-                        discard_buffer_and_refund(bytes, &budget, &diagnostic_path);
+                        discard_buffer_and_refund(bytes, &budget, &diagnostic_path, authority_identity);
                         return stopped;
                     }
                     if bytes.len() == request.max_bytes {
@@ -453,7 +457,7 @@ impl AsyncLocalFileSystem {
                             }
                             Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
                             Err(error) => {
-                                discard_buffer_and_refund(bytes, &budget, &diagnostic_path);
+                                discard_buffer_and_refund(bytes, &budget, &diagnostic_path, authority_identity);
                                 return OperationOutcome::Failed(LocalFileError::from_io(
                                     LocalFileOperation::Read,
                                     Some(diagnostic_path.clone()),
@@ -468,7 +472,7 @@ impl AsyncLocalFileSystem {
                         Ok(0) => break,
                         Ok(read) => {
                             if let Err(error) = reserve_capacity(&mut bytes, read, &budget, maximum, &diagnostic_path) {
-                                discard_buffer_and_refund(bytes, &budget, &diagnostic_path);
+                                discard_buffer_and_refund(bytes, &budget, &diagnostic_path, authority_identity);
                                 return OperationOutcome::Failed(attach_current_directory(
                                     error,
                                     current_directory.as_deref(),
@@ -478,7 +482,7 @@ impl AsyncLocalFileSystem {
                         }
                         Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
                         Err(error) => {
-                            discard_buffer_and_refund(bytes, &budget, &diagnostic_path);
+                            discard_buffer_and_refund(bytes, &budget, &diagnostic_path, authority_identity);
                             return OperationOutcome::Failed(LocalFileError::from_io(
                                 LocalFileOperation::Read,
                                 Some(diagnostic_path.clone()),
@@ -488,7 +492,7 @@ impl AsyncLocalFileSystem {
                         }
                     }
                 }
-                finish_prefix_read(_scope, bytes, complete, &budget, &diagnostic_path)
+                finish_prefix_read(_scope, bytes, complete, &budget, &diagnostic_path, authority_identity)
             },
         )
     }
@@ -522,6 +526,7 @@ impl AsyncLocalFileSystem {
             _ => request.path.clone(),
         };
         let filesystem = self.filesystem.clone();
+        let authority_identity = Arc::as_ptr(&filesystem.core) as usize;
         self.submit_owned(
             manager,
             operation,
@@ -564,7 +569,7 @@ impl AsyncLocalFileSystem {
                 let mut buffer = [0_u8; 8192];
                 while bytes.len() < target {
                     if let Some(stopped) = stop_outcome(_scope) {
-                        discard_buffer_and_refund(bytes, &budget, &diagnostic_path);
+                        discard_buffer_and_refund(bytes, &budget, &diagnostic_path, authority_identity);
                         return stopped;
                     }
                     let count = (target - bytes.len()).min(buffer.len());
@@ -572,7 +577,7 @@ impl AsyncLocalFileSystem {
                         Ok(0) => break,
                         Ok(read) => {
                             if let Err(error) = reserve_capacity(&mut bytes, read, &budget, maximum, &diagnostic_path) {
-                                discard_buffer_and_refund(bytes, &budget, &diagnostic_path);
+                                discard_buffer_and_refund(bytes, &budget, &diagnostic_path, authority_identity);
                                 return OperationOutcome::Failed(attach_current_directory(
                                     error,
                                     current_directory.as_deref(),
@@ -580,13 +585,13 @@ impl AsyncLocalFileSystem {
                             }
                             bytes.extend_from_slice(&buffer[..read]);
                             if let Some(stopped) = stop_outcome(_scope) {
-                                discard_buffer_and_refund(bytes, &budget, &diagnostic_path);
+                                discard_buffer_and_refund(bytes, &budget, &diagnostic_path, authority_identity);
                                 return stopped;
                             }
                         }
                         Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
                         Err(error) => {
-                            discard_buffer_and_refund(bytes, &budget, &diagnostic_path);
+                            discard_buffer_and_refund(bytes, &budget, &diagnostic_path, authority_identity);
                             return OperationOutcome::Failed(LocalFileError::from_io(
                                 LocalFileOperation::Read,
                                 Some(diagnostic_path.clone()),
@@ -597,9 +602,12 @@ impl AsyncLocalFileSystem {
                     }
                 }
                 #[cfg(test)]
-                read_at_success_tests::pause_read_at_success_test_gate(&diagnostic_path);
+                read_at_success_tests::pause_read_at_success_test_gate(
+                    Arc::as_ptr(&filesystem.core) as usize,
+                    &diagnostic_path,
+                );
                 if let Some(stopped) = stop_outcome(_scope) {
-                    discard_buffer_and_refund(bytes, &budget, &diagnostic_path);
+                    discard_buffer_and_refund(bytes, &budget, &diagnostic_path, authority_identity);
                     return stopped;
                 }
                 OperationOutcome::Succeeded(bytes)
@@ -1305,7 +1313,7 @@ fn read_complete_cancellable(
                 }
                 bytes.extend_from_slice(&buffer[..read]);
                 #[cfg(test)]
-                pause_read_all_test_gate(&path);
+                pause_read_all_test_gate(Arc::as_ptr(&filesystem.core) as usize, &path);
                 if let Some(stopped) = stop_outcome(scope) {
                     return stopped;
                 }
@@ -1454,11 +1462,12 @@ fn finish_prefix_read(
     complete: bool,
     budget: &Arc<Mutex<Permit>>,
     path: &Path,
+    authority: usize,
 ) -> OperationOutcome<LocalReadPrefix, LocalFileError> {
     #[cfg(test)]
-    pause_read_all_test_gate(path);
+    pause_read_all_test_gate(authority, path);
     if let Some(stopped) = stop_outcome(scope) {
-        discard_buffer_and_refund(bytes, budget, path);
+        discard_buffer_and_refund(bytes, budget, path, authority);
         return stopped;
     }
     OperationOutcome::Succeeded(LocalReadPrefix { bytes, complete })
@@ -1481,18 +1490,18 @@ fn effective_read_options(filesystem: &crate::LocalFileSystem, options: &LocalRe
 }
 
 #[cfg(test)]
-fn pause_read_all_test_gate(path: &Path) {
+fn pause_read_all_test_gate(authority: usize, path: &Path) {
     let gate = {
         let mut registered = READ_ALL_TEST_GATE.lock().unwrap_or_else(|error| error.into_inner());
-        if registered.as_ref().is_some_and(|(target, _, _)| target == path) {
+        if registered.as_ref().is_some_and(|(target_authority, target, _, _)| *target_authority == authority && target == path) {
             registered.take()
         } else {
             None
         }
     };
-    if let Some((_, entered, release)) = gate {
+    if let Some((_, _, entered, release)) = gate {
         let _ = entered.send(());
-        let _ = release.recv();
+        let _ = release.recv_timeout(std::time::Duration::from_secs(5));
     }
 }
 
@@ -1607,12 +1616,14 @@ fn shrink_to_zero(permit: &Arc<Mutex<Permit>>) {
 /// # Parameters
 /// - `buffer` — output whose allocation is no longer retained by the operation.
 /// - `permit` — shared byte reservation covering that allocation.
-fn discard_buffer_and_refund<T>(buffer: T, permit: &Arc<Mutex<Permit>>, _path: &Path) {
+fn discard_buffer_and_refund<T>(buffer: T, permit: &Arc<Mutex<Permit>>, _path: &Path, authority: usize) {
+    #[cfg(not(test))]
+    let _ = authority;
     #[cfg(test)]
-    pause_discard_buffer_test_gate(_path, DiscardBufferTestStage::BeforeDrop);
+    pause_discard_buffer_test_gate(authority, _path, DiscardBufferTestStage::BeforeDrop);
     drop(buffer);
     #[cfg(test)]
-    pause_discard_buffer_test_gate(_path, DiscardBufferTestStage::AfterDrop);
+    pause_discard_buffer_test_gate(authority, _path, DiscardBufferTestStage::AfterDrop);
     shrink_to_zero(permit);
 }
 
@@ -2104,7 +2115,7 @@ mod stop_gate_tests {
 
         let (entered_tx, entered_rx) = mpsc::channel();
         let (release_tx, release_rx) = mpsc::channel();
-        let _gate = ReadAllTestGateGuard::install(path.clone(), entered_tx, release_rx);
+        let _gate = ReadAllTestGateGuard::install(Arc::as_ptr(&filesystem.filesystem.core) as usize, path.clone(), entered_tx, release_rx);
         let mut stopped = filesystem
             .submit_read_all(
                 &manager,
@@ -2175,10 +2186,10 @@ mod stop_gate_tests {
             let filesystem = block_on(AsyncLocalFileSystem::host(executor.clone())).unwrap();
             let (entered_tx, entered_rx) = mpsc::channel();
             let (release_tx, release_rx) = mpsc::channel();
-            let _gate = ReadAllTestGateGuard::install(path.clone(), entered_tx, release_rx);
+            let _gate = ReadAllTestGateGuard::install(Arc::as_ptr(&filesystem.filesystem.core) as usize, path.clone(), entered_tx, release_rx);
             let (stage_tx, stage_rx) = mpsc::channel();
             let (discard_release_tx, discard_release_rx) = mpsc::channel();
-            let _discard_gate = DiscardBufferTestGateGuard::install(path.clone(), stage_tx, discard_release_rx);
+            let _discard_gate = DiscardBufferTestGateGuard::install(Arc::as_ptr(&filesystem.filesystem.core) as usize, path.clone(), stage_tx, discard_release_rx);
             let (mut stopped, _) = filesystem
                 .submit_read_prefix(
                     &manager,
@@ -2273,13 +2284,14 @@ mod stop_gate_tests {
             let filesystem = block_on(AsyncLocalFileSystem::host(executor.clone())).unwrap();
             let (entered_tx, entered_rx) = mpsc::channel();
             let (release_tx, release_rx) = mpsc::channel();
-            let _gate = ReadAtSuccessTestGateGuard::install(path.clone(), entered_tx, release_rx);
+            let _gate = ReadAtSuccessTestGateGuard::install(Arc::as_ptr(&filesystem.filesystem.core) as usize, path.clone(), entered_tx, release_rx);
             let (stage_tx, stage_rx) = mpsc::channel();
             let (discard_release_tx, discard_release_rx) = mpsc::channel();
             let _discard_gate = if max_bytes == 0 {
                 None
             } else {
                 Some(DiscardBufferTestGateGuard::install(
+                    Arc::as_ptr(&filesystem.filesystem.core) as usize,
                     path.clone(),
                     stage_tx,
                     discard_release_rx,
@@ -2399,7 +2411,7 @@ mod stop_gate_tests {
         occupied.wait_settlement().unwrap();
         let (stage_tx, stage_rx) = mpsc::channel();
         let (release_tx, release_rx) = mpsc::channel();
-        let _discard_gate = DiscardBufferTestGateGuard::install(failed_path.clone(), stage_tx, release_rx);
+        let _discard_gate = DiscardBufferTestGateGuard::install(Arc::as_ptr(&filesystem.filesystem.core) as usize, failed_path.clone(), stage_tx, release_rx);
         let mut failed = filesystem
             .submit_read_prefix(
                 &manager,
@@ -2490,7 +2502,7 @@ mod stop_gate_tests {
         occupied.wait_settlement().unwrap();
         let (stage_tx, stage_rx) = mpsc::channel();
         let (release_tx, release_rx) = mpsc::channel();
-        let _discard_gate = DiscardBufferTestGateGuard::install(failed_path.clone(), stage_tx, release_rx);
+        let _discard_gate = DiscardBufferTestGateGuard::install(Arc::as_ptr(&filesystem.filesystem.core) as usize, failed_path.clone(), stage_tx, release_rx);
         let mut failed = filesystem
             .submit_read_at(
                 &manager,
@@ -2584,7 +2596,7 @@ mod stop_gate_tests {
 
         let (entered_tx, entered_rx) = mpsc::channel();
         let (release_tx, release_rx) = mpsc::channel();
-        let _gate = ReadAllTestGateGuard::install(full_path.clone(), entered_tx, release_rx);
+        let _gate = ReadAllTestGateGuard::install(Arc::as_ptr(&filesystem.filesystem.core) as usize, full_path.clone(), entered_tx, release_rx);
         let mut failed = filesystem
             .submit_read_all(
                 &manager,
@@ -2644,16 +2656,66 @@ mod stop_gate_tests {
         let target = PathBuf::from("target-read");
         let (entered_tx, _entered_rx) = mpsc::channel();
         let (_release_tx, release_rx) = mpsc::channel();
-        let _guard = ReadAllTestGateGuard::install(target.clone(), entered_tx, release_rx);
+        let _guard = ReadAllTestGateGuard::install(0, target.clone(), entered_tx, release_rx);
 
-        super::pause_read_all_test_gate(Path::new("unrelated-read"));
+        super::pause_read_all_test_gate(0, Path::new("unrelated-read"));
         assert!(
             READ_ALL_TEST_GATE
                 .lock()
                 .unwrap_or_else(|error| error.into_inner())
                 .as_ref()
-                .is_some_and(|(path, _, _)| path == &target)
+                .is_some_and(|(_, path, _, _)| path == &target)
         );
+    }
+
+    #[test]
+    fn test_read_all_gate_ignores_same_virtual_path_from_another_root() {
+        use std::sync::mpsc;
+
+        use crate::LocalReadRequest;
+        use crate::operation::AsyncLocalFileSystem;
+        use crate::operation::LocalExecutionConfig;
+        use crate::operation::LocalIoExecutor;
+        use crate::options::LocalReadAllOptions;
+
+        let _gate_lock = READ_ALL_TEST_GATE_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+        let first_root = tempfile::tempdir().unwrap();
+        let second_root = tempfile::tempdir().unwrap();
+        std::fs::write(first_root.path().join("same"), vec![1; 128 * 1024]).unwrap();
+        std::fs::write(second_root.path().join("same"), b"other root").unwrap();
+        let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+        let executor = LocalIoExecutor::new(
+            manager.clone(),
+            LocalExecutionConfig { worker_count: 2, ..Default::default() },
+        ).unwrap();
+        let first = block_on(AsyncLocalFileSystem::rooted(executor.clone(), first_root.path().to_path_buf())).unwrap();
+        let second = block_on(AsyncLocalFileSystem::rooted(executor, second_root.path().to_path_buf())).unwrap();
+        let path = PathBuf::from("/same");
+        let (entered_tx, entered_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        let _gate = ReadAllTestGateGuard::install(
+            Arc::as_ptr(&first.filesystem.core) as usize,
+            path.clone(),
+            entered_tx,
+            release_rx,
+        );
+        let mut second_operation = second.submit_read_all(
+            &manager,
+            Default::default(),
+            LocalReadRequest { path: path.clone(), read: LocalReadAllOptions::new() },
+            Default::default(),
+        ).unwrap().0;
+        assert!(matches!(second_operation.wait_outcome().unwrap(), OperationOutcome::Succeeded(bytes) if bytes == b"other root"));
+
+        let mut first_operation = first.submit_read_all(
+            &manager,
+            Default::default(),
+            LocalReadRequest { path, read: LocalReadAllOptions::new() },
+            Default::default(),
+        ).unwrap().0;
+        entered_rx.recv_timeout(std::time::Duration::from_secs(5)).expect("target root reaches read gate");
+        release_tx.send(()).unwrap();
+        assert!(matches!(first_operation.wait_outcome().unwrap(), OperationOutcome::Succeeded(bytes) if bytes.len() == 128 * 1024));
     }
 
     #[cfg(panic = "unwind")]
@@ -2670,8 +2732,8 @@ mod stop_gate_tests {
 
         let (entered_tx, _entered_rx) = mpsc::channel();
         let (_release_tx, release_rx) = mpsc::channel();
-        let guard = ReadAllTestGateGuard::install(PathBuf::from("registered"), entered_tx, release_rx);
-        super::pause_read_all_test_gate(Path::new("unrelated"));
+        let guard = ReadAllTestGateGuard::install(0, PathBuf::from("registered"), entered_tx, release_rx);
+        super::pause_read_all_test_gate(0, Path::new("unrelated"));
         drop(guard);
         assert!(
             READ_ALL_TEST_GATE
@@ -2696,13 +2758,13 @@ mod stop_gate_tests {
 
         let (entered_tx, entered_rx) = mpsc::channel();
         let (release_tx, release_rx) = mpsc::channel();
-        let guard = DiscardBufferTestGateGuard::install(path.clone(), entered_tx, release_rx);
+        let guard = DiscardBufferTestGateGuard::install(0, path.clone(), entered_tx, release_rx);
         let release = super::DISCARD_BUFFER_TEST_GATE
             .lock()
             .unwrap_or_else(|error| error.into_inner())
             .as_ref()
             .expect("discard gate installed")
-            .2
+            .3
             .clone();
         let poison_release = std::panic::catch_unwind(|| {
             let _release = release.lock().unwrap();
@@ -2711,7 +2773,7 @@ mod stop_gate_tests {
         assert!(poison_release.is_err());
 
         release_tx.send(()).unwrap();
-        super::pause_discard_buffer_test_gate(&path, DiscardBufferTestStage::BeforeDrop);
+        super::pause_discard_buffer_test_gate(0, &path, DiscardBufferTestStage::BeforeDrop);
         assert_eq!(
             entered_rx.recv().unwrap(),
             DiscardBufferTestStage::BeforeDrop,
@@ -2765,6 +2827,7 @@ mod stop_gate_tests {
             DropProbe(Arc::clone(&pool)),
             &permit,
             std::path::Path::new("discard-probe"),
+            0,
         );
 
         assert_eq!(pool.used(), 0, "the permit is refunded after buffer destruction");

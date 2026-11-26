@@ -370,7 +370,7 @@ fn test_digest_conditional_absent_commit_publishes_and_records_effect() {
 fn test_conditional_writer_cancellation_at_precommit_gate_aborts_without_publishing() {
     use qubit_local_files::operation::publish::LocalConditionalWriterCommitRequest;
     use qubit_local_files::options::LocalWritePrecondition;
-    use qubit_local_files::test_support::install_test_gate;
+    use qubit_local_files::test_support::install_test_gate_for_filesystem;
     use qubit_operation::StopReason;
     use sha2::Sha256;
 
@@ -385,7 +385,7 @@ fn test_conditional_writer_cancellation_at_precommit_gate_aborts_without_publish
     let filesystem = facade(&manager)
         .with_symlink_policy(qubit_local_files::policy::LocalSymlinkPolicy::Reject)
         .unwrap();
-    let gate = install_test_gate("lf7-conditional-before-publish").unwrap();
+    let gate = install_test_gate_for_filesystem("lf7-conditional-before-publish", &filesystem).unwrap();
     let (mut operation, observer) = filesystem
         .submit_conditional_writer_commit::<Sha256>(
             &manager,
@@ -424,7 +424,7 @@ fn test_conditional_abort_failure_after_stop_retains_recovery_owner() {
     use qubit_local_files::options::LocalWriteMode;
     use qubit_local_files::options::LocalWritePrecondition;
     use qubit_local_files::test_support::install_test_fault_shared;
-    use qubit_local_files::test_support::install_test_gate;
+    use qubit_local_files::test_support::install_test_gate_for_filesystem;
     use qubit_operation::StopReason;
     use sha2::Sha256;
 
@@ -442,7 +442,7 @@ fn test_conditional_abort_failure_after_stop_retains_recovery_owner() {
         .unwrap()
         .with_symlink_policy(qubit_local_files::policy::LocalSymlinkPolicy::Reject)
         .unwrap();
-    let gate = Arc::new(install_test_gate("lf7-conditional-before-publish").unwrap());
+    let gate = Arc::new(install_test_gate_for_filesystem("lf7-conditional-before-publish", &filesystem).unwrap());
     let (mut operation, observer) = filesystem
         .submit_conditional_writer_commit::<Sha256>(
             &manager,
@@ -1245,7 +1245,7 @@ fn test_queued_temp_persist_observes_stop_before_publishing() {
     use qubit_local_files::operation::submit_temp_file;
     use qubit_local_files::options::LocalPersistOptions;
     use qubit_local_files::options::LocalTempFileOptions;
-    use qubit_local_files::test_support::install_test_gate;
+    use qubit_local_files::test_support::install_test_gate_for_resource;
     use qubit_operation::StopReason;
 
     let directory = tempfile::tempdir().unwrap();
@@ -1266,7 +1266,7 @@ fn test_queued_temp_persist_observes_stop_before_publishing() {
         OperationOutcome::Succeeded(access) => access,
         _ => panic!("temp creation failed"),
     };
-    let gate = install_test_gate("lf7-temp-before-persist-primitive").unwrap();
+    let gate = install_test_gate_for_resource("lf7-temp-before-persist-primitive", access.resource_id()).unwrap();
     let (mut operation, same_access, _) = async_filesystem
         .submit_temp_lifecycle(
             &manager,

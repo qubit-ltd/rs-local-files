@@ -43,6 +43,8 @@ pub(super) struct WorkerStreamInner {
     pub(super) written_bytes: std::sync::atomic::AtomicU64,
     /// Whether successful writes publish append-specific facts.
     pub(super) append_mode: bool,
+    /// Captured filesystem authority used to scope deterministic test gates.
+    pub(super) authority_identity: usize,
     /// One-shot panic injection scoped to this worker instance.
     #[cfg(test)]
     pub(super) panic_next_command: std::sync::atomic::AtomicBool,

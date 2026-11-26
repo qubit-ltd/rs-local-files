@@ -66,6 +66,7 @@ impl WorkerStreamDriver {
         handle_budget: Arc<super::super::internal::permits::Permit>,
         observer: Option<super::super::LocalFactObserver>,
         append_mode: bool,
+        authority_identity: usize,
     ) -> io::Result<ResourceRef<LocalStreamResource>> {
         let cleanup_permit = executor
             .reserve_cleanup()
@@ -87,6 +88,7 @@ impl WorkerStreamDriver {
             observer,
             written_bytes: std::sync::atomic::AtomicU64::new(0),
             append_mode,
+            authority_identity,
             #[cfg(test)]
             panic_next_command: AtomicBool::new(false),
         })));
@@ -658,6 +660,7 @@ mod tests {
             _handle_budget: Mutex::new(Some(handle_budget)),
             observer: None,
             written_bytes: std::sync::atomic::AtomicU64::new(0),
+            authority_identity: 0,
             append_mode: false,
             #[cfg(test)]
             panic_next_command: AtomicBool::new(false),
@@ -731,6 +734,7 @@ mod tests {
             _handle_budget: Mutex::new(Some(Arc::new(executor.reserve_handle().unwrap()))),
             observer: Some(observer),
             written_bytes: std::sync::atomic::AtomicU64::new(5),
+            authority_identity: 0,
             append_mode: true,
             #[cfg(test)]
             panic_next_command: AtomicBool::new(false),
@@ -761,6 +765,7 @@ mod tests {
             _handle_budget: Mutex::new(Some(Arc::new(executor.reserve_handle().unwrap()))),
             observer: None,
             written_bytes: std::sync::atomic::AtomicU64::new(0),
+            authority_identity: 0,
             append_mode: false,
             #[cfg(test)]
             panic_next_command: AtomicBool::new(false),
@@ -813,6 +818,7 @@ mod tests {
             _handle_budget: Mutex::new(Some(Arc::new(executor.reserve_handle().unwrap()))),
             observer: None,
             written_bytes: std::sync::atomic::AtomicU64::new(0),
+            authority_identity: 0,
             append_mode: false,
             #[cfg(test)]
             panic_next_command: AtomicBool::new(false),
@@ -949,6 +955,7 @@ mod tests {
             _handle_budget: Mutex::new(None),
             observer: None,
             written_bytes: std::sync::atomic::AtomicU64::new(0),
+            authority_identity: 0,
             append_mode: false,
             #[cfg(test)]
             panic_next_command: AtomicBool::new(false),
@@ -1006,6 +1013,7 @@ mod tests {
             _handle_budget: Mutex::new(Some(Arc::new(executor.reserve_handle().unwrap()))),
             observer: None,
             written_bytes: std::sync::atomic::AtomicU64::new(0),
+            authority_identity: 0,
             append_mode: true,
             #[cfg(test)]
             panic_next_command: AtomicBool::new(false),
@@ -1108,6 +1116,7 @@ mod tests {
             _handle_budget: Mutex::new(Some(Arc::new(executor.reserve_handle().unwrap()))),
             observer: None,
             written_bytes: std::sync::atomic::AtomicU64::new(0),
+            authority_identity: 0,
             append_mode: false,
             #[cfg(test)]
             panic_next_command: AtomicBool::new(false),
@@ -1203,6 +1212,7 @@ mod tests {
             _handle_budget: Mutex::new(Some(handle_budget)),
             observer: None,
             written_bytes: std::sync::atomic::AtomicU64::new(0),
+            authority_identity: 0,
             append_mode: false,
             #[cfg(test)]
             panic_next_command: AtomicBool::new(false),
@@ -1274,6 +1284,7 @@ mod tests {
             _handle_budget: Mutex::new(Some(handle_budget)),
             observer: None,
             written_bytes: std::sync::atomic::AtomicU64::new(0),
+            authority_identity: 0,
             append_mode: false,
             #[cfg(test)]
             panic_next_command: AtomicBool::new(false),
@@ -1368,6 +1379,7 @@ mod tests {
             _handle_budget: Mutex::new(Some(Arc::new(executor.reserve_handle().unwrap()))),
             observer: None,
             written_bytes: std::sync::atomic::AtomicU64::new(0),
+            authority_identity: 0,
             append_mode: false,
             #[cfg(test)]
             panic_next_command: AtomicBool::new(false),
@@ -1410,6 +1422,7 @@ mod tests {
                     handle_budget,
                     None,
                     false,
+                    0,
                 );
                 result_tx
                     .send(result.err().expect("cleanup capacity must reject stream").kind())
@@ -1456,6 +1469,7 @@ mod tests {
             _handle_budget: Mutex::new(Some(handle_budget)),
             observer: None,
             written_bytes: std::sync::atomic::AtomicU64::new(0),
+            authority_identity: 0,
             append_mode: false,
             #[cfg(test)]
             panic_next_command: AtomicBool::new(false),
@@ -1490,6 +1504,7 @@ mod tests {
             _handle_budget: Mutex::new(Some(Arc::new(executor.reserve_handle().expect("handle permit")))),
             observer: None,
             written_bytes: std::sync::atomic::AtomicU64::new(0),
+            authority_identity: 0,
             append_mode: false,
             #[cfg(test)]
             panic_next_command: AtomicBool::new(false),
@@ -1563,6 +1578,7 @@ mod tests {
             _handle_budget: Mutex::new(Some(handle_budget)),
             observer: None,
             written_bytes: std::sync::atomic::AtomicU64::new(0),
+            authority_identity: 0,
             append_mode: false,
             #[cfg(test)]
             panic_next_command: AtomicBool::new(false),

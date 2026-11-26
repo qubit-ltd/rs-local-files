@@ -159,6 +159,7 @@ async fn stage_bytes_in_scope(
         disk,
         temp_options,
     } = submission;
+    let authority_identity = Arc::as_ptr(&filesystem.core) as usize;
     let context = scope.context();
     if context.stop_reason().is_some() {
         return Err(LocalStageFailure::Stopped);
@@ -169,12 +170,12 @@ async fn stage_bytes_in_scope(
     }
     write_access_chunk(&access, &executor, bytes, context.clone()).await?;
     #[cfg(feature = "test-support")]
-    crate::test_support::hit_test_gate("lf6-stage-bytes-after-write");
+    crate::test_support::hit_test_gate_for_authority("lf6-stage-bytes-after-write", authority_identity);
     if context.stop_reason().is_some() {
         return Err(LocalStageFailure::Stopped);
     }
     drop(owned);
-    seal_access(access, executor, stage, context).await
+    seal_access(access, executor, stage, context, authority_identity).await
 }
 
 /// Creates a child temporary file within the accepted operation scope.
@@ -265,6 +266,7 @@ async fn seal_access(
     executor: LocalIoExecutor,
     stage: LocalStageOptions,
     context: qubit_operation::OperationContext,
+    authority_identity: usize,
 ) -> Result<LocalReadLease, LocalStageFailure> {
     let command_context = context.clone();
     let receiver = access
@@ -294,7 +296,10 @@ async fn seal_access(
             // transition bridge still stores the sealed owner before waking
             // the operation future.
             #[cfg(feature = "test-support")]
-            crate::test_support::hit_test_gate("lf6-stage-bytes-after-native-seal");
+            crate::test_support::hit_test_gate_for_authority(
+                "lf6-stage-bytes-after-native-seal",
+                authority_identity,
+            );
             transition
         })
         .map_err(command_error)?;
@@ -351,6 +356,7 @@ where
     };
     let input_owner = Arc::new(Mutex::new(Some(input)));
     let body_input = Arc::clone(&input_owner);
+    let authority_identity = Arc::as_ptr(&filesystem.core) as usize;
     let task_executor = executor.clone();
     let child_operation = operation.clone();
     let submit = manager.try_submit(operation, move |scope| async move {
@@ -412,7 +418,7 @@ where
         if context.stop_reason().is_some() {
             return Err(LocalStageFailure::Stopped);
         }
-        seal_access(access, task_executor, stage, context).await
+        seal_access(access, task_executor, stage, context, authority_identity).await
     });
     match submit {
         Ok(handle) => Ok(handle),
@@ -628,7 +634,11 @@ mod tests {
         let executor = LocalIoExecutor::new(manager.clone(), crate::operation::LocalExecutionConfig::default())
             .expect("local executor");
         let filesystem = crate::LocalFileSystem::host().expect("filesystem");
-        let gate = crate::test_support::install_test_gate("lf6-stage-bytes-after-write").expect("write boundary gate");
+        let gate = crate::test_support::install_test_gate_for_authority(
+            "lf6-stage-bytes-after-write",
+            Arc::as_ptr(&filesystem.core) as usize,
+        )
+        .expect("write boundary gate");
         SEAL_ATTEMPTS.store(0, std::sync::atomic::Ordering::SeqCst);
         let mut operation = stage_bytes(
             filesystem,
@@ -659,7 +669,11 @@ mod tests {
         let executor = LocalIoExecutor::new(manager.clone(), crate::operation::LocalExecutionConfig::default())
             .expect("local executor");
         let filesystem = crate::LocalFileSystem::host().expect("filesystem");
-        let gate = crate::test_support::install_test_gate("lf6-stage-bytes-after-native-seal").expect("post-seal gate");
+        let gate = crate::test_support::install_test_gate_for_authority(
+            "lf6-stage-bytes-after-native-seal",
+            Arc::as_ptr(&filesystem.core) as usize,
+        )
+        .expect("post-seal gate");
         SEAL_ATTEMPTS.store(0, std::sync::atomic::Ordering::SeqCst);
         let mut operation = stage_bytes(
             filesystem,
