@@ -1,0 +1,21 @@
+name: Release package validation
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  package-validation:
+    name: Validate package contents and links
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.94.0
+      - name: Run release package checks
+        run: ./scripts/check_release_package.sh
