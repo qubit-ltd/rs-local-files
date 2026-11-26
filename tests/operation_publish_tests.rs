@@ -2248,7 +2248,7 @@ fn test_concurrent_staged_submissions_compete_for_shared_handle_quota() {
     use qubit_local_files::operation::publish::LocalStagedTreePublishRequest;
     use qubit_local_files::options::LocalTempDirectoryOptions;
     use qubit_local_files::options::LocalTreePublishOptions;
-    use qubit_local_files::test_support::install_test_gate;
+    use qubit_local_files::test_support::install_test_gate_for_filesystem;
 
     let _support_lock = PUBLISH_TEST_SUPPORT_LOCK
         .lock()
@@ -2274,7 +2274,7 @@ fn test_concurrent_staged_submissions_compete_for_shared_handle_quota() {
         }],
         publish_options: LocalTreePublishOptions::new(),
     };
-    let gate = install_test_gate("lf10-staged-publish-after-admission").unwrap();
+    let gate = install_test_gate_for_filesystem("lf10-staged-publish-after-admission", &filesystem).unwrap();
     let (mut first, _) = filesystem
         .submit_staged_tree_publish(
             &manager,
@@ -2297,6 +2297,67 @@ fn test_concurrent_staged_submissions_compete_for_shared_handle_quota() {
     assert_eq!(rejected.rejection(), LocalSubmitRejection::CapacityExceeded);
     gate.release();
     assert!(matches!(first.wait_outcome().unwrap(), OperationOutcome::Succeeded(_)));
+}
+
+#[cfg(feature = "test-support")]
+#[test]
+fn test_staged_publish_gates_are_scoped_to_filesystem_authority() {
+    use qubit_local_files::operation::publish::LocalStagedTreeFile;
+    use qubit_local_files::operation::publish::LocalStagedTreePublishRequest;
+    use qubit_local_files::options::LocalTempDirectoryOptions;
+    use qubit_local_files::options::LocalTreePublishOptions;
+    use qubit_local_files::test_support::install_test_gate_for_filesystem;
+    use std::time::Duration;
+
+    let directory = tempfile::tempdir().unwrap();
+    let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+    let target_filesystem = facade(&manager);
+    let unrelated_filesystem = facade(&manager);
+    let request = |name: &str| LocalStagedTreePublishRequest {
+        parent: directory.path().into(),
+        name: name.into(),
+        stage_options: LocalTempDirectoryOptions::new(),
+        files: vec![LocalStagedTreeFile {
+            path: PathBuf::from("payload"),
+            bytes: b"authority-scoped".to_vec(),
+        }],
+        publish_options: LocalTreePublishOptions::new(),
+    };
+
+    for (gate_name, suffix) in [
+        ("lf10-staged-publish-after-admission", "admission"),
+        ("lf10-staged-publish-after-stage-write", "stage-write"),
+    ] {
+        let gate = install_test_gate_for_filesystem(gate_name, &target_filesystem).unwrap();
+        let (mut unrelated, _) = unrelated_filesystem
+            .submit_staged_tree_publish(
+                &manager,
+                Default::default(),
+                request(&format!("unrelated-{suffix}")),
+                LocalOperationOptions::default(),
+            )
+            .unwrap();
+        let unrelated_entered_gate = gate.wait_until_entered_timeout(Duration::from_millis(100));
+        if unrelated_entered_gate {
+            gate.release();
+            let outcome = unrelated.wait_outcome().unwrap();
+            assert!(matches!(outcome, OperationOutcome::Succeeded(_)));
+            panic!("same-name staged publish from another authority consumed the target gate");
+        }
+        assert!(matches!(unrelated.wait_outcome().unwrap(), OperationOutcome::Succeeded(_)));
+
+        let (mut target, _) = target_filesystem
+            .submit_staged_tree_publish(
+                &manager,
+                Default::default(),
+                request(&format!("target-{suffix}")),
+                LocalOperationOptions::default(),
+            )
+            .unwrap();
+        gate.wait_until_entered();
+        gate.release();
+        assert!(matches!(target.wait_outcome().unwrap(), OperationOutcome::Succeeded(_)));
+    }
 }
 
 #[cfg(target_os = "linux")]
