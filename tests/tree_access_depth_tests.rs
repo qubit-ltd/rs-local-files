@@ -108,7 +108,7 @@ fn test_nonempty_tree_at_zero_depth_fails_without_partial_permission_changes() {
         assert_eq!(failure.cause().kind(), LocalFileErrorKind::ResourceLimit);
         assert_eq!(
             failure.access_state(),
-            qubit_local_files::outcome::LocalTreeAccessState::Indeterminate
+            qubit_local_files::outcome::LocalTreeAccessState::Preserved
         );
         #[cfg(unix)]
         {
@@ -181,7 +181,7 @@ fn test_over_depth_nested_tree_fails_before_permission_changes() {
         assert_eq!(failure.cause().kind(), LocalFileErrorKind::ResourceLimit);
         assert_eq!(
             failure.access_state(),
-            qubit_local_files::outcome::LocalTreeAccessState::Indeterminate
+            qubit_local_files::outcome::LocalTreeAccessState::Preserved
         );
         #[cfg(unix)]
         {
