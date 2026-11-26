@@ -23,6 +23,13 @@ class ReleasePackageWorkflowTests(unittest.TestCase):
         ci_tasks = (ROOT / ".infra/ci/ci.toml").read_text(encoding="utf-8")
         task_list = ci_tasks.splitlines()[0].partition("=")[2]
         self.assertNotIn('"package"', task_list)
+        self.assertNotIn('"verify"', task_list)
+        self.assertEqual(task_list.count('"project-hook"'), 1)
+
+        project_hook = (ROOT / ".infra/project-ci-check.local.sh").read_text(encoding="utf-8")
+        self.assertIn("run --suite build", project_hook)
+        self.assertIn("run --suite test", project_hook)
+        self.assertNotIn("--suite package", project_hook)
 
 
 if __name__ == "__main__":

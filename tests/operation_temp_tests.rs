@@ -350,6 +350,7 @@ fn test_failed_cleanup_keeps_resource_permit_and_public_recovery_can_retry() {
 }
 
 #[test]
+#[cfg(feature = "test-support")]
 fn test_resolved_temp_recovery_releases_manager_and_cleanup_workers_within_bound() {
     let _guard = lock_temp_operation_test();
     use qubit_local_files::test_support::install_test_fault_shared;
