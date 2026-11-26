@@ -26,10 +26,16 @@ use super::worker_walk_close_state::WorkerWalkCloseState;
 use super::worker_walk_command::WorkerWalkCommand;
 use super::worker_walk_cursor::WorkerWalkCursor;
 use super::worker_walk_inner::WorkerWalkInner;
+#[cfg(test)]
+use super::worker_walk_inner::WalkBatchTransferObservation;
 use super::worker_walk_inner::dispose_panic_payload;
 
 #[cfg(test)]
-fn pause_walk_batch_transfer_test_gate(inner: &WorkerWalkInner, request_id: u64, batch_len: usize) {
+fn pause_walk_batch_transfer_test_gate(
+    inner: &WorkerWalkInner,
+    request_id: u64,
+    observation: WalkBatchTransferObservation,
+) {
     let gate = {
         let mut gate = inner
             .batch_transfer_test_gate
@@ -43,7 +49,7 @@ fn pause_walk_batch_transfer_test_gate(inner: &WorkerWalkInner, request_id: u64,
     };
     if let Some((_, entered, resume)) = gate {
         entered
-            .send(batch_len)
+            .send(observation)
             .expect("batch transfer observer remains connected");
         resume
             .recv_timeout(std::time::Duration::from_secs(5))
@@ -325,7 +331,25 @@ impl LocalWalkDriver for WorkerWalkDriver {
                 pause_walk_batch_transfer_test_gate(
                     &inner,
                     request_id,
-                    result.as_ref().map_or(0, |batch| batch.as_ref().map_or(0, Vec::len)),
+                    WalkBatchTransferObservation {
+                        batch_entries: result
+                            .as_ref()
+                            .map_or(0, |batch| batch.as_ref().map_or(0, Vec::len)),
+                        batch_bytes: result
+                            .as_ref()
+                            .ok()
+                            .and_then(Option::as_ref)
+                            .map_or(0, |entries| {
+                                entries
+                                    .iter()
+                                    .map(|path| path.as_os_str().as_encoded_bytes().len())
+                                    .sum()
+                            }),
+                        lookahead_bytes: cursor_guard
+                            .as_ref()
+                            .and_then(|cursor| cursor.pending_entry.as_ref())
+                            .map_or(0, |path| path.as_os_str().as_encoded_bytes().len()),
+                    },
                 );
                 let wake = {
                     let mut commands = inner.commands.lock().unwrap_or_else(|e| e.into_inner());
@@ -678,9 +702,18 @@ mod tests {
         executor: LocalIoExecutor,
         handle_budget: Arc<super::super::super::internal::permits::Permit>,
     ) -> WorkerWalkDriver {
+        direct_driver_at(directory, &PathBuf::from("."), executor, handle_budget)
+    }
+
+    fn direct_driver_at(
+        directory: &tempfile::TempDir,
+        list_path: &PathBuf,
+        executor: LocalIoExecutor,
+        handle_budget: Arc<super::super::super::internal::permits::Permit>,
+    ) -> WorkerWalkDriver {
         let filesystem = crate::LocalFileSystem::rooted(directory.path()).unwrap();
         let walker = filesystem
-            .list_with_options(&PathBuf::from("."), &LocalListOptions::default())
+            .list_with_options(list_path, &LocalListOptions::default())
             .unwrap();
         let cleanup_permit = executor.reserve_cleanup().unwrap();
         let buffer_budget = Arc::new(Mutex::new(PermitPool::new(1).try_acquire(1).unwrap()));
@@ -1374,10 +1407,10 @@ mod tests {
         );
 
         assert!(driver.poll_batch(&mut context, 73, 8, 1024).is_pending());
-        let generated_batch_len = entered_rx
+        let generated_batch = entered_rx
             .recv_timeout(Duration::from_secs(5))
             .expect("worker generated a real batch");
-        assert_nonempty_generated_batch(generated_batch_len);
+        assert_nonempty_generated_batch(generated_batch.batch_entries);
 
         driver.request_stop();
         assert!(
@@ -1433,15 +1466,15 @@ mod tests {
         let mut context = Context::from_waker(Waker::noop());
 
         assert!(driver.poll_batch(&mut context, 91, 8, 1024).is_pending());
-        let generated_batch_len = entered_rx
+        let generated_batch = entered_rx
             .recv_timeout(Duration::from_secs(5))
             .expect("empty directory batch reaches the transfer gate");
-        let result = std::panic::catch_unwind(|| assert_nonempty_generated_batch(generated_batch_len));
+        let result = std::panic::catch_unwind(|| assert_nonempty_generated_batch(generated_batch.batch_entries));
         driver.request_stop();
         resume_tx.send(()).expect("worker remains paused until resumed");
         block_on(poll_closed(&driver)).expect("negative-control walker closes");
 
-        assert_eq!(generated_batch_len, 0, "empty fixture must generate an empty batch");
+        assert_eq!(generated_batch.batch_entries, 0, "empty fixture must generate an empty batch");
         assert!(result.is_err(), "the regression must reject an empty generated batch");
     }
 
@@ -1463,10 +1496,10 @@ mod tests {
 
         let mut ordinary_context = Context::from_waker(Waker::noop());
         assert!(driver.poll_batch(&mut ordinary_context, 92, 8, 1024).is_pending());
-        let generated_batch_len = entered_rx
+        let generated_batch = entered_rx
             .recv_timeout(Duration::from_secs(5))
             .expect("worker publishes a generated batch before polling it");
-        assert_nonempty_generated_batch(generated_batch_len);
+        assert_nonempty_generated_batch(generated_batch.batch_entries);
         resume_tx.send(()).expect("worker resumes to publish its batch");
 
         let deadline = std::time::Instant::now() + Duration::from_secs(5);
@@ -1793,6 +1826,82 @@ mod tests {
         assert!(names.contains(&std::ffi::OsStr::new("first")));
         assert!(names.contains(&std::ffi::OsStr::new("other")));
         stop_driver(&driver);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_worker_batch_delivery_reports_bounded_batch_and_lookahead_bytes() {
+        use std::sync::mpsc;
+        use std::time::Duration;
+
+        let directory = tempfile::tempdir().unwrap();
+        let mut nested = directory.path().to_path_buf();
+        while nested.as_os_str().as_encoded_bytes().len() < 3_000 {
+            nested.push("d".repeat(100));
+            std::fs::create_dir(&nested).unwrap();
+        }
+        for index in 0..100 {
+            std::fs::write(nested.join(format!("entry-{index:03}")), b"x").unwrap();
+        }
+
+        let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+        let executor = LocalIoExecutor::new(manager, LocalExecutionConfig::default()).unwrap();
+        let list_path = nested.strip_prefix(directory.path()).unwrap().to_path_buf();
+        let driver = direct_driver_at(
+            &directory,
+            &list_path,
+            executor,
+            Arc::new(PermitPool::new(1).try_acquire(1).unwrap()),
+        );
+        let (entered_tx, entered_rx) = mpsc::sync_channel(1);
+        let (resume_tx, resume_rx) = mpsc::sync_channel(1);
+        *driver.0.batch_transfer_test_gate.lock().unwrap() = Some((93, entered_tx, resume_rx));
+        let mut context = Context::from_waker(Waker::noop());
+
+        assert!(driver
+            .poll_batch(
+                &mut context,
+                93,
+                crate::operation::stream::LOCAL_WALK_BATCH_ENTRIES,
+                crate::operation::stream::LOCAL_WALK_BATCH_BYTES,
+            )
+            .is_pending());
+        let observation = entered_rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("worker reports encoded batch and lookahead sizes");
+        resume_tx.send(()).unwrap();
+        let first = block_on(poll_batch(
+            &driver,
+            93,
+            crate::operation::stream::LOCAL_WALK_BATCH_ENTRIES,
+            crate::operation::stream::LOCAL_WALK_BATCH_BYTES,
+        ))
+        .unwrap()
+        .expect("first batch contains entries");
+        let second = block_on(poll_batch(
+            &driver,
+            94,
+            crate::operation::stream::LOCAL_WALK_BATCH_ENTRIES,
+            crate::operation::stream::LOCAL_WALK_BATCH_BYTES,
+        ))
+        .unwrap();
+        stop_driver(&driver);
+
+        assert!(observation.batch_entries > 0);
+        assert!(observation.batch_entries < crate::operation::stream::LOCAL_WALK_BATCH_ENTRIES);
+        assert!(observation.batch_bytes > 0);
+        assert!(
+            observation.batch_bytes <= crate::operation::stream::LOCAL_WALK_BATCH_BYTES,
+            "returned batch has {} encoded bytes",
+            observation.batch_bytes
+        );
+        assert!(observation.lookahead_bytes > 0, "fixture must retain one deferred path");
+        assert!(observation.lookahead_bytes <= crate::operation::stream::LOCAL_WALK_BATCH_BYTES);
+        assert_eq!(
+            first.len() + second.unwrap_or_default().len(),
+            100,
+            "deferred lookahead must be delivered once"
+        );
     }
 
     #[test]
