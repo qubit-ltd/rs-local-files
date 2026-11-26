@@ -473,6 +473,7 @@ impl LocalStagedDirectory {
         for item in self
             .observe_tree_with_options_started_at(&traversal, started_at)
             .map_err(|cause| super::super::tree_recovery::LocalTreeAccessError::new(cause, State::Preserved))?
+            .with_logical_depth_limit(limits.max_depth())
         {
             let item =
                 item.map_err(|cause| super::super::tree_recovery::LocalTreeAccessError::new(cause, State::Preserved))?;
@@ -956,8 +957,13 @@ impl LocalStagedDirectory {
                 )
             })?;
         #[cfg(all(feature = "test-support", windows))]
-        let binding_matches =
-            binding_matches && !crate::local::take_test_support("owner-policy-stage-binding-mismatch-before-root");
+        let binding_matches = if crate::local::take_test_support(
+            "owner-policy-after-child-before-root-binding-mismatch",
+        ) {
+            false
+        } else {
+            binding_matches
+        };
         if !binding_matches {
             return Err(super::super::tree_recovery::LocalTreeAccessError::new(
                 LocalFileError::new(LocalFileErrorKind::ChangedDuringRead, LocalFileOperation::Metadata),
@@ -1210,6 +1216,7 @@ impl LocalStagedDirectory {
             for item in self
                 .observe_tree_with_options_started_at(traversal, started_at)
                 .map_err(|cause| super::super::tree_recovery::LocalTreeAccessError::new(cause, State::Indeterminate))?
+                .with_logical_depth_limit(limits.max_depth())
             {
                 let item = item.map_err(|cause| {
                     super::super::tree_recovery::LocalTreeAccessError::new(cause, State::Indeterminate)
@@ -1514,7 +1521,7 @@ impl LocalStagedDirectory {
         {
             let entries = self
                 .collect_unix_access_entries(limits)
-                .map_err(|cause| super::super::tree_recovery::LocalTreeAccessError::new(cause, State::Indeterminate))?;
+                .map_err(|cause| super::super::tree_recovery::LocalTreeAccessError::new(cause, State::Preserved))?;
             let mut applied = 0_usize;
             let mut synced = sync_requirement != LocalFileSyncRequirement::NotRequired;
             for (relative, kind, identity) in &entries {
@@ -1773,7 +1780,10 @@ impl LocalStagedDirectory {
         let traversal = limits
             .without_max_depth()
             .with_error_policy(crate::options::LocalWalkErrorPolicy::FailFast);
-        for item in self.observe_tree_with_options(&traversal)? {
+        for item in self
+            .observe_tree_with_options(&traversal)?
+            .with_logical_depth_limit(limits.max_depth())
+        {
             let item = item?;
             let depth = item.relative_path().components().count();
             bytes = bytes
@@ -1835,7 +1845,10 @@ impl LocalStagedDirectory {
             .without_max_depth()
             .with_error_policy(crate::options::LocalWalkErrorPolicy::FailFast);
         let collect = (|| -> LocalResult<()> {
-            for item in self.observe_tree_with_options(&traversal)? {
+            for item in self
+                .observe_tree_with_options(&traversal)?
+                .with_logical_depth_limit(limits.max_depth())
+            {
                 let item = item?;
                 let depth = item.relative_path().components().count();
                 bytes = bytes
@@ -1860,7 +1873,7 @@ impl LocalStagedDirectory {
         if let Err(cause) = collect {
             return Err(super::super::tree_recovery::LocalTreeAccessError::new(
                 cause,
-                State::Indeterminate,
+                State::Preserved,
             ));
         }
         entries.sort_by_key(|(path, kind, _)| {

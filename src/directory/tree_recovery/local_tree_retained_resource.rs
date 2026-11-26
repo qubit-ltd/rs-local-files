@@ -333,10 +333,11 @@ impl LocalTreeRetainedResource {
     /// Returns an error if the retained parent cannot observe the child.
     pub(crate) fn binding_matches_identity(&self) -> crate::LocalResult<bool> {
         let named = self.parent.observe_entry(&self.relative)?;
-        Ok(self
+        let matches = self
             .identity
             .as_ref()
-            .is_some_and(|identity| named.identity() == Some(identity)))
+            .is_some_and(|identity| named.identity() == Some(identity));
+        Ok(matches)
     }
     /// Records one identity owned by this tree for a later guarded deletion.
     ///
