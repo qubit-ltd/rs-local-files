@@ -39,4 +39,5 @@ pub(crate) use rooted_temp_resource_backend::RootedTempResourceBackend;
 pub(crate) use temp_directory_delete_backend::TempDirectoryDeleteBackend;
 pub(crate) use temp_entry_identity::TempEntryIdentity;
 pub(crate) use temp_parent::host as prepare_host_parent;
+pub(crate) use temp_parent::persist_install_fault;
 pub(crate) use temp_parent::rooted as prepare_rooted_parent;

@@ -59,22 +59,67 @@ pub(crate) fn rooted(
     root: &crate::rooted::Root,
     target: &crate::local::LocalRelativePath,
     create_parent: bool,
-) -> io::Result<()> {
+) -> io::Result<bool> {
     let Some(parent) = target.as_path().parent() else {
-        return Ok(());
+        return Ok(false);
     };
     if parent.as_os_str().is_empty() {
-        return Ok(());
+        return Ok(false);
     }
     let parent = crate::local::LocalRelativePath::new(parent)?;
     if create_parent {
-        root.create_dir_all(&parent)
+        let mut prefixes = Vec::new();
+        let mut prefix = PathBuf::new();
+        for component in parent.as_path().components() {
+            prefix.push(component.as_os_str());
+            prefixes.push(prefix.clone());
+        }
+        let mut missing = Vec::new();
+        for prefix in prefixes {
+            let relative = crate::local::LocalRelativePath::new(&prefix)?;
+            match root.symlink_metadata(&relative) {
+                Ok(metadata) if metadata.kind() == crate::rooted::EntryKind::Directory => {}
+                Ok(_) => return Err(io::Error::from(io::ErrorKind::NotADirectory)),
+                Err(error) if error.kind() == io::ErrorKind::NotFound => missing.push(prefix),
+                Err(error) => return Err(error),
+            }
+        }
+        let mut created = false;
+        for prefix in missing {
+            let relative = crate::local::LocalRelativePath::new(&prefix)?;
+            match root.create_dir(&relative) {
+                Ok(()) => created = true,
+                Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
+                    if !root
+                        .symlink_metadata(&relative)
+                        .is_ok_and(|metadata| metadata.kind() == crate::rooted::EntryKind::Directory)
+                    {
+                        return Err(error);
+                    }
+                }
+                Err(error) => return Err(error),
+            }
+        }
+        Ok(created)
     } else {
         let metadata = root.symlink_metadata(&parent)?;
         if metadata.kind() == crate::rooted::EntryKind::Directory {
-            Ok(())
+            Ok(false)
         } else {
             Err(io::Error::from(io::ErrorKind::NotADirectory))
         }
     }
+}
+
+/// Injects a deterministic pre-install conflict after parent preparation.
+#[inline]
+pub(crate) fn persist_install_fault() -> Option<io::Error> {
+    #[cfg(feature = "test-support")]
+    if crate::local::take_test_support("temp-persist-install") {
+        return Some(io::Error::new(
+            io::ErrorKind::AlreadyExists,
+            "injected persistence install conflict",
+        ));
+    }
+    None
 }

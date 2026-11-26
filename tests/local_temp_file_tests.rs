@@ -45,6 +45,42 @@ use qubit_local_files::policy::LocalPrivacyRequirement;
 use qubit_local_files::test_support::install_test_fault;
 use tempfile::tempdir;
 
+#[cfg(feature = "test-support")]
+#[test]
+fn test_temp_file_persist_reports_created_parent_effect_after_install_fault() {
+    for rooted in [false, true] {
+        let directory = tempdir().expect("fixture should exist");
+        let filesystem = if rooted {
+            LocalFileSystem::rooted(directory.path())
+        } else {
+            LocalFileSystem::host()
+        }
+        .expect("filesystem should open");
+        let temporary = filesystem
+            .create_temp_file()
+            .expect("temporary file should be created");
+        let target = if rooted {
+            PathBuf::from("/parent/target")
+        } else {
+            directory.path().join("parent/target")
+        };
+        let _fault =
+            install_test_fault("temp-persist-install").expect("persist fault should install");
+
+        let failure = temporary
+            .persist_with(&target, LocalPersistOptions::new().with_create_parent())
+            .expect_err("injected install fault should fail");
+
+        assert_eq!(LocalPersistFailureState::NotPublished, failure.state());
+        assert_eq!(
+            Some(LocalFileEffectState::PartiallyApplied),
+            failure.error().effect_state()
+        );
+        assert!(directory.path().join("parent").is_dir());
+        assert!(!directory.path().join("parent/target").exists());
+    }
+}
+
 fn rooted_host_path(root: &Path, virtual_path: &Path) -> PathBuf {
     root.join(
         virtual_path
@@ -974,6 +1010,10 @@ fn test_temp_published_failure_is_cleanup_only() {
                     .expect_err("inject destination sync failure");
                 assert_eq!(error.stage(), LocalPersistStage::SynchronizeDestination);
                 assert_eq!(error.state(), LocalPersistFailureState::Published);
+                assert_eq!(
+                    Some(LocalFileEffectState::Applied),
+                    error.error().effect_state()
+                );
                 assert_eq!(error.source_state(), LocalTempSourceState::CleanupRequired);
                 assert!(!source.exists());
                 assert!(sandbox.is_dir());
@@ -1310,6 +1350,10 @@ fn test_local_temp_file_persist_reports_indeterminate_install() {
         .persist(&target)
         .expect_err("injected install failure should be reported");
     assert_eq!(LocalPersistFailureState::Indeterminate, error.state());
+    assert_eq!(
+        Some(LocalFileEffectState::Indeterminate),
+        error.error().effect_state()
+    );
 }
 
 /// Verifies a Rooted absolute persistence target is re-anchored at the virtual
