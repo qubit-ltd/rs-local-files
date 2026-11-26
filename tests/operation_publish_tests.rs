@@ -1754,3 +1754,291 @@ fn test_conditional_writer_open_failure_does_not_claim_a_destination_change() {
     assert_eq!(facts.modified_count, 0);
     assert_eq!(facts.modified_bytes, 0);
 }
+#[test]
+fn test_staged_tree_publish_preserves_caller_validation_limits_and_recovery() {
+    use qubit_local_files::directory::LocalTreeValidationOptions;
+    use qubit_local_files::operation::publish::LocalStagedTreeFile;
+    use qubit_local_files::operation::publish::LocalStagedTreePublishError;
+    use qubit_local_files::operation::publish::LocalStagedTreePublishRequest;
+    use qubit_local_files::options::LocalListOptions;
+    use qubit_local_files::options::LocalTempDirectoryOptions;
+    use qubit_local_files::options::LocalTreePublishOptions;
+
+    let directory = tempfile::tempdir().unwrap();
+    let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+    let filesystem = facade(&manager);
+    let (mut operation, _) = filesystem
+        .submit_staged_tree_publish(
+            &manager,
+            Default::default(),
+            LocalStagedTreePublishRequest {
+                parent: directory.path().into(),
+                name: "limited-validation".into(),
+                stage_options: LocalTempDirectoryOptions::new(),
+                files: vec![LocalStagedTreeFile {
+                    path: PathBuf::from("payload"),
+                    bytes: b"staged".to_vec(),
+                }],
+                publish_options: LocalTreePublishOptions::new().with_validation(
+                    LocalTreeValidationOptions::new()
+                        .with_limits(LocalListOptions::new().with_max_entries(0)),
+                ),
+            },
+            LocalOperationOptions::default(),
+        )
+        .unwrap();
+
+    match operation.wait_outcome().unwrap() {
+        OperationOutcome::Failed(LocalStagedTreePublishError::Publish(error)) => {
+            assert!(error.cause().resource_limit_error().is_some());
+            let (native, _reservation) = error.into_parts();
+            assert!(native.cause().resource_limit_error().is_some());
+            let (_cause, stage, _retained) = native.into_parts();
+            let retained = stage.expect("validation failure retains stage");
+            assert!(retained.observation().is_ok());
+            retained.cleanup().unwrap();
+        }
+        outcome => panic!("caller validation limit must prevent publication, got {outcome:?}"),
+    }
+    assert!(!directory.path().join("limited-validation").exists());
+}
+
+#[test]
+fn test_staged_tree_publish_rejects_handle_limit_before_admission() {
+    use qubit_local_files::operation::LocalSubmitRejection;
+    use qubit_local_files::operation::publish::LocalStagedTreeFile;
+    use qubit_local_files::operation::publish::LocalStagedTreePublishRequest;
+    use qubit_local_files::options::LocalTempDirectoryOptions;
+    use qubit_local_files::options::LocalTreePublishOptions;
+
+    let directory = tempfile::tempdir().unwrap();
+    let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+    let filesystem = facade(&manager);
+    let request = LocalStagedTreePublishRequest {
+        parent: directory.path().into(),
+        name: "insufficient-handles".into(),
+        stage_options: LocalTempDirectoryOptions::new(),
+        files: vec![LocalStagedTreeFile {
+            path: PathBuf::from("payload"),
+            bytes: b"staged".to_vec(),
+        }],
+        publish_options: LocalTreePublishOptions::new()
+            .with_owner_access_policy(qubit_local_files::policy::LocalOwnerAccessPolicy::new()),
+    };
+    let rejected = match filesystem.submit_staged_tree_publish(
+        &manager,
+        Default::default(),
+        request,
+        LocalOperationOptions {
+            max_open_handles: Some(2),
+            ..LocalOperationOptions::default()
+        },
+    ) {
+        Err(error) => error,
+        Ok(_) => {
+            panic!("owner-policy root handles must be admitted against the operation handle limit")
+        }
+    };
+    assert_eq!(rejected.rejection(), LocalSubmitRejection::CapacityExceeded);
+    assert!(!directory.path().join("insufficient-handles").exists());
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn test_staged_recovery_retains_and_refunds_handle_quota_across_cleanup() {
+    use qubit_local_files::operation::LocalSubmitRejection;
+    use qubit_local_files::operation::publish::LocalStagedTreeFile;
+    use qubit_local_files::operation::publish::LocalStagedTreePublishError;
+    use qubit_local_files::operation::publish::LocalStagedTreePublishRequest;
+    use qubit_local_files::options::LocalTempDirectoryOptions;
+    use qubit_local_files::options::LocalTreePublishOptions;
+
+    let directory = tempfile::tempdir().unwrap();
+    let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+    let executor = LocalIoExecutor::new(
+        manager.clone(),
+        LocalExecutionConfig {
+            max_open_handles: 4,
+            ..LocalExecutionConfig::default()
+        },
+    )
+    .unwrap();
+    let filesystem = block_on(AsyncLocalFileSystem::host(executor)).unwrap();
+    let (mut operation, _) = filesystem
+        .submit_staged_tree_publish(
+            &manager,
+            Default::default(),
+            LocalStagedTreePublishRequest {
+                parent: directory.path().into(),
+                name: "retained-quota".into(),
+                stage_options: LocalTempDirectoryOptions::new(),
+                files: vec![
+                    LocalStagedTreeFile {
+                        path: PathBuf::from("duplicate"),
+                        bytes: b"first".to_vec(),
+                    },
+                    LocalStagedTreeFile {
+                        path: PathBuf::from("duplicate"),
+                        bytes: b"second".to_vec(),
+                    },
+                ],
+                publish_options: LocalTreePublishOptions::new().with_owner_access_policy(
+                    qubit_local_files::policy::LocalOwnerAccessPolicy::new()
+                        .with_unix_modes(0o700, 0o600),
+                ),
+            },
+            LocalOperationOptions::default(),
+        )
+        .unwrap();
+    let recovery = match operation.wait_outcome().unwrap() {
+        OperationOutcome::Failed(LocalStagedTreePublishError::Write { stage, .. }) => stage,
+        outcome => panic!("duplicate write should leave a recoverable stage, got {outcome:?}"),
+    };
+
+    let writer = LocalWriterCommitRequest {
+        path: directory.path().join("after-recovery"),
+        options: LocalWriteOptions::new(LocalWriteMode::CreateOrReplace),
+        bytes: b"writer".to_vec(),
+    };
+    let rejected = filesystem
+        .submit_writer_commit(
+            &manager,
+            Default::default(),
+            writer,
+            LocalOperationOptions::default(),
+        )
+        .err()
+        .expect("recovery owner must retain the operation's shared handle quota");
+    assert_eq!(rejected.rejection(), LocalSubmitRejection::CapacityExceeded);
+
+    recovery.cleanup().unwrap();
+    let (mut writer, _) = filesystem
+        .submit_writer_commit(
+            &manager,
+            Default::default(),
+            LocalWriterCommitRequest {
+                path: directory.path().join("after-recovery"),
+                options: LocalWriteOptions::new(LocalWriteMode::CreateOrReplace),
+                bytes: b"writer".to_vec(),
+            },
+            LocalOperationOptions::default(),
+        )
+        .expect("successful cleanup refunds the retained handle quota");
+    assert!(matches!(
+        writer.wait_outcome().unwrap(),
+        OperationOutcome::Succeeded(_)
+    ));
+}
+
+#[test]
+fn test_successful_staged_publish_refunds_transient_and_root_handle_quota() {
+    use qubit_local_files::operation::publish::LocalStagedTreeFile;
+    use qubit_local_files::operation::publish::LocalStagedTreePublishRequest;
+    use qubit_local_files::options::LocalTempDirectoryOptions;
+    use qubit_local_files::options::LocalTreePublishOptions;
+
+    let directory = tempfile::tempdir().unwrap();
+    let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+    let executor = LocalIoExecutor::new(
+        manager.clone(),
+        LocalExecutionConfig {
+            max_open_handles: 3,
+            ..LocalExecutionConfig::default()
+        },
+    )
+    .unwrap();
+    let filesystem = block_on(AsyncLocalFileSystem::host(executor)).unwrap();
+    let (mut operation, _) = filesystem
+        .submit_staged_tree_publish(
+            &manager,
+            Default::default(),
+            LocalStagedTreePublishRequest {
+                parent: directory.path().into(),
+                name: "success-refund".into(),
+                stage_options: LocalTempDirectoryOptions::new(),
+                files: vec![LocalStagedTreeFile {
+                    path: PathBuf::from("payload"),
+                    bytes: b"done".to_vec(),
+                }],
+                publish_options: LocalTreePublishOptions::new(),
+            },
+            LocalOperationOptions::default(),
+        )
+        .unwrap();
+    assert!(matches!(
+        operation.wait_outcome().unwrap(),
+        OperationOutcome::Succeeded(_)
+    ));
+
+    let (mut writer, _) = filesystem
+        .submit_writer_commit(
+            &manager,
+            Default::default(),
+            LocalWriterCommitRequest {
+                path: directory.path().join("after-success"),
+                options: LocalWriteOptions::new(LocalWriteMode::CreateOrReplace),
+                bytes: b"writer".to_vec(),
+            },
+            LocalOperationOptions::default(),
+        )
+        .expect("successful publication refunds all staged handle quota");
+    assert!(matches!(
+        writer.wait_outcome().unwrap(),
+        OperationOutcome::Succeeded(_)
+    ));
+}
+
+#[test]
+fn test_staged_publish_checks_caller_exact_manifest_against_generated_manifest() {
+    use qubit_local_files::directory::LocalTreeEntry;
+    use qubit_local_files::operation::publish::LocalStagedTreeFile;
+    use qubit_local_files::operation::publish::LocalStagedTreePublishError;
+    use qubit_local_files::operation::publish::LocalStagedTreePublishRequest;
+    use qubit_local_files::options::LocalTempDirectoryOptions;
+    use qubit_local_files::options::LocalTreePublishOptions;
+
+    let directory = tempfile::tempdir().unwrap();
+    let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+    let filesystem = facade(&manager);
+    let wrong = LocalTreeEntry::new(
+        PathBuf::from("other"),
+        qubit_local_files::outcome::LocalFileKind::File,
+    )
+    .unwrap();
+    let (mut operation, _) = filesystem
+        .submit_staged_tree_publish(
+            &manager,
+            Default::default(),
+            LocalStagedTreePublishRequest {
+                parent: directory.path().into(),
+                name: "manifest-conflict".into(),
+                stage_options: LocalTempDirectoryOptions::new(),
+                files: vec![LocalStagedTreeFile {
+                    path: PathBuf::from("payload"),
+                    bytes: b"payload".to_vec(),
+                }],
+                publish_options: LocalTreePublishOptions::new().with_validation(
+                    qubit_local_files::directory::LocalTreeValidationOptions::new()
+                        .with_exact_entries(vec![wrong]),
+                ),
+            },
+            LocalOperationOptions::default(),
+        )
+        .unwrap();
+    match operation.wait_outcome().unwrap() {
+        OperationOutcome::Failed(LocalStagedTreePublishError::Publish(error)) => {
+            assert_eq!(
+                error.cause().kind(),
+                qubit_local_files::error::LocalFileErrorKind::InvalidOptions
+            );
+            let (native, _) = error.into_parts();
+            let (_, stage, _) = native.into_parts();
+            stage
+                .expect("manifest mismatch preserves stage")
+                .cleanup()
+                .unwrap();
+        }
+        outcome => panic!("conflicting exact manifest must prevent publication, got {outcome:?}"),
+    }
+    assert!(!directory.path().join("manifest-conflict").exists());
+}

@@ -161,7 +161,11 @@ impl LocalStagedDirectory {
         }
         if let Some(validation) = options.validation()
             && let Err(cause) =
-                super::super::internal::tree_verification::verify_tree(&self, validation.exact_entries(), validation)
+                super::super::internal::tree_verification::verify_tree(
+                    &self,
+                    validation.generated_entries().or_else(|| validation.exact_entries()),
+                    validation,
+                )
         {
             return Err(super::super::tree_recovery::LocalTreePublishError::new(
                 cause,

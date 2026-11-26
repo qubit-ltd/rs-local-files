@@ -367,7 +367,11 @@ impl AsyncLocalFileSystem {
 
 impl AsyncLocalFileSystem {
     /// Creates files beneath a private stage, verifies the exact tree, then
-    /// publishes it.
+    /// publishes it. Its handle reservation covers the parent and stage roots,
+    /// one transient tree-validation handle, retained entry handles needed by
+    /// access mutation, and the additional Windows root handle. Validation's
+    /// transient check handle is included in the peak reservation even though
+    /// it is released before access mutation begins.
     ///
     /// # Parameters
     ///
@@ -407,6 +411,36 @@ impl AsyncLocalFileSystem {
             sum.saturating_add(u64::try_from(file.bytes.len()).unwrap_or(u64::MAX))
         });
         let disk_bytes = disk_bytes.max(1);
+        let needs_entry_handles = request.publish_options.owner_access_policy().is_some()
+            || request.publish_options.access() != crate::policy::LocalTreeFinalAccess::Preserve;
+        let extra_handles = if needs_entry_handles {
+            request.files.len().saturating_add(usize::from(cfg!(windows)))
+        } else {
+            0
+        };
+        // The peak includes the parent and stage roots plus one transient
+        // validation handle; access mutation may instead retain every staged
+        // entry and the additional Windows root handle.
+        let required_handles = 2_usize.saturating_add(extra_handles).max(3);
+        let handle_limit = limits
+            .max_open_handles
+            .unwrap_or(self.executor.inner.config.max_open_handles);
+        if handle_limit == 0
+            || handle_limit > self.executor.inner.config.max_open_handles
+            || required_handles > handle_limit
+        {
+            return Err(LocalSubmitError::new(
+                request,
+                super::super::LocalSubmitRejection::CapacityExceeded,
+            ));
+        }
+        let Some(handle_quota) = self.executor.reserve_handles(required_handles) else {
+            return Err(LocalSubmitError::new(
+                request,
+                super::super::LocalSubmitRejection::CapacityExceeded,
+            ));
+        };
+        let handle_quota = Arc::new(handle_quota);
         let disk_limit = limits
             .max_disk_bytes
             .unwrap_or(self.executor.inner.config.max_disk_bytes);
@@ -431,7 +465,9 @@ impl AsyncLocalFileSystem {
             OwnedSubmission {
                 path_is_relative: relative,
 
-                required_handles: 2,
+                // The staged tree's complete reservation is acquired above
+                // and shared with its native recovery owner when necessary.
+                required_handles: 0,
 
                 limits,
 
@@ -461,6 +497,7 @@ impl AsyncLocalFileSystem {
                         ));
                     }
                 };
+                stage.retain_handle_quota(handle_quota.clone());
                 let mut expected = Vec::with_capacity(request.files.len());
                 for file in &request.files {
                     if let Some(stop) = stop_report(scope) {
@@ -492,7 +529,12 @@ impl AsyncLocalFileSystem {
                     record_stage_write(scope, &observer, file.bytes.len() as u64, EffectFact::Known);
                     expected.push(entry);
                 }
-                let validation = crate::directory::LocalTreeValidationOptions::new().with_exact_entries(expected);
+                let validation = request
+                    .publish_options
+                    .validation()
+                    .cloned()
+                    .unwrap_or_default()
+                    .with_generated_entries(expected);
                 let publish_options = request.publish_options.clone().with_validation(validation);
                 if let Some(stop) = stop_report(scope) {
                     return match stage.cleanup() {
@@ -909,6 +951,33 @@ mod relative_host_publish_tests {
             executor,
             Some(root.to_path_buf()),
         )
+    }
+
+    #[test]
+    fn test_staged_publish_handle_reservations_compete_atomically() {
+        let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+        let executor = LocalIoExecutor::new(
+            manager,
+            LocalExecutionConfig {
+                max_open_handles: 5,
+                ..LocalExecutionConfig::default()
+            },
+        )
+        .unwrap();
+        let gate = Arc::new(std::sync::Barrier::new(3));
+        let attempts = (0..2).map(|_| {
+            let executor = executor.clone();
+            let gate = Arc::clone(&gate);
+            std::thread::spawn(move || {
+                gate.wait();
+                executor.reserve_handles(3)
+            })
+        }).collect::<Vec<_>>();
+        gate.wait();
+        let permits = attempts.into_iter().map(|attempt| attempt.join().unwrap()).collect::<Vec<_>>();
+        assert_eq!(1, permits.iter().filter(|permit| permit.is_some()).count());
+        drop(permits);
+        assert!(executor.reserve_handles(5).is_some());
     }
 
     fn create_temp_file_access(

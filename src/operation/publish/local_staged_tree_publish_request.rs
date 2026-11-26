@@ -22,11 +22,14 @@ pub struct LocalStagedTreePublishRequest {
     /// Private temporary-directory creation policy.
     /// Creation policy applied to the private staging directory.
     pub stage_options: crate::options::LocalTempDirectoryOptions,
-    /// Files written under the stage; paths must be direct children.
+    /// Files written under the stage; paths must be direct children. Async
+    /// publication validates the generated manifest and also applies any
+    /// explicit exact manifest, limits, and policy options below.
     /// Files created beneath the stage before publication.
     pub files: Vec<LocalStagedTreeFile>,
-    /// Durability and access options for publication; exact verification is
-    /// added automatically.
+    /// Durability, access, and validation options for publication. The
+    /// generated staged manifest is always validated; an explicit exact
+    /// manifest is checked independently against it and the observed tree.
     /// Durability and access policy used when installing the completed tree.
     pub publish_options: crate::options::LocalTreePublishOptions,
 }
