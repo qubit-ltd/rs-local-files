@@ -215,6 +215,11 @@ impl LocalTreeRetainedResource {
 
     /// Retains an external executor quota for the lifetime of this native
     /// recovery owner.
+    ///
+    /// # Parameters
+    ///
+    /// * `quota` is the shared reservation retained until this owner is
+    ///   released.
     pub(crate) fn retain_handle_quota(&mut self, quota: std::sync::Arc<dyn Send + Sync>) {
         self.handle_quota = Some(quota);
     }

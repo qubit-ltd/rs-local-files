@@ -195,8 +195,7 @@ impl RootedLocalFileSystem {
                 .as_path()
                 .parent()
                 .filter(|parent| !parent.as_os_str().is_empty())
-            && let Err((error, _created)) =
-                prepare_rooted_copy_parent(&self.root, parent, &budget)
+            && let Err((error, _created)) = prepare_rooted_copy_parent(&self.root, parent, &budget)
         {
             return Err(copy_failure_unchanged(rooted_io_error(
                 LocalFileOperation::Copy,

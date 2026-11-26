@@ -612,11 +612,15 @@ fn symlink_source_is_directory(source: &Path) -> io::Result<bool> {
     }
 }
 
-fn create_symlink_entry(
-    link_target: &Path,
-    source_is_directory: bool,
-    target: &Path,
-) -> io::Result<()> {
+/// Creates a symbolic link entry with platform-specific directory handling.
+///
+/// # Parameters
+///
+/// * `link_target` is the stored path target of the symbolic link.
+/// * `source_is_directory` indicates whether the source link points to a
+///   directory.
+/// * `target` is the destination path for the new link.
+fn create_symlink_entry(link_target: &Path, source_is_directory: bool, target: &Path) -> io::Result<()> {
     #[cfg(not(windows))]
     let _ = source_is_directory;
     #[cfg(unix)]

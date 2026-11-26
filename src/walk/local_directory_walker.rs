@@ -501,11 +501,13 @@ impl LocalDirectoryWalker {
     }
 
     /// Enables strict staged-tree depth admission before native metadata work.
-    pub(crate) fn with_logical_depth_limit(
-        mut self,
-        limit: Option<usize>,
-        diagnostic_root: PathBuf,
-    ) -> Self {
+    ///
+    /// # Parameters
+    ///
+    /// * `limit` is the maximum admitted relative depth, or `None` for no
+    ///   limit.
+    /// * `diagnostic_root` is the path used to report a depth violation.
+    pub(crate) fn with_logical_depth_limit(mut self, limit: Option<usize>, diagnostic_root: PathBuf) -> Self {
         if let Some(rooted) = self.rooted.as_mut() {
             rooted.logical_depth_limit = limit;
             rooted.logical_depth_root = Some(diagnostic_root);
@@ -836,17 +838,19 @@ fn needs_seen_names(options: &LocalListOptions) -> bool {
     explicit_name_budget || can_reopen
 }
 
-fn logical_depth_error(
-    root: &Path,
-    relative: &Path,
-    limit: usize,
-    actual: usize,
-) -> LocalFileError {
+/// Creates a resource-limit error for an entry deeper than the configured cap.
+///
+/// # Parameters
+///
+/// * `root` is the diagnostic root path.
+/// * `relative` is the offending entry path relative to the root.
+/// * `limit` is the maximum admitted depth.
+/// * `actual` is the observed entry depth.
+fn logical_depth_error(root: &Path, relative: &Path, limit: usize, actual: usize) -> LocalFileError {
     LocalFileError::from_resource_limit(
         LocalFileOperation::Read,
         Some(root.join(relative)),
-        crate::error::LocalResourceLimitError::new(LocalResourceKind::Depth, limit, 0, actual)
-            .with_observed(actual),
+        crate::error::LocalResourceLimitError::new(LocalResourceKind::Depth, limit, 0, actual).with_observed(actual),
     )
     .with_reason("tree validation depth limit exceeded")
 }

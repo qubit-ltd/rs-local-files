@@ -115,8 +115,8 @@ fn test_read_stage_cancel_late_consumer_cleanup_and_recovery_retry() {
 
     // Cancel another accepted staging operation while the consumer helper
     // still owns the first staged resource.
-    let gate = install_test_gate_for_local_filesystem("lf6-stage-bytes-after-write", &filesystem)
-        .expect("stage write gate");
+    let gate =
+        install_test_gate_for_local_filesystem("lf6-stage-bytes-after-write", &filesystem).expect("stage write gate");
     let mut cancelled_stage = qubit_local_files::stage_bytes(
         filesystem.clone(),
         executor.clone(),

@@ -39,7 +39,8 @@ impl HostLocalFileSystem {
     /// # Parameters
     ///
     /// - `path`: Native file or symbolic-link path.
-    /// - `options`: Missing-entry policy.
+    /// - `options`: Missing-entry policy. Directory deadline and traversal
+    ///   budgets do not apply to this one-entry file deletion.
     /// - `symlink_policy`: Policy for intermediate symbolic links.
     ///
     /// # Returns
@@ -84,10 +85,10 @@ impl HostLocalFileSystem {
     /// # Parameters
     ///
     /// - `path`: Native directory path.
-    /// - `options`: Recursion and missing-entry policy.
+    /// - `options`: Recursion, missing-entry, and directory deadline policy.
     /// - `symlink_policy`: Policy for intermediate symbolic links.
-    /// - `started_at`: Start time used to account for recursive deletion
-    ///   elapsed time.
+    /// - `started_at`: Start time used to account for the cooperative directory
+    ///   deletion deadline.
     ///
     /// # Returns
     ///
@@ -95,8 +96,11 @@ impl HostLocalFileSystem {
     ///
     /// # Errors
     ///
-    /// Returns `LocalFileError` when the entry is not a directory or removal
-    /// fails.
+    /// Returns `LocalFileError` when the entry is not a directory, the
+    /// cooperative deadline expires, or removal fails. A strict deletion
+    /// checks the deadline before removing the directory, including when it
+    /// is empty; recursive traversal budgets apply only when recursion is
+    /// enabled.
     pub fn delete_directory_with_policy(
         path: &Path,
         options: &LocalDeleteOptions,

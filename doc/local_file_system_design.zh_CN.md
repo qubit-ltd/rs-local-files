@@ -1387,10 +1387,11 @@ file 和 directory delete 分开，避免调用方意外删除错误类型：
 - missing-ok 只改变 NotFound 结果，不吞掉 permission、type 或 I/O 错误；
 - Rooted `/` 永远不能删除。
 
-Recursive delete 可显式设置深度、已发现条目数、待处理路径字节数与协作式 deadline。
-根目录计为一个条目、深度为零；枚举子项时先扣减预算再入队。待处理路径预算统计队列内
-路径的原生编码字节，不包含分配器开销和枚举中的临时对象。默认均为 `None`，不限制；
-原生默认值可被显式 Options 替换，强制上限由 provider 适配层保证。
+严格和递归目录删除都会在原生调用之间检查协作式 deadline；即使严格删除空目录，零 deadline 也会在
+移除前超时。文件删除只处理一个非目录条目或链接，不使用目录 deadline。递归删除还可限制深度、已发现
+条目数和待处理路径字节数。请求目录计为一个条目、深度为零；发现子项后先扣减预算再入队。待处理路径
+预算统计队列内路径的原生编码字节，不包括分配器开销和枚举中的临时对象。默认均为 `None`，原生默认值
+可由显式 Options 替换，强制上限由 provider 适配层保证。
 
 Recursive delete 不是事务。预算失败即使发生在部分删除之后，也保留类型化资源事实。若至少一个 entry 已删除后失败，返回
 `LocalFileErrorKind::PublicationIncomplete`，`path` 指向失败的虚拟绝对 entry；已经完成的
@@ -1820,6 +1821,11 @@ authority。已接纳请求持有自己的输入和提交时 options，之后修
 及清理 owner。取消或停止操作不代表已经开始的原生调用会被中断；清理尚未确认时，恢复 owner
 仍可继续提供核查与重试入口。
 
+`request_stop()` 请求协作式取消；其返回值只表示请求是否被接受。完整读取会在读取块之间检查停止
+请求，其他操作则在各自定义的检查点处理。已经开始的原生调用不会被中断。放弃等待 outcome 的 future
+只会结束这次等待，不会替调用方请求停止，也不会取消已接纳任务。需要停止时应显式调用
+`request_stop()`，随后取得 outcome；关闭或转交结果中返回的资源后，再等待 settlement。
+
 完整读取会独立返回 `LocalFactObserver` 和字节结果。`submit_read_all` 在每个读取块之间
 检查协作停止请求，并通过同一个 reader 在读取前后观察变化；这无法保证原子快照。
 `submit_read_all_with_observer` 保留普通完整读取的执行方式，不增加逐块停止检查。两种路径都通过
@@ -1841,6 +1847,11 @@ iterator，归还 handle、批次字节和 cleanup reservation，再发布终态
 活跃等待方共享该结果；通知在状态锁外逐一执行。清理任务被拒绝或 panic 时，关闭保持未确认，保留原生 owner
 及其字节 reservation，并向每个等待方返回相同错误。关闭确认后，即使发布结果的 worker 回调尚在返回，批次字节
 reservation 也已可复用。已经返回的路径批次仍由调用方持有，公开类型继续是 `Vec<PathBuf>`。
+
+提交 walker 时会先从共享池预留完整的 reader 上限。资源充足时，零上限才会进入任务并由 operation
+outcome 报告 `InvalidOptions`；无法预留完整额度时，会先以 `CapacityExceeded` 拒绝提交。worker 最多保留
+一个 256 KiB 批次，以及一条最多 256 KiB 的延迟前瞻路径。单条路径超过前瞻上限时会被丢弃并报告资源
+限制错误。这两份额度分别计算，路径字节保留量最多 512 KiB，不包括分配器开销。
 
 walker 发布前会先预留 cleanup reservation，因此普通队列暂时已满不会占用它的清理槽位。executor
 关闭则不同：worker queue 会永久拒绝清理，settlement 会通过 recovery handle 保留 owner。重试该
@@ -2204,8 +2215,9 @@ backend 负责原生 I/O、发布操作、经 `CopyBudget` 扣减实际字节，
 发布时请求 `Preferred` 或 `Required` 文件同步会按所选限制遍历普通文件，`NotRequired` 跳过此阶段。
 `sync_tree_with_options()` 是单独的完整树遍历。访问策略也会遍历待修改条目；精确 owner policy 默认最多保留
 256 个子项 identity 和管理句柄，显式 `max_entries` 会替换此上限。
-`verify_entries()` 将观测到的条目集合与 expected 集合精确比较，不受顺序影响；两边的路径都必须唯一，重复路径
-（即使 kind 不同）返回 `InvalidOptions`。验证按单遍遍历索引 expected set，不为遍历额外构造拥有型
+`verify_entries()` 将观测到的条目集合与 expected 集合精确比较，不受顺序影响；两边的路径都必须唯一。
+输入集合中的重复路径（即使 kind 不同）返回 `InvalidOptions`；如果遍历观察到同一路径多次，则返回
+`RequirementNotMet`。验证按单遍遍历索引 expected set，不为遍历额外构造拥有型
 副本；索引前先计入 expected path 的原生编码字节。字节预算约束逻辑路径字节，不是进程总堆内存上限，
 不覆盖哈希桶和分配器开销。遍历与索引共同受条目数、深度、路径字节、打开目录数和 deadline 限制。
 有限深度下发现超深条目会失败，不会静默截断。链接只按链接条目观测，不跟随目标，

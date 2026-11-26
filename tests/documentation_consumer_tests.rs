@@ -36,8 +36,10 @@ const INTRO_DEPS_START: &str = "# BEGIN guide introductory dependencies";
 const INTRO_DEPS_END: &str = "# END guide introductory dependencies";
 const ASYNC_WALKER_DEPS_START: &str = "# BEGIN async walker consumer dependencies";
 const ASYNC_WALKER_DEPS_END: &str = "# END async walker consumer dependencies";
-const ASYNC_WALKER_START: &str = "// BEGIN executable async walker example";
-const ASYNC_WALKER_END: &str = "// END executable async walker example";
+const ASYNC_READER_START: &str = "// BEGIN executable async reader example";
+const ASYNC_READER_END: &str = "// END executable async reader example";
+const ASYNC_READER_FAILURE_START: &str = "// BEGIN executable async reader failure example";
+const ASYNC_READER_FAILURE_END: &str = "// END executable async reader failure example";
 const ASYNC_WALKER_FAILURE_START: &str = "// BEGIN executable async walker recovery example";
 const ASYNC_WALKER_FAILURE_END: &str = "// END executable async walker recovery example";
 const TREE_SYNC_START: &str = "// BEGIN executable tree sync example";
@@ -706,7 +708,7 @@ fn test_documented_tree_sync_compiles_with_introductory_dependencies() {
 }
 
 #[test]
-fn test_documented_async_walker_compiles_as_a_consumer() {
+fn test_documented_async_reader_examples_execute_as_consumers() {
     let _guard = lock_documentation_consumer();
     let crate_path = Path::new(env!("CARGO_MANIFEST_DIR"))
         .canonicalize()
@@ -727,8 +729,14 @@ fn test_documented_async_walker_compiles_as_a_consumer() {
             dependency_line,
             &local_files_path_dependency(dependency_line, &dependency_path),
         );
-        let code = extract_marked(guide, ASYNC_WALKER_START, ASYNC_WALKER_END, language);
-        let project = workspace.path().join(format!("async-walker-consumer-{index}"));
+        let fixture = workspace.path().join(format!("async-reader-fixture-{index}"));
+        fs::create_dir_all(&fixture).expect("reader fixture directory is created");
+        fs::write(fixture.join("input.txt"), b"reader input").expect("reader fixture input is written");
+        let code = extract_marked(guide, ASYNC_READER_START, ASYNC_READER_END, language).replace(
+            "PathBuf::from(\"input.txt\")",
+            &format!("PathBuf::from({:?})", fixture.join("input.txt").to_string_lossy()),
+        );
+        let project = workspace.path().join(format!("async-reader-consumer-{index}"));
         fs::create_dir_all(project.join("src")).expect("consumer source directory is created");
         fs::write(
             project.join("Cargo.toml"),
@@ -739,12 +747,12 @@ fn test_documented_async_walker_compiles_as_a_consumer() {
         .expect("consumer manifest is written");
         fs::write(project.join("Cargo.lock"), &consumer_lock).expect("reviewed consumer lock is written");
         let source = format!(
-            "async fn example() -> Result<(), Box<dyn std::error::Error>> {{\n{code}\nOk(())\n}}\nfn main() {{}}\n"
+            "use std::future::Future;\nuse std::sync::Arc;\nuse std::task::{{Context, Poll, Wake, Waker}};\n\nasync fn example() -> Result<Vec<qubit_operation::RecoveryHandle>, Box<dyn std::error::Error>> {{\n{code}\n}}\nstruct ThreadWake(std::thread::Thread);\nimpl Wake for ThreadWake {{ fn wake(self: Arc<Self>) {{ self.0.unpark(); }} fn wake_by_ref(self: &Arc<Self>) {{ self.0.unpark(); }} }}\nfn block_on<T>(future: impl Future<Output = T>) -> T {{ let mut future = Box::pin(future); let waker = Waker::from(Arc::new(ThreadWake(std::thread::current()))); let mut context = Context::from_waker(&waker); loop {{ match future.as_mut().poll(&mut context) {{ Poll::Ready(value) => return value, Poll::Pending => std::thread::park(), }} }} }}\nfn main() {{ assert!(block_on(example()).expect(\"documented reader open, close, and settlement succeed\").is_empty()); }}\n"
         );
         fs::write(project.join("src/main.rs"), source).expect("consumer source is written");
 
         let status = Command::new("cargo")
-            .arg("check")
+            .arg("run")
             .arg("--frozen")
             .arg("--manifest-path")
             .arg(project.join("Cargo.toml"))
@@ -757,7 +765,7 @@ fn test_documented_async_walker_compiles_as_a_consumer() {
             .expect("consumer cargo process starts");
         if !status.status.success() {
             panic!(
-                "{language} async walker consumer failed with {}\nstdout:\n{}\nstderr:\n{}",
+                "{language} async reader consumer failed with {}\nstdout:\n{}\nstderr:\n{}",
                 status.status,
                 String::from_utf8_lossy(&status.stdout),
                 String::from_utf8_lossy(&status.stderr)
@@ -766,7 +774,70 @@ fn test_documented_async_walker_compiles_as_a_consumer() {
         assert_eq!(
             fs::read_to_string(project.join("Cargo.lock")).expect("consumer lock remains readable"),
             consumer_lock,
-            "{language} async walker consumer must not change the reviewed dependency graph"
+            "{language} async reader consumer must not change the reviewed dependency graph"
+        );
+    }
+}
+
+#[test]
+fn test_documented_async_reader_failure_executes_as_consumer() {
+    let _guard = lock_documentation_consumer();
+    let crate_path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .canonicalize()
+        .expect("the tested crate path is canonicalized");
+    let workspace = tempdir().expect("consumer workspace is created");
+    let target = workspace.path().join("target");
+    let parent_lock = fs::read_to_string(crate_path.join("Cargo.lock")).expect("the tested crate has a lockfile");
+    let consumer_lock = consumer_lock::lock_with_parent_sources(ASYNC_WALKER_CONSUMER_LOCK, &parent_lock);
+
+    for (index, (language, guide)) in GUIDES.into_iter().enumerate() {
+        let dependencies = extract_marked(guide, ASYNC_WALKER_DEPS_START, ASYNC_WALKER_DEPS_END, language);
+        let dependency_line = dependencies
+            .lines()
+            .find(|line| line.trim_start().starts_with("qubit-local-files ="))
+            .expect("async reader dependencies contain qubit-local-files");
+        let dependency_path = cargo_manifest_path(&crate_path.to_string_lossy());
+        let dependencies = dependencies.replace(
+            dependency_line,
+            &local_files_path_dependency(dependency_line, &dependency_path),
+        );
+        let code = extract_marked(guide, ASYNC_READER_FAILURE_START, ASYNC_READER_FAILURE_END, language);
+        let project = workspace.path().join(format!("async-reader-failure-consumer-{index}"));
+        fs::create_dir_all(project.join("src")).expect("consumer source directory is created");
+        fs::write(
+            project.join("Cargo.toml"),
+            format!("[package]\nname = \"documentation-consumer\"\nversion = \"0.1.0\"\nedition = \"2024\"\n\n{dependencies}"),
+        )
+        .expect("consumer manifest is written");
+        fs::write(project.join("Cargo.lock"), &consumer_lock).expect("reviewed consumer lock is written");
+        let source = format!(
+            "use std::future::Future;\nuse std::sync::Arc;\nuse std::task::{{Context, Poll, Wake, Waker}};\n\nasync fn example() -> Result<Vec<qubit_operation::RecoveryHandle>, Box<dyn std::error::Error>> {{\n{code}\n}}\nstruct ThreadWake(std::thread::Thread);\nimpl Wake for ThreadWake {{ fn wake(self: Arc<Self>) {{ self.0.unpark(); }} fn wake_by_ref(self: &Arc<Self>) {{ self.0.unpark(); }} }}\nfn block_on<T>(future: impl Future<Output = T>) -> T {{ let mut future = Box::pin(future); let waker = Waker::from(Arc::new(ThreadWake(std::thread::current()))); let mut context = Context::from_waker(&waker); loop {{ match future.as_mut().poll(&mut context) {{ Poll::Ready(value) => return value, Poll::Pending => std::thread::park(), }} }} }}\nfn main() {{ assert!(block_on(example()).expect(\"documented controlled reader failure is handled\").is_empty()); }}\n"
+        );
+        fs::write(project.join("src/main.rs"), source).expect("consumer source is written");
+
+        let status = Command::new("cargo")
+            .arg("run")
+            .arg("--frozen")
+            .arg("--manifest-path")
+            .arg(project.join("Cargo.toml"))
+            .current_dir(&project)
+            .env("CARGO_TARGET_DIR", &target)
+            .env_remove("CARGO_ENCODED_RUSTFLAGS")
+            .env_remove("RUSTFLAGS")
+            .env_remove("CARGO_BUILD_TARGET")
+            .output()
+            .expect("consumer cargo process starts");
+        assert!(
+            status.status.success(),
+            "{language} controlled reader failure consumer failed with {}\nstdout:\n{}\nstderr:\n{}",
+            status.status,
+            String::from_utf8_lossy(&status.stdout),
+            String::from_utf8_lossy(&status.stderr)
+        );
+        assert_eq!(
+            fs::read_to_string(project.join("Cargo.lock")).expect("consumer lock remains readable"),
+            consumer_lock,
+            "{language} controlled reader failure consumer must not change the reviewed dependency graph"
         );
     }
 }

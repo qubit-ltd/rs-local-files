@@ -152,12 +152,7 @@ fn test_rooted_named_entry_error_beyond_tree_depth_limit_is_reported_before_nati
     // Model a retained rooted frame whose cursor reports an entry deeper than
     // the configured limit. The injected child-inspection fault carries that
     // entry's name, exercising the skip path without manufacturing an error.
-    walker
-        .rooted
-        .as_mut()
-        .expect("rooted walker state should exist")
-        .stack[0]
-        .entry_depth = 2;
+    walker.rooted.as_mut().expect("rooted walker state should exist").stack[0].entry_depth = 2;
 
     let _fault = crate::test_support::install_test_fault("rooted-child-inspection-first")
         .expect("named child inspection fault should install");
@@ -167,10 +162,7 @@ fn test_rooted_named_entry_error_beyond_tree_depth_limit_is_reported_before_nati
         .expect("over-depth named failures must report the strict tree depth limit")
         .expect_err("depth admission precedes the injected native child error");
     assert_eq!(crate::LocalFileErrorKind::ResourceLimit, error.kind());
-    assert_eq!(
-        Some(directory.path().join("uninspectable").as_path()),
-        error.path()
-    );
+    assert_eq!(Some(directory.path().join("uninspectable").as_path()), error.path());
     let facts = error.resource_limit_error().expect("depth limit facts");
     assert_eq!(crate::LocalResourceKind::Depth, facts.resource());
     assert_eq!(1, facts.limit());
@@ -189,15 +181,10 @@ fn test_rooted_nameless_enumeration_error_is_preserved_beyond_tree_depth_limit()
     let directory = fixture();
     let mut walker = rooted(&directory, LocalListOptions::new().with_max_depth(1))
         .with_logical_depth_limit(Some(1), directory.path().to_path_buf());
-    walker
-        .rooted
-        .as_mut()
-        .expect("rooted walker state should exist")
-        .stack[0]
-        .entry_depth = 2;
+    walker.rooted.as_mut().expect("rooted walker state should exist").stack[0].entry_depth = 2;
 
-    let _fault = crate::test_support::install_test_fault("rooted-stream-read")
-        .expect("unnamed stream error should install");
+    let _fault =
+        crate::test_support::install_test_fault("rooted-stream-read").expect("unnamed stream error should install");
     let error = walker
         .next()
         .expect("unassignable enumeration failure remains reportable")

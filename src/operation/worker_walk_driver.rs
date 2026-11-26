@@ -25,9 +25,9 @@ use super::stream_state::resource_limit;
 use super::worker_walk_close_state::WorkerWalkCloseState;
 use super::worker_walk_command::WorkerWalkCommand;
 use super::worker_walk_cursor::WorkerWalkCursor;
-use super::worker_walk_inner::WorkerWalkInner;
 #[cfg(test)]
 use super::worker_walk_inner::WalkBatchTransferObservation;
+use super::worker_walk_inner::WorkerWalkInner;
 use super::worker_walk_inner::dispose_panic_payload;
 
 #[cfg(test)]
@@ -332,19 +332,13 @@ impl LocalWalkDriver for WorkerWalkDriver {
                     &inner,
                     request_id,
                     WalkBatchTransferObservation {
-                        batch_entries: result
-                            .as_ref()
-                            .map_or(0, |batch| batch.as_ref().map_or(0, Vec::len)),
-                        batch_bytes: result
-                            .as_ref()
-                            .ok()
-                            .and_then(Option::as_ref)
-                            .map_or(0, |entries| {
-                                entries
-                                    .iter()
-                                    .map(|path| path.as_os_str().as_encoded_bytes().len())
-                                    .sum()
-                            }),
+                        batch_entries: result.as_ref().map_or(0, |batch| batch.as_ref().map_or(0, Vec::len)),
+                        batch_bytes: result.as_ref().ok().and_then(Option::as_ref).map_or(0, |entries| {
+                            entries
+                                .iter()
+                                .map(|path| path.as_os_str().as_encoded_bytes().len())
+                                .sum()
+                        }),
                         lookahead_bytes: cursor_guard
                             .as_ref()
                             .and_then(|cursor| cursor.pending_entry.as_ref())
@@ -517,10 +511,10 @@ fn drop_abandoned_walk_commands(commands: HashMap<u64, WorkerWalkCommand>) {
 
 #[cfg(test)]
 mod tests {
-    use crate::operation::stream::LOCAL_WALK_BATCH_BYTES;
     use std::collections::HashMap;
     use std::future::Future;
     use std::io;
+    use std::path::Path;
     use std::path::PathBuf;
     use std::sync::Arc;
     use std::sync::Mutex;
@@ -550,6 +544,7 @@ mod tests {
     use crate::operation::LocalExecutionConfig;
     use crate::operation::LocalIoExecutor;
     use crate::operation::internal::permits::PermitPool;
+    use crate::operation::stream::LOCAL_WALK_BATCH_BYTES;
 
     struct BatchWakerProbe {
         inner: Arc<WorkerWalkInner>,
@@ -707,7 +702,7 @@ mod tests {
 
     fn direct_driver_at(
         directory: &tempfile::TempDir,
-        list_path: &PathBuf,
+        list_path: &Path,
         executor: LocalIoExecutor,
         handle_budget: Arc<super::super::super::internal::permits::Permit>,
     ) -> WorkerWalkDriver {
@@ -839,15 +834,13 @@ mod tests {
         use std::os::unix::ffi::OsStringExt;
 
         let prefix = PathBuf::from("prefix");
-        let oversized = PathBuf::from(std::ffi::OsString::from_vec(vec![
-            b'x';
-            LOCAL_WALK_BATCH_BYTES + 1
-        ]));
+        let oversized = PathBuf::from(std::ffi::OsString::from_vec(vec![b'x'; LOCAL_WALK_BATCH_BYTES + 1]));
         let mut sequence = [Some(Ok(prefix.clone())), Some(Ok(oversized))].into_iter();
         let mut pending_entry = None;
         let mut pending_error = None;
-        let (first, exhausted) =
-            collect_walk_batch(&mut pending_entry, &mut pending_error, 8, 6, || sequence.next().flatten());
+        let (first, exhausted) = collect_walk_batch(&mut pending_entry, &mut pending_error, 8, 6, || {
+            sequence.next().flatten()
+        });
 
         assert!(!exhausted);
         assert_eq!(first.unwrap(), Some(vec![prefix]));
@@ -1474,7 +1467,10 @@ mod tests {
         resume_tx.send(()).expect("worker remains paused until resumed");
         block_on(poll_closed(&driver)).expect("negative-control walker closes");
 
-        assert_eq!(generated_batch.batch_entries, 0, "empty fixture must generate an empty batch");
+        assert_eq!(
+            generated_batch.batch_entries, 0,
+            "empty fixture must generate an empty batch"
+        );
         assert!(result.is_err(), "the regression must reject an empty generated batch");
     }
 
@@ -1858,14 +1854,16 @@ mod tests {
         *driver.0.batch_transfer_test_gate.lock().unwrap() = Some((93, entered_tx, resume_rx));
         let mut context = Context::from_waker(Waker::noop());
 
-        assert!(driver
-            .poll_batch(
-                &mut context,
-                93,
-                crate::operation::stream::LOCAL_WALK_BATCH_ENTRIES,
-                crate::operation::stream::LOCAL_WALK_BATCH_BYTES,
-            )
-            .is_pending());
+        assert!(
+            driver
+                .poll_batch(
+                    &mut context,
+                    93,
+                    crate::operation::stream::LOCAL_WALK_BATCH_ENTRIES,
+                    crate::operation::stream::LOCAL_WALK_BATCH_BYTES,
+                )
+                .is_pending()
+        );
         let observation = entered_rx
             .recv_timeout(Duration::from_secs(5))
             .expect("worker reports encoded batch and lookahead sizes");

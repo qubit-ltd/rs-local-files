@@ -16,7 +16,12 @@ use super::resource_limits::tighter;
 /// Recursive budgets are opt-in. Entries include the requested root (depth
 /// zero). Pending-path bytes count encoded native path lengths retained by the
 /// work queue, excluding allocator overhead and in-flight enumeration objects.
-/// Deadlines are cooperative checks between native calls, not I/O timeouts.
+/// Recursive traversal budgets (`max_depth`, `max_entries`, and
+/// `max_pending_path_bytes`) apply only to recursive directory deletion. The
+/// cooperative deadline applies to strict and recursive directory deletion;
+/// it is checked between native calls and is not an I/O timeout. File deletion
+/// removes one entry and does not use the directory deadline or traversal
+/// budgets.
 ///
 /// # Examples
 ///
@@ -217,11 +222,12 @@ impl LocalDeleteOptions {
         self
     }
 
-    /// Sets the cooperative elapsed-time limit for recursive deletion.
+    /// Sets the cooperative elapsed-time limit for directory deletion.
     ///
     /// # Parameters
     ///
-    /// * `limit` - Maximum elapsed time allowed for recursive deletion.
+    /// * `limit` - Maximum elapsed time allowed for strict or recursive
+    ///   directory deletion.
     #[inline]
     pub const fn with_deadline(mut self, limit: Duration) -> Self {
         self.deadline = Some(limit);

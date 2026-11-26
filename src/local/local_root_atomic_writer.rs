@@ -579,6 +579,7 @@ impl LocalRootAtomicWriter {
     /// # Errors
     ///
     /// Returns the commit failure enriched with any staging cleanup failure.
+    #[cfg(test)]
     #[inline]
     pub(crate) fn commit_with_durability(self) -> Result<bool, LocalAtomicWriteError> {
         self.commit_recoverable_with_durability()
@@ -587,6 +588,10 @@ impl LocalRootAtomicWriter {
 
     /// Commits a copied file while enforcing its operation deadline at the
     /// final installation boundary.
+    ///
+    /// # Parameters
+    ///
+    /// * `budget` supplies the copy deadline checked before installation.
     pub(crate) fn commit_copy_with_durability(
         self,
         budget: &crate::local::CopyBudget,
@@ -607,6 +612,7 @@ impl LocalRootAtomicWriter {
     ///
     /// Returns a recoverable error before installation or a terminal error
     /// after destination state may have changed.
+    #[cfg(test)]
     pub(crate) fn commit_recoverable_with_durability(self) -> Result<bool, LocalAtomicCommitError<Self>> {
         self.commit_recoverable_with_sync(None).map(|outcome| outcome.durable)
     }
@@ -636,6 +642,14 @@ impl LocalRootAtomicWriter {
         self.commit_recoverable_with_sync_and_budget(observer, None)
     }
 
+    /// Commits while retaining a retryable writer when failure occurs before
+    /// destination installation.
+    ///
+    /// # Parameters
+    ///
+    /// * `observer` is notified when file or parent synchronization is
+    ///   attempted.
+    /// * `budget` supplies optional cooperative copy deadline checks.
     fn commit_recoverable_with_sync_and_budget(
         self,
         observer: Option<&LocalCommitSyncObserver>,
@@ -1083,10 +1097,12 @@ impl LocalRootAtomicWriter {
         })
     }
 
-    fn check_copy_deadline(
-        &self,
-        budget: Option<&crate::local::CopyBudget>,
-    ) -> Result<(), LocalAtomicWriteError> {
+    /// Checks an optional copy deadline before destination installation.
+    ///
+    /// # Parameters
+    ///
+    /// * `budget` contains the deadline to check, if one was configured.
+    fn check_copy_deadline(&self, budget: Option<&crate::local::CopyBudget>) -> Result<(), LocalAtomicWriteError> {
         let Some(budget) = budget else {
             return Ok(());
         };

@@ -52,8 +52,8 @@ qubit-operation = "^0.3"
 
 ```rust,no_run
 # #[cfg(feature = "async")]
-# async fn example() -> Result<(), Box<dyn std::error::Error>> {
-// BEGIN executable async walker example
+# async fn example() -> Result<Vec<qubit_operation::RecoveryHandle>, Box<dyn std::error::Error>> {
+// BEGIN executable async reader example
 use std::path::PathBuf;
 use qubit_local_files::{
     AsyncLocalFileSystem, LocalExecutionConfig, LocalIoExecutor,
@@ -73,14 +73,108 @@ let mut opening = filesystem.submit_open_reader(
 let mut opening = opening.into_async();
 let mut reader = match opening.wait_outcome().await? {
     OperationOutcome::Succeeded(reader) => reader,
-    _ => return Err(std::io::Error::other("reader open did not succeed").into()),
+    OperationOutcome::Failed(error) => {
+        let settlement = opening.wait_settlement().await;
+        eprintln!("原生 reader 打开错误：{error}");
+        for failure in settlement.cleanup_failures.iter() {
+            eprintln!("reader 清理诊断：{failure:?}");
+        }
+        for recovery in settlement.recoveries.iter() {
+            eprintln!("reader 恢复 owner 仍被保留：{recovery:?}");
+        }
+        return Ok(settlement.recoveries.to_vec());
+    }
+    OperationOutcome::Stopped(report) => {
+        let settlement = opening.wait_settlement().await;
+        for failure in settlement.cleanup_failures.iter() {
+            eprintln!("reader 清理诊断：{failure:?}");
+        }
+        for recovery in settlement.recoveries.iter() {
+            eprintln!("reader 恢复 owner 仍被保留：{recovery:?}");
+        }
+        eprintln!("reader 打开已停止：{report:?}");
+        return Ok(settlement.recoveries.to_vec());
+    }
+    _ => return Err(std::io::Error::other("reader 打开未返回 reader").into()),
 };
-reader.close().await?;
+let close_result = reader.close().await;
 drop(reader);
 let settlement = opening.wait_settlement().await;
-assert_eq!(settlement.recovery_count, 0);
-// END executable async walker example
-# Ok(())
+if let Err(error) = close_result {
+    eprintln!("reader 关闭诊断：{error}");
+}
+for failure in settlement.cleanup_failures.iter() {
+    eprintln!("reader settlement 诊断：{failure:?}");
+}
+for recovery in settlement.recoveries.iter() {
+    eprintln!("reader 恢复 owner 仍被保留：{recovery:?}");
+}
+Ok(settlement.recoveries.to_vec())
+// END executable async reader example
+# }
+```
+
+打开失败时，应记录原生错误，并等待 settlement。恢复 handle 应与打开诊断分开交给调用方：
+
+```rust,no_run
+# #[cfg(feature = "async")]
+# async fn example() -> Result<Vec<qubit_operation::RecoveryHandle>, Box<dyn std::error::Error>> {
+// BEGIN executable async reader failure example
+use std::path::PathBuf;
+use qubit_local_files::{AsyncLocalFileSystem, LocalExecutionConfig, LocalIoExecutor};
+use qubit_local_files::options::LocalReadOptions;
+use qubit_operation::{ManagerOptions, OperationManager, OperationOptions, OperationOutcome};
+
+let manager = OperationManager::new(ManagerOptions::default())?;
+let executor = LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default())?;
+let filesystem = AsyncLocalFileSystem::host(executor).await?;
+let mut opening = filesystem.submit_open_reader(
+    &manager,
+    OperationOptions::default(),
+    PathBuf::from("missing-input.txt"),
+    LocalReadOptions::default(),
+)?.into_async();
+let recoveries = match opening.wait_outcome().await? {
+    OperationOutcome::Failed(error) => {
+        let settlement = opening.wait_settlement().await;
+        eprintln!("原生 reader 打开错误：{error}");
+        for failure in settlement.cleanup_failures.iter() {
+            eprintln!("reader settlement 诊断：{failure:?}");
+        }
+        for recovery in settlement.recoveries.iter() {
+            eprintln!("reader 恢复 owner 仍被保留：{recovery:?}");
+        }
+        settlement.recoveries.to_vec()
+    }
+    OperationOutcome::Succeeded(mut reader) => {
+        let close_result = reader.close().await;
+        drop(reader);
+        let settlement = opening.wait_settlement().await;
+        if let Err(error) = close_result {
+            eprintln!("reader 关闭诊断：{error}");
+        }
+        for failure in settlement.cleanup_failures.iter() {
+            eprintln!("reader settlement 诊断：{failure:?}");
+        }
+        for recovery in settlement.recoveries.iter() {
+            eprintln!("reader 恢复 owner 仍被保留：{recovery:?}");
+        }
+        return Err(std::io::Error::other("预期输入文件不存在").into());
+    }
+    OperationOutcome::Stopped(report) => {
+        let settlement = opening.wait_settlement().await;
+        for failure in settlement.cleanup_failures.iter() {
+            eprintln!("reader 清理诊断：{failure:?}");
+        }
+        for recovery in settlement.recoveries.iter() {
+            eprintln!("reader 恢复 owner 仍被保留：{recovery:?}");
+        }
+        return Err(std::io::Error::other(format!("reader 打开已停止：{report:?}")).into());
+    }
+    _ => return Err(std::io::Error::other("reader 打开没有失败").into()),
+};
+Ok(recoveries)
+// END executable async reader failure example
 # }
 ```
 
@@ -128,7 +222,12 @@ executor 配置的 `max_open_handles`。上限低于公式时应增大配置；�
 authority 与 cleanup reservation 使用各自的生命周期。并发 walker 会竞争同一资源池，关闭后归还整份
 预留。若嵌套遍历需要同时保留多个目录 reader，应显式设置正数上限，并确保
 `max_open_handles` 足以容纳这份完整预留及其他活跃操作。零仍是无效 walker 选项；共享池不能满足
-完整预留时，以 `CapacityExceeded` 拒绝请求。
+完整预留时，提交先以 `CapacityExceeded` 拒绝请求；资源充足时才会接纳任务，并由 operation outcome
+报告 `InvalidOptions`。
+
+worker 保留一个不超过 256 KiB 的批次，以及至多一个用于前瞻的延迟路径，后者也不超过 256 KiB。
+单条路径超过前瞻上限时会被丢弃，并报告资源限制错误。批次和前瞻分别计限；walker 保留的路径字节
+合计最多 512 KiB，不包括分配器开销。
 
 如果清理报告保留了 walker owner，settlement 会携带 recovery handle。清理成功或完成运维交接前应
 一直保留它。原生 walker 接纳时已预留清理队列槽位，普通队列饱和不会占用该槽位；worker 已停止或
@@ -643,8 +742,9 @@ fn inspect_access(root: &std::path::Path) -> Result<(), Box<dyn std::error::Erro
 创建 stage 时会记录新目录的 identity，并在接管前再次核对。Linux/Unix 竞态测试确认：若创建期间随机名称被替换，操作会拒绝接管替换目录。若其他参与者仍能修改父目录，后续按名称操作依然可能发生竞态。
 
 `verify_entries()` 会把观测到的条目与配置的 exact set 精确比较；两边都必须路径唯一，且按路径和条目类型
-比较，不受顺序影响。expected 集合应包含链接条目本身，不要把通过 alias 可见的后代也加入集合。重复路径返回
-`InvalidOptions`。设置有限深度时，
+比较，不受顺序影响。expected 集合应包含链接条目本身，不要把通过 alias 可见的后代也加入集合。
+输入集合中重复路径属于参数错误，返回 `InvalidOptions`；若遍历时实际观察到同一路径多次，则返回
+`RequirementNotMet`，表示观测到的树不满足请求。设置有限深度时，
 验证仍覆盖整棵树；发现超出深度的条目会报错，不会静默截断。expected path 字节在建立索引前计入预算，
 验证与遍历共同受条目数、深度、路径字节、打开目录数和 deadline 限制。特殊条目默认允许，只有显式
 启用拒绝规则才会失败。观测能发现已访问条目的变化，但不构成原子快照。
@@ -1588,11 +1688,40 @@ native prefix。
 Windows Rooted 的符号链接读取、类型判断和创建均相对于已打开 handle 执行；复制链接自身时
 不会打开其悬空或位于 authority 外的目标。
 
-## 递归删除预算
+## 目录删除限制
 
 `LocalDeleteOptions` 支持 `with_max_depth`、`with_max_entries`、
 `with_max_pending_path_bytes` 和 `with_deadline`。默认均不限，配套 `without_*`
-方法可独立移除限制。预算适用于递归目录删除；请求目录本身计为一个条目、深度为零。
+方法可独立移除限制。深度、条目数和待处理路径字节预算只用于递归目录删除；协作式 deadline
+用于严格和递归目录删除。系统会在原生调用之间检查 deadline，但无法中断正在阻塞的 I/O。零时长
+deadline 下，即使严格删除空目录也会在移除前超时，目录仍会保留。`delete_file` 只删除一个文件条目，
+不使用这些目录限制。
+
+例如，下面的严格目录删除会因 deadline 为零而超时，空目录仍在；文件删除不使用目录遍历预算：
+
+```rust,no_run
+use std::path::Path;
+use std::time::Duration;
+use std::fs;
+use qubit_local_files::LocalFileSystem;
+use qubit_local_files::options::LocalDeleteOptions;
+
+let fixture = tempfile::tempdir()?;
+fs::create_dir(fixture.path().join("empty"))?;
+fs::write(fixture.path().join("one-file"), b"payload")?;
+let filesystem = LocalFileSystem::host()?;
+let strict = LocalDeleteOptions::new().with_deadline(Duration::ZERO);
+let error = filesystem.delete_directory_with_options(&fixture.path().join("empty"), &strict)
+    .expect_err("零期限会在严格删除目录前过期");
+assert_eq!(std::io::ErrorKind::TimedOut, error.io_error_kind());
+assert!(fixture.path().join("empty").is_dir());
+let file = filesystem.delete_file_with_options(&fixture.path().join("one-file"), &strict)?;
+assert!(file.deleted());
+assert!(!fixture.path().join("one-file").exists());
+# Ok::<(), Box<dyn std::error::Error>>(())
+```
+
+启用递归删除时，请求目录本身计为一个条目，深度为零。
 发现子条目后，在加入工作队列前扣减条目预算；待处理路径按原生编码长度计费，出队即释放。
 队列路径预算不包括分配器开销与枚举中的临时对象。Host 和 Rooted 均惰性枚举，
 同一时间最多打开一个目录读取器。期限在原生操作之间检查，不能中断正在阻塞的 I/O。

@@ -183,8 +183,7 @@ fn test_owner_policy_late_stage_binding_mismatch_blocks_root_acl_mutation() {
     let expected_identity = stage.identity().cloned().expect("stage identity");
     let native = scratch.path().join(stage.relative_name());
     let policy = LocalOwnerAccessPolicy::new().with_windows_masks(0x0012_0189, 0x0012_0089);
-    let security_options = LocalSecurityObservationOptions::new()
-        .with_access(LocalObservationRequirement::Required);
+    let security_options = LocalSecurityObservationOptions::new().with_access(LocalObservationRequirement::Required);
     let root_dacl_before = stage
         .directory()
         .security_observation(&security_options)
@@ -232,10 +231,7 @@ fn test_owner_policy_late_stage_binding_mismatch_blocks_root_acl_mutation() {
         .and_then(|access| access.windows())
         .cloned()
         .expect("Windows child DACL facts");
-    assert_eq!(
-        root_dacl_before, root_dacl_after,
-        "root DACL must remain unchanged"
-    );
+    assert_eq!(root_dacl_before, root_dacl_after, "root DACL must remain unchanged");
     assert_ne!(
         child_dacl_before, child_dacl_after,
         "child DACL must show the applied policy"

@@ -255,8 +255,7 @@ fn test_host_symlink_copy_deadline_after_kind_inspection_prevents_creation() {
     let source = fixture.path().join("source-link");
     let target = fixture.path().join("target-link");
     symlink("stored-target", &source).expect("source link should exist");
-    let _clock =
-        observations::DeadlineClockGuard::expire_at(DeadlineBoundary::HostSymlinkKindInspected);
+    let _clock = observations::DeadlineClockGuard::expire_at(DeadlineBoundary::HostSymlinkKindInspected);
 
     let failure = LocalFileSystem::host()
         .expect("host filesystem should open")
@@ -280,8 +279,7 @@ fn test_host_tree_symlink_copy_deadline_after_kind_inspection_prevents_creation(
     let target = fixture.path().join("target-tree");
     fs::create_dir(&source).expect("source directory should exist");
     symlink("stored-target", source.join("child-link")).expect("source link should exist");
-    let _clock =
-        observations::DeadlineClockGuard::expire_at(DeadlineBoundary::HostSymlinkKindInspected);
+    let _clock = observations::DeadlineClockGuard::expire_at(DeadlineBoundary::HostSymlinkKindInspected);
 
     let failure = LocalFileSystem::host()
         .expect("host filesystem should open")

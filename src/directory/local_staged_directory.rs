@@ -129,6 +129,10 @@ mod write;
 impl LocalStagedDirectory {
     /// Couples an executor handle reservation to the stage's native owner so
     /// it follows recovery, cleanup retry, and Drop ownership transfers.
+    ///
+    /// # Parameters
+    ///
+    /// * `quota` is the shared executor reservation retained by native owners.
     pub(crate) fn retain_handle_quota(&mut self, quota: std::sync::Arc<dyn Send + Sync>) {
         if let Some(owner) = self.owner.as_mut() {
             owner.retain_handle_quota(quota);

@@ -145,6 +145,10 @@ impl LocalTreeValidationOptions {
     }
     /// Stores the async publisher's generated manifest without replacing the
     /// caller's independent exact-set constraint.
+    ///
+    /// # Parameters
+    ///
+    /// * `entries` is the manifest captured by the async publisher.
     pub(crate) fn with_generated_entries(mut self, entries: Vec<LocalTreeEntry>) -> Self {
         self.generated_entries = Some(entries);
         self

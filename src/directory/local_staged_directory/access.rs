@@ -132,11 +132,12 @@ impl LocalStagedDirectory {
     }
 
     /// Validates the complete tree against an expected entry set and optional
-    /// constraints. Exact paths must be unique; repeated paths return
-    /// `InvalidOptions`. Directory and dangling symbolic links are checked as
-    /// entries without following their targets. Finite depth limits fail when
-    /// an actual entry exceeds the limit instead of silently truncating
-    /// validation.
+    /// constraints. Exact paths in either input set must be unique; repeated
+    /// input paths return `InvalidOptions`. If traversal observes an entry
+    /// path more than once, validation returns `RequirementNotMet`. Directory
+    /// and dangling symbolic links are checked as entries without following
+    /// their targets. Finite depth limits fail when an actual entry exceeds
+    /// the limit instead of silently truncating validation.
     ///
     /// The observations detect identity changes at checked entries but do not
     /// provide an atomic snapshot against concurrent filesystem mutations.
@@ -166,9 +167,9 @@ impl LocalStagedDirectory {
     ///
     /// # Errors
     ///
-    /// Returns `InvalidOptions` for repeated exact paths, `ResourceLimit` when
-    /// configured budgets are exceeded, or `RequirementNotMet` when a rule
-    /// or expected entry set is violated.
+    /// Returns `InvalidOptions` for repeated input paths, `ResourceLimit` when
+    /// configured budgets are exceeded, or `RequirementNotMet` when a rule,
+    /// expected entry set, or observed duplicate path is violated.
     pub fn verify_entries(&self, expected: &[LocalTreeEntry], options: &LocalTreeValidationOptions) -> LocalResult<()> {
         super::super::internal::tree_verification::verify_tree(self, Some(expected), options)
     }
@@ -957,13 +958,12 @@ impl LocalStagedDirectory {
                 )
             })?;
         #[cfg(all(feature = "test-support", windows))]
-        let binding_matches = if crate::local::take_test_support(
-            "owner-policy-after-child-before-root-binding-mismatch",
-        ) {
-            false
-        } else {
-            binding_matches
-        };
+        let binding_matches =
+            if crate::local::take_test_support("owner-policy-after-child-before-root-binding-mismatch") {
+                false
+            } else {
+                binding_matches
+            };
         if !binding_matches {
             return Err(super::super::tree_recovery::LocalTreeAccessError::new(
                 LocalFileError::new(LocalFileErrorKind::ChangedDuringRead, LocalFileOperation::Metadata),

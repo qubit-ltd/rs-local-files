@@ -238,12 +238,11 @@ pub(in crate::directory) fn verify_tree(
                 )
             })?;
             if configured_paths.insert(entry.relative_path(), ()).is_some() {
-                return Err(LocalFileError::new(
-                    LocalFileErrorKind::InvalidOptions,
-                    LocalFileOperation::ValidateName,
-                )
-                .with_path(stage.directory().diagnostic_path().join(entry.relative_path()))
-                .with_reason("duplicate expected tree entry path"));
+                return Err(
+                    LocalFileError::new(LocalFileErrorKind::InvalidOptions, LocalFileOperation::ValidateName)
+                        .with_path(stage.directory().diagnostic_path().join(entry.relative_path()))
+                        .with_reason("duplicate expected tree entry path"),
+                );
             }
             if let Some((expected_kind, already_configured)) = index.get_mut(entry.relative_path()) {
                 if *already_configured {
@@ -298,8 +297,7 @@ pub(in crate::directory) fn verify_tree(
                     facts.resource(),
                     LocalResourceKind::SeenNameBytes | LocalResourceKind::Depth
                 )
-            })
-            {
+            }) {
                 error
             } else {
                 context_error(error, stage, Path::new("."), "tree entry observation failed")
@@ -366,7 +364,7 @@ pub(in crate::directory) fn verify_tree(
                     .with_detail(format!("expected {expected_kind:?}, observed {kind:?}")));
             }
             if *was_seen {
-                return Err(requirement_error(stage, path, "tree entry was observed more than once"));
+                return Err(duplicate_observation_error(stage, path));
             }
             *was_seen = true;
         }
@@ -739,6 +737,16 @@ fn requirement_error(stage: &LocalStagedDirectory, relative: &Path, reason: &'st
         .with_reason(reason)
 }
 
+/// Creates the error used when traversal yields an entry path more than once.
+///
+/// # Parameters
+///
+/// * `stage` provides the diagnostic root.
+/// * `relative` identifies the repeated entry within the staged tree.
+fn duplicate_observation_error(stage: &LocalStagedDirectory, relative: &Path) -> LocalFileError {
+    requirement_error(stage, relative, "tree entry was observed more than once")
+}
+
 /// Creates a resource-limit error with staged-tree path and optional budget
 /// facts.
 ///
@@ -864,6 +872,10 @@ mod missing_path_tests {
         )
         .expect_err("duplicate expected paths are invalid");
         assert_eq!(crate::LocalFileErrorKind::InvalidOptions, error.kind());
+
+        let observed_error = super::duplicate_observation_error(&stage, Path::new("payload"));
+        assert_eq!(crate::LocalFileErrorKind::RequirementNotMet, observed_error.kind());
+        assert_eq!(Some("tree entry was observed more than once"), observed_error.reason());
 
         let missing = LocalTreeEntry::new("missing".into(), LocalFileKind::File).expect("missing entry");
         let error = verify_tree(&stage, Some(&[missing]), &LocalTreeValidationOptions::new())

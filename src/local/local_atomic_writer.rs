@@ -145,6 +145,12 @@ impl LocalAtomicWriter {
     }
 
     /// Creates an atomic writer retaining the initiating filesystem identity.
+    ///
+    /// # Parameters
+    ///
+    /// * `path` is the destination path for the atomic write.
+    /// * `options` configures staging and durability behavior.
+    /// * `authority_identity` identifies the initiating filesystem instance.
     pub(crate) fn new_with_authority(
         path: &Path,
         options: LocalAtomicWriteOptions,

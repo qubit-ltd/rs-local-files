@@ -25,6 +25,7 @@ use super::LocalStreamDriver;
 use super::LocalStreamRequest;
 use super::LocalStreamResource;
 use super::WorkerCleanup;
+use super::WorkerStreamOptions;
 use super::dispose_panic_payload;
 use super::fail_stream_queue;
 use super::native_stream_writer::NativeStreamWriter;
@@ -56,17 +57,15 @@ impl WorkerStreamDriver {
     /// * `buffer_budget` - Reservation retained for stream buffers.
     /// * `handle_budget` - Reservation retained while the native handle is
     ///   open.
-    /// * `observer` - Optional operation fact observer for append writes.
-    /// * `append_mode` - Whether writes should update append-specific facts.
+    /// * `options` - Observer, append behavior, and filesystem identity
+    ///   captured when the stream is registered.
     pub(crate) fn managed(
         scope: &qubit_operation::OperationScope,
         executor: super::super::LocalIoExecutor,
         native: LocalNativeStream,
         buffer_budget: Arc<Mutex<super::super::internal::permits::Permit>>,
         handle_budget: Arc<super::super::internal::permits::Permit>,
-        observer: Option<super::super::LocalFactObserver>,
-        append_mode: bool,
-        authority_identity: usize,
+        options: WorkerStreamOptions,
     ) -> io::Result<ResourceRef<LocalStreamResource>> {
         let cleanup_permit = executor
             .reserve_cleanup()
@@ -85,10 +84,10 @@ impl WorkerStreamDriver {
             cleanup_permit: Mutex::new(Some(cleanup_permit)),
             _buffer_budget: buffer_budget,
             _handle_budget: Mutex::new(Some(handle_budget)),
-            observer,
+            observer: options.observer,
             written_bytes: std::sync::atomic::AtomicU64::new(0),
-            append_mode,
-            authority_identity,
+            append_mode: options.append_mode,
+            authority_identity: options.authority_identity,
             #[cfg(test)]
             panic_next_command: AtomicBool::new(false),
         })));
@@ -301,10 +300,13 @@ impl LocalStreamDriver for WorkerStreamDriver {
             let existing = state.commands.remove(&request_id);
             let abandoned = state.commands.drain().map(|(_, command)| command).collect::<Vec<_>>();
             let needs_schedule = existing.is_none();
-            state.commands.insert(request_id, existing.unwrap_or(WorkerCommand {
-                result: None,
-                waker: None,
-            }));
+            state.commands.insert(
+                request_id,
+                existing.unwrap_or(WorkerCommand {
+                    result: None,
+                    waker: None,
+                }),
+            );
             (abandoned, needs_schedule)
         };
         for command in abandoned_commands {
@@ -316,7 +318,10 @@ impl LocalStreamDriver for WorkerStreamDriver {
             let mut abandoned = Vec::new();
             for queued in queue.drain(..) {
                 if queued.request.id == request_id
-                    || matches!(queued.request.command, LocalStreamCommand::Close | LocalStreamCommand::Abort)
+                    || matches!(
+                        queued.request.command,
+                        LocalStreamCommand::Close | LocalStreamCommand::Abort
+                    )
                 {
                     retained.push_back(queued);
                 } else {
@@ -1420,9 +1425,11 @@ mod tests {
                     LocalNativeStream::Reader(native),
                     buffer_budget,
                     handle_budget,
-                    None,
-                    false,
-                    0,
+                    super::WorkerStreamOptions {
+                        observer: None,
+                        append_mode: false,
+                        authority_identity: 0,
+                    },
                 );
                 result_tx
                     .send(result.err().expect("cleanup capacity must reject stream").kind())

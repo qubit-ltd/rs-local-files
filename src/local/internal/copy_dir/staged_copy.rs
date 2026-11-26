@@ -477,11 +477,7 @@ mod symlink_source_read_tests {
 ///
 /// Returns a native link-creation error, or `Unsupported` on platforms that do
 /// not expose symbolic links.
-fn create_symlink_entry(
-    link_target: &Path,
-    source_is_directory: bool,
-    target: &Path,
-) -> std::io::Result<()> {
+fn create_symlink_entry(link_target: &Path, source_is_directory: bool, target: &Path) -> std::io::Result<()> {
     #[cfg(not(windows))]
     let _ = source_is_directory;
     #[cfg(unix)]
