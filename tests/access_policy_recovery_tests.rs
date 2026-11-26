@@ -103,14 +103,7 @@ fn test_remaining_access_name_byte_budget_exact_boundary_and_retry() {
         };
         let error = result.expect_err("seven-byte payload name exceeds six-byte budget");
         assert_eq!(LocalFileErrorKind::ResourceLimit, error.cause().kind());
-        assert_eq!(
-            if owner {
-                LocalTreeAccessState::Preserved
-            } else {
-                LocalTreeAccessState::Indeterminate
-            },
-            error.access_state()
-        );
+        assert_eq!(LocalTreeAccessState::Preserved, error.access_state());
         assert_eq!(
             0o644,
             fs::metadata(native.join("payload"))

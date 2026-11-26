@@ -407,8 +407,8 @@ fn test_lf_review_tree_publish_depth_limit_retains_stage() {
     assert!(!fixture.path().join("destination").exists());
     assert_eq!(
         crate::directory::test_observation_count(),
-        2,
-        "verification stops at the first over-depth entry"
+        1,
+        "the over-depth entry is rejected before metadata observation"
     );
     error
         .into_stage()
