@@ -127,6 +127,14 @@ mod sync;
 mod write;
 
 impl LocalStagedDirectory {
+    /// Couples an executor handle reservation to the stage's native owner so
+    /// it follows recovery, cleanup retry, and Drop ownership transfers.
+    pub(crate) fn retain_handle_quota(&mut self, quota: std::sync::Arc<dyn Send + Sync>) {
+        if let Some(owner) = self.owner.as_mut() {
+            owner.retain_handle_quota(quota);
+        }
+    }
+
     /// Builds a stage from its retained cleanup owner and open directory
     /// authority.
     ///

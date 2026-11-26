@@ -22,6 +22,7 @@ use super::super::LocalOperation;
 use super::super::LocalOperationOptions;
 use super::super::LocalPublicationState;
 use super::super::LocalSubmitError;
+use super::super::internal::permits::Permit;
 #[cfg(feature = "digest")]
 use super::super::publish::LocalConditionalWriterCommandError;
 #[cfg(feature = "digest")]
@@ -83,6 +84,14 @@ fn lock_publication_state<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
         Ok(guard) => guard,
         Err(poisoned) => poisoned.into_inner(),
     }
+}
+
+/// Shrinks the peak staged-publish reservation to the handles still retained
+/// by its recovery owner after transient worker handles have been released.
+fn shrink_staged_handle_quota(quota: &Mutex<Permit>, retained_handles: usize) {
+    let mut permit = quota.lock().unwrap_or_else(|error| error.into_inner());
+    let release = permit.amount().saturating_sub(retained_handles);
+    permit.shrink(release);
 }
 
 impl AsyncLocalFileSystem {
@@ -367,7 +376,11 @@ impl AsyncLocalFileSystem {
 
 impl AsyncLocalFileSystem {
     /// Creates files beneath a private stage, verifies the exact tree, then
-    /// publishes it.
+    /// publishes it. Its handle reservation covers the parent and stage roots,
+    /// one transient tree-validation handle, retained entry handles needed by
+    /// access mutation, and the additional Windows root handle. Validation's
+    /// transient check handle is included in the peak reservation even though
+    /// it is released before access mutation begins.
     ///
     /// # Parameters
     ///
@@ -407,6 +420,36 @@ impl AsyncLocalFileSystem {
             sum.saturating_add(u64::try_from(file.bytes.len()).unwrap_or(u64::MAX))
         });
         let disk_bytes = disk_bytes.max(1);
+        let needs_entry_handles = request.publish_options.owner_access_policy().is_some()
+            || request.publish_options.access() != crate::policy::LocalTreeFinalAccess::Preserve;
+        let extra_handles = if needs_entry_handles {
+            request.files.len().saturating_add(usize::from(cfg!(windows)))
+        } else {
+            0
+        };
+        // The peak includes the parent and stage roots plus one transient
+        // validation handle; access mutation may instead retain every staged
+        // entry and the additional Windows root handle.
+        let required_handles = 2_usize.saturating_add(extra_handles).max(3);
+        let handle_limit = limits
+            .max_open_handles
+            .unwrap_or(self.executor.inner.config.max_open_handles);
+        if handle_limit == 0
+            || handle_limit > self.executor.inner.config.max_open_handles
+            || required_handles > handle_limit
+        {
+            return Err(LocalSubmitError::new(
+                request,
+                super::super::LocalSubmitRejection::CapacityExceeded,
+            ));
+        }
+        let Some(handle_quota) = self.executor.reserve_handles(required_handles) else {
+            return Err(LocalSubmitError::new(
+                request,
+                super::super::LocalSubmitRejection::CapacityExceeded,
+            ));
+        };
+        let handle_quota = Arc::new(Mutex::new(handle_quota));
         let disk_limit = limits
             .max_disk_bytes
             .unwrap_or(self.executor.inner.config.max_disk_bytes);
@@ -431,7 +474,9 @@ impl AsyncLocalFileSystem {
             OwnedSubmission {
                 path_is_relative: relative,
 
-                required_handles: 2,
+                // The staged tree's complete reservation is acquired above
+                // and shared with its native recovery owner when necessary.
+                required_handles: 0,
 
                 limits,
 
@@ -441,6 +486,8 @@ impl AsyncLocalFileSystem {
                 if let Some(stop) = stop_report(scope) {
                     return OperationOutcome::Stopped(stop);
                 }
+                #[cfg(feature = "test-support")]
+                crate::test_support::hit_test_gate("lf10-staged-publish-after-admission");
                 let parent = match filesystem
                     .open_directory_with_options(&parent_path, &crate::options::LocalDirectoryOpenOptions::new())
                 {
@@ -455,26 +502,35 @@ impl AsyncLocalFileSystem {
                     .with_privacy(crate::policy::LocalPrivacyRequirement::Required);
                 let mut stage = match parent.create_staged_directory(&stage_options) {
                     Ok(stage) => stage,
-                    Err(error) => {
+                    Err(mut error) => {
+                        let retained_owners = error.retain_handle_quota(handle_quota.clone());
+                        shrink_staged_handle_quota(&handle_quota, retained_owners);
                         return OperationOutcome::Failed(LocalStagedTreePublishError::Create(
                             LocalStagedTreeReservedError::new(error, reservation.clone()),
                         ));
                     }
                 };
+                stage.retain_handle_quota(handle_quota.clone());
                 let mut expected = Vec::with_capacity(request.files.len());
                 for file in &request.files {
                     if let Some(stop) = stop_report(scope) {
                         return match stage.cleanup() {
                             Ok(()) => OperationOutcome::Stopped(stop),
-                            Err(error) => OperationOutcome::Failed(LocalStagedTreePublishError::Cleanup(
-                                LocalStagedTreeReservedError::new(error, reservation.clone()),
-                            )),
+                            Err(error) => {
+                                OperationOutcome::Failed(LocalStagedTreePublishError::Cleanup(
+                                    {
+                                        shrink_staged_handle_quota(&handle_quota, 2);
+                                        LocalStagedTreeReservedError::new(error, reservation.clone())
+                                    },
+                                ))
+                            }
                         };
                     }
                     let entry =
                         match crate::directory::LocalTreeEntry::new(file.path.clone(), crate::LocalFileKind::File) {
                             Ok(entry) => entry,
                             Err(cause) => {
+                                shrink_staged_handle_quota(&handle_quota, 2);
                                 return OperationOutcome::Failed(LocalStagedTreePublishError::Write {
                                     cause,
                                     stage: LocalStagedTreeRecovery::new(stage, reservation.clone()),
@@ -483,6 +539,7 @@ impl AsyncLocalFileSystem {
                         };
                     let mut input = file.bytes.as_slice();
                     if let Err(cause) = stage.write_file_new(&file.path, &mut input, file.bytes.len() as u64) {
+                        shrink_staged_handle_quota(&handle_quota, 2);
                         record_stage_write(scope, &observer, 0, EffectFact::Unknown);
                         return OperationOutcome::Failed(LocalStagedTreePublishError::Write {
                             cause,
@@ -490,16 +547,28 @@ impl AsyncLocalFileSystem {
                         });
                     }
                     record_stage_write(scope, &observer, file.bytes.len() as u64, EffectFact::Known);
+                    #[cfg(feature = "test-support")]
+                    crate::test_support::hit_test_gate("lf10-staged-publish-after-stage-write");
                     expected.push(entry);
                 }
-                let validation = crate::directory::LocalTreeValidationOptions::new().with_exact_entries(expected);
+                let validation = request
+                    .publish_options
+                    .validation()
+                    .cloned()
+                    .unwrap_or_default()
+                    .with_generated_entries(expected);
                 let publish_options = request.publish_options.clone().with_validation(validation);
                 if let Some(stop) = stop_report(scope) {
                     return match stage.cleanup() {
                         Ok(()) => OperationOutcome::Stopped(stop),
-                        Err(error) => OperationOutcome::Failed(LocalStagedTreePublishError::Cleanup(
-                            LocalStagedTreeReservedError::new(error, reservation.clone()),
-                        )),
+                        Err(error) => {
+                            OperationOutcome::Failed(LocalStagedTreePublishError::Cleanup(
+                                {
+                                    shrink_staged_handle_quota(&handle_quota, 2);
+                                    LocalStagedTreeReservedError::new(error, reservation.clone())
+                                },
+                            ))
+                        }
                     };
                 }
                 match stage.publish_new(&parent, &request.name, &publish_options) {
@@ -520,7 +589,7 @@ impl AsyncLocalFileSystem {
                         }
                         OperationOutcome::Succeeded(outcome)
                     }
-                    Err(error) => {
+                    Err(mut error) => {
                         match error.publication() {
                             crate::outcome::LocalTreePublication::Published => record_local_effect(
                                 scope,
@@ -540,6 +609,8 @@ impl AsyncLocalFileSystem {
                             ),
                             _ => {}
                         }
+                        let retained_owners = error.retain_handle_quota(handle_quota.clone());
+                        shrink_staged_handle_quota(&handle_quota, retained_owners);
                         OperationOutcome::Failed(LocalStagedTreePublishError::Publish(
                             LocalStagedTreeReservedError::new(error, reservation.clone()),
                         ))
@@ -909,6 +980,33 @@ mod relative_host_publish_tests {
             executor,
             Some(root.to_path_buf()),
         )
+    }
+
+    #[test]
+    fn test_staged_publish_handle_reservations_compete_atomically() {
+        let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+        let executor = LocalIoExecutor::new(
+            manager,
+            LocalExecutionConfig {
+                max_open_handles: 5,
+                ..LocalExecutionConfig::default()
+            },
+        )
+        .unwrap();
+        let gate = Arc::new(std::sync::Barrier::new(3));
+        let attempts = (0..2).map(|_| {
+            let executor = executor.clone();
+            let gate = Arc::clone(&gate);
+            std::thread::spawn(move || {
+                gate.wait();
+                executor.reserve_handles(3)
+            })
+        }).collect::<Vec<_>>();
+        gate.wait();
+        let permits = attempts.into_iter().map(|attempt| attempt.join().unwrap()).collect::<Vec<_>>();
+        assert_eq!(1, permits.iter().filter(|permit| permit.is_some()).count());
+        drop(permits);
+        assert!(executor.reserve_handles(5).is_some());
     }
 
     fn create_temp_file_access(

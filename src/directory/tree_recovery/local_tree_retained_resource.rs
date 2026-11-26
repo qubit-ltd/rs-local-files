@@ -84,6 +84,8 @@ pub struct LocalTreeRetainedResource {
     mutation_state: LocalTreeMutationState,
     /// Owner access policy that must remain attached to this recovery owner.
     owner_access_policy: Option<crate::policy::LocalOwnerAccessPolicy>,
+    /// Executor handle quota retained with an asynchronous staged-tree owner.
+    handle_quota: Option<std::sync::Arc<dyn Send + Sync>>,
 }
 
 impl std::fmt::Debug for LocalTreeRetainedResource {
@@ -176,6 +178,7 @@ impl LocalTreeRetainedResource {
             owned_entries: HashMap::new(),
             mutation_state: LocalTreeMutationState::NotStarted,
             owner_access_policy: None,
+            handle_quota: None,
         }
     }
 
@@ -208,6 +211,12 @@ impl LocalTreeRetainedResource {
     /// otherwise.
     pub const fn owner_access_policy(&self) -> Option<&crate::policy::LocalOwnerAccessPolicy> {
         self.owner_access_policy.as_ref()
+    }
+
+    /// Retains an external executor quota for the lifetime of this native
+    /// recovery owner.
+    pub(crate) fn retain_handle_quota(&mut self, quota: std::sync::Arc<dyn Send + Sync>) {
+        self.handle_quota = Some(quota);
     }
 
     /// Sets limits for explicit cleanup and the final Drop attempt.
@@ -444,6 +453,15 @@ impl LocalTreeRetainedResource {
         });
         if !self.cleanup_armed {
             return Ok(());
+        }
+        #[cfg(feature = "test-support")]
+        if crate::local::take_test_support("lf10-staged-cleanup-failure") {
+            return Err(crate::LocalFileError::from_io(
+                crate::LocalFileOperation::Cleanup,
+                Some(self.path.clone()),
+                None,
+                crate::local::test_fault_error(),
+            ));
         }
         let started_at = std::time::Instant::now();
         if self.cleanup_limits.max_entries() == Some(0) || cleanup_deadline_exceeded(self.cleanup_limits, started_at) {

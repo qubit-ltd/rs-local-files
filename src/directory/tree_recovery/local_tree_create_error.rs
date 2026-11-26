@@ -6,6 +6,7 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 use std::path::Path;
+use std::sync::Arc;
 
 use super::super::staged::LocalStagedDirectory;
 use super::local_tree_retained_resource::LocalTreeRetainedResource;
@@ -48,6 +49,21 @@ pub struct LocalTreeCreateError {
     state: LocalTreeMutationState,
 }
 impl LocalTreeCreateError {
+    /// Attaches a shared executor quota to every native owner retained by a
+    /// partial creation failure and reports the retained root-handle count.
+    pub(crate) fn retain_handle_quota(&mut self, quota: std::sync::Arc<dyn Send + Sync>) -> usize {
+        let mut owners = 0_usize;
+        if let Some(stage) = self.stage.as_mut() {
+            stage.retain_handle_quota(Arc::clone(&quota));
+            owners += 1;
+        }
+        for resource in &mut self.retained {
+            resource.retain_handle_quota(Arc::clone(&quota));
+            owners += 1;
+        }
+        owners.saturating_mul(2)
+    }
+
     /// Creates an error with the cause and cleanup owners retained after
     /// staged-directory creation fails.
     ///

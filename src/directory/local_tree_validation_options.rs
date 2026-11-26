@@ -39,6 +39,8 @@ use crate::policy::LocalPrivacyRequirement;
 pub struct LocalTreeValidationOptions {
     /// Exact expected entries, when configured.
     exact_entries: Option<Vec<LocalTreeEntry>>,
+    /// Generated staged manifest used as the primary publication set.
+    generated_entries: Option<Vec<LocalTreeEntry>>,
     /// Whether symbolic links invalidate validation.
     reject_symlinks: bool,
     /// Whether FIFO, socket, device, and unknown kinds invalidate validation.
@@ -62,6 +64,7 @@ impl LocalTreeValidationOptions {
     pub const fn new() -> Self {
         Self {
             exact_entries: None,
+            generated_entries: None,
             reject_symlinks: false,
             reject_special_files: false,
             reject_external_hardlinks: false,
@@ -139,6 +142,17 @@ impl LocalTreeValidationOptions {
     /// receive a stored exact set through these options.
     pub(crate) fn exact_entries(&self) -> Option<&[LocalTreeEntry]> {
         self.exact_entries.as_deref()
+    }
+    /// Stores the async publisher's generated manifest without replacing the
+    /// caller's independent exact-set constraint.
+    pub(crate) fn with_generated_entries(mut self, entries: Vec<LocalTreeEntry>) -> Self {
+        self.generated_entries = Some(entries);
+        self
+    }
+    /// Returns the generated publication manifest, when this is an async
+    /// staged-tree request.
+    pub(crate) fn generated_entries(&self) -> Option<&[LocalTreeEntry]> {
+        self.generated_entries.as_deref()
     }
     /// Reports whether symbolic links are excluded.
     pub(crate) const fn rejects_symlinks(&self) -> bool {
