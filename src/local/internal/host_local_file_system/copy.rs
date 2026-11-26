@@ -264,14 +264,17 @@ impl HostLocalFileSystem {
 
         let source_is_directory = effective_metadata.file_type().is_dir();
         if source_is_directory {
-            if let Err((error, created)) = prepare_copy_parent(target, options, &budget) {
-                let failure = copy_failure_unchanged(copy_io_error(source, target, error));
-                return Err(if created {
-                    failure.with_state(crate::LocalCopyFailureState::PartiallyPublished)
-                } else {
-                    failure
-                });
-            }
+            let parent_dirs_to_sync = match prepare_copy_parent(target, options, &budget) {
+                Ok(paths) => paths,
+                Err((error, created)) => {
+                    let failure = copy_failure_unchanged(copy_io_error(source, target, error));
+                    return Err(if created {
+                        failure.with_state(crate::LocalCopyFailureState::PartiallyPublished)
+                    } else {
+                        failure
+                    });
+                }
+            };
             let stats = match scope_root {
                 Some(scope_root) => {
                     crate::local::copy_dir_all_with_paths_scoped(source, target, internal_options, scope_root)
@@ -280,7 +283,16 @@ impl HostLocalFileSystem {
             };
             let stats = match stats {
                 Ok(stats) => stats,
-                Err(error) => return Err(copy_pipeline_failure(source, target, error)),
+                Err(error) => {
+                    let failure = copy_pipeline_failure(source, target, error);
+                    return Err(if parent_dirs_to_sync.is_empty()
+                        || failure.state() != crate::LocalCopyFailureState::Unchanged
+                    {
+                        failure
+                    } else {
+                        failure.with_state(crate::LocalCopyFailureState::PartiallyPublished)
+                    });
+                }
             };
             if stats.was_fully_skipped() {
                 return Ok(LocalCopyOutcome::new(
@@ -339,7 +351,14 @@ impl HostLocalFileSystem {
         if let Err(error) =
             crate::local::copy_file_with_options(source, target, internal_options, &mut stats, &mut budget)
         {
-            return Err(copy_pipeline_failure(source, target, error));
+            let failure = copy_pipeline_failure(source, target, error);
+            return Err(if parent_dirs_to_sync.is_empty()
+                || failure.state() != crate::LocalCopyFailureState::Unchanged
+            {
+                failure
+            } else {
+                failure.with_state(crate::LocalCopyFailureState::PartiallyPublished)
+            });
         }
         if stats.was_fully_skipped() {
             return Ok(LocalCopyOutcome::new(
@@ -552,6 +571,9 @@ fn copy_symlink_entry(
         let failure = copy_io_error(source, target, error);
         return if action == CopyDestinationAction::Replace {
             Err(copy_failure_indeterminate(failure))
+        } else if !parent_dirs_to_sync.is_empty() {
+            Err(copy_failure_unchanged(failure)
+                .with_state(crate::LocalCopyFailureState::PartiallyPublished))
         } else {
             Err(copy_failure_unchanged(failure))
         };

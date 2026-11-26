@@ -176,7 +176,7 @@ fn test_rooted_copy_race_rewrite_rejects_directory_entries_without_mutation() {
 }
 
 #[test]
-fn test_create_parent_remains_after_source_open_failure_without_destination_publication() {
+fn test_create_parent_effect_is_reported_after_source_open_failure_without_destination_publication() {
     let directory = tempdir().expect("temporary root should be created");
     fs::write(directory.path().join("source"), b"replacement").expect("source file should be written");
     let rooted = LocalFileSystem::rooted(directory.path()).expect("root authority should open");
@@ -190,10 +190,33 @@ fn test_create_parent_remains_after_source_open_failure_without_destination_publ
         )
         .expect_err("injected source-open fault should fail");
 
-    assert_eq!(LocalCopyFailureState::Unchanged, failure.state());
+    assert_eq!(LocalCopyFailureState::PartiallyPublished, failure.state());
     assert!(directory.path().join("new-parent").is_dir());
     assert!(!directory.path().join("new-parent/target").exists());
     assert_eq!(LocalFileErrorKind::PermissionDenied, failure.error().kind());
+}
+
+#[cfg(unix)]
+#[test]
+fn test_host_link_copy_failure_reports_created_parent_without_publication() {
+    use std::os::unix::fs::symlink;
+
+    let directory = tempdir().expect("temporary root should be created");
+    symlink("referent", directory.path().join("source")).expect("source link should be created");
+    let _fault = install_test_fault("local-fs-copy-symlink-create").expect("link fault should install");
+
+    let failure = LocalFileSystem::host()
+        .expect("host filesystem should open")
+        .copy_with_options(
+            &directory.path().join("source"),
+            &directory.path().join("new-parent/target"),
+            &LocalCopyOptions::new().with_create_parent(),
+        )
+        .expect_err("injected link creation fault should fail");
+
+    assert_eq!(LocalCopyFailureState::PartiallyPublished, failure.state());
+    assert!(directory.path().join("new-parent").is_dir());
+    assert!(!directory.path().join("new-parent/target").exists());
 }
 
 #[test]
