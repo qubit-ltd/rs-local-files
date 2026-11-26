@@ -21,6 +21,7 @@ use crate::error::LocalResourceKind;
 use crate::error::LocalResourceLimitError;
 use crate::observation::LocalFileIdentity;
 use crate::observation::LocalObservationRequirement;
+use crate::options::LocalListOptions;
 use crate::policy::LocalPrivacyRequirement;
 use crate::policy::LocalSymlinkPolicy;
 
@@ -68,6 +69,60 @@ pub(in crate::directory) fn verify_tree(
     expected: Option<&[LocalTreeEntry]>,
     options: &LocalTreeValidationOptions,
 ) -> LocalResult<()> {
+    verify_tree_with_observer(
+        stage,
+        expected,
+        options,
+        |stage, walk_limits, expected_name_bytes, max_name_bytes, max_depth| {
+            let mut observer = stage
+                .observe_tree_with_options(walk_limits)
+                .map_err(|error| context_error(error, stage, Path::new("."), "tree traversal could not start"))?;
+            if let Some(maximum) = max_name_bytes {
+                observer = observer.with_logical_path_name_budget(expected_name_bytes, maximum);
+            }
+            Ok(observer.with_logical_depth_limit(max_depth))
+        },
+    )
+}
+
+/// Verifies a staged tree using an injectable source of observed entries.
+///
+/// The source seam keeps validation logic testable with repeated and otherwise
+/// difficult-to-produce observation sequences.
+///
+/// # Parameters
+///
+/// * `stage` is the retained staged directory whose root identity is verified.
+/// * `expected` optionally supplies the exact relative paths and kinds
+///   required.
+/// * `options` supplies privacy, file-kind, hard-link, resource, and deadline
+///   constraints.
+/// * `observer_factory` creates the observed-entry iterator after expected
+///   paths are accounted and receives the logical name-byte and depth limits.
+///
+/// # Type Parameters
+///
+/// * `I` is the iterator type produced by the observation source.
+/// * `F` creates that iterator from the stage and effective traversal limits.
+///
+/// # Returns
+///
+/// `Ok(())` when all requested checks pass; otherwise returns the first
+/// encountered validation or observation error.
+///
+/// # Errors
+///
+/// Returns the same validation and observation errors as [`verify_tree`].
+fn verify_tree_with_observer<I, F>(
+    stage: &LocalStagedDirectory,
+    expected: Option<&[LocalTreeEntry]>,
+    options: &LocalTreeValidationOptions,
+    observer_factory: F,
+) -> LocalResult<()>
+where
+    I: IntoIterator<Item = LocalResult<crate::directory::LocalTreeEntryObservation>>,
+    F: FnOnce(&LocalStagedDirectory, &LocalListOptions, usize, Option<usize>, Option<usize>) -> LocalResult<I>,
+{
     let expected = expected.or_else(|| options.exact_entries());
     let started = Instant::now();
     let deadline = options
@@ -282,13 +337,13 @@ pub(in crate::directory) fn verify_tree(
         .with_recursive()
         .with_symlink_policy(LocalSymlinkPolicy::Reject)
         .with_error_policy(crate::options::LocalWalkErrorPolicy::FailFast);
-    let mut observer = stage
-        .observe_tree_with_options(&walk_limits)
-        .map_err(|error| context_error(error, stage, Path::new("."), "tree traversal could not start"))?
-        .with_logical_depth_limit(limits.max_depth());
-    if let Some(maximum) = limits.max_seen_name_bytes() {
-        observer = observer.with_logical_path_name_budget(expected_name_bytes, maximum);
-    }
+    let observer = observer_factory(
+        stage,
+        &walk_limits,
+        expected_name_bytes,
+        limits.max_seen_name_bytes(),
+        limits.max_depth(),
+    )?;
     for result in observer {
         check_deadline(stage, deadline)?;
         let item = result.map_err(|error| {
@@ -813,6 +868,7 @@ fn resource_overflow(
 #[cfg(test)]
 mod missing_path_tests {
     use std::path::Path;
+    use std::path::PathBuf;
     use std::time::Duration;
 
     use super::resource_overflow;
@@ -822,6 +878,7 @@ mod missing_path_tests {
     use crate::LocalFileSystem;
     use crate::LocalResourceKind;
     use crate::directory::LocalTreeEntry;
+    use crate::directory::LocalTreeEntryObservation;
     use crate::directory::LocalTreeValidationOptions;
     use crate::options::LocalCreateDirectoryOptions;
     use crate::options::LocalDirectoryOpenOptions;
@@ -873,14 +930,42 @@ mod missing_path_tests {
         .expect_err("duplicate expected paths are invalid");
         assert_eq!(crate::LocalFileErrorKind::InvalidOptions, error.kind());
 
-        let observed_error = super::duplicate_observation_error(&stage, Path::new("payload"));
-        assert_eq!(crate::LocalFileErrorKind::RequirementNotMet, observed_error.kind());
-        assert_eq!(Some("tree entry was observed more than once"), observed_error.reason());
-
         let missing = LocalTreeEntry::new("missing".into(), LocalFileKind::File).expect("missing entry");
         let error = verify_tree(&stage, Some(&[missing]), &LocalTreeValidationOptions::new())
             .expect_err("an absent expected path fails exact-set validation");
         assert!(error.reason().is_some());
+        stage.cleanup().expect("cleanup stage");
+    }
+
+    #[test]
+    fn test_tree_validation_rejects_repeated_observed_paths() {
+        let fixture = tempfile::tempdir().expect("fixture");
+        let mut stage = staged_directory(fixture.path());
+        stage
+            .write_file_new(Path::new("payload"), &mut &b"payload"[..], 7)
+            .expect("write staged file");
+        let expected = LocalTreeEntry::new("payload".into(), LocalFileKind::File).expect("expected entry");
+        let observation = stage
+            .directory()
+            .observe_entry(Path::new("payload"))
+            .expect("observe staged payload");
+        let repeated = LocalTreeEntryObservation::new(PathBuf::from("payload"), observation);
+        let observations = vec![Ok(repeated.clone()), Ok(repeated)].into_iter();
+
+        let error = super::verify_tree_with_observer(
+            &stage,
+            Some(std::slice::from_ref(&expected)),
+            &LocalTreeValidationOptions::new(),
+            move |_, _, _, _, _| Ok(observations),
+        )
+        .expect_err("a repeated observed path violates exact tree validation");
+
+        assert_eq!(crate::LocalFileErrorKind::RequirementNotMet, error.kind());
+        assert_eq!(Some("tree entry was observed more than once"), error.reason());
+        assert_eq!(
+            Some(stage.directory().diagnostic_path().join("payload").as_path()),
+            error.path()
+        );
         stage.cleanup().expect("cleanup stage");
     }
 

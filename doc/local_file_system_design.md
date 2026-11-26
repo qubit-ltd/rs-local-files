@@ -1669,9 +1669,10 @@ call was interrupted, and recovery owners remain available when cleanup is
 unconfirmed.
 
 `request_stop()` requests cooperative cancellation; the return value only says
-whether the request was accepted. Complete reads check between read blocks,
-while other operations check at their documented checkpoints. A native call
-already in progress is not interrupted. Abandoning a future that waits for an
+whether the request was accepted. `submit_read_all` checks between read blocks;
+`submit_read_all_with_observer` does not add those per-block stop checks. Other
+operations check at their documented checkpoints. A native call already in
+progress is not interrupted. Abandoning a future that waits for an
 outcome only abandons that wait; it does not request stop or cancel accepted
 work. Call `request_stop()` explicitly when needed, then take the outcome and
 wait for settlement after closing or transferring any returned resource.
