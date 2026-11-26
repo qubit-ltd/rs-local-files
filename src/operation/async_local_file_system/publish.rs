@@ -141,6 +141,8 @@ impl AsyncLocalFileSystem {
             _ => request.path.clone(),
         };
         let filesystem = self.filesystem.clone();
+        #[cfg(feature = "test-support")]
+        let test_gate_authority = Arc::as_ptr(&filesystem.core) as usize;
         let executor = self.executor.clone();
         let owned_capacity = request.bytes.capacity();
         self.submit_owned_with_bytes(
@@ -298,7 +300,11 @@ impl AsyncLocalFileSystem {
                 // Cancellation is honored up to this gate. There is no stop check
                 // after entering commit: the native publication result is authoritative.
                 #[cfg(feature = "test-support")]
-                crate::test_support::hit_test_gate_for_path("lf7-writer-before-publish", &destination);
+                crate::test_support::hit_test_gate_for_authority_path(
+                    "lf7-writer-before-publish",
+                    test_gate_authority,
+                    &destination,
+                );
                 if let Some(stop) = stop_report(scope) {
                     return abort_managed_writer_after_stop(
                         &writer_resource,
@@ -650,6 +656,8 @@ impl AsyncLocalFileSystem {
         };
         let owned_capacity = request.bytes.capacity();
         let filesystem = self.filesystem.clone();
+        #[cfg(feature = "test-support")]
+        let test_gate_authority = Arc::as_ptr(&filesystem.core) as usize;
         let executor = self.executor.clone();
         self.submit_owned_with_bytes(
             manager,
@@ -770,7 +778,10 @@ impl AsyncLocalFileSystem {
                     return abort_managed_conditional_after_stop(&writer_resource, stop);
                 }
                 #[cfg(feature = "test-support")]
-                crate::test_support::hit_test_gate("lf7-conditional-before-publish");
+                crate::test_support::hit_test_gate_for_authority(
+                    "lf7-conditional-before-publish",
+                    test_gate_authority,
+                );
                 if let Some(stop) = stop_report(scope) {
                     return abort_managed_conditional_after_stop(&writer_resource, stop);
                 }
@@ -879,6 +890,7 @@ impl AsyncLocalFileSystem {
                 return Err(LocalTempLifecycleError::Stopped);
             }
             let lease_access = request.access.clone_access();
+            let gate_resource = request.access.resource_id();
             let context = scope.context();
             let unsupported_operation = match request.command {
                 LocalTempLifecycleCommand::Seal { .. } => crate::LocalFileOperation::Commit,
@@ -889,7 +901,10 @@ impl AsyncLocalFileSystem {
             let command = request.command;
             let receiver = request.access.enqueue_native_transition(&executor, move |native| {
                 #[cfg(feature = "test-support")]
-                crate::test_support::hit_test_gate("lf7-temp-before-persist-primitive");
+                crate::test_support::hit_test_gate_for_resource(
+                    "lf7-temp-before-persist-primitive",
+                    gate_resource,
+                );
                 transition_temp_native(native, command, lease_access, context)
             });
             let receiver = match receiver {

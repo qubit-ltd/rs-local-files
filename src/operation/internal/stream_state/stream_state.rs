@@ -780,6 +780,9 @@ impl StreamState {
         if self.closed {
             return;
         }
+        // The dropped handle can no longer deliver buffered bytes. Explicit
+        // close validates pending operations before reaching this path.
+        self.discard_read_buffer();
         let request_id = if let Some(request) = &self.close_request {
             request.id
         } else {
@@ -949,6 +952,28 @@ mod tests {
             assert!(matches!(state.poll_close(&resource, &mut cx), Poll::Ready(_)));
             assert_eq!(state.read_buffer.capacity(), 0);
         }
+    }
+
+    #[test]
+    fn test_reader_drop_discards_buffer_before_requesting_cleanup() {
+        let calls = std::sync::Arc::new(Mutex::new(0));
+        let close_requests = std::sync::Arc::new(Mutex::new(Vec::new()));
+        let resource = LocalStreamResource::new(ReadOnce {
+            bytes: Mutex::new(Some(b"abandoned payload".to_vec())),
+            calls,
+            close_requests: std::sync::Arc::clone(&close_requests),
+        });
+        let mut state = StreamState::new(Direction::Read);
+        let mut cx = Context::from_waker(std::task::Waker::noop());
+        let mut prefix = [0; 1];
+
+        assert!(matches!(state.poll_read(&resource, &mut cx, &mut prefix), Poll::Ready(Ok(1))));
+        assert!(state.read_buffer.capacity() > 0);
+        state.request_close_on_drop(&resource);
+
+        assert_eq!(state.read_buffer.capacity(), 0);
+        assert_eq!(state.read_offset, 0);
+        assert_eq!(close_requests.lock().unwrap().len(), 1);
     }
 
     struct ControlledNativeWriter {

@@ -259,14 +259,26 @@ fn drain_stream_commands(inner: Arc<WorkerStreamInner>) {
                 Err(io::Error::other("Unconfirmed: local stream worker panicked"))
             }
         };
+        #[cfg(feature = "test-support")]
+        if matches!(&request.request.command, LocalStreamCommand::Write { .. })
+            && matches!(&result, Ok(LocalStreamCompletion::Written(_)))
+        {
+            crate::test_support::hit_test_gate_for_authority(
+                "rlf9-writer-after-stage-write",
+                inner.authority_identity,
+            );
+        }
         if matches!(
             request.request.command,
             LocalStreamCommand::Close | LocalStreamCommand::Abort
-        ) && matches!(&result, Ok(LocalStreamCompletion::Closed))
-            && inner.native.lock().unwrap_or_else(|e| e.into_inner()).is_none()
-        {
-            inner.release_handle_budget();
+        ) {
+            // A terminal command ends delivery even when native close fails.
+            // Keep the handle permit while native ownership remains, but the
+            // abandoned buffer budget can no longer back caller-visible data.
             inner.release_buffer_budget();
+            if inner.native.lock().unwrap_or_else(|e| e.into_inner()).is_none() {
+                inner.release_handle_budget();
+            }
         }
         if let Ok(completion) = &result {
             match completion {
@@ -442,8 +454,6 @@ fn execute_stream_command_at(
                 .get(write_offset..)
                 .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "native write offset exceeds payload"))?;
             let count = qubit_io::Output::write(writer.as_mut(), remaining)?;
-            #[cfg(feature = "test-support")]
-            crate::test_support::hit_test_gate("rlf9-writer-after-stage-write");
             Ok(LocalStreamCompletion::Written(count))
         }
         (LocalNativeStream::Writer(writer), LocalStreamCommand::Flush) => {
@@ -774,6 +784,7 @@ mod tests {
             _handle_budget: Mutex::new(Some(std::sync::Arc::new(executor.reserve_handle().unwrap()))),
             observer: Some(observer.clone()),
             written_bytes: std::sync::atomic::AtomicU64::new(0),
+            authority_identity: 0,
             append_mode: true,
             #[cfg(test)]
             panic_next_command: super::AtomicBool::new(false),
@@ -898,6 +909,7 @@ mod tests {
             _handle_budget: Mutex::new(Some(std::sync::Arc::new(executor.reserve_handle().unwrap()))),
             observer: None,
             written_bytes: std::sync::atomic::AtomicU64::new(0),
+            authority_identity: 0,
             append_mode: false,
             #[cfg(test)]
             panic_next_command: super::AtomicBool::new(false),
@@ -936,6 +948,7 @@ mod tests {
             _handle_budget: Mutex::new(Some(std::sync::Arc::new(executor.reserve_handle().unwrap()))),
             observer: None,
             written_bytes: std::sync::atomic::AtomicU64::new(0),
+            authority_identity: 0,
             append_mode: false,
             #[cfg(test)]
             panic_next_command: super::AtomicBool::new(false),
@@ -1048,6 +1061,7 @@ mod tests {
             _handle_budget: Mutex::new(Some(std::sync::Arc::new(executor.reserve_handle().unwrap()))),
             observer: None,
             written_bytes: std::sync::atomic::AtomicU64::new(0),
+            authority_identity: 0,
             append_mode: false,
             #[cfg(test)]
             panic_next_command: super::AtomicBool::new(false),

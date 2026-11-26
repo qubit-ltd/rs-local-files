@@ -48,7 +48,18 @@ pub(super) fn drop_close_waiter(waker: Option<Waker>) {
 
 /// Test-only pause point bound to a request on one walker driver.
 #[cfg(test)]
-pub(super) type WalkBatchTransferTestGate = (u64, std::sync::mpsc::SyncSender<usize>, std::sync::mpsc::Receiver<()>);
+pub(super) struct WalkBatchTransferObservation {
+    pub(super) batch_entries: usize,
+    pub(super) batch_bytes: usize,
+    pub(super) lookahead_bytes: usize,
+}
+
+#[cfg(test)]
+pub(super) type WalkBatchTransferTestGate = (
+    u64,
+    std::sync::mpsc::SyncSender<WalkBatchTransferObservation>,
+    std::sync::mpsc::Receiver<()>,
+);
 
 /// Shared executor, iterator, and close state for one directory worker.
 pub(super) struct WorkerWalkInner {

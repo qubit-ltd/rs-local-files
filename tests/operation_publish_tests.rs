@@ -370,7 +370,7 @@ fn test_digest_conditional_absent_commit_publishes_and_records_effect() {
 fn test_conditional_writer_cancellation_at_precommit_gate_aborts_without_publishing() {
     use qubit_local_files::operation::publish::LocalConditionalWriterCommitRequest;
     use qubit_local_files::options::LocalWritePrecondition;
-    use qubit_local_files::test_support::install_test_gate;
+    use qubit_local_files::test_support::install_test_gate_for_filesystem;
     use qubit_operation::StopReason;
     use sha2::Sha256;
 
@@ -385,7 +385,7 @@ fn test_conditional_writer_cancellation_at_precommit_gate_aborts_without_publish
     let filesystem = facade(&manager)
         .with_symlink_policy(qubit_local_files::policy::LocalSymlinkPolicy::Reject)
         .unwrap();
-    let gate = install_test_gate("lf7-conditional-before-publish").unwrap();
+    let gate = install_test_gate_for_filesystem("lf7-conditional-before-publish", &filesystem).unwrap();
     let (mut operation, observer) = filesystem
         .submit_conditional_writer_commit::<Sha256>(
             &manager,
@@ -424,7 +424,7 @@ fn test_conditional_abort_failure_after_stop_retains_recovery_owner() {
     use qubit_local_files::options::LocalWriteMode;
     use qubit_local_files::options::LocalWritePrecondition;
     use qubit_local_files::test_support::install_test_fault_shared;
-    use qubit_local_files::test_support::install_test_gate;
+    use qubit_local_files::test_support::install_test_gate_for_filesystem;
     use qubit_operation::StopReason;
     use sha2::Sha256;
 
@@ -442,7 +442,7 @@ fn test_conditional_abort_failure_after_stop_retains_recovery_owner() {
         .unwrap()
         .with_symlink_policy(qubit_local_files::policy::LocalSymlinkPolicy::Reject)
         .unwrap();
-    let gate = Arc::new(install_test_gate("lf7-conditional-before-publish").unwrap());
+    let gate = Arc::new(install_test_gate_for_filesystem("lf7-conditional-before-publish", &filesystem).unwrap());
     let (mut operation, observer) = filesystem
         .submit_conditional_writer_commit::<Sha256>(
             &manager,
@@ -1245,7 +1245,7 @@ fn test_queued_temp_persist_observes_stop_before_publishing() {
     use qubit_local_files::operation::submit_temp_file;
     use qubit_local_files::options::LocalPersistOptions;
     use qubit_local_files::options::LocalTempFileOptions;
-    use qubit_local_files::test_support::install_test_gate;
+    use qubit_local_files::test_support::install_test_gate_for_resource;
     use qubit_operation::StopReason;
 
     let directory = tempfile::tempdir().unwrap();
@@ -1266,7 +1266,7 @@ fn test_queued_temp_persist_observes_stop_before_publishing() {
         OperationOutcome::Succeeded(access) => access,
         _ => panic!("temp creation failed"),
     };
-    let gate = install_test_gate("lf7-temp-before-persist-primitive").unwrap();
+    let gate = install_test_gate_for_resource("lf7-temp-before-persist-primitive", access.resource_id()).unwrap();
     let (mut operation, same_access, _) = async_filesystem
         .submit_temp_lifecycle(
             &manager,
@@ -1306,7 +1306,7 @@ fn test_queued_temp_persist_observes_stop_before_publishing() {
 #[cfg(feature = "test-support")]
 #[test]
 fn test_cancellation_at_last_precommit_gate_aborts_without_publishing() {
-    use qubit_local_files::test_support::install_test_gate_for_path;
+    use qubit_local_files::test_support::install_test_gate_for_filesystem_path;
     use qubit_operation::StopReason;
 
     let _gate_lock = WRITER_PUBLISH_GATE_TEST_LOCK
@@ -1316,7 +1316,9 @@ fn test_cancellation_at_last_precommit_gate_aborts_without_publishing() {
     let destination = directory.path().join("cancelled-at-gate");
     let manager = OperationManager::new(ManagerOptions::default()).unwrap();
     let filesystem = facade(&manager);
-    let gate = Arc::new(install_test_gate_for_path("lf7-writer-before-publish", &destination).unwrap());
+    let gate = Arc::new(
+        install_test_gate_for_filesystem_path("lf7-writer-before-publish", &filesystem, &destination).unwrap(),
+    );
     let (mut operation, observer) = filesystem
         .submit_writer_commit(
             &manager,
@@ -1398,7 +1400,7 @@ fn test_cancellation_at_last_precommit_gate_aborts_without_publishing() {
 #[test]
 fn test_failed_abort_after_stop_returns_retryable_writer_and_cleanup_error() {
     use qubit_local_files::test_support::install_test_fault_shared;
-    use qubit_local_files::test_support::install_test_gate_for_path;
+    use qubit_local_files::test_support::install_test_gate_for_filesystem_path;
     use qubit_operation::StopReason;
 
     let _gate_lock = WRITER_PUBLISH_GATE_TEST_LOCK
@@ -1412,7 +1414,7 @@ fn test_failed_abort_after_stop_returns_retryable_writer_and_cleanup_error() {
     let manager = OperationManager::new(ManagerOptions::default()).unwrap();
     let executor = LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).unwrap();
     let filesystem = block_on(AsyncLocalFileSystem::host(executor.clone())).unwrap();
-    let gate = install_test_gate_for_path("lf7-writer-before-publish", &destination).unwrap();
+    let gate = install_test_gate_for_filesystem_path("lf7-writer-before-publish", &filesystem, &destination).unwrap();
     let (mut operation, _) = filesystem
         .submit_writer_commit(
             &manager,
@@ -1565,7 +1567,7 @@ fn test_stop_during_native_publish_preserves_published_fact_when_parent_sync_fai
     use qubit_local_files::outcome::LocalWriteFailureState;
     use qubit_local_files::policy::LocalDurabilityRequirement;
     use qubit_local_files::test_support::install_test_fault_shared;
-    use qubit_local_files::test_support::install_test_gate_for_path;
+    use qubit_local_files::test_support::install_test_gate_for_filesystem_path;
     use qubit_operation::StopReason;
 
     let _support_lock = PUBLISH_TEST_SUPPORT_LOCK
@@ -1576,7 +1578,12 @@ fn test_stop_during_native_publish_preserves_published_fact_when_parent_sync_fai
     let destination = canonical_root.join("nested/created/payload");
     let manager = OperationManager::new(ManagerOptions::default()).unwrap();
     let filesystem = facade(&manager);
-    let gate = install_test_gate_for_path("atomic-writer-after-install-before-parent-sync", &destination).unwrap();
+    let gate = install_test_gate_for_filesystem_path(
+        "atomic-writer-after-install-before-parent-sync",
+        &filesystem,
+        &destination,
+    )
+    .unwrap();
     let _fault = install_test_fault_shared("atomic-writer-created-parent-sync").unwrap();
     let (mut operation, observer) = filesystem
         .submit_writer_commit(
@@ -1622,6 +1629,75 @@ fn test_stop_during_native_publish_preserves_published_fact_when_parent_sync_fai
         observer.snapshot().durability,
         qubit_local_files::operation::LocalDurabilityState::Failed
     );
+}
+
+#[cfg(feature = "test-support")]
+#[test]
+fn test_sync_atomic_publish_gate_isolated_by_filesystem_authority() {
+    use qubit_local_files::LocalFileSystem;
+    use qubit_local_files::test_support::install_test_gate_for_local_filesystem_path;
+    use std::sync::mpsc;
+    use std::time::Duration;
+
+    fn publish(filesystem: LocalFileSystem, destination: PathBuf, bytes: &'static [u8]) -> Result<(), String> {
+        let mut writer = filesystem
+            .open_writer_with_options(&destination, &LocalWriteOptions::new(LocalWriteMode::CreateOrReplace))
+            .map_err(|error| error.to_string())?;
+        writer
+            .write_vectored(&[std::io::IoSlice::new(bytes)])
+            .map_err(|error| error.to_string())?;
+        writer.commit().map(|_| ()).map_err(|error| error.to_string())
+    }
+
+    let _gate_lock = WRITER_PUBLISH_GATE_TEST_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+    let directory = tempfile::tempdir().unwrap();
+    let destination = std::fs::canonicalize(directory.path()).unwrap().join("published");
+    let target_filesystem = LocalFileSystem::host().unwrap();
+    let unrelated_filesystem = LocalFileSystem::host().unwrap();
+    let gate = install_test_gate_for_local_filesystem_path(
+        "atomic-writer-after-install-before-parent-sync",
+        &target_filesystem,
+        &destination,
+    )
+    .unwrap();
+
+    let (unrelated_tx, unrelated_rx) = mpsc::sync_channel(1);
+    let unrelated_path = destination.clone();
+    let unrelated = std::thread::spawn(move || {
+        unrelated_tx
+            .send(publish(unrelated_filesystem, unrelated_path, b"unrelated"))
+            .unwrap();
+    });
+    let unrelated_result = unrelated_rx.recv_timeout(Duration::from_secs(2));
+    if unrelated_result.is_err() {
+        gate.release();
+        let _ = unrelated_rx.recv_timeout(Duration::from_secs(2));
+        unrelated.join().unwrap();
+        panic!("same-path publication from another filesystem authority consumed the target gate");
+    }
+    assert!(unrelated_result.unwrap().is_ok());
+    unrelated.join().unwrap();
+    assert!(
+        !gate.wait_until_entered_timeout(Duration::from_millis(10)),
+        "unrelated authority must not enter the target gate"
+    );
+
+    let (target_tx, target_rx) = mpsc::sync_channel(1);
+    let target_path = destination.clone();
+    let target = std::thread::spawn(move || {
+        target_tx
+            .send(publish(target_filesystem, target_path, b"target"))
+            .unwrap();
+    });
+    gate.wait_until_entered();
+    assert!(
+        target_rx.recv_timeout(Duration::from_millis(25)).is_err(),
+        "target authority remains paused until its gate is released"
+    );
+    gate.release();
+    assert!(target_rx.recv_timeout(Duration::from_secs(2)).unwrap().is_ok());
+    target.join().unwrap();
+    assert_eq!(std::fs::read(destination).unwrap(), b"target");
 }
 
 #[test]

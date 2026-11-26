@@ -384,6 +384,7 @@ impl AsyncLocalFileSystem {
                             worker_handle,
                             None,
                             false,
+                            Arc::as_ptr(&filesystem.core) as usize,
                         );
                         match resource.and_then(super::stream::AsyncLocalFileReader::new) {
                             Ok(reader) => OperationOutcome::Succeeded(reader),
@@ -530,6 +531,7 @@ impl AsyncLocalFileSystem {
                         worker_handle,
                         Some(worker_observer),
                         options.mode() == crate::LocalWriteMode::Append,
+                        Arc::as_ptr(&filesystem.core) as usize,
                     );
                     match resource.and_then(super::stream::AsyncLocalFileWriter::new) {
                         Ok(writer) => OperationOutcome::Succeeded(writer),

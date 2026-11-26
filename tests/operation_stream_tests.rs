@@ -541,7 +541,7 @@ fn test_closed_writer_retains_commit_error_without_retry_permission() {
     use qubit_local_files::options::LocalWriteOptions;
     use qubit_local_files::policy::LocalFileSyncRequirement;
     use qubit_local_files::test_support::install_test_fault_shared;
-    use qubit_local_files::test_support::install_test_gate;
+    use qubit_local_files::test_support::install_test_gate_for_filesystem;
     use qubit_operation::OperationOptions;
     use qubit_operation::OperationOutcome;
 
@@ -571,7 +571,7 @@ fn test_closed_writer_retains_commit_error_without_retry_permission() {
         }
     };
 
-    let gate = install_test_gate("rlf9-writer-after-stage-write").unwrap();
+    let gate = install_test_gate_for_filesystem("rlf9-writer-after-stage-write", &filesystem).unwrap();
     let mut write = Box::pin(writer.write_fully_async(b"staged"));
     assert!(matches!(poll(|cx| write.as_mut().poll(cx)), Poll::Ready(Ok(()))));
     drop(write);
@@ -1613,7 +1613,7 @@ fn test_real_writer_close_finishes_commit_started_before_enqueue() {
     use qubit_local_files::operation::LocalIoExecutor;
     use qubit_local_files::options::LocalWriteMode;
     use qubit_local_files::options::LocalWriteOptions;
-    use qubit_local_files::test_support::install_test_gate;
+    use qubit_local_files::test_support::install_test_gate_for_filesystem;
     use qubit_operation::OperationOptions;
     use qubit_operation::OperationOutcome;
 
@@ -1638,7 +1638,7 @@ fn test_real_writer_close_finishes_commit_started_before_enqueue() {
         _ => panic!("staged writer open failed"),
     };
 
-    let gate = install_test_gate("rlf9-writer-after-stage-write").unwrap();
+    let gate = install_test_gate_for_filesystem("rlf9-writer-after-stage-write", &filesystem).unwrap();
     let mut write = Box::pin(writer.write_fully_async(b"new contents"));
     assert!(matches!(poll(|cx| write.as_mut().poll(cx)), Poll::Ready(Ok(()))));
     drop(write);

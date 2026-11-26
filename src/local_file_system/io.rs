@@ -167,6 +167,7 @@ impl LocalFileSystem {
                 resolved.authority_relative(),
                 options,
                 self.symlink_policy,
+                std::sync::Arc::as_ptr(&self.core) as usize,
             ),
             LocalNamespace::Rooted(rooted) => {
                 rooted.open_writer(resolved.authority_relative(), options, self.symlink_policy)
