@@ -1306,7 +1306,7 @@ fn test_queued_temp_persist_observes_stop_before_publishing() {
 #[cfg(feature = "test-support")]
 #[test]
 fn test_cancellation_at_last_precommit_gate_aborts_without_publishing() {
-    use qubit_local_files::test_support::install_test_gate_for_path;
+    use qubit_local_files::test_support::install_test_gate_for_filesystem_path;
     use qubit_operation::StopReason;
 
     let _gate_lock = WRITER_PUBLISH_GATE_TEST_LOCK
@@ -1316,7 +1316,9 @@ fn test_cancellation_at_last_precommit_gate_aborts_without_publishing() {
     let destination = directory.path().join("cancelled-at-gate");
     let manager = OperationManager::new(ManagerOptions::default()).unwrap();
     let filesystem = facade(&manager);
-    let gate = Arc::new(install_test_gate_for_path("lf7-writer-before-publish", &destination).unwrap());
+    let gate = Arc::new(
+        install_test_gate_for_filesystem_path("lf7-writer-before-publish", &filesystem, &destination).unwrap(),
+    );
     let (mut operation, observer) = filesystem
         .submit_writer_commit(
             &manager,
@@ -1398,7 +1400,7 @@ fn test_cancellation_at_last_precommit_gate_aborts_without_publishing() {
 #[test]
 fn test_failed_abort_after_stop_returns_retryable_writer_and_cleanup_error() {
     use qubit_local_files::test_support::install_test_fault_shared;
-    use qubit_local_files::test_support::install_test_gate_for_path;
+    use qubit_local_files::test_support::install_test_gate_for_filesystem_path;
     use qubit_operation::StopReason;
 
     let _gate_lock = WRITER_PUBLISH_GATE_TEST_LOCK
@@ -1412,7 +1414,7 @@ fn test_failed_abort_after_stop_returns_retryable_writer_and_cleanup_error() {
     let manager = OperationManager::new(ManagerOptions::default()).unwrap();
     let executor = LocalIoExecutor::new(manager.clone(), LocalExecutionConfig::default()).unwrap();
     let filesystem = block_on(AsyncLocalFileSystem::host(executor.clone())).unwrap();
-    let gate = install_test_gate_for_path("lf7-writer-before-publish", &destination).unwrap();
+    let gate = install_test_gate_for_filesystem_path("lf7-writer-before-publish", &filesystem, &destination).unwrap();
     let (mut operation, _) = filesystem
         .submit_writer_commit(
             &manager,

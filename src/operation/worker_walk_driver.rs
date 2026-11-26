@@ -21,6 +21,7 @@ use qubit_operation::ResourceRef;
 use super::LocalWalkDriver;
 use super::LocalWalkResource;
 use super::WorkerCleanup;
+use super::stream_state::resource_limit;
 use super::worker_walk_close_state::WorkerWalkCloseState;
 use super::worker_walk_command::WorkerWalkCommand;
 use super::worker_walk_cursor::WorkerWalkCursor;
@@ -90,6 +91,17 @@ fn collect_walk_batch(
             }
             Some(Ok(path)) => {
                 let size = path.as_os_str().as_encoded_bytes().len();
+                // A path deferred to the next batch is retained lookahead.
+                // Bound it separately and preserve the successful prefix
+                // before reporting an oversized entry.
+                if size > super::LOCAL_WALK_BATCH_BYTES {
+                    let error = resource_limit("single walker path exceeds 256 KiB lookahead limit");
+                    if entries.is_empty() {
+                        return (Err(error), false);
+                    }
+                    *pending_error = Some(error);
+                    break;
+                }
                 if size > max_bytes {
                     if entries.is_empty() {
                         // Preserve the public validator's oversized-path error.
@@ -481,6 +493,7 @@ fn drop_abandoned_walk_commands(commands: HashMap<u64, WorkerWalkCommand>) {
 
 #[cfg(test)]
 mod tests {
+    use crate::operation::stream::LOCAL_WALK_BATCH_BYTES;
     use std::collections::HashMap;
     use std::future::Future;
     use std::io;
@@ -785,6 +798,28 @@ mod tests {
         });
         assert!(exhausted);
         assert_eq!(continued.unwrap(), Some(vec![PathBuf::from("after")]));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_walk_batch_does_not_retain_oversized_lookahead_path() {
+        use std::os::unix::ffi::OsStringExt;
+
+        let prefix = PathBuf::from("prefix");
+        let oversized = PathBuf::from(std::ffi::OsString::from_vec(vec![
+            b'x';
+            LOCAL_WALK_BATCH_BYTES + 1
+        ]));
+        let mut sequence = [Some(Ok(prefix.clone())), Some(Ok(oversized))].into_iter();
+        let mut pending_entry = None;
+        let mut pending_error = None;
+        let (first, exhausted) =
+            collect_walk_batch(&mut pending_entry, &mut pending_error, 8, 6, || sequence.next().flatten());
+
+        assert!(!exhausted);
+        assert_eq!(first.unwrap(), Some(vec![prefix]));
+        assert!(pending_entry.is_none(), "oversized path allocation is discarded");
+        assert!(pending_error.is_some(), "error follows the successful prefix");
     }
 
     #[cfg(panic = "unwind")]

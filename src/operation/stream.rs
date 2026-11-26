@@ -262,11 +262,14 @@ fn drain_stream_commands(inner: Arc<WorkerStreamInner>) {
         if matches!(
             request.request.command,
             LocalStreamCommand::Close | LocalStreamCommand::Abort
-        ) && matches!(&result, Ok(LocalStreamCompletion::Closed))
-            && inner.native.lock().unwrap_or_else(|e| e.into_inner()).is_none()
-        {
-            inner.release_handle_budget();
+        ) {
+            // A terminal command ends delivery even when native close fails.
+            // Keep the handle permit while native ownership remains, but the
+            // abandoned buffer budget can no longer back caller-visible data.
             inner.release_buffer_budget();
+            if inner.native.lock().unwrap_or_else(|e| e.into_inner()).is_none() {
+                inner.release_handle_budget();
+            }
         }
         if let Ok(completion) = &result {
             match completion {

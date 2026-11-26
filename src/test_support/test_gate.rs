@@ -24,7 +24,7 @@ use gate_state::GateState;
 pub use test_gate_guard::TestGateGuard;
 
 /// Selector used to locate a named gate, optionally restricted to one path.
-pub(super) type GateKey = (String, Option<PathBuf>);
+pub(super) type GateKey = (String, Option<PathBuf>, Option<usize>);
 
 /// Process-local registry of gate states.
 type GateRegistry = Mutex<HashMap<GateKey, Arc<GateState>>>;
@@ -57,7 +57,7 @@ fn gates() -> &'static GateRegistry {
 /// dropped.
 #[doc(hidden)]
 pub fn install_test_gate(name: &str) -> io::Result<TestGateGuard> {
-    install_gate(name, None)
+    install_gate(name, None, None)
 }
 
 /// Installs a named gate that only workers operating on `path` can reach.
@@ -76,7 +76,28 @@ pub fn install_test_gate(name: &str) -> io::Result<TestGateGuard> {
 /// same name and path are already installed.
 #[doc(hidden)]
 pub fn install_test_gate_for_path(name: &str, path: &Path) -> io::Result<TestGateGuard> {
-    install_gate(name, Some(path.to_path_buf()))
+    install_gate(name, Some(path.to_path_buf()), None)
+}
+
+/// Installs a path gate scoped to one filesystem authority instance.
+#[doc(hidden)]
+pub fn install_test_gate_for_authority_path(
+    name: &str,
+    authority: usize,
+    path: &Path,
+) -> io::Result<TestGateGuard> {
+    install_gate(name, Some(path.to_path_buf()), Some(authority))
+}
+
+/// Installs a path gate scoped to the authority retained by an async facade.
+#[doc(hidden)]
+pub fn install_test_gate_for_filesystem_path(
+    name: &str,
+    filesystem: &crate::operation::AsyncLocalFileSystem,
+    path: &Path,
+) -> io::Result<TestGateGuard> {
+    let authority = Arc::as_ptr(&filesystem.filesystem.core) as usize;
+    install_test_gate_for_authority_path(name, authority, path)
 }
 
 /// Registers a named gate, optionally restricted to one exact operation path.
@@ -90,12 +111,12 @@ pub fn install_test_gate_for_path(name: &str, path: &Path) -> io::Result<TestGat
 ///
 /// Returns `InvalidInput` for an empty selector and `AlreadyExists` when the
 /// same selector is already installed.
-fn install_gate(name: &str, path: Option<PathBuf>) -> io::Result<TestGateGuard> {
+fn install_gate(name: &str, path: Option<PathBuf>, authority: Option<usize>) -> io::Result<TestGateGuard> {
     if name.is_empty() {
         return Err(io::Error::new(io::ErrorKind::InvalidInput, "test gate name is empty"));
     }
     let state = Arc::new(GateState::default());
-    let key = (name.to_owned(), path);
+    let key = (name.to_owned(), path, authority);
     let mut active = gates().lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     if active.contains_key(&key) {
         return Err(io::Error::new(
@@ -116,7 +137,7 @@ pub(crate) fn hit_test_gate(name: &str) {
     let state = gates()
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
-        .get(&(name.to_owned(), None))
+        .get(&(name.to_owned(), None, None))
         .cloned();
     hit_gate_state(state);
 }
@@ -132,7 +153,17 @@ pub(crate) fn hit_test_gate_for_path(name: &str, path: &Path) {
     let state = gates()
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
-        .get(&(name.to_owned(), Some(path.to_path_buf())))
+        .get(&(name.to_owned(), Some(path.to_path_buf()), None))
+        .cloned();
+    hit_gate_state(state);
+}
+
+/// Pauses a worker only when both its path and captured authority match.
+pub(crate) fn hit_test_gate_for_authority_path(name: &str, authority: usize, path: &Path) {
+    let state = gates()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .get(&(name.to_owned(), Some(path.to_path_buf()), Some(authority)))
         .cloned();
     hit_gate_state(state);
 }
@@ -161,6 +192,8 @@ mod tests {
     use super::hit_test_gate_for_path;
     use super::install_test_gate;
     use super::install_test_gate_for_path;
+    use super::install_test_gate_for_authority_path;
+    use super::hit_test_gate_for_authority_path;
 
     #[test]
     fn test_gate_releases_worker_after_entered_notification() {
@@ -209,5 +242,28 @@ mod tests {
             .recv_timeout(Duration::from_secs(2))
             .expect("the matching target is released");
         matching.join().unwrap();
+    }
+
+    #[test]
+    fn test_gate_wait_reports_when_target_was_not_reached() {
+        let gate = install_test_gate("unreached-gate-diagnostic").unwrap();
+
+        assert!(!gate.wait_until_entered_timeout(std::time::Duration::from_millis(1)));
+    }
+
+    #[test]
+    fn test_authority_scoped_gate_ignores_same_path_from_other_authority() {
+        use std::path::Path;
+        use std::sync::mpsc;
+        use std::time::Duration;
+
+        let gate = install_test_gate_for_authority_path("authority-path-gate", 1, Path::new("same/path")).unwrap();
+        let (tx, rx) = mpsc::channel();
+        std::thread::spawn(move || {
+            hit_test_gate_for_authority_path("authority-path-gate", 2, Path::new("same/path"));
+            tx.send(()).unwrap();
+        });
+        rx.recv_timeout(Duration::from_secs(2)).expect("different authority proceeds");
+        assert!(!gate.wait_until_entered_timeout(Duration::from_millis(1)));
     }
 }

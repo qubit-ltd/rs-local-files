@@ -132,6 +132,8 @@ impl AsyncLocalFileSystem {
             _ => request.path.clone(),
         };
         let filesystem = self.filesystem.clone();
+        #[cfg(feature = "test-support")]
+        let test_gate_authority = Arc::as_ptr(&filesystem.core) as usize;
         let executor = self.executor.clone();
         let owned_capacity = request.bytes.capacity();
         self.submit_owned_with_bytes(
@@ -289,7 +291,11 @@ impl AsyncLocalFileSystem {
                 // Cancellation is honored up to this gate. There is no stop check
                 // after entering commit: the native publication result is authoritative.
                 #[cfg(feature = "test-support")]
-                crate::test_support::hit_test_gate_for_path("lf7-writer-before-publish", &destination);
+                crate::test_support::hit_test_gate_for_authority_path(
+                    "lf7-writer-before-publish",
+                    test_gate_authority,
+                    &destination,
+                );
                 if let Some(stop) = stop_report(scope) {
                     return abort_managed_writer_after_stop(
                         &writer_resource,

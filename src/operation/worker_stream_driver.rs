@@ -294,18 +294,39 @@ impl LocalStreamDriver for WorkerStreamDriver {
             id: request_id,
             command: LocalStreamCommand::Abort,
         };
-        {
+        let (abandoned_commands, needs_schedule) = {
             let mut state = self.0.state.lock().unwrap_or_else(|e| e.into_inner());
-            if state.commands.contains_key(&request_id) {
-                return;
+            let existing = state.commands.remove(&request_id);
+            let abandoned = state.commands.drain().map(|(_, command)| command).collect::<Vec<_>>();
+            let needs_schedule = existing.is_none();
+            state.commands.insert(request_id, existing.unwrap_or(WorkerCommand {
+                result: None,
+                waker: None,
+            }));
+            (abandoned, needs_schedule)
+        };
+        for command in abandoned_commands {
+            drop_stream_command(Some(command));
+        }
+        let abandoned_queue = {
+            let mut queue = self.0.queue.lock().unwrap_or_else(|e| e.into_inner());
+            let mut retained = VecDeque::new();
+            let mut abandoned = Vec::new();
+            for queued in queue.drain(..) {
+                if queued.request.id == request_id
+                    || matches!(queued.request.command, LocalStreamCommand::Close | LocalStreamCommand::Abort)
+                {
+                    retained.push_back(queued);
+                } else {
+                    abandoned.push(queued);
+                }
             }
-            state.commands.insert(
-                request_id,
-                WorkerCommand {
-                    result: None,
-                    waker: None,
-                },
-            );
+            *queue = retained;
+            abandoned
+        };
+        drop(abandoned_queue);
+        if !needs_schedule {
+            return;
         }
         let mut scheduled = false;
         let mut last_error = None;
