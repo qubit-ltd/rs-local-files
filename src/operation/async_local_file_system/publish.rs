@@ -22,6 +22,7 @@ use super::super::LocalOperation;
 use super::super::LocalOperationOptions;
 use super::super::LocalPublicationState;
 use super::super::LocalSubmitError;
+use super::super::internal::permits::Permit;
 #[cfg(feature = "digest")]
 use super::super::publish::LocalConditionalWriterCommandError;
 #[cfg(feature = "digest")]
@@ -83,6 +84,14 @@ fn lock_publication_state<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
         Ok(guard) => guard,
         Err(poisoned) => poisoned.into_inner(),
     }
+}
+
+/// Shrinks the peak staged-publish reservation to the handles still retained
+/// by its recovery owner after transient worker handles have been released.
+fn shrink_staged_handle_quota(quota: &Mutex<Permit>, retained_handles: usize) {
+    let mut permit = quota.lock().unwrap_or_else(|error| error.into_inner());
+    let release = permit.amount().saturating_sub(retained_handles);
+    permit.shrink(release);
 }
 
 impl AsyncLocalFileSystem {
@@ -440,7 +449,7 @@ impl AsyncLocalFileSystem {
                 super::super::LocalSubmitRejection::CapacityExceeded,
             ));
         };
-        let handle_quota = Arc::new(handle_quota);
+        let handle_quota = Arc::new(Mutex::new(handle_quota));
         let disk_limit = limits
             .max_disk_bytes
             .unwrap_or(self.executor.inner.config.max_disk_bytes);
@@ -477,6 +486,8 @@ impl AsyncLocalFileSystem {
                 if let Some(stop) = stop_report(scope) {
                     return OperationOutcome::Stopped(stop);
                 }
+                #[cfg(feature = "test-support")]
+                crate::test_support::hit_test_gate("lf10-staged-publish-after-admission");
                 let parent = match filesystem
                     .open_directory_with_options(&parent_path, &crate::options::LocalDirectoryOpenOptions::new())
                 {
@@ -491,7 +502,9 @@ impl AsyncLocalFileSystem {
                     .with_privacy(crate::policy::LocalPrivacyRequirement::Required);
                 let mut stage = match parent.create_staged_directory(&stage_options) {
                     Ok(stage) => stage,
-                    Err(error) => {
+                    Err(mut error) => {
+                        let retained_owners = error.retain_handle_quota(handle_quota.clone());
+                        shrink_staged_handle_quota(&handle_quota, retained_owners);
                         return OperationOutcome::Failed(LocalStagedTreePublishError::Create(
                             LocalStagedTreeReservedError::new(error, reservation.clone()),
                         ));
@@ -503,15 +516,21 @@ impl AsyncLocalFileSystem {
                     if let Some(stop) = stop_report(scope) {
                         return match stage.cleanup() {
                             Ok(()) => OperationOutcome::Stopped(stop),
-                            Err(error) => OperationOutcome::Failed(LocalStagedTreePublishError::Cleanup(
-                                LocalStagedTreeReservedError::new(error, reservation.clone()),
-                            )),
+                            Err(error) => {
+                                OperationOutcome::Failed(LocalStagedTreePublishError::Cleanup(
+                                    {
+                                        shrink_staged_handle_quota(&handle_quota, 2);
+                                        LocalStagedTreeReservedError::new(error, reservation.clone())
+                                    },
+                                ))
+                            }
                         };
                     }
                     let entry =
                         match crate::directory::LocalTreeEntry::new(file.path.clone(), crate::LocalFileKind::File) {
                             Ok(entry) => entry,
                             Err(cause) => {
+                                shrink_staged_handle_quota(&handle_quota, 2);
                                 return OperationOutcome::Failed(LocalStagedTreePublishError::Write {
                                     cause,
                                     stage: LocalStagedTreeRecovery::new(stage, reservation.clone()),
@@ -520,6 +539,7 @@ impl AsyncLocalFileSystem {
                         };
                     let mut input = file.bytes.as_slice();
                     if let Err(cause) = stage.write_file_new(&file.path, &mut input, file.bytes.len() as u64) {
+                        shrink_staged_handle_quota(&handle_quota, 2);
                         record_stage_write(scope, &observer, 0, EffectFact::Unknown);
                         return OperationOutcome::Failed(LocalStagedTreePublishError::Write {
                             cause,
@@ -527,6 +547,8 @@ impl AsyncLocalFileSystem {
                         });
                     }
                     record_stage_write(scope, &observer, file.bytes.len() as u64, EffectFact::Known);
+                    #[cfg(feature = "test-support")]
+                    crate::test_support::hit_test_gate("lf10-staged-publish-after-stage-write");
                     expected.push(entry);
                 }
                 let validation = request
@@ -539,9 +561,14 @@ impl AsyncLocalFileSystem {
                 if let Some(stop) = stop_report(scope) {
                     return match stage.cleanup() {
                         Ok(()) => OperationOutcome::Stopped(stop),
-                        Err(error) => OperationOutcome::Failed(LocalStagedTreePublishError::Cleanup(
-                            LocalStagedTreeReservedError::new(error, reservation.clone()),
-                        )),
+                        Err(error) => {
+                            OperationOutcome::Failed(LocalStagedTreePublishError::Cleanup(
+                                {
+                                    shrink_staged_handle_quota(&handle_quota, 2);
+                                    LocalStagedTreeReservedError::new(error, reservation.clone())
+                                },
+                            ))
+                        }
                     };
                 }
                 match stage.publish_new(&parent, &request.name, &publish_options) {
@@ -562,7 +589,7 @@ impl AsyncLocalFileSystem {
                         }
                         OperationOutcome::Succeeded(outcome)
                     }
-                    Err(error) => {
+                    Err(mut error) => {
                         match error.publication() {
                             crate::outcome::LocalTreePublication::Published => record_local_effect(
                                 scope,
@@ -582,6 +609,8 @@ impl AsyncLocalFileSystem {
                             ),
                             _ => {}
                         }
+                        let retained_owners = error.retain_handle_quota(handle_quota.clone());
+                        shrink_staged_handle_quota(&handle_quota, retained_owners);
                         OperationOutcome::Failed(LocalStagedTreePublishError::Publish(
                             LocalStagedTreeReservedError::new(error, reservation.clone()),
                         ))

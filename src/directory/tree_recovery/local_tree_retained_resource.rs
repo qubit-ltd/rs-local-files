@@ -460,6 +460,15 @@ impl LocalTreeRetainedResource {
         if !self.cleanup_armed {
             return Ok(());
         }
+        #[cfg(feature = "test-support")]
+        if crate::local::take_test_support("lf10-staged-cleanup-failure") {
+            return Err(crate::LocalFileError::from_io(
+                crate::LocalFileOperation::Cleanup,
+                Some(self.path.clone()),
+                None,
+                crate::local::test_fault_error(),
+            ));
+        }
         let started_at = std::time::Instant::now();
         if self.cleanup_limits.max_entries() == Some(0) || cleanup_deadline_exceeded(self.cleanup_limits, started_at) {
             return Err(crate::LocalFileError::new(

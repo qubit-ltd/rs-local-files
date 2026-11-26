@@ -121,6 +121,21 @@ pub struct LocalTreePublishError {
     access_state: LocalTreeAccessState,
 }
 impl LocalTreePublishError {
+    /// Attaches a shared executor quota to every native owner retained by a
+    /// publication failure and reports the retained root-handle count.
+    pub(crate) fn retain_handle_quota(&mut self, quota: std::sync::Arc<dyn Send + Sync>) -> usize {
+        let mut owners = 0_usize;
+        if let Some(stage) = self.stage.as_mut() {
+            stage.retain_handle_quota(std::sync::Arc::clone(&quota));
+            owners += 1;
+        }
+        for resource in &mut self.retained {
+            resource.retain_handle_quota(std::sync::Arc::clone(&quota));
+            owners += 1;
+        }
+        owners.saturating_mul(2)
+    }
+
     /// Creates a publication error while retaining any stage owner for
     /// recovery.
     ///
