@@ -585,6 +585,17 @@ impl LocalRootAtomicWriter {
             .map_err(|error| error.into_final_error_with(Self::finalize_failed_commit))
     }
 
+    /// Commits a copied file while enforcing its operation deadline at the
+    /// final installation boundary.
+    pub(crate) fn commit_copy_with_durability(
+        self,
+        budget: &crate::local::CopyBudget,
+    ) -> Result<bool, LocalAtomicWriteError> {
+        self.commit_recoverable_with_sync_and_budget(None, Some(budget))
+            .map(|outcome| outcome.durable)
+            .map_err(|error| error.into_final_error_with(Self::finalize_failed_commit))
+    }
+
     /// Attempts commit and reports whether requested durability completed.
     ///
     /// # Returns
@@ -622,11 +633,19 @@ impl LocalRootAtomicWriter {
         self,
         observer: Option<&LocalCommitSyncObserver>,
     ) -> Result<LocalCommitSyncOutcome, LocalAtomicCommitError<Self>> {
+        self.commit_recoverable_with_sync_and_budget(observer, None)
+    }
+
+    fn commit_recoverable_with_sync_and_budget(
+        self,
+        observer: Option<&LocalCommitSyncObserver>,
+        budget: Option<&crate::local::CopyBudget>,
+    ) -> Result<LocalCommitSyncOutcome, LocalAtomicCommitError<Self>> {
         #[cfg(unix)]
         {
             commit_recoverably(
                 self,
-                |writer| writer.commit_attempt(observer),
+                |writer| writer.commit_attempt(observer, budget),
                 |writer| writer.staged_file.is_open(),
             )
         }
@@ -640,7 +659,7 @@ impl LocalRootAtomicWriter {
             }
             commit_recoverably(
                 self,
-                |writer| writer.commit_attempt_windows(observer),
+                |writer| writer.commit_attempt_windows(observer, budget),
                 |writer| writer.staged_file.armed,
             )
         }
@@ -760,6 +779,7 @@ impl LocalRootAtomicWriter {
     fn commit_attempt_windows(
         &mut self,
         observer: Option<&LocalCommitSyncObserver>,
+        budget: Option<&crate::local::CopyBudget>,
     ) -> Result<LocalCommitSyncOutcome, LocalAtomicWriteError> {
         let destination = if self.destination_is_regular {
             Some(
@@ -831,6 +851,11 @@ impl LocalRootAtomicWriter {
         if let Some(opened_destination) = destination.as_ref() {
             self.verify_windows_destination_for_commit(opened_destination)?;
         }
+        #[cfg(test)]
+        crate::tests::rooted::support::resolution_observation_tests::reach_deadline_boundary(
+            crate::tests::rooted::support::resolution_observation_tests::DeadlineBoundary::RootedWriterIdentityVerified,
+        );
+        self.check_copy_deadline(budget)?;
         rename_rooted_entry(
             &self.staged_file.root,
             Path::new(""),
@@ -978,12 +1003,18 @@ impl LocalRootAtomicWriter {
     fn commit_attempt(
         &mut self,
         observer: Option<&LocalCommitSyncObserver>,
+        budget: Option<&crate::local::CopyBudget>,
     ) -> Result<LocalCommitSyncOutcome, LocalAtomicWriteError> {
         let destination = self.open_destination_for_commit()?;
         self.apply_destination_metadata(destination.as_ref())?;
         self.apply_copy_permissions()?;
         let file_synced = self.sync_temporary_file(observer)?;
         self.verify_destination_for_commit(destination.as_ref())?;
+        #[cfg(test)]
+        crate::tests::rooted::support::resolution_observation_tests::reach_deadline_boundary(
+            crate::tests::rooted::support::resolution_observation_tests::DeadlineBoundary::RootedWriterIdentityVerified,
+        );
+        self.check_copy_deadline(budget)?;
         let parent_durable = self.install_and_sync_parent(observer)?;
         let durable = self.durability != LocalDurabilityRequirement::NotRequired && file_synced && parent_durable;
         Ok(LocalCommitSyncOutcome { durable, file_synced })
@@ -1046,6 +1077,24 @@ impl LocalRootAtomicWriter {
                 Some(self.staged_file.diagnostic_path.clone()),
                 #[cfg(not(any(unix, windows)))]
                 None,
+                LocalAtomicDestinationState::Unchanged,
+                source,
+            )
+        })
+    }
+
+    fn check_copy_deadline(
+        &self,
+        budget: Option<&crate::local::CopyBudget>,
+    ) -> Result<(), LocalAtomicWriteError> {
+        let Some(budget) = budget else {
+            return Ok(());
+        };
+        budget.check_deadline().map_err(|source| {
+            LocalAtomicWriteError::new(
+                LocalAtomicWriteStage::ReplaceDestination,
+                self.path.clone(),
+                Some(self.staged_file.diagnostic_path().to_path_buf()),
                 LocalAtomicDestinationState::Unchanged,
                 source,
             )

@@ -167,7 +167,7 @@ fn test_rooted_copy_accepts_parent_created_after_preflight() {
 }
 
 #[test]
-fn test_rooted_copy_parent_creation_deadline_preserves_created_parent_as_partial() {
+fn test_rooted_copy_parent_creation_deadline_reports_unchanged_target() {
     let fixture = tempfile::tempdir().expect("fixture should exist");
     fs::write(fixture.path().join("source"), b"source").unwrap();
     let filesystem = LocalFileSystem::rooted(fixture.path()).expect("rooted filesystem should open");
@@ -184,9 +184,64 @@ fn test_rooted_copy_parent_creation_deadline_preserves_created_parent_as_partial
         .expect_err("deadline after one parent creation must stop before the next");
 
     assert_eq!(ErrorKind::TimedOut, failure.error().io_error_kind());
-    assert_eq!(LocalCopyFailureState::PartiallyPublished, failure.state());
+    assert_eq!(LocalCopyFailureState::Unchanged, failure.state());
     assert!(fixture.path().join("new-parent").is_dir());
     assert!(!fixture.path().join("new-parent/child").exists());
+}
+
+#[test]
+fn test_rooted_copy_deadline_after_destination_revalidation_preserves_target() {
+    let fixture = tempfile::tempdir().expect("fixture should exist");
+    fs::write(fixture.path().join("source"), b"replacement").expect("source should exist");
+    fs::create_dir(fixture.path().join("target")).expect("target directory should exist");
+    fs::write(fixture.path().join("target/child"), b"original")
+        .expect("target child should exist");
+    let filesystem =
+        LocalFileSystem::rooted(fixture.path()).expect("rooted filesystem should open");
+    let _clock = observations::DeadlineClockGuard::expire_at(
+        DeadlineBoundary::RootedCopyDestinationRevalidated,
+    );
+
+    let failure = filesystem
+        .copy_with_options(
+            Path::new("source"),
+            Path::new("target"),
+            &LocalCopyOptions::new()
+                .with_conflict(LocalCopyConflictPolicy::Overwrite)
+                .with_type_conflict(LocalCopyTypeConflictPolicy::Replace)
+                .with_deadline(Duration::from_secs(60)),
+        )
+        .expect_err("late deadline must prevent removal of the replacement target");
+
+    assert_eq!(ErrorKind::TimedOut, failure.error().io_error_kind());
+    assert_eq!(LocalCopyFailureState::Unchanged, failure.state());
+    assert_eq!(b"original", fs::read(fixture.path().join("target/child")).unwrap().as_slice());
+}
+
+#[test]
+fn test_rooted_copy_deadline_after_writer_identity_check_prevents_install() {
+    let fixture = tempfile::tempdir().expect("fixture should exist");
+    fs::write(fixture.path().join("source"), b"replacement").expect("source should exist");
+    fs::write(fixture.path().join("target"), b"original").expect("target should exist");
+    let filesystem =
+        LocalFileSystem::rooted(fixture.path()).expect("rooted filesystem should open");
+    let _clock = observations::DeadlineClockGuard::expire_at(
+        DeadlineBoundary::RootedWriterIdentityVerified,
+    );
+
+    let failure = filesystem
+        .copy_with_options(
+            Path::new("source"),
+            Path::new("target"),
+            &LocalCopyOptions::new()
+                .with_conflict(LocalCopyConflictPolicy::Overwrite)
+                .with_deadline(Duration::from_secs(60)),
+        )
+        .expect_err("late deadline must prevent installing staged bytes");
+
+    assert_eq!(ErrorKind::TimedOut, failure.error().io_error_kind());
+    assert_eq!(LocalCopyFailureState::Unchanged, failure.state());
+    assert_eq!(b"original", fs::read(fixture.path().join("target")).unwrap().as_slice());
 }
 
 #[test]

@@ -195,14 +195,14 @@ impl RootedLocalFileSystem {
                 .as_path()
                 .parent()
                 .filter(|parent| !parent.as_os_str().is_empty())
-            && let Err((error, created)) = prepare_rooted_copy_parent(&self.root, parent, &budget)
+            && let Err((error, _created)) =
+                prepare_rooted_copy_parent(&self.root, parent, &budget)
         {
-            let failure = copy_failure_unchanged(rooted_io_error(LocalFileOperation::Copy, target, error));
-            return Err(if created {
-                failure.with_state(crate::LocalCopyFailureState::PartiallyPublished)
-            } else {
-                failure
-            });
+            return Err(copy_failure_unchanged(rooted_io_error(
+                LocalFileOperation::Copy,
+                target,
+                error,
+            )));
         }
         let stats = self
             .root
