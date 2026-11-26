@@ -332,6 +332,11 @@ impl LocalTreeRetainedResource {
     ///
     /// Returns an error if the retained parent cannot observe the child.
     pub(crate) fn binding_matches_identity(&self) -> crate::LocalResult<bool> {
+        let named = self.parent.observe_entry(&self.relative)?;
+        let matches = self
+            .identity
+            .as_ref()
+            .is_some_and(|identity| named.identity() == Some(identity));
         #[cfg(all(feature = "test-support", windows))]
         if crate::local::take_test_support_on_nth(
             "owner-policy-stage-binding-mismatch-before-root",
@@ -339,11 +344,7 @@ impl LocalTreeRetainedResource {
         ) {
             return Ok(false);
         }
-        let named = self.parent.observe_entry(&self.relative)?;
-        Ok(self
-            .identity
-            .as_ref()
-            .is_some_and(|identity| named.identity() == Some(identity)))
+        Ok(matches)
     }
     /// Records one identity owned by this tree for a later guarded deletion.
     ///

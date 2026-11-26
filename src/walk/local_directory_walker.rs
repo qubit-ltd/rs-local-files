@@ -836,8 +836,12 @@ fn needs_seen_names(options: &LocalListOptions) -> bool {
     explicit_name_budget || can_reopen
 }
 
-fn logical_depth_error(root: &Path, relative: &Path, limit: usize) -> LocalFileError {
-    let actual = relative.components().count();
+fn logical_depth_error(
+    root: &Path,
+    relative: &Path,
+    limit: usize,
+    actual: usize,
+) -> LocalFileError {
     LocalFileError::from_resource_limit(
         LocalFileOperation::Read,
         Some(root.join(relative)),
@@ -1126,9 +1130,14 @@ impl LocalDirectoryWalker {
                     self.logical_depth_root.as_deref().unwrap_or(&self.root),
                     &relative,
                     limit,
+                    entry_depth,
                 )));
             }
-            if self.options.max_depth().is_some_and(|max_depth| entry_depth > max_depth) {
+            if self
+                .options
+                .max_depth()
+                .is_some_and(|max_depth| entry_depth > max_depth)
+            {
                 continue;
             }
             if let Err(error) = self.consume_host_entry_budgets(&entry, &relative_parent) {
@@ -1455,6 +1464,17 @@ fn next_rooted_entry(
                     if !is_new_name {
                         continue;
                     }
+                    if let Some(limit) = state.logical_depth_limit
+                        && entry_depth > limit
+                    {
+                        let relative = output_parent.join(&name);
+                        return Some(Err(logical_depth_error(
+                            state.logical_depth_root.as_deref().unwrap_or(namespace_root),
+                            &relative,
+                            limit,
+                            entry_depth,
+                        )));
+                    }
                     if options.max_depth().is_some_and(|max_depth| entry_depth > max_depth) {
                         continue;
                     }
@@ -1489,6 +1509,7 @@ fn next_rooted_entry(
                 state.logical_depth_root.as_deref().unwrap_or(namespace_root),
                 &relative,
                 limit,
+                entry_depth,
             )));
         }
         if options.max_depth().is_some_and(|max_depth| entry_depth > max_depth) {

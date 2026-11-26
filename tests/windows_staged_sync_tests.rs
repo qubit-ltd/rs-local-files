@@ -13,8 +13,11 @@ use std::path::Path;
 use qubit_local_files::LocalFileSystem;
 use qubit_local_files::directory::LocalDirectoryHandle;
 use qubit_local_files::error::LocalFileErrorKind;
+use qubit_local_files::observation::LocalObservationRequirement;
+use qubit_local_files::observation::LocalSecurityObservationOptions;
 use qubit_local_files::options::LocalDirectoryOpenOptions;
 use qubit_local_files::options::LocalListOptions;
+use qubit_local_files::options::LocalObservedReadOptions;
 use qubit_local_files::options::LocalTempDirectoryOptions;
 use qubit_local_files::options::LocalTreePublishOptions;
 use qubit_local_files::policy::LocalFileSyncRequirement;
@@ -179,7 +182,27 @@ fn test_owner_policy_late_stage_binding_mismatch_blocks_root_acl_mutation() {
         .expect("payload");
     let expected_identity = stage.identity().cloned().expect("stage identity");
     let native = scratch.path().join(stage.relative_name());
-    let policy = LocalOwnerAccessPolicy::new().with_windows_masks(0x0016_01ef, 0x0016_019f);
+    let policy = LocalOwnerAccessPolicy::new().with_windows_masks(0x0012_0189, 0x0012_0089);
+    let security_options = LocalSecurityObservationOptions::new()
+        .with_access(LocalObservationRequirement::Required);
+    let root_dacl_before = stage
+        .directory()
+        .security_observation(&security_options)
+        .expect("capture stage root DACL before child mutation")
+        .access()
+        .and_then(|access| access.windows())
+        .cloned()
+        .expect("Windows root DACL facts");
+    let child_dacl_before = stage
+        .directory()
+        .open_observed_reader(Path::new("payload"), &LocalObservedReadOptions::new())
+        .expect("open child for DACL observation")
+        .security_observation(&security_options)
+        .expect("capture child DACL before mutation")
+        .access()
+        .and_then(|access| access.windows())
+        .cloned()
+        .expect("Windows child DACL facts");
     let _fault =
         install_test_fault("owner-policy-stage-binding-mismatch-before-root").expect("binding mismatch selector");
 
@@ -190,6 +213,32 @@ fn test_owner_policy_late_stage_binding_mismatch_blocks_root_acl_mutation() {
     assert_eq!(
         qubit_local_files::outcome::LocalTreeAccessState::Mixed,
         error.access_state()
+    );
+    let root_dacl_after = stage
+        .directory()
+        .security_observation(&security_options)
+        .expect("capture stage root DACL after child mutation")
+        .access()
+        .and_then(|access| access.windows())
+        .cloned()
+        .expect("Windows root DACL facts");
+    let child_dacl_after = stage
+        .directory()
+        .open_observed_reader(Path::new("payload"), &LocalObservedReadOptions::new())
+        .expect("open child for post-mutation DACL observation")
+        .security_observation(&security_options)
+        .expect("capture child DACL after mutation")
+        .access()
+        .and_then(|access| access.windows())
+        .cloned()
+        .expect("Windows child DACL facts");
+    assert_eq!(
+        root_dacl_before, root_dacl_after,
+        "root DACL must remain unchanged"
+    );
+    assert_ne!(
+        child_dacl_before, child_dacl_after,
+        "child DACL must show the applied policy"
     );
     let retained_stage = parent
         .observe_entry(Path::new(stage.relative_name()))
