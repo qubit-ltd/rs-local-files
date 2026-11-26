@@ -264,13 +264,8 @@ impl HostLocalFileSystem {
 
         let source_is_directory = effective_metadata.file_type().is_dir();
         if source_is_directory {
-            if let Err((error, created)) = prepare_copy_parent(target, options, &budget) {
-                let failure = copy_failure_unchanged(copy_io_error(source, target, error));
-                return Err(if created {
-                    failure.with_state(crate::LocalCopyFailureState::PartiallyPublished)
-                } else {
-                    failure
-                });
+            if let Err((error, _created)) = prepare_copy_parent(target, options, &budget) {
+                return Err(copy_failure_unchanged(copy_io_error(source, target, error)));
             }
             let stats = match scope_root {
                 Some(scope_root) => {
@@ -325,13 +320,8 @@ impl HostLocalFileSystem {
 
         let parent_dirs_to_sync = match prepare_copy_parent(target, options, &budget) {
             Ok(paths) => paths,
-            Err((error, created)) => {
-                let failure = copy_failure_unchanged(copy_io_error(source, target, error));
-                return Err(if created {
-                    failure.with_state(crate::LocalCopyFailureState::PartiallyPublished)
-                } else {
-                    failure
-                });
+            Err((error, _created)) => {
+                return Err(copy_failure_unchanged(copy_io_error(source, target, error)));
             }
         };
 
@@ -482,18 +472,21 @@ fn copy_symlink_entry(
             return Err(copy_failure_unchanged(copy_io_error(source, target, error)));
         }
     };
+    let source_is_directory = match symlink_source_is_directory(source) {
+        Ok(value) => value,
+        Err(error) => return Err(copy_failure_unchanged(copy_io_error(source, target, error))),
+    };
+    #[cfg(test)]
+    crate::tests::rooted::support::resolution_observation_tests::reach_deadline_boundary(
+        crate::tests::rooted::support::resolution_observation_tests::DeadlineBoundary::HostSymlinkKindInspected,
+    );
     if let Err(error) = budget.check_deadline() {
         return Err(copy_failure_unchanged(copy_io_error(source, target, error)));
     }
     let parent_dirs_to_sync = match prepare_copy_parent(target, options, budget) {
         Ok(paths) => paths,
-        Err((error, created)) => {
-            let failure = copy_failure_unchanged(copy_io_error(source, target, error));
-            return Err(if created {
-                failure.with_state(crate::LocalCopyFailureState::PartiallyPublished)
-            } else {
-                failure
-            });
+        Err((error, _created)) => {
+            return Err(copy_failure_unchanged(copy_io_error(source, target, error)));
         }
     };
     let mut destination_removed = false;
@@ -547,7 +540,7 @@ fn copy_symlink_entry(
         });
     }
     let create_result = test_io_fault("local-fs-copy-symlink-create")
-        .map_or_else(|| create_symlink_entry(&link_target, source, target), Err);
+        .map_or_else(|| create_symlink_entry(&link_target, source_is_directory, target), Err);
     if let Err(error) = create_result {
         let failure = copy_io_error(source, target, error);
         return if action == CopyDestinationAction::Replace {
@@ -590,35 +583,49 @@ fn copy_symlink_entry(
     ))
 }
 
-/// Creates a symbolic link with the platform-specific link-kind API.
+/// Determines whether a source symbolic link points to a directory link.
 ///
-/// Reads the source link kind without following its target on Windows.
-/// Returns source inspection or link-creation errors, or `Unsupported` where
-/// native symbolic links are unavailable.
+/// Windows needs this distinction when creating a symbolic link. Other
+/// platforms do not require it and return `false` without inspecting `source`.
 ///
 /// # Parameters
 ///
-/// - `link_target`: Stored target path read from the source symbolic link.
-/// - `_source`: Source link used on Windows to determine file versus directory
-///   link kind.
-/// - `target`: Destination path where the symbolic link is created.
+/// - `source`: Symbolic link whose entry type is inspected on Windows.
 ///
 /// # Returns
 ///
-/// `Ok(())` after creating the link.
+/// `Ok(true)` for a Windows directory symbolic link and `Ok(false)` otherwise.
 ///
 /// # Errors
 ///
-/// Returns a source-inspection or link-creation error, or `Unsupported` on
-/// platforms without native symbolic-link support.
-fn create_symlink_entry(link_target: &Path, _source: &Path, target: &Path) -> io::Result<()> {
+/// Returns a native metadata error if the Windows source link cannot be
+/// inspected.
+fn symlink_source_is_directory(source: &Path) -> io::Result<bool> {
+    #[cfg(windows)]
+    {
+        Ok(fs::symlink_metadata(source)?.file_type().is_symlink_dir())
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = source;
+        Ok(false)
+    }
+}
+
+fn create_symlink_entry(
+    link_target: &Path,
+    source_is_directory: bool,
+    target: &Path,
+) -> io::Result<()> {
+    #[cfg(not(windows))]
+    let _ = source_is_directory;
     #[cfg(unix)]
     {
         std::os::unix::fs::symlink(link_target, target)
     }
     #[cfg(windows)]
     {
-        if fs::symlink_metadata(_source)?.file_type().is_symlink_dir() {
+        if source_is_directory {
             std::os::windows::fs::symlink_dir(link_target, target)
         } else {
             std::os::windows::fs::symlink_file(link_target, target)
@@ -626,7 +633,7 @@ fn create_symlink_entry(link_target: &Path, _source: &Path, target: &Path) -> io
     }
     #[cfg(not(any(unix, windows)))]
     {
-        let _ = (link_target, _source, target);
+        let _ = (link_target, source_is_directory, target);
         Err(io::Error::new(
             io::ErrorKind::Unsupported,
             "symbolic links are unsupported on this platform",

@@ -272,6 +272,20 @@ pub(crate) fn copy_symlink_with_options(
         dst,
         stats,
     )?;
+    #[cfg(windows)]
+    let source_is_directory = with_copy_context(
+        std::fs::symlink_metadata(src).map(|metadata| metadata.file_type().is_symlink_dir()),
+        LocalCopyDirStage::CopyFileContents,
+        src,
+        dst,
+        stats,
+    )?;
+    #[cfg(not(windows))]
+    let source_is_directory = false;
+    #[cfg(test)]
+    crate::tests::rooted::support::resolution_observation_tests::reach_deadline_boundary(
+        crate::tests::rooted::support::resolution_observation_tests::DeadlineBoundary::HostSymlinkKindInspected,
+    );
     #[cfg(test)]
     crate::tests::rooted::support::resolution_observation_tests::reach_deadline_boundary(
         crate::tests::rooted::support::resolution_observation_tests::DeadlineBoundary::HostTreeSymlinkTargetRead,
@@ -314,7 +328,13 @@ pub(crate) fn copy_symlink_with_options(
     budget
         .check_deadline()
         .map_err(|source| copy_dir_error(stage, src, dst, stats, source))?;
-    with_copy_context(create_symlink_entry(&link_target, src, dst), stage, src, dst, stats)?;
+    with_copy_context(
+        create_symlink_entry(&link_target, source_is_directory, dst),
+        stage,
+        src,
+        dst,
+        stats,
+    )?;
     with_copy_context(
         record_copied_symlink(stats),
         LocalCopyDirStage::UpdateStatistics,
@@ -445,20 +465,25 @@ mod symlink_source_read_tests {
     }
 }
 
-/// Creates a symbolic link at `target` using the source entry type where the
-/// native platform requires that distinction.
+/// Creates a symbolic link at `target` using its stored target and source kind.
 ///
 /// # Parameters
 ///
-/// * `link_target` - Link target stored in the new directory entry.
-/// * `_source` - Source entry used to determine the Windows link kind.
-/// * `target` - Destination link path.
+/// * `link_target` - Path stored in the new symbolic-link entry.
+/// * `source_is_directory` - Whether the source is a Windows directory link.
+/// * `target` - Path where the new symbolic link is created.
 ///
 /// # Errors
 ///
-/// Returns source-type inspection or native link-creation errors, or
-/// `Unsupported` on platforms that do not expose symbolic links.
-fn create_symlink_entry(link_target: &Path, _source: &Path, target: &Path) -> std::io::Result<()> {
+/// Returns a native link-creation error, or `Unsupported` on platforms that do
+/// not expose symbolic links.
+fn create_symlink_entry(
+    link_target: &Path,
+    source_is_directory: bool,
+    target: &Path,
+) -> std::io::Result<()> {
+    #[cfg(not(windows))]
+    let _ = source_is_directory;
     #[cfg(unix)]
     {
         #[cfg(test)]
@@ -469,7 +494,7 @@ fn create_symlink_entry(link_target: &Path, _source: &Path, target: &Path) -> st
     }
     #[cfg(windows)]
     {
-        if std::fs::symlink_metadata(_source)?.file_type().is_symlink_dir() {
+        if source_is_directory {
             #[cfg(test)]
             crate::tests::native_io_fault_tests::check(
                 crate::tests::native_io_fault_tests::NativeIoPoint::HostTreeSymlinkCreate,
@@ -485,7 +510,7 @@ fn create_symlink_entry(link_target: &Path, _source: &Path, target: &Path) -> st
     }
     #[cfg(not(any(unix, windows)))]
     {
-        let _ = (link_target, _source, target);
+        let _ = (link_target, source_is_directory, target);
         Err(std::io::Error::new(
             ErrorKind::Unsupported,
             "symbolic links are unsupported on this platform",

@@ -7,6 +7,8 @@
 // =============================================================================
 
 use std::fs;
+#[cfg(unix)]
+use std::os::unix::fs::symlink;
 use std::time::Duration;
 
 use crate::LocalCopyConflictPolicy;
@@ -222,7 +224,7 @@ fn test_host_copy_parent_preflight_deadline_prevents_parent_creation() {
 }
 
 #[test]
-fn test_host_copy_parent_creation_deadline_preserves_created_parent_as_partial() {
+fn test_host_copy_parent_creation_deadline_reports_unchanged_target() {
     let fixture = tempfile::tempdir().expect("fixture should exist");
     let source = fixture.path().join("source");
     let target = fixture.path().join("new-parent/child/target");
@@ -241,9 +243,61 @@ fn test_host_copy_parent_creation_deadline_preserves_created_parent_as_partial()
         .expect_err("deadline after one parent creation must stop before the next");
 
     assert_eq!(std::io::ErrorKind::TimedOut, failure.error().io_error_kind());
-    assert_eq!(crate::LocalCopyFailureState::PartiallyPublished, failure.state());
+    assert_eq!(crate::LocalCopyFailureState::Unchanged, failure.state());
     assert!(fixture.path().join("new-parent").is_dir());
     assert!(!fixture.path().join("new-parent/child").exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn test_host_symlink_copy_deadline_after_kind_inspection_prevents_creation() {
+    let fixture = tempfile::tempdir().expect("fixture should exist");
+    let source = fixture.path().join("source-link");
+    let target = fixture.path().join("target-link");
+    symlink("stored-target", &source).expect("source link should exist");
+    let _clock =
+        observations::DeadlineClockGuard::expire_at(DeadlineBoundary::HostSymlinkKindInspected);
+
+    let failure = LocalFileSystem::host()
+        .expect("host filesystem should open")
+        .copy_with_options(
+            &source,
+            &target,
+            &LocalCopyOptions::new().with_deadline(Duration::from_secs(60)),
+        )
+        .expect_err("deadline after source link inspection must prevent creation");
+
+    assert_eq!(std::io::ErrorKind::TimedOut, failure.error().io_error_kind());
+    assert_eq!(crate::LocalCopyFailureState::Unchanged, failure.state());
+    assert!(!target.exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn test_host_tree_symlink_copy_deadline_after_kind_inspection_prevents_creation() {
+    let fixture = tempfile::tempdir().expect("fixture should exist");
+    let source = fixture.path().join("source-tree");
+    let target = fixture.path().join("target-tree");
+    fs::create_dir(&source).expect("source directory should exist");
+    symlink("stored-target", source.join("child-link")).expect("source link should exist");
+    let _clock =
+        observations::DeadlineClockGuard::expire_at(DeadlineBoundary::HostSymlinkKindInspected);
+
+    let failure = LocalFileSystem::host()
+        .expect("host filesystem should open")
+        .copy_with_options(
+            &source,
+            &target,
+            &LocalCopyOptions::new()
+                .with_tree_source()
+                .with_deadline(Duration::from_secs(60)),
+        )
+        .expect_err("deadline after recursive source link inspection must prevent creation");
+
+    assert_eq!(std::io::ErrorKind::TimedOut, failure.error().io_error_kind());
+    assert_eq!(crate::LocalCopyFailureState::PartiallyPublished, failure.state());
+    assert!(target.is_dir());
+    assert!(!target.join("child-link").exists());
 }
 
 #[test]

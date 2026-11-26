@@ -294,7 +294,13 @@ pub(super) fn copy_file(
                 sentinel.write_all(b"replacement sentinel")
             });
             let source_error = race_result.err().unwrap_or_else(crate::local::test_fault_error);
-            let mut failure = error(Stage::PrepareDestination, source, destination, statistics, source_error);
+            let mut failure = error(
+                Stage::PrepareDestination,
+                source,
+                destination,
+                statistics,
+                source_error,
+            );
             if let Err(cleanup) = writer.abort() {
                 failure = failure.with_staging_context(
                     writer.staging_path().to_path_buf(),
@@ -337,6 +343,20 @@ pub(super) fn copy_file(
                 }
                 return Err(failure.with_failure_state(crate::LocalCopyFailureState::Unchanged));
             }
+        }
+        #[cfg(test)]
+        crate::tests::rooted::support::resolution_observation_tests::reach_deadline_boundary(
+            crate::tests::rooted::support::resolution_observation_tests::DeadlineBoundary::RootedCopyDestinationRevalidated,
+        );
+        if let Err(source_error) = budget.check_deadline() {
+            let mut failure = error(Stage::PrepareDestination, source, destination, statistics, source_error);
+            if let Err(cleanup) = writer.abort() {
+                failure = failure.with_staging_context(
+                    writer.staging_path().to_path_buf(),
+                    Some(cleanup.into_staging_parts().2),
+                );
+            }
+            return Err(failure.with_failure_state(crate::LocalCopyFailureState::Unchanged));
         }
         if destination_metadata.is_some() {
             let removal = if destination_metadata.is_some_and(|metadata| metadata.kind() == EntryKind::Directory) {
@@ -402,10 +422,10 @@ pub(super) fn copy_file(
         }
         Err(error)
     } else {
-        writer.commit_with_durability()
+        writer.commit_copy_with_durability(budget)
     };
     #[cfg(not(feature = "test-support"))]
-    let commit_result = writer.commit_with_durability();
+    let commit_result = writer.commit_copy_with_durability(budget);
     let file_durable = match commit_result {
         Ok(file_durable) => file_durable,
         Err(source_error) => {
