@@ -340,7 +340,7 @@ impl LocalTreeRetainedResource {
         #[cfg(all(feature = "test-support", windows))]
         if crate::local::take_test_support_on_nth(
             "owner-policy-stage-binding-mismatch-before-root",
-            2,
+            3,
         ) {
             return Ok(false);
         }
