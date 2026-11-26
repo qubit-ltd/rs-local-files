@@ -203,8 +203,8 @@ fn test_owner_policy_late_stage_binding_mismatch_blocks_root_acl_mutation() {
         .and_then(|access| access.windows())
         .cloned()
         .expect("Windows child DACL facts");
-    let _fault =
-        install_test_fault("owner-policy-stage-binding-mismatch-before-root").expect("binding mismatch selector");
+    let _fault = install_test_fault("owner-policy-after-child-before-root-binding-mismatch")
+        .expect("post-child/pre-root binding mismatch selector");
 
     let error = stage
         .apply_owner_access_policy_with_options(&policy, &LocalListOptions::new())

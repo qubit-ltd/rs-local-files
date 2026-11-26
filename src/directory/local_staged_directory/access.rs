@@ -956,6 +956,14 @@ impl LocalStagedDirectory {
                     if applied { State::Mixed } else { State::Preserved },
                 )
             })?;
+        #[cfg(all(feature = "test-support", windows))]
+        let binding_matches = if crate::local::take_test_support(
+            "owner-policy-after-child-before-root-binding-mismatch",
+        ) {
+            false
+        } else {
+            binding_matches
+        };
         if !binding_matches {
             return Err(super::super::tree_recovery::LocalTreeAccessError::new(
                 LocalFileError::new(LocalFileErrorKind::ChangedDuringRead, LocalFileOperation::Metadata),

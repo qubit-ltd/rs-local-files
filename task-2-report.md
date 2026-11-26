@@ -2,18 +2,25 @@
 
 ## RLF-TEST-WINDOWS-LATE-BINDING
 
-The Windows fault injection in `LocalTreeRetainedResource::binding_matches_identity` was configured for call 2. That call occurs before the child ACL mutation (the staged-root precheck). The post-child, pre-root-policy check is call 3: call 1 is the retained-entry preparation check, call 2 is the root precheck, and call 3 follows child mutation. The injection now targets call 3.
+The ordinal-based fault was removed. The checked-in mutation flow has four calls to `binding_matches_identity`:
 
-The existing Windows regression still asserts all required effects: a `ChangedDuringRead` error with `Mixed` state, changed child DACL, unchanged root DACL, a readable stage entry with the original identity, and successful cleanup/recovery. The Unix owner-policy lifecycle coverage remains untouched.
+1. `access.rs:759`: retained-entry preparation, before mutation.
+2. `access.rs:800`: Windows root-handle precheck, before child mutations.
+3. `access.rs:952`: after the retained-child mutation loop and before applying the root ACL.
+4. `access.rs:1016`: after applying the root ACL.
 
-### Verification evidence
+The earlier report selected occurrence 3, which maps to call site 3 in this checked-out flow; occurrence 4 is after root ACL application. Since an ordinal depends on the entire invocation path and reviewers traced it differently, the regression now uses a dedicated selector consumed immediately at the post-child/pre-root identity-check result. Its location is phase-specific and has no occurrence counter. Moving the injection before child mutation causes the `Mixed` state and changed-child-DACL assertions to fail; moving it after root mutation causes the unchanged-root-DACL assertion to fail.
 
-- `cargo test --locked --features test-support --test owner_policy_lifecycle_tests` — passed, 38 tests.
-- `cargo test --locked --features test-support --test windows_staged_sync_tests test_owner_policy_late_stage_binding_mismatch_blocks_root_acl_mutation -- --exact --nocapture` on Linux — compiled the Linux test target but ran 0 tests because this integration test is gated on Windows.
-- `cargo test --target x86_64-pc-windows-gnu --locked --features test-support --test windows_staged_sync_tests test_owner_policy_late_stage_binding_mismatch_blocks_root_acl_mutation --no-run` — blocked before compiling this crate's Windows test: `alloca` could not find `x86_64-w64-mingw32-gcc`; `windows-sys` also could not find `x86_64-w64-mingw32-dlltool`.
+The regression retains assertions for `ChangedDuringRead`, `Mixed`, changed child DACL, unchanged root DACL, original stage identity and payload, and successful cleanup. The Unix owner-policy lifecycle tests are unchanged.
 
-The corrected Windows regression could not be executed here, so a native RED/GREEN run and target Windows CI evidence remain outstanding. Before this fix, the injected mismatch fires on call 2 at the root precheck, before child mutation. The regression then reports `Preserved` instead of the asserted `Mixed` state, and the child DACL remains unchanged. The fix changes only the injection ordinal. Windows execution is required to confirm the expected RED and GREEN outcomes.
+## Evidence and checkpoints
+
+- **FIRST_CHECK:** Traced all four call sites above and the sole old `take_test_support_on_nth` selector. The post-child/pre-root boundary is call site 3, but the injection is now attached directly to that phase rather than an ordinal.
+- **RED:** Changed the Windows test to the new phase-specific selector before adding its consumer. This is expected to fail on Windows because the current implementation does not consume that selector and proceeds to mutate the root. The test could not be executed in this environment, so this is a reasoned RED expectation, not a runtime RED result.
+- **GREEN:** `cargo test --locked --features test-support --test owner_policy_lifecycle_tests` — passed, 38 tests. `git diff --check` — passed.
+- **Windows execution limitation:** The Linux invocation of the Windows integration test is cfg-gated and runs zero tests. Cross-target `cargo test --target x86_64-pc-windows-gnu ... --no-run` stops in dependencies before compiling this crate: `alloca` cannot find `x86_64-w64-mingw32-gcc`, and `windows-sys` cannot find `x86_64-w64-mingw32-dlltool`. Native Windows RED/GREEN evidence remains outstanding.
+- **COMMITTED:** Follow-up commit recorded separately in the Paseo checkpoint message; earlier commits are preserved.
 
 ## Preserved T2 work
 
-The named-entry depth fix from commit `51f38fb0244b5f88ec5ca08d259d9fc68f93058f` and the nameless-error regression remain unchanged.
+The named-entry depth fix from commit `51f38fb0244b5f88ec5ca08d259d9fc68f93058f` and the nameless-error regression remain intact.

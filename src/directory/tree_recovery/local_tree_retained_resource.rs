@@ -337,13 +337,6 @@ impl LocalTreeRetainedResource {
             .identity
             .as_ref()
             .is_some_and(|identity| named.identity() == Some(identity));
-        #[cfg(all(feature = "test-support", windows))]
-        if crate::local::take_test_support_on_nth(
-            "owner-policy-stage-binding-mismatch-before-root",
-            3,
-        ) {
-            return Ok(false);
-        }
         Ok(matches)
     }
     /// Records one identity owned by this tree for a later guarded deletion.
