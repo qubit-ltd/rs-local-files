@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import datetime as dt
 import hashlib
 import json
@@ -38,6 +39,39 @@ DEFAULT_THRESHOLDS = {"lines": {"minimum": 90, "inclusive": False},
                       "regions": {"minimum": 85, "inclusive": False}}
 ALLOWED_CONFIG = {"scope", "exclude_packages", "source_dirs", "threshold_exempt_files",
                   "thresholds", "clippy", "coverage_cfg_clippy", "run_coverage_cfg_clippy"}
+
+
+@contextlib.contextmanager
+def output_root_lock(root: Path):
+    """Exclusively lock a coverage output root until collection and rollback finish."""
+    lock_path = root.parent / f".{root.name}.coverage-provenance.lock"
+    try:
+        lock = lock_path.open("a+b")
+    except OSError as error:
+        raise RuntimeError(f"could not open coverage provenance lock {lock_path}: {error}") from error
+    try:
+        if os.name == "nt":
+            import msvcrt
+
+            lock.seek(0)
+            if not lock.read(1):
+                lock.write(b"\0")
+                lock.flush()
+            lock.seek(0)
+            try:
+                msvcrt.locking(lock.fileno(), msvcrt.LK_NBLCK, 1)
+            except OSError as error:
+                raise RuntimeError("another coverage provenance run is active for this output root") from error
+        else:
+            import fcntl
+
+            try:
+                fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except OSError as error:
+                raise RuntimeError("another coverage provenance run is active for this output root") from error
+        yield
+    finally:
+        lock.close()
 
 
 def _excluded_source_path(relative: str) -> bool:
@@ -340,6 +374,15 @@ def main() -> int:
     parser.add_argument("coverage_args", nargs=argparse.REMAINDER)
     options = parser.parse_args()
     root = options.project_root.resolve()
+    try:
+        with output_root_lock(root):
+            return _run_locked(options, root)
+    except RuntimeError as error:
+        print(f"coverage provenance: {error}", file=sys.stderr)
+        return 2
+
+
+def _run_locked(options: argparse.Namespace, root: Path) -> int:
     if options.coverage_args and options.coverage_args[0] == "--":
         options.coverage_args = options.coverage_args[1:]
     test_mode = os.environ.get("RLF_COVERAGE_TEST_MODE") == "1"
