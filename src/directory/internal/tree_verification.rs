@@ -175,7 +175,14 @@ pub(in crate::directory) fn verify_tree(
         None
     };
 
-    if let (Some(configured), Some(index)) = (options.exact_entries(), expected_index.as_mut()) {
+    let configured_is_same_list = expected.is_some_and(|entries| {
+        options.exact_entries().is_some_and(|configured| {
+            std::ptr::eq(entries.as_ptr(), configured.as_ptr()) && entries.len() == configured.len()
+        })
+    });
+    if !configured_is_same_list
+        && let (Some(configured), Some(index)) = (options.exact_entries(), expected_index.as_mut())
+    {
         if let Some(maximum) = limits.max_entries()
             && configured.len() > maximum
         {
@@ -191,7 +198,8 @@ pub(in crate::directory) fn verify_tree(
         }
         let mut configured_name_bytes = 0_usize;
         let mut mismatch = configured.len() != index.len();
-        for (position, entry) in configured.iter().enumerate() {
+        let mut configured_paths = HashMap::<&Path, ()>::new();
+        for entry in configured {
             check_deadline(stage, deadline)?;
             let requested = entry.relative_path().as_os_str().as_encoded_bytes().len();
             let next = configured_name_bytes.checked_add(requested).ok_or_else(|| {
@@ -221,6 +229,22 @@ pub(in crate::directory) fn verify_tree(
                 ));
             }
             configured_name_bytes = next;
+            configured_paths.try_reserve(1).map_err(|_| {
+                resource_error(
+                    stage,
+                    entry.relative_path(),
+                    "tree validation expected-set allocation failed",
+                    None,
+                )
+            })?;
+            if configured_paths.insert(entry.relative_path(), ()).is_some() {
+                return Err(LocalFileError::new(
+                    LocalFileErrorKind::InvalidOptions,
+                    LocalFileOperation::ValidateName,
+                )
+                .with_path(stage.directory().diagnostic_path().join(entry.relative_path()))
+                .with_reason("duplicate expected tree entry path"));
+            }
             if let Some((expected_kind, already_configured)) = index.get_mut(entry.relative_path()) {
                 if *already_configured {
                     return Err(LocalFileError::new(
@@ -233,17 +257,6 @@ pub(in crate::directory) fn verify_tree(
                 *already_configured = true;
                 mismatch |= *expected_kind != entry.kind();
             } else {
-                if configured[..position]
-                    .iter()
-                    .any(|previous| previous.relative_path() == entry.relative_path())
-                {
-                    return Err(LocalFileError::new(
-                        LocalFileErrorKind::InvalidOptions,
-                        LocalFileOperation::ValidateName,
-                    )
-                    .with_path(stage.directory().diagnostic_path().join(entry.relative_path()))
-                    .with_reason("duplicate expected tree entry path"));
-                }
                 mismatch = true;
             }
         }
@@ -272,16 +285,20 @@ pub(in crate::directory) fn verify_tree(
         .with_error_policy(crate::options::LocalWalkErrorPolicy::FailFast);
     let mut observer = stage
         .observe_tree_with_options(&walk_limits)
-        .map_err(|error| context_error(error, stage, Path::new("."), "tree traversal could not start"))?;
+        .map_err(|error| context_error(error, stage, Path::new("."), "tree traversal could not start"))?
+        .with_logical_depth_limit(limits.max_depth());
     if let Some(maximum) = limits.max_seen_name_bytes() {
         observer = observer.with_logical_path_name_budget(expected_name_bytes, maximum);
     }
     for result in observer {
         check_deadline(stage, deadline)?;
         let item = result.map_err(|error| {
-            if error
-                .resource_limit_error()
-                .is_some_and(|facts| facts.resource() == LocalResourceKind::SeenNameBytes)
+            if error.resource_limit_error().is_some_and(|facts| {
+                matches!(
+                    facts.resource(),
+                    LocalResourceKind::SeenNameBytes | LocalResourceKind::Depth
+                )
+            })
             {
                 error
             } else {
@@ -962,6 +979,7 @@ mod missing_path_tests {
 
     #[test]
     fn test_tree_validation_fails_instead_of_truncating_at_depth_limit() {
+        crate::directory::reset_test_observation_count();
         let fixture = tempfile::tempdir().expect("fixture");
         let mut stage = staged_directory(fixture.path());
         stage
@@ -976,6 +994,7 @@ mod missing_path_tests {
             Some(stage.directory().diagnostic_path().join("payload").as_path()),
             error.path()
         );
+        assert_eq!(0, crate::directory::test_observation_count());
 
         stage.cleanup().expect("cleanup stage");
     }

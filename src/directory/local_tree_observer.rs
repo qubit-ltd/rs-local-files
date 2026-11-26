@@ -111,6 +111,15 @@ impl LocalTreeObserver {
                 .with_logical_path_name_budget(observed, limit, self.directory.diagnostic_path().to_path_buf());
         self
     }
+
+    /// Applies strict staged-tree depth admission before entry observation.
+    pub(crate) fn with_logical_depth_limit(mut self, limit: Option<usize>) -> Self {
+        self.walker = self.walker.with_logical_depth_limit(
+            limit,
+            self.directory.diagnostic_path().to_path_buf(),
+        );
+        self
+    }
 }
 
 impl Iterator for LocalTreeObserver {

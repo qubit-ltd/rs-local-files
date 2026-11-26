@@ -29,4 +29,8 @@ pub(in crate::walk) struct RootedWalkState {
     pub(in crate::walk) descend_subtree: Option<std::path::PathBuf>,
     /// Optional tree-validation path-byte budget applied to enumerated entries.
     pub(in crate::walk) logical_path_name_budget: Option<LogicalPathNameBudget>,
+    /// Optional strict logical depth limit used by staged-tree admission.
+    pub(in crate::walk) logical_depth_limit: Option<usize>,
+    /// Namespace root used for strict depth-limit diagnostics.
+    pub(in crate::walk) logical_depth_root: Option<std::path::PathBuf>,
 }

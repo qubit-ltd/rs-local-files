@@ -564,7 +564,10 @@ impl LocalStagedDirectory {
         let traversal = limits
             .without_max_depth()
             .with_error_policy(crate::options::LocalWalkErrorPolicy::FailFast);
-        for item in self.observe_tree_with_options_started_at(&traversal, started_at)? {
+        for item in self
+            .observe_tree_with_options_started_at(&traversal, started_at)?
+            .with_logical_depth_limit(limits.max_depth())
+        {
             budget.check(self.directory().diagnostic_path())?;
             let item = item?;
             budget.check(&self.directory().diagnostic_path().join(item.relative_path()))?;
@@ -750,7 +753,10 @@ impl LocalStagedDirectory {
             .with_error_policy(crate::options::LocalWalkErrorPolicy::FailFast);
         let mut directories = Vec::new();
         let mut seen_bytes = 0_usize;
-        for item in self.observe_tree_with_options_started_at(&traversal, started_at)? {
+        for item in self
+            .observe_tree_with_options_started_at(&traversal, started_at)?
+            .with_logical_depth_limit(limits.max_depth())
+        {
             budget.check(self.directory().diagnostic_path())?;
             let item = item?;
             let relative = item.relative_path();

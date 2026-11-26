@@ -107,6 +107,10 @@ pub struct LocalDirectoryWalker {
     seen_name_budget: Option<ResourceBudget<LocalResourceKind, usize>>,
     /// Optional logical relative-path budget used only by tree validation.
     logical_path_name_budget: Option<LogicalPathNameBudget>,
+    /// Optional strict depth limit used by full staged-tree scans.
+    logical_depth_limit: Option<usize>,
+    /// Namespace root used for strict depth-limit diagnostics.
+    logical_depth_root: Option<PathBuf>,
     /// Monotonic deadline fixed when the walker is created.
     deadline: Option<Instant>,
     /// Optional root-relative subtree controlling recursive descent.
@@ -259,6 +263,8 @@ impl LocalDirectoryWalker {
                 .max_seen_name_bytes()
                 .map(|limit| ResourceBudget::new(LocalResourceKind::SeenNameBytes, limit)),
             logical_path_name_budget: None,
+            logical_depth_limit: None,
+            logical_depth_root: None,
             deadline,
             descend_subtree: None,
             started: false,
@@ -392,6 +398,8 @@ impl LocalDirectoryWalker {
                 symlink_policy,
                 descend_subtree: None,
                 logical_path_name_budget: None,
+                logical_depth_limit: None,
+                logical_depth_root: None,
             }),
             terminated: false,
             symlink_policy,
@@ -402,6 +410,8 @@ impl LocalDirectoryWalker {
                 .max_seen_name_bytes()
                 .map(|limit| ResourceBudget::new(LocalResourceKind::SeenNameBytes, limit)),
             logical_path_name_budget: None,
+            logical_depth_limit: None,
+            logical_depth_root: None,
             deadline,
             descend_subtree: None,
             started: false,
@@ -486,6 +496,22 @@ impl LocalDirectoryWalker {
             rooted.logical_path_name_budget = Some(budget);
         } else {
             self.logical_path_name_budget = Some(budget);
+        }
+        self
+    }
+
+    /// Enables strict staged-tree depth admission before native metadata work.
+    pub(crate) fn with_logical_depth_limit(
+        mut self,
+        limit: Option<usize>,
+        diagnostic_root: PathBuf,
+    ) -> Self {
+        if let Some(rooted) = self.rooted.as_mut() {
+            rooted.logical_depth_limit = limit;
+            rooted.logical_depth_root = Some(diagnostic_root);
+        } else {
+            self.logical_depth_limit = limit;
+            self.logical_depth_root = Some(diagnostic_root);
         }
         self
     }
@@ -810,6 +836,17 @@ fn needs_seen_names(options: &LocalListOptions) -> bool {
     explicit_name_budget || can_reopen
 }
 
+fn logical_depth_error(root: &Path, relative: &Path, limit: usize) -> LocalFileError {
+    let actual = relative.components().count();
+    LocalFileError::from_resource_limit(
+        LocalFileOperation::Read,
+        Some(root.join(relative)),
+        crate::error::LocalResourceLimitError::new(LocalResourceKind::Depth, limit, 0, actual)
+            .with_observed(actual),
+    )
+    .with_reason("tree validation depth limit exceeded")
+}
+
 impl LocalDirectoryWalker {
     /// Advances the current host reader to its next unseen entry.
     ///
@@ -1080,11 +1117,18 @@ impl LocalDirectoryWalker {
                     continue;
                 }
             };
-            if self
-                .options
-                .max_depth()
-                .is_some_and(|max_depth| entry_depth > max_depth)
+            if let Some(limit) = self.logical_depth_limit
+                && entry_depth > limit
             {
+                let relative = relative_parent.join(entry.file_name());
+                self.terminated = true;
+                return Some(Err(logical_depth_error(
+                    self.logical_depth_root.as_deref().unwrap_or(&self.root),
+                    &relative,
+                    limit,
+                )));
+            }
+            if self.options.max_depth().is_some_and(|max_depth| entry_depth > max_depth) {
                 continue;
             }
             if let Err(error) = self.consume_host_entry_budgets(&entry, &relative_parent) {
@@ -1437,6 +1481,16 @@ fn next_rooted_entry(
                 )));
             }
         };
+        if let Some(limit) = state.logical_depth_limit
+            && entry_depth > limit
+        {
+            let relative = output_parent.join(entry.name());
+            return Some(Err(logical_depth_error(
+                state.logical_depth_root.as_deref().unwrap_or(namespace_root),
+                &relative,
+                limit,
+            )));
+        }
         if options.max_depth().is_some_and(|max_depth| entry_depth > max_depth) {
             continue;
         }

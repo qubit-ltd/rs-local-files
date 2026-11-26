@@ -691,6 +691,29 @@ fn test_publish_conflict_retains_stage_with_owner_policy() {
 
 #[cfg(target_os = "linux")]
 #[test]
+fn test_access_preflight_depth_failure_reports_preserved_stage() {
+    let scratch = tempfile::tempdir().expect("scratch directory");
+    let parent = parent(&scratch);
+    let mut stage = parent
+        .create_staged_directory(&LocalTempDirectoryOptions::new())
+        .expect("stage");
+    stage
+        .write_file_new(Path::new("payload"), &mut &b"payload"[..], 32)
+        .expect("payload");
+
+    let error = stage
+        .apply_access_policy_with_options(
+            LocalTreeFinalAccess::CurrentUserOnly,
+            &LocalListOptions::new().with_max_depth(0),
+        )
+        .expect_err("depth preflight must fail before access changes");
+    assert_eq!(LocalTreeAccessState::Preserved, error.access_state());
+    assert_eq!(LocalFileErrorKind::ResourceLimit, error.cause().kind());
+    stage.cleanup().expect("cleanup preserved stage");
+}
+
+#[cfg(target_os = "linux")]
+#[test]
 fn test_publish_invalid_name_preserves_existing_owner_policy() {
     use std::ffi::OsStr;
 
