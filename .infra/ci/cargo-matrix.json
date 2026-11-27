@@ -8,22 +8,10 @@
       "features": []
     },
     {
-      "name": "async-only",
+      "name": "no-default-features",
       "commands": ["check", "test", "doc"],
       "defaultFeatures": false,
-      "features": ["async"]
-    },
-    {
-      "name": "digest-only",
-      "commands": ["check", "test", "doc"],
-      "defaultFeatures": false,
-      "features": ["digest"]
-    },
-    {
-      "name": "all",
-      "commands": ["check", "test", "doc"],
-      "defaultFeatures": false,
-      "features": ["async", "digest", "test-support"]
+      "features": []
     }
   ]
 }

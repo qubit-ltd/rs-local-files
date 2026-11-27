@@ -6,5 +6,5 @@ fuzz_seconds_per_target = 10
 fuzz_max_len = 4096
 coverage_cfg_clippy = false
 audit_cached_fallback = true
-matrix = ".infra/ci/cargo-matrix.json"
+matrix = ".infra/ci/project-cargo-matrix.json"
 hook = ".infra/bin/project-ci-check.sh"
