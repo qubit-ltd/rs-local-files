@@ -13,6 +13,7 @@ use crate::LocalCopyTypeConflictPolicy;
 use crate::LocalDurabilityRequirement;
 use crate::LocalFileErrorKind;
 use crate::LocalFileKind;
+use crate::LocalMetadataPreservePolicy;
 
 /// Validates the actual source entry before any destination mutation.
 ///
@@ -60,6 +61,30 @@ pub(crate) fn copy_source_guarantee_unavailable(
 ) -> bool {
     (source_kind != LocalFileKind::File && atomicity == LocalAtomicityRequirement::Required)
         || (source_kind == LocalFileKind::Directory && durability == LocalDurabilityRequirement::Required)
+}
+
+/// Reports whether the requested permission metadata guarantee applies to an
+/// observed source entry.
+///
+/// Native symlink copies install the link entry but cannot preserve its
+/// permissions. The source kind must come from the operation's no-follow
+/// inspection so this decision cannot race an adapter preflight.
+///
+/// # Parameters
+///
+/// - `source_kind`: Entry kind observed by the native copy operation.
+/// - `preserve_metadata`: Requested metadata preservation policy.
+///
+/// # Returns
+///
+/// Whether permission preservation is unsupported for the observed entry.
+#[must_use]
+#[inline]
+pub(crate) fn copy_metadata_guarantee_unavailable(
+    source_kind: LocalFileKind,
+    preserve_metadata: LocalMetadataPreservePolicy,
+) -> bool {
+    source_kind == LocalFileKind::Symlink && preserve_metadata == LocalMetadataPreservePolicy::Permissions
 }
 
 /// Reports whether replacing a directory would violate required atomicity.

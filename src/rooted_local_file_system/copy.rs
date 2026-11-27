@@ -177,6 +177,30 @@ impl RootedLocalFileSystem {
                 crate::LocalMetadataPreservePolicy::None,
             ));
         }
+        if source_kind == crate::LocalFileKind::Symlink
+            && options.conflict() == crate::LocalCopyConflictPolicy::Skip
+            && target_exists
+        {
+            return Ok(LocalCopyOutcome::new(
+                LocalCopyStats::skipped_one(),
+                if directory {
+                    LocalCopyMethod::Recursive
+                } else {
+                    LocalCopyMethod::StagedFile
+                },
+                false,
+                false,
+                crate::LocalMetadataPreservePolicy::None,
+            ));
+        }
+        if crate::local::copy_metadata_guarantee_unavailable(source_kind, options.preserve_metadata()) {
+            return Err(copy_failure_unchanged(
+                LocalFileError::new(LocalFileErrorKind::RequirementNotMet, LocalFileOperation::Copy)
+                    .with_reason("portable permission metadata cannot be preserved for a symbolic-link source")
+                    .with_path(source.to_path_buf())
+                    .with_target(target.to_path_buf()),
+            ));
+        }
         if crate::local::copy_file_replace_requires_atomicity(
             directory,
             options.atomicity(),
@@ -190,23 +214,37 @@ impl RootedLocalFileSystem {
                     .with_target(target.to_path_buf()),
             ));
         }
-        if options.creates_parent()
+        let parent_created = if options.creates_parent()
             && let Some(parent) = target_path
                 .as_path()
                 .parent()
                 .filter(|parent| !parent.as_os_str().is_empty())
-            && let Err((error, _created)) = prepare_rooted_copy_parent(&self.root, parent, &budget)
         {
-            return Err(copy_failure_unchanged(rooted_io_error(
-                LocalFileOperation::Copy,
-                target,
-                error,
-            )));
-        }
+            match prepare_rooted_copy_parent(&self.root, parent, &budget) {
+                Ok(created) => created,
+                Err((error, created)) => {
+                    let failure = copy_failure_unchanged(rooted_io_error(LocalFileOperation::Copy, target, error));
+                    return Err(if created {
+                        failure.with_state(crate::LocalCopyFailureState::PartiallyPublished)
+                    } else {
+                        failure
+                    });
+                }
+            }
+        } else {
+            false
+        };
         let stats = self
             .root
             .copy_with_durability(&source_path, &target_path, internal_options, options.durability())
-            .map_err(|error| copy_failure_from_dir_error(source, target, error, directory))?;
+            .map_err(|error| {
+                let failure = copy_failure_from_dir_error(source, target, error, directory);
+                if parent_created && failure.state() == crate::LocalCopyFailureState::Unchanged {
+                    failure.with_state(crate::LocalCopyFailureState::PartiallyPublished)
+                } else {
+                    failure
+                }
+            })?;
         let selected_source_kind = stats.source_kind.unwrap_or(source_kind);
         let directory = selected_source_kind == crate::LocalFileKind::Directory;
         if stats.was_fully_skipped() {
@@ -269,7 +307,7 @@ fn prepare_rooted_copy_parent(
     root: &crate::rooted::Root,
     parent: &Path,
     budget: &crate::local::CopyBudget,
-) -> Result<(), (io::Error, bool)> {
+) -> Result<bool, (io::Error, bool)> {
     let mut prefixes = Vec::new();
     let mut prefix = std::path::PathBuf::new();
     for component in parent.components() {
@@ -318,7 +356,7 @@ fn prepare_rooted_copy_parent(
         }
         budget.check_deadline().map_err(|error| (error, created))?;
     }
-    Ok(())
+    Ok(created)
 }
 
 /// Preserves copy failure details while adjusting publication state for a

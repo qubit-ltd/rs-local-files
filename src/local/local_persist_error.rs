@@ -131,6 +131,13 @@ impl<T> LocalPersistError<T> {
             resolved_target.clone(),
             error,
         );
+        let error = match state {
+            LocalPersistFailureState::Published => error.with_effect_state(crate::error::LocalFileEffectState::Applied),
+            LocalPersistFailureState::Indeterminate => {
+                error.with_effect_state(crate::error::LocalFileEffectState::Indeterminate)
+            }
+            LocalPersistFailureState::NotPublished => error,
+        };
         Self {
             error: Box::new(error),
             resource: Box::new(resource),
@@ -265,6 +272,21 @@ impl<T> LocalPersistError<T> {
             state: self.state,
             source_state: self.source_state,
         }
+    }
+
+    /// Records a native namespace effect independently of target publication.
+    ///
+    /// # Parameters
+    ///
+    /// - `state`: Effect state established by the native operation.
+    ///
+    /// # Returns
+    ///
+    /// The failure with the native effect state attached.
+    #[inline]
+    pub(crate) fn with_effect_state(mut self, state: crate::error::LocalFileEffectState) -> Self {
+        self.error = Box::new((*self.error).with_effect_state(state));
+        self
     }
 
     /// Attaches the PWD snapshot retained by the temporary resource.

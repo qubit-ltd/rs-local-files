@@ -264,9 +264,17 @@ impl HostLocalFileSystem {
 
         let source_is_directory = effective_metadata.file_type().is_dir();
         if source_is_directory {
-            if let Err((error, _created)) = prepare_copy_parent(target, options, &budget) {
-                return Err(copy_failure_unchanged(copy_io_error(source, target, error)));
-            }
+            let parent_dirs_to_sync = match prepare_copy_parent(target, options, &budget) {
+                Ok(paths) => paths,
+                Err((error, created)) => {
+                    let failure = copy_failure_unchanged(copy_io_error(source, target, error));
+                    return Err(if created {
+                        failure.with_state(crate::LocalCopyFailureState::PartiallyPublished)
+                    } else {
+                        failure
+                    });
+                }
+            };
             let stats = match scope_root {
                 Some(scope_root) => {
                     crate::local::copy_dir_all_with_paths_scoped(source, target, internal_options, scope_root)
@@ -275,7 +283,14 @@ impl HostLocalFileSystem {
             };
             let stats = match stats {
                 Ok(stats) => stats,
-                Err(error) => return Err(copy_pipeline_failure(source, target, error)),
+                Err(error) => {
+                    return Err(copy_pipeline_failure_with_parent_effect(
+                        source,
+                        target,
+                        error,
+                        !parent_dirs_to_sync.is_empty(),
+                    ));
+                }
             };
             if stats.was_fully_skipped() {
                 return Ok(LocalCopyOutcome::new(
@@ -329,7 +344,12 @@ impl HostLocalFileSystem {
         if let Err(error) =
             crate::local::copy_file_with_options(source, target, internal_options, &mut stats, &mut budget)
         {
-            return Err(copy_pipeline_failure(source, target, error));
+            return Err(copy_pipeline_failure_with_parent_effect(
+                source,
+                target,
+                error,
+                !parent_dirs_to_sync.is_empty(),
+            ));
         }
         if stats.was_fully_skipped() {
             return Ok(LocalCopyOutcome::new(
@@ -462,6 +482,14 @@ fn copy_symlink_entry(
             crate::LocalMetadataPreservePolicy::None,
         ));
     }
+    if crate::local::copy_metadata_guarantee_unavailable(crate::LocalFileKind::Symlink, options.preserve_metadata()) {
+        return Err(copy_failure_unchanged(
+            LocalFileError::new(LocalFileErrorKind::RequirementNotMet, LocalFileOperation::Copy)
+                .with_reason("portable permission metadata cannot be preserved for a symbolic-link source")
+                .with_path(source.to_path_buf())
+                .with_target(target.to_path_buf()),
+        ));
+    }
     debug_assert!(matches!(
         action,
         CopyDestinationAction::Create | CopyDestinationAction::Replace
@@ -545,6 +573,8 @@ fn copy_symlink_entry(
         let failure = copy_io_error(source, target, error);
         return if action == CopyDestinationAction::Replace {
             Err(copy_failure_indeterminate(failure))
+        } else if !parent_dirs_to_sync.is_empty() {
+            Err(copy_failure_unchanged(failure).with_state(crate::LocalCopyFailureState::PartiallyPublished))
         } else {
             Err(copy_failure_unchanged(failure))
         };
@@ -792,6 +822,44 @@ fn copy_alias_error(source: &Path, target: &Path) -> LocalFileError {
 #[inline]
 fn copy_pipeline_failure(source: &Path, target: &Path, error: crate::local::LocalCopyDirError) -> LocalCopyFailure {
     LocalCopyFailure::from_copy_dir_error(source, target, error)
+}
+
+/// Combines a known parent creation with a recursive-copy failure that proves
+/// the final file was never committed.
+///
+/// # Parameters
+///
+/// - `source`: Resolved source path associated with the failed copy.
+/// - `target`: Resolved destination path associated with the failed copy.
+/// - `error`: Internal directory-copy failure to preserve.
+/// - `parent_created`: Whether this operation created a destination parent.
+///
+/// # Returns
+///
+/// A copy failure that includes the parent creation effect when applicable.
+#[inline]
+fn copy_pipeline_failure_with_parent_effect(
+    source: &Path,
+    target: &Path,
+    error: crate::local::LocalCopyDirError,
+    parent_created: bool,
+) -> LocalCopyFailure {
+    let precommit_file_failure = error.stage() == crate::LocalCopyDirStage::CopyFileContents
+        && error.cleanup_error().is_none()
+        && matches!(
+            error.atomic_destination_state(),
+            None | Some(crate::LocalAtomicDestinationState::Unchanged)
+        )
+        && matches!(
+            error.failure_state(),
+            None | Some(crate::LocalCopyFailureState::Unchanged)
+        );
+    let failure = copy_pipeline_failure(source, target, error);
+    if parent_created && (failure.state() == crate::LocalCopyFailureState::Unchanged || precommit_file_failure) {
+        failure.with_state(crate::LocalCopyFailureState::PartiallyPublished)
+    } else {
+        failure
+    }
 }
 
 /// Adds both copy paths to a native I/O failure.

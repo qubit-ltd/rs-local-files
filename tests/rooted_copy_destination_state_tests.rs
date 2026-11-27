@@ -176,7 +176,7 @@ fn test_rooted_copy_race_rewrite_rejects_directory_entries_without_mutation() {
 }
 
 #[test]
-fn test_create_parent_remains_after_source_open_failure_without_destination_publication() {
+fn test_create_parent_effect_is_reported_after_source_open_failure_without_destination_publication() {
     let directory = tempdir().expect("temporary root should be created");
     fs::write(directory.path().join("source"), b"replacement").expect("source file should be written");
     let rooted = LocalFileSystem::rooted(directory.path()).expect("root authority should open");
@@ -190,10 +190,118 @@ fn test_create_parent_remains_after_source_open_failure_without_destination_publ
         )
         .expect_err("injected source-open fault should fail");
 
-    assert_eq!(LocalCopyFailureState::Unchanged, failure.state());
+    assert_eq!(LocalCopyFailureState::PartiallyPublished, failure.state());
     assert!(directory.path().join("new-parent").is_dir());
     assert!(!directory.path().join("new-parent/target").exists());
     assert_eq!(LocalFileErrorKind::PermissionDenied, failure.error().kind());
+}
+
+#[test]
+fn test_host_regular_file_copy_failure_reports_created_parent_effect() {
+    let directory = tempdir().expect("temporary root should be created");
+    fs::write(directory.path().join("source"), b"payload").expect("source should be written");
+    let _fault = install_test_fault("copy-staging-copy").expect("staging copy fault should install");
+
+    let failure = LocalFileSystem::host()
+        .expect("host filesystem should open")
+        .copy_with_options(
+            &directory.path().join("source"),
+            &directory.path().join("new-parent/target"),
+            &LocalCopyOptions::new().with_create_parent(),
+        )
+        .expect_err("injected staging copy fault should fail");
+
+    assert!(directory.path().join("new-parent").is_dir());
+    assert!(!directory.path().join("new-parent/target").exists());
+    assert!(failure.staging_path().is_none());
+    assert!(failure.cleanup_error().is_none());
+    assert_eq!(LocalCopyFailureState::PartiallyPublished, failure.state());
+}
+
+#[test]
+fn test_host_tree_copy_failure_reports_created_parent_effect() {
+    let directory = tempdir().expect("temporary root should be created");
+    fs::create_dir(directory.path().join("source-tree")).expect("source tree should be created");
+    fs::write(directory.path().join("source-tree/entry"), b"payload").expect("entry should be written");
+    let _fault = install_test_fault("copy-staging-copy").expect("staging copy fault should install");
+
+    let failure = LocalFileSystem::host()
+        .expect("host filesystem should open")
+        .copy_with_options(
+            &directory.path().join("source-tree"),
+            &directory.path().join("new-parent/target"),
+            &LocalCopyOptions::new().with_tree_source().with_create_parent(),
+        )
+        .expect_err("injected tree child copy fault should fail");
+
+    assert_eq!(LocalCopyFailureState::PartiallyPublished, failure.state());
+    assert!(directory.path().join("new-parent").is_dir());
+    assert!(directory.path().join("new-parent/target").is_dir());
+}
+
+#[test]
+fn test_rooted_tree_copy_failure_reports_created_parent_effect() {
+    let directory = tempdir().expect("temporary root should be created");
+    fs::create_dir(directory.path().join("source-tree")).expect("source tree should be created");
+    let rooted = LocalFileSystem::rooted(directory.path()).expect("root authority should open");
+    let _fault = install_test_fault("rooted-copy-directory-create").expect("directory fault should install");
+
+    let failure = rooted
+        .copy_with_options(
+            Path::new("source-tree"),
+            Path::new("new-parent/target"),
+            &LocalCopyOptions::new().with_tree_source().with_create_parent(),
+        )
+        .expect_err("injected tree destination create fault should fail");
+
+    assert_eq!(LocalCopyFailureState::PartiallyPublished, failure.state());
+    assert!(directory.path().join("new-parent").is_dir());
+    assert!(!directory.path().join("new-parent/target").exists());
+}
+
+#[test]
+fn test_rooted_link_copy_failure_reports_created_parent_effect() {
+    use std::os::unix::fs::symlink;
+
+    let directory = tempdir().expect("temporary root should be created");
+    symlink("missing", directory.path().join("source")).expect("source link should be created");
+    let rooted = LocalFileSystem::rooted(directory.path()).expect("root authority should open");
+    let _fault = install_test_fault("rooted-copy-symlink-create").expect("link fault should install");
+
+    let failure = rooted
+        .copy_with_options(
+            Path::new("source"),
+            Path::new("new-parent/target"),
+            &LocalCopyOptions::new().with_create_parent(),
+        )
+        .expect_err("injected link publication fault should fail");
+
+    assert_eq!(LocalCopyFailureState::PartiallyPublished, failure.state());
+    assert!(directory.path().join("new-parent").is_dir());
+    assert!(!directory.path().join("new-parent/target").exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn test_host_link_copy_failure_reports_created_parent_without_publication() {
+    use std::os::unix::fs::symlink;
+
+    let directory = tempdir().expect("temporary root should be created");
+    symlink("referent", directory.path().join("source")).expect("source link should be created");
+    let _fault = install_test_fault("local-fs-copy-symlink-create").expect("link fault should install");
+
+    let failure = LocalFileSystem::host()
+        .expect("host filesystem should open")
+        .copy_with_options(
+            &directory.path().join("source"),
+            &directory.path().join("new-parent/target"),
+            &LocalCopyOptions::new().with_create_parent(),
+        )
+        .expect_err("injected link creation fault should fail");
+
+    assert_eq!(LocalCopyFailureState::PartiallyPublished, failure.state());
+    assert!(directory.path().join("new-parent").is_dir());
+    assert!(!directory.path().join("new-parent/target").exists());
 }
 
 #[test]

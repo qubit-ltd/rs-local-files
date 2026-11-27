@@ -1004,20 +1004,25 @@ impl LocalTempFile {
                     ));
                 }
             };
-            let result = if options.overwrites() {
-                crate::local::replace_file(&self.core.path, &target)
-            } else {
-                crate::local::move_file_without_replacing(&self.core.path, &target)
+            let result = match super::internal::persist_install_fault() {
+                Some(error) => Err(error),
+                None if options.overwrites() => crate::local::replace_file(&self.core.path, &target),
+                None => crate::local::move_file_without_replacing(&self.core.path, &target),
             };
             if let Err(error) = result {
                 let publication = self.record_native_persist_failure(&error);
-                return Err(self.persist_error(
+                let failure = self.persist_error(
                     error,
                     requested_target,
                     Some(namespace_target),
                     LocalPersistStage::InstallDestination,
                     publication,
-                ));
+                );
+                return Err(if parent_dirs_to_sync.is_empty() {
+                    failure
+                } else {
+                    failure.with_effect_state(crate::error::LocalFileEffectState::PartiallyApplied)
+                });
             }
             self.core.state = LocalTempResourceState::SandboxPending;
             let parent_durable = match synchronize_host_publication(
@@ -1090,29 +1095,37 @@ impl LocalTempFile {
             }
         };
         let destination = resolved;
-        if let Err(error) = prepare_rooted_parent(&rooted.root, &destination, options.creates_parent()) {
-            return Err(self.persist_error(
-                error,
-                requested_target,
-                Some(namespace_target),
-                LocalPersistStage::PrepareParent,
-                LocalPersistFailureState::NotPublished,
-            ));
-        }
-        let result = if options.overwrites() {
-            rooted.root.rename(&source, &destination)
-        } else {
-            rooted.root.rename_without_replacing(&source, &destination)
+        let parent_created = match prepare_rooted_parent(&rooted.root, &destination, options.creates_parent()) {
+            Ok(created) => created,
+            Err(error) => {
+                return Err(self.persist_error(
+                    error,
+                    requested_target,
+                    Some(namespace_target),
+                    LocalPersistStage::PrepareParent,
+                    LocalPersistFailureState::NotPublished,
+                ));
+            }
+        };
+        let result = match super::internal::persist_install_fault() {
+            Some(error) => Err(error),
+            None if options.overwrites() => rooted.root.rename(&source, &destination),
+            None => rooted.root.rename_without_replacing(&source, &destination),
         };
         if let Err(error) = result {
             let publication = self.record_native_persist_failure(&error);
-            return Err(self.persist_error(
+            let failure = self.persist_error(
                 error,
                 requested_target,
                 Some(namespace_target),
                 LocalPersistStage::InstallDestination,
                 publication,
-            ));
+            );
+            return Err(if parent_created {
+                failure.with_effect_state(crate::error::LocalFileEffectState::PartiallyApplied)
+            } else {
+                failure
+            });
         }
         self.core.state = LocalTempResourceState::SandboxPending;
         let parent_durable =
