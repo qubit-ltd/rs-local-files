@@ -1719,6 +1719,144 @@ mod tests {
         ));
     }
 
+    #[test]
+    fn test_worker_constructor_contains_clone_drop_panic_after_completion_races_poll() {
+        use std::sync::atomic::AtomicUsize;
+        use std::sync::atomic::Ordering;
+        use std::sync::mpsc;
+        use std::task::RawWaker;
+        use std::task::RawWakerVTable;
+        use std::time::Duration;
+
+        struct CloneRaceProbe {
+            release_worker: Mutex<Option<mpsc::Sender<()>>>,
+            worker_wake: Mutex<mpsc::Receiver<()>>,
+            panicking_clone_drops: Arc<AtomicUsize>,
+            panic_payload_drops: Arc<AtomicUsize>,
+        }
+
+        struct PanicPayload(Arc<AtomicUsize>);
+        impl Drop for PanicPayload {
+            fn drop(&mut self) {
+                self.0.fetch_add(1, Ordering::SeqCst);
+            }
+        }
+
+        struct ChannelWake(mpsc::Sender<()>);
+        impl Wake for ChannelWake {
+            fn wake(self: Arc<Self>) {
+                let _ = self.0.send(());
+            }
+
+            fn wake_by_ref(self: &Arc<Self>) {
+                let _ = self.0.send(());
+            }
+        }
+
+        unsafe fn clone_after_releasing_worker(data: *const ()) -> RawWaker {
+            // SAFETY: the probe outlives the future poll and all raw-waker callbacks.
+            let probe = unsafe { &*(data.cast::<CloneRaceProbe>()) };
+            probe
+                .release_worker
+                .lock()
+                .unwrap()
+                .take()
+                .expect("worker release is available")
+                .send(())
+                .expect("blocked worker is waiting for release");
+            probe
+                .worker_wake
+                .lock()
+                .unwrap()
+                .recv_timeout(Duration::from_secs(5))
+                .expect("worker publishes completion and wakes the first poll waker");
+            RawWaker::new(data, &PANIC_ON_CLONED_WAKER_DROP_VTABLE)
+        }
+
+        unsafe fn unexpected_waker_clone(_: *const ()) -> RawWaker {
+            panic!("the cloned completion-race waker is not cloned again");
+        }
+
+        unsafe fn no_op_raw_waker(_: *const ()) {}
+
+        unsafe fn panic_on_cloned_waker_drop(data: *const ()) {
+            // SAFETY: the probe outlives the cloned waker dropped during this poll.
+            let probe = unsafe { &*(data.cast::<CloneRaceProbe>()) };
+            probe.panicking_clone_drops.fetch_add(1, Ordering::SeqCst);
+            std::panic::panic_any(PanicPayload(Arc::clone(&probe.panic_payload_drops)));
+        }
+
+        const COMPLETION_RACE_WAKER_VTABLE: RawWakerVTable = RawWakerVTable::new(
+            clone_after_releasing_worker,
+            no_op_raw_waker,
+            no_op_raw_waker,
+            no_op_raw_waker,
+        );
+        const PANIC_ON_CLONED_WAKER_DROP_VTABLE: RawWakerVTable = RawWakerVTable::new(
+            unexpected_waker_clone,
+            no_op_raw_waker,
+            no_op_raw_waker,
+            panic_on_cloned_waker_drop,
+        );
+
+        let manager = OperationManager::new(ManagerOptions::default()).unwrap();
+        let executor = LocalIoExecutor::new(
+            manager,
+            LocalExecutionConfig {
+                worker_count: 1,
+                queue_capacity: 2,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let (started_tx, started_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        executor
+            .enqueue_task(move || {
+                started_tx.send(()).unwrap();
+                release_rx.recv().unwrap();
+            })
+            .unwrap();
+        started_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+
+        let (worker_wake_tx, worker_wake_rx) = mpsc::channel();
+        let first_waker = Waker::from(Arc::new(ChannelWake(worker_wake_tx)));
+        let mut first_context = Context::from_waker(&first_waker);
+        let mut future = Box::pin(super::run_on_worker(&executor, || Ok::<_, crate::LocalFileError>(37)));
+        assert!(matches!(future.as_mut().poll(&mut first_context), Poll::Pending));
+
+        let probe = CloneRaceProbe {
+            release_worker: Mutex::new(Some(release_tx)),
+            worker_wake: Mutex::new(worker_wake_rx),
+            panicking_clone_drops: Arc::new(AtomicUsize::new(0)),
+            panic_payload_drops: Arc::new(AtomicUsize::new(0)),
+        };
+        // SAFETY: the probe remains alive through the second poll and its cloned waker
+        // drop.
+        let completion_race_waker = unsafe {
+            Waker::from_raw(RawWaker::new(
+                (&probe as *const CloneRaceProbe).cast(),
+                &COMPLETION_RACE_WAKER_VTABLE,
+            ))
+        };
+        let mut completion_race_context = Context::from_waker(&completion_race_waker);
+
+        assert!(matches!(
+            future.as_mut().poll(&mut completion_race_context),
+            Poll::Ready(Ok(37))
+        ));
+        assert_eq!(
+            probe.panicking_clone_drops.load(Ordering::SeqCst),
+            1,
+            "the unused cloned waker is dropped after worker completion races the poll"
+        );
+        assert_eq!(
+            probe.panic_payload_drops.load(Ordering::SeqCst),
+            1,
+            "the panic payload from the cloned waker drop is disposed"
+        );
+    }
+
     #[cfg(panic = "unwind")]
     #[test]
     fn test_constructor_completion_survives_panicking_waker_payload_destructors() {
