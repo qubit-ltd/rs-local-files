@@ -1832,7 +1832,7 @@ mod tests {
 
         let directory = tempfile::tempdir().unwrap();
         let mut nested = directory.path().to_path_buf();
-        while nested.as_os_str().as_encoded_bytes().len() < 3_000 {
+        while nested.as_os_str().as_encoded_bytes().len() < 700 {
             nested.push("d".repeat(100));
             std::fs::create_dir(&nested).unwrap();
         }
@@ -1853,6 +1853,7 @@ mod tests {
         let (resume_tx, resume_rx) = mpsc::sync_channel(1);
         *driver.0.batch_transfer_test_gate.lock().unwrap() = Some((93, entered_tx, resume_rx));
         let mut context = Context::from_waker(Waker::noop());
+        let byte_limit = 4_096;
 
         assert!(
             driver
@@ -1860,7 +1861,7 @@ mod tests {
                     &mut context,
                     93,
                     crate::operation::stream::LOCAL_WALK_BATCH_ENTRIES,
-                    crate::operation::stream::LOCAL_WALK_BATCH_BYTES,
+                    byte_limit,
                 )
                 .is_pending()
         );
@@ -1872,17 +1873,23 @@ mod tests {
             &driver,
             93,
             crate::operation::stream::LOCAL_WALK_BATCH_ENTRIES,
-            crate::operation::stream::LOCAL_WALK_BATCH_BYTES,
+            byte_limit,
         ))
         .unwrap()
         .expect("first batch contains entries");
-        let second = block_on(poll_batch(
+        let mut delivered_entries = first.len();
+        let mut request_id = 94;
+        while let Some(batch) = block_on(poll_batch(
             &driver,
-            94,
+            request_id,
             crate::operation::stream::LOCAL_WALK_BATCH_ENTRIES,
-            crate::operation::stream::LOCAL_WALK_BATCH_BYTES,
+            byte_limit,
         ))
-        .unwrap();
+        .unwrap()
+        {
+            delivered_entries += batch.len();
+            request_id += 1;
+        }
         stop_driver(&driver);
 
         assert!(observation.batch_entries > 0);
@@ -1896,7 +1903,7 @@ mod tests {
         assert!(observation.lookahead_bytes > 0, "fixture must retain one deferred path");
         assert!(observation.lookahead_bytes <= crate::operation::stream::LOCAL_WALK_BATCH_BYTES);
         assert_eq!(
-            first.len() + second.unwrap_or_default().len(),
+            delivered_entries,
             100,
             "deferred lookahead must be delivered once"
         );

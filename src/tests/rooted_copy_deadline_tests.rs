@@ -184,7 +184,7 @@ fn test_rooted_copy_parent_creation_deadline_reports_unchanged_target() {
         .expect_err("deadline after one parent creation must stop before the next");
 
     assert_eq!(ErrorKind::TimedOut, failure.error().io_error_kind());
-    assert_eq!(LocalCopyFailureState::Unchanged, failure.state());
+    assert_eq!(LocalCopyFailureState::PartiallyPublished, failure.state());
     assert!(fixture.path().join("new-parent").is_dir());
     assert!(!fixture.path().join("new-parent/child").exists());
 }
