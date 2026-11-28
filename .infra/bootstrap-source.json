@@ -1,7 +1,7 @@
 {
   "config_sources": {
     "rs-infra-ci": "sha256:2cc68b5ab050769382d7e9af468cb60b2261fb8e387d0ced9974c8d068964271",
-    "rs-infra-dependency": "sha256:fac0cef3bfd3e6184dcc7284d6097bc0a8acdbe0269576b5b1a38eb58f61fd87",
+    "rs-infra-dependency": "sha256:45fab0e3c1d7b59aede49646628185044d145c757e0da0d072feae47abdce1ff",
     "rs-infra-style": "sha256:f5ebba934dfcd04bb4b7a3847f27b8a73dcab28afbfe7cb2a9c2e884ebc4564c",
     "rs-infra-tools": "sha256:b52fdcc1a8382533f3f5f56d0f458fca1e30baa853f6acb394d913ec32972166"
   },
@@ -60,7 +60,7 @@
     },
     ".infra/bootstrap.sh": {
       "executable": true,
-      "sha256": "efb236dddf9f03c929071b1b86afffe827542d9cc7b44dc31f2de927c9265f39"
+      "sha256": "ddfb2d8163468408d9aa5411cb17d9f390fb21c25cec9d7dfc52ada3c3bd9c39"
     },
     ".infra/ci/cargo-matrix.json": {
       "executable": false,
@@ -94,9 +94,13 @@
       "executable": false,
       "sha256": "73667620dcced6577b18f927632b183b5b79764921009c55eaa080f1f15ae49a"
     },
+    ".infra/dependency/policy/baselines/v2026.11.17.txt": {
+      "executable": false,
+      "sha256": "bae513fbf1530a89ce42facb3362a2a9aa300c378b4a5bab5f5866d4f2461ac6"
+    },
     ".infra/dependency/policy/current.toml": {
       "executable": false,
-      "sha256": "10534ca10b6fe80ddf04366a2442de9aa0464a7c8843d4159a0960c1a925a5e6"
+      "sha256": "13ae019ff7a3f5140537d7270c48309942d30365d6f51a6c916f988b973258f8"
     },
     ".infra/lib/style_analyze.py": {
       "executable": true,
@@ -123,8 +127,8 @@
       "sha256": "e32ec3e600a5095ed7a95e5f6d0c30abf1d9f5b0647952fe43d2c60c1c92ad4a"
     }
   },
-  "package_sha256": "e053c57885bfe51630328a7b94cad190a5c9c7b38942a9ad7739096a0fc18729",
+  "package_sha256": "6a9f778f3d265d290e6f525ced060eb83a58981e982ccdcf9c6e7d4de2041fac",
   "schema": 1,
   "source_repository": "https://github.com/qubit-ltd/rs-infra-tools.git",
-  "source_revision": "9a37b1849ea1ae49c3182b0a3bfd43f451a8827c"
+  "source_revision": "4aab4623442656569e27b86678d7a082f296ae2f"
 }
